@@ -4,6 +4,25 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="AI Game Secretary" Height="900" Width="1400">
   <Grid>
-    <wv2:WebView2 x:Name="WebView" />
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <Border Grid.Row="0" Background="#FFF7F7F7" BorderBrush="#FFE5E5E5" BorderThickness="0,0,0,1" Padding="10">
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+          <Button x:Name="BtnRestart" Content="Restart" Margin="0,0,8,0" Padding="12,6" Click="BtnRestart_Click" />
+          <Button x:Name="BtnReload" Content="Reload" Margin="0,0,8,0" Padding="12,6" Click="BtnReload_Click" />
+          <Button x:Name="BtnToggleOverlay" Content="Overlay" Margin="0,0,8,0" Padding="12,6" Click="BtnToggleOverlay_Click" />
+          <Button x:Name="BtnOpenLogs" Content="Open Logs" Margin="0,0,8,0" Padding="12,6" Click="BtnOpenLogs_Click" />
+          <Button x:Name="BtnOpenBrowser" Content="Open Browser" Padding="12,6" Click="BtnOpenBrowser_Click" />
+        </StackPanel>
+
+        <TextBlock x:Name="TxtStatus" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="#FF333333" Text="Status: ..." />
+      </DockPanel>
+    </Border>
+
+    <wv2:WebView2 Grid.Row="1" x:Name="WebView" />
   </Grid>
 </Window>

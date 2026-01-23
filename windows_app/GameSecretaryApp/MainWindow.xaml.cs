@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
@@ -14,6 +15,7 @@ public partial class MainWindow : Window
     private OverlayWindow? _overlay;
     private IntPtr _hwnd;
     private HwndSource? _source;
+    private bool _isRestarting;
 
     public MainWindow()
     {
@@ -93,7 +95,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        Title = "AI Game Secretary (Starting backend...)";
+        SetStatus("Starting backend...");
 
         var userData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -110,12 +112,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            Title = "AI Game Secretary (Backend failed)";
+            SetStatus("Backend failed");
             MessageBox.Show(ex.Message, "Backend start failed", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
-        Title = "AI Game Secretary (Warming up model...)";
+        SetStatus("Warming up model...");
         try
         {
             await BackendManager.Instance.WarmupLocalVlmAsync(timeoutSec: 1800);
@@ -124,8 +126,102 @@ public partial class MainWindow : Window
         {
         }
 
-        Title = "AI Game Secretary";
+        SetStatus("Ready");
         WebView.CoreWebView2.Navigate(BackendManager.Instance.DashboardUrl);
+    }
+
+    private void SetStatus(string msg)
+    {
+        try { Title = "AI Game Secretary" + (string.IsNullOrWhiteSpace(msg) ? "" : $" ({msg})"); } catch { }
+        try { if (TxtStatus != null) TxtStatus.Text = "Status: " + (msg ?? ""); } catch { }
+    }
+
+    private void SetUiEnabled(bool enabled)
+    {
+        try { if (BtnRestart != null) BtnRestart.IsEnabled = enabled; } catch { }
+        try { if (BtnReload != null) BtnReload.IsEnabled = enabled; } catch { }
+        try { if (BtnToggleOverlay != null) BtnToggleOverlay.IsEnabled = enabled; } catch { }
+        try { if (BtnOpenLogs != null) BtnOpenLogs.IsEnabled = enabled; } catch { }
+        try { if (BtnOpenBrowser != null) BtnOpenBrowser.IsEnabled = enabled; } catch { }
+    }
+
+    private async void BtnRestart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRestarting) return;
+        _isRestarting = true;
+        SetUiEnabled(false);
+        SetStatus("Restarting backend...");
+        try
+        {
+            await BackendManager.Instance.RestartAsync(warmupTimeoutSec: 1800);
+            SetStatus("Ready");
+            try
+            {
+                WebView.CoreWebView2?.Navigate(BackendManager.Instance.DashboardUrl);
+            }
+            catch
+            {
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Restart failed");
+            try { MessageBox.Show(ex.Message, "Restart failed", MessageBoxButton.OK, MessageBoxImage.Error); } catch { }
+        }
+        finally
+        {
+            _isRestarting = false;
+            SetUiEnabled(true);
+        }
+    }
+
+    private void BtnReload_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            WebView.CoreWebView2?.Reload();
+        }
+        catch
+        {
+            try { WebView.Source = new Uri(BackendManager.Instance.DashboardUrl); } catch { }
+        }
+    }
+
+    private void BtnToggleOverlay_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleOverlay();
+    }
+
+    private void BtnOpenLogs_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dir = BackendManager.Instance.LogsDir;
+            try { Directory.CreateDirectory(dir); } catch { }
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = dir,
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+        }
+    }
+
+    private void BtnOpenBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = BackendManager.Instance.DashboardUrl,
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+        }
     }
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)

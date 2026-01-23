@@ -10,7 +10,38 @@ user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
 
+def _ensure_dpi_awareness() -> None:
+    try:
+        user32.SetProcessDpiAwarenessContext.argtypes = (ctypes.c_void_p,)
+        user32.SetProcessDpiAwarenessContext.restype = ctypes.c_bool
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (DPI_AWARENESS_CONTEXT)-4
+        if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    except Exception:
+        pass
+    try:
+        shcore = ctypes.WinDLL("shcore", use_last_error=True)
+        shcore.SetProcessDpiAwareness.argtypes = (ctypes.c_int,)
+        shcore.SetProcessDpiAwareness.restype = ctypes.c_int
+        shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        user32.SetProcessDPIAware.argtypes = ()
+        user32.SetProcessDPIAware.restype = ctypes.c_bool
+        user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+_ensure_dpi_awareness()
+
+
 EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+
+EnumChildProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
 @dataclass
@@ -38,6 +69,42 @@ def _get_window_text(hwnd: int) -> str:
 
 def _is_window_visible(hwnd: int) -> bool:
     return bool(user32.IsWindowVisible(hwnd))
+
+
+def _client_area(hwnd: int) -> int:
+    try:
+        rect = wintypes.RECT()
+        if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+            return 0
+        w = int(rect.right - rect.left)
+        h = int(rect.bottom - rect.top)
+        return max(0, w) * max(0, h)
+    except Exception:
+        return 0
+
+
+def find_largest_visible_child(hwnd_parent: int) -> Optional[int]:
+    best_hwnd: Optional[int] = None
+    best_area = 0
+
+    def _cb(hwnd: int, lparam: int) -> bool:
+        nonlocal best_hwnd, best_area
+        try:
+            if not _is_window_visible(hwnd):
+                return True
+            area = _client_area(hwnd)
+            if area > best_area:
+                best_area = area
+                best_hwnd = int(hwnd)
+        except Exception:
+            pass
+        return True
+
+    try:
+        user32.EnumChildWindows(int(hwnd_parent), EnumChildProc(_cb), 0)
+    except Exception:
+        return None
+    return best_hwnd
 
 
 def find_window_by_title_substring(title_substring: str) -> Optional[int]:
@@ -82,34 +149,38 @@ def get_client_rect_on_screen(hwnd: int) -> Rect:
 
 
 def capture_client(hwnd: int) -> Image.Image:
-    r = get_client_rect_on_screen(hwnd)
-    w, h = r.width, r.height
+    rect = wintypes.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        raise OSError(ctypes.get_last_error())
+
+    w = int(rect.right - rect.left)
+    h = int(rect.bottom - rect.top)
     if w <= 0 or h <= 0:
         raise ValueError("window client rect is empty")
 
-    hdc_screen = user32.GetDC(0)
+    hdc_screen = user32.GetDC(hwnd)
     if not hdc_screen:
         raise OSError(ctypes.get_last_error())
 
     hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
     if not hdc_mem:
-        user32.ReleaseDC(0, hdc_screen)
+        user32.ReleaseDC(hwnd, hdc_screen)
         raise OSError(ctypes.get_last_error())
 
     hbmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
     if not hbmp:
         gdi32.DeleteDC(hdc_mem)
-        user32.ReleaseDC(0, hdc_screen)
+        user32.ReleaseDC(hwnd, hdc_screen)
         raise OSError(ctypes.get_last_error())
 
     old = gdi32.SelectObject(hdc_mem, hbmp)
     SRCCOPY = 0x00CC0020
 
-    if not gdi32.BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, r.left, r.top, SRCCOPY):
+    if not gdi32.BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, 0, 0, SRCCOPY):
         gdi32.SelectObject(hdc_mem, old)
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(hdc_mem)
-        user32.ReleaseDC(0, hdc_screen)
+        user32.ReleaseDC(hwnd, hdc_screen)
         raise OSError(ctypes.get_last_error())
 
     bmi = ctypes.create_string_buffer(40)
@@ -126,7 +197,7 @@ def capture_client(hwnd: int) -> Image.Image:
         gdi32.SelectObject(hdc_mem, old)
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(hdc_mem)
-        user32.ReleaseDC(0, hdc_screen)
+        user32.ReleaseDC(hwnd, hdc_screen)
         raise OSError(ctypes.get_last_error())
 
     img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB")
@@ -134,6 +205,6 @@ def capture_client(hwnd: int) -> Image.Image:
     gdi32.SelectObject(hdc_mem, old)
     gdi32.DeleteObject(hbmp)
     gdi32.DeleteDC(hdc_mem)
-    user32.ReleaseDC(0, hdc_screen)
+    user32.ReleaseDC(hwnd, hdc_screen)
 
     return img

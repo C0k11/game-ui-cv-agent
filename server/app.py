@@ -71,9 +71,6 @@ def _get_vlm_agent():
 def _start_vlm_agent(*, payload: Dict[str, Any]) -> None:
     global _VLM_AGENT
     with _VLM_AGENT_LOCK:
-        if _VLM_AGENT is not None and getattr(_VLM_AGENT, "is_running")():
-            return
-
         from agent.vlm_policy import VlmPolicyAgent, VlmPolicyConfig
 
         cfg = VlmPolicyConfig(
@@ -325,14 +322,28 @@ def root() -> str:
 def dashboard() -> FileResponse:
     if not DASHBOARD_PATH.exists():
         raise HTTPException(status_code=404, detail="dashboard.html not found")
-    return FileResponse(str(DASHBOARD_PATH))
+    return FileResponse(
+        str(DASHBOARD_PATH),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/annotate.html")
 def annotate() -> FileResponse:
     if not ANNOTATE_PATH.exists():
         raise HTTPException(status_code=404, detail="annotate.html not found")
-    return FileResponse(str(ANNOTATE_PATH))
+    return FileResponse(
+        str(ANNOTATE_PATH),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/v1/status")
@@ -341,10 +352,23 @@ def status() -> Dict[str, Any]:
     agent_running = bool(agent is not None and getattr(agent, "is_running")())
     last_action = None
     last_error = ""
+    agent_cfg = None
     try:
         if agent is not None:
             last_action = getattr(agent, "last_action")
             last_error = getattr(agent, "last_error")
+            cfg = getattr(agent, "cfg", None)
+            if cfg is not None:
+                agent_cfg = {
+                    "window_title": getattr(cfg, "window_title", None),
+                    "goal": getattr(cfg, "goal", None),
+                    "steps": getattr(cfg, "steps", None),
+                    "dry_run": getattr(cfg, "dry_run", None),
+                    "step_sleep_s": getattr(cfg, "step_sleep_s", None),
+                    "exploration_click": getattr(cfg, "exploration_click", None),
+                    "forbid_premium_currency": getattr(cfg, "forbid_premium_currency", None),
+                    "model": getattr(cfg, "model", None),
+                }
     except Exception:
         pass
     return {
@@ -354,6 +378,7 @@ def status() -> Dict[str, Any]:
         "agent_running": agent_running,
         "agent_pid": None,
         "agent_type": "vlm_policy",
+        "agent_cfg": agent_cfg,
         "last_action": last_action,
         "last_error": last_error,
     }
@@ -1325,6 +1350,12 @@ def build_vlm_ocr_index(
 
 @app.post("/api/v1/start")
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        agent = _get_vlm_agent()
+        if agent is not None and getattr(agent, "is_running")():
+            _stop_vlm_agent()
+    except Exception:
+        pass
     _start_vlm_agent(payload=payload)
     return status()
 

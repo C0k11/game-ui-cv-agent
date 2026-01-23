@@ -16,6 +16,6 @@ LLM_API_KEY = os.environ.get("LLM_API_KEY")
 LOCAL_VLM_MODEL = os.environ.get("LOCAL_VLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct")
 LOCAL_VLM_MODELS_DIR = os.environ.get("LOCAL_VLM_MODELS_DIR", os.path.join(MODELS_DIR, "vlm"))
 LOCAL_VLM_DEVICE = os.environ.get("LOCAL_VLM_DEVICE", "cuda")
-LOCAL_VLM_MAX_NEW_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_NEW_TOKENS", "2048"))
+LOCAL_VLM_MAX_NEW_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_NEW_TOKENS", "256"))
 
 ADB_SERIAL = os.environ.get("ADB_SERIAL")

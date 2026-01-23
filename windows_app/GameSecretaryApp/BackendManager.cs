@@ -17,11 +17,35 @@ public sealed class BackendManager
     private Process? _proc;
     private string? _repoRoot;
 
+    public string? RepoRoot => _repoRoot;
+
     public string ApiHost { get; } = "127.0.0.1";
     public int ApiPort { get; } = 8000;
 
     public string ApiBase => $"http://{ApiHost}:{ApiPort}/api/v1";
     public string DashboardUrl => $"http://{ApiHost}:{ApiPort}/dashboard.html?v={Uri.EscapeDataString(DateTime.UtcNow.Ticks.ToString())}";
+
+    public string LogsDir
+    {
+        get
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_repoRoot))
+                {
+                    return Path.Combine(_repoRoot, "logs");
+                }
+            }
+            catch
+            {
+            }
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GameSecretaryApp",
+                "logs"
+            );
+        }
+    }
 
     public string LocalVlmModel { get; } = "Qwen/Qwen3-VL-8B-Instruct";
 
@@ -130,6 +154,20 @@ public sealed class BackendManager
         if (!ok)
         {
             throw new TimeoutException($"Backend did not become ready: {ApiBase}/status");
+        }
+    }
+
+    public async Task RestartAsync(int warmupTimeoutSec)
+    {
+        Stop();
+        await Task.Delay(250);
+        await StartAsync();
+        try
+        {
+            await WarmupLocalVlmAsync(timeoutSec: warmupTimeoutSec);
+        }
+        catch
+        {
         }
     }
 

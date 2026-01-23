@@ -84,9 +84,35 @@
         <button id="btn_clear" class="btn ghost">Clear View</button>
       </div>
 
+      <div class="row" style="margin-top: 2px;">
+        <span class="muted" style="font-size: 12px;">Presets:</span>
+        <button id="btn_preset_dryrun" class="btn">DryRun 80</button>
+        <button id="btn_preset_real" class="btn">Real Loop</button>
+        <button id="btn_goal_daily" class="btn">Daily Routine Template</button>
+      </div>
+
       <div class="status" id="status">
         <span class="pill" id="status_pill">Unknown</span>
         <span class="mono" id="status_text">Status: ...</span>
+      </div>
+
+      <div id="routineHud" style="display: none; margin-top: 10px; padding: 10px; border-radius: 8px; background-color: #f0f9ff; border: 1px solid #bae6fd;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+          <span style="font-weight: bold; font-size: 1.1em;" id="routinePhase">Idle</span>
+          <span id="routineBadge" style="background: #0ea5e9; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em;">Normal</span>
+        </div>
+
+        <div style="width: 100%; background-color: #e0e0e0; height: 8px; border-radius: 4px; margin-bottom: 5px;">
+          <div id="routineProgressBar" style="width: 0%; height: 100%; background-color: #0ea5e9; border-radius: 4px; transition: width 0.3s;"></div>
+        </div>
+
+        <div style="font-size: 0.85em; color: #555; display: flex; justify-content: space-between;">
+          <span id="routineStepInfo">Step 0/0</span>
+          <span id="routineTurnInfo">Turns: 0/15</span>
+        </div>
+        <div id="routineRetryInfo" style="font-size: 0.85em; color: #d97706; display: none; margin-top: 2px;">
+          Retrying (0/0)
+        </div>
       </div>
     </div>
 
@@ -131,6 +157,28 @@
       } catch (e) {}
     }
 
+    const DAILY_ROUTINE_TEMPLATE = `[Routine]\n【目标】蔚蓝档案：日常收菜（排除总力战/大决战/制约解除决战）
+
+【总原则】
+- 先判断当前界面是什么（大厅/二级菜单/弹窗），优先关闭公告/签到等阻挡弹窗。
+- 优先处理红点/可领取/确认/开始/进入/跳过/一键领取等“安全按钮”。
+- 绝对不要点击：总力战/大决战/制约解除决战（即使有红点也忽略）。
+- 绝对不要点击：充值/购买/招募/抽卡/青辉石/清輝石/Pyroxene 相关。
+
+【流程（状态机）】
+1) 大厅：处理弹窗 -> 观察咖啡厅/日程/社团/业务区红点
+2) 咖啡厅：领取收益 -> 依次点击所有黄色感叹号/对话气泡角色 -> 返回大厅
+3) 日程：优先点红点且Rank较高/最优的区域 -> 确认 -> 返回
+4) 社团：领取AP -> 返回
+5) 悬赏通缉：有票就选最高难度 -> 扫荡 -> Max -> 确认 -> 返回
+6) 战术对抗赛：仅领奖；如需要日课则打一场（进场后优先点跳过）-> 返回
+7) 清体力：活动期优先活动扫荡；否则主线/Hard收藏关卡扫荡到体力不足
+8) 制造：领取完成品 -> 有空位就制造 -> 确认 -> 返回
+9) 邮箱&任务：一键领取 -> 确认 -> 返回
+
+【异常处理】
+- 如果不确定/界面识别失败：先 wait；必要时点击“返回/关闭/X/空白安全区域”尝试回到大厅。`;
+
     async function api(path, opts) {
       const r = await fetch(path, opts);
       if (!r.ok) {
@@ -166,7 +214,68 @@
         const ok = Boolean(st.agent_running) && !le;
         $('status_pill').className = 'pill ' + (ok ? 'ok' : 'bad');
         $('status_pill').textContent = ok ? 'Running' : (st.agent_running ? 'Error' : 'Stopped');
-        $('status_text').textContent = `agent_running=${st.agent_running} type=${st.agent_type || ''} last_error=${le} last_action=${la}`;
+        let cfgStr = '';
+        try {
+          const cfg = st.agent_cfg || null;
+          if (cfg) {
+            const g = (typeof cfg.goal === 'string') ? cfg.goal.replace(/\s+/g, ' ').slice(0, 140) : '';
+            cfgStr = ` cfg.goal=${g} cfg.steps=${cfg.steps} cfg.dry_run=${cfg.dry_run}`;
+          }
+        } catch (e) {
+        }
+        $('status_text').textContent = `agent_running=${st.agent_running} type=${st.agent_type || ''} last_error=${le} last_action=${la}${cfgStr}`;
+
+        try {
+          const hud = $('routineHud');
+          const r = st.last_action && st.last_action._routine ? st.last_action._routine : null;
+          const active = Boolean(r && r.active);
+
+          if (!active) {
+            hud.style.display = 'none';
+          } else {
+            hud.style.display = 'block';
+            const badge = $('routineBadge');
+            const progressBar = $('routineProgressBar');
+            const retryDiv = $('routineRetryInfo');
+
+            $('routinePhase').textContent = String(r.step_name || 'Unknown');
+
+            const totalSteps = (typeof r.total_steps === 'number' && r.total_steps > 0) ? r.total_steps : 6;
+            const stepIndex = (typeof r.step_index === 'number' && r.step_index >= 0) ? r.step_index : 0;
+            const progressPct = ((stepIndex + 1) / totalSteps) * 100;
+            progressBar.style.width = `${Math.min(Math.max(progressPct, 0), 100)}%`;
+            $('routineStepInfo').textContent = `Step ${stepIndex + 1}/${totalSteps}`;
+
+            const maxTurns = (typeof r.max_turns_per_attempt === 'number' && r.max_turns_per_attempt > 0) ? r.max_turns_per_attempt : 15;
+            const turns = (typeof r.turns_in_current_attempt === 'number' && r.turns_in_current_attempt >= 0) ? r.turns_in_current_attempt : 0;
+            $('routineTurnInfo').textContent = `Turns: ${turns}/${maxTurns}`;
+
+            const inRecovery = Boolean(r.in_recovery_mode);
+            if (inRecovery) {
+              badge.textContent = 'RECOVERY MODE';
+              badge.style.backgroundColor = '#ef4444';
+              hud.style.backgroundColor = '#fef2f2';
+              hud.style.borderColor = '#fca5a5';
+              progressBar.style.backgroundColor = '#ef4444';
+            } else {
+              badge.textContent = 'Normal';
+              badge.style.backgroundColor = '#0ea5e9';
+              hud.style.backgroundColor = '#f0f9ff';
+              hud.style.borderColor = '#bae6fd';
+              progressBar.style.backgroundColor = '#0ea5e9';
+            }
+
+            const rc = (typeof r.current_step_retry_count === 'number') ? r.current_step_retry_count : 0;
+            const mr = (typeof r.max_retries === 'number' && r.max_retries >= 0) ? r.max_retries : 0;
+            if (rc > 0 && !inRecovery) {
+              retryDiv.style.display = 'block';
+              retryDiv.textContent = `⚠️ Retrying Step (${rc}/${mr})`;
+            } else {
+              retryDiv.style.display = 'none';
+            }
+          }
+        } catch (e) {
+        }
       } catch (e) {
         $('status_pill').className = 'pill bad';
         $('status_pill').textContent = 'Offline';
@@ -205,6 +314,27 @@
     $('btn_clear').onclick = () => {
       $('agent_out').value = '';
       $('agent_err').value = '';
+    };
+
+    $('btn_preset_dryrun').onclick = () => {
+      $('steps').value = '80';
+      $('dry_run').checked = true;
+      $('forbid_premium_currency').checked = true;
+      $('exploration_click').checked = true;
+      saveNow();
+    };
+
+    $('btn_preset_real').onclick = () => {
+      $('steps').value = '0';
+      $('dry_run').checked = false;
+      $('forbid_premium_currency').checked = true;
+      $('exploration_click').checked = true;
+      saveNow();
+    };
+
+    $('btn_goal_daily').onclick = () => {
+      $('goal').value = DAILY_ROUTINE_TEMPLATE;
+      saveNow();
     };
 
     ['window_title', 'steps', 'step_sleep_s', 'goal', 'dry_run', 'forbid_premium_currency', 'exploration_click'].forEach((id) => {
