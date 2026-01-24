@@ -57,7 +57,7 @@ class VlmPolicyConfig:
     device: str = LOCAL_VLM_DEVICE
     max_new_tokens: int = LOCAL_VLM_MAX_NEW_TOKENS
 
-    perception_max_new_tokens: int = 256
+    perception_max_new_tokens: int = 128
     perception_max_items: int = 40
 
     perception_every_n_steps: int = 4
@@ -69,6 +69,12 @@ class VlmPolicyConfig:
 
     autoclick_safe_buttons: bool = True
     autoclick_safe_cooldown_steps: int = 2
+
+    cafe_headpat: bool = True
+    cafe_headpat_cooldown_steps: int = 1
+
+    click_debounce_steps: int = 2
+    click_debounce_dist_px: int = 24
 
     prompt_history_steps: int = 2
 
@@ -91,6 +97,14 @@ class VlmPolicyAgent:
 
         self._last_exploration_step: int = -10_000
         self._last_autoclick_step: int = -10_000
+        self._last_headpat_step: int = -10_000
+        self._last_headpat_xy: Optional[Tuple[int, int]] = None
+
+        self._last_click_step: int = -10_000
+        self._last_click_xy: Optional[Tuple[int, int]] = None
+        self._last_click_reason: str = ""
+
+        self._screenshot_fail_count: int = 0
 
         self._recent: list[dict[str, Any]] = []
 
@@ -853,6 +867,339 @@ class VlmPolicyAgent:
         lines = [r[2] for r in rows[: int(self.cfg.perception_max_items)]]
         return "\n".join(lines)
 
+    def _snap_click_to_perception_label(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        a = str(action.get("action") or "").lower().strip()
+        if a != "click":
+            return action
+
+        items = None
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        if not isinstance(items, list) or not items:
+            return action
+
+        reason = str(action.get("reason") or "")
+        phase = ""
+        try:
+            rm = action.get("_routine")
+            if isinstance(rm, dict):
+                phase = str(rm.get("phase") or "")
+        except Exception:
+            phase = ""
+
+        # Heuristic label mapping for routine navigation.
+        want: list[str] = []
+        rlow = reason.lower()
+        plow = phase.lower()
+        if "cafe" in rlow or "咖啡" in reason or "cafe" in plow or "咖啡" in phase:
+            want = ["cafe", "咖啡", "咖啡厅"]
+        elif "task" in rlow or "任务" in reason:
+            want = ["task", "任务"]
+        elif "mail" in rlow or "邮箱" in reason:
+            want = ["mail", "邮箱", "邮件"]
+        elif "schedule" in rlow or "日程" in reason or "schedule" in plow or "日程" in phase:
+            want = ["schedule", "日程"]
+        elif "club" in rlow or "社团" in reason or "club" in plow or "社团" in phase:
+            want = ["club", "社团"]
+        elif "bounty" in rlow or "悬赏" in reason or "bounty" in plow or "悬赏" in phase:
+            want = ["bounty", "wanted", "悬赏", "通缉"]
+
+        if not want:
+            return action
+
+        best = None
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "").strip()
+            bb = it.get("bbox")
+            if not label or not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                continue
+            llow = label.lower()
+            if any(k in llow or k in label for k in want):
+                best = [int(v) for v in bb]
+                break
+
+        if best is None:
+            return action
+
+        x, y = _center([int(v) for v in best])
+        out = dict(action)
+        out["target"] = [int(x), int(y)]
+        out["bbox"] = [int(v) for v in best]
+        out.setdefault("_snapped", True)
+        return out
+
+    def _maybe_close_popup_heuristic(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        a = str(action.get("action") or "").lower().strip()
+        if a != "click":
+            return action
+
+        reason = str(action.get("reason") or "")
+        rlow = reason.lower()
+        if not ("关闭" in reason or "close" in rlow or "弹窗" in reason or "popup" in rlow):
+            return action
+
+        # Deterministic close: click near top-right corner.
+        w, h = 0, 0
+        try:
+            if hasattr(self._device, "client_size"):
+                w, h = self._device.client_size()
+        except Exception:
+            w, h = 0, 0
+        if w <= 0 or h <= 0:
+            return action
+
+        tx = int(max(0, int(w) - 40))
+        ty = int(min(int(h) - 1, 40))
+        out = dict(action)
+        out["target"] = [int(tx), int(ty)]
+        out.setdefault("_close_heuristic", True)
+        return out
+
+    def _debounce_click(self, action: Dict[str, Any], *, step_id: int) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        a = str(action.get("action") or "").lower().strip()
+        if a != "click":
+            return action
+        tgt = action.get("target")
+        if not (isinstance(tgt, (list, tuple)) and len(tgt) == 2):
+            return action
+
+        try:
+            cd = int(getattr(self.cfg, "click_debounce_steps", 2) or 2)
+        except Exception:
+            cd = 2
+        try:
+            dist = int(getattr(self.cfg, "click_debounce_dist_px", 24) or 24)
+        except Exception:
+            dist = 24
+
+        x, y = int(tgt[0]), int(tgt[1])
+        reason = str(action.get("reason") or "")
+        rnorm = reason.strip().lower()
+
+        last_xy = self._last_click_xy
+        if last_xy is not None and (int(step_id) - int(self._last_click_step)) <= int(cd):
+            if abs(int(x) - int(last_xy[0])) + abs(int(y) - int(last_xy[1])) <= int(dist) and (not rnorm or rnorm == self._last_click_reason):
+                return {
+                    "action": "wait",
+                    "duration_ms": 600,
+                    "reason": "Debounced repeated click at nearly the same location.",
+                    "raw": action.get("raw"),
+                    "_prompt": action.get("_prompt"),
+                    "_perception": action.get("_perception"),
+                    "_model": action.get("_model"),
+                    "_routine": action.get("_routine"),
+                    "_debounced": True,
+                }
+
+        self._last_click_step = int(step_id)
+        self._last_click_xy = (int(x), int(y))
+        self._last_click_reason = rnorm
+        return action
+
+    def _block_check_lobby_noise(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        try:
+            if not bool(getattr(self._routine, "is_active", False)):
+                return action
+            step = self._routine.get_current_step()
+            if step is None or str(getattr(step, "name", "") or "") != "Check Lobby":
+                return action
+        except Exception:
+            return action
+
+        a = str(action.get("action") or "").lower().strip()
+        if a != "click":
+            return action
+
+        reason = str(action.get("reason") or "")
+        rlow = reason.lower()
+        # During lobby check, don't open secondary menus like Tasks/Schedule/etc.
+        if any(k in rlow for k in ("task", "schedule", "club", "bounty", "mail")) or any(k in reason for k in ("任务", "日程", "社团", "悬赏", "邮箱", "邮件")):
+            return {
+                "action": "wait",
+                "duration_ms": 800,
+                "reason": "Blocked click to secondary menu during Check Lobby; waiting for a clearer state.",
+                "raw": action.get("raw"),
+                "_prompt": action.get("_prompt"),
+                "_perception": action.get("_perception"),
+                "_model": action.get("_model"),
+                "_routine": action.get("_routine"),
+                "_blocked": True,
+            }
+        return action
+
+    def _detect_yellow_markers(self, *, screenshot_path: str) -> List[List[int]]:
+        try:
+            with Image.open(screenshot_path) as im:
+                im = im.convert("RGB")
+                ow, oh = im.size
+                if ow <= 0 or oh <= 0:
+                    return []
+
+                scale = 0.25
+                nw = max(1, int(round(float(ow) * scale)))
+                nh = max(1, int(round(float(oh) * scale)))
+                sim = im.resize((nw, nh), resample=Image.BILINEAR)
+                px = sim.load()
+
+                visited = [[False] * nw for _ in range(nh)]
+                out: List[List[int]] = []
+
+                def is_yellow(r: int, g: int, b: int) -> bool:
+                    return r >= 200 and g >= 150 and b <= 140 and (r - b) >= 60
+
+                for y in range(nh):
+                    for x in range(nw):
+                        if visited[y][x]:
+                            continue
+                        r, g, b = px[x, y]
+                        if not is_yellow(int(r), int(g), int(b)):
+                            visited[y][x] = True
+                            continue
+
+                        # BFS component
+                        stack = [(x, y)]
+                        visited[y][x] = True
+                        minx = maxx = x
+                        miny = maxy = y
+                        cnt = 0
+                        while stack:
+                            cx, cy = stack.pop()
+                            cnt += 1
+                            if cx < minx:
+                                minx = cx
+                            if cx > maxx:
+                                maxx = cx
+                            if cy < miny:
+                                miny = cy
+                            if cy > maxy:
+                                maxy = cy
+
+                            for nx2, ny2 in ((cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)):
+                                if nx2 < 0 or nx2 >= nw or ny2 < 0 or ny2 >= nh:
+                                    continue
+                                if visited[ny2][nx2]:
+                                    continue
+                                rr, gg, bb = px[nx2, ny2]
+                                if is_yellow(int(rr), int(gg), int(bb)):
+                                    visited[ny2][nx2] = True
+                                    stack.append((nx2, ny2))
+                                else:
+                                    visited[ny2][nx2] = True
+
+                        bw = maxx - minx + 1
+                        bh = maxy - miny + 1
+                        area = bw * bh
+
+                        # Filter out too small/large blobs.
+                        if cnt < 10 or cnt > 2000:
+                            continue
+                        if area < 20 or area > 8000:
+                            continue
+                        if bw < 2 or bh < 2:
+                            continue
+
+                        # Convert bbox back to original coords.
+                        x1 = int(round(float(minx) / scale))
+                        y1 = int(round(float(miny) / scale))
+                        x2 = int(round(float(maxx + 1) / scale))
+                        y2 = int(round(float(maxy + 1) / scale))
+                        x1 = max(0, min(int(ow) - 1, x1))
+                        y1 = max(0, min(int(oh) - 1, y1))
+                        x2 = max(0, min(int(ow), x2))
+                        y2 = max(0, min(int(oh), y2))
+                        if x2 <= x1 or y2 <= y1:
+                            continue
+
+                        # Headpat markers are usually not near the very bottom UI.
+                        if y1 > int(oh * 0.85):
+                            continue
+
+                        out.append([int(x1), int(y1), int(x2), int(y2)])
+
+                out.sort(key=lambda bb: (bb[1], bb[0]))
+                return out[:12]
+        except Exception:
+            return []
+
+    def _maybe_cafe_headpat(self, *, action: Dict[str, Any], screenshot_path: str, step_id: int) -> Dict[str, Any]:
+        if not bool(getattr(self.cfg, "cafe_headpat", False)):
+            return action
+        try:
+            if not bool(getattr(self._routine, "is_active", False)):
+                return action
+            step = self._routine.get_current_step()
+            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
+                return action
+        except Exception:
+            return action
+
+        try:
+            cd = int(getattr(self.cfg, "cafe_headpat_cooldown_steps", 1) or 1)
+        except Exception:
+            cd = 1
+        if step_id - int(self._last_headpat_step) <= cd:
+            return action
+
+        # Don't override explicit "claim earnings" actions.
+        try:
+            rlow = str(action.get("reason") or "").lower()
+            if "claim" in rlow and ("earn" in rlow or "credit" in rlow or "ap" in rlow):
+                return action
+        except Exception:
+            pass
+
+        marks = self._detect_yellow_markers(screenshot_path=screenshot_path)
+        if not marks:
+            return action
+
+        chosen = None
+        for bb in marks:
+            cx, cy = _center(bb)
+            last = self._last_headpat_xy
+            if last is None:
+                chosen = bb
+                break
+            if abs(int(cx) - int(last[0])) + abs(int(cy) - int(last[1])) > 60:
+                chosen = bb
+                break
+        if chosen is None:
+            chosen = marks[0]
+
+        x1, y1, x2, y2 = [int(v) for v in chosen]
+        cx, cy = _center(chosen)
+        bw = max(1, x2 - x1)
+        bh = max(1, y2 - y1)
+        tx = int(cx + max(18, int(round(bw * 0.6))))
+        ty = int(cy + max(18, int(round(bh * 0.9))))
+
+        self._last_headpat_step = int(step_id)
+        self._last_headpat_xy = (int(cx), int(cy))
+
+        out = {
+            "action": "click",
+            "target": [int(tx), int(ty)],
+            "reason": "Cafe headpat: yellow interaction marker detected; clicking slightly right/below to interact with the student.",
+            "raw": action.get("raw"),
+            "_prompt": action.get("_prompt"),
+            "_perception": action.get("_perception"),
+            "_model": action.get("_model"),
+            "_routine": action.get("_routine"),
+            "_headpat": True,
+        }
+        return out
+
     def _decide(self, *, screenshot_path: str, step_id: int = -1, orig_size: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
         with Image.open(screenshot_path) as im:
             w, h = im.size
@@ -864,6 +1211,23 @@ class VlmPolicyAgent:
             hf_home=self.cfg.hf_home,
             device=self.cfg.device,
         )
+        try:
+            t_load0 = time.time()
+            if hasattr(engine, "ensure_loaded"):
+                engine.ensure_loaded()
+            t_load = time.time() - t_load0
+            if t_load > 0.25:
+                ts = datetime.now().isoformat(timespec="seconds")
+                self._log_out(f"[{ts}] step={int(step_id)} stage=load_model detail=loaded_in_s:{t_load:.2f}")
+        except Exception as e:
+            return {
+                "action": "wait",
+                "duration_ms": 1500,
+                "reason": "VLM model load failed; waiting.",
+                "raw": "",
+                "_vlm_error": str(e),
+                "_routine": self._routine_meta(),
+            }
 
         p_prompt = self._perception_prompt(width=int(w), height=int(h))
         items = []
@@ -873,9 +1237,52 @@ class VlmPolicyAgent:
         except Exception:
             n = 1
         run_perception = n <= 1 or step_id < 0 or (step_id % n == 0)
+        try:
+            if bool(getattr(self._routine, "is_active", False)):
+                step = None
+                try:
+                    step = self._routine.get_current_step()
+                except Exception:
+                    step = None
+                name = ""
+                if step is not None:
+                    name = str(getattr(step, "name", "") or "")
+                if name in ("Cafe", "Schedule", "Club", "Bounties", "Mail & Tasks"):
+                    run_perception = True
+        except Exception:
+            pass
         if run_perception:
             self._set_stage(step_id=int(step_id), stage="perception")
+            t_p0 = time.time()
+            try:
+                ts = datetime.now().isoformat(timespec="seconds")
+                self._log_out(f"[{ts}] step={int(step_id)} stage=perception_begin")
+            except Exception:
+                pass
+            done_evt = threading.Event()
+            def _watch_perception() -> None:
+                try:
+                    time.sleep(45.0)
+                    if not done_evt.is_set():
+                        ts2 = datetime.now().isoformat(timespec="seconds")
+                        self._log_out(f"[{ts2}] step={int(step_id)} stage=perception_still_running")
+                except Exception:
+                    pass
+            try:
+                threading.Thread(target=_watch_perception, daemon=True).start()
+            except Exception:
+                pass
             p_res = engine.ocr(image_path=screenshot_path, prompt=p_prompt, max_new_tokens=int(self.cfg.perception_max_new_tokens))
+            try:
+                done_evt.set()
+            except Exception:
+                pass
+            try:
+                dt = time.time() - t_p0
+                ts = datetime.now().isoformat(timespec="seconds")
+                self._log_out(f"[{ts}] step={int(step_id)} stage=perception_end elapsed_s={dt:.2f}")
+            except Exception:
+                pass
             p_raw = str(p_res.get("raw") or "")
             p_parsed = {}
             try:
@@ -891,9 +1298,71 @@ class VlmPolicyAgent:
             prompt = prompt + "\nDetected UI text elements (bbox label):\n" + items_txt + "\n"
 
         self._set_stage(step_id=int(step_id), stage="policy")
+        t_a0 = time.time()
+        try:
+            ts = datetime.now().isoformat(timespec="seconds")
+            self._log_out(f"[{ts}] step={int(step_id)} stage=policy_begin")
+        except Exception:
+            pass
+        done_evt2 = threading.Event()
+        def _watch_policy() -> None:
+            try:
+                time.sleep(45.0)
+                if not done_evt2.is_set():
+                    ts2 = datetime.now().isoformat(timespec="seconds")
+                    self._log_out(f"[{ts2}] step={int(step_id)} stage=policy_still_running")
+            except Exception:
+                pass
+        try:
+            threading.Thread(target=_watch_policy, daemon=True).start()
+        except Exception:
+            pass
         res = engine.ocr(image_path=screenshot_path, prompt=prompt, max_new_tokens=int(self.cfg.max_new_tokens))
+        try:
+            done_evt2.set()
+        except Exception:
+            pass
+        try:
+            dt = time.time() - t_a0
+            ts = datetime.now().isoformat(timespec="seconds")
+            self._log_out(f"[{ts}] step={int(step_id)} stage=policy_end elapsed_s={dt:.2f}")
+        except Exception:
+            pass
         raw = str(res.get("raw") or "")
-        act = _parse_json_content(raw)
+        vlm_err = ""
+        try:
+            vlm_err = str(res.get("error") or "")
+        except Exception:
+            vlm_err = ""
+        if vlm_err:
+            try:
+                ts = datetime.now().isoformat(timespec="seconds")
+                self._log_out(f"[{ts}] step={int(step_id)} stage=policy_vlm_error error={vlm_err}")
+            except Exception:
+                pass
+
+        if vlm_err == "hard_timeout":
+            act = {
+                "action": "wait",
+                "duration_ms": 800,
+                "reason": "VLM policy timed out; model worker restarted. Waiting and retrying next step.",
+                "raw": raw,
+                "_vlm_error": vlm_err,
+            }
+            act.setdefault("_prompt", prompt)
+            act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items})
+            act.setdefault("_routine", self._routine_meta())
+            return act
+        try:
+            act = _parse_json_content(raw)
+        except Exception:
+            act = {
+                "action": "wait",
+                "duration_ms": 1200,
+                "reason": "Policy output could not be parsed as JSON; falling back to wait.",
+            }
+        if vlm_err:
+            act.setdefault("_vlm_error", vlm_err)
         act.setdefault("raw", raw)
         act.setdefault("_prompt", prompt)
         act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items})
@@ -912,10 +1381,123 @@ class VlmPolicyAgent:
         )
         act.setdefault("_routine", self._routine_meta())
 
-        if orig_size and isinstance(orig_size, (tuple, list)) and len(orig_size) == 2:
-            try:
+        ow, oh = 0, 0
+        try:
+            if orig_size and isinstance(orig_size, (tuple, list)) and len(orig_size) == 2:
                 ow, oh = int(orig_size[0]), int(orig_size[1])
-                if ow > 0 and oh > 0 and int(w) > 0 and int(h) > 0 and (ow != int(w) or oh != int(h)):
+        except Exception:
+            ow, oh = 0, 0
+
+        def _clamp_to_xy(x: int, y: int, ww: int, hh: int) -> tuple[int, int]:
+            if int(ww) > 0:
+                x = int(max(0, min(int(ww) - 1, int(x))))
+            if int(hh) > 0:
+                y = int(max(0, min(int(hh) - 1, int(y))))
+            return int(x), int(y)
+
+        def _clamp_to_image_xy(x: int, y: int) -> tuple[int, int]:
+            return _clamp_to_xy(int(x), int(y), int(w), int(h))
+
+        def _clamp_to_orig_xy(x: int, y: int) -> tuple[int, int]:
+            return _clamp_to_xy(int(x), int(y), int(ow), int(oh))
+
+        def _clamp_bbox(bb: list[int]) -> list[int]:
+            if len(bb) != 4:
+                return bb
+            x1, y1, x2, y2 = [int(v) for v in bb]
+            x1, y1 = _clamp_to_image_xy(int(x1), int(y1))
+            x2, y2 = _clamp_to_image_xy(int(x2), int(y2))
+            if x2 < x1:
+                x1, x2 = x2, x1
+            if y2 < y1:
+                y1, y2 = y2, y1
+            return [int(x1), int(y1), int(x2), int(y2)]
+
+        def _clamp_bbox_orig(bb: list[int]) -> list[int]:
+            if len(bb) != 4:
+                return bb
+            x1, y1, x2, y2 = [int(v) for v in bb]
+            x1, y1 = _clamp_to_orig_xy(int(x1), int(y1))
+            x2, y2 = _clamp_to_orig_xy(int(x2), int(y2))
+            if x2 < x1:
+                x1, x2 = x2, x1
+            if y2 < y1:
+                y1, y2 = y2, y1
+            return [int(x1), int(y1), int(x2), int(y2)]
+
+        # If the model outputs coords that don't fit the current inference image (w,h)
+        # but DO fit the original screenshot (orig_size), treat them as original-space coords
+        # and skip the later rescale step.
+        use_orig_coords = False
+        try:
+            if ow > 0 and oh > 0:
+                tgt = act.get("target")
+                if isinstance(tgt, (list, tuple)) and len(tgt) == 2:
+                    x, y = int(tgt[0]), int(tgt[1])
+                    if (x >= int(w) or y >= int(h)) and (0 <= x < ow and 0 <= y < oh):
+                        use_orig_coords = True
+        except Exception:
+            pass
+
+        # Clamp coordinates to inference image bounds BEFORE rescaling to orig_size.
+        try:
+            tgt = act.get("target")
+            if isinstance(tgt, (list, tuple)) and len(tgt) == 2:
+                if use_orig_coords:
+                    x, y = _clamp_to_orig_xy(int(tgt[0]), int(tgt[1]))
+                else:
+                    x, y = _clamp_to_image_xy(int(tgt[0]), int(tgt[1]))
+                act["target"] = [int(x), int(y)]
+        except Exception:
+            pass
+
+        try:
+            bb = act.get("bbox")
+            if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                if use_orig_coords:
+                    act["bbox"] = _clamp_bbox_orig([int(v) for v in bb])
+                else:
+                    act["bbox"] = _clamp_bbox([int(v) for v in bb])
+        except Exception:
+            pass
+
+        try:
+            p1 = act.get("from")
+            p2 = act.get("to")
+            if isinstance(p1, (list, tuple)) and len(p1) == 2:
+                if use_orig_coords:
+                    x, y = _clamp_to_orig_xy(int(p1[0]), int(p1[1]))
+                else:
+                    x, y = _clamp_to_image_xy(int(p1[0]), int(p1[1]))
+                act["from"] = [int(x), int(y)]
+            if isinstance(p2, (list, tuple)) and len(p2) == 2:
+                if use_orig_coords:
+                    x, y = _clamp_to_orig_xy(int(p2[0]), int(p2[1]))
+                else:
+                    x, y = _clamp_to_image_xy(int(p2[0]), int(p2[1]))
+                act["to"] = [int(x), int(y)]
+        except Exception:
+            pass
+
+        try:
+            p = act.get("_perception")
+            if isinstance(p, dict) and isinstance(p.get("items"), list):
+                for it in p.get("items"):
+                    if not isinstance(it, dict):
+                        continue
+                    bb = it.get("bbox")
+                    if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                        if use_orig_coords:
+                            it["bbox"] = _clamp_bbox_orig([int(v) for v in bb])
+                        else:
+                            it["bbox"] = _clamp_bbox([int(v) for v in bb])
+        except Exception:
+            pass
+
+        if (not use_orig_coords) and orig_size and isinstance(orig_size, (tuple, list)) and len(orig_size) == 2:
+            try:
+                ow2, oh2 = int(orig_size[0]), int(orig_size[1])
+                if ow2 > 0 and oh2 > 0 and int(w) > 0 and int(h) > 0 and (ow2 != int(w) or oh2 != int(h)):
                     sx = float(ow) / float(w)
                     sy = float(oh) / float(h)
                     act = self._rescale_action(act, sx=sx, sy=sy)
@@ -956,6 +1538,18 @@ class VlmPolicyAgent:
             sx = float(cw) / float(w)
             sy = float(ch) / float(h)
 
+        try:
+            action.setdefault(
+                "_telemetry",
+                {
+                    "shot_size": [int(w), int(h)],
+                    "client_size": [int(cw), int(ch)],
+                    "scale": [float(round(sx, 6)), float(round(sy, 6))],
+                },
+            )
+        except Exception:
+            pass
+
         def _scale_xy(x: int, y: int) -> tuple[int, int]:
             if sx == 1.0 and sy == 1.0:
                 return int(x), int(y)
@@ -986,19 +1580,73 @@ class VlmPolicyAgent:
                     pass
             return int(x), int(y)
 
+        def _scale_bbox(bb: list[int]) -> list[int]:
+            if len(bb) != 4:
+                return bb
+            x1, y1, x2, y2 = [int(v) for v in bb]
+            p1x, p1y = _scale_xy(int(x1), int(y1))
+            p2x, p2y = _scale_xy(int(x2), int(y2))
+            x1c, y1c = _clamp_xy(int(p1x), int(p1y))
+            x2c, y2c = _clamp_xy(int(p2x), int(p2y))
+            if x2c < x1c:
+                x1c, x2c = x2c, x1c
+            if y2c < y1c:
+                y1c, y2c = y2c, y1c
+            return [int(x1c), int(y1c), int(x2c), int(y2c)]
+
+        try:
+            p = action.get("_perception")
+            if isinstance(p, dict) and isinstance(p.get("items"), list):
+                items2 = []
+                for it in p.get("items"):
+                    if not isinstance(it, dict):
+                        continue
+                    bb = it.get("bbox")
+                    if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                        continue
+                    it2 = dict(it)
+                    it2["bbox"] = _scale_bbox([int(v) for v in bb])
+                    items2.append(it2)
+                action["_perception_client"] = {"items": items2}
+        except Exception:
+            pass
+
         if a == "click":
             target = action.get("target")
             if isinstance(target, (list, tuple)) and len(target) == 2:
+                try:
+                    action["target_model"] = [int(target[0]), int(target[1])]
+                except Exception:
+                    pass
                 tx, ty = _scale_xy(int(target[0]), int(target[1]))
                 x, y = _clamp_xy(int(tx), int(ty))
+                try:
+                    action["target_client"] = [int(x), int(y)]
+                    if hasattr(self._device, "client_to_screen"):
+                        sx2, sy2 = self._device.client_to_screen(int(x), int(y))
+                        action["target_screen"] = [int(sx2), int(sy2)]
+                except Exception:
+                    pass
                 self._device.click_client(int(x), int(y))
                 return
 
             bbox = action.get("bbox")
             if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-                x, y = _center([int(x) for x in bbox])
-                tx, ty = _scale_xy(int(x), int(y))
+                try:
+                    action["bbox_model"] = [int(v) for v in bbox]
+                except Exception:
+                    pass
+                cx0, cy0 = _center([int(x) for x in bbox])
+                tx, ty = _scale_xy(int(cx0), int(cy0))
                 x, y = _clamp_xy(int(tx), int(ty))
+                try:
+                    action["target_client"] = [int(x), int(y)]
+                    action["bbox_client"] = _scale_bbox([int(v) for v in bbox])
+                    if hasattr(self._device, "client_to_screen"):
+                        sx2, sy2 = self._device.client_to_screen(int(x), int(y))
+                        action["target_screen"] = [int(sx2), int(sy2)]
+                except Exception:
+                    pass
                 self._device.click_client(int(x), int(y))
                 return
 
@@ -1019,6 +1667,18 @@ class VlmPolicyAgent:
             p2x, p2y = _scale_xy(int(p2[0]), int(p2[1]))
             x1, y1 = _clamp_xy(int(p1x), int(p1y))
             x2, y2 = _clamp_xy(int(p2x), int(p2y))
+            try:
+                action["from_model"] = [int(p1[0]), int(p1[1])]
+                action["to_model"] = [int(p2[0]), int(p2[1])]
+                action["from_client"] = [int(x1), int(y1)]
+                action["to_client"] = [int(x2), int(y2)]
+                if hasattr(self._device, "client_to_screen"):
+                    sx1, sy1 = self._device.client_to_screen(int(x1), int(y1))
+                    sx2, sy2 = self._device.client_to_screen(int(x2), int(y2))
+                    action["from_screen"] = [int(sx1), int(sy1)]
+                    action["to_screen"] = [int(sx2), int(sy2)]
+            except Exception:
+                pass
             self._device.swipe_client(int(x1), int(y1), int(x2), int(y2), duration_ms=d)
             return
 
@@ -1071,6 +1731,8 @@ class VlmPolicyAgent:
             step_id = i
             shot_path = str((self._run_dir / f"step_{step_id:06d}.png").resolve())
 
+            extra_sleep_s = 0.0
+
             self._sync_routine_from_goal(self.cfg.goal)
             try:
                 self._routine.on_turn_start()
@@ -1083,6 +1745,7 @@ class VlmPolicyAgent:
             try:
                 self._set_stage(step_id=step_id, stage="screenshot")
                 self._device.screenshot_client(shot_path)
+                self._screenshot_fail_count = 0
                 self._set_stage(step_id=step_id, stage="decide")
 
                 vlm_path = shot_path
@@ -1093,7 +1756,10 @@ class VlmPolicyAgent:
                         ow, oh = im.size
                         orig_size = (int(ow), int(oh))
                         max_side = max(int(ow), int(oh))
-                        target_max_side = 960
+                        try:
+                            target_max_side = int(os.environ.get("VLM_IMAGE_MAX_SIDE", "960"))
+                        except Exception:
+                            target_max_side = 960
                         if max_side > target_max_side:
                             scale = float(target_max_side) / float(max_side)
                             nw = max(1, int(round(float(ow) * scale)))
@@ -1117,8 +1783,13 @@ class VlmPolicyAgent:
 
                 act_before = act
                 act = self._sanitize_action(act)
+                act = self._maybe_close_popup_heuristic(act)
+                act = self._block_check_lobby_noise(act)
+                act = self._snap_click_to_perception_label(act)
+                act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id)
                 act = self._sanitize_action(act)
+                act = self._debounce_click(act, step_id=step_id)
                 act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)
                 act = self._sanitize_action(act)
                 act = self._maybe_advance_routine(act)
@@ -1131,6 +1802,16 @@ class VlmPolicyAgent:
                 err = str(e)
                 with self._lock:
                     self._last_error = err
+                try:
+                    low = err.lower()
+                except Exception:
+                    low = err
+                if str(err).strip() == "1400" or "1400" in str(err) or "window not found" in low or "invalid" in low:
+                    self._screenshot_fail_count += 1
+                    n = min(6, max(0, int(self._screenshot_fail_count) - 1))
+                    extra_sleep_s = float(min(10.0, 0.5 * (2 ** n)))
+                    if self._screenshot_fail_count >= 30:
+                        self._stop.set()
 
             try:
                 rel_shot = str(Path(shot_path).relative_to(Path.cwd())).replace("\\", "/")
@@ -1196,6 +1877,6 @@ class VlmPolicyAgent:
             if self.cfg.steps and i >= self.cfg.steps:
                 break
 
-            time.sleep(max(0.0, float(self.cfg.step_sleep_s)))
+            time.sleep(max(0.0, float(self.cfg.step_sleep_s)) + max(0.0, float(extra_sleep_s)))
 
         self._stop.set()

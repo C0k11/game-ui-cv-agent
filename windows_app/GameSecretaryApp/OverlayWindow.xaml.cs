@@ -75,6 +75,24 @@ public partial class OverlayWindow : Window
 
         try
         {
+            if (doc != null && doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (doc.RootElement.TryGetProperty("agent_cfg", out var cfg) && cfg.ValueKind == JsonValueKind.Object)
+                {
+                    var wt = TryGetString(cfg, "window_title");
+                    if (!string.IsNullOrWhiteSpace(wt))
+                    {
+                        TargetWindowTitleSubstring = wt;
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
             RenderAction(doc);
         }
         catch
@@ -163,13 +181,45 @@ public partial class OverlayWindow : Window
             : (exploration ? Color.FromArgb(220, 240, 180, 30) : Color.FromArgb(220, 50, 220, 120));
         var stroke = new SolidColorBrush(color);
 
+        try
+        {
+            JsonElement p;
+            if (act.TryGetProperty("_perception_client", out p) && p.ValueKind == JsonValueKind.Object)
+            {
+            }
+            else if (act.TryGetProperty("_perception", out p) && p.ValueKind == JsonValueKind.Object)
+            {
+            }
+            else
+            {
+                p = default;
+            }
+
+            if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                var bboxBrush = new SolidColorBrush(Color.FromArgb(160, 90, 160, 255));
+                var n = 0;
+                foreach (var it in items.EnumerateArray())
+                {
+                    if (n >= 25) break;
+                    if (it.ValueKind != JsonValueKind.Object) continue;
+                    if (!TryGetRect(it, "bbox", out var r)) continue;
+                    DrawRect(r, bboxBrush);
+                    n++;
+                }
+            }
+        }
+        catch
+        {
+        }
+
         if (a == "click")
         {
-            if (TryGetPoint(act, "target", out var p))
+            if (TryGetPoint(act, "target_client", out var p) || TryGetPoint(act, "target", out p))
             {
                 DrawCross(p, stroke);
             }
-            else if (TryGetRect(act, "bbox", out var r))
+            else if (TryGetRect(act, "bbox_client", out var r) || TryGetRect(act, "bbox", out r))
             {
                 DrawRect(r, stroke);
                 DrawCross(new Point(r.X + r.Width / 2.0, r.Y + r.Height / 2.0), stroke);
@@ -177,7 +227,8 @@ public partial class OverlayWindow : Window
         }
         else if (a == "swipe")
         {
-            if (TryGetPoint(act, "from", out var p1) && TryGetPoint(act, "to", out var p2))
+            if ((TryGetPoint(act, "from_client", out var p1) || TryGetPoint(act, "from", out p1))
+                && (TryGetPoint(act, "to_client", out var p2) || TryGetPoint(act, "to", out p2)))
             {
                 DrawLine(p1, p2, stroke);
                 DrawCross(p1, stroke);

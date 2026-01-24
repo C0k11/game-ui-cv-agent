@@ -79,6 +79,9 @@ user32.SendInput.restype = ctypes.c_uint
 user32.GetSystemMetrics.argtypes = (ctypes.c_int,)
 user32.GetSystemMetrics.restype = ctypes.c_int
 
+user32.IsWindow.argtypes = (ctypes.c_void_p,)
+user32.IsWindow.restype = ctypes.c_bool
+
 
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
@@ -137,7 +140,12 @@ class WindowsInput:
 
     def _resolve(self) -> WindowTarget:
         if self._target is not None:
-            return self._target
+            try:
+                if user32.IsWindow(ctypes.c_void_p(int(self._target.hwnd))) and user32.IsWindow(ctypes.c_void_p(int(self._target.render_hwnd))):
+                    return self._target
+            except Exception:
+                pass
+            self._target = None
         hwnd = find_window_by_title_substring(self.title_substring)
         if hwnd is None:
             raise RuntimeError(f"window not found: {self.title_substring}")
@@ -159,28 +167,85 @@ class WindowsInput:
         return t.hwnd
 
     def screenshot_client(self, out_path: str) -> None:
-        t = self._resolve()
-        img = capture_client(t.render_hwnd)
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        img.save(out_path)
+        last = None
+        for _ in range(2):
+            t = self._resolve()
+            try:
+                img = capture_client(t.render_hwnd)
+                Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                img.save(out_path)
+                return
+            except OSError as e:
+                last = e
+                try:
+                    if getattr(e, "winerror", None) == 1400:
+                        self._target = None
+                        continue
+                except Exception:
+                    pass
+                raise
+            except Exception as e:
+                last = e
+                self._target = None
+        if last is not None:
+            raise last
 
     def client_size(self) -> tuple[int, int]:
-        t = self._resolve()
-        r = get_client_rect_on_screen(t.render_hwnd)
-        w = max(0, int(r.right - r.left))
-        h = max(0, int(r.bottom - r.top))
-        return int(w), int(h)
+        last = None
+        for _ in range(2):
+            t = self._resolve()
+            try:
+                r = get_client_rect_on_screen(t.render_hwnd)
+                w = max(0, int(r.right - r.left))
+                h = max(0, int(r.bottom - r.top))
+                return int(w), int(h)
+            except OSError as e:
+                last = e
+                try:
+                    if getattr(e, "winerror", None) == 1400:
+                        self._target = None
+                        continue
+                except Exception:
+                    pass
+                raise
+            except Exception as e:
+                last = e
+                self._target = None
+        if last is not None:
+            raise last
+        return 0, 0
 
     def _client_to_screen(self, x: int, y: int) -> tuple[int, int]:
-        t = self._resolve()
-        r = get_client_rect_on_screen(t.render_hwnd)
-        w = max(0, int(r.right - r.left))
-        h = max(0, int(r.bottom - r.top))
-        if w > 0:
-            x = int(max(0, min(w - 1, int(x))))
-        if h > 0:
-            y = int(max(0, min(h - 1, int(y))))
-        return (int(r.left + x), int(r.top + y))
+        last = None
+        for _ in range(2):
+            t = self._resolve()
+            try:
+                r = get_client_rect_on_screen(t.render_hwnd)
+                w = max(0, int(r.right - r.left))
+                h = max(0, int(r.bottom - r.top))
+                if w > 0:
+                    x = int(max(0, min(w - 1, int(x))))
+                if h > 0:
+                    y = int(max(0, min(h - 1, int(y))))
+                return (int(r.left + x), int(r.top + y))
+            except OSError as e:
+                last = e
+                try:
+                    if getattr(e, "winerror", None) == 1400:
+                        self._target = None
+                        continue
+                except Exception:
+                    pass
+                raise
+            except Exception as e:
+                last = e
+                self._target = None
+        if last is not None:
+            raise last
+        return (int(x), int(y))
+
+    def client_to_screen(self, x: int, y: int) -> tuple[int, int]:
+        return self._client_to_screen(int(x), int(y))
 
     def click_client(self, x: int, y: int) -> None:
         self._focus()

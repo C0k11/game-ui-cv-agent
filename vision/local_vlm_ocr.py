@@ -16,6 +16,12 @@ except Exception:  # pragma: no cover
 
 
 try:
+    from transformers import AutoModelForImageTextToText  # type: ignore
+except Exception:  # pragma: no cover
+    AutoModelForImageTextToText = None  # type: ignore
+
+
+try:
     from transformers import AutoModelForCausalLM  # type: ignore
 except Exception:  # pragma: no cover
     AutoModelForCausalLM = None  # type: ignore
@@ -42,6 +48,9 @@ class LocalVlmOcr:
         self._lock = threading.Lock()
         self._model = None
         self._processor = None
+
+    def ensure_loaded(self) -> None:
+        self._ensure_loaded()
 
     def _set_hf_cache(self) -> None:
         os.environ.setdefault("HF_HOME", self.cfg.hf_home)
@@ -84,26 +93,45 @@ class LocalVlmOcr:
             self._processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
             model = None
-            if AutoModelForVision2Seq is not None:
+            is_cuda = str(self.cfg.device or "").lower().startswith("cuda")
+            last_err: Optional[Exception] = None
+            if AutoModelForImageTextToText is not None:
+                try:
+                    model = AutoModelForImageTextToText.from_pretrained(
+                        model_path,
+                        torch_dtype="auto",
+                        device_map="auto" if is_cuda else None,
+                        trust_remote_code=True,
+                    )
+                except Exception as e:
+                    last_err = e
+                    model = None
+
+            if model is None and AutoModelForVision2Seq is not None:
                 try:
                     model = AutoModelForVision2Seq.from_pretrained(
                         model_path,
                         torch_dtype="auto",
-                        device_map="auto" if self.cfg.device == "cuda" else None,
+                        device_map="auto" if is_cuda else None,
                         trust_remote_code=True,
                     )
-                except Exception:
+                except Exception as e:
+                    last_err = e
                     model = None
 
             if model is None:
-                if AutoModelForCausalLM is None:
-                    raise ImportError("transformers AutoModelForCausalLM is not available")
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    torch_dtype="auto",
-                    device_map="auto" if self.cfg.device == "cuda" else None,
-                    trust_remote_code=True,
-                )
+                allow_text_fb = (os.environ.get("LOCAL_VLM_ALLOW_TEXT_FALLBACK") or "").strip() == "1"
+                if allow_text_fb and AutoModelForCausalLM is not None:
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        torch_dtype="auto",
+                        device_map="auto" if is_cuda else None,
+                        trust_remote_code=True,
+                    )
+                else:
+                    if last_err is None:
+                        raise RuntimeError("No compatible vision model loader found in transformers")
+                    raise RuntimeError(f"Failed to load vision model: {last_err}")
 
             self._model = model.eval()
 
@@ -139,10 +167,20 @@ class LocalVlmOcr:
                 pass
 
         with torch.inference_mode():
+            mt = None
+            try:
+                s = (os.environ.get("LOCAL_VLM_MAX_TIME_S") or "").strip()
+                if s:
+                    mt = float(s)
+            except Exception:
+                mt = None
+            if mt is None:
+                mt = 25.0
             generated = self._model.generate(
                 **inputs,
                 max_new_tokens=int(max_new_tokens) if max_new_tokens else int(self.cfg.max_new_tokens),
                 do_sample=False,
+                max_time=float(mt),
             )
 
         if isinstance(inputs, dict) and "input_ids" in inputs:
