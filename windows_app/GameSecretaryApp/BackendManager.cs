@@ -109,7 +109,8 @@ public sealed class BackendManager
 
             // Force local_vlm only (Qwen3-VL-8B)
             psi.Environment["LOCAL_VLM_MODEL"] = LocalVlmModel;
-            psi.Environment["LOCAL_VLM_DEVICE"] = "cuda";
+            var dev = Environment.GetEnvironmentVariable("LOCAL_VLM_DEVICE") ?? "";
+            psi.Environment["LOCAL_VLM_DEVICE"] = string.IsNullOrWhiteSpace(dev) ? "cuda" : dev;
             psi.Environment["LOCAL_VLM_MODELS_DIR"] = Path.Combine(@"D:\Project\ml_cache\models", "vlm");
             psi.Environment["HF_HOME"] = @"D:\Project\ml_cache\huggingface";
         }
@@ -164,7 +165,11 @@ public sealed class BackendManager
         await StartAsync();
         try
         {
-            await WarmupLocalVlmAsync(timeoutSec: warmupTimeoutSec);
+            var warm = (Environment.GetEnvironmentVariable("GAMESECRETARY_WARMUP_ON_START") ?? "").Trim();
+            if (warm == "1" && warmupTimeoutSec > 0)
+            {
+                await WarmupLocalVlmAsync(timeoutSec: warmupTimeoutSec);
+            }
         }
         catch
         {

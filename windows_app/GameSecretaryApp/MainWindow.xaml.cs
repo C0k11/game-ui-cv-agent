@@ -117,17 +117,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        SetStatus("Warming up model...");
+        SetStatus("Ready");
+        WebView.CoreWebView2.Navigate(BackendManager.Instance.DashboardUrl);
+
         try
         {
-            await BackendManager.Instance.WarmupLocalVlmAsync(timeoutSec: 1800);
+            var warm = (Environment.GetEnvironmentVariable("GAMESECRETARY_WARMUP_ON_START") ?? "").Trim();
+            if (warm == "1")
+            {
+                SetStatus("Warming up model...");
+                try { await BackendManager.Instance.WarmupLocalVlmAsync(timeoutSec: 1800); } catch { }
+                SetStatus("Ready");
+            }
         }
         catch
         {
         }
-
-        SetStatus("Ready");
-        WebView.CoreWebView2.Navigate(BackendManager.Instance.DashboardUrl);
     }
 
     private void SetStatus(string msg)

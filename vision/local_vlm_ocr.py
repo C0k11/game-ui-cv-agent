@@ -92,46 +92,65 @@ class LocalVlmOcr:
 
             self._processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
-            model = None
+            def _load_model(*, use_cuda: bool):
+                model2 = None
+                last_err2: Optional[Exception] = None
+                if AutoModelForImageTextToText is not None:
+                    try:
+                        model2 = AutoModelForImageTextToText.from_pretrained(
+                            model_path,
+                            torch_dtype="auto",
+                            device_map="auto" if use_cuda else None,
+                            trust_remote_code=True,
+                        )
+                    except Exception as e:
+                        last_err2 = e
+                        model2 = None
+
+                if model2 is None and AutoModelForVision2Seq is not None:
+                    try:
+                        model2 = AutoModelForVision2Seq.from_pretrained(
+                            model_path,
+                            torch_dtype="auto",
+                            device_map="auto" if use_cuda else None,
+                            trust_remote_code=True,
+                        )
+                    except Exception as e:
+                        last_err2 = e
+                        model2 = None
+
+                if model2 is None:
+                    allow_text_fb = (os.environ.get("LOCAL_VLM_ALLOW_TEXT_FALLBACK") or "").strip() == "1"
+                    if allow_text_fb and AutoModelForCausalLM is not None:
+                        model2 = AutoModelForCausalLM.from_pretrained(
+                            model_path,
+                            torch_dtype="auto",
+                            device_map="auto" if use_cuda else None,
+                            trust_remote_code=True,
+                        )
+                    else:
+                        if last_err2 is None:
+                            raise RuntimeError("No compatible vision model loader found in transformers")
+                        raise RuntimeError(f"Failed to load vision model: {last_err2}")
+                return model2
+
             is_cuda = str(self.cfg.device or "").lower().startswith("cuda")
-            last_err: Optional[Exception] = None
-            if AutoModelForImageTextToText is not None:
-                try:
-                    model = AutoModelForImageTextToText.from_pretrained(
-                        model_path,
-                        torch_dtype="auto",
-                        device_map="auto" if is_cuda else None,
-                        trust_remote_code=True,
-                    )
-                except Exception as e:
-                    last_err = e
-                    model = None
-
-            if model is None and AutoModelForVision2Seq is not None:
-                try:
-                    model = AutoModelForVision2Seq.from_pretrained(
-                        model_path,
-                        torch_dtype="auto",
-                        device_map="auto" if is_cuda else None,
-                        trust_remote_code=True,
-                    )
-                except Exception as e:
-                    last_err = e
-                    model = None
-
-            if model is None:
-                allow_text_fb = (os.environ.get("LOCAL_VLM_ALLOW_TEXT_FALLBACK") or "").strip() == "1"
-                if allow_text_fb and AutoModelForCausalLM is not None:
-                    model = AutoModelForCausalLM.from_pretrained(
-                        model_path,
-                        torch_dtype="auto",
-                        device_map="auto" if is_cuda else None,
-                        trust_remote_code=True,
-                    )
+            try:
+                model = _load_model(use_cuda=bool(is_cuda))
+            except Exception as e:
+                msg = str(e).lower()
+                fb = (os.environ.get("LOCAL_VLM_FALLBACK_CPU_ON_OOM") or "1").strip()
+                allow_fb = fb not in ("0", "false", "False")
+                if allow_fb and is_cuda and ("out of memory" in msg or "cuda" in msg and "memory" in msg):
+                    try:
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    self.cfg.device = "cpu"
+                    model = _load_model(use_cuda=False)
                 else:
-                    if last_err is None:
-                        raise RuntimeError("No compatible vision model loader found in transformers")
-                    raise RuntimeError(f"Failed to load vision model: {last_err}")
+                    raise
 
             self._model = model.eval()
 
