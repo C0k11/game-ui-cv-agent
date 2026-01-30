@@ -1024,6 +1024,24 @@ class VlmPolicyAgent:
 
         reason = str(action.get("reason") or "")
         rlow = reason.lower()
+
+        # Allow closing popups (even if the text contains words like "task").
+        try:
+            raw = str(action.get("raw") or "")
+        except Exception:
+            raw = ""
+        blob = (reason + "\n" + raw)
+        blob_low = (blob or "").lower()
+        if (
+            "关闭" in blob
+            or "关掉" in blob
+            or "close" in blob_low
+            or "popup" in blob_low
+            or "弹窗" in blob
+            or "公告" in blob
+        ):
+            return action
+
         # During lobby check, don't open secondary menus like Tasks/Schedule/etc.
         if any(k in rlow for k in ("task", "schedule", "club", "bounty", "mail")) or any(k in reason for k in ("任务", "日程", "社团", "悬赏", "邮箱", "邮件")):
             return {
