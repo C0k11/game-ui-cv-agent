@@ -228,6 +228,7 @@ public sealed class BackendManager
             psi.Environment["LOCAL_VLM_DEVICE"] = string.IsNullOrWhiteSpace(dev) ? "cuda" : dev;
             psi.Environment["LOCAL_VLM_MODELS_DIR"] = Path.Combine(@"D:\Project\ml_cache\models", "vlm");
             psi.Environment["HF_HOME"] = @"D:\Project\ml_cache\huggingface";
+            psi.Environment["GAMESECRETARY_PARENT_PID"] = Process.GetCurrentProcess().Id.ToString();
         }
         catch
         {
@@ -414,7 +415,7 @@ public sealed class BackendManager
             var rootEsc = (root ?? "").Replace("'", "''");
             var script = "$ErrorActionPreference='SilentlyContinue';" +
                          "$root='" + rootEsc + "';" +
-                         "$procs = Get-CimInstance Win32_Process -Filter 'Name=''python.exe''';" +
+                         "$procs = Get-CimInstance Win32_Process;" +
                          "foreach($p in $procs){" +
                          "  $cl = $p.CommandLine;" +
                          "  if([string]::IsNullOrWhiteSpace($cl)){ continue }" +
