@@ -934,7 +934,7 @@ class VlmPolicyAgent:
         out.setdefault("_snapped", True)
         return out
 
-    def _maybe_close_popup_heuristic(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    def _maybe_close_popup_heuristic(self, action: Dict[str, Any], *, screenshot_path: str) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
         a = str(action.get("action") or "").lower().strip()
@@ -946,22 +946,64 @@ class VlmPolicyAgent:
         if not ("关闭" in reason or "close" in rlow or "弹窗" in reason or "popup" in rlow):
             return action
 
-        # Deterministic close: click near top-right corner.
-        w, h = 0, 0
+        # Prefer closing by clicking an actual close/X button detected in perception.
+        sw, sh = 0, 0
         try:
-            if hasattr(self._device, "client_size"):
-                w, h = self._device.client_size()
+            with Image.open(screenshot_path) as im:
+                sw, sh = im.size
         except Exception:
-            w, h = 0, 0
-        if w <= 0 or h <= 0:
-            return action
+            sw, sh = 0, 0
 
-        tx = int(max(0, int(w) - 40))
-        ty = int(min(int(h) - 1, 40))
-        out = dict(action)
-        out["target"] = [int(tx), int(ty)]
-        out.setdefault("_close_heuristic", True)
-        return out
+        items = None
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+
+        best_bb = None
+        if isinstance(items, list) and items:
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                label = str(it.get("label") or "").strip()
+                bb = it.get("bbox")
+                if not label or not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                    continue
+                ll = label.lower()
+                if (
+                    ll in ("x", "×")
+                    or "close" in ll
+                    or "关闭" in label
+                    or "关" == label
+                    or "×" in label
+                ):
+                    bb2 = [int(v) for v in bb]
+                    if sw > 0 and sh > 0:
+                        cx, cy = _center(bb2)
+                        if int(cx) < int(sw * 0.55) or int(cy) > int(sh * 0.45):
+                            continue
+                    best_bb = bb2
+                    break
+
+        if best_bb is not None:
+            x, y = _center([int(v) for v in best_bb])
+            out = dict(action)
+            out["target"] = [int(x), int(y)]
+            out["bbox"] = [int(v) for v in best_bb]
+            out.setdefault("_close_heuristic", "perception_close")
+            return out
+
+        # Fallback: ESC usually closes menus/popups and is safer than clicking window top-right.
+        return {
+            "action": "back",
+            "reason": "Close popup via ESC heuristic (no close button detected).",
+            "raw": action.get("raw"),
+            "_prompt": action.get("_prompt"),
+            "_perception": action.get("_perception"),
+            "_model": action.get("_model"),
+            "_routine": action.get("_routine"),
+            "_close_heuristic": "esc",
+        }
 
     def _debounce_click(self, action: Dict[str, Any], *, step_id: int) -> Dict[str, Any]:
         if not isinstance(action, dict):
@@ -1801,7 +1843,7 @@ class VlmPolicyAgent:
 
                 act_before = act
                 act = self._sanitize_action(act)
-                act = self._maybe_close_popup_heuristic(act)
+                act = self._maybe_close_popup_heuristic(act, screenshot_path=shot_path)
                 act = self._block_check_lobby_noise(act)
                 act = self._snap_click_to_perception_label(act)
                 act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
