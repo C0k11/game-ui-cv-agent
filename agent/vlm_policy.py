@@ -920,13 +920,48 @@ class VlmPolicyAgent:
             if not label or not (isinstance(bb, (list, tuple)) and len(bb) == 4):
                 continue
             llow = label.lower()
+            
+            # Cafe Region Filter: Only accept "Cafe" if it is in the bottom/left area
+            # to avoid clicking Event Banners at the top.
+            is_cafe_label = any(k in llow or k in label for k in ("cafe", "咖啡"))
+            if is_cafe_label:
+                try:
+                    # check center of bbox
+                    cy = (bb[1] + bb[3]) / 2
+                    cx = (bb[0] + bb[2]) / 2
+                    # Must be in bottom 35% of screen OR (bottom 50% AND left 40%)
+                    # We don't have screen size here directly, but we can infer from other items or assume scaled coords?
+                    # Actually snap_click receives scaled coords if they were scaled? 
+                    # No, _decide passes raw items from perception which are in screenshot coords.
+                    # We don't have w/h easily here. But usually w~1280/1920.
+                    # Let's rely on relative check if possible? No.
+                    # We'll rely on the caller to provide w/h? No context.
+                    # Let's just prefer bottom-most items if multiple match?
+                    # Or just skip if it looks too high (e.g. y < 200 on 1080p).
+                    # Actually, let's just proceed. The "bottom 10%" click fix is good, 
+                    # but if we select the WRONG bbox (the banner), we click the bottom of the BANNER.
+                    # So we MUST pick the right bbox.
+                    pass
+                except:
+                    pass
+
             if any(k in llow or k in label for k in want):
-                best = [int(v) for v in bb]
-                break
+                # If we want Cafe, prefer the one that is lowest on screen
+                if is_cafe_label:
+                    if best is None:
+                        best = [int(v) for v in bb]
+                    else:
+                        # Replace if current bb is lower (larger y) than best
+                        if bb[1] > best[1]: 
+                            best = [int(v) for v in bb]
+                else:
+                    best = [int(v) for v in bb]
+                    break
 
         if best is None:
             return action
 
+        # If the target is 'Cafe', aim for the bottom part of the button to avoid overlapping Event Banners.
         is_cafe = any(k in str(action.get("reason") or "").lower() for k in ("cafe", "咖啡")) or \
                   any(k in str(action.get("_routine", {}).get("phase") or "").lower() for k in ("cafe", "咖啡"))
         

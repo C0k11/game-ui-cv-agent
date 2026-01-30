@@ -48,7 +48,9 @@ def main() -> int:
                     "left": rect.left,
                     "top": rect.top,
                     "width": rect.width,
-                    "height": rect.height
+                    "height": rect.height,
+                    "x": rect.left,
+                    "y": rect.top,
                 }
             except Exception:
                 rect_info = None

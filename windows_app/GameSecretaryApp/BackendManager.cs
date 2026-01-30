@@ -421,41 +421,24 @@ public sealed class BackendManager
     {
         try
         {
-            var root = _repoRoot;
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                try { root = FindRepoRoot(); } catch { }
-            }
-
-            var rootEsc = (root ?? "").Replace("'", "''");
-            
-            // Determine the python environment we likely used
-            var venvPy = Path.Combine(root ?? "", "venv311");
-            var stockPy = @"D:\Project\Stock\venv311";
-            var venvEsc = venvPy.Replace("'", "''");
-            var stockEsc = stockPy.Replace("'", "''");
-
+            var logPath = Path.Combine(LogsDir, "kill_debug.txt");
             var script = "$ErrorActionPreference='SilentlyContinue';" +
-                         "$root='" + rootEsc + "';" +
-                         "$venv='" + venvEsc + "';" +
-                         "$stock='" + stockEsc + "';" +
-                         "$log='" + Path.Combine(LogsDir, "kill_debug.log").Replace("'", "''") + "';" +
-                         "Add-Content $log 'Starting cleanup...';" +
+                         $"$log='{logPath.Replace("'", "''")}';" +
+                         "function Log($msg) { Add-Content -Path $log -Value ('['+(Get-Date).ToString('HH:mm:ss')+'] ' + $msg) -ErrorAction SilentlyContinue };" +
+                         "Log 'Starting cleanup...';" +
+                         "$me = [System.Diagnostics.Process]::GetCurrentProcess().Id;" + 
                          "$procs = Get-CimInstance Win32_Process;" +
                          "foreach($p in $procs){" +
+                         "  if($p.ProcessId -eq $me){ continue }" + 
                          "  $cl = $p.CommandLine;" +
-                         "  $path = $p.ExecutablePath;" +
-                         "  if([string]::IsNullOrWhiteSpace($cl)){ continue }" +
+                         "  $n = $p.Name;" +
+                         "  if($n -ne 'python.exe' -and $n -ne 'pythonw.exe'){ continue }" +
                          "  $hit = $false;" +
-                         "  if($root -and $cl -like ('*' + $root + '*')){ $hit = $true }" +
-                         "  if($cl -like '*run_backend.py*'){ $hit = $true }" +
-                         "  if($cl -like '*server.app*' -or $cl -like '*uvicorn*api/v1*'){ $hit = $true }" +
-                         "  if($path -and ($path -like ($venv + '*') -or $path -like ($stock + '*'))){" + 
-                         "      if($p.Name -eq 'python.exe'){ $hit = $true }" +
-                         "  }" +
+                         "  if($cl -like '*run_backend.py*'){ $hit = $true; Log 'Match: run_backend' }" +
+                         "  if($cl -like '*server.app*' -or $cl -like '*uvicorn*api/v1*'){ $hit = $true; Log 'Match: uvicorn' }" +
                          "  if($hit){ " +
-                         "      Add-Content $log ('Killing PID=' + $p.ProcessId + ' CL=' + $cl);" +
-                         "      cmd /c ('taskkill /PID ' + $p.ProcessId + ' /T /F') | Out-Null " +
+                         "      Log ('Killing PID=' + $p.ProcessId + ' CL=' + $cl);" +
+                         "      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue" +
                          "  }" +
                          "}";
 
