@@ -33,6 +33,12 @@ except Exception:  # pragma: no cover
     snapshot_download = None  # type: ignore
 
 
+try:
+    from peft import PeftModel  # type: ignore
+except Exception:
+    PeftModel = None
+
+
 @dataclass
 class LocalVlmConfig:
     model: str
@@ -40,6 +46,7 @@ class LocalVlmConfig:
     hf_home: str
     device: str = "cuda"
     max_new_tokens: int = 2048
+    lora_path: Optional[str] = None
 
 
 class LocalVlmOcr:
@@ -48,6 +55,10 @@ class LocalVlmOcr:
         self._lock = threading.Lock()
         self._model = None
         self._processor = None
+        
+        # Check env for LoRA path if not in config
+        if not self.cfg.lora_path:
+            self.cfg.lora_path = os.environ.get("LOCAL_VLM_LORA_PATH")
 
     def ensure_loaded(self) -> None:
         self._ensure_loaded()
