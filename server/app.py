@@ -93,49 +93,49 @@ def _pid_alive(pid: int) -> bool:
 
 def _parent_watchdog() -> None:
     try:
-        pid = int(os.environ.get("GAMESECRETARY_PARENT_PID") or 0)
+        pid_str = os.environ.get("GAMESECRETARY_PARENT_PID") or "0"
+        pid = int(pid_str)
     except Exception:
         pid = 0
+    
+    print(f"DEBUG: Watchdog init. Parent PID: {pid}", flush=True)
+    
     if pid <= 0:
         return
-
-    log_path = LOGS_DIR / "watchdog.log"
-    def _log(msg):
-        try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
-        except:
-            pass
-
-    _log(f"Watchdog started monitoring parent PID={pid}")
 
     while True:
         try:
             if not _pid_alive(pid):
-                _log(f"Parent PID={pid} is dead. Terminating self.")
+                print(f"DEBUG: Watchdog triggered. Parent {pid} gone. Exiting.", flush=True)
                 try:
                     _stop_vlm_agent()
-                except Exception as e:
-                    _log(f"Error stopping agent: {e}")
-                
-                # Force kill self
-                try:
-                    os._exit(0)
                 except Exception:
                     pass
+                try:
+                    # Kill entire process group if possible
+                    if hasattr(os, "killpg"):
+                        os.killpg(os.getpgrp(), 9)
+                    else:
+                        os._exit(0)
+                except Exception:
+                    os._exit(0)
                 break
         except Exception as e:
-            _log(f"Watchdog loop error: {e}")
+            print(f"DEBUG: Watchdog error: {e}", flush=True)
         time.sleep(2.0)
 
 
 app = FastAPI()
 
+# Print env vars for debugging
 try:
+    print(f"DEBUG: Backend starting. Env GAMESECRETARY_PARENT_PID={os.environ.get('GAMESECRETARY_PARENT_PID')}", flush=True)
     if os.environ.get("GAMESECRETARY_PARENT_PID"):
-        threading.Thread(target=_parent_watchdog, daemon=True).start()
-except Exception:
-    pass
+        t = threading.Thread(target=_parent_watchdog, daemon=True)
+        t.start()
+        print("DEBUG: Watchdog thread started", flush=True)
+except Exception as e:
+    print(f"DEBUG: Watchdog start failed: {e}", flush=True)
 
 
 def _get_vision():

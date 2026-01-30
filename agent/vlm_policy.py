@@ -927,7 +927,25 @@ class VlmPolicyAgent:
         if best is None:
             return action
 
-        x, y = _center([int(v) for v in best])
+        is_cafe = any(k in str(action.get("reason") or "").lower() for k in ("cafe", "咖啡")) or \
+                  any(k in str(action.get("_routine", {}).get("phase") or "").lower() for k in ("cafe", "咖啡"))
+        
+        if is_cafe:
+            # Target bottom 10% of the bbox (y_center + 0.40 * height) -> 0.9 position
+            x1, y1, x2, y2 = [int(v) for v in best]
+            h = y2 - y1
+            cx = int((x1 + x2) / 2)
+            cy = int(y1 + 0.90 * h)
+            # Clamp to bbox bottom
+            if cy >= y2: cy = y2 - 1
+            x, y = cx, cy
+            try:
+                self._log_out(f"[Policy] Offsetting Cafe click to bottom 10%: [{x},{y}] (bbox: {best})")
+            except:
+                pass
+        else:
+            x, y = _center([int(v) for v in best])
+
         out = dict(action)
         out["target"] = [int(x), int(y)]
         out["bbox"] = [int(v) for v in best]

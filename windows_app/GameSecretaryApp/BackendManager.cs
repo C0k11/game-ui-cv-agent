@@ -439,6 +439,8 @@ public sealed class BackendManager
                          "$root='" + rootEsc + "';" +
                          "$venv='" + venvEsc + "';" +
                          "$stock='" + stockEsc + "';" +
+                         "$log='" + Path.Combine(LogsDir, "kill_debug.log").Replace("'", "''").Replace("\\", "\\\\") + "';" +
+                         "Add-Content $log 'Starting cleanup...';" +
                          "$procs = Get-CimInstance Win32_Process;" +
                          "foreach($p in $procs){" +
                          "  $cl = $p.CommandLine;" +
@@ -451,7 +453,10 @@ public sealed class BackendManager
                          "  if($path -and ($path -like ($venv + '*') -or $path -like ($stock + '*'))){" + 
                          "      if($p.Name -eq 'python.exe'){ $hit = $true }" +
                          "  }" +
-                         "  if($hit){ cmd /c ('taskkill /PID ' + $p.ProcessId + ' /T /F') | Out-Null }" +
+                         "  if($hit){ " +
+                         "      Add-Content $log ('Killing PID=' + $p.ProcessId + ' CL=' + $cl);" +
+                         "      cmd /c ('taskkill /PID ' + $p.ProcessId + ' /T /F') | Out-Null " +
+                         "  }" +
                          "}";
 
             var psi = new ProcessStartInfo
