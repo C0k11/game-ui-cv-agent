@@ -379,6 +379,7 @@ public sealed class BackendManager
         {
             if (_proc is null)
             {
+                try { RequestBackendShutdown(); } catch { }
                 try { KillBackendByCommandLine(); } catch { }
                 try { KillBackendByStatePid(); } catch { }
                 try { TryKillTcpListener(ApiPort); } catch { }
@@ -388,6 +389,7 @@ public sealed class BackendManager
 
             if (!_proc.HasExited)
             {
+                try { RequestBackendShutdown(); } catch { }
                 try { _proc.Kill(entireProcessTree: true); } catch { }
             }
         }
@@ -402,6 +404,19 @@ public sealed class BackendManager
         }
     }
 
+    private void RequestBackendShutdown()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            var task = client.PostAsync($"{ApiBase}/shutdown", null);
+            task.Wait(1500);
+        }
+        catch
+        {
+        }
+    }
+
     private void KillBackendByCommandLine()
     {
         try
@@ -413,16 +428,29 @@ public sealed class BackendManager
             }
 
             var rootEsc = (root ?? "").Replace("'", "''");
+            
+            // Determine the python environment we likely used
+            var venvPy = Path.Combine(root ?? "", "venv311");
+            var stockPy = @"D:\Project\Stock\venv311";
+            var venvEsc = venvPy.Replace("'", "''").Replace("\\", "\\\\");
+            var stockEsc = stockPy.Replace("'", "''").Replace("\\", "\\\\");
+
             var script = "$ErrorActionPreference='SilentlyContinue';" +
                          "$root='" + rootEsc + "';" +
+                         "$venv='" + venvEsc + "';" +
+                         "$stock='" + stockEsc + "';" +
                          "$procs = Get-CimInstance Win32_Process;" +
                          "foreach($p in $procs){" +
                          "  $cl = $p.CommandLine;" +
+                         "  $path = $p.ExecutablePath;" +
                          "  if([string]::IsNullOrWhiteSpace($cl)){ continue }" +
                          "  $hit = $false;" +
                          "  if($root -and $cl -like ('*' + $root + '*')){ $hit = $true }" +
                          "  if($cl -like '*run_backend.py*'){ $hit = $true }" +
                          "  if($cl -like '*server.app*' -or $cl -like '*uvicorn*api/v1*'){ $hit = $true }" +
+                         "  if($path -and ($path -like ($venv + '*') -or $path -like ($stock + '*'))){" + 
+                         "      if($p.Name -eq 'python.exe'){ $hit = $true }" +
+                         "  }" +
                          "  if($hit){ cmd /c ('taskkill /PID ' + $p.ProcessId + ' /T /F') | Out-Null }" +
                          "}";
 

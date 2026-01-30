@@ -1005,6 +1005,49 @@ class VlmPolicyAgent:
             "_close_heuristic": "esc",
         }
 
+    def _handle_stuck_in_recruit(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Detect if we are accidentally in the Recruit/Gacha screen and back out if needed."""
+        if not isinstance(action, dict):
+            return action
+        
+        # If we intend to recruit, don't interfere
+        reason = str(action.get("reason") or "").lower()
+        if "recruit" in reason or "gacha" in reason or "招募" in reason or "抽卡" in reason:
+            return action
+
+        items = None
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        
+        if not isinstance(items, list) or not items:
+            return action
+
+        # Keywords that strongly suggest we are in the Recruit screen
+        recruit_keywords = ["recruit", "pick up", "gacha", "招募", "募集", "概率", "rates", "points", "exchange"]
+        
+        hit_count = 0
+        for it in items:
+            if not isinstance(it, dict): continue
+            lbl = str(it.get("label") or "").lower()
+            if any(k in lbl for k in recruit_keywords):
+                hit_count += 1
+        
+        # If we see multiple recruit keywords, we are likely stuck
+        if hit_count >= 2:
+            return {
+                "action": "back",
+                "reason": "Detected 'Recruit' screen while not intending to recruit. Backing out.",
+                "raw": action.get("raw"),
+                "_prompt": action.get("_prompt"),
+                "_perception": action.get("_perception"),
+                "_model": action.get("_model"),
+                "_routine": action.get("_routine"),
+                "_recovery": "stuck_in_recruit",
+            }
+        return action
+
     def _debounce_click(self, action: Dict[str, Any], *, step_id: int) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action

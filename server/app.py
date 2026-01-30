@@ -99,19 +99,33 @@ def _parent_watchdog() -> None:
     if pid <= 0:
         return
 
+    log_path = LOGS_DIR / "watchdog.log"
+    def _log(msg):
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+        except:
+            pass
+
+    _log(f"Watchdog started monitoring parent PID={pid}")
+
     while True:
         try:
             if not _pid_alive(pid):
+                _log(f"Parent PID={pid} is dead. Terminating self.")
                 try:
                     _stop_vlm_agent()
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log(f"Error stopping agent: {e}")
+                
+                # Force kill self
                 try:
                     os._exit(0)
                 except Exception:
-                    break
-        except Exception:
-            pass
+                    pass
+                break
+        except Exception as e:
+            _log(f"Watchdog loop error: {e}")
         time.sleep(2.0)
 
 
@@ -260,6 +274,19 @@ def ensure_ollama(*, host: str, port: int, models_dir: str, auto_pull: bool, mod
 
     if auto_pull and model_tag:
         _ollama_pull(models_dir=models_dir, model_tag=model_tag)
+
+
+@app.post("/api/v1/shutdown")
+def shutdown_server() -> Dict[str, str]:
+    def _do_exit():
+        time.sleep(0.2)
+        try:
+            _stop_vlm_agent()
+        except Exception:
+            pass
+        os._exit(0)
+    threading.Thread(target=_do_exit, daemon=True).start()
+    return {"status": "shutting_down"}
 
 
 @app.post("/api/v1/vlm/ensure")
