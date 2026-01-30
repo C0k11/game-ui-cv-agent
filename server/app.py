@@ -7,6 +7,7 @@ import hashlib
 import threading
 import base64
 import tempfile
+import ctypes
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
@@ -49,7 +50,78 @@ _VLM_AGENT_LOCK = threading.Lock()
 _VLM_AGENT = None
 
 
+def _pid_alive(pid: int) -> bool:
+    try:
+        if pid <= 0:
+            return False
+    except Exception:
+        return False
+
+    if os.name == "nt":
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong)
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+            kernel32.GetExitCodeProcess.restype = ctypes.c_bool
+            kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+            kernel32.CloseHandle.restype = ctypes.c_bool
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+
+            h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not h:
+                return False
+            code = ctypes.c_ulong(0)
+            ok = kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+            try:
+                kernel32.CloseHandle(h)
+            except Exception:
+                pass
+            if not ok:
+                return False
+            return int(code.value) == STILL_ACTIVE
+        except Exception:
+            return False
+
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def _parent_watchdog() -> None:
+    try:
+        pid = int(os.environ.get("GAMESECRETARY_PARENT_PID") or 0)
+    except Exception:
+        pid = 0
+    if pid <= 0:
+        return
+
+    while True:
+        try:
+            if not _pid_alive(pid):
+                try:
+                    _stop_vlm_agent()
+                except Exception:
+                    pass
+                try:
+                    os._exit(0)
+                except Exception:
+                    break
+        except Exception:
+            pass
+        time.sleep(2.0)
+
+
 app = FastAPI()
+
+try:
+    if os.environ.get("GAMESECRETARY_PARENT_PID"):
+        threading.Thread(target=_parent_watchdog, daemon=True).start()
+except Exception:
+    pass
 
 
 def _get_vision():

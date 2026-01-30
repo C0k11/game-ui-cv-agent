@@ -1085,7 +1085,9 @@ class VlmPolicyAgent:
             return action
 
         # During lobby check, don't open secondary menus like Tasks/Schedule/etc.
-        if any(k in rlow for k in ("task", "schedule", "club", "bounty", "mail")) or any(k in reason for k in ("任务", "日程", "社团", "悬赏", "邮箱", "邮件")):
+        if any(k in rlow for k in ("task", "schedule", "club", "bounty", "mail", "recruit", "recruitment", "gacha")) or any(
+            k in reason for k in ("任务", "日程", "社团", "悬赏", "邮箱", "邮件", "招募", "抽卡")
+        ):
             return {
                 "action": "wait",
                 "duration_ms": 800,
