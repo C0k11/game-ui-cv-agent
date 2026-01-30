@@ -57,6 +57,8 @@ class _SubprocessVlm:
         self._pending: Dict[int, Dict[str, Any]] = {}
         self._ready: bool = False
         self._ready_error: str = ""
+        self._cooldown_until: float = 0.0
+        self._cooldown_error: str = ""
 
     def _ensure_proc(self) -> None:
         with self._lock:
@@ -88,10 +90,10 @@ class _SubprocessVlm:
         deadline = time.time() + max(5.0, startup_to)
 
         while True:
-            if self._ready:
-                return
             if self._ready_error:
                 raise RuntimeError(self._ready_error)
+            if self._ready:
+                return
             remaining = deadline - time.time()
             if remaining <= 0:
                 raise TimeoutError("vlm_worker_startup_timeout")
@@ -101,6 +103,25 @@ class _SubprocessVlm:
             except queue.Empty:
                 continue
             self._handle_resp_msg(msg)
+
+    def _shutdown_proc(self) -> None:
+        with self._lock:
+            try:
+                if self._proc is not None and self._proc.is_alive():
+                    self._proc.terminate()
+            except Exception:
+                pass
+            try:
+                if self._proc is not None:
+                    self._proc.join(timeout=1.0)
+            except Exception:
+                pass
+            self._proc = None
+            self._req_q = None
+            self._resp_q = None
+            self._pending = {}
+            self._ready = False
+            self._ready_error = ""
 
     def _handle_resp_msg(self, msg: Dict[str, Any]) -> None:
         if not isinstance(msg, dict):
@@ -142,13 +163,35 @@ class _SubprocessVlm:
             self._wait_ready()
 
     def ocr(self, *, image_path: str, prompt: str, max_new_tokens: Optional[int] = None) -> Dict[str, Any]:
+        try:
+            if self._cooldown_until and time.time() < float(self._cooldown_until):
+                return {"raw": "", "error": str(self._cooldown_error or "startup_error:cooldown")}
+        except Exception:
+            pass
         self._ensure_proc()
         if not self._ready:
             try:
                 self._wait_ready()
             except Exception as e:
+                err = str(e)
+                low = err.lower()
+                if "paging file" in low or "os error 1455" in low or " 1455" in low or low.endswith("1455"):
+                    try:
+                        cd = float(os.environ.get("LOCAL_VLM_STARTUP_COOLDOWN_S", "60"))
+                    except Exception:
+                        cd = 60.0
+                    try:
+                        self._cooldown_error = f"startup_error:{err}"
+                        self._cooldown_until = time.time() + max(5.0, float(cd))
+                    except Exception:
+                        pass
+                    try:
+                        self._shutdown_proc()
+                    except Exception:
+                        pass
+                    return {"raw": "", "error": f"startup_error:{err}"}
                 self._restart_proc()
-                return {"raw": "", "error": f"startup_error:{e}"}
+                return {"raw": "", "error": f"startup_error:{err}"}
         assert self._req_q is not None
         assert self._resp_q is not None
 

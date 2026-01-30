@@ -176,14 +176,27 @@ class LocalVlmOcr:
                 msg = str(e).lower()
                 fb = (os.environ.get("LOCAL_VLM_FALLBACK_CPU_ON_OOM") or "1").strip()
                 allow_fb = fb not in ("0", "false", "False")
-                if allow_fb and is_cuda and ("out of memory" in msg or "cuda" in msg and "memory" in msg):
+
+                is_mem_err = False
+                try:
+                    if "out of memory" in msg or ("cuda" in msg and "memory" in msg):
+                        is_mem_err = True
+                    if "paging file" in msg or "os error 1455" in msg or " 1455" in msg or msg.endswith("1455"):
+                        is_mem_err = True
+                except Exception:
+                    is_mem_err = False
+
+                if allow_fb and is_cuda and is_mem_err:
                     try:
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                     except Exception:
                         pass
                     self.cfg.device = "cpu"
-                    model = _load_model(use_cuda=False)
+                    try:
+                        model = _load_model(use_cuda=False)
+                    except Exception as e2:
+                        raise RuntimeError(f"Failed to load vision model on CUDA (memory/paging-file error) and CPU fallback also failed: {e}; cpu_error: {e2}")
                 else:
                     raise
 
