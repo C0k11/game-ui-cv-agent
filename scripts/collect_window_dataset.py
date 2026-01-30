@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.win_capture import capture_client, find_window_by_title_substring
+from scripts.win_capture import capture_client, find_window_by_title_substring, get_client_rect_on_screen
 
 
 def main() -> int:
@@ -38,7 +38,28 @@ def main() -> int:
 
     with meta_path.open("a", encoding="utf-8") as f:
         while True:
-            img = capture_client(hwnd)
+            # Re-check window existence/rect each frame in case it moved
+            if not hwnd:
+                break
+            
+            try:
+                rect = get_client_rect_on_screen(hwnd)
+                rect_info = {
+                    "left": rect.left,
+                    "top": rect.top,
+                    "width": rect.width,
+                    "height": rect.height
+                }
+            except Exception:
+                rect_info = None
+
+            try:
+                img = capture_client(hwnd)
+            except Exception as e:
+                print(f"Capture failed: {e}")
+                time.sleep(1)
+                continue
+
             name = f"frame_{i:06d}.png"
             img_path = out_dir / name
             img.save(img_path)
@@ -47,6 +68,7 @@ def main() -> int:
                 "image": str(img_path.relative_to(root)).replace("\\", "/"),
                 "timestamp": time.time(),
                 "index": i,
+                "client_rect": rect_info,
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
