@@ -1,4 +1,5 @@
 import ctypes
+import os
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
@@ -149,62 +150,155 @@ def get_client_rect_on_screen(hwnd: int) -> Rect:
 
 
 def capture_client(hwnd: int) -> Image.Image:
-    rect = wintypes.RECT()
-    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
-        raise OSError(ctypes.get_last_error())
+    def _capture_window_dc() -> Image.Image:
+        rect = wintypes.RECT()
+        if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+            raise OSError(ctypes.get_last_error())
 
-    w = int(rect.right - rect.left)
-    h = int(rect.bottom - rect.top)
-    if w <= 0 or h <= 0:
-        raise ValueError("window client rect is empty")
+        w = int(rect.right - rect.left)
+        h = int(rect.bottom - rect.top)
+        if w <= 0 or h <= 0:
+            raise ValueError("window client rect is empty")
 
-    hdc_screen = user32.GetDC(hwnd)
-    if not hdc_screen:
-        raise OSError(ctypes.get_last_error())
+        hdc_screen = user32.GetDC(hwnd)
+        if not hdc_screen:
+            raise OSError(ctypes.get_last_error())
 
-    hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
-    if not hdc_mem:
-        user32.ReleaseDC(hwnd, hdc_screen)
-        raise OSError(ctypes.get_last_error())
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+        if not hdc_mem:
+            user32.ReleaseDC(hwnd, hdc_screen)
+            raise OSError(ctypes.get_last_error())
 
-    hbmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
-    if not hbmp:
-        gdi32.DeleteDC(hdc_mem)
-        user32.ReleaseDC(hwnd, hdc_screen)
-        raise OSError(ctypes.get_last_error())
+        hbmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+        if not hbmp:
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(hwnd, hdc_screen)
+            raise OSError(ctypes.get_last_error())
 
-    old = gdi32.SelectObject(hdc_mem, hbmp)
-    SRCCOPY = 0x00CC0020
+        old = gdi32.SelectObject(hdc_mem, hbmp)
+        SRCCOPY = 0x00CC0020
 
-    if not gdi32.BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, 0, 0, SRCCOPY):
+        if not gdi32.BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, 0, 0, SRCCOPY):
+            gdi32.SelectObject(hdc_mem, old)
+            gdi32.DeleteObject(hbmp)
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(hwnd, hdc_screen)
+            raise OSError(ctypes.get_last_error())
+
+        bmi = ctypes.create_string_buffer(40)
+        ctypes.memset(bmi, 0, 40)
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint32))[0] = 40
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[1] = w
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[2] = -h
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[6] = 1
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[7] = 32
+
+        buf = ctypes.create_string_buffer(w * h * 4)
+        bits = gdi32.GetDIBits(hdc_mem, hbmp, 0, h, buf, bmi, 0)
+        if bits == 0:
+            gdi32.SelectObject(hdc_mem, old)
+            gdi32.DeleteObject(hbmp)
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(hwnd, hdc_screen)
+            raise OSError(ctypes.get_last_error())
+
+        img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB")
+
         gdi32.SelectObject(hdc_mem, old)
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(hdc_mem)
         user32.ReleaseDC(hwnd, hdc_screen)
-        raise OSError(ctypes.get_last_error())
 
-    bmi = ctypes.create_string_buffer(40)
-    ctypes.memset(bmi, 0, 40)
-    ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint32))[0] = 40
-    ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[1] = w
-    ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[2] = -h
-    ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[6] = 1
-    ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[7] = 32
+        return img
 
-    buf = ctypes.create_string_buffer(w * h * 4)
-    bits = gdi32.GetDIBits(hdc_mem, hbmp, 0, h, buf, bmi, 0)
-    if bits == 0:
+    def _capture_desktop_dc() -> Image.Image:
+        r = get_client_rect_on_screen(hwnd)
+        w = int(r.right - r.left)
+        h = int(r.bottom - r.top)
+        if w <= 0 or h <= 0:
+            raise ValueError("window client rect is empty")
+
+        hdc_screen = user32.GetDC(0)
+        if not hdc_screen:
+            raise OSError(ctypes.get_last_error())
+
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+        if not hdc_mem:
+            user32.ReleaseDC(0, hdc_screen)
+            raise OSError(ctypes.get_last_error())
+
+        hbmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+        if not hbmp:
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+            raise OSError(ctypes.get_last_error())
+
+        old = gdi32.SelectObject(hdc_mem, hbmp)
+        SRCCOPY = 0x00CC0020
+
+        if not gdi32.BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, int(r.left), int(r.top), SRCCOPY):
+            gdi32.SelectObject(hdc_mem, old)
+            gdi32.DeleteObject(hbmp)
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+            raise OSError(ctypes.get_last_error())
+
+        bmi = ctypes.create_string_buffer(40)
+        ctypes.memset(bmi, 0, 40)
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint32))[0] = 40
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[1] = w
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[2] = -h
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[6] = 1
+        ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[7] = 32
+
+        buf = ctypes.create_string_buffer(w * h * 4)
+        bits = gdi32.GetDIBits(hdc_mem, hbmp, 0, h, buf, bmi, 0)
+        if bits == 0:
+            gdi32.SelectObject(hdc_mem, old)
+            gdi32.DeleteObject(hbmp)
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+            raise OSError(ctypes.get_last_error())
+
+        img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB")
+
         gdi32.SelectObject(hdc_mem, old)
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(hdc_mem)
-        user32.ReleaseDC(hwnd, hdc_screen)
-        raise OSError(ctypes.get_last_error())
+        user32.ReleaseDC(0, hdc_screen)
 
-    img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB")
+        return img
 
-    gdi32.SelectObject(hdc_mem, old)
-    gdi32.DeleteObject(hbmp)
-    gdi32.DeleteDC(hdc_mem)
-    user32.ReleaseDC(hwnd, hdc_screen)
+    def _is_nearly_black(im: Image.Image) -> bool:
+        try:
+            sim = im.resize((32, 32), resample=Image.BILINEAR).convert("RGB")
+            px = sim.getdata()
+            tot = 0
+            n = 0
+            for r, g, b in px:
+                tot += int(r) + int(g) + int(b)
+                n += 1
+            if n <= 0:
+                return False
+            avg = tot / float(n * 3)
+            return avg <= 8.0
+        except Exception:
+            return False
 
-    return img
+    try:
+        mode = (os.environ.get("WIN_CAPTURE_MODE") or "auto").strip().lower()
+    except Exception:
+        mode = "auto"
+
+    if mode == "desktop":
+        return _capture_desktop_dc()
+    if mode == "window":
+        return _capture_window_dc()
+
+    img0 = _capture_window_dc()
+    if _is_nearly_black(img0):
+        try:
+            return _capture_desktop_dc()
+        except Exception:
+            return img0
+    return img0

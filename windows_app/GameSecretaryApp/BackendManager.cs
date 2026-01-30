@@ -368,6 +368,7 @@ public sealed class BackendManager
         {
             if (_proc is null)
             {
+                try { KillBackendByStatePid(); } catch { }
                 try { TryKillTcpListener(ApiPort); } catch { }
                 try { Win32Job.Close(ref _job); } catch { }
                 return;
@@ -382,8 +383,61 @@ public sealed class BackendManager
         {
             try { _proc?.Dispose(); } catch { }
             _proc = null;
+            try { KillBackendByStatePid(); } catch { }
             try { TryKillTcpListener(ApiPort); } catch { }
             try { Win32Job.Close(ref _job); } catch { }
+        }
+    }
+
+    private void KillBackendByStatePid()
+    {
+        try
+        {
+            var root = _repoRoot;
+            string statePath;
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                statePath = Path.Combine(root, "logs", "backend.state.json");
+            }
+            else
+            {
+                statePath = Path.Combine(LogsDir, "backend.state.json");
+            }
+            if (!File.Exists(statePath)) return;
+            var txt = File.ReadAllText(statePath);
+            using var doc = JsonDocument.Parse(txt);
+            if (!doc.RootElement.TryGetProperty("pid", out var pidEl)) return;
+            var pid = pidEl.GetInt32();
+            if (pid <= 0) return;
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "taskkill",
+                    Arguments = $"/PID {pid} /T /F",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                using var p = Process.Start(psi);
+                try { p?.WaitForExit(2500); } catch { }
+            }
+            catch
+            {
+                try
+                {
+                    var proc = Process.GetProcessById(pid);
+                    proc.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
         }
     }
 
