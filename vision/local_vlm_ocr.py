@@ -178,6 +178,24 @@ class LocalVlmOcr:
                         if last_err2 is None:
                             raise RuntimeError("No compatible vision model loader found in transformers")
                         raise RuntimeError(f"Failed to load vision model: {last_err2}")
+                
+                # Apply LoRA if configured
+                if self.cfg.lora_path and os.path.exists(self.cfg.lora_path):
+                    if PeftModel is not None:
+                        try:
+                            print(f"Loading LoRA adapter from {self.cfg.lora_path}...")
+                            model2 = PeftModel.from_pretrained(model2, self.cfg.lora_path)
+                            # Merge for inference speed? 
+                            # usually model2 = model2.merge_and_unload()
+                            # But let's keep it simple for now, maybe merge if requested.
+                            # Merging requires enough RAM.
+                            if (os.environ.get("LOCAL_VLM_LORA_MERGE") or "").strip() == "1":
+                                model2 = model2.merge_and_unload()
+                        except Exception as e:
+                            print(f"Failed to load LoRA adapter: {e}")
+                    else:
+                        print("Warning: peft not installed, cannot load LoRA adapter.")
+
                 return model2
 
             is_cuda = str(self.cfg.device or "").lower().startswith("cuda")

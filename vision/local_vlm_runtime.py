@@ -237,6 +237,7 @@ def get_local_vlm(*, model: str, models_dir: str, hf_home: str, device: str):
             hf_home=hf_home,
             device=device,
             max_new_tokens=2048,
+            lora_path=os.environ.get("LOCAL_VLM_LORA_PATH"),
         )
         if use_sub:
             _LOCAL_VLM = _SubprocessVlm(cfg)  # type: ignore[assignment]
