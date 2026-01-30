@@ -42,14 +42,38 @@ public partial class OverlayWindow : Window
 
     private async Task TickAsync()
     {
+        var scaleX = 1.0;
+        var scaleY = 1.0;
+        try
+        {
+            var src = PresentationSource.FromVisual(this);
+            if (src?.CompositionTarget != null)
+            {
+                var m = src.CompositionTarget.TransformToDevice;
+                scaleX = m.M11;
+                scaleY = m.M22;
+            }
+        }
+        catch { }
+
         try
         {
             if (Win32Window.TryGetClientRectOnScreen(TargetWindowTitleSubstring, out var rect))
             {
-                Left = rect.Left;
-                Top = rect.Top;
-                Width = Math.Max(1, rect.Width);
-                Height = Math.Max(1, rect.Height);
+                if (scaleX > 0 && scaleY > 0)
+                {
+                    Left = rect.Left / scaleX;
+                    Top = rect.Top / scaleY;
+                    Width = Math.Max(1, rect.Width / scaleX);
+                    Height = Math.Max(1, rect.Height / scaleY);
+                }
+                else
+                {
+                    Left = rect.Left;
+                    Top = rect.Top;
+                    Width = Math.Max(1, rect.Width);
+                    Height = Math.Max(1, rect.Height);
+                }
                 if (!IsVisible) Show();
             }
             else
@@ -93,7 +117,7 @@ public partial class OverlayWindow : Window
 
         try
         {
-            RenderAction(doc);
+            RenderAction(doc, scaleX, scaleY);
         }
         catch
         {
@@ -161,10 +185,13 @@ public partial class OverlayWindow : Window
         }
     }
 
-    private void RenderAction(JsonDocument? doc)
+    private void RenderAction(JsonDocument? doc, double scaleX, double scaleY)
     {
         CanvasRoot.Children.Clear();
         if (doc is null) return;
+
+        if (scaleX <= 0) scaleX = 1.0;
+        if (scaleY <= 0) scaleY = 1.0;
 
         if (!doc.RootElement.TryGetProperty("last_action", out var act) || act.ValueKind != JsonValueKind.Object)
         {
@@ -204,7 +231,7 @@ public partial class OverlayWindow : Window
                     if (n >= 25) break;
                     if (it.ValueKind != JsonValueKind.Object) continue;
                     if (!TryGetRect(it, "bbox", out var r)) continue;
-                    DrawRect(r, bboxBrush);
+                    DrawRect(r, bboxBrush, scaleX, scaleY);
                     n++;
                 }
             }
@@ -217,12 +244,12 @@ public partial class OverlayWindow : Window
         {
             if (TryGetPoint(act, "target_client", out var p) || TryGetPoint(act, "target", out p))
             {
-                DrawCross(p, stroke);
+                DrawCross(p, stroke, scaleX, scaleY);
             }
             else if (TryGetRect(act, "bbox_client", out var r) || TryGetRect(act, "bbox", out r))
             {
-                DrawRect(r, stroke);
-                DrawCross(new Point(r.X + r.Width / 2.0, r.Y + r.Height / 2.0), stroke);
+                DrawRect(r, stroke, scaleX, scaleY);
+                DrawCross(new Point(r.X + r.Width / 2.0, r.Y + r.Height / 2.0), stroke, scaleX, scaleY);
             }
         }
         else if (a == "swipe")
@@ -230,9 +257,9 @@ public partial class OverlayWindow : Window
             if ((TryGetPoint(act, "from_client", out var p1) || TryGetPoint(act, "from", out p1))
                 && (TryGetPoint(act, "to_client", out var p2) || TryGetPoint(act, "to", out p2)))
             {
-                DrawLine(p1, p2, stroke);
-                DrawCross(p1, stroke);
-                DrawCross(p2, stroke);
+                DrawLine(p1, p2, stroke, scaleX, scaleY);
+                DrawCross(p1, stroke, scaleX, scaleY);
+                DrawCross(p2, stroke, scaleX, scaleY);
             }
         }
         else if (a == "wait")
@@ -250,45 +277,47 @@ public partial class OverlayWindow : Window
         DrawLabel(text, stroke);
     }
 
-    private void DrawLine(Point p1, Point p2, Brush stroke)
+    private void DrawLine(Point p1, Point p2, Brush stroke, double sx, double sy)
     {
         var line = new Line
         {
-            X1 = p1.X,
-            Y1 = p1.Y,
-            X2 = p2.X,
-            Y2 = p2.Y,
+            X1 = p1.X / sx,
+            Y1 = p1.Y / sy,
+            X2 = p2.X / sx,
+            Y2 = p2.Y / sy,
             Stroke = stroke,
             StrokeThickness = 3,
         };
         CanvasRoot.Children.Add(line);
     }
 
-    private void DrawRect(Rect r, Brush stroke)
+    private void DrawRect(Rect r, Brush stroke, double sx, double sy)
     {
         var rect = new Rectangle
         {
-            Width = r.Width,
-            Height = r.Height,
+            Width = r.Width / sx,
+            Height = r.Height / sy,
             Stroke = stroke,
             StrokeThickness = 2,
         };
-        Canvas.SetLeft(rect, r.X);
-        Canvas.SetTop(rect, r.Y);
+        Canvas.SetLeft(rect, r.X / sx);
+        Canvas.SetTop(rect, r.Y / sy);
         CanvasRoot.Children.Add(rect);
     }
 
-    private void DrawCross(Point p, Brush stroke)
+    private void DrawCross(Point p, Brush stroke, double sx, double sy)
     {
+        var px = p.X / sx;
+        var py = p.Y / sy;
         var s = 10.0;
-        var l1 = new Line { X1 = p.X - s, Y1 = p.Y, X2 = p.X + s, Y2 = p.Y, Stroke = stroke, StrokeThickness = 3 };
-        var l2 = new Line { X1 = p.X, Y1 = p.Y - s, X2 = p.X, Y2 = p.Y + s, Stroke = stroke, StrokeThickness = 3 };
+        var l1 = new Line { X1 = px - s, Y1 = py, X2 = px + s, Y2 = py, Stroke = stroke, StrokeThickness = 3 };
+        var l2 = new Line { X1 = px, Y1 = py - s, X2 = px, Y2 = py + s, Stroke = stroke, StrokeThickness = 3 };
         CanvasRoot.Children.Add(l1);
         CanvasRoot.Children.Add(l2);
 
         var ring = new Ellipse { Width = 26, Height = 26, Stroke = stroke, StrokeThickness = 2 };
-        Canvas.SetLeft(ring, p.X - ring.Width / 2.0);
-        Canvas.SetTop(ring, p.Y - ring.Height / 2.0);
+        Canvas.SetLeft(ring, px - ring.Width / 2.0);
+        Canvas.SetTop(ring, py - ring.Height / 2.0);
         CanvasRoot.Children.Add(ring);
     }
 
