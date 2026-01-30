@@ -320,18 +320,28 @@ public sealed class BackendManager
             try { p.WaitForExit(1500); } catch { }
 
             var re = new Regex(@"\\s+TCP\\s+[^\\s]+:" + port + @"\\s+[^\\s]+\\s+LISTENING\\s+(\\d+)", RegexOptions.IgnoreCase);
-            var m = re.Match(txt ?? "");
-            if (!m.Success) return;
-            if (!int.TryParse(m.Groups[1].Value, out var pid)) return;
-            if (pid <= 0) return;
+            var ms = re.Matches(txt ?? "");
+            if (ms == null || ms.Count <= 0) return;
 
-            try
+            foreach (Match m in ms)
             {
-                var proc = Process.GetProcessById(pid);
-                proc.Kill(entireProcessTree: true);
-            }
-            catch
-            {
+                try
+                {
+                    if (m == null || !m.Success) continue;
+                    if (!int.TryParse(m.Groups[1].Value, out var pid)) continue;
+                    if (pid <= 0) continue;
+                    try
+                    {
+                        var proc = Process.GetProcessById(pid);
+                        proc.Kill(entireProcessTree: true);
+                    }
+                    catch
+                    {
+                    }
+                }
+                catch
+                {
+                }
             }
         }
         catch
@@ -368,6 +378,7 @@ public sealed class BackendManager
         {
             if (_proc is null)
             {
+                try { KillBackendByCommandLine(); } catch { }
                 try { KillBackendByStatePid(); } catch { }
                 try { TryKillTcpListener(ApiPort); } catch { }
                 try { Win32Job.Close(ref _job); } catch { }
@@ -383,9 +394,52 @@ public sealed class BackendManager
         {
             try { _proc?.Dispose(); } catch { }
             _proc = null;
+            try { KillBackendByCommandLine(); } catch { }
             try { KillBackendByStatePid(); } catch { }
             try { TryKillTcpListener(ApiPort); } catch { }
             try { Win32Job.Close(ref _job); } catch { }
+        }
+    }
+
+    private void KillBackendByCommandLine()
+    {
+        try
+        {
+            var root = _repoRoot;
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                try { root = FindRepoRoot(); } catch { }
+            }
+
+            var rootEsc = (root ?? "").Replace("'", "''");
+            var script = "$ErrorActionPreference='SilentlyContinue';" +
+                         "$root='" + rootEsc + "';" +
+                         "$procs = Get-CimInstance Win32_Process -Filter 'Name=''python.exe''';" +
+                         "foreach($p in $procs){" +
+                         "  $cl = $p.CommandLine;" +
+                         "  if([string]::IsNullOrWhiteSpace($cl)){ continue }" +
+                         "  $hit = $false;" +
+                         "  if($root -and $cl -like ('*' + $root + '*')){ $hit = $true }" +
+                         "  if($cl -like '*run_backend.py*'){ $hit = $true }" +
+                         "  if($cl -like '*server.app*' -or $cl -like '*uvicorn*api/v1*'){ $hit = $true }" +
+                         "  if($hit){ cmd /c ('taskkill /PID ' + $p.ProcessId + ' /T /F') | Out-Null }" +
+                         "}";
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{script}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+
+            using var p = Process.Start(psi);
+            try { p?.WaitForExit(3500); } catch { }
+        }
+        catch
+        {
         }
     }
 
