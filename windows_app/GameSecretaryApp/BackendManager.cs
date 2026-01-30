@@ -432,14 +432,14 @@ public sealed class BackendManager
             // Determine the python environment we likely used
             var venvPy = Path.Combine(root ?? "", "venv311");
             var stockPy = @"D:\Project\Stock\venv311";
-            var venvEsc = venvPy.Replace("'", "''").Replace("\\", "\\\\");
-            var stockEsc = stockPy.Replace("'", "''").Replace("\\", "\\\\");
+            var venvEsc = venvPy.Replace("'", "''");
+            var stockEsc = stockPy.Replace("'", "''");
 
             var script = "$ErrorActionPreference='SilentlyContinue';" +
                          "$root='" + rootEsc + "';" +
                          "$venv='" + venvEsc + "';" +
                          "$stock='" + stockEsc + "';" +
-                         "$log='" + Path.Combine(LogsDir, "kill_debug.log").Replace("'", "''").Replace("\\", "\\\\") + "';" +
+                         "$log='" + Path.Combine(LogsDir, "kill_debug.log").Replace("'", "''") + "';" +
                          "Add-Content $log 'Starting cleanup...';" +
                          "$procs = Get-CimInstance Win32_Process;" +
                          "foreach($p in $procs){" +
