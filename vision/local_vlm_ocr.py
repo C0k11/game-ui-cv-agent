@@ -95,13 +95,46 @@ class LocalVlmOcr:
             def _load_model(*, use_cuda: bool):
                 model2 = None
                 last_err2: Optional[Exception] = None
+
+                dm: Any = "auto" if use_cuda else None
+                try:
+                    if use_cuda and torch.cuda.is_available():
+                        try:
+                            force = (os.environ.get("LOCAL_VLM_FORCE_GPU") or "").strip()
+                        except Exception:
+                            force = ""
+                        if force == "1":
+                            dm = {"": 0}
+                        elif force == "0":
+                            dm = "auto"
+                        else:
+                            try:
+                                min_gb = float((os.environ.get("LOCAL_VLM_FORCE_GPU_MIN_GB") or "20").strip())
+                            except Exception:
+                                min_gb = 20.0
+                            try:
+                                total = float(getattr(torch.cuda.get_device_properties(0), "total_memory", 0) or 0)
+                                if total > 0 and (total / (1024**3)) >= float(min_gb):
+                                    dm = {"": 0}
+                            except Exception:
+                                pass
+                except Exception:
+                    dm = "auto" if use_cuda else None
+
+                extra_kwargs: Dict[str, Any] = {}
+                try:
+                    extra_kwargs["low_cpu_mem_usage"] = True
+                except Exception:
+                    pass
+
                 if AutoModelForImageTextToText is not None:
                     try:
                         model2 = AutoModelForImageTextToText.from_pretrained(
                             model_path,
                             torch_dtype="auto",
-                            device_map="auto" if use_cuda else None,
+                            device_map=dm,
                             trust_remote_code=True,
+                            **extra_kwargs,
                         )
                     except Exception as e:
                         last_err2 = e
@@ -112,8 +145,9 @@ class LocalVlmOcr:
                         model2 = AutoModelForVision2Seq.from_pretrained(
                             model_path,
                             torch_dtype="auto",
-                            device_map="auto" if use_cuda else None,
+                            device_map=dm,
                             trust_remote_code=True,
+                            **extra_kwargs,
                         )
                     except Exception as e:
                         last_err2 = e
@@ -125,8 +159,9 @@ class LocalVlmOcr:
                         model2 = AutoModelForCausalLM.from_pretrained(
                             model_path,
                             torch_dtype="auto",
-                            device_map="auto" if use_cuda else None,
+                            device_map=dm,
                             trust_remote_code=True,
+                            **extra_kwargs,
                         )
                     else:
                         if last_err2 is None:

@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 
 namespace GameSecretaryApp;
 
@@ -16,6 +17,7 @@ public sealed class BackendManager
 
     private Process? _proc;
     private string? _repoRoot;
+    private IntPtr _job;
 
     public string? RepoRoot => _repoRoot;
 
@@ -50,6 +52,119 @@ public sealed class BackendManager
     public string LocalVlmModel { get; } = "Qwen/Qwen3-VL-8B-Instruct";
 
     private BackendManager() { }
+
+    private static class Win32Job
+    {
+        private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+        private const int JobObjectExtendedLimitInformation = 9;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IO_COUNTERS
+        {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public long Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(IntPtr hJob, int JobObjectInformationClass, IntPtr lpJobObjectInformation, uint cbJobObjectInformationLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        public static IntPtr EnsureJob(ref IntPtr job)
+        {
+            if (job != IntPtr.Zero) return job;
+            var h = CreateJobObject(IntPtr.Zero, null);
+            if (h == IntPtr.Zero) return IntPtr.Zero;
+            try
+            {
+                var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                var len = (uint)Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
+                var ptr = Marshal.AllocHGlobal((int)len);
+                try
+                {
+                    Marshal.StructureToPtr(info, ptr, false);
+                    if (!SetInformationJobObject(h, JobObjectExtendedLimitInformation, ptr, len))
+                    {
+                        try { CloseHandle(h); } catch { }
+                        return IntPtr.Zero;
+                    }
+                }
+                finally
+                {
+                    try { Marshal.FreeHGlobal(ptr); } catch { }
+                }
+            }
+            catch
+            {
+                try { CloseHandle(h); } catch { }
+                return IntPtr.Zero;
+            }
+            job = h;
+            return h;
+        }
+
+        public static void Assign(IntPtr job, Process p)
+        {
+            try
+            {
+                if (job == IntPtr.Zero) return;
+                AssignProcessToJobObject(job, p.Handle);
+            }
+            catch
+            {
+            }
+        }
+
+        public static void Close(ref IntPtr job)
+        {
+            try
+            {
+                if (job == IntPtr.Zero) return;
+                CloseHandle(job);
+            }
+            catch
+            {
+            }
+            job = IntPtr.Zero;
+        }
+    }
 
     public async Task StartAsync()
     {
@@ -130,6 +245,15 @@ public sealed class BackendManager
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         _proc = p;
+
+        try
+        {
+            Win32Job.EnsureJob(ref _job);
+            Win32Job.Assign(_job, p);
+        }
+        catch
+        {
+        }
 
         try
         {
@@ -244,6 +368,8 @@ public sealed class BackendManager
         {
             if (_proc is null)
             {
+                try { TryKillTcpListener(ApiPort); } catch { }
+                try { Win32Job.Close(ref _job); } catch { }
                 return;
             }
 
@@ -256,6 +382,8 @@ public sealed class BackendManager
         {
             try { _proc?.Dispose(); } catch { }
             _proc = null;
+            try { TryKillTcpListener(ApiPort); } catch { }
+            try { Win32Job.Close(ref _job); } catch { }
         }
     }
 
