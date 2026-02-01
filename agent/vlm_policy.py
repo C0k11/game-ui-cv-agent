@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -43,6 +44,34 @@ def _parse_json_content(content: str) -> Dict[str, Any]:
     raise json.JSONDecodeError("Unable to parse JSON", content, 0)
 
 
+def _parse_perception_items_fallback(content: str) -> List[Dict[str, Any]]:
+    s = content or ""
+    if not s:
+        return []
+    items: List[Dict[str, Any]] = []
+    try:
+        pattern = re.compile(
+            r'\{"label"\s*:\s*"(?P<label>[^"]+)"[^{}]*?"bbox"\s*:\s*\[(?P<x1>-?\d+)\s*,\s*(?P<y1>-?\d+)\s*,\s*(?P<x2>-?\d+)\s*,\s*(?P<y2>-?\d+)\]'
+        )
+        for match in pattern.finditer(s):
+            label = (match.group("label") or "").strip()
+            if not label:
+                continue
+            try:
+                bbox = [
+                    int(match.group("x1")),
+                    int(match.group("y1")),
+                    int(match.group("x2")),
+                    int(match.group("y2")),
+                ]
+            except Exception:
+                continue
+            items.append({"label": label, "bbox": bbox})
+    except Exception:
+        return items
+    return items
+
+
 @dataclass
 class VlmPolicyConfig:
     window_title: str = "Blue Archive"
@@ -57,7 +86,7 @@ class VlmPolicyConfig:
     device: str = LOCAL_VLM_DEVICE
     max_new_tokens: int = LOCAL_VLM_MAX_NEW_TOKENS
 
-    perception_max_new_tokens: int = 128
+    perception_max_new_tokens: int = 256
     perception_max_items: int = 40
 
     perception_every_n_steps: int = 4
@@ -99,6 +128,11 @@ class VlmPolicyAgent:
         self._last_autoclick_step: int = -10_000
         self._last_headpat_step: int = -10_000
         self._last_headpat_xy: Optional[Tuple[int, int]] = None
+
+        self._cafe_last_claim_step: int = -10_000
+        self._cafe_last_invite_step: int = -10_000
+        self._cafe_last_store2_step: int = -10_000
+        self._cafe_idle_steps: int = 0
 
         self._last_click_step: int = -10_000
         self._last_click_xy: Optional[Tuple[int, int]] = None
@@ -559,6 +593,389 @@ class VlmPolicyAgent:
                     continue
         return out
 
+    def _resolve_image_size(self, items: Any, *, meta: Optional[Dict[str, Any]] = None) -> Tuple[int, int]:
+        iw = ih = 0
+        try:
+            if isinstance(meta, dict):
+                sz = meta.get("image_size")
+                if isinstance(sz, (list, tuple)) and len(sz) == 2:
+                    iw, ih = int(sz[0]), int(sz[1])
+        except Exception:
+            iw, ih = 0, 0
+        maxw = maxh = 0
+        if isinstance(items, list):
+            for it in items:
+                try:
+                    bb = it.get("bbox")
+                    if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                        maxw = max(maxw, int(bb[2]))
+                        maxh = max(maxh, int(bb[3]))
+                except Exception:
+                    pass
+        if iw <= 0 or ih <= 0:
+            iw, ih = int(maxw), int(maxh)
+        else:
+            if maxw > iw:
+                iw = int(maxw)
+            if maxh > ih:
+                ih = int(maxh)
+        return iw, ih
+
+    def _has_cafe_claim_ui(self, items: Any, *, height: int) -> bool:
+        if not isinstance(items, list) or height <= 0:
+            return False
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "")
+            if not label:
+                continue
+            llow = label.lower()
+            bb = it.get("bbox")
+            if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                continue
+            cy = (bb[1] + bb[3]) / 2
+            if cy < float(height) * 0.55:
+                continue
+            if any(
+                k in llow or k in label
+                for k in (
+                    "earn",
+                    "earnings",
+                    "income",
+                    "reward",
+                    "rewards",
+                    "收益",
+                    "领取",
+                    "收取",
+                    "累计",
+                    "累積",
+                    "報酬",
+                    "奖励",
+                    "獎勵",
+                )
+            ):
+                return True
+        return False
+
+    def _has_cafe_control_ui(self, items: Any, *, height: int) -> bool:
+        if not isinstance(items, list) or height <= 0:
+            return False
+        keywords = (
+            "invite",
+            "invitation",
+            "ticket",
+            "邀请",
+            "邀請",
+            "邀请券",
+            "邀請券",
+            "邀请卷",
+            "招待",
+            "移動至2號店",
+            "移动至2号店",
+            "2号店",
+            "2號店",
+            "二号店",
+            "二號店",
+        )
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "")
+            if not label:
+                continue
+            llow = label.lower()
+            if any(k in llow or k in label for k in keywords):
+                return True
+        return False
+
+    def _is_lobby_view(self, items: Any, *, width: int, height: int) -> bool:
+        if not isinstance(items, list) or width <= 0 or height <= 0:
+            return False
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "")
+            bb = it.get("bbox")
+            if not label or not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                continue
+            llow = label.lower()
+            if any(k in llow or k in label for k in ("cafe", "咖啡", "咖啡厅", "咖啡廳", "schale")):
+                cy = (bb[1] + bb[3]) / 2
+                if cy >= float(height) * 0.55:
+                    return True
+        return False
+
+    def _is_cafe_interior(self, items: Any, *, width: int, height: int) -> bool:
+        if not isinstance(items, list) or width <= 0 or height <= 0:
+            return False
+        if self._has_cafe_claim_ui(items, height=height):
+            return True
+        if self._has_cafe_control_ui(items, height=height):
+            return True
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "")
+            bb = it.get("bbox")
+            if not label or not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                continue
+            llow = label.lower()
+            if any(k in llow or k in label for k in ("cafe", "咖啡", "咖啡厅", "咖啡廳")):
+                cy = (bb[1] + bb[3]) / 2
+                if cy <= float(height) * 0.45:
+                    return True
+        return False
+
+    def _maybe_force_cafe_nav(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        try:
+            if not bool(getattr(self._routine, "is_active", False)):
+                return action
+            step = self._routine.get_current_step()
+            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
+                return action
+        except Exception:
+            return action
+
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        if not isinstance(items, list) or not items:
+            return action
+
+        iw, ih = self._resolve_image_size(items, meta=action.get("_perception"))
+        if iw <= 0 or ih <= 0:
+            return action
+
+        has_cafe_claim = self._has_cafe_claim_ui(items, height=ih)
+
+        best = None
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            label = str(it.get("label") or "")
+            bb = it.get("bbox")
+            if not label or not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                continue
+            llow = label.lower()
+            if not any(k in llow or k in label for k in ("cafe", "咖啡", "咖啡厅", "咖啡廳")):
+                continue
+            cy = (bb[1] + bb[3]) / 2
+            if cy < float(ih) * 0.55:
+                continue
+            if best is None or bb[1] > best[1] or (bb[1] == best[1] and bb[0] < best[0]):
+                best = [int(v) for v in bb]
+        if best is None:
+            reason = str(action.get("reason") or "")
+            rlow = reason.lower()
+            wants_cafe = any(
+                k in rlow or k in reason
+                for k in ("cafe", "咖啡", "headpat", "摸头", "摸頭", "claim", "earn", "credits", "ap", "收益", "领取", "收取")
+            )
+            if not has_cafe_claim and wants_cafe and iw > 0 and ih > 0:
+                fx = int(round(float(iw) * 0.06))
+                fy = int(round(float(ih) * 0.93))
+                out = dict(action)
+                out["action"] = "click"
+                out["target"] = [max(0, min(int(iw) - 1, fx)), max(0, min(int(ih) - 1, fy))]
+                out["reason"] = "Cafe nav fallback: no cafe claim UI detected; clicking bottom-left nav."
+                out.setdefault("_cafe_nav_override", True)
+                return out
+            return action
+
+        try:
+            tgt = action.get("target")
+            if isinstance(tgt, (list, tuple)) and len(tgt) == 2:
+                tx, ty = int(tgt[0]), int(tgt[1])
+                if best[0] <= tx <= best[2] and best[1] <= ty <= best[3]:
+                    return action
+        except Exception:
+            pass
+
+        reason = str(action.get("reason") or "")
+        rlow = reason.lower()
+        if "close" in rlow or "取消" in reason or "关闭" in reason or "弹窗" in reason or "popup" in rlow:
+            return action
+        if has_cafe_claim:
+            return action
+
+        x1, y1, x2, y2 = best
+        h = y2 - y1
+        cx = int((x1 + x2) / 2)
+        cy = int(y1 + 0.90 * h)
+        if cy >= y2:
+            cy = y2 - 1
+        out = dict(action)
+        out["action"] = "click"
+        out["target"] = [int(cx), int(cy)]
+        out["bbox"] = [int(v) for v in best]
+        out["reason"] = "Cafe nav override: bottom UI Cafe button detected; forcing navigation."
+        out.setdefault("_cafe_nav_override", True)
+        return out
+
+    def _maybe_cafe_actions(self, action: Dict[str, Any], *, screenshot_path: str, step_id: int) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        try:
+            if not bool(getattr(self._routine, "is_active", False)):
+                return action
+            step = self._routine.get_current_step()
+            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
+                return action
+        except Exception:
+            return action
+
+        a = str(action.get("action") or "").lower().strip()
+        if a in ("back", "stop"):
+            return action
+
+        reason = str(action.get("reason") or "")
+        rlow = reason.lower()
+        if any(k in rlow or k in reason for k in ("close", "cancel", "popup", "关闭", "取消", "弹窗")):
+            return action
+
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        if not isinstance(items, list) or not items:
+            return action
+
+        iw, ih = self._resolve_image_size(items, meta=action.get("_perception"))
+        if iw <= 0 or ih <= 0:
+            return action
+        if self._is_lobby_view(items, width=iw, height=ih):
+            return action
+        if not self._is_cafe_interior(items, width=iw, height=ih):
+            return action
+
+        def _pick_bbox(keywords: Sequence[str], *, prefer_bottom: bool = False, prefer_right: bool = False) -> Optional[List[int]]:
+            best_bb = None
+            best_metric = None
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                label = str(it.get("label") or "").strip()
+                if not label:
+                    continue
+                llow = label.lower()
+                if not any(k in llow or k in label for k in keywords):
+                    continue
+                if self._dangerous_label(label):
+                    continue
+                if self.cfg.forbid_premium_currency and self._premium_label(label):
+                    continue
+                bb = it.get("bbox")
+                if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                    continue
+                x1, y1, x2, y2 = [int(v) for v in bb]
+                cx = (x1 + x2) / 2.0
+                cy = (y1 + y2) / 2.0
+                area = max(1, (x2 - x1) * (y2 - y1))
+                if prefer_bottom:
+                    metric = (cy, area)
+                elif prefer_right:
+                    metric = (cx, area)
+                else:
+                    metric = (area, cy)
+                if best_metric is None or metric > best_metric:
+                    best_metric = metric
+                    best_bb = [x1, y1, x2, y2]
+            return best_bb
+
+        claim_keywords = (
+            "earn",
+            "earnings",
+            "claim",
+            "collect",
+            "income",
+            "reward",
+            "rewards",
+            "收益",
+            "领取",
+            "收取",
+            "累计",
+            "累積",
+            "報酬",
+            "奖励",
+            "獎勵",
+        )
+        invite_keywords = (
+            "invite",
+            "invitation",
+            "ticket",
+            "邀请",
+            "邀請",
+            "邀请券",
+            "邀請券",
+            "邀请卷",
+            "招待",
+        )
+        store2_keywords = (
+            "move",
+            "2nd",
+            "second",
+            "branch",
+            "移動至2號店",
+            "移动至2号店",
+            "2号店",
+            "2號店",
+            "二号店",
+            "二號店",
+        )
+
+        if step_id - int(self._cafe_last_claim_step) > 2:
+            bb = _pick_bbox(claim_keywords, prefer_bottom=True)
+            if bb is not None:
+                self._cafe_last_claim_step = int(step_id)
+                self._cafe_idle_steps = 0
+                x, y = _center(bb)
+                out = dict(action)
+                out["action"] = "click"
+                out["target"] = [int(x), int(y)]
+                out["bbox"] = [int(v) for v in bb]
+                out["reason"] = "Cafe action: claim earnings button detected."
+                out["_cafe_action"] = "claim"
+                return out
+
+        if step_id - int(self._cafe_last_invite_step) > 3:
+            bb = _pick_bbox(invite_keywords, prefer_right=True)
+            if bb is not None:
+                self._cafe_last_invite_step = int(step_id)
+                self._cafe_idle_steps = 0
+                x, y = _center(bb)
+                out = dict(action)
+                out["action"] = "click"
+                out["target"] = [int(x), int(y)]
+                out["bbox"] = [int(v) for v in bb]
+                out["reason"] = "Cafe action: invitation ticket detected; attempting to invite."
+                out["_cafe_action"] = "invite"
+                return out
+
+        try:
+            marks = self._detect_yellow_markers(screenshot_path=screenshot_path)
+        except Exception:
+            marks = []
+
+        if not marks and step_id - int(self._cafe_last_store2_step) > 4:
+            bb = _pick_bbox(store2_keywords, prefer_right=True)
+            if bb is not None:
+                self._cafe_last_store2_step = int(step_id)
+                self._cafe_idle_steps = 0
+                x, y = _center(bb)
+                out = dict(action)
+                out["action"] = "click"
+                out["target"] = [int(x), int(y)]
+                out["bbox"] = [int(v) for v in bb]
+                out["reason"] = "Cafe action: move to 2nd cafe/store detected; navigating."
+                out["_cafe_action"] = "store2"
+                return out
+
+        return action
+
     def _maybe_exploration_click(self, *, action: Dict[str, Any], action_before: Optional[Dict[str, Any]], screenshot_path: str, step_id: int) -> Dict[str, Any]:
         if not self.cfg.exploration_click:
             return action
@@ -845,6 +1262,7 @@ class VlmPolicyAgent:
         return (
             "Extract actionable UI text elements from the image. Return JSON only. "
             "Format: {\"items\": [{\"label\": <text>, \"bbox\": [x1,y1,x2,y2]}]}. "
+            "Include cafe controls (earnings/claim, invitation ticket, move to 2nd store) when visible. "
             f"Image size: width={width}, height={height}. "
             "Do not include any extra keys. Do not wrap in markdown."
         )
@@ -893,10 +1311,26 @@ class VlmPolicyAgent:
 
         # Heuristic label mapping for routine navigation.
         want: list[str] = []
+        iw = ih = 0
+        try:
+            sz = action.get("_perception", {}).get("image_size")
+            if isinstance(sz, (list, tuple)) and len(sz) == 2:
+                iw, ih = int(sz[0]), int(sz[1])
+        except Exception:
+            iw, ih = 0, 0
+        if (iw <= 0 or ih <= 0) and isinstance(items, list):
+            for it in items:
+                try:
+                    bb = it.get("bbox")
+                    if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                        iw = max(iw, int(bb[2]))
+                        ih = max(ih, int(bb[3]))
+                except Exception:
+                    pass
         rlow = reason.lower()
         plow = phase.lower()
         if "cafe" in rlow or "咖啡" in reason or "cafe" in plow or "咖啡" in phase:
-            want = ["cafe", "咖啡", "咖啡厅"]
+            want = ["cafe", "咖啡", "咖啡厅", "咖啡廳"]
         elif "task" in rlow or "任务" in reason:
             want = ["task", "任务"]
         elif "mail" in rlow or "邮箱" in reason:
@@ -923,26 +1357,15 @@ class VlmPolicyAgent:
             
             # Cafe Region Filter: Only accept "Cafe" if it is in the bottom/left area
             # to avoid clicking Event Banners at the top.
-            is_cafe_label = any(k in llow or k in label for k in ("cafe", "咖啡"))
-            if is_cafe_label:
+            is_cafe_label = any(k in llow or k in label for k in ("cafe", "咖啡", "咖啡厅", "咖啡廳"))
+            if is_cafe_label and iw > 0 and ih > 0:
                 try:
-                    # check center of bbox
+                    # Must be in bottom 40% OR (bottom half and left side)
                     cy = (bb[1] + bb[3]) / 2
                     cx = (bb[0] + bb[2]) / 2
-                    # Must be in bottom 35% of screen OR (bottom 50% AND left 40%)
-                    # We don't have screen size here directly, but we can infer from other items or assume scaled coords?
-                    # Actually snap_click receives scaled coords if they were scaled? 
-                    # No, _decide passes raw items from perception which are in screenshot coords.
-                    # We don't have w/h easily here. But usually w~1280/1920.
-                    # Let's rely on relative check if possible? No.
-                    # We'll rely on the caller to provide w/h? No context.
-                    # Let's just prefer bottom-most items if multiple match?
-                    # Or just skip if it looks too high (e.g. y < 200 on 1080p).
-                    # Actually, let's just proceed. The "bottom 10%" click fix is good, 
-                    # but if we select the WRONG bbox (the banner), we click the bottom of the BANNER.
-                    # So we MUST pick the right bbox.
-                    pass
-                except:
+                    if not (cy >= float(ih) * 0.60 or (cy >= float(ih) * 0.50 and cx <= float(iw) * 0.45)):
+                        continue
+                except Exception:
                     pass
 
             if any(k in llow or k in label for k in want):
@@ -1000,6 +1423,17 @@ class VlmPolicyAgent:
             return action
 
         # Prefer closing by clicking an actual close/X button detected in perception.
+        # Strict Trigger: Must imply closing/cancelling.
+        if not (
+            "关闭" in reason
+            or "close" in rlow
+            or "cancel" in rlow
+            or "dismiss" in rlow
+            or "取消" in reason
+            or "关掉" in reason
+        ):
+            return action
+
         sw, sh = 0, 0
         try:
             with Image.open(screenshot_path) as im:
@@ -1101,6 +1535,55 @@ class VlmPolicyAgent:
             }
         return action
 
+    def _maybe_recover_cafe_wrong_screen(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        try:
+            if not bool(getattr(self._routine, "is_active", False)):
+                return action
+            step = self._routine.get_current_step()
+            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
+                return action
+        except Exception:
+            return action
+
+        a = str(action.get("action") or "").lower().strip()
+        if a == "back":
+            return action
+
+        reason = str(action.get("reason") or "")
+        rlow = reason.lower()
+        if any(k in rlow or k in reason for k in ("close", "cancel", "popup", "关闭", "取消", "弹窗")):
+            return action
+
+        items = None
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        if not isinstance(items, list) or not items:
+            return action
+
+        iw, ih = self._resolve_image_size(items, meta=action.get("_perception"))
+        if iw <= 0 or ih <= 0:
+            return action
+
+        if self._is_lobby_view(items, width=iw, height=ih):
+            return action
+        if self._is_cafe_interior(items, width=iw, height=ih):
+            return action
+
+        return {
+            "action": "back",
+            "reason": "Cafe step recovery: detected neither Lobby nor Cafe interior; backing out.",
+            "raw": action.get("raw"),
+            "_prompt": action.get("_prompt"),
+            "_perception": action.get("_perception"),
+            "_model": action.get("_model"),
+            "_routine": action.get("_routine"),
+            "_recovery": "cafe_wrong_screen",
+        }
+
     def _debounce_click(self, action: Dict[str, Any], *, step_id: int) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
@@ -1181,8 +1664,8 @@ class VlmPolicyAgent:
             return action
 
         # During lobby check, don't open secondary menus like Tasks/Schedule/etc.
-        if any(k in rlow for k in ("task", "schedule", "club", "bounty", "mail", "recruit", "recruitment", "gacha")) or any(
-            k in reason for k in ("任务", "日程", "社团", "悬赏", "邮箱", "邮件", "招募", "抽卡")
+        if any(k in rlow for k in ("task", "schedule", "club", "bounty", "mail", "recruit", "recruitment", "gacha", "notice", "announcement", "notification", "event")) or any(
+            k in reason for k in ("任务", "日程", "社团", "悬赏", "邮箱", "邮件", "招募", "抽卡", "公告", "通知", "红点", "red dot", "活动")
         ):
             return {
                 "action": "wait",
@@ -1303,6 +1786,36 @@ class VlmPolicyAgent:
         except Exception:
             return action
 
+        if isinstance(action, dict) and action.get("_cafe_action"):
+            return action
+
+        # Don't override the navigation click that enters Cafe.
+        try:
+            reason = str(action.get("reason") or "")
+            rlow = reason.lower()
+            if ("cafe" in rlow or "咖啡" in reason) and any(k in rlow or k in reason for k in ("navigate", "go to", "enter", "前往", "进入")):
+                return action
+        except Exception:
+            pass
+
+        sw, sh = 0, 0
+        try:
+            with Image.open(screenshot_path) as im:
+                sw, sh = im.size
+        except Exception:
+            sw, sh = 0, 0
+
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        if not (sw > 0 and sh > 0 and isinstance(items, list) and items):
+            return action
+        if self._is_lobby_view(items, width=sw, height=sh):
+            return action
+        if not self._is_cafe_interior(items, width=sw, height=sh):
+            return action
+
         try:
             cd = int(getattr(self.cfg, "cafe_headpat_cooldown_steps", 1) or 1)
         except Exception:
@@ -1319,6 +1832,8 @@ class VlmPolicyAgent:
             pass
 
         marks = self._detect_yellow_markers(screenshot_path=screenshot_path)
+        if marks and sh > 0:
+            marks = [bb for bb in marks if ((bb[1] + bb[3]) / 2) >= float(sh) * 0.2]
         if not marks:
             return action
 
@@ -1357,6 +1872,78 @@ class VlmPolicyAgent:
             "_headpat": True,
         }
         return out
+
+    def _maybe_cafe_idle_exit(self, *, action: Dict[str, Any], screenshot_path: str, step_id: int) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+        try:
+            if not bool(getattr(self._routine, "is_active", False)):
+                self._cafe_idle_steps = 0
+                return action
+            step = self._routine.get_current_step()
+            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
+                self._cafe_idle_steps = 0
+                return action
+        except Exception:
+            return action
+
+        if action.get("_cafe_action") or action.get("_headpat"):
+            self._cafe_idle_steps = 0
+            return action
+
+        a = str(action.get("action") or "").lower().strip()
+        if a != "wait":
+            self._cafe_idle_steps = 0
+            return action
+
+        try:
+            items = action.get("_perception", {}).get("items")
+        except Exception:
+            items = None
+        if not isinstance(items, list) or not items:
+            return action
+
+        iw, ih = self._resolve_image_size(items, meta=action.get("_perception"))
+        if iw <= 0 or ih <= 0:
+            return action
+        if not self._is_cafe_interior(items, width=iw, height=ih):
+            self._cafe_idle_steps = 0
+            return action
+        if self._has_cafe_claim_ui(items, height=ih) or self._has_cafe_control_ui(items, height=ih):
+            self._cafe_idle_steps = 0
+            return action
+        if step_id - int(self._cafe_last_claim_step) <= 2:
+            self._cafe_idle_steps = 0
+            return action
+        if step_id - int(self._cafe_last_invite_step) <= 2:
+            self._cafe_idle_steps = 0
+            return action
+        if step_id - int(self._cafe_last_store2_step) <= 2:
+            self._cafe_idle_steps = 0
+            return action
+
+        try:
+            marks = self._detect_yellow_markers(screenshot_path=screenshot_path)
+        except Exception:
+            marks = []
+        if marks:
+            self._cafe_idle_steps = 0
+            return action
+
+        self._cafe_idle_steps = int(self._cafe_idle_steps) + 1
+        if self._cafe_idle_steps < 4:
+            return action
+        self._cafe_idle_steps = 0
+        return {
+            "action": "back",
+            "reason": "Cafe idle: no claim/invite/headpat targets; backing out to lobby.",
+            "raw": action.get("raw"),
+            "_prompt": action.get("_prompt"),
+            "_perception": action.get("_perception"),
+            "_model": action.get("_model"),
+            "_routine": action.get("_routine"),
+            "_cafe_idle_exit": True,
+        }
 
     def _decide(self, *, screenshot_path: str, step_id: int = -1, orig_size: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
         with Image.open(screenshot_path) as im:
@@ -1449,6 +2036,13 @@ class VlmPolicyAgent:
                 p_parsed = {}
             if isinstance(p_parsed, dict) and isinstance(p_parsed.get("items"), list):
                 items = p_parsed.get("items")
+            if not items and p_raw:
+                try:
+                    fb_items = _parse_perception_items_fallback(p_raw)
+                except Exception:
+                    fb_items = []
+                if fb_items:
+                    items = fb_items
 
         prompt = self._prompt(width=int(w), height=int(h))
         items_txt = self._format_items(items)
@@ -1508,7 +2102,7 @@ class VlmPolicyAgent:
                 "_vlm_error": vlm_err,
             }
             act.setdefault("_prompt", prompt)
-            act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items})
+            act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items, "image_size": [int(w), int(h)]})
             act.setdefault("_routine", self._routine_meta())
             return act
         try:
@@ -1523,7 +2117,7 @@ class VlmPolicyAgent:
             act.setdefault("_vlm_error", vlm_err)
         act.setdefault("raw", raw)
         act.setdefault("_prompt", prompt)
-        act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items})
+        act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items, "image_size": [int(w), int(h)]})
         act.setdefault(
             "_model",
             {
@@ -1661,6 +2255,15 @@ class VlmPolicyAgent:
                     act = self._rescale_action(act, sx=sx, sy=sy)
             except Exception:
                 pass
+
+        try:
+            p = act.get("_perception")
+            if isinstance(p, dict) and orig_size and isinstance(orig_size, (tuple, list)) and len(orig_size) == 2:
+                ow2, oh2 = int(orig_size[0]), int(orig_size[1])
+                if ow2 > 0 and oh2 > 0:
+                    p["image_size"] = [int(ow2), int(oh2)]
+        except Exception:
+            pass
 
         return act
 
@@ -1943,8 +2546,13 @@ class VlmPolicyAgent:
                 act = self._sanitize_action(act)
                 act = self._maybe_close_popup_heuristic(act, screenshot_path=shot_path)
                 act = self._block_check_lobby_noise(act)
+                act = self._handle_stuck_in_recruit(act)
+                act = self._maybe_recover_cafe_wrong_screen(act)
                 act = self._snap_click_to_perception_label(act)
+                act = self._maybe_force_cafe_nav(act)
+                act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
+                act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id)
                 act = self._sanitize_action(act)
                 act = self._debounce_click(act, step_id=step_id)

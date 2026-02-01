@@ -320,7 +320,7 @@ public sealed class BackendManager
             var txt = p.StandardOutput.ReadToEnd();
             try { p.WaitForExit(1500); } catch { }
 
-            var re = new Regex(@"\\s+TCP\\s+[^\\s]+:" + port + @"\\s+[^\\s]+\\s+LISTENING\\s+(\\d+)", RegexOptions.IgnoreCase);
+            var re = new Regex(@"\s+TCP\s+[^\s]+:" + port + @"\s+[^\s]+\s+LISTENING\s+(\d+)", RegexOptions.IgnoreCase);
             var ms = re.Matches(txt ?? "");
             if (ms == null || ms.Count <= 0) return;
 
@@ -454,6 +454,25 @@ public sealed class BackendManager
 
             using var p = Process.Start(psi);
             try { p?.WaitForExit(3500); } catch { }
+
+            // Nuclear option: WMIC (in case PowerShell is restricted or fails)
+            try
+            {
+                // Kill python processes running from this repo (matching the path in command line)
+                // We use a simplified match to avoid complex escaping issues.
+                var repoFolder = "ai game secretary"; 
+                var wmicArgs = $"process where \"name='python.exe' and CommandLine like '%{repoFolder}%'\" delete";
+                var psiWmic = new ProcessStartInfo
+                {
+                    FileName = "wmic",
+                    Arguments = wmicArgs,
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                };
+                using var pWmic = Process.Start(psiWmic);
+                pWmic?.WaitForExit(1000);
+            }
+            catch { }
         }
         catch
         {

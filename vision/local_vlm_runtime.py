@@ -20,6 +20,7 @@ def _vlm_worker_main(cfg_dict: Dict[str, Any], req_q: Queue, resp_q: Queue) -> N
         hf_home=str(cfg_dict.get("hf_home") or ""),
         device=str(cfg_dict.get("device") or "cuda"),
         max_new_tokens=int(cfg_dict.get("max_new_tokens") or 2048),
+        lora_path=str(cfg_dict.get("lora_path") or "") if cfg_dict.get("lora_path") else None,
     )
     engine = LocalVlmOcr(cfg)
     ready_err = ""
@@ -75,6 +76,7 @@ class _SubprocessVlm:
                 "hf_home": self.cfg.hf_home,
                 "device": self.cfg.device,
                 "max_new_tokens": self.cfg.max_new_tokens,
+                "lora_path": self.cfg.lora_path,
             }
             p = Process(target=_vlm_worker_main, args=(cfg_dict, self._req_q, self._resp_q), daemon=True)
             p.start()
@@ -237,7 +239,6 @@ def get_local_vlm(*, model: str, models_dir: str, hf_home: str, device: str):
             hf_home=hf_home,
             device=device,
             max_new_tokens=2048,
-            lora_path=os.environ.get("LOCAL_VLM_LORA_PATH"),
         )
         if use_sub:
             _LOCAL_VLM = _SubprocessVlm(cfg)  # type: ignore[assignment]

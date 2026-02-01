@@ -29,8 +29,8 @@ class DailyRoutineManager:
             DailyRoutineStep(
                 name="Check Lobby",
                 instruction=(
-                    "Ensure you are in the Main Lobby. If there are any popups (Check-in, Announcements), close them. "
-                    "If you see 'Cafe' or 'Schale', you are ready."
+                    "Goal: Ensure you are in the Main Lobby. If there are any popups (Check-in, Announcements), close them. If you see 'Cafe' or 'Schale', you are ready.\n"
+                    "IMPORTANT: Do NOT click on 'Tasks', 'Mail', 'Club', 'Schedule', 'Recruit' or 'Bounties' during this phase, even if they have Red Dots/Notifications. IGNORE them. Only handle popups.",
                 ),
                 exit_condition="In Lobby and no popups blocking view.",
             ),
