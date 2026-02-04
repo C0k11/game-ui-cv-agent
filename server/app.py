@@ -8,6 +8,7 @@ import threading
 import base64
 import tempfile
 import ctypes
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
@@ -48,6 +49,7 @@ _VISION = None
 
 _VLM_AGENT_LOCK = threading.Lock()
 _VLM_AGENT = None
+_LAST_AGENT_START_ERROR = ""
 
 
 def _pid_alive(pid: int) -> bool:
@@ -159,6 +161,13 @@ def _start_vlm_agent(*, payload: Dict[str, Any]) -> None:
     with _VLM_AGENT_LOCK:
         from agent.vlm_policy import VlmPolicyAgent, VlmPolicyConfig
 
+        vlm_image_max_side = payload.get("vlm_image_max_side")
+        try:
+            if vlm_image_max_side is not None:
+                vlm_image_max_side = int(vlm_image_max_side)
+        except Exception:
+            vlm_image_max_side = None
+
         cfg = VlmPolicyConfig(
             window_title=str(payload.get("window_title") or "Blue Archive"),
             goal=str(payload.get("goal") or "Keep the game running safely."),
@@ -168,6 +177,12 @@ def _start_vlm_agent(*, payload: Dict[str, Any]) -> None:
             exploration_click=bool(payload.get("exploration_click") or False),
             forbid_premium_currency=bool(payload.get("forbid_premium_currency") if payload.get("forbid_premium_currency") is not None else True),
         )
+
+        if vlm_image_max_side is not None:
+            try:
+                cfg.vlm_image_max_side = int(vlm_image_max_side)
+            except Exception:
+                pass
 
         _VLM_AGENT = VlmPolicyAgent(cfg)
         _VLM_AGENT.start()
@@ -464,10 +479,19 @@ def status() -> Dict[str, Any]:
                     "steps": getattr(cfg, "steps", None),
                     "dry_run": getattr(cfg, "dry_run", None),
                     "step_sleep_s": getattr(cfg, "step_sleep_s", None),
+                    "vlm_image_max_side": getattr(cfg, "vlm_image_max_side", None),
                     "exploration_click": getattr(cfg, "exploration_click", None),
                     "forbid_premium_currency": getattr(cfg, "forbid_premium_currency", None),
                     "model": getattr(cfg, "model", None),
                 }
+    except Exception:
+        pass
+
+    try:
+        if not agent_running and not last_error:
+            global _LAST_AGENT_START_ERROR
+            if _LAST_AGENT_START_ERROR:
+                last_error = str(_LAST_AGENT_START_ERROR)
     except Exception:
         pass
     return {
@@ -1449,13 +1473,26 @@ def build_vlm_ocr_index(
 
 @app.post("/api/v1/start")
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
+    global _LAST_AGENT_START_ERROR
+    _LAST_AGENT_START_ERROR = ""
+    try:
+        for fn in ("agent.out.log", "agent.err.log"):
+            try:
+                (LOGS_DIR / fn).write_text("", encoding="utf-8")
+            except Exception:
+                pass
+    except Exception:
+        pass
     try:
         agent = _get_vlm_agent()
         if agent is not None and getattr(agent, "is_running")():
             _stop_vlm_agent()
     except Exception:
         pass
-    _start_vlm_agent(payload=payload)
+    try:
+        _start_vlm_agent(payload=payload)
+    except Exception:
+        _LAST_AGENT_START_ERROR = traceback.format_exc(limit=20)
     return status()
 
 

@@ -59,6 +59,9 @@
         <label>Step Sleep (s)
           <input id="step_sleep_s" type="number" value="0.6" />
         </label>
+        <label>VLM Max Side (0=off)
+          <input id="vlm_image_max_side" type="number" value="1280" />
+        </label>
       </div>
 
       <div class="row">
@@ -145,6 +148,12 @@
         if (typeof s.goal === 'string') $('goal').value = s.goal;
         if (typeof s.steps === 'number') $('steps').value = String(s.steps);
         if (typeof s.step_sleep_s === 'number') $('step_sleep_s').value = String(s.step_sleep_s);
+        const uiRev = (typeof s._ui_rev === 'number') ? s._ui_rev : 0;
+        if (uiRev >= 2 && typeof s.vlm_image_max_side === 'number') {
+          $('vlm_image_max_side').value = String(s.vlm_image_max_side);
+        } else {
+          $('vlm_image_max_side').value = '0';
+        }
         if (typeof s.dry_run === 'boolean') $('dry_run').checked = s.dry_run;
         if (typeof s.forbid_premium_currency === 'boolean') $('forbid_premium_currency').checked = s.forbid_premium_currency;
         if (typeof s.exploration_click === 'boolean') $('exploration_click').checked = s.exploration_click;
@@ -192,10 +201,12 @@
 
     function payload() {
       return {
+        _ui_rev: 2,
         window_title: $('window_title').value.trim(),
         goal: $('goal').value.trim(),
         steps: parseInt($('steps').value, 10) || 0,
         step_sleep_s: parseFloat($('step_sleep_s').value) || 0.6,
+        vlm_image_max_side: parseInt($('vlm_image_max_side').value, 10) || 0,
         dry_run: $('dry_run').checked,
         forbid_premium_currency: $('forbid_premium_currency').checked,
         exploration_click: $('exploration_click').checked,
@@ -219,7 +230,7 @@
           const cfg = st.agent_cfg || null;
           if (cfg) {
             const g = (typeof cfg.goal === 'string') ? cfg.goal.replace(/\s+/g, ' ').slice(0, 140) : '';
-            cfgStr = ` cfg.goal=${g} cfg.steps=${cfg.steps} cfg.dry_run=${cfg.dry_run}`;
+            cfgStr = ` cfg.goal=${g} cfg.steps=${cfg.steps} cfg.dry_run=${cfg.dry_run} cfg.vlm_image_max_side=${cfg.vlm_image_max_side}`;
           }
         } catch (e) {
         }
@@ -321,6 +332,7 @@
       $('dry_run').checked = true;
       $('forbid_premium_currency').checked = true;
       $('exploration_click').checked = true;
+      $('vlm_image_max_side').value = '1280';
       saveNow();
     };
 
@@ -329,6 +341,7 @@
       $('dry_run').checked = false;
       $('forbid_premium_currency').checked = true;
       $('exploration_click').checked = true;
+      $('vlm_image_max_side').value = '1280';
       saveNow();
     };
 
@@ -337,7 +350,7 @@
       saveNow();
     };
 
-    ['window_title', 'steps', 'step_sleep_s', 'goal', 'dry_run', 'forbid_premium_currency', 'exploration_click'].forEach((id) => {
+    ['window_title', 'steps', 'step_sleep_s', 'vlm_image_max_side', 'goal', 'dry_run', 'forbid_premium_currency', 'exploration_click'].forEach((id) => {
       const el = $(id);
       if (!el) return;
       el.addEventListener('change', saveNow);
