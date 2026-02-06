@@ -601,7 +601,14 @@ class VlmPolicyAgent:
             return out
 
         try:
-            if sw > 0 and sh > 0:
+            allow_nav_check = True
+            try:
+                if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                    allow_nav_check = False
+            except Exception:
+                allow_nav_check = True
+
+            if allow_nav_check and sw > 0 and sh > 0:
                 roi_nav = (int(0), int(round(float(sh) * 0.80)), int(sw), int(sh))
                 tmpl_lobby0 = str(getattr(self.cfg, "cerebellum_template_lobby_check", "lobby_check.png") or "")
                 nav_tmps = _uniq(
@@ -617,23 +624,39 @@ class VlmPolicyAgent:
                     ]
                 )
                 hits = 0
+                try:
+                    m0 = None
+                    if tmpl_lobby0:
+                        m0 = c.best_match(screenshot_path=screenshot_path, template_name=tmpl_lobby0, roi=roi_nav)
+                    if m0 is not None and float(m0.score) >= 0.960:
+                        self._startup_finished = True
+                        return None
+                except Exception:
+                    pass
+
                 for tmpl in nav_tmps:
+                    if str(tmpl or "").strip() == str(tmpl_lobby0 or "").strip():
+                        continue
                     try:
-                        m = c.match(screenshot_path=screenshot_path, template_name=tmpl, roi=roi_nav)
+                        m = c.best_match(screenshot_path=screenshot_path, template_name=tmpl, roi=roi_nav)
                     except Exception:
                         m = None
-                    if m is not None:
-                        hits += 1
-                        if hits >= 2:
-                            self._startup_finished = True
-                            return None
+                    try:
+                        if m is None or float(m.score) < 0.935:
+                            continue
+                    except Exception:
+                        continue
+                    hits += 1
+                    if hits >= 2:
+                        self._startup_finished = True
+                        return None
         except Exception:
             pass
 
         try:
             try:
                 cd_steps = 4
-                if int(step_id) - int(getattr(self, "_last_tap_to_start_step", -10_000)) <= int(cd_steps):
+                if int(step_id) - int(getattr(self, "_last_tap_to_start_step", -10_000)) < int(cd_steps):
                     return {
                         "action": "wait",
                         "duration_ms": 1200,
@@ -713,13 +736,19 @@ class VlmPolicyAgent:
             return action
 
         try:
+            boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
+            if boot_preinteractive and int(step_id) <= 60:
+                return action
+        except Exception:
+            pass
+
+        try:
             if not bool(getattr(self.cfg, "cerebellum_enabled", True)):
                 return action
         except Exception:
             return action
 
         reason = str(action.get("reason") or "")
-        rlow = reason.lower()
         raw = str(action.get("raw") or "")
         blob = reason + "\n" + raw
         blob_low = blob.lower()
@@ -800,6 +829,13 @@ class VlmPolicyAgent:
                     roi=roi_notice,
                 )
                 if isinstance(act, dict):
+                    try:
+                        cb = act.get("_cerebellum", {})
+                        if float(cb.get("score") or 0.0) < 0.975:
+                            continue
+                    except Exception:
+                        pass
+
                     act["raw"] = action.get("raw")
                     act["_prompt"] = action.get("_prompt")
                     act["_perception"] = action.get("_perception")
@@ -836,6 +872,130 @@ class VlmPolicyAgent:
         except Exception:
             pass
         return action
+
+    def _block_startup_vlm_clicks(self, action: Dict[str, Any], *, step_id: int, screenshot_path: str) -> Dict[str, Any]:
+        if not isinstance(action, dict):
+            return action
+
+        try:
+            if str(action.get("action") or "").lower().strip() != "click":
+                return action
+        except Exception:
+            return action
+
+        try:
+            if bool(action.get("_startup_tap")):
+                return action
+        except Exception:
+            pass
+        try:
+            if action.get("_close_heuristic") is not None:
+                return action
+        except Exception:
+            pass
+        try:
+            if isinstance(action.get("_cerebellum"), dict):
+                return action
+        except Exception:
+            pass
+
+        boot_preinteractive = False
+        try:
+            boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
+        except Exception:
+            boot_preinteractive = False
+
+        w = h = 0
+        try:
+            with Image.open(screenshot_path) as im:
+                w, h = im.size
+        except Exception:
+            w, h = 0, 0
+
+        try:
+            tgt = action.get("target")
+        except Exception:
+            tgt = None
+
+        if boot_preinteractive and int(step_id) <= 60:
+            if isinstance(tgt, (list, tuple)) and len(tgt) == 2 and w > 0 and h > 0:
+                try:
+                    x, y = int(tgt[0]), int(tgt[1])
+                    ex = int(round(float(w) * 0.50))
+                    ey = int(round(float(h) * 0.82))
+                    near_bottom = int(y) >= int(round(float(h) * 0.68))
+                    ok_x = abs(int(x) - int(ex)) <= int(round(float(w) * 0.20))
+                    ok_y = abs(int(y) - int(ey)) <= int(round(float(h) * 0.12))
+                    if near_bottom and ok_x and ok_y:
+                        out = dict(action)
+                        out["target"] = [int(ex), int(ey)]
+                        out["_startup_tap"] = True
+                        out["reason"] = "Startup: forcing tap-to-start click at bottom-center."
+                        return out
+                except Exception:
+                    pass
+
+            return {
+                "action": "wait",
+                "duration_ms": 900,
+                "reason": "Startup: blocked VLM coordinate click before tap-to-start is confirmed.",
+                "raw": action.get("raw"),
+                "_prompt": action.get("_prompt"),
+                "_perception": action.get("_perception"),
+                "_model": action.get("_model"),
+                "_routine": action.get("_routine"),
+                "_blocked": True,
+                "_blocked_reason": "startup_preinteractive_click",
+            }
+
+        try:
+            if bool(getattr(self, "_startup_finished", False)):
+                return action
+        except Exception:
+            pass
+
+        if not (isinstance(tgt, (list, tuple)) and len(tgt) == 2 and w > 0 and h > 0):
+            return {
+                "action": "wait",
+                "duration_ms": 900,
+                "reason": "Startup: blocked ambiguous click (missing target).",
+                "raw": action.get("raw"),
+                "_prompt": action.get("_prompt"),
+                "_perception": action.get("_perception"),
+                "_model": action.get("_model"),
+                "_routine": action.get("_routine"),
+                "_blocked": True,
+                "_blocked_reason": "startup_missing_target",
+            }
+
+        try:
+            x, y = int(tgt[0]), int(tgt[1])
+            ex = int(round(float(w) * 0.50))
+            ey = int(round(float(h) * 0.82))
+            near_bottom = int(y) >= int(round(float(h) * 0.68))
+            ok_x = abs(int(x) - int(ex)) <= int(round(float(w) * 0.20))
+            ok_y = abs(int(y) - int(ey)) <= int(round(float(h) * 0.12))
+            if near_bottom and ok_x and ok_y:
+                out = dict(action)
+                out["target"] = [int(ex), int(ey)]
+                out["_startup_tap"] = True
+                out["reason"] = "Startup: forcing tap-to-start click at bottom-center."
+                return out
+        except Exception:
+            pass
+
+        return {
+            "action": "wait",
+            "duration_ms": 900,
+            "reason": "Startup: blocked VLM coordinate click outside bottom-center.",
+            "raw": action.get("raw"),
+            "_prompt": action.get("_prompt"),
+            "_perception": action.get("_perception"),
+            "_model": action.get("_model"),
+            "_routine": action.get("_routine"),
+            "_blocked": True,
+            "_blocked_reason": "startup_outside_bottom_center",
+        }
 
     def _rescale_action(self, action: Dict[str, Any], *, sx: float, sy: float) -> Dict[str, Any]:
         if not isinstance(action, dict):
@@ -2040,6 +2200,12 @@ class VlmPolicyAgent:
         if not isinstance(action, dict):
             return action
         try:
+            boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
+            if boot_preinteractive and int(step_id) <= 60:
+                return action
+        except Exception:
+            pass
+        try:
             if action.get("_close_heuristic"):
                 return action
         except Exception:
@@ -2182,7 +2348,7 @@ class VlmPolicyAgent:
                         if isinstance(act, dict):
                             try:
                                 cb = act.get("_cerebellum", {})
-                                if float(cb.get("score") or 0.0) < 0.90:
+                                if float(cb.get("score") or 0.0) < 0.975:
                                     continue
                             except Exception:
                                 pass
@@ -3830,6 +3996,14 @@ class VlmPolicyAgent:
                 return False
         except Exception:
             return False
+
+        try:
+            boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
+            if boot_preinteractive and int(step_id) <= 60:
+                return False
+        except Exception:
+            pass
+
         try:
             interval = int(getattr(self.cfg, "supervision_always_min_step_interval", 2) or 2)
         except Exception:
@@ -4035,6 +4209,8 @@ class VlmPolicyAgent:
 
             sup_any = None
 
+            vlm_called = False
+
             self._sync_routine_from_goal(self.cfg.goal)
             try:
                 self._routine.on_turn_start()
@@ -4089,6 +4265,7 @@ class VlmPolicyAgent:
                         self._last_supervision_step = int(step_id)
                     except Exception:
                         pass
+                    vlm_called = True
                     sup = self._supervise(screenshot_path=shot_path, expected_state=str(self._expected_state or "Lobby"), step_id=int(step_id))
                     try:
                         self._last_supervision_any_step = int(step_id)
@@ -4102,12 +4279,85 @@ class VlmPolicyAgent:
                     if ok:
                         self._supervision_fail_count = 0
                         self._set_expected_state(None)
-                        act = {
-                            "action": "wait",
-                            "duration_ms": 220,
-                            "reason": f"Supervisor check passed (state={sup.get('state')}).",
-                            "_supervision": sup,
-                        }
+
+                        try:
+                            if not bool(getattr(self, "_startup_finished", False)) and int(getattr(self, "_startup_tap_attempts", 0) or 0) > 0:
+                                st = str(sup.get("state") or "").strip().lower()
+                                conf = 0.0
+                                try:
+                                    conf = float(sup.get("confidence") or 0.0)
+                                except Exception:
+                                    conf = 0.0
+
+                                if st in ("lobby", "title") and float(conf) >= 0.85:
+                                    sw0 = sh0 = 0
+                                    try:
+                                        with Image.open(shot_path) as im:
+                                            sw0, sh0 = im.size
+                                    except Exception:
+                                        sw0, sh0 = 0, 0
+
+                                    act2 = None
+                                    try:
+                                        c2 = getattr(self, "_cerebellum", None)
+                                        if c2 is not None and bool(getattr(self.cfg, "cerebellum_enabled", True)) and sw0 > 0 and sh0 > 0:
+                                            roi_start = (
+                                                int(round(float(sw0) * 0.40)),
+                                                int(round(float(sh0) * 0.74)),
+                                                int(round(float(sw0) * 0.60)),
+                                                int(round(float(sh0) * 0.92)),
+                                            )
+                                            act2 = c2.click_action(
+                                                screenshot_path=shot_path,
+                                                template_name="点击开始.png",
+                                                reason_prefix="Cerebellum: tap to start (supervisor-confirmed).",
+                                                roi=roi_start,
+                                            )
+                                            if isinstance(act2, dict):
+                                                try:
+                                                    cb = act2.get("_cerebellum", {})
+                                                    if float(cb.get("score") or 0.0) < 0.90:
+                                                        act2 = None
+                                                except Exception:
+                                                    pass
+                                    except Exception:
+                                        act2 = None
+
+                                    if isinstance(act2, dict):
+                                        act2["_startup_tap"] = True
+                                        act2["_supervision"] = sup
+                                        try:
+                                            self._last_tap_to_start_step = int(step_id)
+                                        except Exception:
+                                            pass
+                                        act = act2
+                                    elif sw0 > 0 and sh0 > 0:
+                                        x = int(round(float(sw0) * 0.50))
+                                        y = int(round(float(sh0) * 0.82))
+                                        x = max(0, min(int(sw0) - 1, int(x)))
+                                        y = max(0, min(int(sh0) - 1, int(y)))
+                                        try:
+                                            self._last_tap_to_start_step = int(step_id)
+                                            self._last_tap_to_start_xy = (int(x), int(y))
+                                        except Exception:
+                                            pass
+                                        act = {
+                                            "action": "click",
+                                            "target": [int(x), int(y)],
+                                            "reason": "Startup: supervisor indicates tap-to-start screen; clicking bottom-center to start.",
+                                            "_startup_tap": True,
+                                            "_supervision": sup,
+                                        }
+                        except Exception:
+                            pass
+
+                        if act is None:
+                            act = {
+                                "action": "wait",
+                                "duration_ms": 220,
+                                "reason": f"Supervisor check passed (state={sup.get('state')}).",
+                                "_supervision": sup,
+                            }
                     else:
                         self._supervision_fail_count = int(self._supervision_fail_count) + 1
                         act = self._supervision_to_recovery_action(sup=sup, screenshot_path=shot_path)
@@ -4125,16 +4375,6 @@ class VlmPolicyAgent:
                                 }
                         except Exception:
                             pass
-
-                try:
-                    if sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
-                        sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
-                        try:
-                            self._last_supervision_any_step = int(step_id)
-                        except Exception:
-                            pass
-                except Exception:
-                    sup_any = None
 
                 self._set_stage(step_id=step_id, stage="decide")
                 if act is None:
@@ -4275,6 +4515,7 @@ class VlmPolicyAgent:
                         if fast_close is not None:
                             act = fast_close
                         else:
+                            vlm_called = True
                             act = self._decide(screenshot_path=vlm_path, step_id=step_id, orig_size=orig_size)
                     finally:
                         try:
@@ -4289,6 +4530,7 @@ class VlmPolicyAgent:
                 act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
                 act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_tap_to_start(act, step_id=step_id)
+                act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
                 act = self._block_check_lobby_noise(act)
                 act = self._handle_stuck_in_recruit(act)
                 act = self._maybe_recover_cafe_wrong_screen(act)
@@ -4303,6 +4545,17 @@ class VlmPolicyAgent:
                 act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)
                 act = self._sanitize_action(act)
                 act = self._maybe_advance_routine(act)
+
+                try:
+                    if (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
+                        sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
+                        try:
+                            self._last_supervision_any_step = int(step_id)
+                        except Exception:
+                            pass
+                except Exception:
+                    sup_any = None
+
                 try:
                     if sup_any is not None and isinstance(act, dict):
                         act["_supervision_any"] = sup_any
