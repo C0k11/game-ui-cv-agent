@@ -148,11 +148,16 @@
         if (typeof s.goal === 'string') $('goal').value = s.goal;
         if (typeof s.steps === 'number') $('steps').value = String(s.steps);
         if (typeof s.step_sleep_s === 'number') $('step_sleep_s').value = String(s.step_sleep_s);
-        const uiRev = (typeof s._ui_rev === 'number') ? s._ui_rev : 0;
-        if (uiRev >= 2 && typeof s.vlm_image_max_side === 'number') {
-          $('vlm_image_max_side').value = String(s.vlm_image_max_side);
+        if (typeof s.vlm_image_max_side === 'number') {
+          const v = s.vlm_image_max_side;
+          const off = Boolean(s._vlm_image_max_side_off);
+          if (v === 0 && !off) {
+            $('vlm_image_max_side').value = '1280';
+          } else {
+            $('vlm_image_max_side').value = String(v);
+          }
         } else {
-          $('vlm_image_max_side').value = '0';
+          $('vlm_image_max_side').value = '1280';
         }
         if (typeof s.dry_run === 'boolean') $('dry_run').checked = s.dry_run;
         if (typeof s.forbid_premium_currency === 'boolean') $('forbid_premium_currency').checked = s.forbid_premium_currency;
@@ -200,13 +205,17 @@
     }
 
     function payload() {
+      const vRaw = String($('vlm_image_max_side').value || '').trim();
+      const vParsed = parseInt(vRaw, 10);
+      const v = Number.isFinite(vParsed) ? vParsed : 0;
       return {
         _ui_rev: 2,
         window_title: $('window_title').value.trim(),
         goal: $('goal').value.trim(),
         steps: parseInt($('steps').value, 10) || 0,
         step_sleep_s: parseFloat($('step_sleep_s').value) || 0.6,
-        vlm_image_max_side: parseInt($('vlm_image_max_side').value, 10) || 0,
+        vlm_image_max_side: v,
+        _vlm_image_max_side_off: (vRaw === '0'),
         dry_run: $('dry_run').checked,
         forbid_premium_currency: $('forbid_premium_currency').checked,
         exploration_click: $('exploration_click').checked,

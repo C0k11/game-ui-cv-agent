@@ -226,8 +226,10 @@ public sealed class BackendManager
             psi.Environment["LOCAL_VLM_MODEL"] = LocalVlmModel;
             var dev = Environment.GetEnvironmentVariable("LOCAL_VLM_DEVICE") ?? "";
             psi.Environment["LOCAL_VLM_DEVICE"] = string.IsNullOrWhiteSpace(dev) ? "cuda" : dev;
+            psi.Environment["MODELS_DIR"] = @"D:\Project\ml_cache\models";
             psi.Environment["LOCAL_VLM_MODELS_DIR"] = Path.Combine(@"D:\Project\ml_cache\models", "vlm");
             psi.Environment["HF_HOME"] = @"D:\Project\ml_cache\huggingface";
+            psi.Environment["HUGGINGFACE_HUB_CACHE"] = @"D:\Project\ml_cache\huggingface";
             psi.Environment["GAMESECRETARY_PARENT_PID"] = Process.GetCurrentProcess().Id.ToString();
         }
         catch

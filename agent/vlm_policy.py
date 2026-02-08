@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, List
 
 import traceback
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from action.windows_input import WindowsInput
 from agent.daily_routine import DailyRoutineManager
@@ -272,11 +272,11 @@ class VlmPolicyConfig:
     supervision_always_min_step_interval: int = 2
 
     cerebellum_enabled: bool = True
-    cerebellum_assets_dir: str = "assets"
+    cerebellum_assets_dir: str = "data/captures"
     cerebellum_confidence: float = 0.80
-    cerebellum_template_start_anchor: str = "start_anchor.png"
-    cerebellum_template_notice_close: str = "notice_close.png"
-    cerebellum_template_lobby_check: str = "lobby_check.png"
+    cerebellum_template_start_anchor: str = "点击开始.png"
+    cerebellum_template_notice_close: str = "内嵌公告的叉.png"
+    cerebellum_template_lobby_check: str = "学生.png"
 
     out_dir: str = "data/trajectories"
 
@@ -571,6 +571,14 @@ class VlmPolicyAgent:
             roi_notice = None
             roi_start = None
 
+        im_l = None
+        try:
+            if sw > 0 and sh > 0:
+                with Image.open(screenshot_path) as im:
+                    im_l = im.convert("L")
+        except Exception:
+            im_l = None
+
         try:
             import cv2  # type: ignore
 
@@ -705,6 +713,28 @@ class VlmPolicyAgent:
                         score = float(cb.get("score") or 0.0)
                         if tname == "点击开始.png" and float(score) < 0.87:
                             continue
+                    except Exception:
+                        pass
+
+                    try:
+                        cb = act.get("_cerebellum", {})
+                        tname = str(cb.get("template") or "")
+                        bb = cb.get("bbox")
+                        if tname == "点击开始.png" and im_l is not None and isinstance(bb, (list, tuple)) and len(bb) == 4:
+                            x1, y1, x2, y2 = [int(v) for v in bb]
+                            x1 = max(0, min(int(sw) - 1, int(x1)))
+                            y1 = max(0, min(int(sh) - 1, int(y1)))
+                            x2 = max(int(x1) + 1, min(int(sw), int(x2)))
+                            y2 = max(int(y1) + 1, min(int(sh), int(y2)))
+                            crop = im_l.crop((int(x1), int(y1), int(x2), int(y2)))
+                            std = 0.0
+                            try:
+                                std = float((ImageStat.Stat(crop).stddev or [0.0])[0])
+                            except Exception:
+                                std = 0.0
+                            # Reject false positives on near-uniform/blank areas during loading.
+                            if float(std) < 10.0:
+                                continue
                     except Exception:
                         pass
 
@@ -1241,16 +1271,15 @@ class VlmPolicyAgent:
         return (
             f"You are controlling a game via mouse/keyboard. Image size: {int(width)}x{int(height)}.\n"
             "Output ONLY a single JSON object (no markdown).\n"
-            "When a notice/announcement/webview popup should be closed and coordinates are unreliable, output: {action:'wait', duration_ms:200, reason:'delegate: close_notice'}.\n"
-            "When navigating from Lobby or confirming/cancelling dialogs, DO NOT output coordinates. Instead output a delegate command in the reason field, e.g. {action:'wait', duration_ms:200, reason:'delegate: open_cafe'}.\n"
-            "Supported delegates: open_cafe, open_schedule, open_mail, open_social, open_craft, confirm, cancel, touch_head.\n"
-            "Valid actions:\n"
-            "- click: {action:'click', target:[x,y]} or {action:'click', bbox:[x1,y1,x2,y2]}\n"
-            "- swipe: {action:'swipe', from:[x,y], to:[x,y], duration_ms:int}\n"
-            "- back: {action:'back'}\n"
-            "- wait: {action:'wait', duration_ms:int}\n"
-            "- stop: {action:'stop'}\n"
-            "- done: {action:'done'} (only when the routine exit condition is satisfied)\n"
+            "IMPORTANT: You are a SUPERVISOR. Do NOT output click/back/swipe coordinates.\n"
+            "Always output action='wait' unless you need to stop.\n"
+            "To request a click via OpenCV (Cerebellum), put a delegate command in the reason field.\n"
+            "Examples:\n"
+            "- Close notices/webview: {action:'wait', duration_ms:200, reason:'delegate: close_notice'}\n"
+            "- From Lobby, open Cafe: {action:'wait', duration_ms:200, reason:'delegate: open_cafe'}\n"
+            "- Confirm/Cancel dialogs: {action:'wait', duration_ms:200, reason:'delegate: confirm'}\n"
+            "Supported delegates: close_notice, open_cafe, open_schedule, open_mail, open_social, open_craft, confirm, cancel, touch_head.\n"
+            "Valid actions: wait, stop, done.\n"
             f"Safety: {safety}\n"
             + routine_block
         )
@@ -1770,6 +1799,36 @@ class VlmPolicyAgent:
             self._nav_force_miss_count = 0
         except Exception:
             pass
+
+        key = ""
+        try:
+            if step_name == "Cafe":
+                key = "open_cafe"
+            elif step_name == "Schedule":
+                key = "open_schedule"
+            elif step_name == "Club":
+                key = "open_social"
+            elif step_name == "Mail & Tasks":
+                key = "open_mail"
+        except Exception:
+            key = ""
+        try:
+            c = getattr(self, "_cerebellum", None)
+            if key and c is not None and bool(getattr(self.cfg, "cerebellum_enabled", True)):
+                return {
+                    "action": "wait",
+                    "duration_ms": 200,
+                    "reason": f"delegate: {key}",
+                    "raw": action.get("raw"),
+                    "_prompt": action.get("_prompt"),
+                    "_perception": action.get("_perception"),
+                    "_model": action.get("_model"),
+                    "_routine": action.get("_routine"),
+                    "_nav_force_delegate": True,
+                    "_nav_force_delegate_key": str(key),
+                }
+        except Exception:
+            pass
         return {
             "action": "click",
             "target": [int(x), int(y)],
@@ -1849,7 +1908,9 @@ class VlmPolicyAgent:
             "_cafe_action": True,
         }
 
-    def _maybe_autoclick_safe_button(self, *, action: Dict[str, Any], action_before: Optional[Dict[str, Any]], step_id: int) -> Dict[str, Any]:
+    def _maybe_autoclick_safe_button(
+        self, *, action: Dict[str, Any], action_before: Optional[Dict[str, Any]], step_id: int, screenshot_path: str
+    ) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
         if not bool(getattr(self.cfg, "autoclick_safe_buttons", True)):
@@ -1868,6 +1929,53 @@ class VlmPolicyAgent:
         try:
             if step_id - int(self._last_autoclick_step) <= int(cd):
                 return action
+        except Exception:
+            pass
+
+        try:
+            c = getattr(self, "_cerebellum", None)
+        except Exception:
+            c = None
+
+        sw = sh = 0
+        try:
+            with Image.open(screenshot_path) as im:
+                sw, sh = im.size
+        except Exception:
+            sw, sh = 0, 0
+
+        try:
+            if c is not None and bool(getattr(self.cfg, "cerebellum_enabled", True)) and sw > 0 and sh > 0:
+                roi = (
+                    int(round(float(sw) * 0.18)),
+                    int(round(float(sh) * 0.34)),
+                    int(round(float(sw) * 0.82)),
+                    int(round(float(sh) * 0.96)),
+                )
+                for tmpl, key in (("确认(可以点space）.png", "confirm"), ("取消（可点Esc）.png", "cancel")):
+                    act2 = c.click_action(
+                        screenshot_path=screenshot_path,
+                        template_name=tmpl,
+                        reason_prefix=f"Cerebellum(autoclick): {key}.",
+                        roi=roi,
+                    )
+                    if isinstance(act2, dict):
+                        try:
+                            cb = act2.get("_cerebellum", {})
+                            if float(cb.get("score") or 0.0) < 0.94:
+                                continue
+                        except Exception:
+                            pass
+                        self._last_autoclick_step = int(step_id)
+                        act2["raw"] = action.get("raw")
+                        act2["_prompt"] = action.get("_prompt")
+                        act2["_perception"] = action.get("_perception")
+                        act2["_model"] = action.get("_model")
+                        act2["_routine"] = action.get("_routine")
+                        act2["_autoclick"] = True
+                        act2.setdefault("_delegate", {})
+                        act2["_delegate"]["type"] = str(key)
+                        return act2
         except Exception:
             pass
 
@@ -3322,6 +3430,20 @@ class VlmPolicyAgent:
                 "duration_ms": 1200,
                 "reason": "Policy output could not be parsed as JSON; falling back to wait.",
             }
+        try:
+            if not isinstance(act, dict):
+                act = {}
+            a0 = str(act.get("action") or "").strip().lower()
+            s0 = str(raw or "").strip()
+            if (not a0) and (not s0 or s0 == "{" or (s0.startswith("{") and ("}" not in s0))):
+                act = {
+                    "action": "wait",
+                    "duration_ms": 250,
+                    "reason": "delegate: close_notice",
+                    "_vlm_error": "truncated_policy_output",
+                }
+        except Exception:
+            pass
         if vlm_err:
             act.setdefault("_vlm_error", vlm_err)
         act.setdefault("raw", raw)
@@ -3341,6 +3463,28 @@ class VlmPolicyAgent:
             },
         )
         act.setdefault("_routine", self._routine_meta())
+
+        try:
+            a0 = str(act.get("action") or "").lower().strip()
+            r0 = str(act.get("reason") or "")
+            if not a0:
+                a0 = "wait"
+                act["action"] = "wait"
+            if a0 not in ("wait", "stop", "done"):
+                act["_vlm_action_original"] = a0
+                act["_vlm_action_blocked"] = True
+                act.pop("target", None)
+                act.pop("bbox", None)
+                act.pop("from", None)
+                act.pop("to", None)
+                act["action"] = "wait"
+                act.setdefault("duration_ms", 350)
+                if "delegate:" in str(r0).lower():
+                    act["reason"] = str(r0)
+                else:
+                    act["reason"] = f"Blocked VLM action '{a0}'; VLM is restricted to wait/delegate only."
+        except Exception:
+            pass
 
         ow, oh = 0, 0
         try:
@@ -4152,35 +4296,12 @@ class VlmPolicyAgent:
             }
 
         if sug == "close_popup":
-            sw, sh = 0, 0
-            try:
-                with Image.open(screenshot_path) as im:
-                    sw, sh = im.size
-            except Exception:
-                sw, sh = 0, 0
-            x = 0
-            y = 0
-            try:
-                bb = self._detect_close_x_roi(screenshot_path=screenshot_path, step_id=-1)
-            except Exception:
-                bb = None
-            if isinstance(bb, (list, tuple)) and len(bb) == 4:
-                try:
-                    x, y = _center([int(v) for v in bb])
-                except Exception:
-                    x, y = 0, 0
-            if (x <= 0 or y <= 0) and sw > 0 and sh > 0:
-                x = int(round(float(sw) * 0.915))
-                y = int(round(float(sh) * 0.115))
-            if sw > 0 and sh > 0:
-                x = max(0, min(int(sw) - 1, int(x)))
-                y = max(0, min(int(sh) - 1, int(y)))
             return {
-                "action": "click",
-                "target": [int(x), int(y)],
-                "reason": f"Supervisor recovery: close_popup (seen={seen}).",
+                "action": "wait",
+                "duration_ms": 200,
+                "reason": "delegate: close_notice",
                 "_supervision": sup,
-                "_close_heuristic": "notice_x_fallback",
+                "_supervision_recovery": f"close_popup (seen={seen})",
             }
 
         return {
@@ -4271,24 +4392,61 @@ class VlmPolicyAgent:
                         self._last_supervision_any_step = int(step_id)
                     except Exception:
                         pass
-                    ok = True
+                    seen = "Unknown"
                     try:
-                        ok = bool(sup.get("ok"))
+                        seen = str(sup.get("state") or "Unknown").strip()
                     except Exception:
-                        ok = True
-                    if ok:
+                        seen = "Unknown"
+                    try:
+                        seen_low = str(seen).lower().strip()
+                    except Exception:
+                        seen_low = str(seen)
+
+                    expected0 = ""
+                    try:
+                        expected0 = str(sup.get("expected_state") or self._expected_state or "").strip()
+                    except Exception:
+                        expected0 = ""
+                    try:
+                        expected_low = str(expected0).lower().strip()
+                    except Exception:
+                        expected_low = str(expected0)
+
+                    conf = 0.0
+                    try:
+                        conf = float(sup.get("confidence") or 0.0)
+                    except Exception:
+                        conf = 0.0
+
+                    passed = False
+                    try:
+                        if expected_low == "lobby":
+                            passed = seen_low in ("lobby", "title")
+                        elif expected_low and expected_low != "unknown":
+                            passed = seen_low == expected_low
+                    except Exception:
+                        passed = False
+
+                    if (not passed) and expected_low and expected_low != "unknown" and seen_low == "loading":
+                        self._supervision_fail_count = 0
+                        try:
+                            if self._expected_state:
+                                self._set_expected_state(self._expected_state, delay_s=1.2)
+                        except Exception:
+                            pass
+                        act = {
+                            "action": "wait",
+                            "duration_ms": 650,
+                            "reason": f"Supervisor: still Loading while waiting for {expected0 or self._expected_state}.",
+                            "_supervision": sup,
+                        }
+                    elif passed and float(conf) >= 0.60:
                         self._supervision_fail_count = 0
                         self._set_expected_state(None)
 
                         try:
                             if not bool(getattr(self, "_startup_finished", False)) and int(getattr(self, "_startup_tap_attempts", 0) or 0) > 0:
                                 st = str(sup.get("state") or "").strip().lower()
-                                conf = 0.0
-                                try:
-                                    conf = float(sup.get("confidence") or 0.0)
-                                except Exception:
-                                    conf = 0.0
-
                                 if st in ("lobby", "title") and float(conf) >= 0.85:
                                     sw0 = sh0 = 0
                                     try:
@@ -4505,8 +4663,23 @@ class VlmPolicyAgent:
                                 nh = max(1, int(round(float(oh) * scale)))
                                 im2 = im.resize((nw, nh), resample=Image.BILINEAR)
                                 tmp_vlm_path = str((self._run_dir / f"step_{step_id:06d}_vlm.jpg").resolve())
-                                im2.save(tmp_vlm_path, quality=85)
+                                im2.save(tmp_vlm_path, quality=92)
                                 vlm_path = tmp_vlm_path
+                                try:
+                                    ts2 = datetime.now().isoformat(timespec="seconds")
+                                    self._log_out(
+                                        f"[{ts2}] step={int(step_id)} vlm_input_resize orig=[{int(ow)},{int(oh)}] resized=[{int(nw)},{int(nh)}] max_side={int(target_max_side)}"
+                                    )
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    ts2 = datetime.now().isoformat(timespec="seconds")
+                                    self._log_out(
+                                        f"[{ts2}] step={int(step_id)} vlm_input_no_resize size=[{int(ow)},{int(oh)}] max_side={int(target_max_side)}"
+                                    )
+                                except Exception:
+                                    pass
                     except Exception:
                         tmp_vlm_path = ""
                         vlm_path = shot_path
@@ -4539,7 +4712,7 @@ class VlmPolicyAgent:
                 act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id)
+                act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id, screenshot_path=shot_path)
                 act = self._sanitize_action(act)
                 act = self._debounce_click(act, step_id=step_id)
                 act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)

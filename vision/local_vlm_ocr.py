@@ -271,7 +271,7 @@ class LocalVlmOcr:
             except Exception:
                 mt = None
             if mt is None:
-                mt = 25.0
+                mt = 12.0
             generated = self._model.generate(
                 **inputs,
                 max_new_tokens=int(max_new_tokens) if max_new_tokens else int(self.cfg.max_new_tokens),
