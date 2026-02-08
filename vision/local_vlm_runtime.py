@@ -2,8 +2,11 @@ import os
 import queue
 import threading
 import time
+import math
 from multiprocessing import Process, Queue
 from typing import Any, Dict, Optional
+
+from PIL import Image
 
 from vision.local_vlm_ocr import LocalVlmConfig, LocalVlmOcr
 
@@ -201,7 +204,27 @@ class _SubprocessVlm:
         self._req_q.put({"id": rid, "image_path": image_path, "prompt": prompt, "max_new_tokens": max_new_tokens})
 
         try:
-            to_s = float(os.environ.get("LOCAL_VLM_HARD_TIMEOUT_S", "35"))
+            base = 35.0
+            to_s = base
+            to_s_env = (os.environ.get("LOCAL_VLM_HARD_TIMEOUT_S") or "").strip()
+            if to_s_env:
+                try:
+                    to_s = float(to_s_env)
+                except Exception:
+                    to_s = base
+
+            w, h = 0, 0
+            try:
+                with Image.open(image_path) as im:
+                    w, h = im.size
+            except Exception:
+                w, h = 0, 0
+            if w > 0 and h > 0:
+                baseline = float(960 * 540)
+                ratio = max(1.0, (float(w) * float(h)) / baseline)
+                adaptive = float(base * math.sqrt(ratio))
+                to_s = float(max(float(to_s), adaptive))
+            to_s = float(max(base, min(180.0, to_s)))
         except Exception:
             to_s = 35.0
         deadline = time.time() + max(1.0, to_s)

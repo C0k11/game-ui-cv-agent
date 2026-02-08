@@ -10,6 +10,32 @@ from PIL import Image
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+try:
+    user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+    user32.GetClassNameW.restype = ctypes.c_int
+except Exception:
+    pass
+
+try:
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+except Exception:
+    pass
+
+try:
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+except Exception:
+    pass
+
+try:
+    kernel32.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD))
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+except Exception:
+    pass
+
 
 def _ensure_dpi_awareness() -> None:
     try:
@@ -68,6 +94,60 @@ def _get_window_text(hwnd: int) -> str:
     return buf.value
 
 
+def _get_class_name(hwnd: int) -> str:
+    try:
+        buf = ctypes.create_unicode_buffer(256)
+        if int(user32.GetClassNameW(int(hwnd), buf, 256) or 0) > 0:
+            return str(buf.value or "")
+    except Exception:
+        pass
+    return ""
+
+
+def _get_window_pid(hwnd: int) -> int:
+    try:
+        pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(wintypes.HWND(int(hwnd)), ctypes.byref(pid))
+        return int(pid.value)
+    except Exception:
+        return 0
+
+
+def _process_basename(pid: int) -> str:
+    pid = int(pid)
+    if pid <= 0:
+        return ""
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    h = None
+    try:
+        h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, wintypes.DWORD(pid))
+    except Exception:
+        h = None
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(2048)
+        size = wintypes.DWORD(len(buf))
+        try:
+            kernel32.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD))
+            kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        except Exception:
+            pass
+        ok = bool(kernel32.QueryFullProcessImageNameW(wintypes.HANDLE(h), wintypes.DWORD(0), buf, ctypes.byref(size)))
+        if not ok:
+            return ""
+        p = str(buf.value or "")
+        base = p.replace("/", "\\").rsplit("\\", 1)[-1]
+        return str(base or "")
+    except Exception:
+        return ""
+    finally:
+        try:
+            kernel32.CloseHandle(wintypes.HANDLE(h))
+        except Exception:
+            pass
+
+
 def _is_window_visible(hwnd: int) -> bool:
     return bool(user32.IsWindowVisible(hwnd))
 
@@ -113,24 +193,69 @@ def find_window_by_title_substring(title_substring: str) -> Optional[int]:
     if not title_substring:
         return None
 
-    found: Optional[int] = None
+    bad_exes = {
+        "chrome.exe",
+        "msedge.exe",
+        "firefox.exe",
+        "brave.exe",
+        "opera.exe",
+        "iexplore.exe",
+    }
+
+    bad_classes = {
+        "chrome_widgetwin_0",
+        "chrome_widgetwin_1",
+        "mozillawindowclass",
+        "applicationframewindow",
+    }
+
+    candidates: list[tuple[int, int, int]] = []
 
     def _cb(hwnd: int, lparam: int) -> bool:
-        nonlocal found
-        if found is not None:
-            return False
         if not _is_window_visible(hwnd):
             return True
         title = _get_window_text(hwnd).strip()
         if not title:
             return True
-        if title_substring in title.lower():
-            found = hwnd
-            return False
+        if title_substring not in title.lower():
+            return True
+
+        try:
+            cls = _get_class_name(int(hwnd)).lower().strip()
+        except Exception:
+            cls = ""
+        if cls in bad_classes:
+            return True
+
+        pid = _get_window_pid(int(hwnd))
+        exe = _process_basename(int(pid)).lower().strip()
+        if exe in bad_exes:
+            return True
+
+        try:
+            area = int(_client_area(int(hwnd)))
+        except Exception:
+            area = 0
+
+        iconic = 0
+        try:
+            iconic = 1 if bool(user32.IsIconic(int(hwnd))) else 0
+        except Exception:
+            iconic = 0
+
+        candidates.append((int(iconic), -int(area), int(hwnd)))
         return True
 
-    user32.EnumWindows(EnumWindowsProc(_cb), 0)
-    return found
+    try:
+        user32.EnumWindows(EnumWindowsProc(_cb), 0)
+    except Exception:
+        return None
+
+    if not candidates:
+        return None
+
+    candidates.sort()
+    return int(candidates[0][2])
 
 
 def get_client_rect_on_screen(hwnd: int) -> Rect:
@@ -285,6 +410,12 @@ def capture_client(hwnd: int) -> Image.Image:
         except Exception:
             return False
 
+    def _sig(im: Image.Image) -> bytes:
+        try:
+            return im.resize((32, 32), resample=Image.BILINEAR).convert("RGB").tobytes()
+        except Exception:
+            return b""
+
     try:
         mode = (os.environ.get("WIN_CAPTURE_MODE") or "auto").strip().lower()
     except Exception:
@@ -296,9 +427,15 @@ def capture_client(hwnd: int) -> Image.Image:
         return _capture_window_dc()
 
     img0 = _capture_window_dc()
-    if _is_nearly_black(img0):
-        try:
-            return _capture_desktop_dc()
-        except Exception:
-            return img0
+    try:
+        img1 = _capture_desktop_dc()
+        if not _is_nearly_black(img1):
+            if _is_nearly_black(img0):
+                return img1
+            s0 = _sig(img0)
+            s1 = _sig(img1)
+            if s0 and s1 and s0 != s1:
+                return img1
+    except Exception:
+        pass
     return img0
