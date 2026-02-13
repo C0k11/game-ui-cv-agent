@@ -799,7 +799,7 @@ class VlmPolicyAgent:
             return action
 
         try:
-            cd = 2
+            cd = 1 if wants_delegate else 2
             if int(step_id) - int(getattr(self, "_last_cerebellum_notice_step", -10_000)) <= int(cd):
                 return action
         except Exception:
@@ -897,10 +897,26 @@ class VlmPolicyAgent:
             pass
 
         try:
+            prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
+            if int(step_id) <= int(prev) + 2:
+                self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
+            else:
+                self._cerebellum_notice_streak = 1
             self._last_cerebellum_notice_step = int(step_id)
-            self._cerebellum_notice_streak = 0
         except Exception:
             pass
+
+        if wants_delegate:
+            return {
+                "action": "back",
+                "reason": "delegate: close_notice — Cerebellum template not matched; pressing ESC to close popup.",
+                "raw": action.get("raw"),
+                "_prompt": action.get("_prompt"),
+                "_perception": action.get("_perception"),
+                "_model": action.get("_model"),
+                "_routine": action.get("_routine"),
+                "_close_heuristic": "cerebellum_notice_esc_fallback",
+            }
         return action
 
     def _block_startup_vlm_clicks(self, action: Dict[str, Any], *, step_id: int, screenshot_path: str) -> Dict[str, Any]:

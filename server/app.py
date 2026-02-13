@@ -1509,6 +1509,15 @@ def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     global _LAST_AGENT_START_ERROR
     _LAST_AGENT_START_ERROR = ""
+    # --- clear logs ---
+    try:
+        for fn in ("agent.out.log", "agent.err.log"):
+            try:
+                (LOGS_DIR / fn).write_text("", encoding="utf-8")
+            except Exception:
+                pass
+    except Exception:
+        pass
     # --- auto-launch game ---
     _game_launch_status = ""
     try:
@@ -1519,16 +1528,6 @@ def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
         log_path = LOGS_DIR / "agent.out.log"
         with log_path.open("a", encoding="utf-8") as f:
             f.write(f"[game_launch] {_game_launch_status}\n")
-    except Exception:
-        pass
-    # --- clear logs & start agent ---
-    try:
-        for fn in ("agent.out.log",):
-            pass  # already written above, don't truncate
-        try:
-            (LOGS_DIR / "agent.err.log").write_text("", encoding="utf-8")
-        except Exception:
-            pass
     except Exception:
         pass
     try:
