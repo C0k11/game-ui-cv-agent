@@ -808,7 +808,11 @@ class VlmPolicyAgent:
         try:
             streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0)
             last_step = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
-            if streak >= 4 and (int(step_id) - int(last_step)) <= 6:
+            total_att = int(getattr(self, "_notice_close_total_attempts", 0) or 0)
+            if (streak >= 3 or total_att >= 3) and (int(step_id) - int(last_step)) <= 10:
+                self._cerebellum_notice_streak = 0
+                self._notice_close_total_attempts = 0
+                self._last_cerebellum_notice_step = int(step_id)
                 out = {
                     "action": "back",
                     "reason": "Repeated notice-close attempts; pressing ESC instead.",
@@ -853,7 +857,7 @@ class VlmPolicyAgent:
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
-                ("公告叉叉.png", 0.92),
+                ("公告叉叉.png", 0.98),
                 (tmpl0, 0.975),
                 ("内嵌公告的叉.png", 0.975),
                 ("游戏内很多页面窗口的叉.png", 0.975),
@@ -897,11 +901,12 @@ class VlmPolicyAgent:
 
                     try:
                         prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
-                        if int(step_id) == int(prev) + 1:
+                        if int(step_id) <= int(prev) + 4:
                             self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
                         else:
                             self._cerebellum_notice_streak = 1
                         self._last_cerebellum_notice_step = int(step_id)
+                        self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
                     except Exception:
                         pass
                     return act
@@ -910,11 +915,12 @@ class VlmPolicyAgent:
 
         try:
             prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
-            if int(step_id) <= int(prev) + 2:
+            if int(step_id) <= int(prev) + 4:
                 self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
             else:
                 self._cerebellum_notice_streak = 1
             self._last_cerebellum_notice_step = int(step_id)
+            self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
         except Exception:
             pass
 
@@ -2014,7 +2020,7 @@ class VlmPolicyAgent:
                     if isinstance(act2, dict):
                         try:
                             cb = act2.get("_cerebellum", {})
-                            if float(cb.get("score") or 0.0) < 0.94:
+                            if float(cb.get("score") or 0.0) < 0.98:
                                 continue
                         except Exception:
                             pass
