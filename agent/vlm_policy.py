@@ -849,9 +849,50 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
+        # --- try clicking "今日不再提示" checkbox first (so popup won't reappear today) ---
+        try:
+            roi_dismiss = None
+            if sw > 0 and sh > 0:
+                roi_dismiss = (int(round(float(sw) * 0.10)), int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.80)))
+            dismiss_act = c.click_action(
+                screenshot_path=screenshot_path,
+                template_name="今日不再提示（点完今日不再有这个弹窗）.png",
+                reason_prefix="Cerebellum(delegate): dismiss today notice.",
+                roi=roi_dismiss,
+            )
+            if isinstance(dismiss_act, dict):
+                cb = dismiss_act.get("_cerebellum", {})
+                if float(cb.get("score") or 0.0) >= 0.90:
+                    dismiss_act["raw"] = action.get("raw")
+                    dismiss_act["_prompt"] = action.get("_prompt")
+                    dismiss_act["_perception"] = action.get("_perception")
+                    dismiss_act["_model"] = action.get("_model")
+                    dismiss_act["_routine"] = action.get("_routine")
+                    dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
+                    try:
+                        self._last_cerebellum_notice_step = int(step_id)
+                        self._cerebellum_notice_streak = 1
+                    except Exception:
+                        pass
+                    return dismiss_act
+        except Exception:
+            pass
+
+        # --- try closing X button via template matching ---
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
-            for tmpl in _uniq([tmpl0, "内嵌公告的叉.png", "游戏内很多页面窗口的叉.png"]):
+            close_templates = [
+                ("公告叉叉.png", 0.92),
+                (tmpl0, 0.975),
+                ("内嵌公告的叉.png", 0.975),
+                ("游戏内很多页面窗口的叉.png", 0.975),
+            ]
+            seen_tmpls: set[str] = set()
+            for tmpl, min_conf in close_templates:
+                tmpl = str(tmpl or "").strip()
+                if not tmpl or tmpl in seen_tmpls:
+                    continue
+                seen_tmpls.add(tmpl)
                 act = c.click_action(
                     screenshot_path=screenshot_path,
                     template_name=tmpl,
@@ -861,7 +902,7 @@ class VlmPolicyAgent:
                 if isinstance(act, dict):
                     try:
                         cb = act.get("_cerebellum", {})
-                        if float(cb.get("score") or 0.0) < 0.975:
+                        if float(cb.get("score") or 0.0) < float(min_conf):
                             continue
                     except Exception:
                         pass
