@@ -1471,16 +1471,64 @@ def build_vlm_ocr_index(
     }
 
 
+def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
+    """Launch game exe if not already running. Returns a short status message."""
+    exe_path = (exe_path or "").strip()
+    if not exe_path:
+        return "no_exe_path"
+    p = Path(exe_path)
+    if not p.is_file():
+        return f"exe_not_found: {exe_path}"
+    exe_name = p.name.lower()
+    # Check if the process is already running
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {p.name}", "/NH"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if exe_name in result.stdout.lower():
+            return "already_running"
+    except Exception:
+        pass  # tasklist failed – try launching anyway
+    # Launch the game
+    try:
+        subprocess.Popen(
+            [str(p)],
+            cwd=str(p.parent),
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+    except Exception as e:
+        return f"launch_error: {e}"
+    # Give the game a moment to create its window
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
+    return "launched"
+
+
 @app.post("/api/v1/start")
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     global _LAST_AGENT_START_ERROR
     _LAST_AGENT_START_ERROR = ""
+    # --- auto-launch game ---
+    _game_launch_status = ""
     try:
-        for fn in ("agent.out.log", "agent.err.log"):
-            try:
-                (LOGS_DIR / fn).write_text("", encoding="utf-8")
-            except Exception:
-                pass
+        _game_launch_status = _maybe_launch_game(str(payload.get("game_exe_path") or ""))
+    except Exception:
+        _game_launch_status = f"exception: {traceback.format_exc(limit=5)}"
+    try:
+        log_path = LOGS_DIR / "agent.out.log"
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(f"[game_launch] {_game_launch_status}\n")
+    except Exception:
+        pass
+    # --- clear logs & start agent ---
+    try:
+        for fn in ("agent.out.log",):
+            pass  # already written above, don't truncate
+        try:
+            (LOGS_DIR / "agent.err.log").write_text("", encoding="utf-8")
+        except Exception:
+            pass
     except Exception:
         pass
     try:
