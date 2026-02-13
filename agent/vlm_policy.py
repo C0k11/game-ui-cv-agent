@@ -849,36 +849,7 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
-        # --- try clicking "今日不再提示" checkbox first (so popup won't reappear today) ---
-        try:
-            roi_dismiss = None
-            if sw > 0 and sh > 0:
-                roi_dismiss = (int(round(float(sw) * 0.10)), int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.80)))
-            dismiss_act = c.click_action(
-                screenshot_path=screenshot_path,
-                template_name="今日不再提示（点完今日不再有这个弹窗）.png",
-                reason_prefix="Cerebellum(delegate): dismiss today notice.",
-                roi=roi_dismiss,
-            )
-            if isinstance(dismiss_act, dict):
-                cb = dismiss_act.get("_cerebellum", {})
-                if float(cb.get("score") or 0.0) >= 0.90:
-                    dismiss_act["raw"] = action.get("raw")
-                    dismiss_act["_prompt"] = action.get("_prompt")
-                    dismiss_act["_perception"] = action.get("_perception")
-                    dismiss_act["_model"] = action.get("_model")
-                    dismiss_act["_routine"] = action.get("_routine")
-                    dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
-                    try:
-                        self._last_cerebellum_notice_step = int(step_id)
-                        self._cerebellum_notice_streak = 1
-                    except Exception:
-                        pass
-                    return dismiss_act
-        except Exception:
-            pass
-
-        # --- try closing X button via template matching ---
+        # --- try closing X button via template matching (priority: close popup first) ---
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
@@ -944,6 +915,30 @@ class VlmPolicyAgent:
             else:
                 self._cerebellum_notice_streak = 1
             self._last_cerebellum_notice_step = int(step_id)
+        except Exception:
+            pass
+
+        # --- try "今日不再提示" checkbox once per streak (only if X not found) ---
+        try:
+            streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0)
+            if streak <= 1 and sw > 0 and sh > 0:
+                roi_dismiss = (int(round(float(sw) * 0.10)), int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.80)))
+                dismiss_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="今日不再提示（点完今日不再有这个弹窗）.png",
+                    reason_prefix="Cerebellum(delegate): dismiss today notice.",
+                    roi=roi_dismiss,
+                )
+                if isinstance(dismiss_act, dict):
+                    cb = dismiss_act.get("_cerebellum", {})
+                    if float(cb.get("score") or 0.0) >= 0.90:
+                        dismiss_act["raw"] = action.get("raw")
+                        dismiss_act["_prompt"] = action.get("_prompt")
+                        dismiss_act["_perception"] = action.get("_perception")
+                        dismiss_act["_model"] = action.get("_model")
+                        dismiss_act["_routine"] = action.get("_routine")
+                        dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
+                        return dismiss_act
         except Exception:
             pass
 
@@ -3984,6 +3979,11 @@ class VlmPolicyAgent:
                     time.sleep(0.9)
                 else:
                     self._device.click_client(int(x), int(y))
+                    try:
+                        if hasattr(self._device, "click_client_message"):
+                            self._device.click_client_message(int(x), int(y))
+                    except Exception:
+                        pass
                 return
 
             bbox = action.get("bbox")
@@ -4004,6 +4004,11 @@ class VlmPolicyAgent:
                 except Exception:
                     pass
                 self._device.click_client(int(x), int(y))
+                try:
+                    if hasattr(self._device, "click_client_message"):
+                        self._device.click_client_message(int(x), int(y))
+                except Exception:
+                    pass
                 return
 
             raise ValueError("click action requires target [x,y] or bbox [x1,y1,x2,y2]")
