@@ -927,8 +927,8 @@ class VlmPolicyAgent:
         # --- try "今日不再提示" checkbox once per streak (only if X not found) ---
         try:
             streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0)
-            if streak <= 1 and sw > 0 and sh > 0:
-                roi_dismiss = (int(round(float(sw) * 0.10)), int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.80)))
+            if streak <= 2 and sw > 0 and sh > 0:
+                roi_dismiss = (int(round(float(sw) * 0.05)), int(round(float(sh) * 0.58)), int(round(float(sw) * 0.30)), int(round(float(sh) * 0.72)))
                 dismiss_act = c.click_action(
                     screenshot_path=screenshot_path,
                     template_name="今日不再提示（点完今日不再有这个弹窗）.png",
@@ -937,13 +937,18 @@ class VlmPolicyAgent:
                 )
                 if isinstance(dismiss_act, dict):
                     cb = dismiss_act.get("_cerebellum", {})
-                    if float(cb.get("score") or 0.0) >= 0.90:
+                    if float(cb.get("score") or 0.0) >= 0.95:
                         dismiss_act["raw"] = action.get("raw")
                         dismiss_act["_prompt"] = action.get("_prompt")
                         dismiss_act["_perception"] = action.get("_perception")
                         dismiss_act["_model"] = action.get("_model")
                         dismiss_act["_routine"] = action.get("_routine")
                         dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
+                        try:
+                            self._last_cerebellum_notice_step = int(step_id)
+                            self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
+                        except Exception:
+                            pass
                         return dismiss_act
         except Exception:
             pass
@@ -2020,7 +2025,7 @@ class VlmPolicyAgent:
                     if isinstance(act2, dict):
                         try:
                             cb = act2.get("_cerebellum", {})
-                            if float(cb.get("score") or 0.0) < 0.98:
+                            if float(cb.get("score") or 0.0) < 0.99:
                                 continue
                         except Exception:
                             pass
