@@ -50,6 +50,12 @@
 
     <div class="card">
       <div class="row">
+        <label>Game EXE Path
+          <input id="game_exe_path" type="text" value="D:\\SteamLibrary\\steamapps\\common\\BlueArchive\\BlueArchive.exe" style="min-width:420px" />
+        </label>
+      </div>
+
+      <div class="row">
         <label>Window Title
           <input id="window_title" type="text" value="Blue Archive" />
         </label>
@@ -144,6 +150,7 @@
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return;
         const s = JSON.parse(raw);
+        if (typeof s.game_exe_path === 'string') $('game_exe_path').value = s.game_exe_path;
         if (typeof s.window_title === 'string') $('window_title').value = s.window_title;
         if (typeof s.goal === 'string') $('goal').value = s.goal;
         if (typeof s.steps === 'number') $('steps').value = String(s.steps);
@@ -210,6 +217,7 @@
       const v = Number.isFinite(vParsed) ? vParsed : 0;
       return {
         _ui_rev: 2,
+        game_exe_path: $('game_exe_path').value.trim(),
         window_title: $('window_title').value.trim(),
         goal: $('goal').value.trim(),
         steps: parseInt($('steps').value, 10) || 0,
@@ -359,7 +367,7 @@
       saveNow();
     };
 
-    ['window_title', 'steps', 'step_sleep_s', 'vlm_image_max_side', 'goal', 'dry_run', 'forbid_premium_currency', 'exploration_click'].forEach((id) => {
+    ['game_exe_path', 'window_title', 'steps', 'step_sleep_s', 'vlm_image_max_side', 'goal', 'dry_run', 'forbid_premium_currency', 'exploration_click'].forEach((id) => {
       const el = $(id);
       if (!el) return;
       el.addEventListener('change', saveNow);
