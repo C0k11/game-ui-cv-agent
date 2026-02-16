@@ -3408,7 +3408,7 @@ class VlmPolicyAgent:
                     "duration_ms": 900,
                     "reason": "VLM perception timed out; waiting and retrying next step.",
                     "raw": p_raw,
-                    "_vlm_error": p_err,
+                    "_vlm_error": "slow_perception",
                 }
                 act.setdefault("_prompt", p_prompt)
                 act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": [], "image_size": [int(w), int(h)]})
@@ -3476,6 +3476,19 @@ class VlmPolicyAgent:
                         "raw": p_raw,
                         "_vlm_error": "slow_perception",
                     }
+                    act.setdefault("_prompt", p_prompt)
+                    act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items2, "image_size": img_size})
+                    act.setdefault("_routine", self._routine_meta())
+                    return act
+            except Exception:
+                pass
+
+        prompt = self._prompt(width=int(w), height=int(h), screenshot_path=screenshot_path, items=items)
+        items_txt = self._format_items(items)
+        if items_txt:
+            prompt = prompt + "\nDetected UI text elements (bbox label):\n" + items_txt + "\n"
+
+        self._set_stage(step_id=int(step_id), stage="policy")
         t_a0 = time.time()
         a_dt = 0.0
         try:
@@ -4741,7 +4754,7 @@ class VlmPolicyAgent:
                                     return out
 
                                 tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
-                                for tmpl in _uniq([tmpl0, "内嵌公告的叉.png", "游戏内很多页面窗口的叉.png"]):
+                                for tmpl in _uniq([tmpl0, "公告叉叉.png", "内嵌公告的叉.png", "游戏内很多页面窗口的叉.png"]):
                                     act2 = c.click_action(
                                         screenshot_path=shot_path,
                                         template_name=tmpl,
