@@ -1322,12 +1322,21 @@ class VlmPolicyAgent:
             "Include close buttons like X/×/Close/关闭, page indicators like 1/2, and primary buttons like OK/Confirm/Skip/Next." 
         )
 
-    def _prompt(self, *, width: int, height: int) -> str:
+    def _prompt(self, *, width: int, height: int, screenshot_path: Optional[str] = None, items: Optional[List[Dict[str, Any]]] = None) -> str:
         routine_block = ""
         try:
             routine_block = str(self._routine.get_prompt_block() or "")
         except Exception:
             routine_block = ""
+
+        scene_hint = ""
+        try:
+            if screenshot_path and self._is_lobby_view(items, width=width, height=height, screenshot_path=screenshot_path):
+                scene_hint = "Current Scene: MAIN LOBBY (Notices are closed). You can proceed with routine tasks."
+            elif screenshot_path and self._is_cafe_interior(items, width=width, height=height):
+                scene_hint = "Current Scene: CAFE INTERIOR."
+        except Exception:
+            pass
 
         forbid = bool(getattr(self.cfg, "forbid_premium_currency", True))
         safety = "Do NOT spend premium currency." if forbid else ""
@@ -1344,6 +1353,7 @@ class VlmPolicyAgent:
             "Supported delegates: close_notice, open_cafe, open_schedule, open_mail, open_social, open_craft, confirm, cancel, touch_head.\n"
             "Valid actions: wait, stop, done.\n"
             f"Safety: {safety}\n"
+            f"{scene_hint}\n"
             + routine_block
         )
 
@@ -1440,7 +1450,7 @@ class VlmPolicyAgent:
                     items = action.get("_perception", {}).get("items")
                 except Exception:
                     items = None
-                if not self._is_lobby_view(items, width=int(sw), height=int(sh)):
+                if not self._is_lobby_view(items, width=int(sw), height=int(sh), screenshot_path=screenshot_path):
                     return action
                 roi = (int(0), int(round(float(sh) * 0.76)), int(sw), int(sh))
             elif key in ("confirm", "cancel"):
@@ -1450,7 +1460,7 @@ class VlmPolicyAgent:
                     items = action.get("_perception", {}).get("items")
                 except Exception:
                     items = None
-                if self._is_lobby_view(items, width=int(sw), height=int(sh)):
+                if self._is_lobby_view(items, width=int(sw), height=int(sh), screenshot_path=screenshot_path):
                     return action
                 if not self._is_cafe_interior(items, width=int(sw), height=int(sh)):
                     return action
@@ -1583,46 +1593,88 @@ class VlmPolicyAgent:
                 my = max(my, y2, y1)
         return int(mx), int(my)
 
-    def _is_lobby_view(self, items: Any, *, width: int, height: int) -> bool:
-        if not isinstance(items, list) or not items:
-            return False
+    def _is_lobby_view(self, items: Any, *, width: int, height: int, screenshot_path: Optional[str] = None) -> bool:
+        # 1. Try OCR/Perception items
         hit = 0
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            lbl = str(it.get("label") or "").strip()
-            if not lbl:
-                continue
-            ll = lbl.lower()
-            if "cafe" in ll or "咖啡" in lbl or "咖啡廳" in lbl:
-                hit += 1
-            if "schale" in ll or "夏莱" in lbl or "夏萊" in lbl:
-                hit += 1
-            if "campaign" in ll or "mission" in ll or "任务" in lbl or "任務" in lbl:
-                hit += 1
-            if hit >= 2:
-                return True
+        if isinstance(items, list):
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                lbl = str(it.get("label") or "").strip()
+                if not lbl:
+                    continue
+                ll = lbl.lower()
+                if "cafe" in ll or "咖啡" in lbl or "咖啡廳" in lbl:
+                    hit += 1
+                if "schale" in ll or "夏莱" in lbl or "夏萊" in lbl:
+                    hit += 1
+                if "campaign" in ll or "mission" in ll or "任务" in lbl or "任務" in lbl:
+                    hit += 1
+        if hit >= 2:
+            return True
+
+        # 2. Try Cerebellum template matching if screenshot is available
+        if screenshot_path and self.cfg.cerebellum_enabled:
+            c = getattr(self, "_cerebellum", None)
+            if c:
+                # Lobby usually has "Cafe", "Students", "Recruit", "Club" icons at bottom
+                # We check for a few key icons.
+                templates = [
+                    "咖啡厅.png", "学生.png", "招募.png", "社交.png",
+                    "制造.png", "商店.png", "课程表.png", "邮箱.png"
+                ]
+                matches = 0
+                try:
+                    # ROI for bottom navigation bar area
+                    roi_nav = (0, int(height * 0.75), width, height)
+                    for tmpl in templates:
+                        m = c.best_match(screenshot_path=screenshot_path, template_name=tmpl, roi=roi_nav)
+                        if m and m.score >= 0.85: # Slightly stricter threshold for scene detection
+                            matches += 1
+                    if matches >= 2:
+                        return True
+                except Exception:
+                    pass
+
         return False
 
-    def _is_cafe_interior(self, items: Any, *, width: int, height: int) -> bool:
-        if not isinstance(items, list) or not items:
-            return False
+    def _is_cafe_interior(self, items: Any, *, width: int, height: int, screenshot_path: Optional[str] = None) -> bool:
+        # 1. Try OCR/Perception items
         hit = 0
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            lbl = str(it.get("label") or "").strip()
-            if not lbl:
-                continue
-            ll = lbl.lower()
-            if "cafe" in ll or "咖啡" in lbl or "咖啡廳" in lbl:
-                hit += 1
-            if "earn" in ll or "earning" in ll or "claim" in ll or "收益" in lbl or "领取" in lbl or "領取" in lbl:
-                hit += 1
-            if "invite" in ll or "邀請" in lbl or "邀请" in lbl:
-                hit += 1
-            if hit >= 2:
-                return True
+        if isinstance(items, list):
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                lbl = str(it.get("label") or "").strip()
+                if not lbl:
+                    continue
+                ll = lbl.lower()
+                if "cafe" in ll or "咖啡" in lbl or "咖啡廳" in lbl:
+                    hit += 1
+                if "earn" in ll or "earning" in ll or "claim" in ll or "收益" in lbl or "领取" in lbl or "領取" in lbl:
+                    hit += 1
+                if "invite" in ll or "邀請" in lbl or "邀请" in lbl:
+                    hit += 1
+        if hit >= 2:
+            return True
+
+        # 2. Try Cerebellum template matching
+        if screenshot_path and self.cfg.cerebellum_enabled:
+            c = getattr(self, "_cerebellum", None)
+            if c:
+                # Cafe interior usually has "Cafe" title (maybe), "Comfort" rank, "Earnings" claim button.
+                # We can check for "Earnings/Claim" related templates if available, or unique cafe UI elements.
+                # Based on user assets: "可摸头的标志.png" (interaction), maybe "收益.png" (not in list but maybe OCR covers it).
+                # User list has: "咖啡厅.png" (likely lobby icon), "可摸头的标志.png".
+                # Let's rely on OCR for Cafe mostly, but maybe check for headpat marker if present?
+                # Actually, better to check for "Cafe Rank" or specific UI if we had templates.
+                # For now, let's trust OCR + maybe headpat marker implies cafe.
+                try:
+                    m = c.best_match(screenshot_path=screenshot_path, template_name="可摸头的标志.png")
+                    if m and m.score >= 0.90:
+                        return True
+                except Exception:
+                    pass
         return False
 
     def _has_cafe_claim_ui(self, items: Any, *, height: int) -> bool:
@@ -3417,7 +3469,7 @@ class VlmPolicyAgent:
             except Exception:
                 pass
 
-        prompt = self._prompt(width=int(w), height=int(h))
+        prompt = self._prompt(width=int(w), height=int(h), screenshot_path=screenshot_path, items=items)
         items_txt = self._format_items(items)
         if items_txt:
             prompt = prompt + "\nDetected UI text elements (bbox label):\n" + items_txt + "\n"
