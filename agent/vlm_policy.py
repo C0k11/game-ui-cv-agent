@@ -1347,7 +1347,7 @@ class VlmPolicyAgent:
             + routine_block
         )
 
-    def _maybe_delegate_intent_to_cerebellum(self, action: Dict[str, Any], *, screenshot_path: str, step_id: int) -> Dict[str, Any]:
+    def _maybe_delegate_intent_to_cerebellum(self, action: Dict[str, Any], *, screenshot_path: str, step_id: int, action_before: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
         try:
@@ -1380,6 +1380,17 @@ class VlmPolicyAgent:
             key = ""
         if not key:
             return action
+
+        # --- Safety: Prevent Confirm after Back (avoid Exit Game) ---
+        try:
+            if key == "confirm":
+                prev_act = str((action_before or {}).get("action") or "").lower().strip()
+                if prev_act in ("back", "esc", "escape"):
+                    # Switch to cancel to close the likely Exit Game dialog
+                    key = "cancel"
+                    action["reason"] = (action.get("reason") or "") + " [Safety: Switched Confirm->Cancel after Back]"
+        except Exception:
+            pass
 
         alias = {
             "open_club": "open_social",
@@ -1991,6 +2002,15 @@ class VlmPolicyAgent:
             cd = 2
         try:
             if step_id - int(self._last_autoclick_step) <= int(cd):
+                return action
+        except Exception:
+            pass
+
+        try:
+            prev_act = str((action_before or {}).get("action") or "").lower().strip()
+            if prev_act in ("back", "esc", "escape"):
+                # if we just pressed Back, we might have triggered an "Exit Game?" dialog.
+                # do NOT autoclick "Confirm" in this case.
                 return action
         except Exception:
             pass
@@ -4774,7 +4794,7 @@ class VlmPolicyAgent:
                 act = self._sanitize_action(act)
                 act = self._maybe_delegate_notice_close_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
+                act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id, action_before=act_before)
                 act = self._maybe_tap_to_start(act, step_id=step_id)
                 act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
                 act = self._block_check_lobby_noise(act)
