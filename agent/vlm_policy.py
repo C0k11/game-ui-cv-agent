@@ -1322,7 +1322,7 @@ class VlmPolicyAgent:
             "Include close buttons like X/×/Close/关闭, page indicators like 1/2, and primary buttons like OK/Confirm/Skip/Next." 
         )
 
-    def _prompt(self, *, width: int, height: int, screenshot_path: Optional[str] = None, items: Optional[List[Dict[str, Any]]] = None) -> str:
+    def _prompt(self, *, width: int, height: int, screenshot_path: Optional[str] = None, items: Optional[List[Dict[str, Any]]] = None, action_before: Optional[Dict[str, Any]] = None) -> str:
         routine_block = ""
         try:
             routine_block = str(self._routine.get_prompt_block() or "")
@@ -1335,6 +1335,19 @@ class VlmPolicyAgent:
                 scene_hint = "Current Scene: MAIN LOBBY (Notices are closed). You can proceed with routine tasks."
             elif screenshot_path and self._is_cafe_interior(items, width=width, height=height):
                 scene_hint = "Current Scene: CAFE INTERIOR."
+        except Exception:
+            pass
+
+        # Context injection: What did we just do?
+        action_hint = ""
+        try:
+            if isinstance(action_before, dict):
+                prev_reason = str(action_before.get("reason") or "").lower()
+                prev_algo = str(action_before.get("_close_heuristic") or "")
+                if "close notice" in prev_reason or "cerebellum_notice_close" in prev_algo:
+                    action_hint = "Recent Action: Just closed an in-game notice/announcement. The screen should now be the Lobby or Menu."
+                elif "tap to start" in prev_reason:
+                    action_hint = "Recent Action: Tapped to start. Expecting transition to Lobby or Notices."
         except Exception:
             pass
 
@@ -1354,6 +1367,7 @@ class VlmPolicyAgent:
             "Valid actions: wait, stop, done.\n"
             f"Safety: {safety}\n"
             f"{scene_hint}\n"
+            f"{action_hint}\n"
             + routine_block
         )
 
@@ -3462,19 +3476,6 @@ class VlmPolicyAgent:
                         "raw": p_raw,
                         "_vlm_error": "slow_perception",
                     }
-                    act.setdefault("_prompt", p_prompt)
-                    act.setdefault("_perception", {"prompt": p_prompt, "raw": p_raw, "items": items2, "image_size": img_size})
-                    act.setdefault("_routine", self._routine_meta())
-                    return act
-            except Exception:
-                pass
-
-        prompt = self._prompt(width=int(w), height=int(h), screenshot_path=screenshot_path, items=items)
-        items_txt = self._format_items(items)
-        if items_txt:
-            prompt = prompt + "\nDetected UI text elements (bbox label):\n" + items_txt + "\n"
-
-        self._set_stage(step_id=int(step_id), stage="policy")
         t_a0 = time.time()
         a_dt = 0.0
         try:
