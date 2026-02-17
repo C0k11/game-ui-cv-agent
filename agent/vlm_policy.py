@@ -568,7 +568,7 @@ class VlmPolicyAgent:
         roi_start = None
         try:
             if sw > 0 and sh > 0:
-                roi_notice = (int(round(float(sw) * 0.72)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.26)))
+                roi_notice = (int(round(float(sw) * 0.55)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.22)))
                 roi_start = (int(round(float(sw) * 0.40)), int(round(float(sh) * 0.74)), int(round(float(sw) * 0.60)), int(round(float(sh) * 0.92)))
         except Exception:
             roi_notice = None
@@ -661,6 +661,47 @@ class VlmPolicyAgent:
                     if hits >= 2:
                         self._startup_finished = True
                         return None
+        except Exception:
+            pass
+
+        # --- During startup, try closing popups that block the title screen ---
+        try:
+            if roi_notice is not None and sw > 0 and sh > 0:
+                _close_tmpls = _uniq([
+                    "公告叉叉.png",
+                    "内嵌公告的叉.png",
+                    "游戏内很多页面窗口的叉.png",
+                ])
+                _best_ca = None
+                _best_sc = 0.0
+                _best_ct = ""
+                for _ct in _close_tmpls:
+                    try:
+                        _ca = c.click_action(
+                            screenshot_path=screenshot_path,
+                            template_name=_ct,
+                            reason_prefix="Cerebellum(startup): close popup on title screen.",
+                            roi=roi_notice,
+                        )
+                        if isinstance(_ca, dict):
+                            _cb = _ca.get("_cerebellum", {})
+                            _sc = float(_cb.get("score") or 0.0)
+                            if math.isnan(_sc) or _sc < 0.25:
+                                continue
+                            if _sc > _best_sc:
+                                _best_ca = _ca
+                                _best_sc = _sc
+                                _best_ct = _ct
+                    except Exception:
+                        continue
+                if _best_ca is not None:
+                    _best_ca["_startup_tap"] = True
+                    try:
+                        ts = datetime.now().isoformat(timespec="seconds")
+                        self._log_out(f"[{ts}] startup popup close: template={_best_ct} score={_best_sc:.3f} step={step_id}")
+                    except Exception:
+                        pass
+                    return _best_ca
         except Exception:
             pass
 
@@ -861,7 +902,7 @@ class VlmPolicyAgent:
         roi_notice = None
         try:
             if sw > 0 and sh > 0:
-                roi_notice = (int(round(float(sw) * 0.72)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.26)))
+                roi_notice = (int(round(float(sw) * 0.55)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.22)))
         except Exception:
             roi_notice = None
 
@@ -876,7 +917,7 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
-        # --- try closing X button via template matching (priority: close popup first) ---
+        # --- try closing X button via template matching (best match wins) ---
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
@@ -886,6 +927,8 @@ class VlmPolicyAgent:
                 ("游戏内很多页面窗口的叉.png", 0.40),
             ]
             seen_tmpls: set[str] = set()
+            _best_act = None
+            _best_score = 0.0
             for tmpl, min_conf in close_templates:
                 tmpl = str(tmpl or "").strip()
                 if not tmpl or tmpl in seen_tmpls:
@@ -905,35 +948,39 @@ class VlmPolicyAgent:
                             continue
                     except Exception:
                         continue
+                    if _sc > _best_score:
+                        _best_act = act
+                        _best_score = _sc
 
-                    act["raw"] = action.get("raw")
-                    act["_prompt"] = action.get("_prompt")
-                    act["_perception"] = action.get("_perception")
-                    act["_model"] = action.get("_model")
-                    act["_routine"] = action.get("_routine")
-                    act["_close_heuristic"] = "cerebellum_notice_close"
-                    act.setdefault("_delegate", {})
-                    act["_delegate"]["from_action"] = str(action.get("action") or "")
-                    act["_delegate"]["from_reason"] = str(reason)
-                    act["_delegate"]["wants_delegate"] = bool(wants_delegate)
+            if _best_act is not None:
+                _best_act["raw"] = action.get("raw")
+                _best_act["_prompt"] = action.get("_prompt")
+                _best_act["_perception"] = action.get("_perception")
+                _best_act["_model"] = action.get("_model")
+                _best_act["_routine"] = action.get("_routine")
+                _best_act["_close_heuristic"] = "cerebellum_notice_close"
+                _best_act.setdefault("_delegate", {})
+                _best_act["_delegate"]["from_action"] = str(action.get("action") or "")
+                _best_act["_delegate"]["from_reason"] = str(reason)
+                _best_act["_delegate"]["wants_delegate"] = bool(wants_delegate)
 
-                    try:
-                        if int(getattr(self, "_startup_tap_attempts", 0) or 0) > 0:
-                            self._startup_finished = True
-                    except Exception:
-                        pass
+                try:
+                    if int(getattr(self, "_startup_tap_attempts", 0) or 0) > 0:
+                        self._startup_finished = True
+                except Exception:
+                    pass
 
-                    try:
-                        prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
-                        if int(step_id) <= int(prev) + 4:
-                            self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
-                        else:
-                            self._cerebellum_notice_streak = 1
-                        self._last_cerebellum_notice_step = int(step_id)
-                        self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
-                    except Exception:
-                        pass
-                    return act
+                try:
+                    prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
+                    if int(step_id) <= int(prev) + 4:
+                        self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
+                    else:
+                        self._cerebellum_notice_streak = 1
+                    self._last_cerebellum_notice_step = int(step_id)
+                    self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
+                except Exception:
+                    pass
+                return _best_act
         except Exception:
             pass
 
