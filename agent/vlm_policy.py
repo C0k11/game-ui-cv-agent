@@ -665,6 +665,30 @@ class VlmPolicyAgent:
             pass
 
         # --- During startup, try closing popups that block the title screen ---
+        # Preferred: click "今日不再顯示" (don't show today) — closes AND prevents re-appearance
+        try:
+            if sw > 0 and sh > 0:
+                _dismiss_roi = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
+                _dismiss_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="今日不再提示（点完今日不再有这个弹窗）.png",
+                    reason_prefix="Cerebellum(startup): dismiss today popup.",
+                    roi=_dismiss_roi,
+                )
+                if isinstance(_dismiss_act, dict):
+                    _cb = _dismiss_act.get("_cerebellum", {})
+                    _sc = float(_cb.get("score") or 0.0)
+                    if not math.isnan(_sc) and _sc >= 0.35:
+                        _dismiss_act["_startup_tap"] = True
+                        try:
+                            ts = datetime.now().isoformat(timespec="seconds")
+                            self._log_out(f"[{ts}] startup dismiss-today: score={_sc:.3f} step={step_id}")
+                        except Exception:
+                            pass
+                        return _dismiss_act
+        except Exception:
+            pass
+        # Fallback: click popup X button
         try:
             if roi_notice is not None and sw > 0 and sh > 0:
                 _close_tmpls = _uniq([
@@ -917,7 +941,36 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
-        # --- try closing X button via template matching (best match wins) ---
+        # --- Preferred: click "今日不再顯示" first (closes AND prevents re-appearance) ---
+        try:
+            if sw > 0 and sh > 0:
+                _dismiss_roi = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
+                _dismiss_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="今日不再提示（点完今日不再有这个弹窗）.png",
+                    reason_prefix="Cerebellum(delegate): dismiss today notice.",
+                    roi=_dismiss_roi,
+                )
+                if isinstance(_dismiss_act, dict):
+                    _cb = _dismiss_act.get("_cerebellum", {})
+                    _sc = float(_cb.get("score") or 0.0)
+                    if not math.isnan(_sc) and _sc >= 0.35:
+                        _dismiss_act["raw"] = action.get("raw")
+                        _dismiss_act["_prompt"] = action.get("_prompt")
+                        _dismiss_act["_perception"] = action.get("_perception")
+                        _dismiss_act["_model"] = action.get("_model")
+                        _dismiss_act["_routine"] = action.get("_routine")
+                        _dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
+                        try:
+                            self._last_cerebellum_notice_step = int(step_id)
+                            self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
+                        except Exception:
+                            pass
+                        return _dismiss_act
+        except Exception:
+            pass
+
+        # --- Fallback: try closing X button via template matching (best match wins) ---
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
@@ -999,7 +1052,7 @@ class VlmPolicyAgent:
         try:
             streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0)
             if streak <= 2 and sw > 0 and sh > 0:
-                roi_dismiss = (int(round(float(sw) * 0.05)), int(round(float(sh) * 0.58)), int(round(float(sw) * 0.30)), int(round(float(sh) * 0.72)))
+                roi_dismiss = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
                 dismiss_act = c.click_action(
                     screenshot_path=screenshot_path,
                     template_name="今日不再提示（点完今日不再有这个弹窗）.png",
