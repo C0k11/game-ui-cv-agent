@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import threading
@@ -184,8 +185,10 @@ def _looks_like_title_screen(items: Any) -> bool:
             score += 2
         if ("uid" in lbl) or ("ver" in lbl) or ("version" in lbl) or ("region" in lbl) or ("blue archive" in lbl):
             score += 1
-        if score >= 3:
-            return True
+        if ("tap" in lbl and "start" in lbl) or ("touch" in lbl and "start" in lbl) or ("点击" in lbl0 and "开始" in lbl0):
+            score += 4
+    if score >= 3:
+        return True
     return False
 
 
@@ -565,7 +568,7 @@ class VlmPolicyAgent:
         roi_start = None
         try:
             if sw > 0 and sh > 0:
-                roi_notice = (int(round(float(sw) * 0.72)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.26)))
+                roi_notice = (int(round(float(sw) * 0.55)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.22)))
                 roi_start = (int(round(float(sw) * 0.40)), int(round(float(sh) * 0.74)), int(round(float(sw) * 0.60)), int(round(float(sh) * 0.92)))
         except Exception:
             roi_notice = None
@@ -611,7 +614,7 @@ class VlmPolicyAgent:
         try:
             allow_nav_check = True
             try:
-                if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 10:
                     allow_nav_check = False
             except Exception:
                 allow_nav_check = True
@@ -636,7 +639,7 @@ class VlmPolicyAgent:
                     m0 = None
                     if tmpl_lobby0:
                         m0 = c.best_match(screenshot_path=screenshot_path, template_name=tmpl_lobby0, roi=roi_nav)
-                    if m0 is not None and float(m0.score) >= 0.960:
+                    if m0 is not None and float(m0.score) >= 0.28:
                         self._startup_finished = True
                         return None
                 except Exception:
@@ -650,7 +653,7 @@ class VlmPolicyAgent:
                     except Exception:
                         m = None
                     try:
-                        if m is None or float(m.score) < 0.935:
+                        if m is None or float(m.score) < 0.28:
                             continue
                     except Exception:
                         continue
@@ -658,6 +661,71 @@ class VlmPolicyAgent:
                     if hits >= 2:
                         self._startup_finished = True
                         return None
+        except Exception:
+            pass
+
+        # --- During startup, try closing popups that block the title screen ---
+        # Preferred: click "今日不再顯示" (don't show today) — closes AND prevents re-appearance
+        try:
+            if sw > 0 and sh > 0:
+                _dismiss_roi = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
+                _dismiss_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="今日不再提示（点完今日不再有这个弹窗）.png",
+                    reason_prefix="Cerebellum(startup): dismiss today popup.",
+                    roi=_dismiss_roi,
+                )
+                if isinstance(_dismiss_act, dict):
+                    _cb = _dismiss_act.get("_cerebellum", {})
+                    _sc = float(_cb.get("score") or 0.0)
+                    if not math.isnan(_sc) and _sc >= 0.35:
+                        _dismiss_act["_startup_tap"] = True
+                        try:
+                            ts = datetime.now().isoformat(timespec="seconds")
+                            self._log_out(f"[{ts}] startup dismiss-today: score={_sc:.3f} step={step_id}")
+                        except Exception:
+                            pass
+                        return _dismiss_act
+        except Exception:
+            pass
+        # Fallback: click popup X button
+        try:
+            if roi_notice is not None and sw > 0 and sh > 0:
+                _close_tmpls = _uniq([
+                    "公告叉叉.png",
+                    "内嵌公告的叉.png",
+                    "游戏内很多页面窗口的叉.png",
+                ])
+                _best_ca = None
+                _best_sc = 0.0
+                _best_ct = ""
+                for _ct in _close_tmpls:
+                    try:
+                        _ca = c.click_action(
+                            screenshot_path=screenshot_path,
+                            template_name=_ct,
+                            reason_prefix="Cerebellum(startup): close popup on title screen.",
+                            roi=roi_notice,
+                        )
+                        if isinstance(_ca, dict):
+                            _cb = _ca.get("_cerebellum", {})
+                            _sc = float(_cb.get("score") or 0.0)
+                            if math.isnan(_sc) or _sc < 0.25:
+                                continue
+                            if _sc > _best_sc:
+                                _best_ca = _ca
+                                _best_sc = _sc
+                                _best_ct = _ct
+                    except Exception:
+                        continue
+                if _best_ca is not None:
+                    _best_ca["_startup_tap"] = True
+                    try:
+                        ts = datetime.now().isoformat(timespec="seconds")
+                        self._log_out(f"[{ts}] startup popup close: template={_best_ct} score={_best_sc:.3f} step={step_id}")
+                    except Exception:
+                        pass
+                    return _best_ca
         except Exception:
             pass
 
@@ -711,7 +779,7 @@ class VlmPolicyAgent:
                         cb = act.get("_cerebellum", {})
                         tname = str(cb.get("template") or "")
                         score = float(cb.get("score") or 0.0)
-                        if tname == "点击开始.png" and float(score) < 0.87:
+                        if tname == "点击开始.png" and float(score) < 0.30:
                             continue
                     except Exception:
                         pass
@@ -767,7 +835,7 @@ class VlmPolicyAgent:
 
         try:
             boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
-            if boot_preinteractive and int(step_id) <= 60:
+            if boot_preinteractive and int(step_id) <= 10:
                 return action
         except Exception:
             pass
@@ -810,6 +878,26 @@ class VlmPolicyAgent:
             last_step = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
             total_att = int(getattr(self, "_notice_close_total_attempts", 0) or 0)
             if (streak >= 3 or total_att >= 3) and (int(step_id) - int(last_step)) <= 10:
+                # Safety: Do NOT press ESC if on Lobby/Title (triggers Exit Game dialog)
+                try:
+                    _lw = _lh = 0
+                    with Image.open(screenshot_path) as _lim:
+                        _lw, _lh = _lim.size
+                    if _lw > 0 and _lh > 0 and self._is_lobby_view([], width=_lw, height=_lh, screenshot_path=screenshot_path):
+                        action = dict(action)
+                        action["reason"] = "delegate: open_cafe"
+                        action["_notice_lobby_override"] = True
+                        self._cerebellum_notice_streak = 0
+                        self._notice_close_total_attempts = 0
+                        return action
+                except Exception:
+                    pass
+                try:
+                    _tm = c.best_match(screenshot_path=screenshot_path, template_name="点击开始.png")
+                    if _tm and _tm.score >= 0.30:
+                        return action
+                except Exception:
+                    pass
                 self._cerebellum_notice_streak = 0
                 self._notice_close_total_attempts = 0
                 self._last_cerebellum_notice_step = int(step_id)
@@ -838,7 +926,7 @@ class VlmPolicyAgent:
         roi_notice = None
         try:
             if sw > 0 and sh > 0:
-                roi_notice = (int(round(float(sw) * 0.72)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.26)))
+                roi_notice = (int(round(float(sw) * 0.55)), int(round(float(sh) * 0.00)), int(sw), int(round(float(sh) * 0.22)))
         except Exception:
             roi_notice = None
 
@@ -853,16 +941,47 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
-        # --- try closing X button via template matching (priority: close popup first) ---
+        # --- Preferred: click "今日不再顯示" first (closes AND prevents re-appearance) ---
+        try:
+            if sw > 0 and sh > 0:
+                _dismiss_roi = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
+                _dismiss_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="今日不再提示（点完今日不再有这个弹窗）.png",
+                    reason_prefix="Cerebellum(delegate): dismiss today notice.",
+                    roi=_dismiss_roi,
+                )
+                if isinstance(_dismiss_act, dict):
+                    _cb = _dismiss_act.get("_cerebellum", {})
+                    _sc = float(_cb.get("score") or 0.0)
+                    if not math.isnan(_sc) and _sc >= 0.35:
+                        _dismiss_act["raw"] = action.get("raw")
+                        _dismiss_act["_prompt"] = action.get("_prompt")
+                        _dismiss_act["_perception"] = action.get("_perception")
+                        _dismiss_act["_model"] = action.get("_model")
+                        _dismiss_act["_routine"] = action.get("_routine")
+                        _dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
+                        try:
+                            self._last_cerebellum_notice_step = int(step_id)
+                            self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
+                        except Exception:
+                            pass
+                        return _dismiss_act
+        except Exception:
+            pass
+
+        # --- Fallback: try closing X button via template matching (best match wins) ---
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
-                ("公告叉叉.png", 0.98),
-                (tmpl0, 0.975),
-                ("内嵌公告的叉.png", 0.975),
-                ("游戏内很多页面窗口的叉.png", 0.975),
+                ("公告叉叉.png", 0.25),
+                (tmpl0, 0.40),
+                ("内嵌公告的叉.png", 0.40),
+                ("游戏内很多页面窗口的叉.png", 0.40),
             ]
             seen_tmpls: set[str] = set()
+            _best_act = None
+            _best_score = 0.0
             for tmpl, min_conf in close_templates:
                 tmpl = str(tmpl or "").strip()
                 if not tmpl or tmpl in seen_tmpls:
@@ -877,39 +996,44 @@ class VlmPolicyAgent:
                 if isinstance(act, dict):
                     try:
                         cb = act.get("_cerebellum", {})
-                        if float(cb.get("score") or 0.0) < float(min_conf):
+                        _sc = float(cb.get("score") or 0.0)
+                        if math.isnan(_sc) or _sc < float(min_conf):
                             continue
                     except Exception:
-                        pass
+                        continue
+                    if _sc > _best_score:
+                        _best_act = act
+                        _best_score = _sc
 
-                    act["raw"] = action.get("raw")
-                    act["_prompt"] = action.get("_prompt")
-                    act["_perception"] = action.get("_perception")
-                    act["_model"] = action.get("_model")
-                    act["_routine"] = action.get("_routine")
-                    act["_close_heuristic"] = "cerebellum_notice_close"
-                    act.setdefault("_delegate", {})
-                    act["_delegate"]["from_action"] = str(action.get("action") or "")
-                    act["_delegate"]["from_reason"] = str(reason)
-                    act["_delegate"]["wants_delegate"] = bool(wants_delegate)
+            if _best_act is not None:
+                _best_act["raw"] = action.get("raw")
+                _best_act["_prompt"] = action.get("_prompt")
+                _best_act["_perception"] = action.get("_perception")
+                _best_act["_model"] = action.get("_model")
+                _best_act["_routine"] = action.get("_routine")
+                _best_act["_close_heuristic"] = "cerebellum_notice_close"
+                _best_act.setdefault("_delegate", {})
+                _best_act["_delegate"]["from_action"] = str(action.get("action") or "")
+                _best_act["_delegate"]["from_reason"] = str(reason)
+                _best_act["_delegate"]["wants_delegate"] = bool(wants_delegate)
 
-                    try:
-                        if int(getattr(self, "_startup_tap_attempts", 0) or 0) > 0:
-                            self._startup_finished = True
-                    except Exception:
-                        pass
+                try:
+                    if int(getattr(self, "_startup_tap_attempts", 0) or 0) > 0:
+                        self._startup_finished = True
+                except Exception:
+                    pass
 
-                    try:
-                        prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
-                        if int(step_id) <= int(prev) + 4:
-                            self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
-                        else:
-                            self._cerebellum_notice_streak = 1
-                        self._last_cerebellum_notice_step = int(step_id)
-                        self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
-                    except Exception:
-                        pass
-                    return act
+                try:
+                    prev = int(getattr(self, "_last_cerebellum_notice_step", -10_000) or -10_000)
+                    if int(step_id) <= int(prev) + 4:
+                        self._cerebellum_notice_streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0) + 1
+                    else:
+                        self._cerebellum_notice_streak = 1
+                    self._last_cerebellum_notice_step = int(step_id)
+                    self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
+                except Exception:
+                    pass
+                return _best_act
         except Exception:
             pass
 
@@ -928,7 +1052,7 @@ class VlmPolicyAgent:
         try:
             streak = int(getattr(self, "_cerebellum_notice_streak", 0) or 0)
             if streak <= 2 and sw > 0 and sh > 0:
-                roi_dismiss = (int(round(float(sw) * 0.05)), int(round(float(sh) * 0.58)), int(round(float(sw) * 0.30)), int(round(float(sh) * 0.72)))
+                roi_dismiss = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
                 dismiss_act = c.click_action(
                     screenshot_path=screenshot_path,
                     template_name="今日不再提示（点完今日不再有这个弹窗）.png",
@@ -937,7 +1061,7 @@ class VlmPolicyAgent:
                 )
                 if isinstance(dismiss_act, dict):
                     cb = dismiss_act.get("_cerebellum", {})
-                    if float(cb.get("score") or 0.0) >= 0.95:
+                    if float(cb.get("score") or 0.0) >= 0.35:
                         dismiss_act["raw"] = action.get("raw")
                         dismiss_act["_prompt"] = action.get("_prompt")
                         dismiss_act["_perception"] = action.get("_perception")
@@ -954,6 +1078,34 @@ class VlmPolicyAgent:
             pass
 
         if wants_delegate:
+            # Safety: Do NOT press ESC if on Lobby/Title (triggers Exit Game dialog)
+            _on_lobby = False
+            try:
+                if sw > 0 and sh > 0 and self._is_lobby_view([], width=sw, height=sh, screenshot_path=screenshot_path):
+                    _on_lobby = True
+            except Exception:
+                pass
+            if _on_lobby:
+                # VLM keeps saying close_notice but we're on Lobby with no popup.
+                # After 2+ failed attempts, override to open_cafe to proceed with routine.
+                _total = 0
+                try:
+                    _total = int(getattr(self, "_notice_close_total_attempts", 0) or 0)
+                except Exception:
+                    _total = 0
+                if _total >= 2:
+                    action = dict(action)
+                    action["reason"] = "delegate: open_cafe"
+                    action["_notice_lobby_override"] = True
+                    self._cerebellum_notice_streak = 0
+                    self._notice_close_total_attempts = 0
+                return action
+            try:
+                _tm = c.best_match(screenshot_path=screenshot_path, template_name="点击开始.png")
+                if _tm and _tm.score >= 0.30:
+                    return action
+            except Exception:
+                pass
             return {
                 "action": "back",
                 "reason": "delegate: close_notice — Cerebellum template not matched; pressing ESC to close popup.",
@@ -1010,7 +1162,7 @@ class VlmPolicyAgent:
         except Exception:
             tgt = None
 
-        if boot_preinteractive and int(step_id) <= 60:
+        if boot_preinteractive and int(step_id) <= 10:
             if isinstance(tgt, (list, tuple)) and len(tgt) == 2 and w > 0 and h > 0:
                 try:
                     x, y = int(tgt[0]), int(tgt[1])
@@ -1332,8 +1484,8 @@ class VlmPolicyAgent:
         scene_hint = ""
         try:
             if screenshot_path and self._is_lobby_view(items, width=width, height=height, screenshot_path=screenshot_path):
-                scene_hint = "Current Scene: MAIN LOBBY (Notices are closed). You can proceed with routine tasks."
-            elif screenshot_path and self._is_cafe_interior(items, width=width, height=height):
+                scene_hint = "Current Scene: MAIN LOBBY. The '公告' button on the left is a PERMANENT UI button, NOT a popup — do NOT try to close it. All notices/popups are already dismissed. Proceed with routine tasks (first: open Cafe via delegate: open_cafe)."
+            elif screenshot_path and self._is_cafe_interior(items, width=width, height=height, screenshot_path=screenshot_path):
                 scene_hint = "Current Scene: CAFE INTERIOR."
         except Exception:
             pass
@@ -1345,9 +1497,11 @@ class VlmPolicyAgent:
                 prev_reason = str(action_before.get("reason") or "").lower()
                 prev_algo = str(action_before.get("_close_heuristic") or "")
                 if "close notice" in prev_reason or "cerebellum_notice_close" in prev_algo:
-                    action_hint = "Recent Action: Just closed an in-game notice/announcement. The screen should now be the Lobby or Menu."
+                    action_hint = "Recent Action: Just closed an in-game notice/announcement. You are likely on the LOBBY screen. If you see the lobby, proceed with routine tasks."
                 elif "tap to start" in prev_reason:
                     action_hint = "Recent Action: Tapped to start. Expecting transition to Lobby or Notices."
+                elif "escape" in prev_reason or "esc" in prev_reason or "back" in prev_reason:
+                    action_hint = "Recent Action: Pressed Back/ESC. If an 'Exit Game' popup appears, click Cancel. If on Lobby, proceed."
         except Exception:
             pass
 
@@ -1408,7 +1562,14 @@ class VlmPolicyAgent:
         # --- Safety: Prevent Confirm after Back (avoid Exit Game) ---
         try:
             if key == "confirm":
-                prev_act = str((action_before or {}).get("action") or "").lower().strip()
+                # Check the actual executed action from the PREVIOUS step
+                last_act_dict = getattr(self, "_last_action", {}) or {}
+                prev_act = str(last_act_dict.get("action") or "").lower().strip()
+                
+                # Also check the current step's raw/before action if it was a chain (less likely but possible)
+                if not prev_act:
+                    prev_act = str((action_before or {}).get("action") or "").lower().strip()
+
                 if prev_act in ("back", "esc", "escape"):
                     # Switch to cancel to close the likely Exit Game dialog
                     key = "cancel"
@@ -1643,7 +1804,7 @@ class VlmPolicyAgent:
                     roi_nav = (0, int(height * 0.75), width, height)
                     for tmpl in templates:
                         m = c.best_match(screenshot_path=screenshot_path, template_name=tmpl, roi=roi_nav)
-                        if m and m.score >= 0.85: # Slightly stricter threshold for scene detection
+                        if m and m.score >= 0.25: # Adjusted for TM_CCOEFF_NORMED score range
                             matches += 1
                     if matches >= 2:
                         return True
@@ -1685,7 +1846,7 @@ class VlmPolicyAgent:
                 # For now, let's trust OCR + maybe headpat marker implies cafe.
                 try:
                     m = c.best_match(screenshot_path=screenshot_path, template_name="可摸头的标志.png")
-                    if m and m.score >= 0.90:
+                    if m and m.score >= 0.25:
                         return True
                 except Exception:
                     pass
@@ -1833,7 +1994,7 @@ class VlmPolicyAgent:
         # Currently a no-op: keep for backwards-compatibility with older pipelines.
         return action
 
-    def _maybe_force_cafe_nav(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    def _maybe_force_cafe_nav(self, action: Dict[str, Any], *, screenshot_path: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
         try:
@@ -1866,7 +2027,7 @@ class VlmPolicyAgent:
             return action
 
         # Only force nav when we are clearly in lobby view.
-        if not self._is_lobby_view(items, width=iw, height=ih):
+        if not self._is_lobby_view(items, width=iw, height=ih, screenshot_path=screenshot_path):
             try:
                 self._nav_force_miss_step_name = ""
                 self._nav_force_miss_count = 0
@@ -2003,7 +2164,7 @@ class VlmPolicyAgent:
         iw, ih = self._resolve_image_size(items, meta=action.get("_perception"))
         if iw <= 0 or ih <= 0:
             return action
-        if not self._is_cafe_interior(items, width=iw, height=ih):
+        if not self._is_cafe_interior(items, width=iw, height=ih, screenshot_path=screenshot_path):
             return action
 
         try:
@@ -2073,8 +2234,14 @@ class VlmPolicyAgent:
             pass
 
         try:
-            prev_act = str((action_before or {}).get("action") or "").lower().strip()
-            if prev_act in ("back", "esc", "escape"):
+            # Check the actual executed action from the PREVIOUS step
+            last_act_dict = getattr(self, "_last_action", {}) or {}
+            prev_act = str(last_act_dict.get("action") or "").lower().strip()
+            
+            # Also check current step raw intent just in case
+            curr_act = str((action_before or {}).get("action") or "").lower().strip()
+
+            if prev_act in ("back", "esc", "escape") or curr_act in ("back", "esc", "escape"):
                 # if we just pressed Back, we might have triggered an "Exit Game?" dialog.
                 # do NOT autoclick "Confirm" in this case.
                 return action
@@ -2111,10 +2278,11 @@ class VlmPolicyAgent:
                     if isinstance(act2, dict):
                         try:
                             cb = act2.get("_cerebellum", {})
-                            if float(cb.get("score") or 0.0) < 0.99:
+                            _sc = float(cb.get("score") or 0.0)
+                            if math.isnan(_sc) or _sc < 0.32:
                                 continue
                         except Exception:
-                            pass
+                            continue
                         self._last_autoclick_step = int(step_id)
                         act2["raw"] = action.get("raw")
                         act2["_prompt"] = action.get("_prompt")
@@ -2279,12 +2447,31 @@ class VlmPolicyAgent:
             "_routine_advanced": bool(advanced),
         }
 
-    def _maybe_tap_to_start(self, action: Dict[str, Any], *, step_id: int) -> Dict[str, Any]:
+    def _maybe_tap_to_start(self, action: Dict[str, Any], *, step_id: int, screenshot_path: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
 
         try:
             if bool(action.get("_startup_tap")):
+                return action
+        except Exception:
+            pass
+
+        # Once the game has entered Lobby (_startup_finished), tap-to-start must NEVER fire.
+        # The 点击开始.png template can false-positive on Lobby backgrounds.
+        try:
+            if bool(getattr(self, "_startup_finished", False)):
+                return action
+        except Exception:
+            pass
+
+        # Safety: If previous executed action was back/esc, we might be on Exit Game dialog.
+        # The title screen background behind the dialog can trigger false-positive title detection.
+        # Do NOT fire tap-to-start in this case.
+        try:
+            last_act_dict = getattr(self, "_last_action", {}) or {}
+            prev_act = str(last_act_dict.get("action") or "").lower().strip()
+            if prev_act in ("back", "esc", "escape"):
                 return action
         except Exception:
             pass
@@ -2362,29 +2549,58 @@ class VlmPolicyAgent:
         except Exception:
             items = None
 
-        if _looks_like_title_screen(items) and iw > 0 and ih > 0:
+        # Robustness: Check Cerebellum for "点击开始.png"
+        start_tmpl_found = False
+        if screenshot_path and self.cfg.cerebellum_enabled:
+            try:
+                c = getattr(self, "_cerebellum", None)
+                if c:
+                    m = c.best_match(screenshot_path=screenshot_path, template_name="点击开始.png")
+                    if m and m.score >= 0.30:
+                        start_tmpl_found = True
+            except Exception:
+                pass
+
+        is_title = _looks_like_title_screen(items) or start_tmpl_found
+
+        if is_title and iw > 0 and ih > 0:
             x = int(round(float(iw) * 0.50))
             y = int(round(float(ih) * 0.82))
             x = max(0, min(int(iw) - 1, int(x)))
             y = max(0, min(int(ih) - 1, int(y)))
-            return _emit_click(int(x), int(y), why="Startup: title screen detected; clicking bottom-center to start.")
+            return _emit_click(int(x), int(y), why="Startup: title screen detected (OCR or Template); clicking bottom-center to start.")
 
         if not isinstance(items, list) or not items:
+            # If no items (blind VLM) AND not explicitly confirmed title -> Do NOT click.
+            # This prevents racing on black screens.
+            if mentions_tap and not is_title:
+                return action
+
             if mentions_tap and iw > 0 and ih > 0:
-                x = int(round(float(iw) * 0.50))
-                y = int(round(float(ih) * 0.82))
-                x = max(0, min(int(iw) - 1, int(x)))
-                y = max(0, min(int(ih) - 1, int(y)))
-                return _emit_click(int(x), int(y), why="Startup: Tap-to-start mentioned; clicking bottom-center to start.")
+                # Should not be reached if is_title is False, but safe fallback logic
+                if is_title:
+                    x = int(round(float(iw) * 0.50))
+                    y = int(round(float(ih) * 0.82))
+                    x = max(0, min(int(iw) - 1, int(x)))
+                    y = max(0, min(int(ih) - 1, int(y)))
+                    return _emit_click(int(x), int(y), why="Startup: Tap-to-start mentioned & title confirmed; clicking.")
+                return action
+
             last_xy = self._last_tap_to_start_xy
             loading_hint = ("loading" in blob_low) or ("now loading" in blob_low) or ("加载" in blob) or ("載入" in blob)
+            # Only repeat click if we are fairly sure we are still on title (or short gap) AND not loading
             if last_xy is not None and (step_id - int(self._last_tap_to_start_step)) <= 3 and (mentions_tap or loading_hint):
+                # If we clicked recently, maybe we can repeat? But user said "confirmed title page only".
+                # If loading_hint is true, we probably should NOT click.
+                if loading_hint:
+                    return action
+                # If mere retry, allowed?
                 x, y = int(last_xy[0]), int(last_xy[1])
                 self._last_tap_to_start_step = int(step_id)
                 out = {
                     "action": "click",
                     "target": [int(x), int(y)],
-                    "reason": "Startup: repeating Tap-to-Start click (no OCR items this step).",
+                    "reason": "Startup: repeating Tap-to-Start click (retry streak).",
                     "raw": action.get("raw"),
                     "_prompt": action.get("_prompt"),
                     "_perception": action.get("_perception"),
@@ -2430,7 +2646,11 @@ class VlmPolicyAgent:
                 except Exception:
                     pass
 
-        if iw > 0 and ih > 0 and ((saw_tap and saw_start) or saw_candidate):
+        # Strict check: Even if we see "tap" and "start", we prefer confirmation of Title context (version, UID, menu etc)
+        # However, if we literally see "Tap to Start", that is strong enough.
+        strong_trigger = (saw_tap and saw_start) or saw_candidate or saw_exact
+
+        if iw > 0 and ih > 0 and strong_trigger:
             x = int(round(float(iw) * 0.50))
             y = int(round(float(ih) * 0.82))
             x = max(0, min(int(iw) - 1, int(x)))
@@ -2445,11 +2665,13 @@ class VlmPolicyAgent:
             pass
 
         if mentions_tap and iw > 0 and ih > 0:
-            x = int(round(float(iw) * 0.50))
-            y = int(round(float(ih) * 0.82))
-            x = max(0, min(int(iw) - 1, int(x)))
-            y = max(0, min(int(ih) - 1, int(y)))
-            return _emit_click(int(x), int(y), why="Startup: Tap-to-start mentioned; clicking bottom-center to start.")
+            if is_title:
+                x = int(round(float(iw) * 0.50))
+                y = int(round(float(ih) * 0.82))
+                x = max(0, min(int(iw) - 1, int(x)))
+                y = max(0, min(int(ih) - 1, int(y)))
+                return _emit_click(int(x), int(y), why="Startup: Tap-to-start mentioned & title confirmed; clicking.")
+            # Else ignored because strict title check failed
 
         return action
 
@@ -2595,7 +2817,7 @@ class VlmPolicyAgent:
                         return out
 
                     tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
-                    for tmpl in _uniq([tmpl0, "内嵌公告的叉.png", "游戏内很多页面窗口的叉.png"]):
+                    for tmpl in _uniq([tmpl0, "公告叉叉.png", "内嵌公告的叉.png", "游戏内很多页面窗口的叉.png"]):
                         act = c.click_action(
                             screenshot_path=screenshot_path,
                             template_name=tmpl,
@@ -2605,10 +2827,11 @@ class VlmPolicyAgent:
                         if isinstance(act, dict):
                             try:
                                 cb = act.get("_cerebellum", {})
-                                if float(cb.get("score") or 0.0) < 0.975:
+                                _sc = float(cb.get("score") or 0.0)
+                                if math.isnan(_sc) or _sc < 0.40:
                                     continue
                             except Exception:
-                                pass
+                                continue
                             act["raw"] = action.get("raw")
                             act["_prompt"] = action.get("_prompt")
                             act["_perception"] = action.get("_perception")
@@ -2897,7 +3120,7 @@ class VlmPolicyAgent:
             }
         return action
 
-    def _maybe_recover_cafe_wrong_screen(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    def _maybe_recover_cafe_wrong_screen(self, action: Dict[str, Any], *, screenshot_path: Optional[str] = None) -> Dict[str, Any]:
         if not isinstance(action, dict):
             return action
         try:
@@ -2930,9 +3153,9 @@ class VlmPolicyAgent:
         if iw <= 0 or ih <= 0:
             return action
 
-        if self._is_lobby_view(items, width=iw, height=ih):
+        if self._is_lobby_view(items, width=iw, height=ih, screenshot_path=screenshot_path):
             return action
-        if self._is_cafe_interior(items, width=iw, height=ih):
+        if self._is_cafe_interior(items, width=iw, height=ih, screenshot_path=screenshot_path):
             return action
 
         return {
@@ -3188,16 +3411,6 @@ class VlmPolicyAgent:
             items = action.get("_perception", {}).get("items")
         except Exception:
             items = None
-        if not (sw > 0 and sh > 0 and isinstance(items, list) and items):
-            return action
-        if self._is_lobby_view(items, width=sw, height=sh):
-            return action
-        if not self._is_cafe_interior(items, width=sw, height=sh):
-            return action
-
-        try:
-            cd = int(getattr(self.cfg, "cafe_headpat_cooldown_steps", 1) or 1)
-        except Exception:
             cd = 1
         if step_id - int(self._last_headpat_step) <= cd:
             return action
@@ -3285,7 +3498,7 @@ class VlmPolicyAgent:
         iw, ih = self._resolve_image_size(items, meta=action.get("_perception"))
         if iw <= 0 or ih <= 0:
             return action
-        if not self._is_cafe_interior(items, width=iw, height=ih):
+        if not self._is_cafe_interior(items, width=iw, height=ih, screenshot_path=screenshot_path):
             self._cafe_idle_steps = 0
             return action
         if self._has_cafe_claim_ui(items, height=ih) or self._has_cafe_control_ui(items, height=ih):
@@ -3956,6 +4169,23 @@ class VlmPolicyAgent:
                 except Exception:
                     pass
 
+                try:
+                    _delegate_type = ""
+                    if isinstance(action.get("_delegate"), dict):
+                        _delegate_type = str(action["_delegate"].get("type") or "")
+                    _cb_tmpl = ""
+                    if isinstance(action.get("_cerebellum"), dict):
+                        _cb_tmpl = str(action["_cerebellum"].get("template") or "")
+                    ts2 = datetime.now().isoformat(timespec="seconds")
+                    self._log_out(
+                        f"[{ts2}] exec_click step={int(step_id)} client=[{int(x)},{int(y)}] "
+                        f"shot=[{w},{h}] client_sz=[{cw},{ch}] scale=[{sx:.3f},{sy:.3f}] "
+                        f"delegate={_delegate_type} template={_cb_tmpl} "
+                        f"target_screen={action.get('target_screen', '?')}"
+                    )
+                except Exception:
+                    pass
+
                 if str(action.get("_close_heuristic") or "") == "notice_x_fallback":
                     try:
                         ts2 = datetime.now().isoformat(timespec="seconds")
@@ -4302,7 +4532,7 @@ class VlmPolicyAgent:
 
         try:
             boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
-            if boot_preinteractive and int(step_id) <= 60:
+            if boot_preinteractive and int(step_id) <= 10:
                 return False
         except Exception:
             pass
@@ -4518,7 +4748,7 @@ class VlmPolicyAgent:
 
                 try:
                     if act is None and not bool(getattr(self, "_startup_finished", False)):
-                        if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                        if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 10:
                             act = {
                                 "action": "wait",
                                 "duration_ms": 900,
@@ -4633,10 +4863,11 @@ class VlmPolicyAgent:
                                             if isinstance(act2, dict):
                                                 try:
                                                     cb = act2.get("_cerebellum", {})
-                                                    if float(cb.get("score") or 0.0) < 0.90:
+                                                    _sc = float(cb.get("score") or 0.0)
+                                                    if math.isnan(_sc) or _sc < 0.30:
                                                         act2 = None
                                                 except Exception:
-                                                    pass
+                                                    act2 = None
                                     except Exception:
                                         act2 = None
 
@@ -4698,7 +4929,7 @@ class VlmPolicyAgent:
 
                     try:
                         if not bool(getattr(self, "_startup_finished", False)):
-                            if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                            if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 10:
                                 act = {
                                     "action": "wait",
                                     "duration_ms": 900,
@@ -4764,10 +4995,11 @@ class VlmPolicyAgent:
                                     if isinstance(act2, dict):
                                         try:
                                             cb = act2.get("_cerebellum", {})
-                                            if float(cb.get("score") or 0.0) < 0.985:
+                                            _sc = float(cb.get("score") or 0.0)
+                                            if math.isnan(_sc) or _sc < 0.45:
                                                 continue
                                         except Exception:
-                                            pass
+                                            continue
                                         try:
                                             ctr = act2.get("_cerebellum", {}).get("center")
                                             if isinstance(ctr, (list, tuple)) and len(ctr) == 2:
@@ -4861,13 +5093,13 @@ class VlmPolicyAgent:
                 act = self._maybe_delegate_notice_close_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
                 act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id, action_before=act_before)
-                act = self._maybe_tap_to_start(act, step_id=step_id)
+                act = self._maybe_tap_to_start(act, step_id=step_id, screenshot_path=shot_path)
                 act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
                 act = self._block_check_lobby_noise(act)
                 act = self._handle_stuck_in_recruit(act)
-                act = self._maybe_recover_cafe_wrong_screen(act)
+                act = self._maybe_recover_cafe_wrong_screen(act, screenshot_path=shot_path)
                 act = self._snap_click_to_perception_label(act)
-                act = self._maybe_force_cafe_nav(act)
+                act = self._maybe_force_cafe_nav(act, screenshot_path=shot_path)
                 act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
                 act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)

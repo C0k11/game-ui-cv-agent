@@ -14,7 +14,9 @@ def _ensure_dpi_awareness() -> None:
     try:
         user32.SetProcessDpiAwarenessContext.argtypes = (ctypes.c_void_p,)
         user32.SetProcessDpiAwarenessContext.restype = ctypes.c_bool
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
         if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            print("[INFO] DPI Awareness: Set to Per-Monitor V2 (-4)", file=sys.stderr)
             return
     except Exception:
         pass
@@ -22,7 +24,9 @@ def _ensure_dpi_awareness() -> None:
         shcore = ctypes.WinDLL("shcore", use_last_error=True)
         shcore.SetProcessDpiAwareness.argtypes = (ctypes.c_int,)
         shcore.SetProcessDpiAwareness.restype = ctypes.c_int
+        # PROCESS_PER_MONITOR_DPI_AWARE = 2
         shcore.SetProcessDpiAwareness(2)
+        print("[INFO] DPI Awareness: Set to Per-Monitor (ShCore)", file=sys.stderr)
         return
     except Exception:
         pass
@@ -30,7 +34,9 @@ def _ensure_dpi_awareness() -> None:
         user32.SetProcessDPIAware.argtypes = ()
         user32.SetProcessDPIAware.restype = ctypes.c_bool
         user32.SetProcessDPIAware()
+        print("[INFO] DPI Awareness: Set to System-Aware", file=sys.stderr)
     except Exception:
+        print("[WARNING] DPI Awareness: Failed to set awareness", file=sys.stderr)
         pass
 
 _ensure_dpi_awareness()
@@ -135,6 +141,7 @@ def _get_virtual_screen_bounds() -> tuple[int, int, int, int]:
         vw = int(user32.GetSystemMetrics(0))
         vh = int(user32.GetSystemMetrics(1))
         vx, vy = 0, 0
+    print(f"[DEBUG] Virtual Screen Bounds: x={vx} y={vy} w={vw} h={vh}", file=sys.stderr)
     return vx, vy, max(1, vw), max(1, vh)
 
 def _clamp_to_screen(sx: int, sy: int, *, warn: bool = True) -> tuple[int, int]:
@@ -165,6 +172,7 @@ def _to_abs(sx: int, sy: int) -> tuple[int, int]:
     y = int(max(vy, min(vy + vh - 1, int(sy))))
     dx = int((x - vx) * 65535 / max(1, vw - 1))
     dy = int((y - vy) * 65535 / max(1, vh - 1))
+    print(f"[DEBUG] _to_abs({sx}, {sy}) -> ({dx}, {dy}) [virtual: {vx},{vy} {vw}x{vh}]", file=sys.stderr)
     return dx, dy
 
 @dataclass
@@ -417,6 +425,15 @@ class WindowsInput:
         r = get_client_rect_on_screen(t.render_hwnd)
         raw_sx, raw_sy = int(r.left + x), int(r.top + y)
         sx, sy = _clamp_to_screen(raw_sx, raw_sy, warn=False)
+        try:
+            print(
+                f"[DEBUG] click_client client=({x},{y}) screen=({sx},{sy}) "
+                f"rect=[{r.left},{r.top},{r.right},{r.bottom}] "
+                f"hwnd={t.hwnd} render={t.render_hwnd}",
+                file=sys.stderr,
+            )
+        except Exception:
+            pass
         if (raw_sx != sx) or (raw_sy != sy):
             _clamp_to_screen(raw_sx, raw_sy, warn=True)
 

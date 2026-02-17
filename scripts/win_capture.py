@@ -1,5 +1,6 @@
 import ctypes
 import os
+import sys
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
@@ -200,6 +201,8 @@ def find_window_by_title_substring(title_substring: str) -> Optional[int]:
         "brave.exe",
         "opera.exe",
         "iexplore.exe",
+        "steam.exe",
+        "steamwebhelper.exe",
     }
 
     bad_classes = {
@@ -252,9 +255,20 @@ def find_window_by_title_substring(title_substring: str) -> Optional[int]:
         return None
 
     if not candidates:
+        print(f"[DEBUG] find_window_by_title_substring('{title_substring}'): No candidates found.", file=sys.stderr)
         return None
 
     candidates.sort()
+    # Debug logging for window selection
+    try:
+        print(f"[DEBUG] find_window_by_title_substring('{title_substring}') candidates:", file=sys.stderr)
+        for _, neg_area, h in candidates:
+            t = _get_window_text(h)
+            p = _process_basename(_get_window_pid(h))
+            print(f"  - hwnd={h} area={-neg_area} exe={p} title='{t}'", file=sys.stderr)
+    except Exception:
+        pass
+
     return int(candidates[0][2])
 
 
