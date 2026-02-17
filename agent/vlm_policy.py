@@ -665,6 +665,11 @@ class VlmPolicyAgent:
             pass
 
         # --- During startup, try closing popups that block the title screen ---
+        try:
+            ts_dbg = datetime.now().isoformat(timespec="seconds")
+            self._log_out(f"[{ts_dbg}] startup_popup_check: step={step_id} sw={sw} sh={sh} roi_notice={roi_notice}")
+        except Exception:
+            pass
         # Preferred: click "今日不再顯示" (don't show today) — closes AND prevents re-appearance
         try:
             if sw > 0 and sh > 0:
@@ -675,6 +680,13 @@ class VlmPolicyAgent:
                     reason_prefix="Cerebellum(startup): dismiss today popup.",
                     roi=_dismiss_roi,
                 )
+                try:
+                    _dbg_sc = "None"
+                    if isinstance(_dismiss_act, dict):
+                        _dbg_sc = str(_dismiss_act.get("_cerebellum", {}).get("score", "?"))
+                    self._log_out(f"[{ts_dbg}] startup_dismiss_today: score={_dbg_sc} roi={_dismiss_roi}")
+                except Exception:
+                    pass
                 if isinstance(_dismiss_act, dict):
                     _cb = _dismiss_act.get("_cerebellum", {})
                     _sc = float(_cb.get("score") or 0.0)
@@ -686,8 +698,11 @@ class VlmPolicyAgent:
                         except Exception:
                             pass
                         return _dismiss_act
-        except Exception:
-            pass
+        except Exception as _e_dismiss:
+            try:
+                self._log_out(f"[{ts_dbg}] startup_dismiss_today EXCEPTION: {type(_e_dismiss).__name__}: {_e_dismiss}")
+            except Exception:
+                pass
         # Fallback: click popup X button
         try:
             if roi_notice is not None and sw > 0 and sh > 0:
@@ -710,13 +725,21 @@ class VlmPolicyAgent:
                         if isinstance(_ca, dict):
                             _cb = _ca.get("_cerebellum", {})
                             _sc = float(_cb.get("score") or 0.0)
+                            try:
+                                self._log_out(f"[{ts_dbg}] startup_x_close: tmpl={_ct} score={_sc:.3f}")
+                            except Exception:
+                                pass
                             if math.isnan(_sc) or _sc < 0.25:
                                 continue
                             if _sc > _best_sc:
                                 _best_ca = _ca
                                 _best_sc = _sc
                                 _best_ct = _ct
-                    except Exception:
+                    except Exception as _e_x:
+                        try:
+                            self._log_out(f"[{ts_dbg}] startup_x_close EXCEPTION: {_ct} {type(_e_x).__name__}: {_e_x}")
+                        except Exception:
+                            pass
                         continue
                 if _best_ca is not None:
                     _best_ca["_startup_tap"] = True
@@ -726,8 +749,11 @@ class VlmPolicyAgent:
                     except Exception:
                         pass
                     return _best_ca
-        except Exception:
-            pass
+        except Exception as _e_xblock:
+            try:
+                self._log_out(f"[{ts_dbg}] startup_x_close_block EXCEPTION: {type(_e_xblock).__name__}: {_e_xblock}")
+            except Exception:
+                pass
 
         try:
             try:
