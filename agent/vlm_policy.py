@@ -614,7 +614,7 @@ class VlmPolicyAgent:
         try:
             allow_nav_check = True
             try:
-                if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 10:
                     allow_nav_check = False
             except Exception:
                 allow_nav_check = True
@@ -770,7 +770,7 @@ class VlmPolicyAgent:
 
         try:
             boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
-            if boot_preinteractive and int(step_id) <= 60:
+            if boot_preinteractive and int(step_id) <= 10:
                 return action
         except Exception:
             pass
@@ -1062,7 +1062,7 @@ class VlmPolicyAgent:
         except Exception:
             tgt = None
 
-        if boot_preinteractive and int(step_id) <= 60:
+        if boot_preinteractive and int(step_id) <= 10:
             if isinstance(tgt, (list, tuple)) and len(tgt) == 2 and w > 0 and h > 0:
                 try:
                     x, y = int(tgt[0]), int(tgt[1])
@@ -4432,7 +4432,7 @@ class VlmPolicyAgent:
 
         try:
             boot_preinteractive = (not bool(getattr(self, "_startup_finished", False))) and int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0
-            if boot_preinteractive and int(step_id) <= 60:
+            if boot_preinteractive and int(step_id) <= 10:
                 return False
         except Exception:
             pass
@@ -4648,7 +4648,7 @@ class VlmPolicyAgent:
 
                 try:
                     if act is None and not bool(getattr(self, "_startup_finished", False)):
-                        if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                        if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 10:
                             act = {
                                 "action": "wait",
                                 "duration_ms": 900,
@@ -4829,7 +4829,7 @@ class VlmPolicyAgent:
 
                     try:
                         if not bool(getattr(self, "_startup_finished", False)):
-                            if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 60:
+                            if int(getattr(self, "_startup_tap_attempts", 0) or 0) <= 0 and int(step_id) <= 10:
                                 act = {
                                     "action": "wait",
                                     "duration_ms": 900,
