@@ -12,7 +12,7 @@ class TemplateMatch:
 
 
 class Cerebellum:
-    def __init__(self, *, assets_dir: Union[str, Path], confidence: float = 0.8) -> None:
+    def __init__(self, *, assets_dir: Union[str, Path], confidence: float = 0.20) -> None:
         self.assets_dir = Path(assets_dir).expanduser().resolve()
         self.confidence = float(confidence)
         self._tmpl_cache: Dict[str, Any] = {}
@@ -61,6 +61,16 @@ class Cerebellum:
                     mask = cv2.threshold(alpha, 1, 255, cv2.THRESH_BINARY)[1]
                 except Exception:
                     mask = None
+                # Discard fully-opaque masks (no transparent pixels).
+                # A useless mask triggers TM_CCORR_NORMED which gives
+                # high scores at WRONG positions for many templates.
+                if mask is not None:
+                    try:
+                        import numpy as _np  # type: ignore
+                        if int(_np.count_nonzero(mask == 0)) == 0:
+                            mask = None
+                    except Exception:
+                        pass
             elif len(getattr(img, "shape", ())) == 2:
                 bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             else:
