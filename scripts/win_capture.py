@@ -201,6 +201,8 @@ def find_window_by_title_substring(title_substring: str) -> Optional[int]:
         "brave.exe",
         "opera.exe",
         "iexplore.exe",
+        "steam.exe",
+        "steamwebhelper.exe",
     }
 
     bad_classes = {
