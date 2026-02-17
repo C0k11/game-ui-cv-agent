@@ -381,7 +381,7 @@ class VlmPolicyAgent:
                                 assets_dir = str(p1)
                 except Exception:
                     pass
-                conf = float(getattr(self.cfg, "cerebellum_confidence", 0.80) or 0.80)
+                conf = float(getattr(self.cfg, "cerebellum_confidence", 0.20) or 0.20)
                 if assets_dir:
                     self._cerebellum = Cerebellum(assets_dir=assets_dir, confidence=float(conf))
         except Exception:
