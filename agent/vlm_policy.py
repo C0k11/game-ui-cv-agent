@@ -3425,13 +3425,21 @@ class VlmPolicyAgent:
     def _maybe_cafe_headpat(self, *, action: Dict[str, Any], screenshot_path: str, step_id: int) -> Dict[str, Any]:
         if not bool(getattr(self.cfg, "cafe_headpat", False)):
             return action
+        # Allow headpat if routine says Cafe OR supervision says Cafe_Inside
+        _in_cafe = False
         try:
-            if not bool(getattr(self._routine, "is_active", False)):
-                return action
-            step = self._routine.get_current_step()
-            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
-                return action
+            if bool(getattr(self._routine, "is_active", False)):
+                step = self._routine.get_current_step()
+                if step is not None and str(getattr(step, "name", "") or "") == "Cafe":
+                    _in_cafe = True
         except Exception:
+            pass
+        try:
+            if str(getattr(self, "_last_supervision_state", "") or "") == "Cafe_Inside":
+                _in_cafe = True
+        except Exception:
+            pass
+        if not _in_cafe:
             return action
 
         if isinstance(action, dict) and action.get("_cafe_action"):
@@ -3457,7 +3465,7 @@ class VlmPolicyAgent:
             items = action.get("_perception", {}).get("items")
         except Exception:
             items = None
-            cd = 1
+        cd = int(getattr(self.cfg, "cafe_headpat_cooldown_steps", 1) or 1)
         if step_id - int(self._last_headpat_step) <= cd:
             return action
 
@@ -4945,6 +4953,10 @@ class VlmPolicyAgent:
                         except Exception:
                             pass
 
+                        try:
+                            self._last_supervision_state = str(sup.get("state") or "")
+                        except Exception:
+                            pass
                         if act is None:
                             act = {
                                 "action": "wait",
@@ -5000,6 +5012,15 @@ class VlmPolicyAgent:
                         c = None
 
                     try:
+                        # Skip fast-close in Cafe interior — no notice popup there; false positive clicks collapse UI
+                        _last_sup_state = ""
+                        try:
+                            _last_sup_state = str(getattr(self, "_last_supervision_state", "") or "")
+                        except Exception:
+                            pass
+                        if _last_sup_state == "Cafe_Inside":
+                            raise RuntimeError("fast_close skipped: Cafe_Inside")
+
                         if (not boot_preinteractive) and c is not None and bool(getattr(self.cfg, "cerebellum_enabled", True)):
                             with Image.open(shot_path) as im:
                                 sw0, sh0 = im.size
@@ -5161,6 +5182,11 @@ class VlmPolicyAgent:
                         sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
                         try:
                             self._last_supervision_any_step = int(step_id)
+                        except Exception:
+                            pass
+                        try:
+                            if isinstance(sup_any, dict) and sup_any.get("state"):
+                                self._last_supervision_state = str(sup_any["state"])
                         except Exception:
                             pass
                 except Exception:
