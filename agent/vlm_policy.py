@@ -276,7 +276,7 @@ class VlmPolicyConfig:
 
     cerebellum_enabled: bool = True
     cerebellum_assets_dir: str = "data/captures"
-    cerebellum_confidence: float = 0.80
+    cerebellum_confidence: float = 0.20
     cerebellum_template_start_anchor: str = "点击开始.png"
     cerebellum_template_notice_close: str = "内嵌公告的叉.png"
     cerebellum_template_lobby_check: str = "学生.png"
