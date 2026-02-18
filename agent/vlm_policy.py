@@ -664,6 +664,30 @@ class VlmPolicyAgent:
         except Exception:
             pass
 
+        # --- During startup, try confirm/skip button first (handles 是否跳過 dialog) ---
+        try:
+            if sw > 0 and sh > 0:
+                _confirm_roi = (int(round(float(sw) * 0.35)), int(round(float(sh) * 0.55)), int(round(float(sw) * 0.82)), int(round(float(sh) * 0.96)))
+                _confirm_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="确认(可以点space）.png",
+                    reason_prefix="Cerebellum(startup): confirm/skip dialog.",
+                    roi=_confirm_roi,
+                )
+                if isinstance(_confirm_act, dict):
+                    _cb = _confirm_act.get("_cerebellum", {})
+                    _sc = float(_cb.get("score") or 0.0)
+                    if not math.isnan(_sc) and _sc >= 0.45:
+                        _confirm_act["_startup_tap"] = True
+                        try:
+                            ts = datetime.now().isoformat(timespec="seconds")
+                            self._log_out(f"[{ts}] startup confirm: score={_sc:.3f} step={step_id}")
+                        except Exception:
+                            pass
+                        return _confirm_act
+        except Exception:
+            pass
+
         # --- During startup, try closing popups that block the title screen ---
         try:
             ts_dbg = datetime.now().isoformat(timespec="seconds")
@@ -690,7 +714,7 @@ class VlmPolicyAgent:
                 if isinstance(_dismiss_act, dict):
                     _cb = _dismiss_act.get("_cerebellum", {})
                     _sc = float(_cb.get("score") or 0.0)
-                    if not math.isnan(_sc) and _sc >= 0.35:
+                    if not math.isnan(_sc) and _sc >= 0.50:
                         _dismiss_act["_startup_tap"] = True
                         try:
                             ts = datetime.now().isoformat(timespec="seconds")
@@ -967,7 +991,12 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
-        # --- Preferred: click "今日不再顯示" first (closes AND prevents re-appearance) ---
+        # --- Unified best-match: try dismiss-today AND X-button templates, pick highest score ---
+        _best_act = None
+        _best_score = 0.0
+        _best_heuristic = ""
+
+        # Candidate 1: "今日不再顯示" checkbox (different ROI — center-left area)
         try:
             if sw > 0 and sh > 0:
                 _dismiss_roi = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
@@ -980,23 +1009,15 @@ class VlmPolicyAgent:
                 if isinstance(_dismiss_act, dict):
                     _cb = _dismiss_act.get("_cerebellum", {})
                     _sc = float(_cb.get("score") or 0.0)
-                    if not math.isnan(_sc) and _sc >= 0.35:
-                        _dismiss_act["raw"] = action.get("raw")
-                        _dismiss_act["_prompt"] = action.get("_prompt")
-                        _dismiss_act["_perception"] = action.get("_perception")
-                        _dismiss_act["_model"] = action.get("_model")
-                        _dismiss_act["_routine"] = action.get("_routine")
-                        _dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
-                        try:
-                            self._last_cerebellum_notice_step = int(step_id)
-                            self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
-                        except Exception:
-                            pass
-                        return _dismiss_act
+                    if not math.isnan(_sc) and _sc >= 0.50:
+                        if _sc > _best_score:
+                            _best_act = _dismiss_act
+                            _best_score = _sc
+                            _best_heuristic = "cerebellum_dismiss_today"
         except Exception:
             pass
 
-        # --- Fallback: try closing X button via template matching (best match wins) ---
+        # Candidate 2+: X-button close templates (top-right ROI)
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
@@ -1006,8 +1027,6 @@ class VlmPolicyAgent:
                 ("游戏内很多页面窗口的叉.png", 0.40),
             ]
             seen_tmpls: set[str] = set()
-            _best_act = None
-            _best_score = 0.0
             for tmpl, min_conf in close_templates:
                 tmpl = str(tmpl or "").strip()
                 if not tmpl or tmpl in seen_tmpls:
@@ -1030,6 +1049,7 @@ class VlmPolicyAgent:
                     if _sc > _best_score:
                         _best_act = act
                         _best_score = _sc
+                        _best_heuristic = "cerebellum_notice_close"
 
             if _best_act is not None:
                 _best_act["raw"] = action.get("raw")
@@ -1037,7 +1057,7 @@ class VlmPolicyAgent:
                 _best_act["_perception"] = action.get("_perception")
                 _best_act["_model"] = action.get("_model")
                 _best_act["_routine"] = action.get("_routine")
-                _best_act["_close_heuristic"] = "cerebellum_notice_close"
+                _best_act["_close_heuristic"] = _best_heuristic or "cerebellum_notice_close"
                 _best_act.setdefault("_delegate", {})
                 _best_act["_delegate"]["from_action"] = str(action.get("action") or "")
                 _best_act["_delegate"]["from_reason"] = str(reason)
@@ -1087,7 +1107,7 @@ class VlmPolicyAgent:
                 )
                 if isinstance(dismiss_act, dict):
                     cb = dismiss_act.get("_cerebellum", {})
-                    if float(cb.get("score") or 0.0) >= 0.35:
+                    if float(cb.get("score") or 0.0) >= 0.50:
                         dismiss_act["raw"] = action.get("raw")
                         dismiss_act["_prompt"] = action.get("_prompt")
                         dismiss_act["_perception"] = action.get("_perception")
