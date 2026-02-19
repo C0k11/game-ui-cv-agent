@@ -209,7 +209,12 @@ class PipelineController:
                 print(f"[Pipeline] Supervision confirms Cafe_Inside, advancing to CAFE_EARNINGS.")
                 self._enter_phase(Phase.CAFE_EARNINGS)
         elif state == "Lobby":
-            if self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_HEADPAT):
+            if self._phase in (Phase.STARTUP, Phase.LOBBY_CLEANUP):
+                # VLM says Lobby — trust it and advance past startup
+                if self._phase == Phase.STARTUP:
+                    print(f"[Pipeline] Supervision says Lobby during STARTUP, advancing to LOBBY_CLEANUP.")
+                    self._enter_phase(Phase.LOBBY_CLEANUP)
+            elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_HEADPAT):
                 # We expected to be in cafe but supervision says lobby — cafe entry failed
                 print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE (retry).")
                 self._cafe_confirmed = False
@@ -414,11 +419,17 @@ class PipelineController:
             return self._click(best.center[0], best.center[1],
                 f"Pipeline(startup): close popup. template={best.template} score={best.score:.3f}")
 
-        # Try tap-to-start
-        m = self._match(screenshot_path, "点击开始.png", min_score=0.50)
+        # Try tap-to-start template
+        m = self._match(screenshot_path, "点击开始.png", min_score=0.40)
         if m is not None:
             return self._click(sw // 2, int(sh * 0.82),
-                f"Pipeline(startup): tap to start. score={m.score:.3f}")
+                f"Pipeline(startup): tap to start (template). score={m.score:.3f}")
+
+        # After several ticks with nothing detected, click center to advance
+        # Handles: title screen (TAP TO START), loading transitions, etc.
+        if self._state.ticks >= 8 and self._state.ticks % 4 == 0:
+            return self._click(sw // 2, int(sh * 0.70),
+                f"Pipeline(startup): blind tap center to advance (tick {self._state.ticks}).")
 
         return self._wait(800, "Pipeline(startup): waiting for game to load.")
 
