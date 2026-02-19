@@ -5241,9 +5241,12 @@ class VlmPolicyAgent:
                     act = self._sanitize_action(act)
                     act = self._maybe_advance_routine(act)
 
-                # Always run periodic supervision — feeds state back to pipeline
+                # Periodic supervision — feeds state back to pipeline
+                # SKIP when pipeline acted: pipeline drives itself via template matching;
+                # VLM supervision blocks 60-73s per call and is the #1 bottleneck.
+                # Pipeline returns None when it needs VLM help, which naturally triggers VLM.
                 try:
-                    if (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
+                    if (not pipeline_acted) and (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
                         sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
                         try:
                             self._last_supervision_any_step = int(step_id)

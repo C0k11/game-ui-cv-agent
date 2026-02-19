@@ -430,14 +430,14 @@ class PipelineController:
                 f"Pipeline(startup): close popup. template={best.template} score={best.score:.3f}")
 
         # Try tap-to-start template
-        m = self._match(screenshot_path, "点击开始.png", min_score=0.40)
+        m = self._match(screenshot_path, "点击开始.png", min_score=0.30)
         if m is not None:
             return self._click(sw // 2, int(sh * 0.82),
                 f"Pipeline(startup): tap to start (template). score={m.score:.3f}")
 
         # After several ticks with nothing detected, click center to advance
         # Handles: title screen (TAP TO START), loading transitions, etc.
-        if self._state.ticks >= 4 and self._state.ticks % 2 == 0:
+        if self._state.ticks >= 2 and self._state.ticks % 2 == 0:
             return self._click(sw // 2, int(sh * 0.70),
                 f"Pipeline(startup): blind tap center to advance (tick {self._state.ticks}).")
 
