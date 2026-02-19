@@ -23,6 +23,12 @@ try:
 except Exception:
     Cerebellum = None  # type: ignore
 
+try:
+    from agent.opencv_pipeline import PipelineController, PipelineConfig
+except Exception:
+    PipelineController = None  # type: ignore
+    PipelineConfig = None  # type: ignore
+
 
 def _center(bbox: Sequence[int]) -> Tuple[int, int]:
     x1, y1, x2, y2 = bbox
@@ -345,6 +351,8 @@ class VlmPolicyAgent:
 
         self._cerebellum_failed_once: bool = False
 
+        self._pipeline = None  # OpenCV pipeline (primary driver when active)
+
         self._cerebellum = None
         try:
             if bool(getattr(self.cfg, "cerebellum_enabled", True)) and Cerebellum is not None:
@@ -430,6 +438,26 @@ class VlmPolicyAgent:
                     self._log_out(f"[{ts2}] cerebellum enabled: assets_dir={ad} confidence={cf}")
         except Exception:
             pass
+
+        # --- Initialize OpenCV pipeline (primary driver for [Routine] goals) ---
+        try:
+            if PipelineController is not None and self._cerebellum is not None:
+                g = str(self.cfg.goal or "")
+                if g.strip().startswith("[Routine]") or "日常" in g or "收菜" in g:
+                    pcfg = PipelineConfig(
+                        assets_dir=str(getattr(self._cerebellum, "assets_dir", "data/captures") or "data/captures"),
+                        confidence=float(getattr(self._cerebellum, "confidence", 0.20) or 0.20),
+                    )
+                    self._pipeline = PipelineController(cerebellum=self._cerebellum, cfg=pcfg)
+                    ts2 = datetime.now().isoformat(timespec="seconds")
+                    self._log_out(f"[{ts2}] opencv_pipeline enabled: goal starts with [Routine]")
+        except Exception as e:
+            self._pipeline = None
+            try:
+                ts2 = datetime.now().isoformat(timespec="seconds")
+                self._log_out(f"[{ts2}] opencv_pipeline init failed: {type(e).__name__}: {e}")
+            except Exception:
+                pass
 
     @property
     def last_action(self) -> Optional[Dict[str, Any]]:
@@ -4784,10 +4812,39 @@ class VlmPolicyAgent:
             err = ""
             act: Optional[Dict[str, Any]] = None
             act_before: Optional[Dict[str, Any]] = None
+            pipeline_acted = False
             try:
                 self._set_stage(step_id=step_id, stage="screenshot")
                 self._device.screenshot_client(shot_path)
                 self._screenshot_fail_count = 0
+
+                # --- OpenCV Pipeline: PRIMARY decision maker ---
+                try:
+                    pipe = getattr(self, "_pipeline", None)
+                    if pipe is not None:
+                        if not pipe.is_active and not pipe._started:
+                            pipe.start()
+                            ts2 = datetime.now().isoformat(timespec="seconds")
+                            self._log_out(f"[{ts2}] step={step_id} opencv_pipeline started")
+                        if pipe.is_active:
+                            self._set_stage(step_id=step_id, stage="pipeline")
+                            pipe_act = pipe.tick(screenshot_path=shot_path)
+                            if isinstance(pipe_act, dict) and str(pipe_act.get("action") or ""):
+                                act = pipe_act
+                                pipeline_acted = True
+                                # Mark startup as finished if pipeline passed startup
+                                try:
+                                    from agent.opencv_pipeline import Phase
+                                    if pipe.phase not in (Phase.STARTUP, Phase.IDLE):
+                                        self._startup_finished = True
+                                except Exception:
+                                    pass
+                except Exception as _pe:
+                    try:
+                        ts2 = datetime.now().isoformat(timespec="seconds")
+                        self._log_out(f"[{ts2}] step={step_id} pipeline.tick error: {type(_pe).__name__}: {_pe}")
+                    except Exception:
+                        pass
 
                 if act is None:
                     cb = None
@@ -4955,6 +5012,10 @@ class VlmPolicyAgent:
 
                         try:
                             self._last_supervision_state = str(sup.get("state") or "")
+                            # Feed supervision state to pipeline
+                            pipe = getattr(self, "_pipeline", None)
+                            if pipe is not None and pipe.is_active:
+                                pipe.notify_supervision(str(sup.get("state") or ""))
                         except Exception:
                             pass
                         if act is None:
@@ -5156,27 +5217,31 @@ class VlmPolicyAgent:
                             pass
 
                 act_before = act
-                act = self._sanitize_action(act)
-                act = self._maybe_delegate_notice_close_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id, action_before=act_before)
-                act = self._maybe_tap_to_start(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._block_check_lobby_noise(act)
-                act = self._handle_stuck_in_recruit(act)
-                act = self._maybe_recover_cafe_wrong_screen(act, screenshot_path=shot_path)
-                act = self._snap_click_to_perception_label(act)
-                act = self._maybe_force_cafe_nav(act, screenshot_path=shot_path)
-                act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id, screenshot_path=shot_path)
-                act = self._sanitize_action(act)
-                act = self._debounce_click(act, step_id=step_id)
-                act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)
-                act = self._sanitize_action(act)
-                act = self._maybe_advance_routine(act)
 
+                # Skip VLM post-processing when pipeline acted — pipeline decisions are deterministic
+                if not pipeline_acted:
+                    act = self._sanitize_action(act)
+                    act = self._maybe_delegate_notice_close_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
+                    act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id, action_before=act_before)
+                    act = self._maybe_tap_to_start(act, step_id=step_id, screenshot_path=shot_path)
+                    act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
+                    act = self._block_check_lobby_noise(act)
+                    act = self._handle_stuck_in_recruit(act)
+                    act = self._maybe_recover_cafe_wrong_screen(act, screenshot_path=shot_path)
+                    act = self._snap_click_to_perception_label(act)
+                    act = self._maybe_force_cafe_nav(act, screenshot_path=shot_path)
+                    act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id, screenshot_path=shot_path)
+                    act = self._sanitize_action(act)
+                    act = self._debounce_click(act, step_id=step_id)
+                    act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)
+                    act = self._sanitize_action(act)
+                    act = self._maybe_advance_routine(act)
+
+                # Always run periodic supervision — feeds state back to pipeline
                 try:
                     if (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
                         sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
@@ -5187,6 +5252,10 @@ class VlmPolicyAgent:
                         try:
                             if isinstance(sup_any, dict) and sup_any.get("state"):
                                 self._last_supervision_state = str(sup_any["state"])
+                                # Feed supervision state to pipeline
+                                pipe = getattr(self, "_pipeline", None)
+                                if pipe is not None and pipe.is_active:
+                                    pipe.notify_supervision(str(sup_any["state"]))
                         except Exception:
                             pass
                 except Exception:
