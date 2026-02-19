@@ -23,6 +23,12 @@ try:
 except Exception:
     Cerebellum = None  # type: ignore
 
+try:
+    from agent.opencv_pipeline import PipelineController, PipelineConfig
+except Exception:
+    PipelineController = None  # type: ignore
+    PipelineConfig = None  # type: ignore
+
 
 def _center(bbox: Sequence[int]) -> Tuple[int, int]:
     x1, y1, x2, y2 = bbox
@@ -276,7 +282,7 @@ class VlmPolicyConfig:
 
     cerebellum_enabled: bool = True
     cerebellum_assets_dir: str = "data/captures"
-    cerebellum_confidence: float = 0.80
+    cerebellum_confidence: float = 0.20
     cerebellum_template_start_anchor: str = "点击开始.png"
     cerebellum_template_notice_close: str = "内嵌公告的叉.png"
     cerebellum_template_lobby_check: str = "学生.png"
@@ -345,6 +351,8 @@ class VlmPolicyAgent:
 
         self._cerebellum_failed_once: bool = False
 
+        self._pipeline = None  # OpenCV pipeline (primary driver when active)
+
         self._cerebellum = None
         try:
             if bool(getattr(self.cfg, "cerebellum_enabled", True)) and Cerebellum is not None:
@@ -381,7 +389,7 @@ class VlmPolicyAgent:
                                 assets_dir = str(p1)
                 except Exception:
                     pass
-                conf = float(getattr(self.cfg, "cerebellum_confidence", 0.80) or 0.80)
+                conf = float(getattr(self.cfg, "cerebellum_confidence", 0.20) or 0.20)
                 if assets_dir:
                     self._cerebellum = Cerebellum(assets_dir=assets_dir, confidence=float(conf))
         except Exception:
@@ -430,6 +438,26 @@ class VlmPolicyAgent:
                     self._log_out(f"[{ts2}] cerebellum enabled: assets_dir={ad} confidence={cf}")
         except Exception:
             pass
+
+        # --- Initialize OpenCV pipeline (primary driver for [Routine] goals) ---
+        try:
+            if PipelineController is not None and self._cerebellum is not None:
+                g = str(self.cfg.goal or "")
+                if g.strip().startswith("[Routine]") or "日常" in g or "收菜" in g:
+                    pcfg = PipelineConfig(
+                        assets_dir=str(getattr(self._cerebellum, "assets_dir", "data/captures") or "data/captures"),
+                        confidence=float(getattr(self._cerebellum, "confidence", 0.20) or 0.20),
+                    )
+                    self._pipeline = PipelineController(cerebellum=self._cerebellum, cfg=pcfg)
+                    ts2 = datetime.now().isoformat(timespec="seconds")
+                    self._log_out(f"[{ts2}] opencv_pipeline enabled: goal starts with [Routine]")
+        except Exception as e:
+            self._pipeline = None
+            try:
+                ts2 = datetime.now().isoformat(timespec="seconds")
+                self._log_out(f"[{ts2}] opencv_pipeline init failed: {type(e).__name__}: {e}")
+            except Exception:
+                pass
 
     @property
     def last_action(self) -> Optional[Dict[str, Any]]:
@@ -664,7 +692,36 @@ class VlmPolicyAgent:
         except Exception:
             pass
 
+        # --- During startup, try confirm/skip button first (handles 是否跳過 dialog) ---
+        try:
+            if sw > 0 and sh > 0:
+                _confirm_roi = (int(round(float(sw) * 0.35)), int(round(float(sh) * 0.55)), int(round(float(sw) * 0.82)), int(round(float(sh) * 0.96)))
+                _confirm_act = c.click_action(
+                    screenshot_path=screenshot_path,
+                    template_name="确认(可以点space）.png",
+                    reason_prefix="Cerebellum(startup): confirm/skip dialog.",
+                    roi=_confirm_roi,
+                )
+                if isinstance(_confirm_act, dict):
+                    _cb = _confirm_act.get("_cerebellum", {})
+                    _sc = float(_cb.get("score") or 0.0)
+                    if not math.isnan(_sc) and _sc >= 0.45:
+                        _confirm_act["_startup_tap"] = True
+                        try:
+                            ts = datetime.now().isoformat(timespec="seconds")
+                            self._log_out(f"[{ts}] startup confirm: score={_sc:.3f} step={step_id}")
+                        except Exception:
+                            pass
+                        return _confirm_act
+        except Exception:
+            pass
+
         # --- During startup, try closing popups that block the title screen ---
+        try:
+            ts_dbg = datetime.now().isoformat(timespec="seconds")
+            self._log_out(f"[{ts_dbg}] startup_popup_check: step={step_id} sw={sw} sh={sh} roi_notice={roi_notice}")
+        except Exception:
+            pass
         # Preferred: click "今日不再顯示" (don't show today) — closes AND prevents re-appearance
         try:
             if sw > 0 and sh > 0:
@@ -675,10 +732,17 @@ class VlmPolicyAgent:
                     reason_prefix="Cerebellum(startup): dismiss today popup.",
                     roi=_dismiss_roi,
                 )
+                try:
+                    _dbg_sc = "None"
+                    if isinstance(_dismiss_act, dict):
+                        _dbg_sc = str(_dismiss_act.get("_cerebellum", {}).get("score", "?"))
+                    self._log_out(f"[{ts_dbg}] startup_dismiss_today: score={_dbg_sc} roi={_dismiss_roi}")
+                except Exception:
+                    pass
                 if isinstance(_dismiss_act, dict):
                     _cb = _dismiss_act.get("_cerebellum", {})
                     _sc = float(_cb.get("score") or 0.0)
-                    if not math.isnan(_sc) and _sc >= 0.35:
+                    if not math.isnan(_sc) and _sc >= 0.50:
                         _dismiss_act["_startup_tap"] = True
                         try:
                             ts = datetime.now().isoformat(timespec="seconds")
@@ -686,8 +750,11 @@ class VlmPolicyAgent:
                         except Exception:
                             pass
                         return _dismiss_act
-        except Exception:
-            pass
+        except Exception as _e_dismiss:
+            try:
+                self._log_out(f"[{ts_dbg}] startup_dismiss_today EXCEPTION: {type(_e_dismiss).__name__}: {_e_dismiss}")
+            except Exception:
+                pass
         # Fallback: click popup X button
         try:
             if roi_notice is not None and sw > 0 and sh > 0:
@@ -710,13 +777,21 @@ class VlmPolicyAgent:
                         if isinstance(_ca, dict):
                             _cb = _ca.get("_cerebellum", {})
                             _sc = float(_cb.get("score") or 0.0)
+                            try:
+                                self._log_out(f"[{ts_dbg}] startup_x_close: tmpl={_ct} score={_sc:.3f}")
+                            except Exception:
+                                pass
                             if math.isnan(_sc) or _sc < 0.25:
                                 continue
                             if _sc > _best_sc:
                                 _best_ca = _ca
                                 _best_sc = _sc
                                 _best_ct = _ct
-                    except Exception:
+                    except Exception as _e_x:
+                        try:
+                            self._log_out(f"[{ts_dbg}] startup_x_close EXCEPTION: {_ct} {type(_e_x).__name__}: {_e_x}")
+                        except Exception:
+                            pass
                         continue
                 if _best_ca is not None:
                     _best_ca["_startup_tap"] = True
@@ -726,8 +801,11 @@ class VlmPolicyAgent:
                     except Exception:
                         pass
                     return _best_ca
-        except Exception:
-            pass
+        except Exception as _e_xblock:
+            try:
+                self._log_out(f"[{ts_dbg}] startup_x_close_block EXCEPTION: {type(_e_xblock).__name__}: {_e_xblock}")
+            except Exception:
+                pass
 
         try:
             try:
@@ -941,7 +1019,12 @@ class VlmPolicyAgent:
                 seen.add(nn)
             return out
 
-        # --- Preferred: click "今日不再顯示" first (closes AND prevents re-appearance) ---
+        # --- Unified best-match: try dismiss-today AND X-button templates, pick highest score ---
+        _best_act = None
+        _best_score = 0.0
+        _best_heuristic = ""
+
+        # Candidate 1: "今日不再顯示" checkbox (different ROI — center-left area)
         try:
             if sw > 0 and sh > 0:
                 _dismiss_roi = (0, int(round(float(sh) * 0.55)), int(round(float(sw) * 0.50)), int(round(float(sh) * 0.85)))
@@ -954,23 +1037,15 @@ class VlmPolicyAgent:
                 if isinstance(_dismiss_act, dict):
                     _cb = _dismiss_act.get("_cerebellum", {})
                     _sc = float(_cb.get("score") or 0.0)
-                    if not math.isnan(_sc) and _sc >= 0.35:
-                        _dismiss_act["raw"] = action.get("raw")
-                        _dismiss_act["_prompt"] = action.get("_prompt")
-                        _dismiss_act["_perception"] = action.get("_perception")
-                        _dismiss_act["_model"] = action.get("_model")
-                        _dismiss_act["_routine"] = action.get("_routine")
-                        _dismiss_act["_close_heuristic"] = "cerebellum_dismiss_today"
-                        try:
-                            self._last_cerebellum_notice_step = int(step_id)
-                            self._notice_close_total_attempts = int(getattr(self, "_notice_close_total_attempts", 0) or 0) + 1
-                        except Exception:
-                            pass
-                        return _dismiss_act
+                    if not math.isnan(_sc) and _sc >= 0.50:
+                        if _sc > _best_score:
+                            _best_act = _dismiss_act
+                            _best_score = _sc
+                            _best_heuristic = "cerebellum_dismiss_today"
         except Exception:
             pass
 
-        # --- Fallback: try closing X button via template matching (best match wins) ---
+        # Candidate 2+: X-button close templates (top-right ROI)
         try:
             tmpl0 = str(getattr(self.cfg, "cerebellum_template_notice_close", "notice_close.png") or "")
             close_templates = [
@@ -980,8 +1055,6 @@ class VlmPolicyAgent:
                 ("游戏内很多页面窗口的叉.png", 0.40),
             ]
             seen_tmpls: set[str] = set()
-            _best_act = None
-            _best_score = 0.0
             for tmpl, min_conf in close_templates:
                 tmpl = str(tmpl or "").strip()
                 if not tmpl or tmpl in seen_tmpls:
@@ -1004,6 +1077,7 @@ class VlmPolicyAgent:
                     if _sc > _best_score:
                         _best_act = act
                         _best_score = _sc
+                        _best_heuristic = "cerebellum_notice_close"
 
             if _best_act is not None:
                 _best_act["raw"] = action.get("raw")
@@ -1011,7 +1085,7 @@ class VlmPolicyAgent:
                 _best_act["_perception"] = action.get("_perception")
                 _best_act["_model"] = action.get("_model")
                 _best_act["_routine"] = action.get("_routine")
-                _best_act["_close_heuristic"] = "cerebellum_notice_close"
+                _best_act["_close_heuristic"] = _best_heuristic or "cerebellum_notice_close"
                 _best_act.setdefault("_delegate", {})
                 _best_act["_delegate"]["from_action"] = str(action.get("action") or "")
                 _best_act["_delegate"]["from_reason"] = str(reason)
@@ -1061,7 +1135,7 @@ class VlmPolicyAgent:
                 )
                 if isinstance(dismiss_act, dict):
                     cb = dismiss_act.get("_cerebellum", {})
-                    if float(cb.get("score") or 0.0) >= 0.35:
+                    if float(cb.get("score") or 0.0) >= 0.50:
                         dismiss_act["raw"] = action.get("raw")
                         dismiss_act["_prompt"] = action.get("_prompt")
                         dismiss_act["_perception"] = action.get("_perception")
@@ -3379,13 +3453,21 @@ class VlmPolicyAgent:
     def _maybe_cafe_headpat(self, *, action: Dict[str, Any], screenshot_path: str, step_id: int) -> Dict[str, Any]:
         if not bool(getattr(self.cfg, "cafe_headpat", False)):
             return action
+        # Allow headpat if routine says Cafe OR supervision says Cafe_Inside
+        _in_cafe = False
         try:
-            if not bool(getattr(self._routine, "is_active", False)):
-                return action
-            step = self._routine.get_current_step()
-            if step is None or str(getattr(step, "name", "") or "") != "Cafe":
-                return action
+            if bool(getattr(self._routine, "is_active", False)):
+                step = self._routine.get_current_step()
+                if step is not None and str(getattr(step, "name", "") or "") == "Cafe":
+                    _in_cafe = True
         except Exception:
+            pass
+        try:
+            if str(getattr(self, "_last_supervision_state", "") or "") == "Cafe_Inside":
+                _in_cafe = True
+        except Exception:
+            pass
+        if not _in_cafe:
             return action
 
         if isinstance(action, dict) and action.get("_cafe_action"):
@@ -3411,7 +3493,7 @@ class VlmPolicyAgent:
             items = action.get("_perception", {}).get("items")
         except Exception:
             items = None
-            cd = 1
+        cd = int(getattr(self.cfg, "cafe_headpat_cooldown_steps", 1) or 1)
         if step_id - int(self._last_headpat_step) <= cd:
             return action
 
@@ -4730,10 +4812,39 @@ class VlmPolicyAgent:
             err = ""
             act: Optional[Dict[str, Any]] = None
             act_before: Optional[Dict[str, Any]] = None
+            pipeline_acted = False
             try:
                 self._set_stage(step_id=step_id, stage="screenshot")
                 self._device.screenshot_client(shot_path)
                 self._screenshot_fail_count = 0
+
+                # --- OpenCV Pipeline: PRIMARY decision maker ---
+                try:
+                    pipe = getattr(self, "_pipeline", None)
+                    if pipe is not None:
+                        if not pipe.is_active and not pipe._started:
+                            pipe.start()
+                            ts2 = datetime.now().isoformat(timespec="seconds")
+                            self._log_out(f"[{ts2}] step={step_id} opencv_pipeline started")
+                        if pipe.is_active:
+                            self._set_stage(step_id=step_id, stage="pipeline")
+                            pipe_act = pipe.tick(screenshot_path=shot_path)
+                            if isinstance(pipe_act, dict) and str(pipe_act.get("action") or ""):
+                                act = pipe_act
+                                pipeline_acted = True
+                                # Mark startup as finished if pipeline passed startup
+                                try:
+                                    from agent.opencv_pipeline import Phase
+                                    if pipe.phase not in (Phase.STARTUP, Phase.IDLE):
+                                        self._startup_finished = True
+                                except Exception:
+                                    pass
+                except Exception as _pe:
+                    try:
+                        ts2 = datetime.now().isoformat(timespec="seconds")
+                        self._log_out(f"[{ts2}] step={step_id} pipeline.tick error: {type(_pe).__name__}: {_pe}")
+                    except Exception:
+                        pass
 
                 if act is None:
                     cb = None
@@ -4899,6 +5010,14 @@ class VlmPolicyAgent:
                         except Exception:
                             pass
 
+                        try:
+                            self._last_supervision_state = str(sup.get("state") or "")
+                            # Feed supervision state to pipeline
+                            pipe = getattr(self, "_pipeline", None)
+                            if pipe is not None and pipe.is_active:
+                                pipe.notify_supervision(str(sup.get("state") or ""))
+                        except Exception:
+                            pass
                         if act is None:
                             act = {
                                 "action": "wait",
@@ -4954,6 +5073,15 @@ class VlmPolicyAgent:
                         c = None
 
                     try:
+                        # Skip fast-close in Cafe interior — no notice popup there; false positive clicks collapse UI
+                        _last_sup_state = ""
+                        try:
+                            _last_sup_state = str(getattr(self, "_last_supervision_state", "") or "")
+                        except Exception:
+                            pass
+                        if _last_sup_state == "Cafe_Inside":
+                            raise RuntimeError("fast_close skipped: Cafe_Inside")
+
                         if (not boot_preinteractive) and c is not None and bool(getattr(self.cfg, "cerebellum_enabled", True)):
                             with Image.open(shot_path) as im:
                                 sw0, sh0 = im.size
@@ -5089,32 +5217,45 @@ class VlmPolicyAgent:
                             pass
 
                 act_before = act
-                act = self._sanitize_action(act)
-                act = self._maybe_delegate_notice_close_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id, action_before=act_before)
-                act = self._maybe_tap_to_start(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
-                act = self._block_check_lobby_noise(act)
-                act = self._handle_stuck_in_recruit(act)
-                act = self._maybe_recover_cafe_wrong_screen(act, screenshot_path=shot_path)
-                act = self._snap_click_to_perception_label(act)
-                act = self._maybe_force_cafe_nav(act, screenshot_path=shot_path)
-                act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)
-                act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id, screenshot_path=shot_path)
-                act = self._sanitize_action(act)
-                act = self._debounce_click(act, step_id=step_id)
-                act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)
-                act = self._sanitize_action(act)
-                act = self._maybe_advance_routine(act)
 
+                # Skip VLM post-processing when pipeline acted — pipeline decisions are deterministic
+                if not pipeline_acted:
+                    act = self._sanitize_action(act)
+                    act = self._maybe_delegate_notice_close_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_close_popup_heuristic(act, step_id=step_id, screenshot_path=shot_path)
+                    act = self._maybe_delegate_intent_to_cerebellum(act, screenshot_path=shot_path, step_id=step_id, action_before=act_before)
+                    act = self._maybe_tap_to_start(act, step_id=step_id, screenshot_path=shot_path)
+                    act = self._block_startup_vlm_clicks(act, step_id=step_id, screenshot_path=shot_path)
+                    act = self._block_check_lobby_noise(act)
+                    act = self._handle_stuck_in_recruit(act)
+                    act = self._maybe_recover_cafe_wrong_screen(act, screenshot_path=shot_path)
+                    act = self._snap_click_to_perception_label(act)
+                    act = self._maybe_force_cafe_nav(act, screenshot_path=shot_path)
+                    act = self._maybe_cafe_actions(act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_cafe_headpat(action=act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_cafe_idle_exit(action=act, screenshot_path=shot_path, step_id=step_id)
+                    act = self._maybe_autoclick_safe_button(action=act, action_before=act_before, step_id=step_id, screenshot_path=shot_path)
+                    act = self._sanitize_action(act)
+                    act = self._debounce_click(act, step_id=step_id)
+                    act = self._maybe_exploration_click(action=act, action_before=act_before, screenshot_path=shot_path, step_id=step_id)
+                    act = self._sanitize_action(act)
+                    act = self._maybe_advance_routine(act)
+
+                # Always run periodic supervision — feeds state back to pipeline
                 try:
                     if (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
                         sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
                         try:
                             self._last_supervision_any_step = int(step_id)
+                        except Exception:
+                            pass
+                        try:
+                            if isinstance(sup_any, dict) and sup_any.get("state"):
+                                self._last_supervision_state = str(sup_any["state"])
+                                # Feed supervision state to pipeline
+                                pipe = getattr(self, "_pipeline", None)
+                                if pipe is not None and pipe.is_active:
+                                    pipe.notify_supervision(str(sup_any["state"]))
                         except Exception:
                             pass
                 except Exception:
