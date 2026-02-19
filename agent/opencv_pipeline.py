@@ -148,6 +148,7 @@ class PipelineController:
         self._last_action_ts: float = 0.0
         self._started: bool = False
         self._cafe_confirmed: bool = False  # Set by supervision or headpat template
+        self._last_sup_state: str = ""  # Last supervision state from VLM
 
     # -- Public API --
 
@@ -224,6 +225,8 @@ class PipelineController:
                 print(f"[Pipeline] Supervision confirms Lobby during CAFE_EXIT, advancing.")
                 self._cafe_confirmed = False
                 self._advance_phase()
+        # Track last supervision state for phase handlers to use
+        self._last_sup_state = state
 
     # -- Phase management --
 
@@ -294,13 +297,11 @@ class PipelineController:
         Requirements to avoid false positives:
         - Only check bottom 20% of screen (nav bar area)
         - Need 3+ templates matched at high confidence (0.50+)
-        - Also verify NO sub-screen indicators (back arrow, home button)
+        - Do NOT call _is_subscreen() here — causes circular dependency
+          and false negatives when subscreen detector has false positives
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
-            return False
-        # Check for sub-screen indicators first — if present, NOT lobby
-        if self._is_subscreen(screenshot_path):
             return False
         roi_nav = (0, int(sh * 0.80), sw, sh)
         hits = 0
@@ -314,18 +315,23 @@ class PipelineController:
         """Detect if we're on a sub-screen (活動任務, 劇情, etc.)
         Sub-screens have a Home icon (🏠) AND/OR gear (⚙) at top-right.
         The lobby and cafe do NOT have these top-right indicators.
-        NOTE: Do NOT check back arrow alone — cafe also has back arrow."""
+        NOTE: Do NOT check back arrow alone — cafe also has back arrow.
+        
+        IMPORTANT: High threshold (0.70+) to avoid false positives!
+        The lobby has small icons (⊞ grid, ↗ expand) at top-right that can
+        match Home/gear templates at low scores (0.50)."""
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return False
         # Check for Home button at top-right (unique to sub-screens)
+        # Use 0.70+ threshold — lobby ⊞ grid icon matched at 0.50!
         home_roi = (int(sw * 0.90), 0, sw, int(sh * 0.10))
-        m = self._match(screenshot_path, "Home按钮.png", roi=home_roi, min_score=0.50)
+        m = self._match(screenshot_path, "Home按钮.png", roi=home_roi, min_score=0.70)
         if m is not None:
             return True
         # Check for settings gear at top-right (unique to sub-screens)
         gear_roi = (int(sw * 0.85), 0, sw, int(sh * 0.10))
-        m = self._match(screenshot_path, "设置齿轮.png", roi=gear_roi, min_score=0.50)
+        m = self._match(screenshot_path, "设置齿轮.png", roi=gear_roi, min_score=0.70)
         if m is not None:
             return True
         return False
@@ -335,15 +341,15 @@ class PipelineController:
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return None
-        # Try Home button first (most reliable)
+        # Try Home button first (most reliable) — need 0.60+ to avoid lobby ⊞ false positive
         home_roi = (int(sw * 0.90), 0, sw, int(sh * 0.10))
-        m = self._match(screenshot_path, "Home按钮.png", roi=home_roi, min_score=0.40)
+        m = self._match(screenshot_path, "Home按钮.png", roi=home_roi, min_score=0.60)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"{reason_prefix}: click Home. score={m.score:.3f}")
         # Try back arrow
         back_roi = (0, 0, int(sw * 0.10), int(sh * 0.10))
-        m = self._match(screenshot_path, "返回按钮.png", roi=back_roi, min_score=0.40)
+        m = self._match(screenshot_path, "返回按钮.png", roi=back_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"{reason_prefix}: click back arrow. score={m.score:.3f}")
@@ -439,15 +445,18 @@ class PipelineController:
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(lobby): no screenshot.")
 
-        # SAFETY: If we're on a sub-screen, go back to lobby first
-        if self._is_subscreen(screenshot_path):
-            print(f"[Pipeline] lobby_cleanup: on sub-screen, going back.")
-            act = self._try_go_back(screenshot_path, "Pipeline(lobby_cleanup)")
-            if act is not None:
-                return act
+        # PRIORITY 1: Check lobby FIRST — if nav bar visible, advance
+        lobby_detected = self._is_lobby(screenshot_path)
 
-        # Check if there's a REAL popup to close — require VERY high score (0.75+)
-        # The popup X button should be clearly visible, not a faint match on lobby UI
+        # PRIORITY 2: Close any popup (選單 popup, announcement, etc.)
+        # Check for 選單 popup X button (center-right area where 選單 X appears)
+        menu_close_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.75), int(sh * 0.20))
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=menu_close_roi, min_score=0.65)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(lobby): close menu/popup. template={m.template} score={m.score:.3f}")
+
+        # Check for announcement X button (top-right)
         close_roi = (int(sw * 0.55), 0, sw, int(sh * 0.20))
         best = None
         best_score = 0.0
@@ -460,10 +469,17 @@ class PipelineController:
             return self._click(best.center[0], best.center[1],
                 f"Pipeline(lobby): close popup. template={best.template} score={best.score:.3f}")
 
-        # If lobby nav bar is visible, move to cafe
-        if self._is_lobby(screenshot_path):
+        # PRIORITY 3: If lobby nav bar visible and no popups, advance to cafe
+        if lobby_detected:
             self._advance_phase()  # → CAFE
             return self._wait(200, "Pipeline(lobby): clean, advancing to cafe.")
+
+        # PRIORITY 4: If NOT lobby AND on a sub-screen, go back
+        if self._is_subscreen(screenshot_path):
+            print(f"[Pipeline] lobby_cleanup: on sub-screen, going back.")
+            act = self._try_go_back(screenshot_path, "Pipeline(lobby_cleanup)")
+            if act is not None:
+                return act
 
         # Not in lobby — maybe still loading or on wrong screen
         return self._wait(500, "Pipeline(lobby): waiting for lobby.")
