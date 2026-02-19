@@ -210,11 +210,15 @@ class PipelineController:
                 print(f"[Pipeline] Supervision confirms Cafe_Inside, advancing to CAFE_EARNINGS.")
                 self._enter_phase(Phase.CAFE_EARNINGS)
         elif state == "Lobby":
-            if self._phase in (Phase.STARTUP, Phase.LOBBY_CLEANUP):
-                # VLM says Lobby — trust it and advance past startup
-                if self._phase == Phase.STARTUP:
-                    print(f"[Pipeline] Supervision says Lobby during STARTUP, advancing to LOBBY_CLEANUP.")
-                    self._enter_phase(Phase.LOBBY_CLEANUP)
+            if self._phase == Phase.STARTUP:
+                # VLM says Lobby during STARTUP — advance past startup
+                print(f"[Pipeline] Supervision says Lobby during STARTUP, advancing to LOBBY_CLEANUP.")
+                self._enter_phase(Phase.LOBBY_CLEANUP)
+            elif self._phase == Phase.LOBBY_CLEANUP:
+                # VLM says Lobby during LOBBY_CLEANUP — no popups blocking, advance to CAFE
+                if self._state.ticks >= 2:
+                    print(f"[Pipeline] Supervision says Lobby during LOBBY_CLEANUP (tick {self._state.ticks}), advancing to CAFE.")
+                    self._advance_phase()
             elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_HEADPAT):
                 # We expected to be in cafe but supervision says lobby — cafe entry failed
                 print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE (retry).")
@@ -306,7 +310,7 @@ class PipelineController:
         roi_nav = (0, int(sh * 0.80), sw, sh)
         hits = 0
         for tmpl in ["咖啡厅.png", "学生.png", "课程表.png", "社交.png", "制造.png", "招募.png"]:
-            m = self._match(screenshot_path, tmpl, roi=roi_nav, min_score=0.50)
+            m = self._match(screenshot_path, tmpl, roi=roi_nav, min_score=0.35)
             if m is not None:
                 hits += 1
         return hits >= 3
@@ -433,7 +437,7 @@ class PipelineController:
 
         # After several ticks with nothing detected, click center to advance
         # Handles: title screen (TAP TO START), loading transitions, etc.
-        if self._state.ticks >= 8 and self._state.ticks % 4 == 0:
+        if self._state.ticks >= 4 and self._state.ticks % 2 == 0:
             return self._click(sw // 2, int(sh * 0.70),
                 f"Pipeline(startup): blind tap center to advance (tick {self._state.ticks}).")
 
@@ -513,7 +517,7 @@ class PipelineController:
         # In lobby → click cafe button
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "咖啡厅.png", roi=roi_nav, min_score=0.50)
+            m = self._match(screenshot_path, "咖啡厅.png", roi=roi_nav, min_score=0.35)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(cafe): click cafe button. score={m.score:.3f}")
