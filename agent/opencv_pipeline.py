@@ -307,24 +307,20 @@ class PipelineController:
 
     def _is_subscreen(self, screenshot_path: str) -> bool:
         """Detect if we're on a sub-screen (活動任務, 劇情, etc.)
-        Sub-screens have a back arrow (←) at top-left AND a Home icon (🏠) at top-right.
-        The lobby does NOT have these."""
+        Sub-screens have a Home icon (🏠) AND/OR gear (⚙) at top-right.
+        The lobby and cafe do NOT have these top-right indicators.
+        NOTE: Do NOT check back arrow alone — cafe also has back arrow."""
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return False
-        # Check for Home button at top-right (if user has captured it)
+        # Check for Home button at top-right (unique to sub-screens)
         home_roi = (int(sw * 0.90), 0, sw, int(sh * 0.10))
-        m = self._match(screenshot_path, "Home按钮.png", roi=home_roi, min_score=0.50)
+        m = self._match(screenshot_path, "主界面.png", roi=home_roi, min_score=0.50)
         if m is not None:
             return True
-        # Check for back arrow at top-left (if user has captured it)
-        back_roi = (0, 0, int(sw * 0.10), int(sh * 0.10))
-        m = self._match(screenshot_path, "返回按钮.png", roi=back_roi, min_score=0.50)
-        if m is not None:
-            return True
-        # Check for settings gear at top-right (sub-screens have gear + home)
+        # Check for settings gear at top-right (unique to sub-screens)
         gear_roi = (int(sw * 0.85), 0, sw, int(sh * 0.10))
-        m = self._match(screenshot_path, "设置齿轮.png", roi=gear_roi, min_score=0.50)
+        m = self._match(screenshot_path, "齿轮.png", roi=gear_roi, min_score=0.50)
         if m is not None:
             return True
         return False
@@ -336,13 +332,13 @@ class PipelineController:
             return None
         # Try Home button first (most reliable)
         home_roi = (int(sw * 0.90), 0, sw, int(sh * 0.10))
-        m = self._match(screenshot_path, "Home按钮.png", roi=home_roi, min_score=0.40)
+        m = self._match(screenshot_path, "主界面.png", roi=home_roi, min_score=0.40)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"{reason_prefix}: click Home. score={m.score:.3f}")
         # Try back arrow
         back_roi = (0, 0, int(sw * 0.10), int(sh * 0.10))
-        m = self._match(screenshot_path, "返回按钮.png", roi=back_roi, min_score=0.40)
+        m = self._match(screenshot_path, "返回.png", roi=back_roi, min_score=0.40)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"{reason_prefix}: click back arrow. score={m.score:.3f}")
@@ -360,8 +356,16 @@ class PipelineController:
         m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.40)
         if m is not None:
             return True
-        # Check for cafe earnings button (if user has captured it)
-        m = self._match(screenshot_path, "咖啡厅收益按钮.png", min_score=0.40)
+        # Check for cafe earnings button
+        m = self._match(screenshot_path, "咖啡厅收益.png", min_score=0.40)
+        if m is not None:
+            return True
+        # Check for "移动至2号店" button (unique to cafe)
+        m = self._match(screenshot_path, "移动至2号店.png", min_score=0.40)
+        if m is not None:
+            return True
+        # Check for invitation ticket (unique to cafe)
+        m = self._match(screenshot_path, "邀请卷（带黄点）.png", min_score=0.40)
         if m is not None:
             return True
         return False
@@ -516,8 +520,8 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_earnings): confirm earnings. score={m.score:.3f}")
 
-        # Try cafe earnings button template (if user captured it)
-        m = self._match(screenshot_path, "咖啡厅收益按钮.png", min_score=0.40)
+        # Try cafe earnings button template
+        m = self._match(screenshot_path, "咖啡厅收益.png", min_score=0.40)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_earnings): click earnings button. score={m.score:.3f}")
