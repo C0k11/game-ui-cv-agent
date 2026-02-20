@@ -5012,9 +5012,9 @@ class VlmPolicyAgent:
 
                         try:
                             self._last_supervision_state = str(sup.get("state") or "")
-                            # Feed supervision state to pipeline
+                            # Feed supervision state to pipeline (also when DONE for recovery)
                             pipe = getattr(self, "_pipeline", None)
-                            if pipe is not None and pipe.is_active:
+                            if pipe is not None and getattr(pipe, "_started", False):
                                 pipe.notify_supervision(str(sup.get("state") or ""))
                         except Exception:
                             pass
@@ -5241,9 +5241,12 @@ class VlmPolicyAgent:
                     act = self._sanitize_action(act)
                     act = self._maybe_advance_routine(act)
 
-                # Always run periodic supervision — feeds state back to pipeline
+                # Periodic supervision — feeds state back to pipeline
+                # SKIP when pipeline acted: pipeline drives itself via template matching;
+                # VLM supervision blocks 60-73s per call and is the #1 bottleneck.
+                # Pipeline returns None when it needs VLM help, which naturally triggers VLM.
                 try:
-                    if (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
+                    if (not pipeline_acted) and (not vlm_called) and sup_any is None and self._should_run_supervision_any(step_id=int(step_id)):
                         sup_any = self._supervise(screenshot_path=shot_path, expected_state="Unknown", step_id=int(step_id))
                         try:
                             self._last_supervision_any_step = int(step_id)
@@ -5252,9 +5255,9 @@ class VlmPolicyAgent:
                         try:
                             if isinstance(sup_any, dict) and sup_any.get("state"):
                                 self._last_supervision_state = str(sup_any["state"])
-                                # Feed supervision state to pipeline
+                                # Feed supervision state to pipeline (also when DONE for recovery)
                                 pipe = getattr(self, "_pipeline", None)
-                                if pipe is not None and pipe.is_active:
+                                if pipe is not None and getattr(pipe, "_started", False):
                                     pipe.notify_supervision(str(sup_any["state"]))
                         except Exception:
                             pass
