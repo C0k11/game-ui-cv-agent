@@ -299,6 +299,16 @@ def shutdown_server() -> Dict[str, str]:
             _stop_vlm_agent()
         except Exception:
             pass
+        # Explicitly kill VLM subprocess (multiprocessing.Process) which holds ~1GB+ memory.
+        # os._exit() bypasses daemon process cleanup, so we must terminate it manually.
+        try:
+            from vision.local_vlm_runtime import _LOCAL_VLM, _LOCAL_VLM_LOCK
+            with _LOCAL_VLM_LOCK:
+                vlm = _LOCAL_VLM
+            if vlm is not None and hasattr(vlm, "_shutdown_proc"):
+                vlm._shutdown_proc()
+        except Exception:
+            pass
         os._exit(0)
     threading.Thread(target=_do_exit, daemon=True).start()
     return {"status": "shutting_down"}

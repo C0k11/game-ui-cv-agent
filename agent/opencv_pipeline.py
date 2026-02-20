@@ -515,17 +515,15 @@ class PipelineController:
         return self._wait(500, "Pipeline(lobby): waiting for lobby.")
 
     def _handle_cafe_enter(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Click cafe button from lobby, wait for cafe to load."""
+        """Click cafe button from lobby, wait for cafe to load.
+        
+        NOTE: Do NOT use _is_subscreen() here — the cafe IS a subscreen
+        (has Home button + gear at top-right). Using _is_subscreen() would
+        always send us back to lobby, creating an infinite loop.
+        """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(cafe): no screenshot.")
-
-        # SAFETY: If we're on a sub-screen, go back first
-        if self._is_subscreen(screenshot_path):
-            print(f"[Pipeline] cafe_enter: on sub-screen, going back to lobby.")
-            act = self._try_go_back(screenshot_path, "Pipeline(cafe_enter)")
-            if act is not None:
-                return act
 
         # Check if supervision confirmed cafe (more reliable than template)
         if self._cafe_confirmed:
@@ -534,9 +532,22 @@ class PipelineController:
             self._advance_phase()  # → CAFE_EARNINGS
             return self._wait(200, "Pipeline(cafe): supervision confirmed cafe.")
 
+        # Check if we're in the cafe (template matching, threshold 0.55)
+        # Check cafe BEFORE lobby — cafe templates score 1.0 inside cafe,
+        # and we already gate lobby false-positives via _is_lobby() priority below.
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] Cafe interior detected by template.")
+            self._cafe_confirmed = True
+            self._cafe_actually_entered = True
+            # Close any popup inside cafe (e.g. 說明/訪問學生目錄 dialog)
+            m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+            if m is not None:
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(cafe): close cafe popup. template={m.template} score={m.score:.3f}")
+            self._advance_phase()  # → CAFE_EARNINGS
+            return self._wait(200, "Pipeline(cafe): already in cafe.")
+
         # In lobby → close popups if any, then click cafe button
-        # Check lobby BEFORE cafe interior to prevent false positives
-        # (cafe templates can match at 0.43 on lobby, causing premature cafe detection)
         if self._is_lobby(screenshot_path):
             # Close announcement X buttons first (top-right)
             close_roi = (int(sw * 0.55), 0, sw, int(sh * 0.20))
@@ -563,14 +574,6 @@ class PipelineController:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(cafe): click cafe button. score={m.score:.3f}")
             return self._wait(400, "Pipeline(cafe): cafe button not found, waiting.")
-
-        # NOT in lobby — check if we're in cafe (template, raised threshold 0.55)
-        if self._is_cafe_interior(screenshot_path):
-            print("[Pipeline] Cafe interior detected by template.")
-            self._cafe_confirmed = True
-            self._cafe_actually_entered = True
-            self._advance_phase()  # → CAFE_EARNINGS
-            return self._wait(200, "Pipeline(cafe): already in cafe.")
 
         # Loading screen — just wait
         return self._wait(600, "Pipeline(cafe): waiting for cafe to load.")
@@ -641,11 +644,12 @@ class PipelineController:
             self._enter_phase(Phase.CAFE_EXIT)
             return self._wait(200, "Pipeline(headpat): back in lobby unexpectedly.")
 
-        if self._is_subscreen(screenshot_path):
-            print("[Pipeline] headpat: on sub-screen, going back.")
-            act = self._try_go_back(screenshot_path, "Pipeline(headpat)")
-            if act is not None:
-                return act
+        # NOTE: Do NOT use _is_subscreen() — cafe has Home/gear buttons.
+        # Close any unexpected popup via X button instead.
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(headpat): close popup. template={m.template} score={m.score:.3f}")
 
         # Look for confirm button (interaction dialog)
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
