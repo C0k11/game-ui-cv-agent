@@ -105,6 +105,7 @@ class StepState:
     last_click_xy: Optional[Tuple[int, int]] = None
     headpat_done: List[Tuple[int, int]] = field(default_factory=list)
     earnings_claimed: bool = False
+    last_popup_close_tick: int = -10  # tick at which last popup was closed
 
 
 @dataclass
@@ -149,6 +150,8 @@ class PipelineController:
         self._started: bool = False
         self._cafe_confirmed: bool = False  # Set by supervision or headpat template
         self._last_sup_state: str = ""  # Last supervision state from VLM
+        self._cafe_actually_entered: bool = False  # True only if we actually entered cafe
+        self._done_restart_count: int = 0  # prevent infinite DONE→restart loops
 
     # -- Public API --
 
@@ -206,6 +209,7 @@ class PipelineController:
         # Use supervision to validate/correct phase
         if state == "Cafe_Inside":
             self._cafe_confirmed = True
+            self._cafe_actually_entered = True
             if self._phase == Phase.CAFE:
                 print(f"[Pipeline] Supervision confirms Cafe_Inside, advancing to CAFE_EARNINGS.")
                 self._enter_phase(Phase.CAFE_EARNINGS)
@@ -229,6 +233,20 @@ class PipelineController:
                 print(f"[Pipeline] Supervision confirms Lobby during CAFE_EXIT, advancing.")
                 self._cafe_confirmed = False
                 self._advance_phase()
+            elif self._phase == Phase.DONE:
+                # Pipeline reached DONE but cafe was never actually entered — restart (max 2 times)
+                if not self._cafe_actually_entered and self._done_restart_count < 2:
+                    self._done_restart_count += 1
+                    print(f"[Pipeline] Supervision says Lobby, phase is DONE but cafe never entered. Restart #{self._done_restart_count} from LOBBY_CLEANUP.")
+                    self._cafe_confirmed = False
+                    self._enter_phase(Phase.LOBBY_CLEANUP)
+        elif state == "Popup":
+            # VLM says there's a popup — if pipeline is DONE, restart to handle it
+            if self._phase == Phase.DONE and not self._cafe_actually_entered and self._done_restart_count < 2:
+                self._done_restart_count += 1
+                print(f"[Pipeline] Supervision says Popup, phase is DONE but cafe never entered. Restart #{self._done_restart_count} from LOBBY_CLEANUP.")
+                self._cafe_confirmed = False
+                self._enter_phase(Phase.LOBBY_CLEANUP)
         # Track last supervision state for phase handlers to use
         self._last_sup_state = state
 
@@ -368,19 +386,20 @@ class PipelineController:
         (活動任務 立即前往 buttons, lobby event banners, etc.)
         """
         # Check for headpat marker (unique to cafe)
-        m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.40)
+        # Threshold 0.55: lobby false-positives score 0.39-0.43, cafe real matches should be 0.65+
+        m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
         if m is not None:
             return True
         # Check for cafe earnings button
-        m = self._match(screenshot_path, "咖啡厅收益按钮.png", min_score=0.40)
+        m = self._match(screenshot_path, "咖啡厅收益按钮.png", min_score=0.55)
         if m is not None:
             return True
         # Check for "移动至2号店" button (unique to cafe)
-        m = self._match(screenshot_path, "移动至2号店.png", min_score=0.40)
+        m = self._match(screenshot_path, "移动至2号店.png", min_score=0.55)
         if m is not None:
             return True
         # Check for invitation ticket (unique to cafe)
-        m = self._match(screenshot_path, "邀请卷（带黄点）.png", min_score=0.40)
+        m = self._match(screenshot_path, "邀请卷（带黄点）.png", min_score=0.55)
         if m is not None:
             return True
         return False
@@ -457,6 +476,7 @@ class PipelineController:
         menu_close_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.75), int(sh * 0.20))
         m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=menu_close_roi, min_score=0.65)
         if m is not None:
+            self._state.last_popup_close_tick = self._state.ticks
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(lobby): close menu/popup. template={m.template} score={m.score:.3f}")
 
@@ -470,13 +490,19 @@ class PipelineController:
                 best = m
                 best_score = m.score
         if best is not None:
+            self._state.last_popup_close_tick = self._state.ticks
             return self._click(best.center[0], best.center[1],
                 f"Pipeline(lobby): close popup. template={best.template} score={best.score:.3f}")
 
         # PRIORITY 3: If lobby nav bar visible and no popups, advance to cafe
+        # Require at least 2 clean ticks after last popup close to catch follow-up popups
         if lobby_detected:
-            self._advance_phase()  # → CAFE
-            return self._wait(200, "Pipeline(lobby): clean, advancing to cafe.")
+            clean_gap = self._state.ticks - self._state.last_popup_close_tick
+            if clean_gap >= 2:
+                self._advance_phase()  # → CAFE
+                return self._wait(200, "Pipeline(lobby): clean, advancing to cafe.")
+            else:
+                return self._wait(400, "Pipeline(lobby): waiting for follow-up popups after close.")
 
         # PRIORITY 4: If NOT lobby AND on a sub-screen, go back
         if self._is_subscreen(screenshot_path):
@@ -504,24 +530,47 @@ class PipelineController:
         # Check if supervision confirmed cafe (more reliable than template)
         if self._cafe_confirmed:
             print("[Pipeline] Cafe confirmed by supervision.")
+            self._cafe_actually_entered = True
             self._advance_phase()  # → CAFE_EARNINGS
             return self._wait(200, "Pipeline(cafe): supervision confirmed cafe.")
 
-        # Check via template (headpat marker only — no yellow marker detection)
-        if self._is_cafe_interior(screenshot_path):
-            print("[Pipeline] Cafe interior detected by template.")
-            self._cafe_confirmed = True
-            self._advance_phase()  # → CAFE_EARNINGS
-            return self._wait(200, "Pipeline(cafe): already in cafe.")
-
-        # In lobby → click cafe button
+        # In lobby → close popups if any, then click cafe button
+        # Check lobby BEFORE cafe interior to prevent false positives
+        # (cafe templates can match at 0.43 on lobby, causing premature cafe detection)
         if self._is_lobby(screenshot_path):
+            # Close announcement X buttons first (top-right)
+            close_roi = (int(sw * 0.55), 0, sw, int(sh * 0.20))
+            best = None
+            best_score = 0.0
+            for tmpl, min_s in [("内嵌公告的叉.png", 0.75), ("游戏内很多页面窗口的叉.png", 0.70)]:
+                m = self._match(screenshot_path, tmpl, roi=close_roi, min_score=min_s)
+                if m is not None and m.score > best_score:
+                    best = m
+                    best_score = m.score
+            if best is not None:
+                return self._click(best.center[0], best.center[1],
+                    f"Pipeline(cafe): close popup first. template={best.template} score={best.score:.3f}")
+            # Close menu X button (center area)
+            menu_close_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.75), int(sh * 0.20))
+            m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=menu_close_roi, min_score=0.65)
+            if m is not None:
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(cafe): close menu first. template={m.template} score={m.score:.3f}")
+            # No popups — click cafe button
             roi_nav = (0, int(sh * 0.80), sw, sh)
             m = self._match(screenshot_path, "咖啡厅.png", roi=roi_nav, min_score=0.35)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(cafe): click cafe button. score={m.score:.3f}")
             return self._wait(400, "Pipeline(cafe): cafe button not found, waiting.")
+
+        # NOT in lobby — check if we're in cafe (template, raised threshold 0.55)
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] Cafe interior detected by template.")
+            self._cafe_confirmed = True
+            self._cafe_actually_entered = True
+            self._advance_phase()  # → CAFE_EARNINGS
+            return self._wait(200, "Pipeline(cafe): already in cafe.")
 
         # Loading screen — just wait
         return self._wait(600, "Pipeline(cafe): waiting for cafe to load.")
