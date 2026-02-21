@@ -89,6 +89,8 @@ class Phase(Enum):
     CAFE_INVITE = auto()
     CAFE_HEADPAT = auto()
     CAFE_SWITCH = auto()       # move to cafe 2F
+    CAFE_2_EARNINGS = auto()   # collect earnings in cafe 2F
+    CAFE_2_INVITE = auto()     # invite student in cafe 2F
     CAFE_2_HEADPAT = auto()    # headpat in cafe 2F
     CAFE_EXIT = auto()
     SCHEDULE_ENTER = auto()
@@ -143,6 +145,8 @@ class PipelineController:
             Phase.CAFE_INVITE,
             Phase.CAFE_HEADPAT,
             Phase.CAFE_SWITCH,
+            Phase.CAFE_2_EARNINGS,
+            Phase.CAFE_2_INVITE,
             Phase.CAFE_2_HEADPAT,
             Phase.CAFE_EXIT,
             Phase.SCHEDULE_ENTER,
@@ -233,7 +237,8 @@ class PipelineController:
                     print(f"[Pipeline] Supervision says Lobby during LOBBY_CLEANUP (tick {self._state.ticks}), advancing to CAFE.")
                     self._advance_phase()
             elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_INVITE, Phase.CAFE_HEADPAT,
-                                Phase.CAFE_SWITCH, Phase.CAFE_2_HEADPAT):
+                                Phase.CAFE_SWITCH, Phase.CAFE_2_EARNINGS,
+                                Phase.CAFE_2_INVITE, Phase.CAFE_2_HEADPAT):
                 # We expected to be in cafe but supervision says lobby — cafe entry failed
                 print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE_EXIT.")
                 self._cafe_confirmed = False
@@ -288,7 +293,9 @@ class PipelineController:
             Phase.CAFE_INVITE: self._handle_cafe_invite,
             Phase.CAFE_HEADPAT: self._handle_cafe_headpat,
             Phase.CAFE_SWITCH: self._handle_cafe_switch,
-            Phase.CAFE_2_HEADPAT: self._handle_cafe_headpat,  # reuse same logic
+            Phase.CAFE_2_EARNINGS: self._handle_cafe_earnings,  # reuse
+            Phase.CAFE_2_INVITE: self._handle_cafe_invite,      # reuse (picks 2nd student)
+            Phase.CAFE_2_HEADPAT: self._handle_cafe_headpat,    # reuse
             Phase.CAFE_EXIT: self._handle_cafe_exit,
             Phase.SCHEDULE_ENTER: self._handle_schedule_enter,
             Phase.SCHEDULE_EXECUTE: self._handle_schedule_execute,
@@ -731,181 +738,192 @@ class PipelineController:
         return self._wait(200, "Pipeline(cafe_earnings): no earnings dialog, advancing.")
 
     def _handle_cafe_invite(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Use invite tickets to invite featured (精選) characters to cafe.
+        """Invite featured (精選) students via MomoTalk.
+
+        Cafe 1 (CAFE_INVITE): invite 1st featured student.
+        Cafe 2 (CAFE_2_INVITE): invite 2nd featured student.
 
         Sub-state machine:
-          "" (init)        → click invite ticket button in cafe
-          "list_open"      → MomoTalk list detected; check sort order
-          "sort_opening"   → clicked sort dropdown, waiting for sort dialog
-          "sort_selecting" → sort dialog open, click 精選 option
-          "sort_confirming"→ 精選 selected, click 確認
-          "picking"        → sorted by 精選, find student with 精選標誌 → click 邀請
-          "confirming"     → click confirm after selecting student
-          "done"           → invite complete, advance to headpat
+          "" (init)           → click invite ticket button in cafe
+          "momotalk_open"     → MomoTalk detected; check sort
+          "sort_opening"      → clicked sort dropdown, waiting for sort dialog
+          "sort_selecting"    → sort dialog open, click 精選 option
+          "sort_confirming"   → 精選 selected, click 確認
+          "check_direction"   → verify sort direction is descending (下排序)
+          "picking"           → find Nth featured student → click 邀請
+          "confirming"        → clicked invite, waiting for confirm dialog
+          "done"              → advance to next phase
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(cafe_invite): no screenshot.")
         ss = self._state.sub_state
+        cafe_num = 2 if self._phase == Phase.CAFE_2_INVITE else 1
 
-        # Global timeout: if stuck too long, advance anyway
+        # Global timeout
         if self._state.ticks >= 30:
             self._advance_phase()
-            return self._wait(300, "Pipeline(cafe_invite): timeout, advancing to headpat.")
+            return self._wait(300, "Pipeline(cafe_invite): timeout, advancing.")
+
+        # ── DONE state ──
+        if ss == "done":
+            self._advance_phase()
+            return self._wait(300, f"Pipeline(cafe_invite): invite done (cafe {cafe_num}), advancing.")
 
         # ── PRIORITY 1: Confirm dialogs ──
-        # Only treat as invite-done when sub_state is 'confirming' (after clicking 邀請).
-        # Other confirm dialogs (bag full, reward notifications) should just be dismissed.
         confirm_roi = (int(sw * 0.25), int(sh * 0.35), int(sw * 0.75), int(sh * 0.95))
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
         if m is not None:
             if ss == "confirming":
-                # Confirming invite → student is being invited → done
                 self._state.sub_state = "done"
             elif ss == "sort_confirming":
-                # Confirming the sort dialog → after this MomoTalk list reloads
-                self._state.sub_state = "picking"
-            # else: just dismiss (bag full, reward notifications, etc.) — keep current sub_state
+                self._state.sub_state = "check_direction"
+            # else: just dismiss (bag full, etc.) — keep current sub_state
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_invite): confirm. sub={ss} score={m.score:.3f}")
 
-        # ── Close generic popups (reward/通知 dialogs, NOT MomoTalk X) ──
-        # Only close popups when we're NOT in the MomoTalk list
-        if ss not in ("list_open", "sort_opening", "sort_selecting", "sort_confirming", "picking"):
+        # ── Close generic popups (NOT when in MomoTalk) ──
+        momotalk_states = ("momotalk_open", "sort_opening", "sort_selecting",
+                           "sort_confirming", "check_direction", "picking")
+        if ss not in momotalk_states:
             m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(cafe_invite): close popup. score={m.score:.3f}")
 
-        # ── SORT DIALOG: detect 排列 dialog by checking for sort options ──
-        # If sort dialog is open, we see 精選/羈絆等級/學園/名字 buttons
+        # ── PRIORITY 2: Sort dialog (排列) ──
         sort_dialog_roi = (int(sw * 0.20), int(sh * 0.10), int(sw * 0.80), int(sh * 0.80))
-        # Check if 精選 is already selected (pink button) → just confirm
-        m_featured_selected = self._match(screenshot_path,
+        # 精選 already selected (pink) → click 確認
+        m_feat_sel = self._match(screenshot_path,
             "咖啡厅momotalk排序选项_精选.png", roi=sort_dialog_roi, min_score=0.55)
-        if m_featured_selected is not None:
-            # Sort dialog is open with 精選 already selected → click 確認
-            # The sort dialog template includes the full dialog with 確認 at bottom.
-            # The game's standard 确认(可以点space) template doesn't match
-            # the sort dialog's plain 確認 button, so use positional click
-            # at center-bottom of the matched dialog bbox.
-            bx1, by1, bx2, by2 = m_featured_selected.bbox
+        if m_feat_sel is not None:
+            bx1, by1, bx2, by2 = m_feat_sel.bbox
             confirm_x = (bx1 + bx2) // 2
             confirm_y = by1 + int((by2 - by1) * 0.88)
-            self._state.sub_state = "picking"
+            self._state.sub_state = "sort_confirming"
             return self._click(confirm_x, confirm_y,
-                f"Pipeline(cafe_invite): sort confirm (精選 selected, positional). score={m_featured_selected.score:.3f}")
+                f"Pipeline(cafe_invite): sort confirm (精選 selected). score={m_feat_sel.score:.3f}")
 
-        # Check if sort dialog is open but 精選 NOT selected → click 精選
-        # Sort dialog layout (2x2 grid):
-        #   名字 (0.25, 0.30)  |  學園 (0.75, 0.30)
-        #   羈絆等級 (0.25, 0.55) | 精選 (0.75, 0.55)
-        #   確認 (0.50, 0.88)
+        # Sort dialog open but 精選 NOT selected → click 精選 (bottom-right of 2x2 grid)
         for tmpl in ("咖啡厅momotalk排序选项_羁绊等级.png",
                      "咖啡厅momotalk排序选项_学院.png",
                      "咖啡厅momotalk排序选项_名字.png"):
             m_other = self._match(screenshot_path, tmpl, roi=sort_dialog_roi, min_score=0.55)
             if m_other is not None:
-                # Sort dialog open with different sort → click 精選 at bottom-right
                 self._state.sub_state = "sort_selecting"
                 bx1, by1, bx2, by2 = m_other.bbox
                 feat_x = bx1 + int((bx2 - bx1) * 0.75)
                 feat_y = by1 + int((by2 - by1) * 0.55)
                 return self._click(feat_x, feat_y,
-                    f"Pipeline(cafe_invite): click 精選 sort option (positional). dialog={tmpl} score={m_other.score:.3f}")
+                    f"Pipeline(cafe_invite): click 精選 option. dialog={tmpl} score={m_other.score:.3f}")
 
-        # ── MOMOTALK LIST: detect by looking for 邀請 buttons ──
+        # ── PRIORITY 3: MomoTalk list (邀請 button visible) ──
         invite_btn_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.85))
         m_invite_btn = self._match(screenshot_path, "邀请.png",
             roi=invite_btn_roi, min_score=0.55)
         if m_invite_btn is not None:
-            # MomoTalk list is open — we can see 邀請 buttons
-            if ss not in ("list_open", "picking", "sort_opening"):
-                self._state.sub_state = "list_open"
-
-            # Check sort state in the MomoTalk header.
-            # The sort dropdown shows the current sort type text (精選/羈絆等級/etc)
-            # and a toggle icon (≡↓ descending or ≡↑ ascending).
-            # If already sorted by 精選 → skip to picking.
-            # If NOT sorted by 精選 → click the sort TEXT to open the sort type dialog.
-            # The ≡↓/≡↑ button only toggles asc/desc, it does NOT open the sort dialog.
+            # MomoTalk is open
             sort_indicator_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.80), int(sh * 0.25))
 
-            # Detect if already sorted by 精選 by matching 精選 text in dropdown
+            # ── Step A: Check if sort is 精選 ──
             m_feat_sort = self._match(screenshot_path, "精选.png",
-                roi=sort_indicator_roi, min_score=0.70)
+                roi=sort_indicator_roi, min_score=0.55)
             already_featured = m_feat_sort is not None
 
-            if not already_featured and ss != "picking":
-                # NOT sorted by 精選 → click sort TEXT to open sort type dialog
-                # Try to find 羈絆等級 text (most common default)
-                m_bond_sort = self._match(screenshot_path, "momotalk羁绊等级.png",
-                    roi=sort_indicator_roi, min_score=0.60)
-                if m_bond_sort is not None:
+            if not already_featured and ss not in ("check_direction", "picking"):
+                # NOT sorted by 精選 → need to open sort dialog
+                # Find sort direction icon to locate the sort dropdown TEXT to its left
+                m_asc = self._match(screenshot_path, "上排序.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                m_desc = self._match(screenshot_path, "下排列.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                sort_icon = m_asc or m_desc
+                if sort_icon is not None:
+                    # Click the sort TEXT (to the left of the direction icon)
+                    click_x = sort_icon.center[0] - int(sw * 0.06)
+                    click_y = sort_icon.center[1]
                     self._state.sub_state = "sort_opening"
-                    return self._click(m_bond_sort.center[0], m_bond_sort.center[1],
-                        f"Pipeline(cafe_invite): click sort text to open dialog. score={m_bond_sort.score:.3f}")
-                # Fallback: if we can't identify the sort text, just proceed to picking
-                # (the list may already be sorted by 精選 but template didn't match)
+                    return self._click(click_x, click_y,
+                        f"Pipeline(cafe_invite): click sort dropdown (left of direction icon). icon={sort_icon.template}")
+                # Try specific sort text templates
+                m_bond = self._match(screenshot_path, "momotalk羁绊等级.png",
+                    roi=sort_indicator_roi, min_score=0.60)
+                if m_bond is not None:
+                    self._state.sub_state = "sort_opening"
+                    return self._click(m_bond.center[0], m_bond.center[1],
+                        f"Pipeline(cafe_invite): click sort text. score={m_bond.score:.3f}")
+                # Can't identify sort → proceed to picking anyway
+                self._state.sub_state = "picking"
 
-            # NOTE: Sort direction toggle (≡↓/≡↑) is NOT checked because
-            # template matching cannot distinguish them (both score ~0.89-1.0).
-            # Just proceed to finding featured badge students directly.
+            # ── Step B: Check sort direction (descending = 下排序) ──
+            if ss == "check_direction" or (already_featured and ss not in ("picking",)):
+                m_asc = self._match(screenshot_path, "上排序.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                if m_asc is not None:
+                    # Ascending sort → click to toggle to descending
+                    self._state.sub_state = "check_direction"
+                    return self._click(m_asc.center[0], m_asc.center[1],
+                        f"Pipeline(cafe_invite): toggle to descending. score={m_asc.score:.3f}")
+                # Already descending (or no icon found) → proceed to picking
+                self._state.sub_state = "picking"
 
-            # Sorted by 精選 (or we already set it) → find 精選標誌 students
-            # Look for the yellow star badge on any student in the list
-            badge_roi = (int(sw * 0.20), int(sh * 0.10), int(sw * 0.55), int(sh * 0.85))
-            m_badge = self._match(screenshot_path, "精选标志.png",
-                roi=badge_roi, min_score=0.50)
+            # ── Step C: Pick featured student ──
+            if ss == "picking" or (already_featured and ss in ("momotalk_open", "")):
+                self._state.sub_state = "picking"
+                badge_roi = (int(sw * 0.05), int(sh * 0.10), int(sw * 0.55), int(sh * 0.90))
+                badges = self._find_all_matches(screenshot_path, "精选标志.png",
+                    roi=badge_roi, min_score=0.50, nms_dist=50)
+                # Sort by Y position (top to bottom) — with 精選+下排序, featured are at top
+                badges.sort(key=lambda b: b.center[1])
 
-            if m_badge is not None:
-                # Found a featured student! Click the 邀請 button on the same row.
-                # The 邀請 button is to the right of the student, same Y row.
-                badge_cy = m_badge.center[1]
-                # Find the 邀請 button closest to the same Y position
-                all_invites = self._find_all_matches(screenshot_path, "邀请.png",
-                    roi=invite_btn_roi, min_score=0.50)
-                best_invite = None
-                best_dist = 9999
-                for inv in all_invites:
-                    dist = abs(inv.center[1] - badge_cy)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_invite = inv
-                if best_invite is not None and best_dist < sh * 0.08:
+                target_idx = cafe_num - 1  # 0 for cafe 1, 1 for cafe 2
+                if target_idx < len(badges):
+                    badge = badges[target_idx]
+                    badge_cy = badge.center[1]
+                    # Find 邀請 button on the same row
+                    all_invites = self._find_all_matches(screenshot_path, "邀请.png",
+                        roi=invite_btn_roi, min_score=0.50)
+                    best_invite = None
+                    best_dist = 9999
+                    for inv in all_invites:
+                        dist = abs(inv.center[1] - badge_cy)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_invite = inv
+                    if best_invite is not None and best_dist < sh * 0.10:
+                        self._state.sub_state = "confirming"
+                        return self._click(best_invite.center[0], best_invite.center[1],
+                            f"Pipeline(cafe_invite): invite featured #{cafe_num}. badge_y={badge_cy} btn_y={best_invite.center[1]}")
+
+                # Not enough featured students or no matching invite button
+                if self._state.ticks >= 10:
+                    # Fallback: invite first visible student
                     self._state.sub_state = "confirming"
-                    return self._click(best_invite.center[0], best_invite.center[1],
-                        f"Pipeline(cafe_invite): invite featured student. badge_y={badge_cy} btn_y={best_invite.center[1]}")
-                # Badge found but no close invite button in _find_all_matches
-                # Use best single-match invite button as target (still better than badge)
-                self._state.sub_state = "confirming"
-                return self._click(m_invite_btn.center[0], m_invite_btn.center[1],
-                    f"Pipeline(cafe_invite): invite first visible student (badge found). badge_score={m_badge.score:.3f}")
+                    return self._click(m_invite_btn.center[0], m_invite_btn.center[1],
+                        f"Pipeline(cafe_invite): fallback invite first visible (cafe {cafe_num}).")
+                return self._wait(400, f"Pipeline(cafe_invite): looking for featured #{cafe_num}.")
 
-            # No 精選標誌 found → no featured students available
-            # Just click the first available 邀請 button as fallback
-            if ss == "picking" and self._state.ticks >= 8:
-                self._state.sub_state = "confirming"
-                return self._click(m_invite_btn.center[0], m_invite_btn.center[1],
-                    f"Pipeline(cafe_invite): no featured student, invite first. score={m_invite_btn.score:.3f}")
-            self._state.sub_state = "picking"
-            return self._wait(400, "Pipeline(cafe_invite): looking for featured students.")
+            # MomoTalk open but sub_state not yet set
+            if ss not in momotalk_states:
+                self._state.sub_state = "momotalk_open"
+            return self._wait(400, f"Pipeline(cafe_invite): MomoTalk open, sub={ss}.")
 
-        # ── CAFE INTERIOR: look for invite ticket button ──
-        if ss == "done":
-            # Already invited one student → advance to headpat
-            self._advance_phase()
-            return self._wait(300, "Pipeline(cafe_invite): invite done, advancing to headpat.")
-
+        # ── PRIORITY 4: Cafe interior — look for invite ticket ──
         invite_roi = (int(sw * 0.50), int(sh * 0.75), sw, sh)
         m = self._match(screenshot_path, "邀请卷（带黄点）.png", roi=invite_roi, min_score=0.55)
         if m is not None:
-            self._state.sub_state = "list_open"
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_invite): click invite ticket. score={m.score:.3f}")
 
-        # No invite ticket visible — maybe no tickets or already used
-        if self._state.ticks >= 5:
+        # Positional fallback: invite ticket at fixed position (no yellow dot)
+        # Position from previous successful match: ~(sw*0.70, sh*0.91)
+        if ss == "" and self._state.ticks in (3, 4):
+            tx, ty = int(sw * 0.70), int(sh * 0.91)
+            return self._click(tx, ty,
+                f"Pipeline(cafe_invite): positional click invite ticket area ({tx},{ty}).")
+
+        # No invite ticket found
+        if self._state.ticks >= 6:
             self._advance_phase()
             return self._wait(300, "Pipeline(cafe_invite): no invite ticket, advancing.")
 
@@ -1005,17 +1023,27 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
 
-        # Click 移动至2号店 button (top-left area of cafe)
-        switch_roi = (0, 0, int(sw * 0.25), int(sh * 0.15))
-        m = self._match(screenshot_path, "移动至2号店.png", roi=switch_roi, min_score=0.25)
+        # Click 移动至2号店 button (top-left area of cafe, no ROI — template is unique)
+        m = self._match(screenshot_path, "移动至2号店.png", min_score=0.50)
         if m is not None:
+            if self._state.ticks >= 8:
+                # Clicked 8+ times but still seeing button → click isn't working
+                print("[Pipeline] cafe_switch: clicked 8 times but button persists, skipping.")
+                self._advance_phase()
+                return self._wait(300, "Pipeline(cafe_switch): click not working, skipping.")
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
 
-        # If button not found after a few ticks, skip to exit (maybe cafe 2 unavailable)
+        # Button disappeared → we either switched successfully or it's not available
+        if self._state.ticks >= 2:
+            # Give it a couple ticks to detect the new cafe
+            self._advance_phase()
+            return self._wait(500, "Pipeline(cafe_switch): button gone, advancing.")
+
+        # If button not found on first tick, wait a bit
         if self._state.ticks >= 5:
-            print("[Pipeline] cafe_switch: button not found, skipping to exit.")
-            self._enter_phase(Phase.CAFE_EXIT)
+            print("[Pipeline] cafe_switch: button not found, skipping.")
+            self._advance_phase()
             return self._wait(300, "Pipeline(cafe_switch): timeout, skipping.")
 
         return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
