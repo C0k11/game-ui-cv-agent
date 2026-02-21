@@ -787,30 +787,40 @@ class PipelineController:
                     f"Pipeline(cafe_invite): close popup. score={m.score:.3f}")
 
         # ── PRIORITY 2: Sort dialog (排列) ──
+        # Templates are whole-dialog screenshots (~835x440). Each matches best
+        # when its option is selected (pink). Low-scoring matches have shifted
+        # bboxes (~100px off), so we MUST use the highest-scoring template.
+        # Dialog layout (relative to bbox): 精選=(0.75, 0.58), 確認=(0.50, 0.88)
         sort_dialog_roi = (int(sw * 0.20), int(sh * 0.10), int(sw * 0.80), int(sh * 0.80))
-        # 精選 already selected (pink) → click 確認
-        m_feat_sel = self._match(screenshot_path,
-            "咖啡厅momotalk排序选项_精选.png", roi=sort_dialog_roi, min_score=0.55)
-        if m_feat_sel is not None:
-            bx1, by1, bx2, by2 = m_feat_sel.bbox
-            confirm_x = (bx1 + bx2) // 2
-            confirm_y = by1 + int((by2 - by1) * 0.88)
-            self._state.sub_state = "sort_confirming"
-            return self._click(confirm_x, confirm_y,
-                f"Pipeline(cafe_invite): sort confirm (精選 selected). score={m_feat_sel.score:.3f}")
-
-        # Sort dialog open but 精選 NOT selected → click 精選 (bottom-right of 2x2 grid)
-        for tmpl in ("咖啡厅momotalk排序选项_羁绊等级.png",
-                     "咖啡厅momotalk排序选项_学院.png",
-                     "咖啡厅momotalk排序选项_名字.png"):
-            m_other = self._match(screenshot_path, tmpl, roi=sort_dialog_roi, min_score=0.55)
-            if m_other is not None:
-                self._state.sub_state = "sort_selecting"
-                bx1, by1, bx2, by2 = m_other.bbox
-                feat_x = bx1 + int((bx2 - bx1) * 0.75)
-                feat_y = by1 + int((by2 - by1) * 0.55)
+        sort_templates = [
+            "咖啡厅momotalk排序选项_精选.png",
+            "咖啡厅momotalk排序选项_名字.png",
+            "咖啡厅momotalk排序选项_学院.png",
+            "咖啡厅momotalk排序选项_羁绊等级.png",
+        ]
+        best_sort = None
+        for tmpl in sort_templates:
+            m_sort = self._match(screenshot_path, tmpl, roi=sort_dialog_roi, min_score=0.55)
+            if m_sort is not None and (best_sort is None or m_sort.score > best_sort.score):
+                best_sort = m_sort
+        if best_sort is not None:
+            bx1, by1, bx2, by2 = best_sort.bbox
+            dw, dh = bx2 - bx1, by2 - by1
+            is_featured = best_sort.template == "咖啡厅momotalk排序选项_精选.png"
+            if is_featured or ss == "sort_confirming":
+                # 精選 already selected OR we just clicked it → click 確認
+                confirm_x = bx1 + int(dw * 0.50)
+                confirm_y = by1 + int(dh * 0.88)
+                self._state.sub_state = "sort_confirming"
+                return self._click(confirm_x, confirm_y,
+                    f"Pipeline(cafe_invite): click 確認. best={best_sort.template} score={best_sort.score:.3f}")
+            else:
+                # 精選 NOT selected → click 精選 (bottom-right of 2x2 grid)
+                feat_x = bx1 + int(dw * 0.75)
+                feat_y = by1 + int(dh * 0.58)
+                self._state.sub_state = "sort_confirming"
                 return self._click(feat_x, feat_y,
-                    f"Pipeline(cafe_invite): click 精選 option. dialog={tmpl} score={m_other.score:.3f}")
+                    f"Pipeline(cafe_invite): click 精選 option. best={best_sort.template} score={best_sort.score:.3f}")
 
         # ── PRIORITY 3: MomoTalk list (邀請 button visible) ──
         invite_btn_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.85))
@@ -917,9 +927,10 @@ class PipelineController:
     def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Tap all students with Emoticon_Action (yellow speech bubble) markers.
 
-        Uses template matching with Emoticon_Action.png to find interactable
-        characters, then clicks slightly below each emoticon to interact.
-        Does NOT use HSV yellow detection (too many false positives from furniture).
+        Uses HSV color thresholding + morphological contour extraction:
+        HSV→filter UI yellow→close/open morphology→find contours→filter by
+        area (1500-15000) and aspect ratio (1.5-5.0 horizontal pill shape).
+        <2ms on CPU, immune to scaling/animation/background changes.
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
@@ -951,45 +962,50 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # Find ALL Emoticon_Action markers in the cafe play area.
-        # ROI excludes: top nav bar (y < 0.08*sh), bottom UI bar (y > 0.72*sh).
-        # Two-step: grayscale matching finds structural candidates, then yellow
-        # color verification filters out false positives from non-yellow furniture.
-        cafe_play_roi = (0, int(sh * 0.08), sw, int(sh * 0.72))
-        emoticons_raw = self._find_all_matches(screenshot_path, "Emoticon_Action.png",
-            roi=cafe_play_roi, min_score=0.75, nms_dist=60)
-        # Post-filter: only keep matches where the region contains bright yellow pixels
-        emoticons = []
-        if emoticons_raw and cv2 is not None and np is not None:
+        # ── Detect emoticons via HSV color thresholding + contour extraction ──
+        # Pure color-based approach: converts to HSV, isolates the specific "UI
+        # yellow" of Emoticon_Action bubbles, applies morphological cleanup, then
+        # filters contours by area and aspect ratio (horizontal pill shape).
+        # Runs <2ms on CPU. Immune to scaling, animation, and background.
+        emoticons: list = []
+        if cv2 is not None and np is not None:
             img = cv2.imread(screenshot_path)
             if img is not None:
-                hsv_full = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                for emo in emoticons_raw:
-                    x1, y1, x2, y2 = emo.bbox
-                    region_hsv = hsv_full[max(0,y1):min(img.shape[0],y2),
-                                          max(0,x1):min(img.shape[1],x2)]
-                    if region_hsv.size == 0:
+                # ROI: cafe play area (exclude top nav and bottom UI bar)
+                ry0, ry1 = int(sh * 0.08), int(sh * 0.72)
+                roi_bgr = img[ry0:ry1, 0:sw]
+                roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+                # Threshold for Emoticon_Action yellow (H≈19, S≈192, V≈236)
+                yellow_mask = cv2.inRange(roi_hsv, (15, 130, 180), (30, 255, 255))
+                # Morphological close (fill outline gaps) then open (remove noise)
+                kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_CLOSE, kern)
+                yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_OPEN, kern)
+                contours, _ = cv2.findContours(
+                    yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if area < 2500 or area > 15000:
                         continue
-                    yellow = cv2.inRange(region_hsv, (15, 150, 200), (30, 255, 255))
-                    ratio = np.sum(yellow > 0) / max(1, yellow.size)
-                    if ratio > 0.05:  # ≥5% of region is bright yellow
-                        emoticons.append(emo)
+                    x, y, w, h = cv2.boundingRect(cnt)
+                    aspect = w / max(h, 1)
+                    if aspect < 1.5 or aspect > 5.0:
+                        continue
+                    # Convert back to absolute coordinates
+                    cx = x + w // 2
+                    cy = ry0 + y + h // 2
+                    emoticons.append((cx, cy, area, aspect))
 
         if not emoticons:
-            # No emoticons found — done with headpat
-            if self._state.ticks >= 2:
+            if self._state.ticks >= 3:
                 self._advance_phase()
                 return self._wait(200, "Pipeline(headpat): no emoticons found, advancing.")
             return self._wait(500, "Pipeline(headpat): waiting for emoticons to appear.")
 
-        # Click each emoticon we haven't visited yet.
-        # The character is below the emoticon bubble, so offset click downward.
-        for emo in emoticons:
-            ex, ey = emo.center
-            # Click below the emoticon (character body is ~40-80px below the bubble center)
+        # Click each emoticon (character body is below the bubble).
+        for (ex, ey, area, aspect) in emoticons:
             tx = ex
             ty = ey + max(self.cfg.headpat_offset_y, int(sh * 0.05))
-            # Check if we already clicked near this position
             already = False
             for px, py in self._state.headpat_done:
                 if abs(tx - px) + abs(ty - py) < 80:
@@ -998,9 +1014,8 @@ class PipelineController:
             if not already:
                 self._state.headpat_done.append((tx, ty))
                 return self._click(tx, ty,
-                    f"Pipeline(headpat): click character below emoticon at ({ex},{ey}). score={emo.score:.3f}")
+                    f"Pipeline(headpat): click below emoticon at ({ex},{ey}). area={area} ar={aspect:.1f}")
 
-        # All emoticons clicked
         self._advance_phase()
         return self._wait(200, "Pipeline(headpat): all emoticons done, advancing.")
 
