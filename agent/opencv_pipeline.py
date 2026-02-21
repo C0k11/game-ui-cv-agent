@@ -773,7 +773,6 @@ class PipelineController:
             # The game's standard 确认(可以点space) template doesn't match
             # the sort dialog's plain 確認 button, so use positional click
             # at center-bottom of the matched dialog bbox.
-            self._state.sub_state = "sort_confirming"
             bx1, by1, bx2, by2 = m_featured_selected.bbox
             confirm_x = (bx1 + bx2) // 2
             confirm_y = by1 + int((by2 - by1) * 0.88)
