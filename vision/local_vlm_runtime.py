@@ -16,7 +16,54 @@ _LOCAL_VLM: Optional[LocalVlmOcr] = None
 _LOCAL_VLM_KEY: str = ""
 
 
+def _start_parent_watchdog() -> None:
+    """Self-terminate if parent process dies (prevents orphaned VLM process ~1.4GB).
+
+    On Windows, when C# kills the main Python process, this subprocess becomes
+    an orphan. The watchdog detects this and calls os._exit(0).
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    parent_pid = os.getpid()
+    try:
+        parent_pid = os.getppid()
+    except Exception:
+        return  # can't get parent PID, skip watchdog
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+
+    def _watchdog():
+        while True:
+            time.sleep(3)
+            try:
+                handle = ctypes.windll.kernel32.OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION, False, parent_pid)
+                if not handle:
+                    # Parent process no longer exists
+                    os._exit(0)
+                # Process handle obtained — check if it's actually alive
+                exit_code = ctypes.wintypes.DWORD()
+                ok = ctypes.windll.kernel32.GetExitCodeProcess(
+                    handle, ctypes.byref(exit_code))
+                ctypes.windll.kernel32.CloseHandle(handle)
+                if ok and exit_code.value != STILL_ACTIVE:
+                    os._exit(0)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_watchdog, daemon=True)
+    t.start()
+
+
 def _vlm_worker_main(cfg_dict: Dict[str, Any], req_q: Queue, resp_q: Queue) -> None:
+    # Start watchdog FIRST — if parent dies during model load, we still clean up
+    try:
+        _start_parent_watchdog()
+    except Exception:
+        pass
+
     cfg = LocalVlmConfig(
         model=str(cfg_dict.get("model") or ""),
         models_dir=str(cfg_dict.get("models_dir") or ""),

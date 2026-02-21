@@ -293,15 +293,47 @@ def ensure_ollama(*, host: str, port: int, models_dir: str, auto_pull: bool, mod
 
 @app.post("/api/v1/shutdown")
 def shutdown_server() -> Dict[str, str]:
+    # Kill VLM subprocess SYNCHRONOUSLY before returning the response.
+    # CRITICAL: C# calls _proc.Kill() immediately after this response returns,
+    # which orphans the VLM subprocess (~1.4GB) if we haven't killed it yet.
+    # The previous approach (delayed thread) never executed because C# killed us first.
+    _kill_vlm_subprocess()
+
     def _do_exit():
         time.sleep(0.2)
         try:
             _stop_vlm_agent()
         except Exception:
             pass
+        _kill_vlm_subprocess()  # retry in case first attempt missed
         os._exit(0)
     threading.Thread(target=_do_exit, daemon=True).start()
     return {"status": "shutting_down"}
+
+
+def _kill_vlm_subprocess() -> None:
+    """Terminate the VLM multiprocessing.Process that holds ~1.4GB memory."""
+    try:
+        from vision.local_vlm_runtime import _LOCAL_VLM, _LOCAL_VLM_LOCK
+        with _LOCAL_VLM_LOCK:
+            vlm = _LOCAL_VLM
+        if vlm is None:
+            return
+        # Try the clean shutdown method
+        if hasattr(vlm, "_shutdown_proc"):
+            vlm._shutdown_proc()
+        # Nuclear fallback: kill by PID if subprocess object is available
+        proc = getattr(vlm, "_proc", None)
+        if proc is not None:
+            pid = getattr(proc, "pid", None)
+            if pid is not None:
+                try:
+                    import signal
+                    os.kill(pid, signal.SIGTERM)
+                except (OSError, ProcessLookupError):
+                    pass
+    except Exception:
+        pass
 
 
 @app.post("/api/v1/vlm/ensure")
