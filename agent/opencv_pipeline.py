@@ -145,7 +145,7 @@ class PipelineController:
             Phase.CAFE_INVITE,
             Phase.CAFE_HEADPAT,
             Phase.CAFE_SWITCH,
-            Phase.CAFE_2_EARNINGS,
+            # CAFE_2_EARNINGS skipped: earnings are shared between cafe 1 and 2
             Phase.CAFE_2_INVITE,
             Phase.CAFE_2_HEADPAT,
             Phase.CAFE_EXIT,
@@ -830,6 +830,11 @@ class PipelineController:
             # MomoTalk is open
             sort_indicator_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.80), int(sh * 0.25))
 
+            # Sort dialog just closed → transition to direction check
+            if ss == "sort_confirming":
+                self._state.sub_state = "check_direction"
+                ss = "check_direction"
+
             # ── Step A: Open sort dialog (unless already past sort setup) ──
             # Don't try to read the sort dropdown text (精选.png false-positives
             # at 0.612 on "名字" sort). Always open the sort dialog to verify.
@@ -856,16 +861,20 @@ class PipelineController:
                 # Can't locate sort dropdown → proceed to picking
                 self._state.sub_state = "picking"
 
-            # ── Step B: Check sort direction (click 上排序 ONCE to toggle) ──
+            # ── Step B: Check sort direction (compare 上排序 vs 下排列 scores) ──
             if ss == "check_direction":
                 m_asc = self._match(screenshot_path, "上排序.png",
                     roi=sort_indicator_roi, min_score=0.55)
-                if m_asc is not None:
+                m_desc = self._match(screenshot_path, "下排列.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                asc_score = m_asc.score if m_asc else 0
+                desc_score = m_desc.score if m_desc else 0
+                if m_asc is not None and asc_score > desc_score:
                     # Ascending → click once to toggle to descending, then pick
                     self._state.sub_state = "picking"
                     return self._click(m_asc.center[0], m_asc.center[1],
-                        f"Pipeline(cafe_invite): toggle ascending→descending (once). score={m_asc.score:.3f}")
-                # Already descending → proceed to picking
+                        f"Pipeline(cafe_invite): toggle asc→desc. asc={asc_score:.3f} desc={desc_score:.3f}")
+                # Already descending (or no icon) → proceed to picking
                 self._state.sub_state = "picking"
 
             # ── Step C: Pick featured student ──
@@ -997,7 +1006,7 @@ class PipelineController:
                     emoticons.append((cx, cy, area, aspect))
 
         if not emoticons:
-            if self._state.ticks >= 3:
+            if self._state.ticks >= 5:
                 self._advance_phase()
                 return self._wait(200, "Pipeline(headpat): no emoticons found, advancing.")
             return self._wait(500, "Pipeline(headpat): waiting for emoticons to appear.")
