@@ -551,10 +551,12 @@ class PipelineController:
             self._advance_phase()  # → CAFE_EARNINGS
             return self._wait(200, "Pipeline(cafe): supervision confirmed cafe.")
 
-        # Check if we're in the cafe (template matching, threshold 0.55)
-        # Check cafe BEFORE lobby — cafe templates score 1.0 inside cafe,
-        # and we already gate lobby false-positives via _is_lobby() priority below.
-        if self._is_cafe_interior(screenshot_path):
+        # Check lobby FIRST — _is_cafe_interior() can false-positive on lobby
+        # (Emoticon_Action.png matches yellow elements like event banners).
+        is_lobby = self._is_lobby(screenshot_path)
+
+        # Only trust cafe interior detection if NOT on lobby
+        if not is_lobby and self._is_cafe_interior(screenshot_path):
             print("[Pipeline] Cafe interior detected by template.")
             self._cafe_confirmed = True
             self._cafe_actually_entered = True
@@ -567,7 +569,7 @@ class PipelineController:
             return self._wait(200, "Pipeline(cafe): already in cafe.")
 
         # In lobby → close popups if any, then click cafe button
-        if self._is_lobby(screenshot_path):
+        if is_lobby:
             # Close announcement X buttons first (top-right)
             close_roi = (int(sw * 0.55), 0, sw, int(sh * 0.20))
             best = None
@@ -628,12 +630,8 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_earnings): click earnings button. score={m.score:.3f}")
 
-        # Blind click: only if cafe is confirmed by supervision AND first tick
-        if self._cafe_confirmed and self._state.ticks <= 1:
-            tx = int(sw * 0.08)
-            ty = int(sh * 0.18)
-            return self._click(tx, ty,
-                "Pipeline(cafe_earnings): click earnings area (top-left).")
+        # NOTE: Removed blind click at (sw*0.08, sh*0.18) — it hits 公告 button
+        # on lobby if cafe detection was a false positive. Only use template matching.
 
         # After a couple ticks, assume earnings done or not available
         self._state.earnings_claimed = True
@@ -839,11 +837,27 @@ class PipelineController:
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(schedule_enter): no screenshot.")
 
-        # Close any popups first
-        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.75)
+        # PRIORITY 1: Close announcement popups (公告) — these block everything
+        # Check wide area since announcement X can be at various positions
+        close_roi = (int(sw * 0.30), 0, sw, int(sh * 0.20))
+        best = None
+        best_score = 0.0
+        for tmpl, min_s in [("内嵌公告的叉.png", 0.70), ("公告叉叉.png", 0.55),
+                            ("游戏内很多页面窗口的叉.png", 0.70)]:
+            m = self._match(screenshot_path, tmpl, roi=close_roi, min_score=min_s)
+            if m is not None and m.score > best_score:
+                best = m
+                best_score = m.score
+        if best is not None:
+            return self._click(best.center[0], best.center[1],
+                f"Pipeline(schedule_enter): close popup. template={best.template} score={best.score:.3f}")
+
+        # Also check center-area X button (menu popups)
+        menu_close_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.75), int(sh * 0.20))
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=menu_close_roi, min_score=0.65)
         if m is not None:
             return self._click(m.center[0], m.center[1],
-                f"Pipeline(schedule_enter): close popup. score={m.score:.3f}")
+                f"Pipeline(schedule_enter): close menu popup. score={m.score:.3f}")
 
         # Confirm dialogs
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
@@ -860,10 +874,11 @@ class PipelineController:
                 self._advance_phase()  # → SCHEDULE_EXECUTE
                 return self._wait(300, "Pipeline(schedule_enter): inside sub-screen, advancing.")
 
-        # In lobby → click schedule button
+        # In lobby → click schedule button (require score >= 0.50 to avoid
+        # clicking behind popup overlays where template scores ~0.42)
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.35)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.50)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
