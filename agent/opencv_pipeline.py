@@ -769,30 +769,35 @@ class PipelineController:
             "咖啡厅momotalk排序选项_精选.png", roi=sort_dialog_roi, min_score=0.55)
         if m_featured_selected is not None:
             # Sort dialog is open with 精選 already selected → click 確認
+            # The sort dialog template includes the full dialog with 確認 at bottom.
+            # The game's standard 确认(可以点space) template doesn't match
+            # the sort dialog's plain 確認 button, so use positional click
+            # at center-bottom of the matched dialog bbox.
             self._state.sub_state = "sort_confirming"
-            # Look for confirm button in sort dialog
-            m2 = self._match(screenshot_path, "确认(可以点space）.png",
-                roi=confirm_roi, min_score=0.35)
-            if m2 is not None:
-                self._state.sub_state = "picking"
-                return self._click(m2.center[0], m2.center[1],
-                    f"Pipeline(cafe_invite): sort confirm (精選 selected). score={m2.score:.3f}")
-            return self._wait(300, "Pipeline(cafe_invite): 精選 selected, looking for confirm.")
+            bx1, by1, bx2, by2 = m_featured_selected.bbox
+            confirm_x = (bx1 + bx2) // 2
+            confirm_y = by1 + int((by2 - by1) * 0.88)
+            self._state.sub_state = "picking"
+            return self._click(confirm_x, confirm_y,
+                f"Pipeline(cafe_invite): sort confirm (精選 selected, positional). score={m_featured_selected.score:.3f}")
 
         # Check if sort dialog is open but 精選 NOT selected → click 精選
+        # Sort dialog layout (2x2 grid):
+        #   名字 (0.25, 0.30)  |  學園 (0.75, 0.30)
+        #   羈絆等級 (0.25, 0.55) | 精選 (0.75, 0.55)
+        #   確認 (0.50, 0.88)
         for tmpl in ("咖啡厅momotalk排序选项_羁绊等级.png",
                      "咖啡厅momotalk排序选项_学院.png",
                      "咖啡厅momotalk排序选项_名字.png"):
             m_other = self._match(screenshot_path, tmpl, roi=sort_dialog_roi, min_score=0.55)
             if m_other is not None:
-                # Sort dialog is open with a different sort selected → click 精選 text
+                # Sort dialog open with different sort → click 精選 at bottom-right
                 self._state.sub_state = "sort_selecting"
-                m_feat = self._match(screenshot_path, "精选.png",
-                    roi=sort_dialog_roi, min_score=0.40)
-                if m_feat is not None:
-                    return self._click(m_feat.center[0], m_feat.center[1],
-                        f"Pipeline(cafe_invite): click 精選 sort option. score={m_feat.score:.3f}")
-                return self._wait(300, "Pipeline(cafe_invite): sort dialog open, 精選 not found.")
+                bx1, by1, bx2, by2 = m_other.bbox
+                feat_x = bx1 + int((bx2 - bx1) * 0.75)
+                feat_y = by1 + int((by2 - by1) * 0.55)
+                return self._click(feat_x, feat_y,
+                    f"Pipeline(cafe_invite): click 精選 sort option (positional). dialog={tmpl} score={m_other.score:.3f}")
 
         # ── MOMOTALK LIST: detect by looking for 邀請 buttons ──
         invite_btn_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.85))
