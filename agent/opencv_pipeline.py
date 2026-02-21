@@ -112,6 +112,7 @@ class StepState:
     last_click_xy: Optional[Tuple[int, int]] = None
     headpat_done: List[Tuple[int, int]] = field(default_factory=list)
     earnings_claimed: bool = False
+    invite_skip: int = 0  # students skipped due to 隔壁 warning
     last_popup_close_tick: int = -10  # tick at which last popup was closed
 
 
@@ -770,6 +771,16 @@ class PipelineController:
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
         if m is not None:
             if ss == "confirming":
+                # Check for 取消 button → "隔壁咖啡廳" warning (student in other cafe)
+                m_cancel = self._match(screenshot_path, "取消（可点Esc）.png",
+                    roi=confirm_roi, min_score=0.55)
+                if m_cancel is not None:
+                    # Cancel and retry with next student
+                    self._state.invite_skip += 1
+                    self._state.sub_state = "picking"
+                    return {"action": "back",
+                            "reason": f"Pipeline(cafe_invite): cancel 隔壁 warning, skip+={self._state.invite_skip}",
+                            "_pipeline": True}
                 self._state.sub_state = "done"
             elif ss == "sort_confirming":
                 self._state.sub_state = "check_direction"
@@ -872,10 +883,12 @@ class PipelineController:
                 if m_asc is not None and asc_score > desc_score:
                     # Ascending → click once to toggle to descending, then pick
                     self._state.sub_state = "picking"
+                    ss = "picking"
                     return self._click(m_asc.center[0], m_asc.center[1],
                         f"Pipeline(cafe_invite): toggle asc→desc. asc={asc_score:.3f} desc={desc_score:.3f}")
                 # Already descending (or no icon) → proceed to picking
                 self._state.sub_state = "picking"
+                ss = "picking"
 
             # ── Step C: Pick featured student ──
             if ss == "picking":
@@ -884,7 +897,7 @@ class PipelineController:
                     roi=badge_roi, min_score=0.50, nms_dist=50)
                 badges.sort(key=lambda b: b.center[1])
 
-                target_idx = cafe_num - 1  # 0 for cafe 1, 1 for cafe 2
+                target_idx = cafe_num - 1 + self._state.invite_skip
                 if target_idx < len(badges):
                     badge = badges[target_idx]
                     badge_cy = badge.center[1]
