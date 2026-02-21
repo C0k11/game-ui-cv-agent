@@ -312,10 +312,12 @@ class PipelineController:
         self, screenshot_path: str, template: str, *,
         roi: Optional[Tuple[int, int, int, int]] = None,
         min_score: float = 0.50, nms_dist: int = 30,
+        use_color: bool = False,
     ) -> List[TemplateMatch]:
         """Find ALL occurrences of a template in the screenshot (not just the best).
 
         Uses cv2.matchTemplate and non-maximum suppression to return multiple hits.
+        When use_color=True, matches on BGR image (better for color-specific templates).
         """
         if cv2 is None or np is None or self._cerebellum is None:
             return []
@@ -332,7 +334,17 @@ class PipelineController:
             return []
         th, tw = tmpl_g.shape[:2]
         sh_full, sw_full = scr.shape[:2]
-        scr_g = cv2.cvtColor(scr, cv2.COLOR_BGR2GRAY)
+
+        # Choose matching image: BGR (color) or grayscale
+        if use_color:
+            tmpl_bgr = info.get("bgr")
+            if tmpl_bgr is None:
+                return []
+            match_scr = scr.copy()
+            match_tmpl = tmpl_bgr
+        else:
+            match_scr = cv2.cvtColor(scr, cv2.COLOR_BGR2GRAY)
+            match_tmpl = tmpl_g
 
         x_off, y_off = 0, 0
         if roi is not None:
@@ -343,19 +355,24 @@ class PipelineController:
                 x1 = max(x0 + 1, min(sw_full, x1))
                 y1 = max(y0 + 1, min(sh_full, y1))
                 if (x1 - x0) >= tw and (y1 - y0) >= th:
-                    scr_g = scr_g[y0:y1, x0:x1]
+                    match_scr = match_scr[y0:y1, x0:x1]
                     x_off, y_off = x0, y0
             except Exception:
                 x_off, y_off = 0, 0
 
-        method = cv2.TM_CCOEFF_NORMED
-        use_mask = tmpl_mask is not None
-        if use_mask:
-            method = cv2.TM_CCORR_NORMED
-        if use_mask:
-            res = cv2.matchTemplate(scr_g, tmpl_g, method, mask=tmpl_mask)
+        # Color matching always uses TM_CCOEFF_NORMED (no mask).
+        # Grayscale uses mask if available.
+        if use_color:
+            res = cv2.matchTemplate(match_scr, match_tmpl, cv2.TM_CCOEFF_NORMED)
         else:
-            res = cv2.matchTemplate(scr_g, tmpl_g, method)
+            method = cv2.TM_CCOEFF_NORMED
+            use_mask = tmpl_mask is not None
+            if use_mask:
+                method = cv2.TM_CCORR_NORMED
+            if use_mask:
+                res = cv2.matchTemplate(match_scr, match_tmpl, method, mask=tmpl_mask)
+            else:
+                res = cv2.matchTemplate(match_scr, match_tmpl, method)
 
         # Find all locations above threshold
         locs = np.where(res >= min_score)
@@ -740,16 +757,19 @@ class PipelineController:
             self._advance_phase()
             return self._wait(300, "Pipeline(cafe_invite): timeout, advancing to headpat.")
 
-        # ── PRIORITY 1: Confirm dialogs (appear after clicking 邀請) ──
+        # ── PRIORITY 1: Confirm dialogs ──
+        # Only treat as invite-done when sub_state is 'confirming' (after clicking 邀請).
+        # Other confirm dialogs (bag full, reward notifications) should just be dismissed.
         confirm_roi = (int(sw * 0.25), int(sh * 0.35), int(sw * 0.75), int(sh * 0.95))
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
         if m is not None:
-            if ss == "sort_confirming":
+            if ss == "confirming":
+                # Confirming invite → student is being invited → done
+                self._state.sub_state = "done"
+            elif ss == "sort_confirming":
                 # Confirming the sort dialog → after this MomoTalk list reloads
                 self._state.sub_state = "picking"
-            else:
-                # Confirming invite → student is being invited
-                self._state.sub_state = "done"
+            # else: just dismiss (bag full, reward notifications, etc.) — keep current sub_state
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_invite): confirm. sub={ss} score={m.score:.3f}")
 
@@ -896,11 +916,11 @@ class PipelineController:
         return self._wait(500, "Pipeline(cafe_invite): waiting for invite UI.")
 
     def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Tap all students with yellow interaction markers.
-        
-        ONLY runs when we're actually inside the cafe (confirmed by supervision
-        or headpat template). Yellow marker detection is used HERE (inside cafe)
-        but NOT for cafe detection.
+        """Tap all students with Emoticon_Action (yellow speech bubble) markers.
+
+        Uses template matching with Emoticon_Action.png to find interactable
+        characters, then clicks slightly below each emoticon to interact.
+        Does NOT use HSV yellow detection (too many false positives from furniture).
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
@@ -932,58 +952,43 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # GATE: Only look for yellow markers if template confirms markers exist.
-        # Without this gate, HSV picks up 60+ false positives from cafe furniture.
-        # Try Emoticon_Action.png (clean game sprite) first, then screenshot-based fallback.
-        headpat_tmpl = self._match(screenshot_path, "Emoticon_Action.png", min_score=0.55)
-        if headpat_tmpl is None:
-            headpat_tmpl = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
-        if headpat_tmpl is None:
-            # No character markers detected — done with headpat
+        # Find ALL Emoticon_Action markers in the cafe play area.
+        # ROI excludes: top nav bar (y < 0.08*sh), bottom UI bar (y > 0.72*sh)
+        # where invite buttons and other yellow UI elements cause false positives.
+        # use_color=True for BGR matching — grayscale matching gives too many false
+        # positives from cafe furniture (0.71 best). BGR caps at 0.61 on empty cafes.
+        cafe_play_roi = (0, int(sh * 0.08), sw, int(sh * 0.72))
+        emoticons = self._find_all_matches(screenshot_path, "Emoticon_Action.png",
+            roi=cafe_play_roi, min_score=0.65, nms_dist=60, use_color=True)
+
+        if not emoticons:
+            # No emoticons found — done with headpat
             if self._state.ticks >= 2:
-                self._advance_phase()  # → CAFE_EXIT
-                return self._wait(200, "Pipeline(headpat): no markers found, advancing.")
-            return self._wait(500, "Pipeline(headpat): waiting for markers to appear.")
+                self._advance_phase()
+                return self._wait(200, "Pipeline(headpat): no emoticons found, advancing.")
+            return self._wait(500, "Pipeline(headpat): waiting for emoticons to appear.")
 
-        # Template confirmed markers exist. Use HSV to find ALL marker positions.
-        marks = _detect_yellow_markers(screenshot_path)
-        # Filter to cafe area (not nav bar, not top bar)
-        marks = [(x1, y1, x2, y2) for x1, y1, x2, y2 in marks
-                 if 0.12 * sh < (y1 + y2) / 2 < 0.80 * sh]
-
-        if not marks:
-            # Template matched but HSV found nothing — click template position directly
-            tx = headpat_tmpl.center[0] + self.cfg.headpat_offset_x
-            ty = headpat_tmpl.center[1] + self.cfg.headpat_offset_y
-            if (tx, ty) not in self._state.headpat_done:
-                self._state.headpat_done.append((tx, ty))
-                return self._click(tx, ty,
-                    f"Pipeline(headpat): click headpat marker. score={headpat_tmpl.score:.3f}")
-            # Already clicked this one — done
-            self._advance_phase()  # → CAFE_EXIT
-            return self._wait(200, "Pipeline(headpat): no more markers, advancing.")
-
-        # Find a marker we haven't clicked yet
-        for x1, y1, x2, y2 in marks:
-            cx, cy = _center((x1, y1, x2, y2))
-            bw = max(1, x2 - x1)
-            bh = max(1, y2 - y1)
-            tx = int(cx + max(self.cfg.headpat_offset_x, int(bw * 0.6)))
-            ty = int(cy + max(self.cfg.headpat_offset_y, int(bh * 0.9)))
+        # Click each emoticon we haven't visited yet.
+        # The character is below the emoticon bubble, so offset click downward.
+        for emo in emoticons:
+            ex, ey = emo.center
+            # Click below the emoticon (character body is ~40-80px below the bubble center)
+            tx = ex
+            ty = ey + max(self.cfg.headpat_offset_y, int(sh * 0.05))
             # Check if we already clicked near this position
             already = False
             for px, py in self._state.headpat_done:
-                if abs(tx - px) + abs(ty - py) < 60:
+                if abs(tx - px) + abs(ty - py) < 80:
                     already = True
                     break
             if not already:
                 self._state.headpat_done.append((tx, ty))
                 return self._click(tx, ty,
-                    f"Pipeline(headpat): click yellow marker at ({cx},{cy}).")
+                    f"Pipeline(headpat): click character below emoticon at ({ex},{ey}). score={emo.score:.3f}")
 
-        # All markers clicked
-        self._advance_phase()  # → CAFE_EXIT
-        return self._wait(200, "Pipeline(headpat): all markers done, advancing.")
+        # All emoticons clicked
+        self._advance_phase()
+        return self._wait(200, "Pipeline(headpat): all emoticons done, advancing.")
 
     def _handle_cafe_switch(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Switch from cafe 1F to cafe 2F by clicking 移动至2号店."""
