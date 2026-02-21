@@ -367,19 +367,14 @@ class PipelineController:
             except Exception:
                 x_off, y_off = 0, 0
 
-        # Color matching always uses TM_CCOEFF_NORMED (no mask).
-        # Grayscale uses mask if available.
-        if use_color:
-            res = cv2.matchTemplate(match_scr, match_tmpl, cv2.TM_CCOEFF_NORMED)
+        # Use mask (from alpha channel) when available for both color and grayscale.
+        # TM_CCORR_NORMED supports mask; TM_CCOEFF_NORMED does not.
+        use_mask = tmpl_mask is not None
+        method = cv2.TM_CCORR_NORMED if use_mask else cv2.TM_CCOEFF_NORMED
+        if use_mask:
+            res = cv2.matchTemplate(match_scr, match_tmpl, method, mask=tmpl_mask)
         else:
-            method = cv2.TM_CCOEFF_NORMED
-            use_mask = tmpl_mask is not None
-            if use_mask:
-                method = cv2.TM_CCORR_NORMED
-            if use_mask:
-                res = cv2.matchTemplate(match_scr, match_tmpl, method, mask=tmpl_mask)
-            else:
-                res = cv2.matchTemplate(match_scr, match_tmpl, method)
+            res = cv2.matchTemplate(match_scr, match_tmpl, method)
 
         # Find all locations above threshold
         locs = np.where(res >= min_score)
@@ -825,62 +820,55 @@ class PipelineController:
             # MomoTalk is open
             sort_indicator_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.80), int(sh * 0.25))
 
-            # ── Step A: Check if sort is 精選 ──
-            m_feat_sort = self._match(screenshot_path, "精选.png",
-                roi=sort_indicator_roi, min_score=0.55)
-            already_featured = m_feat_sort is not None
-
-            if not already_featured and ss not in ("check_direction", "picking"):
-                # NOT sorted by 精選 → need to open sort dialog
-                # Find sort direction icon to locate the sort dropdown TEXT to its left
+            # ── Step A: Open sort dialog (unless already past sort setup) ──
+            # Don't try to read the sort dropdown text (精选.png false-positives
+            # at 0.612 on "名字" sort). Always open the sort dialog to verify.
+            if ss in ("", "momotalk_open"):
+                # Find sort direction icon to click the sort TEXT to its left
                 m_asc = self._match(screenshot_path, "上排序.png",
                     roi=sort_indicator_roi, min_score=0.55)
                 m_desc = self._match(screenshot_path, "下排列.png",
                     roi=sort_indicator_roi, min_score=0.55)
                 sort_icon = m_asc or m_desc
                 if sort_icon is not None:
-                    # Click the sort TEXT (to the left of the direction icon)
                     click_x = sort_icon.center[0] - int(sw * 0.06)
                     click_y = sort_icon.center[1]
                     self._state.sub_state = "sort_opening"
                     return self._click(click_x, click_y,
-                        f"Pipeline(cafe_invite): click sort dropdown (left of direction icon). icon={sort_icon.template}")
-                # Try specific sort text templates
+                        f"Pipeline(cafe_invite): click sort dropdown (left of icon). cafe={cafe_num}")
+                # Try specific sort text template
                 m_bond = self._match(screenshot_path, "momotalk羁绊等级.png",
                     roi=sort_indicator_roi, min_score=0.60)
                 if m_bond is not None:
                     self._state.sub_state = "sort_opening"
                     return self._click(m_bond.center[0], m_bond.center[1],
                         f"Pipeline(cafe_invite): click sort text. score={m_bond.score:.3f}")
-                # Can't identify sort → proceed to picking anyway
+                # Can't locate sort dropdown → proceed to picking
                 self._state.sub_state = "picking"
 
-            # ── Step B: Check sort direction (descending = 下排序) ──
-            if ss == "check_direction" or (already_featured and ss not in ("picking",)):
+            # ── Step B: Check sort direction (click 上排序 ONCE to toggle) ──
+            if ss == "check_direction":
                 m_asc = self._match(screenshot_path, "上排序.png",
                     roi=sort_indicator_roi, min_score=0.55)
                 if m_asc is not None:
-                    # Ascending sort → click to toggle to descending
-                    self._state.sub_state = "check_direction"
+                    # Ascending → click once to toggle to descending, then pick
+                    self._state.sub_state = "picking"
                     return self._click(m_asc.center[0], m_asc.center[1],
-                        f"Pipeline(cafe_invite): toggle to descending. score={m_asc.score:.3f}")
-                # Already descending (or no icon found) → proceed to picking
+                        f"Pipeline(cafe_invite): toggle ascending→descending (once). score={m_asc.score:.3f}")
+                # Already descending → proceed to picking
                 self._state.sub_state = "picking"
 
             # ── Step C: Pick featured student ──
-            if ss == "picking" or (already_featured and ss in ("momotalk_open", "")):
-                self._state.sub_state = "picking"
+            if ss == "picking":
                 badge_roi = (int(sw * 0.05), int(sh * 0.10), int(sw * 0.55), int(sh * 0.90))
                 badges = self._find_all_matches(screenshot_path, "精选标志.png",
                     roi=badge_roi, min_score=0.50, nms_dist=50)
-                # Sort by Y position (top to bottom) — with 精選+下排序, featured are at top
                 badges.sort(key=lambda b: b.center[1])
 
                 target_idx = cafe_num - 1  # 0 for cafe 1, 1 for cafe 2
                 if target_idx < len(badges):
                     badge = badges[target_idx]
                     badge_cy = badge.center[1]
-                    # Find 邀請 button on the same row
                     all_invites = self._find_all_matches(screenshot_path, "邀请.png",
                         roi=invite_btn_roi, min_score=0.50)
                     best_invite = None
@@ -896,16 +884,13 @@ class PipelineController:
                             f"Pipeline(cafe_invite): invite featured #{cafe_num}. badge_y={badge_cy} btn_y={best_invite.center[1]}")
 
                 # Not enough featured students or no matching invite button
-                if self._state.ticks >= 10:
-                    # Fallback: invite first visible student
+                if self._state.ticks >= 12:
                     self._state.sub_state = "confirming"
                     return self._click(m_invite_btn.center[0], m_invite_btn.center[1],
                         f"Pipeline(cafe_invite): fallback invite first visible (cafe {cafe_num}).")
                 return self._wait(400, f"Pipeline(cafe_invite): looking for featured #{cafe_num}.")
 
-            # MomoTalk open but sub_state not yet set
-            if ss not in momotalk_states:
-                self._state.sub_state = "momotalk_open"
+            # Waiting for sort dialog or other transition
             return self._wait(400, f"Pipeline(cafe_invite): MomoTalk open, sub={ss}.")
 
         # ── PRIORITY 4: Cafe interior — look for invite ticket ──
@@ -967,13 +952,28 @@ class PipelineController:
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
         # Find ALL Emoticon_Action markers in the cafe play area.
-        # ROI excludes: top nav bar (y < 0.08*sh), bottom UI bar (y > 0.72*sh)
-        # where invite buttons and other yellow UI elements cause false positives.
-        # use_color=True for BGR matching — grayscale matching gives too many false
-        # positives from cafe furniture (0.71 best). BGR caps at 0.61 on empty cafes.
+        # ROI excludes: top nav bar (y < 0.08*sh), bottom UI bar (y > 0.72*sh).
+        # Two-step: grayscale matching finds structural candidates, then yellow
+        # color verification filters out false positives from non-yellow furniture.
         cafe_play_roi = (0, int(sh * 0.08), sw, int(sh * 0.72))
-        emoticons = self._find_all_matches(screenshot_path, "Emoticon_Action.png",
-            roi=cafe_play_roi, min_score=0.65, nms_dist=60, use_color=True)
+        emoticons_raw = self._find_all_matches(screenshot_path, "Emoticon_Action.png",
+            roi=cafe_play_roi, min_score=0.75, nms_dist=60)
+        # Post-filter: only keep matches where the region contains bright yellow pixels
+        emoticons = []
+        if emoticons_raw and cv2 is not None and np is not None:
+            img = cv2.imread(screenshot_path)
+            if img is not None:
+                hsv_full = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                for emo in emoticons_raw:
+                    x1, y1, x2, y2 = emo.bbox
+                    region_hsv = hsv_full[max(0,y1):min(img.shape[0],y2),
+                                          max(0,x1):min(img.shape[1],x2)]
+                    if region_hsv.size == 0:
+                        continue
+                    yellow = cv2.inRange(region_hsv, (15, 150, 200), (30, 255, 255))
+                    ratio = np.sum(yellow > 0) / max(1, yellow.size)
+                    if ratio > 0.05:  # ≥5% of region is bright yellow
+                        emoticons.append(emo)
 
         if not emoticons:
             # No emoticons found — done with headpat
