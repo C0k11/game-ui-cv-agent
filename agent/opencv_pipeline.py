@@ -88,8 +88,12 @@ class Phase(Enum):
     CAFE_EARNINGS = auto()
     CAFE_INVITE = auto()
     CAFE_HEADPAT = auto()
+    CAFE_SWITCH = auto()       # move to cafe 2F
+    CAFE_2_HEADPAT = auto()    # headpat in cafe 2F
     CAFE_EXIT = auto()
-    SCHEDULE = auto()
+    SCHEDULE_ENTER = auto()
+    SCHEDULE_EXECUTE = auto()
+    SCHEDULE = auto()          # legacy alias
     CLUB = auto()
     BOUNTIES = auto()
     CRAFT = auto()
@@ -138,9 +142,12 @@ class PipelineController:
             Phase.CAFE_EARNINGS,
             Phase.CAFE_INVITE,
             Phase.CAFE_HEADPAT,
+            Phase.CAFE_SWITCH,
+            Phase.CAFE_2_HEADPAT,
             Phase.CAFE_EXIT,
+            Phase.SCHEDULE_ENTER,
+            Phase.SCHEDULE_EXECUTE,
             # Future phases:
-            # Phase.SCHEDULE,
             # Phase.CLUB,
             # Phase.BOUNTIES,
             # Phase.CRAFT,
@@ -225,11 +232,12 @@ class PipelineController:
                 if self._state.ticks >= 2:
                     print(f"[Pipeline] Supervision says Lobby during LOBBY_CLEANUP (tick {self._state.ticks}), advancing to CAFE.")
                     self._advance_phase()
-            elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_INVITE, Phase.CAFE_HEADPAT):
+            elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_INVITE, Phase.CAFE_HEADPAT,
+                                Phase.CAFE_SWITCH, Phase.CAFE_2_HEADPAT):
                 # We expected to be in cafe but supervision says lobby — cafe entry failed
-                print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE (retry).")
+                print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE_EXIT.")
                 self._cafe_confirmed = False
-                self._enter_phase(Phase.CAFE)
+                self._enter_phase(Phase.CAFE_EXIT)
             elif self._phase == Phase.CAFE_EXIT:
                 # Good — we wanted to return to lobby
                 print(f"[Pipeline] Supervision confirms Lobby during CAFE_EXIT, advancing.")
@@ -279,7 +287,11 @@ class PipelineController:
             Phase.CAFE_EARNINGS: self._handle_cafe_earnings,
             Phase.CAFE_INVITE: self._handle_cafe_invite,
             Phase.CAFE_HEADPAT: self._handle_cafe_headpat,
+            Phase.CAFE_SWITCH: self._handle_cafe_switch,
+            Phase.CAFE_2_HEADPAT: self._handle_cafe_headpat,  # reuse same logic
             Phase.CAFE_EXIT: self._handle_cafe_exit,
+            Phase.SCHEDULE_ENTER: self._handle_schedule_enter,
+            Phase.SCHEDULE_EXECUTE: self._handle_schedule_execute,
         }.get(self._phase)
 
     # -- Cerebellum helpers --
@@ -388,7 +400,11 @@ class PipelineController:
         DO NOT use yellow marker detection — yellow appears on many screens
         (活動任務 立即前往 buttons, lobby event banners, etc.)
         """
-        # Check for headpat marker (unique to cafe)
+        # Check for headpat marker via clean game sprite (Emoticon_Action.png)
+        m = self._match(screenshot_path, "Emoticon_Action.png", min_score=0.55)
+        if m is not None:
+            return True
+        # Fallback: screenshot-based headpat marker
         # Threshold 0.55: lobby false-positives score 0.39-0.43, cafe real matches should be 0.65+
         m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
         if m is not None:
@@ -702,8 +718,10 @@ class PipelineController:
 
         # GATE: Only look for yellow markers if template confirms markers exist.
         # Without this gate, HSV picks up 60+ false positives from cafe furniture.
-        # 可摸头的标志.png scores ~1.0 on real markers, ~0.48 on empty cafe.
-        headpat_tmpl = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
+        # Try Emoticon_Action.png (clean game sprite) first, then screenshot-based fallback.
+        headpat_tmpl = self._match(screenshot_path, "Emoticon_Action.png", min_score=0.55)
+        if headpat_tmpl is None:
+            headpat_tmpl = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
         if headpat_tmpl is None:
             # No character markers detected — done with headpat
             if self._state.ticks >= 2:
@@ -751,6 +769,40 @@ class PipelineController:
         self._advance_phase()  # → CAFE_EXIT
         return self._wait(200, "Pipeline(headpat): all markers done, advancing.")
 
+    def _handle_cafe_switch(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Switch from cafe 1F to cafe 2F by clicking 移动至2号店."""
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(cafe_switch): no screenshot.")
+
+        # Close any popup first (Rank Up, etc.)
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(cafe_switch): close popup. score={m.score:.3f}")
+
+        # Confirm dialogs
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
+
+        # Click 移动至2号店 button (bottom area of cafe)
+        switch_roi = (0, int(sh * 0.85), int(sw * 0.50), sh)
+        m = self._match(screenshot_path, "移动至2号店.png", roi=switch_roi, min_score=0.45)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
+
+        # If button not found after a few ticks, skip to exit (maybe cafe 2 unavailable)
+        if self._state.ticks >= 5:
+            print("[Pipeline] cafe_switch: button not found, skipping to exit.")
+            self._enter_phase(Phase.CAFE_EXIT)
+            return self._wait(300, "Pipeline(cafe_switch): timeout, skipping.")
+
+        return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
+
     def _handle_cafe_exit(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Return to lobby from cafe."""
         sw, sh = self._get_size(screenshot_path)
@@ -776,6 +828,104 @@ class PipelineController:
                 "Pipeline(cafe_exit): click back arrow area.")
 
         return {"action": "back", "reason": "Pipeline(cafe_exit): press back to return to lobby.", "_pipeline": True}
+
+    # -----------------------------------------------------------------------
+    # Schedule handlers
+    # -----------------------------------------------------------------------
+
+    def _handle_schedule_enter(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Navigate from lobby to schedule (课程表)."""
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(schedule_enter): no screenshot.")
+
+        # Close any popups first
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.75)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(schedule_enter): close popup. score={m.score:.3f}")
+
+        # Confirm dialogs
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(schedule_enter): confirm. score={m.score:.3f}")
+
+        # Already inside schedule? Check for back button + no lobby nav
+        # (schedule is a sub-screen with Home button)
+        if not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path):
+            # Likely inside schedule already
+            if self._state.ticks >= 2:
+                self._advance_phase()  # → SCHEDULE_EXECUTE
+                return self._wait(300, "Pipeline(schedule_enter): inside sub-screen, advancing.")
+
+        # In lobby → click schedule button
+        if self._is_lobby(screenshot_path):
+            roi_nav = (0, int(sh * 0.80), sw, sh)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.35)
+            if m is not None:
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
+            return self._wait(400, "Pipeline(schedule_enter): schedule button not found.")
+
+        return self._wait(500, "Pipeline(schedule_enter): waiting for lobby.")
+
+    def _handle_schedule_execute(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Execute schedule: click rooms, confirm, handle ticket exhaustion.
+
+        Strategy: Use template matching for confirm buttons and popups.
+        For room selection, click the leftmost/first available room area.
+        VLM fallback handles complex decisions (return None to defer).
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(schedule_exec): no screenshot.")
+
+        # If we ended up in lobby, schedule is done
+        if self._is_lobby(screenshot_path):
+            print("[Pipeline] schedule_execute: back in lobby, schedule done.")
+            self._advance_phase()  # → DONE
+            return self._wait(300, "Pipeline(schedule_exec): back in lobby, done.")
+
+        # Close any popup (ticket exhausted, reward, etc.)
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.75)
+        if m is not None:
+            self._state.sub_state = "popup_closed"
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(schedule_exec): close popup. score={m.score:.3f}")
+
+        # After closing a popup, if we see lobby nav, we're done
+        if self._state.sub_state == "popup_closed" and self._is_lobby(screenshot_path):
+            self._advance_phase()
+            return self._wait(300, "Pipeline(schedule_exec): done after popup close.")
+
+        # Confirm button (start schedule, result confirm, etc.)
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.85), int(sh * 0.95))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        if m is not None:
+            self._state.sub_state = "confirmed"
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(schedule_exec): confirm. score={m.score:.3f}")
+
+        # Tap center to skip animations (schedule result, etc.)
+        if self._state.sub_state == "confirmed" and self._state.ticks % 2 == 0:
+            return self._click(sw // 2, sh // 2,
+                "Pipeline(schedule_exec): tap to skip animation.")
+
+        # Defer to VLM for room selection and complex decisions
+        # Return None so VLM takes over
+        if self._state.ticks >= 20:
+            # Timeout — go back to lobby
+            print("[Pipeline] schedule_execute: timeout, going back.")
+            act = self._try_go_back(screenshot_path, "Pipeline(schedule_exec)")
+            if act is not None:
+                return act
+            self._advance_phase()
+            return self._wait(300, "Pipeline(schedule_exec): timeout.")
+
+        # Let VLM handle room selection for the first several ticks
+        return None
 
     # -----------------------------------------------------------------------
     # Debug / status

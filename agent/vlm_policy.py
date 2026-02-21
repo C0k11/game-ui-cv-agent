@@ -3461,7 +3461,7 @@ class VlmPolicyAgent:
             if pipe is not None and getattr(pipe, "_started", False):
                 from agent.opencv_pipeline import Phase
                 p = getattr(pipe, "_phase", None)
-                if p in (Phase.CAFE_EXIT, Phase.DONE):
+                if p in (Phase.CAFE_EXIT, Phase.SCHEDULE_ENTER, Phase.SCHEDULE_EXECUTE, Phase.DONE):
                     return action
         except Exception:
             pass
