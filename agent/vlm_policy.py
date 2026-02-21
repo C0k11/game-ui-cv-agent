@@ -3453,6 +3453,19 @@ class VlmPolicyAgent:
     def _maybe_cafe_headpat(self, *, action: Dict[str, Any], screenshot_path: str, step_id: int) -> Dict[str, Any]:
         if not bool(getattr(self.cfg, "cafe_headpat", False)):
             return action
+
+        # Block headpat if pipeline has moved past cafe (CAFE_EXIT or DONE).
+        # Without this, VLM headpat leaks to lobby/recruitment screens after cafe.
+        try:
+            pipe = getattr(self, "_pipeline", None)
+            if pipe is not None and getattr(pipe, "_started", False):
+                from agent.opencv_pipeline import Phase
+                p = getattr(pipe, "_phase", None)
+                if p in (Phase.CAFE_EXIT, Phase.DONE):
+                    return action
+        except Exception:
+            pass
+
         # Allow headpat if routine says Cafe OR supervision says Cafe_Inside
         _in_cafe = False
         try:

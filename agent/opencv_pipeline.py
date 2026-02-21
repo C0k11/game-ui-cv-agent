@@ -86,6 +86,7 @@ class Phase(Enum):
     LOBBY_CLEANUP = auto()
     CAFE = auto()
     CAFE_EARNINGS = auto()
+    CAFE_INVITE = auto()
     CAFE_HEADPAT = auto()
     CAFE_EXIT = auto()
     SCHEDULE = auto()
@@ -135,6 +136,7 @@ class PipelineController:
             Phase.LOBBY_CLEANUP,
             Phase.CAFE,
             Phase.CAFE_EARNINGS,
+            Phase.CAFE_INVITE,
             Phase.CAFE_HEADPAT,
             Phase.CAFE_EXIT,
             # Future phases:
@@ -223,7 +225,7 @@ class PipelineController:
                 if self._state.ticks >= 2:
                     print(f"[Pipeline] Supervision says Lobby during LOBBY_CLEANUP (tick {self._state.ticks}), advancing to CAFE.")
                     self._advance_phase()
-            elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_HEADPAT):
+            elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_INVITE, Phase.CAFE_HEADPAT):
                 # We expected to be in cafe but supervision says lobby — cafe entry failed
                 print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE (retry).")
                 self._cafe_confirmed = False
@@ -275,6 +277,7 @@ class PipelineController:
             Phase.LOBBY_CLEANUP: self._handle_lobby_cleanup,
             Phase.CAFE: self._handle_cafe_enter,
             Phase.CAFE_EARNINGS: self._handle_cafe_earnings,
+            Phase.CAFE_INVITE: self._handle_cafe_invite,
             Phase.CAFE_HEADPAT: self._handle_cafe_headpat,
             Phase.CAFE_EXIT: self._handle_cafe_exit,
         }.get(self._phase)
@@ -618,8 +621,47 @@ class PipelineController:
 
         # After a couple ticks, assume earnings done or not available
         self._state.earnings_claimed = True
-        self._advance_phase()  # → CAFE_HEADPAT
+        self._advance_phase()  # → CAFE_INVITE
         return self._wait(200, "Pipeline(cafe_earnings): no earnings dialog, advancing.")
+
+    def _handle_cafe_invite(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Use invite tickets to invite characters to cafe before headpat.
+
+        Flow: click 邀請券 button → select character → confirm → repeat.
+        If no invite button or after using tickets, advance to CAFE_HEADPAT.
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(cafe_invite): no screenshot.")
+
+        # Close any popup (reward dialogs, etc.)
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(cafe_invite): close popup. template={m.template} score={m.score:.3f}")
+
+        # Look for confirm button (invite confirmation dialog)
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.95))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(cafe_invite): confirm invite. score={m.score:.3f}")
+
+        # Look for invite ticket button (bottom area of cafe)
+        invite_roi = (int(sw * 0.50), int(sh * 0.75), sw, sh)
+        m = self._match(screenshot_path, "邀请卷（带黄点）.png", roi=invite_roi, min_score=0.55)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(cafe_invite): click invite ticket. score={m.score:.3f}")
+
+        # sub_state tracks invite flow: "" → "invited" after first attempt
+        # If we already tried inviting or no invite button found after 3 ticks, advance
+        if self._state.ticks >= 3 or self._state.sub_state == "invited":
+            self._advance_phase()  # → CAFE_HEADPAT
+            return self._wait(300, "Pipeline(cafe_invite): done, advancing to headpat.")
+
+        # Tap anywhere safe to dismiss transition animations
+        return self._wait(500, "Pipeline(cafe_invite): waiting for invite UI.")
 
     def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Tap all students with yellow interaction markers.
@@ -658,25 +700,32 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # Detect yellow markers
+        # GATE: Only look for yellow markers if template confirms markers exist.
+        # Without this gate, HSV picks up 60+ false positives from cafe furniture.
+        # 可摸头的标志.png scores ~1.0 on real markers, ~0.48 on empty cafe.
+        headpat_tmpl = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
+        if headpat_tmpl is None:
+            # No character markers detected — done with headpat
+            if self._state.ticks >= 2:
+                self._advance_phase()  # → CAFE_EXIT
+                return self._wait(200, "Pipeline(headpat): no markers found, advancing.")
+            return self._wait(500, "Pipeline(headpat): waiting for markers to appear.")
+
+        # Template confirmed markers exist. Use HSV to find ALL marker positions.
         marks = _detect_yellow_markers(screenshot_path)
         # Filter to cafe area (not nav bar, not top bar)
         marks = [(x1, y1, x2, y2) for x1, y1, x2, y2 in marks
                  if 0.12 * sh < (y1 + y2) / 2 < 0.80 * sh]
 
         if not marks:
-            # Also try the headpat template
-            m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.25)
-            if m is not None:
-                # Click slightly below and right of the marker (on the character's head)
-                tx = m.center[0] + self.cfg.headpat_offset_x
-                ty = m.center[1] + self.cfg.headpat_offset_y
-                if (tx, ty) not in self._state.headpat_done:
-                    self._state.headpat_done.append((tx, ty))
-                    return self._click(tx, ty,
-                        f"Pipeline(headpat): click headpat marker. score={m.score:.3f}")
-
-            # No markers left — done with headpat
+            # Template matched but HSV found nothing — click template position directly
+            tx = headpat_tmpl.center[0] + self.cfg.headpat_offset_x
+            ty = headpat_tmpl.center[1] + self.cfg.headpat_offset_y
+            if (tx, ty) not in self._state.headpat_done:
+                self._state.headpat_done.append((tx, ty))
+                return self._click(tx, ty,
+                    f"Pipeline(headpat): click headpat marker. score={headpat_tmpl.score:.3f}")
+            # Already clicked this one — done
             self._advance_phase()  # → CAFE_EXIT
             return self._wait(200, "Pipeline(headpat): no more markers, advancing.")
 
