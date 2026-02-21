@@ -492,15 +492,10 @@ class PipelineController:
     def _is_cafe_interior(self, screenshot_path: str) -> bool:
         """Check if we're inside the cafe.
         
-        ONLY use headpat template (unique to cafe).
-        DO NOT use yellow marker detection — yellow appears on many screens
-        (活動任務 立即前往 buttons, lobby event banners, etc.)
+        Uses cafe-specific templates. Does NOT use Emoticon_Action.png
+        (scores 0.94 on lobby without ROI — too many false positives).
         """
-        # Check for headpat marker via clean game sprite (Emoticon_Action.png)
-        m = self._match(screenshot_path, "Emoticon_Action.png", min_score=0.55)
-        if m is not None:
-            return True
-        # Fallback: screenshot-based headpat marker
+        # Screenshot-based headpat marker
         # Threshold 0.55: lobby false-positives score 0.39-0.43, cafe real matches should be 0.65+
         m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
         if m is not None:
@@ -529,9 +524,10 @@ class PipelineController:
         if sw <= 0 or sh <= 0:
             return self._wait(500, "Pipeline(startup): waiting for screenshot.")
 
-        # Lobby detection: need at least 5 ticks before trusting _is_lobby()
-        # to avoid false positives on loading screens
-        if self._state.ticks >= 5 and self._is_lobby(screenshot_path):
+        # Lobby detection: _is_lobby() requires 3+ nav bar templates matched,
+        # which is robust enough to avoid false positives on loading screens.
+        # Check from tick 1 so we skip ahead immediately if starting from lobby.
+        if self._is_lobby(screenshot_path):
             print("[Pipeline] Lobby detected, startup complete.")
             self._advance_phase()
             return self._wait(300, "Pipeline(startup): lobby detected, advancing.")
@@ -1009,9 +1005,9 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
 
-        # Click 移动至2号店 button (bottom area of cafe)
-        switch_roi = (0, int(sh * 0.85), int(sw * 0.50), sh)
-        m = self._match(screenshot_path, "移动至2号店.png", roi=switch_roi, min_score=0.45)
+        # Click 移动至2号店 button (top-left area of cafe)
+        switch_roi = (0, 0, int(sw * 0.25), int(sh * 0.15))
+        m = self._match(screenshot_path, "移动至2号店.png", roi=switch_roi, min_score=0.25)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
@@ -1097,16 +1093,25 @@ class PipelineController:
                 self._advance_phase()  # → SCHEDULE_EXECUTE
                 return self._wait(300, "Pipeline(schedule_enter): inside sub-screen, advancing.")
 
-        # In lobby → click schedule button (require score >= 0.50 to avoid
-        # clicking behind popup overlays where template scores ~0.42)
+        # In lobby → click schedule button
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.50)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.40)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
+            # Timeout: if in lobby but schedule not found after many ticks, skip
+            if self._state.ticks >= 10:
+                print("[Pipeline] schedule_enter: schedule not found after 10 ticks, skipping.")
+                self._advance_phase()  # → SCHEDULE_EXECUTE (will detect lobby → DONE)
+                return self._wait(300, "Pipeline(schedule_enter): schedule button not found, skipping.")
             return self._wait(400, "Pipeline(schedule_enter): schedule button not found.")
 
+        # Not in lobby, not in subscreen — might be transitioning
+        if self._state.ticks >= 15:
+            print("[Pipeline] schedule_enter: timeout, skipping.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(schedule_enter): timeout, skipping.")
         return self._wait(500, "Pipeline(schedule_enter): waiting for lobby.")
 
     def _handle_schedule_execute(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
