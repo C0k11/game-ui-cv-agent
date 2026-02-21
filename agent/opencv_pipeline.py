@@ -4,15 +4,18 @@ OpenCV-driven deterministic pipeline for Blue Archive daily routine.
 Architecture:
   - PipelineController: state machine that drives routine steps sequentially
   - PipelineStep (base): each step detects state, emits actions, checks completion
-  - VLM is NOT called here — only Cerebellum template matching + OpenCV color detection
+  - VLM is called for headpat emoticon detection (semantic understanding);
+    all other phases use Cerebellum template matching + OpenCV.
   - The parent agent (VlmPolicyAgent) calls pipeline.tick() each loop iteration;
-    if the pipeline returns an action, it is used directly (no VLM needed).
+    if the pipeline returns an action, it is used directly.
     If the pipeline returns None, VLM fallback kicks in.
 """
 
 from __future__ import annotations
 
+import json
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -133,9 +136,11 @@ class PipelineConfig:
 class PipelineController:
     """Deterministic OpenCV pipeline for Blue Archive daily routine."""
 
-    def __init__(self, cerebellum: Optional[Any] = None, cfg: Optional[PipelineConfig] = None):
+    def __init__(self, cerebellum: Optional[Any] = None, cfg: Optional[PipelineConfig] = None,
+                 vlm_engine: Optional[Any] = None):
         self.cfg = cfg or PipelineConfig()
         self._cerebellum = cerebellum
+        self._vlm_engine = vlm_engine
         self._phase = Phase.IDLE
         self._state = StepState()
         self._phase_order: List[Phase] = [
@@ -768,7 +773,7 @@ class PipelineController:
 
         # ── PRIORITY 1: Confirm dialogs ──
         confirm_roi = (int(sw * 0.25), int(sh * 0.35), int(sw * 0.75), int(sh * 0.95))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             if ss == "confirming":
                 # Check for 取消 button → "隔壁咖啡廳" warning (student in other cafe)
@@ -946,13 +951,67 @@ class PipelineController:
 
         return self._wait(500, "Pipeline(cafe_invite): waiting for invite UI.")
 
-    def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Tap all students with Emoticon_Action (yellow speech bubble) markers.
+    # -- VLM emoticon detection helper ------------------------------------------
 
-        Uses HSV color thresholding + morphological contour extraction:
-        HSV→filter UI yellow→close/open morphology→find contours→filter by
-        area (1500-15000) and aspect ratio (1.5-5.0 horizontal pill shape).
-        <2ms on CPU, immune to scaling/animation/background changes.
+    _VLM_HEADPAT_PROMPT = (
+        "This is a screenshot of a cafe in the game Blue Archive. "
+        "Find ALL yellow interaction icons (emoticon bubbles / starburst markers) "
+        "floating above characters' heads. These are bright yellow UI elements "
+        "that indicate you can interact with the character. "
+        "Return ONLY a JSON array of normalized [x, y] coordinates (0.0-1.0) "
+        "for the center of each yellow icon. Example: [[0.45, 0.30], [0.72, 0.55]]. "
+        "If none found, return []. Output JSON only, no explanation."
+    )
+
+    def _vlm_detect_emoticons(self, screenshot_path: str, sw: int, sh: int
+                              ) -> Optional[List[Tuple[int, int]]]:
+        """Ask VLM to find yellow emoticon markers. Returns list of (x, y) or None on failure."""
+        if self._vlm_engine is None:
+            return None
+        try:
+            res = self._vlm_engine.ocr(
+                image_path=screenshot_path,
+                prompt=self._VLM_HEADPAT_PROMPT,
+                max_new_tokens=256,
+            )
+            raw = str(res.get("raw") or "").strip()
+            if not raw:
+                return []
+            # Extract JSON array from response (VLM may wrap in markdown)
+            cleaned = raw.strip().strip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+            # Find the outermost [...] array
+            m = re.search(r'\[.*\]', cleaned, re.DOTALL)
+            if not m:
+                print(f"[Pipeline] VLM headpat: no JSON array in response: {raw[:200]}")
+                return []
+            coords = json.loads(m.group(0))
+            if not isinstance(coords, list):
+                return []
+            result: List[Tuple[int, int]] = []
+            for item in coords:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    nx, ny = float(item[0]), float(item[1])
+                    if 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0:
+                        result.append((int(nx * sw), int(ny * sh)))
+                    else:
+                        print(f"[Pipeline] VLM headpat: out-of-range coord ({nx}, {ny})")
+            return result
+        except Exception as e:
+            print(f"[Pipeline] VLM headpat error: {type(e).__name__}: {e}")
+            return None
+
+    # -- Headpat handler -------------------------------------------------------
+
+    def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Tap all students with yellow interaction markers above their heads.
+
+        Uses VLM (Qwen-VL) for semantic detection: sends cafe screenshot with
+        a structured prompt, gets back normalized coordinates of yellow emoticon
+        markers. VLM understands the visual meaning — works regardless of marker
+        shape (pills, starbursts, hearts), scale, or animation state.
+        ~1-2s per call, but only called once per tick.
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
@@ -979,53 +1038,27 @@ class PipelineController:
 
         # Look for confirm button (interaction dialog)
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # ── Detect emoticons via HSV color thresholding + contour extraction ──
-        # Pure color-based approach: converts to HSV, isolates the specific "UI
-        # yellow" of Emoticon_Action bubbles, applies morphological cleanup, then
-        # filters contours by area and aspect ratio (horizontal pill shape).
-        # Runs <2ms on CPU. Immune to scaling, animation, and background.
-        emoticons: list = []
-        if cv2 is not None and np is not None:
-            img = cv2.imread(screenshot_path)
-            if img is not None:
-                # ROI: cafe play area (exclude top nav and bottom UI bar)
-                ry0, ry1 = int(sh * 0.08), int(sh * 0.72)
-                roi_bgr = img[ry0:ry1, 0:sw]
-                roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
-                # Threshold for Emoticon_Action yellow (H≈19, S≈192, V≈236)
-                yellow_mask = cv2.inRange(roi_hsv, (15, 130, 180), (30, 255, 255))
-                # Morphological close (fill outline gaps) then open (remove noise)
-                kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_CLOSE, kern)
-                yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_OPEN, kern)
-                contours, _ = cv2.findContours(
-                    yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                for cnt in contours:
-                    area = cv2.contourArea(cnt)
-                    if area < 2500 or area > 15000:
-                        continue
-                    x, y, w, h = cv2.boundingRect(cnt)
-                    aspect = w / max(h, 1)
-                    if aspect < 1.5 or aspect > 5.0:
-                        continue
-                    # Convert back to absolute coordinates
-                    cx = x + w // 2
-                    cy = ry0 + y + h // 2
-                    emoticons.append((cx, cy, area, aspect))
+        # ── Detect emoticons via VLM ──
+        emoticons = self._vlm_detect_emoticons(screenshot_path, sw, sh)
+        if emoticons is None:
+            # VLM unavailable — skip headpat
+            print("[Pipeline] headpat: VLM engine not available, skipping.")
+            self._advance_phase()
+            return self._wait(200, "Pipeline(headpat): no VLM, advancing.")
 
         if not emoticons:
-            if self._state.ticks >= 5:
+            if self._state.ticks >= 3:
                 self._advance_phase()
-                return self._wait(200, "Pipeline(headpat): no emoticons found, advancing.")
-            return self._wait(500, "Pipeline(headpat): waiting for emoticons to appear.")
+                return self._wait(200, "Pipeline(headpat): VLM found no emoticons, advancing.")
+            return self._wait(800, "Pipeline(headpat): VLM found nothing, retrying.")
 
-        # Click each emoticon (character body is below the bubble).
-        for (ex, ey, area, aspect) in emoticons:
+        # Click one emoticon per tick (character body is below the marker).
+        for (ex, ey) in emoticons:
             tx = ex
             ty = ey + max(self.cfg.headpat_offset_y, int(sh * 0.05))
             already = False
@@ -1036,7 +1069,7 @@ class PipelineController:
             if not already:
                 self._state.headpat_done.append((tx, ty))
                 return self._click(tx, ty,
-                    f"Pipeline(headpat): click below emoticon at ({ex},{ey}). area={area} ar={aspect:.1f}")
+                    f"Pipeline(headpat): VLM click below emoticon at ({ex},{ey}).")
 
         self._advance_phase()
         return self._wait(200, "Pipeline(headpat): all emoticons done, advancing.")
@@ -1055,7 +1088,7 @@ class PipelineController:
 
         # Confirm dialogs
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
@@ -1145,7 +1178,7 @@ class PipelineController:
 
         # Confirm dialogs
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(schedule_enter): confirm. score={m.score:.3f}")
@@ -1210,7 +1243,7 @@ class PipelineController:
 
         # Confirm button (start schedule, result confirm, etc.)
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.85), int(sh * 0.95))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             self._state.sub_state = "confirmed"
             return self._click(m.center[0], m.center[1],
