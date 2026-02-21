@@ -807,25 +807,34 @@ class PipelineController:
             if ss not in ("list_open", "picking", "sort_opening"):
                 self._state.sub_state = "list_open"
 
-            # Check if already sorted by 精選: look for the sort dropdown text
-            # If we see 羈絆等級 in the sort dropdown → need to change sort
+            # Check sort state in the MomoTalk header.
+            # The sort dropdown shows the current sort type text (精選/羈絆等級/etc)
+            # and a toggle icon (≡↓ descending or ≡↑ ascending).
+            # If already sorted by 精選 → skip to picking.
+            # If NOT sorted by 精選 → click the sort TEXT to open the sort type dialog.
+            # The ≡↓/≡↑ button only toggles asc/desc, it does NOT open the sort dialog.
             sort_indicator_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.80), int(sh * 0.25))
-            m_bond_sort = self._match(screenshot_path, "momotalk羁绊等级.png",
-                roi=sort_indicator_roi, min_score=0.40)
 
-            if m_bond_sort is not None and ss != "picking":
-                # Currently sorted by 羈絆等級 → open sort dialog
-                # Click the sort dropdown button (the ≡↓ icon next to sort text)
-                m_sort_btn = self._match(screenshot_path, "下排列.png",
-                    roi=sort_indicator_roi, min_score=0.40)
-                if m_sort_btn is not None:
+            # Detect if already sorted by 精選 by matching 精選 text in dropdown
+            m_feat_sort = self._match(screenshot_path, "精选.png",
+                roi=sort_indicator_roi, min_score=0.70)
+            already_featured = m_feat_sort is not None
+
+            if not already_featured and ss != "picking":
+                # NOT sorted by 精選 → click sort TEXT to open sort type dialog
+                # Try to find 羈絆等級 text (most common default)
+                m_bond_sort = self._match(screenshot_path, "momotalk羁绊等级.png",
+                    roi=sort_indicator_roi, min_score=0.60)
+                if m_bond_sort is not None:
                     self._state.sub_state = "sort_opening"
-                    return self._click(m_sort_btn.center[0], m_sort_btn.center[1],
-                        f"Pipeline(cafe_invite): open sort dialog. score={m_sort_btn.score:.3f}")
-                # Fallback: click the sort text area itself
-                self._state.sub_state = "sort_opening"
-                return self._click(m_bond_sort.center[0], m_bond_sort.center[1],
-                    f"Pipeline(cafe_invite): click sort text to open dialog. score={m_bond_sort.score:.3f}")
+                    return self._click(m_bond_sort.center[0], m_bond_sort.center[1],
+                        f"Pipeline(cafe_invite): click sort text to open dialog. score={m_bond_sort.score:.3f}")
+                # Fallback: if we can't identify the sort text, just proceed to picking
+                # (the list may already be sorted by 精選 but template didn't match)
+
+            # NOTE: Sort direction toggle (≡↓/≡↑) is NOT checked because
+            # template matching cannot distinguish them (both score ~0.89-1.0).
+            # Just proceed to finding featured badge students directly.
 
             # Sorted by 精選 (or we already set it) → find 精選標誌 students
             # Look for the yellow star badge on any student in the list
@@ -851,10 +860,11 @@ class PipelineController:
                     self._state.sub_state = "confirming"
                     return self._click(best_invite.center[0], best_invite.center[1],
                         f"Pipeline(cafe_invite): invite featured student. badge_y={badge_cy} btn_y={best_invite.center[1]}")
-                # Badge found but no matching invite button → click badge row directly
+                # Badge found but no close invite button in _find_all_matches
+                # Use best single-match invite button as target (still better than badge)
                 self._state.sub_state = "confirming"
-                return self._click(m_invite_btn.center[0], m_badge.center[1],
-                    f"Pipeline(cafe_invite): invite student near badge. badge_score={m_badge.score:.3f}")
+                return self._click(m_invite_btn.center[0], m_invite_btn.center[1],
+                    f"Pipeline(cafe_invite): invite first visible student (badge found). badge_score={m_badge.score:.3f}")
 
             # No 精選標誌 found → no featured students available
             # Just click the first available 邀請 button as fallback
