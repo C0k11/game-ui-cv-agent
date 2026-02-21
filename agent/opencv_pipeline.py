@@ -805,9 +805,9 @@ class PipelineController:
 
             # Check if already sorted by 精選: look for the sort dropdown text
             # If we see 羈絆等級 in the sort dropdown → need to change sort
-            sort_indicator_roi = (int(sw * 0.30), int(sh * 0.05), int(sw * 0.65), int(sh * 0.18))
+            sort_indicator_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.80), int(sh * 0.25))
             m_bond_sort = self._match(screenshot_path, "momotalk羁绊等级.png",
-                roi=sort_indicator_roi, min_score=0.50)
+                roi=sort_indicator_roi, min_score=0.40)
 
             if m_bond_sort is not None and ss != "picking":
                 # Currently sorted by 羈絆等級 → open sort dialog
