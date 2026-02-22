@@ -56,8 +56,20 @@ def _center(bbox) -> Tuple[int, int]:
     return int((x1 + x2) // 2), int((y1 + y2) // 2)
 
 
-def _detect_yellow_markers(screenshot_path: str, *, min_area: int = 80, max_area: int = 12000) -> List[Tuple[int, int, int, int]]:
-    """Detect yellow exclamation-mark interaction markers in cafe."""
+def _detect_yellow_markers(
+    screenshot_path: str,
+    *,
+    min_area: int = 80,
+    max_area: int = 12000,
+    safe_roi: Optional[Tuple[int, int, int, int]] = None,
+) -> List[Tuple[int, int, int, int]]:
+    """Detect yellow exclamation-mark interaction markers in cafe.
+
+    Args:
+        safe_roi: (x1, y1, x2, y2) absolute pixel region to restrict detection
+                  to. Only contours whose center falls inside this box are kept.
+                  This is the "safe zone" that avoids all UI chrome.
+    """
     if cv2 is None or np is None:
         return []
     img = cv2.imread(screenshot_path)
@@ -80,9 +92,22 @@ def _detect_yellow_markers(screenshot_path: str, *, min_area: int = 80, max_area
         aspect = w / max(h, 1)
         if aspect > 3.0 or aspect < 0.2:
             continue
+        cx, cy = x + w // 2, y + h // 2
+        if safe_roi is not None:
+            rx1, ry1, rx2, ry2 = safe_roi
+            if cx < rx1 or cx > rx2 or cy < ry1 or cy > ry2:
+                continue
         out.append((x, y, x + w, y + h))
     out.sort(key=lambda b: (b[1], b[0]))
     return out[:12]
+
+
+# Safe ROI margins — avoids top resource bar, bottom menu, side buttons.
+# Values are fractions of screen width/height.
+SAFE_ROI_LEFT   = 0.08   # skip left sidebar (指定訪問, 隨機訪問)
+SAFE_ROI_RIGHT  = 0.92   # skip right edge (gear, home buttons)
+SAFE_ROI_TOP    = 0.12   # skip top resource bar + cafe header
+SAFE_ROI_BOTTOM = 0.78   # skip bottom menu (編輯模式, 禮物, etc.)
 
 
 # ---------------------------------------------------------------------------
@@ -1064,14 +1089,37 @@ class PipelineController:
 
     # -- Headpat handler -------------------------------------------------------
 
-    def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Tap all students with yellow interaction markers above their heads.
+    # -- Pan-and-Scan viewport definitions ------------------------------------
+    # Each viewport: (name, swipe_dx_frac, swipe_dy_frac)
+    # dx/dy are fractions of screen size for the swipe delta (from center).
+    # Negative dx = swipe left = expose right side of map, etc.
+    _PAN_SCAN_VIEWPORTS = [
+        # ("center", 0, 0),  — initial view, no swipe needed
+        ("top_right",    -0.30, +0.20),   # swipe left-down → expose top-right
+        ("bottom_right", -0.30, -0.20),   # swipe left-up   → expose bottom-right
+        ("bottom_left",  +0.30, -0.20),   # swipe right-up  → expose bottom-left
+        ("top_left",     +0.30, +0.20),   # swipe right-down → expose top-left
+    ]
+    _SWIPE_DURATION_MS = 500  # slow swipe to avoid map inertia fly-away
 
-        Uses VLM (Qwen-VL) for semantic detection: sends cafe screenshot with
-        a structured prompt, gets back normalized coordinates of yellow emoticon
-        markers. VLM understands the visual meaning — works regardless of marker
-        shape (pills, starbursts, hearts), scale, or animation state.
-        ~1-2s per call, but only called once per tick.
+    def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Tap all students with yellow interaction markers using HSV pan-and-scan.
+
+        Strategy:
+        1. Define a "safe zone" ROI in the center of the screen that avoids all
+           UI chrome (top bar, bottom menu, side buttons).
+        2. Use HSV yellow detection ONLY inside this safe zone.
+        3. Pan the cafe map to 5 viewports (center + 4 corners) by swiping,
+           scanning each viewport for yellow bubbles.
+
+        Sub-state machine:
+          "scan_center"   → initial scan at default view
+          "pan_N"         → swiping to viewport N (0-3)
+          "wait_N"        → waiting for swipe inertia to settle
+          "scan_N"        → scanning viewport N for bubbles
+          "reset"         → swiping back to center
+          "wait_reset"    → waiting for reset swipe inertia
+          "done"          → all viewports scanned, advance
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
@@ -1089,118 +1137,208 @@ class PipelineController:
             self._enter_phase(Phase.CAFE_EXIT)
             return self._wait(200, "Pipeline(headpat): back in lobby unexpectedly.")
 
-        # NOTE: Do NOT use _is_subscreen() — cafe has Home/gear buttons.
-        # Close any unexpected popup via X button instead.
+        # Global timeout — prevent infinite loops
+        if self._state.ticks >= 50:
+            print("[Pipeline] headpat: global timeout, advancing.")
+            self._advance_phase()
+            return self._wait(200, "Pipeline(headpat): timeout, advancing.")
+
+        # ── Handle popups that appear after patting ──
         m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
         if m is not None:
             return self._click(m.center[0], m.center[1],
-                f"Pipeline(headpat): close popup. template={m.template} score={m.score:.3f}")
+                f"Pipeline(headpat): close popup. score={m.score:.3f}")
 
-        # Look for confirm button (interaction dialog)
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # Dismiss fullscreen popups (羈絆升級 Rank Up, etc.) — no X or confirm button
-        # These appear after patting a character; just tap anywhere to dismiss.
+        # Dismiss fullscreen popups (羈絆升級 Rank Up, etc.)
         if not self._is_cafe_interior(screenshot_path):
             return self._click(sw // 2, sh // 2,
                 f"Pipeline(headpat): tap to dismiss fullscreen popup (tick {self._state.ticks}).")
 
-        # ── Detect emoticons: YOLO (primary) → VLM (fallback) ──
-        emoticons: Optional[List[Tuple[int, int]]] = None
-        detector_name = "none"
+        # ── Compute safe ROI ──
+        safe_roi = (
+            int(sw * SAFE_ROI_LEFT),
+            int(sh * SAFE_ROI_TOP),
+            int(sw * SAFE_ROI_RIGHT),
+            int(sh * SAFE_ROI_BOTTOM),
+        )
 
-        # Try YOLO first (~1ms GPU, trained model required)
-        if self._yolo is not None:
+        ss = self._state.sub_state
+
+        # Initialize sub_state
+        if ss == "":
+            self._state.sub_state = "scan_center"
+            ss = "scan_center"
+
+        # ── SCAN states: detect and click yellow bubbles ──
+        if ss.startswith("scan_"):
+            markers = _detect_yellow_markers(screenshot_path, safe_roi=safe_roi)
+            if markers:
+                # Click the first unvisited marker
+                for (x1, y1, x2, y2) in markers:
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    # Offset: click slightly below/right of bubble (character body)
+                    tx = cx + max(self.cfg.headpat_offset_x, int(sw * 0.03))
+                    ty = cy + max(self.cfg.headpat_offset_y, int(sh * 0.02))
+                    already = False
+                    for px, py in self._state.headpat_done:
+                        if abs(tx - px) + abs(ty - py) < 80:
+                            already = True
+                            break
+                    if not already:
+                        self._state.headpat_done.append((tx, ty))
+                        # After clicking, stay in same scan state to re-scan
+                        # (new bubbles may appear after interaction)
+                        print(f"[Pipeline] headpat HSV: click at ({tx},{ty}), viewport={ss}")
+                        return self._click(tx, ty,
+                            f"Pipeline(headpat): HSV click bubble at ({cx},{cy}), viewport={ss}.")
+                # All markers in this viewport already visited — fall through to advance
+
+            # No (new) markers in this viewport → advance to next
+            if ss == "scan_center":
+                if not self._PAN_SCAN_VIEWPORTS:
+                    self._state.sub_state = "done"
+                else:
+                    self._state.sub_state = "pan_0"
+            elif ss.startswith("scan_"):
+                # scan_N → next viewport or reset
+                try:
+                    idx = int(ss.split("_")[1])
+                except (ValueError, IndexError):
+                    idx = len(self._PAN_SCAN_VIEWPORTS)
+                next_idx = idx + 1
+                if next_idx < len(self._PAN_SCAN_VIEWPORTS):
+                    self._state.sub_state = f"pan_{next_idx}"
+                else:
+                    self._state.sub_state = "reset"
+            return self._wait(300, f"Pipeline(headpat): no new bubbles in {ss}, moving on.")
+
+        # ── PAN states: swipe to expose a corner ──
+        if ss.startswith("pan_"):
             try:
-                yolo_results = self._yolo.detect_headpat_bubbles(screenshot_path, conf=0.35)
-                emoticons = yolo_results  # [] means "ran, found nothing"; distinguishes from None
-                detector_name = "YOLO"
-                print(f"[Pipeline] headpat YOLO: found {len(emoticons)} bubbles")
-            except Exception as e:
-                print(f"[Pipeline] headpat YOLO error: {e}")
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                self._state.sub_state = "done"
+                return self._wait(200, "Pipeline(headpat): pan index error, done.")
 
-        # Fallback to VLM (~1-2s) only if YOLO is not available
-        if emoticons is None:
-            vlm_result = self._vlm_detect_emoticons(screenshot_path, sw, sh)
-            if vlm_result is not None:
-                emoticons = vlm_result
-                detector_name = "VLM"
-            else:
-                # Neither YOLO nor VLM available
-                print("[Pipeline] headpat: no detector available, skipping.")
-                self._advance_phase()
-                return self._wait(200, "Pipeline(headpat): no detector, advancing.")
+            if idx >= len(self._PAN_SCAN_VIEWPORTS):
+                self._state.sub_state = "reset"
+                return self._wait(200, "Pipeline(headpat): all viewports done, resetting.")
 
-        if not emoticons:
-            if self._state.ticks >= 3:
-                self._advance_phase()
-                return self._wait(200, f"Pipeline(headpat): {detector_name} found no emoticons, advancing.")
-            return self._wait(800, f"Pipeline(headpat): {detector_name} found nothing, retrying.")
+            name, dx_frac, dy_frac = self._PAN_SCAN_VIEWPORTS[idx]
+            cx, cy = sw // 2, sh // 2
+            to_x = cx + int(sw * dx_frac)
+            to_y = cy + int(sh * dy_frac)
+            self._state.sub_state = f"wait_{idx}"
+            print(f"[Pipeline] headpat: panning to {name} ({cx},{cy})→({to_x},{to_y})")
+            return {
+                "action": "swipe",
+                "from": [cx, cy],
+                "to": [to_x, to_y],
+                "duration_ms": self._SWIPE_DURATION_MS,
+                "reason": f"Pipeline(headpat): swipe to expose {name}.",
+                "_pipeline": True,
+            }
 
-        # Click one emoticon per tick. In isometric view, character body is
-        # to the RIGHT of (and slightly below) the yellow icon.
-        for (ex, ey) in emoticons:
-            tx = ex + max(self.cfg.headpat_offset_x, int(sw * 0.03))
-            ty = ey + max(self.cfg.headpat_offset_y, int(sh * 0.02))
-            already = False
-            for px, py in self._state.headpat_done:
-                if abs(tx - px) + abs(ty - py) < 80:
-                    already = True
-                    break
-            if not already:
-                self._state.headpat_done.append((tx, ty))
-                return self._click(tx, ty,
-                    f"Pipeline(headpat): {detector_name} click below emoticon at ({ex},{ey}).")
+        # ── WAIT states: let swipe inertia settle ──
+        if ss.startswith("wait_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                idx = 0
+            # Wait 2 ticks (the sub_state persists across ticks since we set
+            # wait_N on the swipe tick, then scan_N after waiting)
+            self._state.sub_state = f"scan_{idx}"
+            return self._wait(800, f"Pipeline(headpat): waiting for swipe inertia (viewport {idx}).")
 
-        self._advance_phase()
-        return self._wait(200, "Pipeline(headpat): all emoticons done, advancing.")
+        # ── RESET: swipe back to center ──
+        if ss == "reset":
+            # We don't know exact displacement, but the cafe has a "home" position.
+            # Just do a small tap in the center to stop any residual inertia,
+            # then advance. The next phase will handle the new position.
+            self._state.sub_state = "wait_reset"
+            return self._wait(300, "Pipeline(headpat): resetting view.")
+
+        if ss == "wait_reset":
+            self._state.sub_state = "done"
+            return self._wait(300, "Pipeline(headpat): reset done.")
+
+        # ── DONE ──
+        if ss == "done":
+            n = len(self._state.headpat_done)
+            print(f"[Pipeline] headpat: pan-and-scan complete. Patted {n} students.")
+            self._advance_phase()
+            return self._wait(200, f"Pipeline(headpat): all viewports scanned ({n} patted), advancing.")
 
     def _handle_cafe_switch(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Switch from cafe 1F to cafe 2F by clicking 移动至2号店."""
+        """Switch from cafe 1F to cafe 2F by clicking 移动至2号店.
+
+        IMPORTANT: The template 移动至2号店.png also matches 移動至1號店 at
+        high score (0.96+) because the buttons look almost identical. So we
+        must click ONLY ONCE, then wait for the scene to reload.
+
+        Sub-states:
+          "" (init)     → find and click 移動至2號店
+          "switching"   → button clicked; wait for cafe to reload (handle
+                          TAP TO START screen, loading screens, etc.)
+        """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(cafe_switch): no screenshot.")
+        ss = self._state.sub_state
 
-        # Close any popup first (Rank Up / 羈絆升級, etc.)
+        # Global timeout
+        if self._state.ticks >= 15:
+            print("[Pipeline] cafe_switch: timeout, advancing.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(cafe_switch): timeout, advancing.")
+
+        # ── Close popups in any state ──
         m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): close popup. score={m.score:.3f}")
-
-        # Confirm dialogs
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
 
-        # Dismiss 羈絆升級 or reward screens (full-screen, tap anywhere to continue)
-        # These screens have no X button and no confirm button — just tap center
-        if not self._is_cafe_interior(screenshot_path) and not self._is_lobby(screenshot_path):
-            if self._state.ticks >= 2:
-                return self._click(sw // 2, sh // 2,
-                    f"Pipeline(cafe_switch): tap to dismiss fullscreen popup (tick {self._state.ticks}).")
-
-        # Click 移动至2号店 button
-        m = self._match(screenshot_path, "移动至2号店.png", min_score=0.50)
-        if m is not None:
-            if self._state.ticks >= 8:
-                print("[Pipeline] cafe_switch: clicked 8 times but button persists, skipping.")
+        # ── INIT: Click the switch button once ──
+        if ss == "":
+            m = self._match(screenshot_path, "移动至2号店.png", min_score=0.50)
+            if m is not None:
+                self._state.sub_state = "switching"
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
+            # Button not visible yet — maybe a popup is blocking
+            if self._state.ticks >= 5:
                 self._advance_phase()
-                return self._wait(300, "Pipeline(cafe_switch): click not working, skipping.")
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
+                return self._wait(300, "Pipeline(cafe_switch): button not found, advancing.")
+            return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
 
-        # Button not found — wait a few ticks then advance
-        if self._state.ticks >= 5:
+        # ── SWITCHING: Wait for cafe to reload after click ──
+        # During transition the game may show TAP TO START or loading screen.
+        # Once we see cafe interior again, we've arrived at cafe 2.
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] cafe_switch: cafe interior detected after switch.")
             self._advance_phase()
-            return self._wait(300, "Pipeline(cafe_switch): button not found, advancing.")
+            return self._wait(400, "Pipeline(cafe_switch): arrived at cafe 2, advancing.")
 
-        return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
+        # Handle TAP TO START screen during transition — tap to proceed
+        m_tap = self._match(screenshot_path, "点击开始.png", min_score=0.40)
+        if m_tap is not None:
+            return self._click(sw // 2, int(sh * 0.82),
+                f"Pipeline(cafe_switch): tap to start during transition. score={m_tap.score:.3f}")
+
+        # Unknown screen during transition — just wait (do NOT tap center,
+        # that was causing the infinite loop by re-clicking the switch button)
+        return self._wait(600, f"Pipeline(cafe_switch): waiting for cafe to load (tick {self._state.ticks}).")
 
     def _handle_cafe_exit(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Return to lobby from cafe."""
