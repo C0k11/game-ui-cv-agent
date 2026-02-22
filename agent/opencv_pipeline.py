@@ -932,17 +932,18 @@ class PipelineController:
 
         # ── PRIORITY 4: Cafe interior — look for invite ticket ──
         invite_roi = (int(sw * 0.50), int(sh * 0.75), sw, sh)
-        m = self._match(screenshot_path, "邀请卷（带黄点）.png", roi=invite_roi, min_score=0.55)
-        if m is not None:
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(cafe_invite): click invite ticket. score={m.score:.3f}")
 
-        # Positional fallback: invite ticket at fixed position (no yellow dot)
-        # Position from previous successful match: ~(sw*0.70, sh*0.91)
-        if ss == "" and self._state.ticks in (3, 4):
-            tx, ty = int(sw * 0.70), int(sh * 0.91)
-            return self._click(tx, ty,
-                f"Pipeline(cafe_invite): positional click invite ticket area ({tx},{ty}).")
+        m_active = self._match(screenshot_path, "邀请卷（带黄点）.png", roi=invite_roi, min_score=0.55)
+        if m_active is not None:
+            return self._click(m_active.center[0], m_active.center[1],
+                f"Pipeline(cafe_invite): click invite ticket. score={m_active.score:.3f}")
+
+        # Active template didn't match — check if ticket is used (greyed out)
+        m_used = self._match(screenshot_path, "邀请卷已用.png", roi=invite_roi, min_score=0.60)
+        if m_used is not None:
+            self._advance_phase()
+            return self._wait(200,
+                f"Pipeline(cafe_invite): invite ticket already used, skipping. score={m_used.score:.3f}")
 
         # No invite ticket found
         if self._state.ticks >= 6:
@@ -953,50 +954,76 @@ class PipelineController:
 
     # -- VLM emoticon detection helper ------------------------------------------
 
-    _VLM_HEADPAT_PROMPT = (
-        "This is a screenshot of a cafe in the game Blue Archive. "
-        "Find ALL yellow interaction icons (emoticon bubbles / starburst markers) "
-        "floating above characters' heads. These are bright yellow UI elements "
-        "that indicate you can interact with the character. "
-        "Return ONLY a JSON array of normalized [x, y] coordinates (0.0-1.0) "
-        "for the center of each yellow icon. Example: [[0.45, 0.30], [0.72, 0.55]]. "
-        "If none found, return []. Output JSON only, no explanation."
+    _VLM_HEADPAT_PROMPT_TEMPLATE = (
+        "You are a game UI detector. Find all bright yellow interaction icons "
+        "(emoticon bubbles, starburst markers, exclamation marks) floating above "
+        "characters' heads in this cafe screenshot. These are yellow UI elements. "
+        "Return JSON only. "
+        'Return format: {{"items": [{{"label": "emoticon", "bbox": [x1,y1,x2,y2]}}]}}. '
+        "bbox must be pixel coordinates in the original image. "
+        "Image size: width={w}, height={h}. "
+        "If no yellow icons found, return {{\"items\": []}}. "
+        "Do not include any extra keys. Do not wrap in markdown."
     )
 
     def _vlm_detect_emoticons(self, screenshot_path: str, sw: int, sh: int
                               ) -> Optional[List[Tuple[int, int]]]:
-        """Ask VLM to find yellow emoticon markers. Returns list of (x, y) or None on failure."""
+        """Ask VLM to find yellow emoticon markers. Returns list of (cx, cy) or None on failure."""
         if self._vlm_engine is None:
             return None
         try:
+            prompt = self._VLM_HEADPAT_PROMPT_TEMPLATE.format(w=sw, h=sh)
             res = self._vlm_engine.ocr(
                 image_path=screenshot_path,
-                prompt=self._VLM_HEADPAT_PROMPT,
-                max_new_tokens=256,
+                prompt=prompt,
+                max_new_tokens=512,
             )
             raw = str(res.get("raw") or "").strip()
+            print(f"[Pipeline] VLM headpat raw: {raw[:300]}")
             if not raw:
                 return []
-            # Extract JSON array from response (VLM may wrap in markdown)
+            # Clean markdown wrapping
             cleaned = raw.strip().strip("`").strip()
             if cleaned.lower().startswith("json"):
                 cleaned = cleaned[4:].strip()
-            # Find the outermost [...] array
-            m = re.search(r'\[.*\]', cleaned, re.DOTALL)
-            if not m:
-                print(f"[Pipeline] VLM headpat: no JSON array in response: {raw[:200]}")
-                return []
-            coords = json.loads(m.group(0))
-            if not isinstance(coords, list):
-                return []
+            # Try to parse as JSON object with items+bbox (primary format)
             result: List[Tuple[int, int]] = []
-            for item in coords:
-                if isinstance(item, (list, tuple)) and len(item) >= 2:
-                    nx, ny = float(item[0]), float(item[1])
-                    if 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0:
-                        result.append((int(nx * sw), int(ny * sh)))
-                    else:
-                        print(f"[Pipeline] VLM headpat: out-of-range coord ({nx}, {ny})")
+            json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    items = parsed.get("items", []) if isinstance(parsed, dict) else []
+                    for item in items:
+                        bbox = item.get("bbox") if isinstance(item, dict) else None
+                        if bbox and len(bbox) >= 4:
+                            x1, y1, x2, y2 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+                            cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                            if 0 <= cx <= sw and 0 <= cy <= sh:
+                                result.append((cx, cy))
+                            else:
+                                print(f"[Pipeline] VLM headpat: bbox out of range: {bbox}")
+                    if result:
+                        return result
+                except json.JSONDecodeError:
+                    pass
+            # Fallback: try parsing as array of [x, y] pairs
+            arr_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+            if arr_match:
+                try:
+                    coords = json.loads(arr_match.group(0))
+                    if isinstance(coords, list):
+                        for item in coords:
+                            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                                nx, ny = float(item[0]), float(item[1])
+                                # Handle both normalized (0-1) and pixel coordinates
+                                if nx <= 1.0 and ny <= 1.0:
+                                    result.append((int(nx * sw), int(ny * sh)))
+                                elif 0 <= nx <= sw and 0 <= ny <= sh:
+                                    result.append((int(nx), int(ny)))
+                except json.JSONDecodeError:
+                    pass
+            if not result:
+                print(f"[Pipeline] VLM headpat: no valid coords parsed from: {raw[:200]}")
             return result
         except Exception as e:
             print(f"[Pipeline] VLM headpat error: {type(e).__name__}: {e}")
@@ -1057,10 +1084,11 @@ class PipelineController:
                 return self._wait(200, "Pipeline(headpat): VLM found no emoticons, advancing.")
             return self._wait(800, "Pipeline(headpat): VLM found nothing, retrying.")
 
-        # Click one emoticon per tick (character body is below the marker).
+        # Click one emoticon per tick. In isometric view, character body is
+        # to the RIGHT of (and slightly below) the yellow icon.
         for (ex, ey) in emoticons:
-            tx = ex
-            ty = ey + max(self.cfg.headpat_offset_y, int(sh * 0.05))
+            tx = ex + max(self.cfg.headpat_offset_x, int(sw * 0.03))
+            ty = ey + max(self.cfg.headpat_offset_y, int(sh * 0.02))
             already = False
             for px, py in self._state.headpat_done:
                 if abs(tx - px) + abs(ty - py) < 80:
