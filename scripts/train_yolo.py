@@ -80,7 +80,6 @@ def main():
         patience=20,
         save=True,
         plots=True,
-        augment=True,
         cache=True,
     )
 
