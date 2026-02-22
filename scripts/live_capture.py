@@ -1,33 +1,51 @@
 """Live screenshot capture for YOLO training dataset.
 
 Takes periodic screenshots of the game window while running.
-Use this while the game is in cafe to collect diverse headpat training data.
+Uses Win32 GDI PrintWindow (PW_RENDERFULLCONTENT) — works with
+DirectX/Unity hardware-accelerated windows. Zero extra dependencies
+(ctypes only, no pywin32).
+
+Frame-diff dedup: skips near-identical frames to avoid wasting disk
+and labeling effort on static scenes.
 
 Usage:
-    python scripts/live_capture.py                  # default: 2s interval, 200 max
-    python scripts/live_capture.py --interval 1.5   # faster capture
-    python scripts/live_capture.py --limit 500      # more images
-    python scripts/live_capture.py --window "BlueArchive"  # custom window title
+    python scripts/live_capture.py
+    python scripts/live_capture.py --interval 1.2 --limit 800
+    python scripts/live_capture.py --window "Blue Archive"
 
 Press Ctrl+C to stop early.
 """
 
+import argparse
 import ctypes
 import ctypes.wintypes
-import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
-OUTPUT_DIR = Path(r"D:\Project\ml_cache\models\yolo\dataset\images\train")
+import cv2
+import numpy as np
 
-# Win32 screenshot via GDI (no extra dependencies)
+OUTPUT_DIR = Path(r"D:\Project\ml_cache\models\yolo\dataset\images\train")
+DIFF_THRESHOLD = 8  # mean pixel diff below this → skip (near-duplicate)
+
+# Win32 GDI via ctypes (zero extra dependencies)
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
 
-SRCCOPY = 0x00CC0020
+
+class _BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32),
+        ("biHeight", ctypes.c_int32), ("biPlanes", ctypes.c_uint16),
+        ("biBitCount", ctypes.c_uint16), ("biCompression", ctypes.c_uint32),
+        ("biSizeImage", ctypes.c_uint32), ("biXPelsPerMeter", ctypes.c_int32),
+        ("biYPelsPerMeter", ctypes.c_int32), ("biClrUsed", ctypes.c_uint32),
+        ("biClrImportant", ctypes.c_uint32),
+    ]
 
 
-def find_window(title_fragment: str = "BlueArchive"):
+def find_window(title_fragment: str = "Blue Archive"):
     """Find game window by partial title match."""
     result = []
 
@@ -45,38 +63,24 @@ def find_window(title_fragment: str = "BlueArchive"):
     return result[0] if result else None
 
 
-def capture_window(hwnd) -> bytes:
-    """Capture window client area to PNG bytes via GDI."""
-    from PIL import Image
-    import io
-
+def capture_window(hwnd) -> np.ndarray | None:
+    """Capture window client area to BGR numpy array via GDI PrintWindow."""
     rect = ctypes.wintypes.RECT()
     user32.GetClientRect(hwnd, ctypes.byref(rect))
     w, h = rect.right, rect.bottom
     if w <= 0 or h <= 0:
-        return b""
+        return None
 
     hdc_src = user32.GetDC(hwnd)
     hdc_dst = gdi32.CreateCompatibleDC(hdc_src)
     bmp = gdi32.CreateCompatibleBitmap(hdc_src, w, h)
     gdi32.SelectObject(hdc_dst, bmp)
 
-    # PrintWindow with PW_RENDERFULLCONTENT (flag=2) for hardware-accelerated windows
+    # PW_RENDERFULLCONTENT (flag=2) for hardware-accelerated windows
     user32.PrintWindow(hwnd, hdc_dst, 2)
 
-    # Read bitmap bits
-    class BITMAPINFOHEADER(ctypes.Structure):
-        _fields_ = [
-            ("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32),
-            ("biHeight", ctypes.c_int32), ("biPlanes", ctypes.c_uint16),
-            ("biBitCount", ctypes.c_uint16), ("biCompression", ctypes.c_uint32),
-            ("biSizeImage", ctypes.c_uint32), ("biXPelsPerMeter", ctypes.c_int32),
-            ("biYPelsPerMeter", ctypes.c_int32), ("biClrUsed", ctypes.c_uint32),
-            ("biClrImportant", ctypes.c_uint32),
-        ]
-
-    bmi = BITMAPINFOHEADER()
-    bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bmi = _BITMAPINFOHEADER()
+    bmi.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
     bmi.biWidth = w
     bmi.biHeight = -h  # top-down
     bmi.biPlanes = 1
@@ -90,65 +94,69 @@ def capture_window(hwnd) -> bytes:
     gdi32.DeleteDC(hdc_dst)
     user32.ReleaseDC(hwnd, hdc_src)
 
-    img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1)
-    img = img.convert("RGB")
-    out = io.BytesIO()
-    img.save(out, format="PNG")
-    return out.getvalue()
+    # BGRA → BGR numpy array (cv2 native format)
+    frame = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)
+    return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
 
 def main():
-    interval = 2.0
-    limit = 200
-    window_title = "BlueArchive"
-
-    args = sys.argv[1:]
-    for i, a in enumerate(args):
-        if a == "--interval" and i + 1 < len(args):
-            interval = float(args[i + 1])
-        elif a == "--limit" and i + 1 < len(args):
-            limit = int(args[i + 1])
-        elif a == "--window" and i + 1 < len(args):
-            window_title = args[i + 1]
+    parser = argparse.ArgumentParser(description="Live game screenshot capture for YOLO dataset")
+    parser.add_argument("--interval", type=float, default=1.5, help="capture interval in seconds")
+    parser.add_argument("--limit", type=int, default=500, help="max screenshots to capture")
+    parser.add_argument("--window", type=str, default="Blue Archive", help="game window title keyword")
+    args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    existing = len(list(OUTPUT_DIR.glob("live_*.png")))
-    print(f"Live capture: window='{window_title}' interval={interval}s limit={limit}")
-    print(f"Output: {OUTPUT_DIR} ({existing} existing live captures)")
-    print("Press Ctrl+C to stop.\n")
+    existing = len(list(OUTPUT_DIR.glob("*.jpg"))) + len(list(OUTPUT_DIR.glob("*.png")))
 
-    hwnd = find_window(window_title)
+    hwnd = find_window(args.window)
     if hwnd is None:
-        print(f"ERROR: No window found matching '{window_title}'")
-        print("Make sure the game is running.")
-        sys.exit(1)
+        print(f"ERROR: no window matching '{args.window}'. Make sure the game is running.")
+        return
 
     buf = ctypes.create_unicode_buffer(256)
     user32.GetWindowTextW(hwnd, buf, 256)
-    print(f"Found window: '{buf.value}'")
+    print(f"Window: '{buf.value}'")
+    print(f"Output: {OUTPUT_DIR} ({existing} existing)")
+    print(f"Settings: interval={args.interval}s limit={args.limit} diff_threshold={DIFF_THRESHOLD}")
+    print("Press Ctrl+C to stop.\n")
 
     count = 0
+    skipped = 0
+    last_gray = None
+
     try:
-        while count < limit:
-            ts = int(time.time() * 1000)
-            data = capture_window(hwnd)
-            if not data:
+        while count < args.limit:
+            frame = capture_window(hwnd)
+            if frame is None:
                 print("  (empty capture, window minimized?)")
-                time.sleep(interval)
+                time.sleep(args.interval)
                 continue
 
-            filename = f"live_{ts}.png"
-            (OUTPUT_DIR / filename).write_bytes(data)
-            count += 1
-            if count % 10 == 0:
-                print(f"  captured {count}/{limit}...")
-            time.sleep(interval)
-    except KeyboardInterrupt:
-        print(f"\nStopped by user.")
+            # Frame-diff dedup: skip near-identical frames
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if last_gray is not None:
+                diff = cv2.absdiff(gray, last_gray)
+                if np.mean(diff) < DIFF_THRESHOLD:
+                    skipped += 1
+                    time.sleep(0.2)
+                    continue
+            last_gray = gray
 
-    print(f"\nDone. Captured {count} screenshots.")
-    print(f"Total in dataset: {len(list(OUTPUT_DIR.glob('*.png')))} images")
-    print(f"\nNext: label with AnyLabeling → python scripts/train_yolo.py")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            filename = f"headpat_{ts}.jpg"
+            cv2.imwrite(str(OUTPUT_DIR / filename), frame,
+                        [cv2.IMWRITE_JPEG_QUALITY, 98])
+            count += 1
+            print(f"  [{count:03d}/{args.limit}] {filename}  {frame.shape[1]}x{frame.shape[0]}")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("\nStopped by user.")
+
+    total = len(list(OUTPUT_DIR.glob("*.jpg"))) + len(list(OUTPUT_DIR.glob("*.png")))
+    print(f"\nCaptured {count} frames ({skipped} duplicates skipped)")
+    print(f"Total in dataset: {total} images")
+    print(f"\nNext: label with AnyLabeling -> python scripts/train_yolo.py")
 
 
 if __name__ == "__main__":
