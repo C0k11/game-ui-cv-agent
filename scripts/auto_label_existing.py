@@ -18,17 +18,21 @@ import numpy as np
 DATASET_ROOT = r"D:\Project\ml_cache\models\yolo\dataset"
 CLASS_ID = 0
 
-# Tuned from Emoticon_Action.png HSV analysis: bright saturated yellow only
-LOWER_YELLOW = np.array([20, 150, 180])
+# Measured from actual in-game pills: orange-yellow H~13, not pure yellow H~25
+LOWER_YELLOW = np.array([5, 80, 150])
 UPPER_YELLOW = np.array([35, 255, 255])
-MIN_CONTOUR_AREA = 200    # real bubbles are 500-900px area
-MERGE_DIST = 60           # merge contours within this pixel distance
-# Final box size constraints (pixels)
-MIN_BOX_W, MAX_BOX_W = 15, 120
-MIN_BOX_H, MAX_BOX_H = 10, 80
-# ROI: exclude top UI bar and bottom toolbar (fractions of image height)
+MIN_CONTOUR_AREA = 500    # pills are 700-2000px; UI panels >3000; dots <200
+MAX_CONTOUR_AREA = 3000
+MERGE_DIST = 50           # merge contour segments of same pill
+# Final box size constraints (pixels at 1602x894)
+MIN_BOX_W, MAX_BOX_W = 40, 130
+MIN_BOX_H, MAX_BOX_H = 15, 45
+MIN_ASPECT = 1.8          # pills are strongly elongated (measured 2.0-3.7)
+MAX_ASPECT = 5.0
+# ROI: exclude top UI bar, bottom toolbar, and left sidebar
 ROI_TOP_FRAC = 0.12
-ROI_BOT_FRAC = 0.85
+ROI_BOT_FRAC = 0.88
+ROI_LEFT_FRAC = 0.10      # exclude left sidebar (指定訪問/隨機訪問)
 
 
 def _merge_boxes(boxes, dist):
@@ -63,34 +67,37 @@ def _merge_boxes(boxes, dist):
 
 def detect_headpat_bubbles(frame):
     h, w = frame.shape[:2]
-    # Crop to game area (exclude UI bars)
+    # Crop to game area (exclude UI bars and left sidebar)
     y_top, y_bot = int(h * ROI_TOP_FRAC), int(h * ROI_BOT_FRAC)
-    roi = frame[y_top:y_bot, :]
+    x_left = int(w * ROI_LEFT_FRAC)
+    roi = frame[y_top:y_bot, x_left:]
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, LOWER_YELLOW, UPPER_YELLOW)
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # Aggressive close to merge pill segments, then open to remove noise
+    kernel_close = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close, iterations=3)
+    kernel_open = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     raw_boxes = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area < MIN_CONTOUR_AREA:
+        if area < MIN_CONTOUR_AREA or area > MAX_CONTOUR_AREA:
             continue
         x, y, bw, bh = cv2.boundingRect(cnt)
         # Translate back to full-image coordinates
-        raw_boxes.append((x, y + y_top, x + bw, y + y_top + bh))
+        raw_boxes.append((x + x_left, y + y_top, x + x_left + bw, y + y_top + bh))
 
-    # Merge nearby boxes (starburst creates multiple contour segments)
-    merged = _merge_boxes(raw_boxes, MERGE_DIST)
-
-    # Filter by final box size
+    # Filter by final box size and aspect ratio (no merge — morphological
+    # close already connects segments; separate pills should stay separate)
     boxes = []
-    for x1, y1, x2, y2 in merged:
+    for x1, y1, x2, y2 in raw_boxes:
         bw, bh = x2 - x1, y2 - y1
-        if MIN_BOX_W <= bw <= MAX_BOX_W and MIN_BOX_H <= bh <= MAX_BOX_H:
+        aspect = bw / max(bh, 1)
+        if (MIN_BOX_W <= bw <= MAX_BOX_W and MIN_BOX_H <= bh <= MAX_BOX_H
+                and MIN_ASPECT <= aspect <= MAX_ASPECT):
             boxes.append((x1, y1, x2, y2))
     return boxes
 
