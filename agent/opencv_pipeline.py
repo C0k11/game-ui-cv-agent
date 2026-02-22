@@ -544,18 +544,35 @@ class PipelineController:
     # -----------------------------------------------------------------------
 
     def _handle_startup(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Close startup popups/notices until we reach the lobby."""
+        """Close startup popups/notices until we reach the lobby.
+
+        Also detects if we're already in a known screen (cafe, lobby, subscreen)
+        and fast-forwards to the correct phase instead of blindly tapping.
+        """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(500, "Pipeline(startup): waiting for screenshot.")
 
-        # Lobby detection: _is_lobby() requires 3+ nav bar templates matched,
-        # which is robust enough to avoid false positives on loading screens.
-        # Check from tick 1 so we skip ahead immediately if starting from lobby.
+        # Fast-forward: already in cafe → skip to CAFE_EARNINGS
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] Cafe detected during STARTUP, jumping to CAFE_EARNINGS.")
+            self._cafe_confirmed = True
+            self._cafe_actually_entered = True
+            self._enter_phase(Phase.CAFE_EARNINGS)
+            return self._wait(200, "Pipeline(startup): cafe detected, jumping to CAFE_EARNINGS.")
+
+        # Fast-forward: already in lobby
         if self._is_lobby(screenshot_path):
             print("[Pipeline] Lobby detected, startup complete.")
             self._advance_phase()
             return self._wait(300, "Pipeline(startup): lobby detected, advancing.")
+
+        # Fast-forward: on a subscreen (schedule, mission, etc.) → go Home
+        if self._is_subscreen(screenshot_path):
+            print("[Pipeline] Subscreen detected during STARTUP, navigating Home.")
+            act = self._try_go_back(screenshot_path, "Pipeline(startup)")
+            if act is not None:
+                return act
 
         # Try confirm button (skip dialog) — high confidence only
         confirm_roi = (int(sw * 0.30), int(sh * 0.50), int(sw * 0.85), int(sh * 0.98))
@@ -584,8 +601,8 @@ class PipelineController:
             return self._click(best.center[0], best.center[1],
                 f"Pipeline(startup): close popup. template={best.template} score={best.score:.3f}")
 
-        # Try tap-to-start template
-        m = self._match(screenshot_path, "点击开始.png", min_score=0.30)
+        # Try tap-to-start template — require 0.50+ to avoid false positives
+        m = self._match(screenshot_path, "点击开始.png", min_score=0.50)
         if m is not None:
             return self._click(sw // 2, int(sh * 0.82),
                 f"Pipeline(startup): tap to start (template). score={m.score:.3f}")
@@ -603,6 +620,14 @@ class PipelineController:
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(lobby): no screenshot.")
+
+        # PRIORITY 0: Already in cafe → skip lobby entirely, jump to CAFE_EARNINGS
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] Cafe detected during LOBBY_CLEANUP, jumping to CAFE_EARNINGS.")
+            self._cafe_confirmed = True
+            self._cafe_actually_entered = True
+            self._enter_phase(Phase.CAFE_EARNINGS)
+            return self._wait(200, "Pipeline(lobby): cafe detected, jumping to CAFE_EARNINGS.")
 
         # PRIORITY 1: Check lobby FIRST — if nav bar visible, advance
         lobby_detected = self._is_lobby(screenshot_path)
@@ -793,16 +818,7 @@ class PipelineController:
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             if ss == "confirming":
-                # Check for 取消 button → "隔壁咖啡廳" warning (student in other cafe)
-                m_cancel = self._match(screenshot_path, "取消（可点Esc）.png",
-                    roi=confirm_roi, min_score=0.55)
-                if m_cancel is not None:
-                    # Cancel and retry with next student
-                    self._state.invite_skip += 1
-                    self._state.sub_state = "picking"
-                    return {"action": "back",
-                            "reason": f"Pipeline(cafe_invite): cancel 隔壁 warning, skip+={self._state.invite_skip}",
-                            "_pipeline": True}
+                # 隔壁咖啡廳 warning or normal confirm → always click 確認 to proceed
                 self._state.sub_state = "done"
             elif ss == "sort_confirming":
                 self._state.sub_state = "check_direction"
@@ -1087,6 +1103,12 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
+        # Dismiss fullscreen popups (羈絆升級 Rank Up, etc.) — no X or confirm button
+        # These appear after patting a character; just tap anywhere to dismiss.
+        if not self._is_cafe_interior(screenshot_path):
+            return self._click(sw // 2, sh // 2,
+                f"Pipeline(headpat): tap to dismiss fullscreen popup (tick {self._state.ticks}).")
+
         # ── Detect emoticons: YOLO (primary) → VLM (fallback) ──
         emoticons: Optional[List[Tuple[int, int]]] = None
         detector_name = "none"
@@ -1143,7 +1165,7 @@ class PipelineController:
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(cafe_switch): no screenshot.")
 
-        # Close any popup first (Rank Up, etc.)
+        # Close any popup first (Rank Up / 羈絆升級, etc.)
         m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
         if m is not None:
             return self._click(m.center[0], m.center[1],
@@ -1156,28 +1178,27 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
 
-        # Click 移动至2号店 button (top-left area of cafe, no ROI — template is unique)
+        # Dismiss 羈絆升級 or reward screens (full-screen, tap anywhere to continue)
+        # These screens have no X button and no confirm button — just tap center
+        if not self._is_cafe_interior(screenshot_path) and not self._is_lobby(screenshot_path):
+            if self._state.ticks >= 2:
+                return self._click(sw // 2, sh // 2,
+                    f"Pipeline(cafe_switch): tap to dismiss fullscreen popup (tick {self._state.ticks}).")
+
+        # Click 移动至2号店 button
         m = self._match(screenshot_path, "移动至2号店.png", min_score=0.50)
         if m is not None:
             if self._state.ticks >= 8:
-                # Clicked 8+ times but still seeing button → click isn't working
                 print("[Pipeline] cafe_switch: clicked 8 times but button persists, skipping.")
                 self._advance_phase()
                 return self._wait(300, "Pipeline(cafe_switch): click not working, skipping.")
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
 
-        # Button disappeared → we either switched successfully or it's not available
-        if self._state.ticks >= 2:
-            # Give it a couple ticks to detect the new cafe
-            self._advance_phase()
-            return self._wait(500, "Pipeline(cafe_switch): button gone, advancing.")
-
-        # If button not found on first tick, wait a bit
+        # Button not found — wait a few ticks then advance
         if self._state.ticks >= 5:
-            print("[Pipeline] cafe_switch: button not found, skipping.")
             self._advance_phase()
-            return self._wait(300, "Pipeline(cafe_switch): timeout, skipping.")
+            return self._wait(300, "Pipeline(cafe_switch): button not found, advancing.")
 
         return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
 
