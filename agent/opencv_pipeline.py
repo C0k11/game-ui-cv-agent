@@ -1091,24 +1091,23 @@ class PipelineController:
         emoticons: Optional[List[Tuple[int, int]]] = None
         detector_name = "none"
 
-        # Try YOLO first (~5-10ms, trained model required)
+        # Try YOLO first (~1ms GPU, trained model required)
         if self._yolo is not None:
             try:
-                yolo_results = self._yolo.detect_headpat_bubbles(screenshot_path, conf=0.5)
-                if yolo_results:
-                    emoticons = yolo_results
-                    detector_name = "YOLO"
-                    print(f"[Pipeline] headpat YOLO: found {len(emoticons)} bubbles")
+                yolo_results = self._yolo.detect_headpat_bubbles(screenshot_path, conf=0.35)
+                emoticons = yolo_results  # [] means "ran, found nothing"; distinguishes from None
+                detector_name = "YOLO"
+                print(f"[Pipeline] headpat YOLO: found {len(emoticons)} bubbles")
             except Exception as e:
                 print(f"[Pipeline] headpat YOLO error: {e}")
 
-        # Fallback to VLM (~1-2s) if YOLO didn't find anything or isn't available
-        if emoticons is None or (not emoticons and self._yolo is None):
+        # Fallback to VLM (~1-2s) only if YOLO is not available
+        if emoticons is None:
             vlm_result = self._vlm_detect_emoticons(screenshot_path, sw, sh)
             if vlm_result is not None:
                 emoticons = vlm_result
                 detector_name = "VLM"
-            elif emoticons is None:
+            else:
                 # Neither YOLO nor VLM available
                 print("[Pipeline] headpat: no detector available, skipping.")
                 self._advance_phase()
@@ -1133,7 +1132,7 @@ class PipelineController:
             if not already:
                 self._state.headpat_done.append((tx, ty))
                 return self._click(tx, ty,
-                    f"Pipeline(headpat): VLM click below emoticon at ({ex},{ey}).")
+                    f"Pipeline(headpat): {detector_name} click below emoticon at ({ex},{ey}).")
 
         self._advance_phase()
         return self._wait(200, "Pipeline(headpat): all emoticons done, advancing.")
