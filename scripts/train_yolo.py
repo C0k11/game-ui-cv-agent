@@ -1,4 +1,4 @@
-"""Train YOLOv8-Nano for Blue Archive UI detection.
+"""Train YOLO26-Nano for Blue Archive UI detection.
 
 Prerequisites:
     pip install ultralytics
@@ -14,7 +14,7 @@ from pathlib import Path
 
 DATASET_YAML = Path(r"D:\Project\ml_cache\models\yolo\dataset\data.yaml")
 OUTPUT_DIR = Path(r"D:\Project\ml_cache\models\yolo")
-PRETRAINED = "yolov8n.pt"  # Nano — 3.2M params, ~5-10ms/frame
+PRETRAINED = "yolo26n.pt"  # YOLO26 Nano — 2.4M params, NMS-free, ~39ms CPU ONNX
 
 
 def main():

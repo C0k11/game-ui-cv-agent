@@ -1,7 +1,9 @@
-"""YOLOv8-based object detector for Blue Archive UI elements.
+"""YOLO26-Nano object detector for Blue Archive UI elements.
 
 Phase 1: headpat_bubble detection in cafe.
 Future: skill_ui, boss_weakness, stun_gauge for Total Assault.
+
+YOLO26n: 2.4M params, NMS-free end-to-end, ~39ms CPU ONNX.
 
 Usage:
     from vision.yolo_detector import YoloDetector
