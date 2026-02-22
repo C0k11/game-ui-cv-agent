@@ -76,8 +76,9 @@ def _detect_yellow_markers(
     if img is None:
         return []
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    # Yellow range in HSV
-    lo = np.array([18, 120, 180], dtype=np.uint8)
+    # Yellow range in HSV — tightened to avoid furniture/decoration false positives.
+    # Real headpat bubbles are bright saturated yellow; furniture is duller.
+    lo = np.array([18, 180, 200], dtype=np.uint8)
     hi = np.array([35, 255, 255], dtype=np.uint8)
     mask = cv2.inRange(hsv, lo, hi)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -97,6 +98,12 @@ def _detect_yellow_markers(
             rx1, ry1, rx2, ry2 = safe_roi
             if cx < rx1 or cx > rx2 or cy < ry1 or cy > ry2:
                 continue
+        # Fill-ratio check: real bubbles are solid yellow blobs.
+        # Furniture has yellow mixed with other colors → low fill ratio.
+        roi_mask = mask[y:y+h, x:x+w]
+        fill_ratio = float(cv2.countNonZero(roi_mask)) / max(1, w * h)
+        if fill_ratio < 0.35:
+            continue
         out.append((x, y, x + w, y + h))
     out.sort(key=lambda b: (b[1], b[0]))
     return out[:12]
@@ -106,7 +113,7 @@ def _detect_yellow_markers(
 # Values are fractions of screen width/height.
 SAFE_ROI_LEFT   = 0.08   # skip left sidebar (指定訪問, 隨機訪問)
 SAFE_ROI_RIGHT  = 0.92   # skip right edge (gear, home buttons)
-SAFE_ROI_TOP    = 0.12   # skip top resource bar + cafe header
+SAFE_ROI_TOP    = 0.15   # skip top resource bar + cafe header + timer icon
 SAFE_ROI_BOTTOM = 0.78   # skip bottom menu (編輯模式, 禮物, etc.)
 
 
@@ -245,7 +252,11 @@ class PipelineController:
         self._state.ticks += 1
 
         # Timeout → skip to next phase
-        if self._state.ticks > self.cfg.max_ticks_per_phase:
+        # Headpat phases need more ticks for pan-and-scan (5 viewports × ~5 ticks each)
+        phase_tick_limit = self.cfg.max_ticks_per_phase
+        if self._phase in (Phase.CAFE_HEADPAT, Phase.CAFE_2_HEADPAT):
+            phase_tick_limit = 60
+        if self._state.ticks > phase_tick_limit:
             print(f"[Pipeline] Phase {self._phase.name} timed out after {self._state.ticks} ticks, skipping.")
             self._advance_phase()
             if self._phase in (Phase.IDLE, Phase.DONE):
@@ -1143,17 +1154,40 @@ class PipelineController:
             self._advance_phase()
             return self._wait(200, "Pipeline(headpat): timeout, advancing.")
 
-        # ── Handle popups that appear after patting ──
-        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+        # ── Close MomoTalk / popups that may still be open ──
+        # MomoTalk can stay open after invite phase; its yellow level badges
+        # trigger massive HSV false positives. Close it first.
+        close_roi = (int(sw * 0.30), int(sh * 0.01), int(sw * 0.80), int(sh * 0.20))
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=close_roi, min_score=0.70)
         if m is not None:
             return self._click(m.center[0], m.center[1],
-                f"Pipeline(headpat): close popup. score={m.score:.3f}")
+                f"Pipeline(headpat): close popup/MomoTalk. score={m.score:.3f}")
+
+        # Also check for a wider close button area (羈絆升級 popups, etc.)
+        wide_close_roi = (int(sw * 0.45), 0, sw, int(sh * 0.30))
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=wide_close_roi, min_score=0.80)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(headpat): close wide popup. score={m.score:.3f}")
 
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
         m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
+
+        # Detect MomoTalk still open (邀請 button visible) → close it
+        momo_invite_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.85))
+        m_momo = self._match(screenshot_path, "邀请.png", roi=momo_invite_roi, min_score=0.55)
+        if m_momo is not None:
+            # MomoTalk is covering the screen — find and click its X
+            momo_x_roi = (int(sw * 0.30), int(sh * 0.01), int(sw * 0.80), int(sh * 0.15))
+            m_x = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=momo_x_roi, min_score=0.50)
+            if m_x is not None:
+                return self._click(m_x.center[0], m_x.center[1],
+                    f"Pipeline(headpat): close MomoTalk (邀請 visible). score={m_x.score:.3f}")
+            # X not found at expected position, try pressing Escape
+            return {"action": "back", "reason": "Pipeline(headpat): MomoTalk open, pressing Escape.", "_pipeline": True}
 
         # Dismiss fullscreen popups (羈絆升級 Rank Up, etc.)
         if not self._is_cafe_interior(screenshot_path):
@@ -1206,16 +1240,12 @@ class PipelineController:
                 else:
                     self._state.sub_state = "pan_0"
             elif ss.startswith("scan_"):
-                # scan_N → next viewport or reset
+                # scan_N → reverse swipe back to center, then next viewport
                 try:
                     idx = int(ss.split("_")[1])
                 except (ValueError, IndexError):
                     idx = len(self._PAN_SCAN_VIEWPORTS)
-                next_idx = idx + 1
-                if next_idx < len(self._PAN_SCAN_VIEWPORTS):
-                    self._state.sub_state = f"pan_{next_idx}"
-                else:
-                    self._state.sub_state = "reset"
+                self._state.sub_state = f"reverse_{idx}"
             return self._wait(300, f"Pipeline(headpat): no new bubbles in {ss}, moving on.")
 
         # ── PAN states: swipe to expose a corner ──
@@ -1227,8 +1257,8 @@ class PipelineController:
                 return self._wait(200, "Pipeline(headpat): pan index error, done.")
 
             if idx >= len(self._PAN_SCAN_VIEWPORTS):
-                self._state.sub_state = "reset"
-                return self._wait(200, "Pipeline(headpat): all viewports done, resetting.")
+                self._state.sub_state = "done"
+                return self._wait(200, "Pipeline(headpat): all viewports done.")
 
             name, dx_frac, dy_frac = self._PAN_SCAN_VIEWPORTS[idx]
             cx, cy = sw // 2, sh // 2
@@ -1251,22 +1281,48 @@ class PipelineController:
                 idx = int(ss.split("_")[1])
             except (ValueError, IndexError):
                 idx = 0
-            # Wait 2 ticks (the sub_state persists across ticks since we set
-            # wait_N on the swipe tick, then scan_N after waiting)
             self._state.sub_state = f"scan_{idx}"
             return self._wait(800, f"Pipeline(headpat): waiting for swipe inertia (viewport {idx}).")
 
-        # ── RESET: swipe back to center ──
-        if ss == "reset":
-            # We don't know exact displacement, but the cafe has a "home" position.
-            # Just do a small tap in the center to stop any residual inertia,
-            # then advance. The next phase will handle the new position.
-            self._state.sub_state = "wait_reset"
-            return self._wait(300, "Pipeline(headpat): resetting view.")
-
-        if ss == "wait_reset":
+        # ── REVERSE states: swipe back to center after scanning a corner ──
+        # This prevents cumulative drift that would make later viewports wrong.
+        if ss.startswith("reverse_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                idx = 0
+            if idx < len(self._PAN_SCAN_VIEWPORTS):
+                name, dx_frac, dy_frac = self._PAN_SCAN_VIEWPORTS[idx]
+                cx, cy = sw // 2, sh // 2
+                # Reverse: swipe in the OPPOSITE direction
+                to_x = cx - int(sw * dx_frac)
+                to_y = cy - int(sh * dy_frac)
+                self._state.sub_state = f"rwait_{idx}"
+                print(f"[Pipeline] headpat: reversing from {name} ({cx},{cy})→({to_x},{to_y})")
+                return {
+                    "action": "swipe",
+                    "from": [cx, cy],
+                    "to": [to_x, to_y],
+                    "duration_ms": self._SWIPE_DURATION_MS,
+                    "reason": f"Pipeline(headpat): reverse swipe from {name} back to center.",
+                    "_pipeline": True,
+                }
+            # Index out of range → just advance
             self._state.sub_state = "done"
-            return self._wait(300, "Pipeline(headpat): reset done.")
+            return self._wait(200, "Pipeline(headpat): reverse index error, done.")
+
+        # ── RWAIT states: wait for reverse swipe inertia ──
+        if ss.startswith("rwait_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                idx = 0
+            next_idx = idx + 1
+            if next_idx < len(self._PAN_SCAN_VIEWPORTS):
+                self._state.sub_state = f"pan_{next_idx}"
+            else:
+                self._state.sub_state = "done"
+            return self._wait(600, f"Pipeline(headpat): reverse inertia settling (viewport {idx}).")
 
         # ── DONE ──
         if ss == "done":
