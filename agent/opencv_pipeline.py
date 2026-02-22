@@ -40,6 +40,12 @@ except ImportError:
     Cerebellum = None  # type: ignore
     TemplateMatch = None  # type: ignore
 
+try:
+    from vision.yolo_detector import YoloDetector, get_yolo_detector
+except ImportError:
+    YoloDetector = None  # type: ignore
+    get_yolo_detector = None  # type: ignore
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -141,6 +147,17 @@ class PipelineController:
         self.cfg = cfg or PipelineConfig()
         self._cerebellum = cerebellum
         self._vlm_engine = vlm_engine
+        # YOLO detector (primary headpat detector, falls back to VLM if not trained)
+        self._yolo: Optional[Any] = None
+        try:
+            if get_yolo_detector is not None:
+                self._yolo = get_yolo_detector()
+                if self._yolo is not None:
+                    print("[Pipeline] YOLO detector loaded for headpat.")
+                else:
+                    print("[Pipeline] YOLO model not found (not trained yet), using VLM fallback.")
+        except Exception as e:
+            print(f"[Pipeline] YOLO init failed: {e}")
         self._phase = Phase.IDLE
         self._state = StepState()
         self._phase_order: List[Phase] = [
@@ -1070,19 +1087,38 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # ── Detect emoticons via VLM ──
-        emoticons = self._vlm_detect_emoticons(screenshot_path, sw, sh)
-        if emoticons is None:
-            # VLM unavailable — skip headpat
-            print("[Pipeline] headpat: VLM engine not available, skipping.")
-            self._advance_phase()
-            return self._wait(200, "Pipeline(headpat): no VLM, advancing.")
+        # ── Detect emoticons: YOLO (primary) → VLM (fallback) ──
+        emoticons: Optional[List[Tuple[int, int]]] = None
+        detector_name = "none"
+
+        # Try YOLO first (~5-10ms, trained model required)
+        if self._yolo is not None:
+            try:
+                yolo_results = self._yolo.detect_headpat_bubbles(screenshot_path, conf=0.5)
+                if yolo_results:
+                    emoticons = yolo_results
+                    detector_name = "YOLO"
+                    print(f"[Pipeline] headpat YOLO: found {len(emoticons)} bubbles")
+            except Exception as e:
+                print(f"[Pipeline] headpat YOLO error: {e}")
+
+        # Fallback to VLM (~1-2s) if YOLO didn't find anything or isn't available
+        if emoticons is None or (not emoticons and self._yolo is None):
+            vlm_result = self._vlm_detect_emoticons(screenshot_path, sw, sh)
+            if vlm_result is not None:
+                emoticons = vlm_result
+                detector_name = "VLM"
+            elif emoticons is None:
+                # Neither YOLO nor VLM available
+                print("[Pipeline] headpat: no detector available, skipping.")
+                self._advance_phase()
+                return self._wait(200, "Pipeline(headpat): no detector, advancing.")
 
         if not emoticons:
             if self._state.ticks >= 3:
                 self._advance_phase()
-                return self._wait(200, "Pipeline(headpat): VLM found no emoticons, advancing.")
-            return self._wait(800, "Pipeline(headpat): VLM found nothing, retrying.")
+                return self._wait(200, f"Pipeline(headpat): {detector_name} found no emoticons, advancing.")
+            return self._wait(800, f"Pipeline(headpat): {detector_name} found nothing, retrying.")
 
         # Click one emoticon per tick. In isometric view, character body is
         # to the RIGHT of (and slightly below) the yellow icon.
