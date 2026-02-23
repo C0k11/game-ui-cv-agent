@@ -844,6 +844,31 @@ class PipelineController:
             self._advance_phase()
             return self._wait(300, "Pipeline(cafe_invite): timeout, advancing.")
 
+        # ── CLOSING MOMOTALK state ──
+        # After invite confirmed, MomoTalk may still be open (showing animation
+        # or student list). Close it before advancing to headpat.
+        if ss == "closing_momotalk":
+            # Try template X button first
+            close_roi = (int(sw * 0.30), int(sh * 0.01), int(sw * 0.80), int(sh * 0.20))
+            m_x = self._match(screenshot_path, "游戏内很多页面窗口的叉.png",
+                roi=close_roi, min_score=0.50)
+            if m_x is not None:
+                self._state.sub_state = "done"
+                return self._click(m_x.center[0], m_x.center[1],
+                    f"Pipeline(cafe_invite): close MomoTalk X. score={m_x.score:.3f}")
+            # Check if MomoTalk is still visible (邀請 button in student list)
+            momo_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.75))
+            m_inv = self._match(screenshot_path, "邀请.png", roi=momo_roi, min_score=0.55)
+            if m_inv is not None:
+                # Blind-click MomoTalk X at known position
+                x_btn_x = int(sw * 0.66)
+                x_btn_y = int(sh * 0.075)
+                return self._click(x_btn_x, x_btn_y,
+                    f"Pipeline(cafe_invite): blind-click MomoTalk X at ({x_btn_x},{x_btn_y}).")
+            # MomoTalk seems closed → advance
+            self._state.sub_state = "done"
+            return self._wait(300, f"Pipeline(cafe_invite): MomoTalk closed, advancing.")
+
         # ── DONE state ──
         if ss == "done":
             self._advance_phase()
@@ -855,7 +880,7 @@ class PipelineController:
         if m is not None:
             if ss == "confirming":
                 # 隔壁咖啡廳 warning or normal confirm → always click 確認 to proceed
-                self._state.sub_state = "done"
+                self._state.sub_state = "closing_momotalk"
             elif ss == "sort_confirming":
                 self._state.sub_state = "check_direction"
             # else: just dismiss (bag full, etc.) — keep current sub_state
@@ -1176,18 +1201,17 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # Detect MomoTalk still open (邀請 button visible) → close it
-        momo_invite_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.85))
+        # Detect MomoTalk still open (邀請 button or invitation animation).
+        # NEVER press Escape here — it exits the cafe entirely!
+        # Instead, blind-click the MomoTalk X at its known position.
+        momo_invite_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.75))
         m_momo = self._match(screenshot_path, "邀请.png", roi=momo_invite_roi, min_score=0.55)
         if m_momo is not None:
-            # MomoTalk is covering the screen — find and click its X
-            momo_x_roi = (int(sw * 0.30), int(sh * 0.01), int(sw * 0.80), int(sh * 0.15))
-            m_x = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=momo_x_roi, min_score=0.50)
-            if m_x is not None:
-                return self._click(m_x.center[0], m_x.center[1],
-                    f"Pipeline(headpat): close MomoTalk (邀請 visible). score={m_x.score:.3f}")
-            # X not found at expected position, try pressing Escape
-            return {"action": "back", "reason": "Pipeline(headpat): MomoTalk open, pressing Escape.", "_pipeline": True}
+            # MomoTalk X is always at top-right of dialog: ~66% width, ~7.5% height
+            x_btn_x = int(sw * 0.66)
+            x_btn_y = int(sh * 0.075)
+            return self._click(x_btn_x, x_btn_y,
+                f"Pipeline(headpat): blind-click MomoTalk X at ({x_btn_x},{x_btn_y}).")
 
         # Dismiss fullscreen popups (羈絆升級 Rank Up, etc.)
         if not self._is_cafe_interior(screenshot_path):
