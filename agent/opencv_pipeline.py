@@ -137,8 +137,15 @@ class Phase(Enum):
     SCHEDULE_ENTER = auto()
     SCHEDULE_EXECUTE = auto()
     SCHEDULE = auto()          # legacy alias
-    CLUB = auto()
-    BOUNTIES = auto()
+    CLUB_ENTER = auto()        # navigate to club from lobby
+    CLUB_CLAIM = auto()        # claim AP reward inside club
+    CLUB = auto()              # legacy alias
+    CAMPAIGN_ENTER = auto()    # lobby → click 業務區
+    CAMPAIGN_BOUNTIES = auto() # 悬赏通缉 sweep loop
+    CAMPAIGN_SCRIMMAGES = auto()  # 学院交流会 sweep loop
+    CAMPAIGN_PVP = auto()      # 战术对抗赛 claim + optional fight
+    CAMPAIGN_EXIT = auto()     # back to lobby from campaign
+    BOUNTIES = auto()          # legacy alias
     CRAFT = auto()
     MAIL_TASKS = auto()
     DONE = auto()
@@ -206,9 +213,14 @@ class PipelineController:
             Phase.CAFE_EXIT,
             Phase.SCHEDULE_ENTER,
             Phase.SCHEDULE_EXECUTE,
+            Phase.CLUB_ENTER,
+            Phase.CLUB_CLAIM,
+            Phase.CAMPAIGN_ENTER,
+            Phase.CAMPAIGN_BOUNTIES,
+            Phase.CAMPAIGN_SCRIMMAGES,
+            Phase.CAMPAIGN_PVP,
+            Phase.CAMPAIGN_EXIT,
             # Future phases:
-            # Phase.CLUB,
-            # Phase.BOUNTIES,
             # Phase.CRAFT,
             # Phase.MAIL_TASKS,
             Phase.DONE,
@@ -358,6 +370,13 @@ class PipelineController:
             Phase.CAFE_EXIT: self._handle_cafe_exit,
             Phase.SCHEDULE_ENTER: self._handle_schedule_enter,
             Phase.SCHEDULE_EXECUTE: self._handle_schedule_execute,
+            Phase.CLUB_ENTER: self._handle_club_enter,
+            Phase.CLUB_CLAIM: self._handle_club_claim,
+            Phase.CAMPAIGN_ENTER: self._handle_campaign_enter,
+            Phase.CAMPAIGN_BOUNTIES: self._handle_campaign_bounties,
+            Phase.CAMPAIGN_SCRIMMAGES: self._handle_campaign_scrimmages,
+            Phase.CAMPAIGN_PVP: self._handle_campaign_pvp,
+            Phase.CAMPAIGN_EXIT: self._handle_campaign_exit,
         }.get(self._phase)
 
     # -- Cerebellum helpers --
@@ -1135,35 +1154,35 @@ class PipelineController:
     # -- Headpat handler -------------------------------------------------------
 
     # -- Pan-and-Scan viewport definitions ------------------------------------
-    # Each viewport: (name, swipe_dx_frac, swipe_dy_frac)
-    # dx/dy are fractions of screen size for the swipe delta (from center).
-    # Negative dx = swipe left = expose right side of map, etc.
+    # 2-point diagonal: zoom out first, then one swipe left (covers left half
+    # = bottom-left + top-left) and one swipe right (covers right half =
+    # top-right + bottom-right).  Half the ticks of the old 4-corner approach.
     _PAN_SCAN_VIEWPORTS = [
-        # ("center", 0, 0),  — initial view, no swipe needed
-        ("top_right",    -0.30, +0.20),   # swipe left-down → expose top-right
-        ("bottom_right", -0.30, -0.20),   # swipe left-up   → expose bottom-right
-        ("bottom_left",  +0.30, -0.20),   # swipe right-up  → expose bottom-left
-        ("top_left",     +0.30, +0.20),   # swipe right-down → expose top-left
+        ("left_half",  +0.35, 0.0),   # swipe right → expose left side of map
+        ("right_half", -0.35, 0.0),   # swipe left  → expose right side of map
     ]
     _SWIPE_DURATION_MS = 500  # slow swipe to avoid map inertia fly-away
+    _ZOOM_OUT_CLICKS = -5     # mouse wheel clicks to zoom out (negative = zoom out)
 
     def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Tap all students with yellow interaction markers using HSV pan-and-scan.
 
         Strategy:
-        1. Define a "safe zone" ROI in the center of the screen that avoids all
-           UI chrome (top bar, bottom menu, side buttons).
-        2. Use HSV yellow detection ONLY inside this safe zone.
-        3. Pan the cafe map to 5 viewports (center + 4 corners) by swiping,
-           scanning each viewport for yellow bubbles.
+        1. Zoom out to minimum (mouse wheel scroll) for maximum visibility.
+        2. Define a "safe zone" ROI that avoids UI chrome.
+        3. Use HSV yellow detection ONLY inside this safe zone.
+        4. Pan the cafe map to 3 viewports (center + left half + right half)
+           by swiping, scanning each for yellow bubbles.
 
         Sub-state machine:
-          "scan_center"   → initial scan at default view
-          "pan_N"         → swiping to viewport N (0-3)
+          "zoom_out"      → scroll wheel to zoom out for max visibility
+          "zoom_wait"     → wait for zoom animation to settle
+          "scan_center"   → initial scan at default (zoomed-out) view
+          "pan_N"         → swiping to viewport N (0=left_half, 1=right_half)
           "wait_N"        → waiting for swipe inertia to settle
           "scan_N"        → scanning viewport N for bubbles
-          "reset"         → swiping back to center
-          "wait_reset"    → waiting for reset swipe inertia
+          "reverse_N"     → swiping back to center after scanning
+          "rwait_N"       → waiting for reverse swipe inertia
           "done"          → all viewports scanned, advance
         """
         sw, sh = self._get_size(screenshot_path)
@@ -1239,8 +1258,25 @@ class PipelineController:
 
         # Initialize sub_state
         if ss == "":
+            self._state.sub_state = "zoom_out"
+            ss = "zoom_out"
+
+        # ── ZOOM OUT: scroll wheel to zoom out for max cafe visibility ──
+        if ss == "zoom_out":
+            self._state.sub_state = "zoom_wait"
+            cx, cy = sw // 2, sh // 2
+            print(f"[Pipeline] headpat: zooming out ({self._ZOOM_OUT_CLICKS} clicks) at ({cx},{cy})")
+            return {
+                "action": "scroll",
+                "target": [cx, cy],
+                "clicks": self._ZOOM_OUT_CLICKS,
+                "reason": f"Pipeline(headpat): zoom out cafe view ({self._ZOOM_OUT_CLICKS} clicks).",
+                "_pipeline": True,
+            }
+
+        if ss == "zoom_wait":
             self._state.sub_state = "scan_center"
-            ss = "scan_center"
+            return self._wait(800, "Pipeline(headpat): waiting for zoom animation to settle.")
 
         # ── SCAN states: detect and click yellow bubbles ──
         if ss.startswith("scan_"):
@@ -1578,6 +1614,279 @@ class PipelineController:
 
         # Let VLM handle room selection for the first several ticks
         return None
+
+    # -----------------------------------------------------------------------
+    # Club handlers
+    # -----------------------------------------------------------------------
+
+    def _handle_club_enter(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Navigate from lobby to club (社交) to claim daily AP."""
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(club_enter): no screenshot.")
+
+        if self._state.ticks >= 15:
+            self._advance_phase()
+            return self._wait(300, "Pipeline(club_enter): timeout, skipping.")
+
+        # Close popups
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.70)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(club_enter): close popup. score={m.score:.3f}")
+
+        # Confirm dialogs
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(club_enter): confirm. score={m.score:.3f}")
+
+        # Already inside club? (not lobby, is subscreen)
+        if not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path):
+            if self._state.ticks >= 2:
+                self._advance_phase()
+                return self._wait(500, "Pipeline(club_enter): inside club, advancing to claim.")
+
+        # In lobby → click club button
+        if self._is_lobby(screenshot_path):
+            roi_nav = (0, int(sh * 0.80), sw, sh)
+            m = self._match(screenshot_path, "社交.png", roi=roi_nav, min_score=0.40)
+            if m is not None:
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(club_enter): click club. score={m.score:.3f}")
+            if self._state.ticks >= 8:
+                print("[Pipeline] club_enter: club button not found, skipping.")
+                self._advance_phase()
+                return self._wait(300, "Pipeline(club_enter): club not found, skipping.")
+            return self._wait(400, "Pipeline(club_enter): looking for club button.")
+
+        return self._wait(500, "Pipeline(club_enter): waiting.")
+
+    def _handle_club_claim(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Inside club: dismiss AP reward popup, then exit back to lobby.
+
+        The club page auto-shows a +10 AP popup on entry. Just tap to dismiss,
+        then click back/Home to return to lobby.
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(club_claim): no screenshot.")
+
+        if self._state.ticks >= 15:
+            self._advance_phase()
+            return self._wait(300, "Pipeline(club_claim): timeout, advancing.")
+
+        # If back in lobby, we're done
+        if self._is_lobby(screenshot_path):
+            print("[Pipeline] club_claim: back in lobby.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(club_claim): back in lobby, done.")
+
+        # Close any popup / dismiss reward
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.65)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(club_claim): close popup. score={m.score:.3f}")
+
+        # Confirm
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(club_claim): confirm. score={m.score:.3f}")
+
+        # Tap to dismiss any fullscreen reward overlay (first few ticks)
+        if self._state.ticks <= 3:
+            return self._click(int(sw * 0.10), int(sh * 0.10),
+                "Pipeline(club_claim): tap to dismiss reward overlay.")
+
+        # Try to go back to lobby
+        act = self._try_go_back(screenshot_path, "Pipeline(club_claim)")
+        if act is not None:
+            return act
+
+        return self._wait(400, "Pipeline(club_claim): waiting.")
+
+    # -----------------------------------------------------------------------
+    # Campaign handlers
+    # -----------------------------------------------------------------------
+
+    def _handle_campaign_enter(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Navigate from lobby into the Campaign (業務區) menu.
+
+        Sub-states:
+          "" (init)     → in lobby, click 業務區 / Campaign button
+          "inside"      → inside campaign menu, advance to bounties
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(campaign_enter): no screenshot.")
+
+        if self._state.ticks >= 20:
+            self._advance_phase()
+            return self._wait(300, "Pipeline(campaign_enter): timeout, skipping.")
+
+        # Close popups
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.70)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(campaign_enter): close popup. score={m.score:.3f}")
+
+        # Confirm
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(campaign_enter): confirm. score={m.score:.3f}")
+
+        # Already inside campaign sub-screen?
+        if not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path):
+            if self._state.ticks >= 2:
+                self._advance_phase()
+                return self._wait(300, "Pipeline(campaign_enter): inside campaign, advancing.")
+
+        # In lobby → defer to VLM for clicking campaign button
+        # (we don't have a 業務區 template yet)
+        if self._is_lobby(screenshot_path):
+            # Return None to let VLM handle navigation
+            return None
+
+        return self._wait(500, "Pipeline(campaign_enter): waiting.")
+
+    def _handle_campaign_bounties(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """悬赏通缉 (Bounties) sweep loop.
+
+        Strategy: Click each bounty type → select highest difficulty →
+        sweep max → confirm → close results → next type → back.
+
+        For now, defer to VLM since we need specific templates.
+        Return None to let VLM handle.
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(bounties): no screenshot.")
+
+        if self._state.ticks >= 40:
+            print("[Pipeline] bounties: timeout, advancing.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(bounties): timeout, advancing.")
+
+        # If back in lobby, skip remaining campaign phases
+        if self._is_lobby(screenshot_path):
+            print("[Pipeline] bounties: back in lobby unexpectedly.")
+            self._enter_phase(Phase.CAMPAIGN_EXIT)
+            return self._wait(300, "Pipeline(bounties): back in lobby.")
+
+        # Close popups / confirm dialogs
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.70)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(bounties): close popup. score={m.score:.3f}")
+
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(bounties): confirm. score={m.score:.3f}")
+
+        # Defer to VLM for navigation and sweep actions
+        return None
+
+    def _handle_campaign_scrimmages(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """学院交流会 (Scrimmages) sweep loop.
+
+        Same pattern as bounties. Defer to VLM.
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(scrimmages): no screenshot.")
+
+        if self._state.ticks >= 40:
+            print("[Pipeline] scrimmages: timeout, advancing.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(scrimmages): timeout, advancing.")
+
+        if self._is_lobby(screenshot_path):
+            print("[Pipeline] scrimmages: back in lobby unexpectedly.")
+            self._enter_phase(Phase.CAMPAIGN_EXIT)
+            return self._wait(300, "Pipeline(scrimmages): back in lobby.")
+
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.70)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(scrimmages): close popup. score={m.score:.3f}")
+
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(scrimmages): confirm. score={m.score:.3f}")
+
+        return None
+
+    def _handle_campaign_pvp(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """战术对抗赛 (Tactical PvP): claim rewards + optional battle.
+
+        Strategy:
+          1. Enter PvP screen
+          2. Click claim reward buttons (time reward + daily reward)
+          3. Optional: fight one match (for daily quest)
+          4. Exit
+
+        Defer to VLM for now.
+        """
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(pvp): no screenshot.")
+
+        if self._state.ticks >= 40:
+            print("[Pipeline] pvp: timeout, advancing.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(pvp): timeout, advancing.")
+
+        if self._is_lobby(screenshot_path):
+            print("[Pipeline] pvp: back in lobby unexpectedly.")
+            self._enter_phase(Phase.CAMPAIGN_EXIT)
+            return self._wait(300, "Pipeline(pvp): back in lobby.")
+
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.70)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(pvp): close popup. score={m.score:.3f}")
+
+        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(pvp): confirm. score={m.score:.3f}")
+
+        return None
+
+    def _handle_campaign_exit(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
+        """Exit campaign area back to lobby."""
+        sw, sh = self._get_size(screenshot_path)
+        if sw <= 0 or sh <= 0:
+            return self._wait(300, "Pipeline(campaign_exit): no screenshot.")
+
+        if self._state.ticks >= 15:
+            self._advance_phase()
+            return self._wait(300, "Pipeline(campaign_exit): timeout, advancing.")
+
+        # Already in lobby → done
+        if self._is_lobby(screenshot_path):
+            print("[Pipeline] campaign_exit: in lobby.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(campaign_exit): back in lobby, done.")
+
+        # Click Home button
+        m = self._match(screenshot_path, "Home按钮.png", min_score=0.60)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(campaign_exit): click Home. score={m.score:.3f}")
+
+        # Press Escape to go back
+        return {"action": "back", "reason": "Pipeline(campaign_exit): press ESC to go back.", "_pipeline": True}
 
     # -----------------------------------------------------------------------
     # Debug / status

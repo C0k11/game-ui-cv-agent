@@ -116,6 +116,8 @@ MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_VIRTUALDESK = 0x4000
+MOUSEEVENTF_WHEEL = 0x0800
+WHEEL_DELTA = 120
 
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
@@ -617,6 +619,40 @@ class WindowsInput:
                 INPUT(type=INPUT_KEYBOARD, ii=INPUT_I(ki=KEYBDINPUT(wVk=0, wScan=SC_SPACE, dwFlags=KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, time=0, dwExtraInfo=0))),
             ]
         )
+
+    def scroll_client(self, x: int, y: int, clicks: int = -3) -> None:
+        """Send mouse wheel scroll at client coordinates (x, y).
+
+        clicks > 0 = scroll up (zoom in), clicks < 0 = scroll down (zoom out).
+        Each click is WHEEL_DELTA (120) units.
+        """
+        self._focus()
+        sx, sy = self._client_to_screen(int(x), int(y))
+        try:
+            user32.SetCursorPos(int(sx), int(sy))
+        except Exception:
+            pass
+        time.sleep(0.05)
+        for _ in range(abs(clicks)):
+            delta = WHEEL_DELTA if clicks > 0 else -WHEEL_DELTA
+            _send_inputs(
+                [
+                    INPUT(
+                        type=INPUT_MOUSE,
+                        ii=INPUT_I(
+                            mi=MOUSEINPUT(
+                                dx=0,
+                                dy=0,
+                                mouseData=ctypes.c_ulong(delta & 0xFFFFFFFF),
+                                dwFlags=MOUSEEVENTF_WHEEL,
+                                time=0,
+                                dwExtraInfo=0,
+                            )
+                        ),
+                    ),
+                ]
+            )
+            time.sleep(0.08)
 
     def press_enter(self) -> None:
         self._focus()
