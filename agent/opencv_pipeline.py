@@ -802,6 +802,15 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_earnings): confirm earnings. score={m.score:.3f}")
 
+        # Check if earnings are 0% — no point clicking
+        earnings_roi = (int(sw * 0.75), int(sh * 0.80), sw, sh)
+        m_zero = self._match(screenshot_path, "咖啡厅收益为0.png", roi=earnings_roi, min_score=0.50)
+        if m_zero is not None:
+            self._state.earnings_claimed = True
+            self._advance_phase()
+            return self._wait(200,
+                f"Pipeline(cafe_earnings): earnings 0%, skipping. score={m_zero.score:.3f}")
+
         # Try cafe earnings button template
         m = self._match(screenshot_path, "咖啡厅收益按钮.png", min_score=0.40)
         if m is not None:
