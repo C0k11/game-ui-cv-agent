@@ -4,15 +4,18 @@ OpenCV-driven deterministic pipeline for Blue Archive daily routine.
 Architecture:
   - PipelineController: state machine that drives routine steps sequentially
   - PipelineStep (base): each step detects state, emits actions, checks completion
-  - VLM is NOT called here — only Cerebellum template matching + OpenCV color detection
+  - VLM is called for headpat emoticon detection (semantic understanding);
+    all other phases use Cerebellum template matching + OpenCV.
   - The parent agent (VlmPolicyAgent) calls pipeline.tick() each loop iteration;
-    if the pipeline returns an action, it is used directly (no VLM needed).
+    if the pipeline returns an action, it is used directly.
     If the pipeline returns None, VLM fallback kicks in.
 """
 
 from __future__ import annotations
 
+import json
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -37,6 +40,12 @@ except ImportError:
     Cerebellum = None  # type: ignore
     TemplateMatch = None  # type: ignore
 
+try:
+    from vision.yolo_detector import YoloDetector, get_yolo_detector
+except ImportError:
+    YoloDetector = None  # type: ignore
+    get_yolo_detector = None  # type: ignore
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,16 +56,29 @@ def _center(bbox) -> Tuple[int, int]:
     return int((x1 + x2) // 2), int((y1 + y2) // 2)
 
 
-def _detect_yellow_markers(screenshot_path: str, *, min_area: int = 80, max_area: int = 12000) -> List[Tuple[int, int, int, int]]:
-    """Detect yellow exclamation-mark interaction markers in cafe."""
+def _detect_yellow_markers(
+    screenshot_path: str,
+    *,
+    min_area: int = 80,
+    max_area: int = 12000,
+    safe_roi: Optional[Tuple[int, int, int, int]] = None,
+) -> List[Tuple[int, int, int, int]]:
+    """Detect yellow exclamation-mark interaction markers in cafe.
+
+    Args:
+        safe_roi: (x1, y1, x2, y2) absolute pixel region to restrict detection
+                  to. Only contours whose center falls inside this box are kept.
+                  This is the "safe zone" that avoids all UI chrome.
+    """
     if cv2 is None or np is None:
         return []
     img = cv2.imread(screenshot_path)
     if img is None:
         return []
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    # Yellow range in HSV
-    lo = np.array([18, 120, 180], dtype=np.uint8)
+    # Yellow range in HSV — tightened to avoid furniture/decoration false positives.
+    # Real headpat bubbles are bright saturated yellow; furniture is duller.
+    lo = np.array([18, 180, 200], dtype=np.uint8)
     hi = np.array([35, 255, 255], dtype=np.uint8)
     mask = cv2.inRange(hsv, lo, hi)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -71,9 +93,28 @@ def _detect_yellow_markers(screenshot_path: str, *, min_area: int = 80, max_area
         aspect = w / max(h, 1)
         if aspect > 3.0 or aspect < 0.2:
             continue
+        cx, cy = x + w // 2, y + h // 2
+        if safe_roi is not None:
+            rx1, ry1, rx2, ry2 = safe_roi
+            if cx < rx1 or cx > rx2 or cy < ry1 or cy > ry2:
+                continue
+        # Fill-ratio check: real bubbles are solid yellow blobs.
+        # Furniture has yellow mixed with other colors → low fill ratio.
+        roi_mask = mask[y:y+h, x:x+w]
+        fill_ratio = float(cv2.countNonZero(roi_mask)) / max(1, w * h)
+        if fill_ratio < 0.35:
+            continue
         out.append((x, y, x + w, y + h))
     out.sort(key=lambda b: (b[1], b[0]))
     return out[:12]
+
+
+# Safe ROI margins — avoids top resource bar, bottom menu, side buttons.
+# Values are fractions of screen width/height.
+SAFE_ROI_LEFT   = 0.08   # skip left sidebar (指定訪問, 隨機訪問)
+SAFE_ROI_RIGHT  = 0.92   # skip right edge (gear, home buttons)
+SAFE_ROI_TOP    = 0.15   # skip top resource bar + cafe header + timer icon
+SAFE_ROI_BOTTOM = 0.78   # skip bottom menu (編輯模式, 禮物, etc.)
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +130,8 @@ class Phase(Enum):
     CAFE_INVITE = auto()
     CAFE_HEADPAT = auto()
     CAFE_SWITCH = auto()       # move to cafe 2F
+    CAFE_2_EARNINGS = auto()   # collect earnings in cafe 2F
+    CAFE_2_INVITE = auto()     # invite student in cafe 2F
     CAFE_2_HEADPAT = auto()    # headpat in cafe 2F
     CAFE_EXIT = auto()
     SCHEDULE_ENTER = auto()
@@ -110,6 +153,7 @@ class StepState:
     last_click_xy: Optional[Tuple[int, int]] = None
     headpat_done: List[Tuple[int, int]] = field(default_factory=list)
     earnings_claimed: bool = False
+    invite_skip: int = 0  # students skipped due to 隔壁 warning
     last_popup_close_tick: int = -10  # tick at which last popup was closed
 
 
@@ -130,9 +174,22 @@ class PipelineConfig:
 class PipelineController:
     """Deterministic OpenCV pipeline for Blue Archive daily routine."""
 
-    def __init__(self, cerebellum: Optional[Any] = None, cfg: Optional[PipelineConfig] = None):
+    def __init__(self, cerebellum: Optional[Any] = None, cfg: Optional[PipelineConfig] = None,
+                 vlm_engine: Optional[Any] = None):
         self.cfg = cfg or PipelineConfig()
         self._cerebellum = cerebellum
+        self._vlm_engine = vlm_engine
+        # YOLO detector (primary headpat detector, falls back to VLM if not trained)
+        self._yolo: Optional[Any] = None
+        try:
+            if get_yolo_detector is not None:
+                self._yolo = get_yolo_detector()
+                if self._yolo is not None:
+                    print("[Pipeline] YOLO detector loaded for headpat.")
+                else:
+                    print("[Pipeline] YOLO model not found (not trained yet), using VLM fallback.")
+        except Exception as e:
+            print(f"[Pipeline] YOLO init failed: {e}")
         self._phase = Phase.IDLE
         self._state = StepState()
         self._phase_order: List[Phase] = [
@@ -143,6 +200,8 @@ class PipelineController:
             Phase.CAFE_INVITE,
             Phase.CAFE_HEADPAT,
             Phase.CAFE_SWITCH,
+            # CAFE_2_EARNINGS skipped: earnings are shared between cafe 1 and 2
+            Phase.CAFE_2_INVITE,
             Phase.CAFE_2_HEADPAT,
             Phase.CAFE_EXIT,
             Phase.SCHEDULE_ENTER,
@@ -193,7 +252,11 @@ class PipelineController:
         self._state.ticks += 1
 
         # Timeout → skip to next phase
-        if self._state.ticks > self.cfg.max_ticks_per_phase:
+        # Headpat phases need more ticks for pan-and-scan (5 viewports × ~5 ticks each)
+        phase_tick_limit = self.cfg.max_ticks_per_phase
+        if self._phase in (Phase.CAFE_HEADPAT, Phase.CAFE_2_HEADPAT):
+            phase_tick_limit = 60
+        if self._state.ticks > phase_tick_limit:
             print(f"[Pipeline] Phase {self._phase.name} timed out after {self._state.ticks} ticks, skipping.")
             self._advance_phase()
             if self._phase in (Phase.IDLE, Phase.DONE):
@@ -233,7 +296,8 @@ class PipelineController:
                     print(f"[Pipeline] Supervision says Lobby during LOBBY_CLEANUP (tick {self._state.ticks}), advancing to CAFE.")
                     self._advance_phase()
             elif self._phase in (Phase.CAFE_EARNINGS, Phase.CAFE_INVITE, Phase.CAFE_HEADPAT,
-                                Phase.CAFE_SWITCH, Phase.CAFE_2_HEADPAT):
+                                Phase.CAFE_SWITCH, Phase.CAFE_2_EARNINGS,
+                                Phase.CAFE_2_INVITE, Phase.CAFE_2_HEADPAT):
                 # We expected to be in cafe but supervision says lobby — cafe entry failed
                 print(f"[Pipeline] Supervision says Lobby but phase is {self._phase.name}, resetting to CAFE_EXIT.")
                 self._cafe_confirmed = False
@@ -288,7 +352,9 @@ class PipelineController:
             Phase.CAFE_INVITE: self._handle_cafe_invite,
             Phase.CAFE_HEADPAT: self._handle_cafe_headpat,
             Phase.CAFE_SWITCH: self._handle_cafe_switch,
-            Phase.CAFE_2_HEADPAT: self._handle_cafe_headpat,  # reuse same logic
+            Phase.CAFE_2_EARNINGS: self._handle_cafe_earnings,  # reuse
+            Phase.CAFE_2_INVITE: self._handle_cafe_invite,      # reuse (picks 2nd student)
+            Phase.CAFE_2_HEADPAT: self._handle_cafe_headpat,    # reuse
             Phase.CAFE_EXIT: self._handle_cafe_exit,
             Phase.SCHEDULE_ENTER: self._handle_schedule_enter,
             Phase.SCHEDULE_EXECUTE: self._handle_schedule_execute,
@@ -307,6 +373,97 @@ class PipelineController:
         if m.score < threshold:
             return None
         return m
+
+    def _find_all_matches(
+        self, screenshot_path: str, template: str, *,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        min_score: float = 0.50, nms_dist: int = 30,
+        use_color: bool = False,
+    ) -> List[TemplateMatch]:
+        """Find ALL occurrences of a template in the screenshot (not just the best).
+
+        Uses cv2.matchTemplate and non-maximum suppression to return multiple hits.
+        When use_color=True, matches on BGR image (better for color-specific templates).
+        """
+        if cv2 is None or np is None or self._cerebellum is None:
+            return []
+        info = self._cerebellum._load_template(str(template))
+        if info is None:
+            return []
+        tmpl_g = info.get("gray")
+        tmpl_mask = info.get("mask")
+        if tmpl_g is None:
+            return []
+
+        scr = self._cerebellum._imread(Path(screenshot_path).resolve(), cv2.IMREAD_COLOR)
+        if scr is None:
+            return []
+        th, tw = tmpl_g.shape[:2]
+        sh_full, sw_full = scr.shape[:2]
+
+        # Choose matching image: BGR (color) or grayscale
+        if use_color:
+            tmpl_bgr = info.get("bgr")
+            if tmpl_bgr is None:
+                return []
+            match_scr = scr.copy()
+            match_tmpl = tmpl_bgr
+        else:
+            match_scr = cv2.cvtColor(scr, cv2.COLOR_BGR2GRAY)
+            match_tmpl = tmpl_g
+
+        x_off, y_off = 0, 0
+        if roi is not None:
+            try:
+                x0, y0, x1, y1 = [int(v) for v in roi]
+                x0 = max(0, min(sw_full - 1, x0))
+                y0 = max(0, min(sh_full - 1, y0))
+                x1 = max(x0 + 1, min(sw_full, x1))
+                y1 = max(y0 + 1, min(sh_full, y1))
+                if (x1 - x0) >= tw and (y1 - y0) >= th:
+                    match_scr = match_scr[y0:y1, x0:x1]
+                    x_off, y_off = x0, y0
+            except Exception:
+                x_off, y_off = 0, 0
+
+        # Use mask (from alpha channel) when available for both color and grayscale.
+        # TM_CCORR_NORMED supports mask; TM_CCOEFF_NORMED does not.
+        use_mask = tmpl_mask is not None
+        method = cv2.TM_CCORR_NORMED if use_mask else cv2.TM_CCOEFF_NORMED
+        if use_mask:
+            res = cv2.matchTemplate(match_scr, match_tmpl, method, mask=tmpl_mask)
+        else:
+            res = cv2.matchTemplate(match_scr, match_tmpl, method)
+
+        # Find all locations above threshold
+        locs = np.where(res >= min_score)
+        results: List[TemplateMatch] = []
+        candidates = sorted(zip(locs[0], locs[1], res[locs]), key=lambda t: -t[2])
+
+        # Simple NMS: skip candidates too close to already-accepted ones
+        accepted: List[Tuple[int, int]] = []
+        for cy_raw, cx_raw, score_val in candidates:
+            cx_abs = int(cx_raw) + x_off + tw // 2
+            cy_abs = int(cy_raw) + y_off + th // 2
+            too_close = False
+            for ax, ay in accepted:
+                if abs(cx_abs - ax) < nms_dist and abs(cy_abs - ay) < nms_dist:
+                    too_close = True
+                    break
+            if too_close:
+                continue
+            accepted.append((cx_abs, cy_abs))
+            x1 = int(cx_raw) + x_off
+            y1 = int(cy_raw) + y_off
+            results.append(TemplateMatch(
+                template=str(template),
+                score=float(score_val),
+                bbox=(x1, y1, x1 + tw, y1 + th),
+                center=(cx_abs, cy_abs),
+            ))
+            if len(results) >= 20:  # cap results
+                break
+        return results
 
     def _click(self, x: int, y: int, reason: str) -> Dict[str, Any]:
         self._state.last_click_xy = (x, y)
@@ -396,15 +553,10 @@ class PipelineController:
     def _is_cafe_interior(self, screenshot_path: str) -> bool:
         """Check if we're inside the cafe.
         
-        ONLY use headpat template (unique to cafe).
-        DO NOT use yellow marker detection — yellow appears on many screens
-        (活動任務 立即前往 buttons, lobby event banners, etc.)
+        Uses cafe-specific templates. Does NOT use Emoticon_Action.png
+        (scores 0.94 on lobby without ROI — too many false positives).
         """
-        # Check for headpat marker via clean game sprite (Emoticon_Action.png)
-        m = self._match(screenshot_path, "Emoticon_Action.png", min_score=0.55)
-        if m is not None:
-            return True
-        # Fallback: screenshot-based headpat marker
+        # Screenshot-based headpat marker
         # Threshold 0.55: lobby false-positives score 0.39-0.43, cafe real matches should be 0.65+
         m = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
         if m is not None:
@@ -428,17 +580,35 @@ class PipelineController:
     # -----------------------------------------------------------------------
 
     def _handle_startup(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Close startup popups/notices until we reach the lobby."""
+        """Close startup popups/notices until we reach the lobby.
+
+        Also detects if we're already in a known screen (cafe, lobby, subscreen)
+        and fast-forwards to the correct phase instead of blindly tapping.
+        """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(500, "Pipeline(startup): waiting for screenshot.")
 
-        # Lobby detection: need at least 5 ticks before trusting _is_lobby()
-        # to avoid false positives on loading screens
-        if self._state.ticks >= 5 and self._is_lobby(screenshot_path):
+        # Fast-forward: already in cafe → skip to CAFE_EARNINGS
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] Cafe detected during STARTUP, jumping to CAFE_EARNINGS.")
+            self._cafe_confirmed = True
+            self._cafe_actually_entered = True
+            self._enter_phase(Phase.CAFE_EARNINGS)
+            return self._wait(200, "Pipeline(startup): cafe detected, jumping to CAFE_EARNINGS.")
+
+        # Fast-forward: already in lobby
+        if self._is_lobby(screenshot_path):
             print("[Pipeline] Lobby detected, startup complete.")
             self._advance_phase()
             return self._wait(300, "Pipeline(startup): lobby detected, advancing.")
+
+        # Fast-forward: on a subscreen (schedule, mission, etc.) → go Home
+        if self._is_subscreen(screenshot_path):
+            print("[Pipeline] Subscreen detected during STARTUP, navigating Home.")
+            act = self._try_go_back(screenshot_path, "Pipeline(startup)")
+            if act is not None:
+                return act
 
         # Try confirm button (skip dialog) — high confidence only
         confirm_roi = (int(sw * 0.30), int(sh * 0.50), int(sw * 0.85), int(sh * 0.98))
@@ -467,8 +637,8 @@ class PipelineController:
             return self._click(best.center[0], best.center[1],
                 f"Pipeline(startup): close popup. template={best.template} score={best.score:.3f}")
 
-        # Try tap-to-start template
-        m = self._match(screenshot_path, "点击开始.png", min_score=0.30)
+        # Try tap-to-start template — require 0.50+ to avoid false positives
+        m = self._match(screenshot_path, "点击开始.png", min_score=0.50)
         if m is not None:
             return self._click(sw // 2, int(sh * 0.82),
                 f"Pipeline(startup): tap to start (template). score={m.score:.3f}")
@@ -486,6 +656,14 @@ class PipelineController:
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(lobby): no screenshot.")
+
+        # PRIORITY 0: Already in cafe → skip lobby entirely, jump to CAFE_EARNINGS
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] Cafe detected during LOBBY_CLEANUP, jumping to CAFE_EARNINGS.")
+            self._cafe_confirmed = True
+            self._cafe_actually_entered = True
+            self._enter_phase(Phase.CAFE_EARNINGS)
+            return self._wait(200, "Pipeline(lobby): cafe detected, jumping to CAFE_EARNINGS.")
 
         # PRIORITY 1: Check lobby FIRST — if nav bar visible, advance
         lobby_detected = self._is_lobby(screenshot_path)
@@ -639,50 +817,345 @@ class PipelineController:
         return self._wait(200, "Pipeline(cafe_earnings): no earnings dialog, advancing.")
 
     def _handle_cafe_invite(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Use invite tickets to invite characters to cafe before headpat.
+        """Invite featured (精選) students via MomoTalk.
 
-        Flow: click 邀請券 button → select character → confirm → repeat.
-        If no invite button or after using tickets, advance to CAFE_HEADPAT.
+        Cafe 1 (CAFE_INVITE): invite 1st featured student.
+        Cafe 2 (CAFE_2_INVITE): invite 2nd featured student.
+
+        Sub-state machine:
+          "" (init)           → click invite ticket button in cafe
+          "momotalk_open"     → MomoTalk detected; check sort
+          "sort_opening"      → clicked sort dropdown, waiting for sort dialog
+          "sort_selecting"    → sort dialog open, click 精選 option
+          "sort_confirming"   → 精選 selected, click 確認
+          "check_direction"   → verify sort direction is descending (下排序)
+          "picking"           → find Nth featured student → click 邀請
+          "confirming"        → clicked invite, waiting for confirm dialog
+          "done"              → advance to next phase
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(cafe_invite): no screenshot.")
+        ss = self._state.sub_state
+        cafe_num = 2 if self._phase == Phase.CAFE_2_INVITE else 1
 
-        # Close any popup (reward dialogs, etc.)
-        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+        # Global timeout
+        if self._state.ticks >= 30:
+            self._advance_phase()
+            return self._wait(300, "Pipeline(cafe_invite): timeout, advancing.")
+
+        # ── CLOSING MOMOTALK state ──
+        # After invite confirmed, MomoTalk may still be open (showing animation
+        # or student list). Close it before advancing to headpat.
+        if ss == "closing_momotalk":
+            # Try template X button first
+            close_roi = (int(sw * 0.30), int(sh * 0.01), int(sw * 0.80), int(sh * 0.20))
+            m_x = self._match(screenshot_path, "游戏内很多页面窗口的叉.png",
+                roi=close_roi, min_score=0.50)
+            if m_x is not None:
+                self._state.sub_state = "done"
+                return self._click(m_x.center[0], m_x.center[1],
+                    f"Pipeline(cafe_invite): close MomoTalk X. score={m_x.score:.3f}")
+            # Check if MomoTalk is still visible (邀請 button in student list)
+            momo_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.75))
+            m_inv = self._match(screenshot_path, "邀请.png", roi=momo_roi, min_score=0.55)
+            if m_inv is not None:
+                # Blind-click MomoTalk X at known position
+                x_btn_x = int(sw * 0.66)
+                x_btn_y = int(sh * 0.075)
+                return self._click(x_btn_x, x_btn_y,
+                    f"Pipeline(cafe_invite): blind-click MomoTalk X at ({x_btn_x},{x_btn_y}).")
+            # MomoTalk seems closed → advance
+            self._state.sub_state = "done"
+            return self._wait(300, f"Pipeline(cafe_invite): MomoTalk closed, advancing.")
+
+        # ── DONE state ──
+        if ss == "done":
+            self._advance_phase()
+            return self._wait(300, f"Pipeline(cafe_invite): invite done (cafe {cafe_num}), advancing.")
+
+        # ── PRIORITY 1: Confirm dialogs ──
+        confirm_roi = (int(sw * 0.25), int(sh * 0.35), int(sw * 0.75), int(sh * 0.95))
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
+            if ss == "confirming":
+                # 隔壁咖啡廳 warning or normal confirm → always click 確認 to proceed
+                self._state.sub_state = "closing_momotalk"
+            elif ss == "sort_confirming":
+                self._state.sub_state = "check_direction"
+            # else: just dismiss (bag full, etc.) — keep current sub_state
             return self._click(m.center[0], m.center[1],
-                f"Pipeline(cafe_invite): close popup. template={m.template} score={m.score:.3f}")
+                f"Pipeline(cafe_invite): confirm. sub={ss} score={m.score:.3f}")
 
-        # Look for confirm button (invite confirmation dialog)
-        confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.95))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
-        if m is not None:
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(cafe_invite): confirm invite. score={m.score:.3f}")
+        # ── Close generic popups (NOT when in MomoTalk) ──
+        momotalk_states = ("momotalk_open", "sort_opening", "sort_selecting",
+                           "sort_confirming", "check_direction", "picking")
+        if ss not in momotalk_states:
+            m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+            if m is not None:
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(cafe_invite): close popup. score={m.score:.3f}")
 
-        # Look for invite ticket button (bottom area of cafe)
+        # ── PRIORITY 2: Sort dialog (排列) ──
+        # Templates are whole-dialog screenshots (~835x440). Each matches best
+        # when its option is selected (pink). Low-scoring matches have shifted
+        # bboxes (~100px off), so we MUST use the highest-scoring template.
+        # Dialog layout (relative to bbox): 精選=(0.75, 0.58), 確認=(0.50, 0.88)
+        sort_dialog_roi = (int(sw * 0.20), int(sh * 0.10), int(sw * 0.80), int(sh * 0.80))
+        sort_templates = [
+            "咖啡厅momotalk排序选项_精选.png",
+            "咖啡厅momotalk排序选项_名字.png",
+            "咖啡厅momotalk排序选项_学院.png",
+            "咖啡厅momotalk排序选项_羁绊等级.png",
+        ]
+        best_sort = None
+        for tmpl in sort_templates:
+            m_sort = self._match(screenshot_path, tmpl, roi=sort_dialog_roi, min_score=0.55)
+            if m_sort is not None and (best_sort is None or m_sort.score > best_sort.score):
+                best_sort = m_sort
+        if best_sort is not None:
+            bx1, by1, bx2, by2 = best_sort.bbox
+            dw, dh = bx2 - bx1, by2 - by1
+            is_featured = best_sort.template == "咖啡厅momotalk排序选项_精选.png"
+            if is_featured or ss == "sort_confirming":
+                # 精選 already selected OR we just clicked it → click 確認
+                confirm_x = bx1 + int(dw * 0.50)
+                confirm_y = by1 + int(dh * 0.88)
+                self._state.sub_state = "sort_confirming"
+                return self._click(confirm_x, confirm_y,
+                    f"Pipeline(cafe_invite): click 確認. best={best_sort.template} score={best_sort.score:.3f}")
+            else:
+                # 精選 NOT selected → click 精選 (bottom-right of 2x2 grid)
+                feat_x = bx1 + int(dw * 0.75)
+                feat_y = by1 + int(dh * 0.58)
+                self._state.sub_state = "sort_confirming"
+                return self._click(feat_x, feat_y,
+                    f"Pipeline(cafe_invite): click 精選 option. best={best_sort.template} score={best_sort.score:.3f}")
+
+        # ── PRIORITY 3: MomoTalk list (邀請 button visible) ──
+        invite_btn_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.85))
+        m_invite_btn = self._match(screenshot_path, "邀请.png",
+            roi=invite_btn_roi, min_score=0.55)
+        if m_invite_btn is not None:
+            # MomoTalk is open
+            sort_indicator_roi = (int(sw * 0.25), int(sh * 0.05), int(sw * 0.80), int(sh * 0.25))
+
+            # Sort dialog just closed → transition to direction check
+            if ss == "sort_confirming":
+                self._state.sub_state = "check_direction"
+                ss = "check_direction"
+
+            # ── Step A: Open sort dialog (unless already past sort setup) ──
+            # Don't try to read the sort dropdown text (精选.png false-positives
+            # at 0.612 on "名字" sort). Always open the sort dialog to verify.
+            if ss in ("", "momotalk_open"):
+                # Find sort direction icon to click the sort TEXT to its left
+                m_asc = self._match(screenshot_path, "上排序.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                m_desc = self._match(screenshot_path, "下排列.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                sort_icon = m_asc or m_desc
+                if sort_icon is not None:
+                    click_x = sort_icon.center[0] - int(sw * 0.06)
+                    click_y = sort_icon.center[1]
+                    self._state.sub_state = "sort_opening"
+                    return self._click(click_x, click_y,
+                        f"Pipeline(cafe_invite): click sort dropdown (left of icon). cafe={cafe_num}")
+                # Try specific sort text template
+                m_bond = self._match(screenshot_path, "momotalk羁绊等级.png",
+                    roi=sort_indicator_roi, min_score=0.60)
+                if m_bond is not None:
+                    self._state.sub_state = "sort_opening"
+                    return self._click(m_bond.center[0], m_bond.center[1],
+                        f"Pipeline(cafe_invite): click sort text. score={m_bond.score:.3f}")
+                # Can't locate sort dropdown → proceed to picking
+                self._state.sub_state = "picking"
+
+            # ── Step B: Check sort direction (compare 上排序 vs 下排列 scores) ──
+            if ss == "check_direction":
+                m_asc = self._match(screenshot_path, "上排序.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                m_desc = self._match(screenshot_path, "下排列.png",
+                    roi=sort_indicator_roi, min_score=0.55)
+                asc_score = m_asc.score if m_asc else 0
+                desc_score = m_desc.score if m_desc else 0
+                if m_asc is not None and asc_score > desc_score:
+                    # Ascending → click once to toggle to descending, then pick
+                    self._state.sub_state = "picking"
+                    ss = "picking"
+                    return self._click(m_asc.center[0], m_asc.center[1],
+                        f"Pipeline(cafe_invite): toggle asc→desc. asc={asc_score:.3f} desc={desc_score:.3f}")
+                # Already descending (or no icon) → proceed to picking
+                self._state.sub_state = "picking"
+                ss = "picking"
+
+            # ── Step C: Pick featured student ──
+            if ss == "picking":
+                badge_roi = (int(sw * 0.05), int(sh * 0.10), int(sw * 0.55), int(sh * 0.90))
+                badges = self._find_all_matches(screenshot_path, "精选标志.png",
+                    roi=badge_roi, min_score=0.50, nms_dist=50)
+                badges.sort(key=lambda b: b.center[1])
+
+                target_idx = cafe_num - 1 + self._state.invite_skip
+                if target_idx < len(badges):
+                    badge = badges[target_idx]
+                    badge_cy = badge.center[1]
+                    all_invites = self._find_all_matches(screenshot_path, "邀请.png",
+                        roi=invite_btn_roi, min_score=0.50)
+                    best_invite = None
+                    best_dist = 9999
+                    for inv in all_invites:
+                        dist = abs(inv.center[1] - badge_cy)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_invite = inv
+                    if best_invite is not None and best_dist < sh * 0.10:
+                        self._state.sub_state = "confirming"
+                        return self._click(best_invite.center[0], best_invite.center[1],
+                            f"Pipeline(cafe_invite): invite featured #{cafe_num}. badge_y={badge_cy} btn_y={best_invite.center[1]}")
+
+                # Not enough featured students or no matching invite button
+                if self._state.ticks >= 12:
+                    self._state.sub_state = "confirming"
+                    return self._click(m_invite_btn.center[0], m_invite_btn.center[1],
+                        f"Pipeline(cafe_invite): fallback invite first visible (cafe {cafe_num}).")
+                return self._wait(400, f"Pipeline(cafe_invite): looking for featured #{cafe_num}.")
+
+            # Waiting for sort dialog or other transition
+            return self._wait(400, f"Pipeline(cafe_invite): MomoTalk open, sub={ss}.")
+
+        # ── PRIORITY 4: Cafe interior — look for invite ticket ──
         invite_roi = (int(sw * 0.50), int(sh * 0.75), sw, sh)
-        m = self._match(screenshot_path, "邀请卷（带黄点）.png", roi=invite_roi, min_score=0.55)
-        if m is not None:
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(cafe_invite): click invite ticket. score={m.score:.3f}")
 
-        # sub_state tracks invite flow: "" → "invited" after first attempt
-        # If we already tried inviting or no invite button found after 3 ticks, advance
-        if self._state.ticks >= 3 or self._state.sub_state == "invited":
-            self._advance_phase()  # → CAFE_HEADPAT
-            return self._wait(300, "Pipeline(cafe_invite): done, advancing to headpat.")
+        m_active = self._match(screenshot_path, "邀请卷（带黄点）.png", roi=invite_roi, min_score=0.55)
+        if m_active is not None:
+            return self._click(m_active.center[0], m_active.center[1],
+                f"Pipeline(cafe_invite): click invite ticket. score={m_active.score:.3f}")
 
-        # Tap anywhere safe to dismiss transition animations
+        # Active template didn't match — check if ticket is used (greyed out)
+        m_used = self._match(screenshot_path, "邀请卷已用.png", roi=invite_roi, min_score=0.60)
+        if m_used is not None:
+            self._advance_phase()
+            return self._wait(200,
+                f"Pipeline(cafe_invite): invite ticket already used, skipping. score={m_used.score:.3f}")
+
+        # No invite ticket found
+        if self._state.ticks >= 6:
+            self._advance_phase()
+            return self._wait(300, "Pipeline(cafe_invite): no invite ticket, advancing.")
+
         return self._wait(500, "Pipeline(cafe_invite): waiting for invite UI.")
 
+    # -- VLM emoticon detection helper ------------------------------------------
+
+    _VLM_HEADPAT_PROMPT_TEMPLATE = (
+        "You are a game UI detector. Find all bright yellow interaction icons "
+        "(emoticon bubbles, starburst markers, exclamation marks) floating above "
+        "characters' heads in this cafe screenshot. These are yellow UI elements. "
+        "Return JSON only. "
+        'Return format: {{"items": [{{"label": "emoticon", "bbox": [x1,y1,x2,y2]}}]}}. '
+        "bbox must be pixel coordinates in the original image. "
+        "Image size: width={w}, height={h}. "
+        "If no yellow icons found, return {{\"items\": []}}. "
+        "Do not include any extra keys. Do not wrap in markdown."
+    )
+
+    def _vlm_detect_emoticons(self, screenshot_path: str, sw: int, sh: int
+                              ) -> Optional[List[Tuple[int, int]]]:
+        """Ask VLM to find yellow emoticon markers. Returns list of (cx, cy) or None on failure."""
+        if self._vlm_engine is None:
+            return None
+        try:
+            prompt = self._VLM_HEADPAT_PROMPT_TEMPLATE.format(w=sw, h=sh)
+            res = self._vlm_engine.ocr(
+                image_path=screenshot_path,
+                prompt=prompt,
+                max_new_tokens=512,
+            )
+            raw = str(res.get("raw") or "").strip()
+            print(f"[Pipeline] VLM headpat raw: {raw[:300]}")
+            if not raw:
+                return []
+            # Clean markdown wrapping
+            cleaned = raw.strip().strip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+            # Try to parse as JSON object with items+bbox (primary format)
+            result: List[Tuple[int, int]] = []
+            json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    items = parsed.get("items", []) if isinstance(parsed, dict) else []
+                    for item in items:
+                        bbox = item.get("bbox") if isinstance(item, dict) else None
+                        if bbox and len(bbox) >= 4:
+                            x1, y1, x2, y2 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+                            cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                            if 0 <= cx <= sw and 0 <= cy <= sh:
+                                result.append((cx, cy))
+                            else:
+                                print(f"[Pipeline] VLM headpat: bbox out of range: {bbox}")
+                    if result:
+                        return result
+                except json.JSONDecodeError:
+                    pass
+            # Fallback: try parsing as array of [x, y] pairs
+            arr_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+            if arr_match:
+                try:
+                    coords = json.loads(arr_match.group(0))
+                    if isinstance(coords, list):
+                        for item in coords:
+                            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                                nx, ny = float(item[0]), float(item[1])
+                                # Handle both normalized (0-1) and pixel coordinates
+                                if nx <= 1.0 and ny <= 1.0:
+                                    result.append((int(nx * sw), int(ny * sh)))
+                                elif 0 <= nx <= sw and 0 <= ny <= sh:
+                                    result.append((int(nx), int(ny)))
+                except json.JSONDecodeError:
+                    pass
+            if not result:
+                print(f"[Pipeline] VLM headpat: no valid coords parsed from: {raw[:200]}")
+            return result
+        except Exception as e:
+            print(f"[Pipeline] VLM headpat error: {type(e).__name__}: {e}")
+            return None
+
+    # -- Headpat handler -------------------------------------------------------
+
+    # -- Pan-and-Scan viewport definitions ------------------------------------
+    # Each viewport: (name, swipe_dx_frac, swipe_dy_frac)
+    # dx/dy are fractions of screen size for the swipe delta (from center).
+    # Negative dx = swipe left = expose right side of map, etc.
+    _PAN_SCAN_VIEWPORTS = [
+        # ("center", 0, 0),  — initial view, no swipe needed
+        ("top_right",    -0.30, +0.20),   # swipe left-down → expose top-right
+        ("bottom_right", -0.30, -0.20),   # swipe left-up   → expose bottom-right
+        ("bottom_left",  +0.30, -0.20),   # swipe right-up  → expose bottom-left
+        ("top_left",     +0.30, +0.20),   # swipe right-down → expose top-left
+    ]
+    _SWIPE_DURATION_MS = 500  # slow swipe to avoid map inertia fly-away
+
     def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Tap all students with yellow interaction markers.
-        
-        ONLY runs when we're actually inside the cafe (confirmed by supervision
-        or headpat template). Yellow marker detection is used HERE (inside cafe)
-        but NOT for cafe detection.
+        """Tap all students with yellow interaction markers using HSV pan-and-scan.
+
+        Strategy:
+        1. Define a "safe zone" ROI in the center of the screen that avoids all
+           UI chrome (top bar, bottom menu, side buttons).
+        2. Use HSV yellow detection ONLY inside this safe zone.
+        3. Pan the cafe map to 5 viewports (center + 4 corners) by swiping,
+           scanning each viewport for yellow bubbles.
+
+        Sub-state machine:
+          "scan_center"   → initial scan at default view
+          "pan_N"         → swiping to viewport N (0-3)
+          "wait_N"        → waiting for swipe inertia to settle
+          "scan_N"        → scanning viewport N for bubbles
+          "reset"         → swiping back to center
+          "wait_reset"    → waiting for reset swipe inertia
+          "done"          → all viewports scanned, advance
         """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
@@ -700,106 +1173,252 @@ class PipelineController:
             self._enter_phase(Phase.CAFE_EXIT)
             return self._wait(200, "Pipeline(headpat): back in lobby unexpectedly.")
 
-        # NOTE: Do NOT use _is_subscreen() — cafe has Home/gear buttons.
-        # Close any unexpected popup via X button instead.
-        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
+        # Global timeout — prevent infinite loops
+        if self._state.ticks >= 50:
+            print("[Pipeline] headpat: global timeout, advancing.")
+            self._advance_phase()
+            return self._wait(200, "Pipeline(headpat): timeout, advancing.")
+
+        # ── Close MomoTalk / popups that may still be open ──
+        # MomoTalk can stay open after invite phase; its yellow level badges
+        # trigger massive HSV false positives. Close it first.
+        close_roi = (int(sw * 0.30), int(sh * 0.01), int(sw * 0.80), int(sh * 0.20))
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=close_roi, min_score=0.70)
         if m is not None:
             return self._click(m.center[0], m.center[1],
-                f"Pipeline(headpat): close popup. template={m.template} score={m.score:.3f}")
+                f"Pipeline(headpat): close popup/MomoTalk. score={m.score:.3f}")
 
-        # Look for confirm button (interaction dialog)
+        # Also check for a wider close button area (羈絆升級 popups, etc.)
+        wide_close_roi = (int(sw * 0.45), 0, sw, int(sh * 0.30))
+        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", roi=wide_close_roi, min_score=0.80)
+        if m is not None:
+            return self._click(m.center[0], m.center[1],
+                f"Pipeline(headpat): close wide popup. score={m.score:.3f}")
+
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(headpat): confirm dialog. score={m.score:.3f}")
 
-        # GATE: Only look for yellow markers if template confirms markers exist.
-        # Without this gate, HSV picks up 60+ false positives from cafe furniture.
-        # Try Emoticon_Action.png (clean game sprite) first, then screenshot-based fallback.
-        headpat_tmpl = self._match(screenshot_path, "Emoticon_Action.png", min_score=0.55)
-        if headpat_tmpl is None:
-            headpat_tmpl = self._match(screenshot_path, "可摸头的标志.png", min_score=0.55)
-        if headpat_tmpl is None:
-            # No character markers detected — done with headpat
-            if self._state.ticks >= 2:
-                self._advance_phase()  # → CAFE_EXIT
-                return self._wait(200, "Pipeline(headpat): no markers found, advancing.")
-            return self._wait(500, "Pipeline(headpat): waiting for markers to appear.")
+        # Detect MomoTalk still open (邀請 button or invitation animation).
+        # NEVER press Escape here — it exits the cafe entirely!
+        # Instead, blind-click the MomoTalk X at its known position.
+        momo_invite_roi = (int(sw * 0.35), int(sh * 0.10), int(sw * 0.75), int(sh * 0.75))
+        m_momo = self._match(screenshot_path, "邀请.png", roi=momo_invite_roi, min_score=0.55)
+        if m_momo is not None:
+            # MomoTalk X is always at top-right of dialog: ~66% width, ~7.5% height
+            x_btn_x = int(sw * 0.66)
+            x_btn_y = int(sh * 0.075)
+            return self._click(x_btn_x, x_btn_y,
+                f"Pipeline(headpat): blind-click MomoTalk X at ({x_btn_x},{x_btn_y}).")
 
-        # Template confirmed markers exist. Use HSV to find ALL marker positions.
-        marks = _detect_yellow_markers(screenshot_path)
-        # Filter to cafe area (not nav bar, not top bar)
-        marks = [(x1, y1, x2, y2) for x1, y1, x2, y2 in marks
-                 if 0.12 * sh < (y1 + y2) / 2 < 0.80 * sh]
+        # Dismiss fullscreen popups (羈絆升級 Rank Up, etc.)
+        if not self._is_cafe_interior(screenshot_path):
+            return self._click(sw // 2, sh // 2,
+                f"Pipeline(headpat): tap to dismiss fullscreen popup (tick {self._state.ticks}).")
 
-        if not marks:
-            # Template matched but HSV found nothing — click template position directly
-            tx = headpat_tmpl.center[0] + self.cfg.headpat_offset_x
-            ty = headpat_tmpl.center[1] + self.cfg.headpat_offset_y
-            if (tx, ty) not in self._state.headpat_done:
-                self._state.headpat_done.append((tx, ty))
-                return self._click(tx, ty,
-                    f"Pipeline(headpat): click headpat marker. score={headpat_tmpl.score:.3f}")
-            # Already clicked this one — done
-            self._advance_phase()  # → CAFE_EXIT
-            return self._wait(200, "Pipeline(headpat): no more markers, advancing.")
+        # ── Compute safe ROI ──
+        safe_roi = (
+            int(sw * SAFE_ROI_LEFT),
+            int(sh * SAFE_ROI_TOP),
+            int(sw * SAFE_ROI_RIGHT),
+            int(sh * SAFE_ROI_BOTTOM),
+        )
 
-        # Find a marker we haven't clicked yet
-        for x1, y1, x2, y2 in marks:
-            cx, cy = _center((x1, y1, x2, y2))
-            bw = max(1, x2 - x1)
-            bh = max(1, y2 - y1)
-            tx = int(cx + max(self.cfg.headpat_offset_x, int(bw * 0.6)))
-            ty = int(cy + max(self.cfg.headpat_offset_y, int(bh * 0.9)))
-            # Check if we already clicked near this position
-            already = False
-            for px, py in self._state.headpat_done:
-                if abs(tx - px) + abs(ty - py) < 60:
-                    already = True
-                    break
-            if not already:
-                self._state.headpat_done.append((tx, ty))
-                return self._click(tx, ty,
-                    f"Pipeline(headpat): click yellow marker at ({cx},{cy}).")
+        ss = self._state.sub_state
 
-        # All markers clicked
-        self._advance_phase()  # → CAFE_EXIT
-        return self._wait(200, "Pipeline(headpat): all markers done, advancing.")
+        # Initialize sub_state
+        if ss == "":
+            self._state.sub_state = "scan_center"
+            ss = "scan_center"
+
+        # ── SCAN states: detect and click yellow bubbles ──
+        if ss.startswith("scan_"):
+            markers = _detect_yellow_markers(screenshot_path, safe_roi=safe_roi)
+            if markers:
+                # Click the first unvisited marker
+                for (x1, y1, x2, y2) in markers:
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    # Offset: click slightly below/right of bubble (character body)
+                    tx = cx + max(self.cfg.headpat_offset_x, int(sw * 0.03))
+                    ty = cy + max(self.cfg.headpat_offset_y, int(sh * 0.02))
+                    already = False
+                    for px, py in self._state.headpat_done:
+                        if abs(tx - px) + abs(ty - py) < 80:
+                            already = True
+                            break
+                    if not already:
+                        self._state.headpat_done.append((tx, ty))
+                        # After clicking, stay in same scan state to re-scan
+                        # (new bubbles may appear after interaction)
+                        print(f"[Pipeline] headpat HSV: click at ({tx},{ty}), viewport={ss}")
+                        return self._click(tx, ty,
+                            f"Pipeline(headpat): HSV click bubble at ({cx},{cy}), viewport={ss}.")
+                # All markers in this viewport already visited — fall through to advance
+
+            # No (new) markers in this viewport → advance to next
+            if ss == "scan_center":
+                if not self._PAN_SCAN_VIEWPORTS:
+                    self._state.sub_state = "done"
+                else:
+                    self._state.sub_state = "pan_0"
+            elif ss.startswith("scan_"):
+                # scan_N → reverse swipe back to center, then next viewport
+                try:
+                    idx = int(ss.split("_")[1])
+                except (ValueError, IndexError):
+                    idx = len(self._PAN_SCAN_VIEWPORTS)
+                self._state.sub_state = f"reverse_{idx}"
+            return self._wait(300, f"Pipeline(headpat): no new bubbles in {ss}, moving on.")
+
+        # ── PAN states: swipe to expose a corner ──
+        if ss.startswith("pan_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                self._state.sub_state = "done"
+                return self._wait(200, "Pipeline(headpat): pan index error, done.")
+
+            if idx >= len(self._PAN_SCAN_VIEWPORTS):
+                self._state.sub_state = "done"
+                return self._wait(200, "Pipeline(headpat): all viewports done.")
+
+            name, dx_frac, dy_frac = self._PAN_SCAN_VIEWPORTS[idx]
+            cx, cy = sw // 2, sh // 2
+            to_x = cx + int(sw * dx_frac)
+            to_y = cy + int(sh * dy_frac)
+            self._state.sub_state = f"wait_{idx}"
+            print(f"[Pipeline] headpat: panning to {name} ({cx},{cy})→({to_x},{to_y})")
+            return {
+                "action": "swipe",
+                "from": [cx, cy],
+                "to": [to_x, to_y],
+                "duration_ms": self._SWIPE_DURATION_MS,
+                "reason": f"Pipeline(headpat): swipe to expose {name}.",
+                "_pipeline": True,
+            }
+
+        # ── WAIT states: let swipe inertia settle ──
+        if ss.startswith("wait_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                idx = 0
+            self._state.sub_state = f"scan_{idx}"
+            return self._wait(800, f"Pipeline(headpat): waiting for swipe inertia (viewport {idx}).")
+
+        # ── REVERSE states: swipe back to center after scanning a corner ──
+        # This prevents cumulative drift that would make later viewports wrong.
+        if ss.startswith("reverse_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                idx = 0
+            if idx < len(self._PAN_SCAN_VIEWPORTS):
+                name, dx_frac, dy_frac = self._PAN_SCAN_VIEWPORTS[idx]
+                cx, cy = sw // 2, sh // 2
+                # Reverse: swipe in the OPPOSITE direction
+                to_x = cx - int(sw * dx_frac)
+                to_y = cy - int(sh * dy_frac)
+                self._state.sub_state = f"rwait_{idx}"
+                print(f"[Pipeline] headpat: reversing from {name} ({cx},{cy})→({to_x},{to_y})")
+                return {
+                    "action": "swipe",
+                    "from": [cx, cy],
+                    "to": [to_x, to_y],
+                    "duration_ms": self._SWIPE_DURATION_MS,
+                    "reason": f"Pipeline(headpat): reverse swipe from {name} back to center.",
+                    "_pipeline": True,
+                }
+            # Index out of range → just advance
+            self._state.sub_state = "done"
+            return self._wait(200, "Pipeline(headpat): reverse index error, done.")
+
+        # ── RWAIT states: wait for reverse swipe inertia ──
+        if ss.startswith("rwait_"):
+            try:
+                idx = int(ss.split("_")[1])
+            except (ValueError, IndexError):
+                idx = 0
+            next_idx = idx + 1
+            if next_idx < len(self._PAN_SCAN_VIEWPORTS):
+                self._state.sub_state = f"pan_{next_idx}"
+            else:
+                self._state.sub_state = "done"
+            return self._wait(600, f"Pipeline(headpat): reverse inertia settling (viewport {idx}).")
+
+        # ── DONE ──
+        if ss == "done":
+            n = len(self._state.headpat_done)
+            print(f"[Pipeline] headpat: pan-and-scan complete. Patted {n} students.")
+            self._advance_phase()
+            return self._wait(200, f"Pipeline(headpat): all viewports scanned ({n} patted), advancing.")
 
     def _handle_cafe_switch(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Switch from cafe 1F to cafe 2F by clicking 移动至2号店."""
+        """Switch from cafe 1F to cafe 2F by clicking 移动至2号店.
+
+        IMPORTANT: The template 移动至2号店.png also matches 移動至1號店 at
+        high score (0.96+) because the buttons look almost identical. So we
+        must click ONLY ONCE, then wait for the scene to reload.
+
+        Sub-states:
+          "" (init)     → find and click 移動至2號店
+          "switching"   → button clicked; wait for cafe to reload (handle
+                          TAP TO START screen, loading screens, etc.)
+        """
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(cafe_switch): no screenshot.")
+        ss = self._state.sub_state
 
-        # Close any popup first (Rank Up, etc.)
+        # Global timeout
+        if self._state.ticks >= 15:
+            print("[Pipeline] cafe_switch: timeout, advancing.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(cafe_switch): timeout, advancing.")
+
+        # ── Close popups in any state ──
         m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.80)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): close popup. score={m.score:.3f}")
-
-        # Confirm dialogs
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_switch): confirm. score={m.score:.3f}")
 
-        # Click 移动至2号店 button (bottom area of cafe)
-        switch_roi = (0, int(sh * 0.85), int(sw * 0.50), sh)
-        m = self._match(screenshot_path, "移动至2号店.png", roi=switch_roi, min_score=0.45)
-        if m is not None:
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
+        # ── INIT: Click the switch button once ──
+        if ss == "":
+            m = self._match(screenshot_path, "移动至2号店.png", min_score=0.50)
+            if m is not None:
+                self._state.sub_state = "switching"
+                return self._click(m.center[0], m.center[1],
+                    f"Pipeline(cafe_switch): click switch to cafe 2. score={m.score:.3f}")
+            # Button not visible yet — maybe a popup is blocking
+            if self._state.ticks >= 5:
+                self._advance_phase()
+                return self._wait(300, "Pipeline(cafe_switch): button not found, advancing.")
+            return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
 
-        # If button not found after a few ticks, skip to exit (maybe cafe 2 unavailable)
-        if self._state.ticks >= 5:
-            print("[Pipeline] cafe_switch: button not found, skipping to exit.")
-            self._enter_phase(Phase.CAFE_EXIT)
-            return self._wait(300, "Pipeline(cafe_switch): timeout, skipping.")
+        # ── SWITCHING: Wait for cafe to reload after click ──
+        # During transition the game may show TAP TO START or loading screen.
+        # Once we see cafe interior again, we've arrived at cafe 2.
+        if self._is_cafe_interior(screenshot_path):
+            print("[Pipeline] cafe_switch: cafe interior detected after switch.")
+            self._advance_phase()
+            return self._wait(400, "Pipeline(cafe_switch): arrived at cafe 2, advancing.")
 
-        return self._wait(500, "Pipeline(cafe_switch): waiting for switch button.")
+        # Handle TAP TO START screen during transition — tap to proceed
+        m_tap = self._match(screenshot_path, "点击开始.png", min_score=0.40)
+        if m_tap is not None:
+            return self._click(sw // 2, int(sh * 0.82),
+                f"Pipeline(cafe_switch): tap to start during transition. score={m_tap.score:.3f}")
+
+        # Unknown screen during transition — just wait (do NOT tap center,
+        # that was causing the infinite loop by re-clicking the switch button)
+        return self._wait(600, f"Pipeline(cafe_switch): waiting for cafe to load (tick {self._state.ticks}).")
 
     def _handle_cafe_exit(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Return to lobby from cafe."""
@@ -861,7 +1480,7 @@ class PipelineController:
 
         # Confirm dialogs
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.75), int(sh * 0.90))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(schedule_enter): confirm. score={m.score:.3f}")
@@ -874,16 +1493,25 @@ class PipelineController:
                 self._advance_phase()  # → SCHEDULE_EXECUTE
                 return self._wait(300, "Pipeline(schedule_enter): inside sub-screen, advancing.")
 
-        # In lobby → click schedule button (require score >= 0.50 to avoid
-        # clicking behind popup overlays where template scores ~0.42)
+        # In lobby → click schedule button
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.50)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.40)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
+            # Timeout: if in lobby but schedule not found after many ticks, skip
+            if self._state.ticks >= 10:
+                print("[Pipeline] schedule_enter: schedule not found after 10 ticks, skipping.")
+                self._advance_phase()  # → SCHEDULE_EXECUTE (will detect lobby → DONE)
+                return self._wait(300, "Pipeline(schedule_enter): schedule button not found, skipping.")
             return self._wait(400, "Pipeline(schedule_enter): schedule button not found.")
 
+        # Not in lobby, not in subscreen — might be transitioning
+        if self._state.ticks >= 15:
+            print("[Pipeline] schedule_enter: timeout, skipping.")
+            self._advance_phase()
+            return self._wait(300, "Pipeline(schedule_enter): timeout, skipping.")
         return self._wait(500, "Pipeline(schedule_enter): waiting for lobby.")
 
     def _handle_schedule_execute(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
@@ -917,7 +1545,7 @@ class PipelineController:
 
         # Confirm button (start schedule, result confirm, etc.)
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.85), int(sh * 0.95))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.40)
+        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
         if m is not None:
             self._state.sub_state = "confirmed"
             return self._click(m.center[0], m.center[1],

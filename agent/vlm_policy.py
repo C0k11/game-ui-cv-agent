@@ -448,7 +448,18 @@ class VlmPolicyAgent:
                         assets_dir=str(getattr(self._cerebellum, "assets_dir", "data/captures") or "data/captures"),
                         confidence=float(getattr(self._cerebellum, "confidence", 0.20) or 0.20),
                     )
-                    self._pipeline = PipelineController(cerebellum=self._cerebellum, cfg=pcfg)
+                    vlm_eng = None
+                    try:
+                        vlm_eng = get_local_vlm(
+                            model=self.cfg.model,
+                            models_dir=self.cfg.models_dir,
+                            hf_home=self.cfg.hf_home,
+                            device=self.cfg.device,
+                        )
+                    except Exception:
+                        pass
+                    self._pipeline = PipelineController(
+                        cerebellum=self._cerebellum, cfg=pcfg, vlm_engine=vlm_eng)
                     ts2 = datetime.now().isoformat(timespec="seconds")
                     self._log_out(f"[{ts2}] opencv_pipeline enabled: goal starts with [Routine]")
         except Exception as e:

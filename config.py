@@ -18,4 +18,9 @@ LOCAL_VLM_MODELS_DIR = os.environ.get("LOCAL_VLM_MODELS_DIR", os.path.join(MODEL
 LOCAL_VLM_DEVICE = os.environ.get("LOCAL_VLM_DEVICE", "cuda")
 LOCAL_VLM_MAX_NEW_TOKENS = int(os.environ.get("LOCAL_VLM_MAX_NEW_TOKENS", "256"))
 
+YOLO_MODEL_PATH = os.environ.get(
+    "YOLO_MODEL_PATH",
+    os.path.join(MODELS_DIR, "yolo", "best.pt"),
+)
+
 ADB_SERIAL = os.environ.get("ADB_SERIAL")
