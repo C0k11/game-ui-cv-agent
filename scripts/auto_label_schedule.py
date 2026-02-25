@@ -58,11 +58,15 @@ def detect_students_in_rooms(frame: np.ndarray, matcher: AvatarMatcher, candidat
             if tmpl_img is None:
                 continue
                 
-            # Resize template to expected avatar size in schedule (approx 120x120 at 1080p, scale by w/1920)
-            expected_size = int(120 * (w / 1920))
-            if expected_size <= 0: continue
+            # Resize template to expected avatar size in schedule
+            # At 1080p (w=1920), avatar width is approx 120px.
+            scale_factor = (120 * (w / 1920)) / tmpl_img.shape[1]
+            if scale_factor <= 0: continue
             
-            tmpl_resized = cv2.resize(tmpl_img, (expected_size, expected_size))
+            new_w = int(tmpl_img.shape[1] * scale_factor)
+            new_h = int(tmpl_img.shape[0] * scale_factor)
+            
+            tmpl_resized = cv2.resize(tmpl_img, (new_w, new_h))
             
             # Apply anti-occlusion mask to both template and the room search area
             tmpl_masked = matcher._crop_bottom_right(tmpl_resized)
@@ -84,7 +88,7 @@ def detect_students_in_rooms(frame: np.ndarray, matcher: AvatarMatcher, candidat
             if max_val > best_score and max_val > 0.85: # High threshold for auto-labeling
                 best_score = max_val
                 tx, ty = max_loc
-                best_box = (rx1 + tx, ry1 + ty, rx1 + tx + expected_size, ry1 + ty + expected_size)
+                best_box = (rx1 + tx, ry1 + ty, rx1 + tx + new_w, ry1 + ty + new_h)
                 
         if best_box is not None:
             boxes.append(best_box)
