@@ -20,7 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from vision.avatar_matcher import AvatarMatcher
 
-DATASET_ROOT = r"D:\Project\ml_cache\models\yolo\datasets\schedule"
+DATASET_ROOT = r"D:\Project\ml_cache\models\yolo\dataset\schedule"
 CLASS_ID = 0  # student_avatar
 
 def detect_students_in_rooms(frame: np.ndarray, matcher: AvatarMatcher, candidate_names: list[str]) -> list[tuple[int, int, int, int]]:
