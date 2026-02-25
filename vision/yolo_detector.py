@@ -100,11 +100,39 @@ class YoloDetector:
             print(f"[YoloDetector] detect error: {type(e).__name__}: {e}")
             return []
 
-    def detect_headpat_bubbles(self, image_path: str, conf: float = 0.5
-                               ) -> List[Tuple[int, int]]:
+    def detect_headpat_bubbles(self, image_path: str, conf: float = 0.5) -> List[Tuple[int, int]]:
         """Convenience: detect headpat bubbles, return list of (cx, cy) centers."""
-        dets = self.detect(image_path, conf=conf, classes=[0])
+        # Find the class ID for headpat_bubble
+        if not self._ensure_loaded():
+            return []
+        cls_id = None
+        for k, v in self._model.names.items():
+            if v == "headpat_bubble":
+                cls_id = k
+                break
+        if cls_id is None:
+            # Fallback to 0 if not found by name
+            cls_id = 0
+            
+        dets = self.detect(image_path, conf=conf, classes=[cls_id])
         return [d["center"] for d in dets]
+
+    def detect_student_avatars(self, image_path: str, conf: float = 0.4) -> List[Dict[str, Any]]:
+        """Convenience: detect student avatars in Schedule, return full detection objects."""
+        if not self._ensure_loaded():
+            return []
+        cls_id = None
+        for k, v in self._model.names.items():
+            if v == "student_avatar":
+                cls_id = k
+                break
+        
+        # If the model doesn't have student_avatar yet, return empty list
+        if cls_id is None:
+            print("[YoloDetector] Warning: 'student_avatar' class not found in model.")
+            return []
+            
+        return self.detect(image_path, conf=conf, classes=[cls_id])
 
 
 def get_yolo_detector(model_path: str = _DEFAULT_MODEL_PATH,
