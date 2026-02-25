@@ -86,8 +86,15 @@ def detect_students_in_rooms(frame: np.ndarray, matcher: AvatarMatcher, candidat
             _, max_val, _, max_loc = cv2.minMaxLoc(res)
             
             if max_val > best_score and max_val > 0.85: # High threshold for auto-labeling
-                best_score = max_val
                 tx, ty = max_loc
+                
+                # Verify that the matched region isn't just a blank flat area.
+                # Empty templates (like Seia Swimsuit placeholders) will get very high match scores against blank walls.
+                matched_roi = room_gray[ty:ty+new_h, tx:tx+new_w]
+                if np.std(matched_roi) < 20.0:
+                    continue
+                    
+                best_score = max_val
                 best_box = (rx1 + tx, ry1 + ty, rx1 + tx + new_w, ry1 + ty + new_h)
                 
         if best_box is not None:
