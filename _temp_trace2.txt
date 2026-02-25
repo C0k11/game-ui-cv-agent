@@ -1,0 +1,116 @@
+﻿  0 STARTUP              t=1   wait   Pipeline(startup): waiting for game to load.
+  1 STARTUP              t=2   click  Pipeline(startup): blind tap center to advance (tick 2).
+  2 STARTUP              t=3   wait   Pipeline(startup): waiting for game to load.
+  3 STARTUP              t=4   click  Pipeline(startup): blind tap center to advance (tick 4).
+  4 STARTUP              t=5   wait   Pipeline(startup): waiting for game to load.
+  5 STARTUP              t=6   click  Pipeline(startup): blind tap center to advance (tick 6).
+  6 STARTUP              t=7   wait   Pipeline(startup): waiting for game to load.
+  7 STARTUP              t=8   click  Pipeline(startup): blind tap center to advance (tick 8).
+  8 STARTUP              t=9   click  Pipeline(startup): click confirm. score=0.596
+  9 LOBBY_CLEANUP        t=0   wait   Pipeline(startup): lobby detected, advancing.
+ 10 LOBBY_CLEANUP        t=1   click  Pipeline(lobby): close popup. template=内嵌公告的叉.png score=0.873
+ 11 LOBBY_CLEANUP        t=2   wait   Pipeline(lobby): waiting for follow-up popups after close.
+ 12 CAFE                 t=0   wait   Pipeline(lobby): clean, advancing to cafe.
+ 13 CAFE                 t=1   click  Pipeline(cafe): click cafe button. score=0.426
+ 14 CAFE                 t=2   wait   Pipeline(cafe): waiting for cafe to load.
+ 15 CAFE                 t=3   wait   Pipeline(cafe): waiting for cafe to load.
+ 16 CAFE                 t=4   click  Pipeline(cafe): close cafe popup. template=游戏内很多页面窗口的叉.png score=0.953
+ 17 CAFE_EARNINGS        t=0   wait   Pipeline(cafe): supervision confirmed cafe.
+ 18 CAFE_INVITE          t=0   wait   Pipeline(cafe_earnings): earnings 0%, skipping. score=0.901
+ 19 CAFE_INVITE          t=1   click  Pipeline(cafe_invite): click invite ticket. score=0.947
+ 20 CAFE_INVITE          t=2   click  Pipeline(cafe_invite): click sort dropdown (left of icon). cafe=1
+ 21 CAFE_INVITE          t=3   click  Pipeline(cafe_invite): click 確認. best=咖啡厅momotalk排序选项_精选.png score=0.979
+ 22 CAFE_INVITE          t=4   click  Pipeline(cafe_invite): invite featured #1. badge_y=371 btn_y=415
+ 23 CAFE_INVITE          t=5   click  Pipeline(cafe_invite): confirm. sub=confirming score=0.596
+ 24 CAFE_INVITE          t=6   click  Pipeline(cafe_invite): blind-click MomoTalk X at (1586,100).
+ 25 CAFE_INVITE          t=7   wait   Pipeline(cafe_invite): MomoTalk closed, advancing.
+ 26 CAFE_HEADPAT         t=0   wait   Pipeline(cafe_invite): invite done (cafe 1), advancing.
+ 27 CAFE_HEADPAT         t=1   scroll Pipeline(headpat): zoom out cafe view (-5 clicks).
+ 28 CAFE_HEADPAT         t=2   wait   Pipeline(headpat): waiting for zoom animation to settle.
+ 29 CAFE_HEADPAT         t=3   click  Pipeline(headpat): HSV click bubble at (1307,496), viewport=scan_center.
+ 30 CAFE_HEADPAT         t=4   click  Pipeline(headpat): HSV click bubble at (1654,787), viewport=scan_center.
+ 31 CAFE_HEADPAT         t=5   click  Pipeline(headpat): HSV click bubble at (1349,816), viewport=scan_center.
+ 32 CAFE_HEADPAT         t=6   click  Pipeline(headpat): HSV click bubble at (876,824), viewport=scan_center.
+ 33 CAFE_HEADPAT         t=7   click  Pipeline(headpat): HSV click bubble at (1565,855), viewport=scan_center.
+ 34 CAFE_HEADPAT         t=8   wait   Pipeline(headpat): no new bubbles in scan_center, moving on.
+ 35 CAFE_HEADPAT         t=9   swipe  Pipeline(headpat): swipe to expose left_half.
+ 36 CAFE_HEADPAT         t=10  wait   Pipeline(headpat): waiting for swipe inertia (viewport 0).
+ 37 CAFE_HEADPAT         t=11  click  Pipeline(headpat): HSV click bubble at (1039,951), viewport=scan_0.
+ 38 CAFE_HEADPAT         t=12  wait   Pipeline(headpat): no new bubbles in scan_0, moving on.
+ 39 CAFE_HEADPAT         t=13  swipe  Pipeline(headpat): reverse swipe from left_half back to center.
+ 40 CAFE_HEADPAT         t=14  wait   Pipeline(headpat): reverse inertia settling (viewport 0).
+ 41 CAFE_HEADPAT         t=15  swipe  Pipeline(headpat): swipe to expose right_half.
+ 42 CAFE_HEADPAT         t=16  wait   Pipeline(headpat): waiting for swipe inertia (viewport 1).
+ 43 CAFE_HEADPAT         t=17  click  Pipeline(headpat): HSV click bubble at (935,575), viewport=scan_1.
+ 44 CAFE_HEADPAT         t=18  wait   Pipeline(headpat): no new bubbles in scan_1, moving on.
+ 45 CAFE_HEADPAT         t=19  swipe  Pipeline(headpat): reverse swipe from right_half back to center.
+ 46 CAFE_HEADPAT         t=20  wait   Pipeline(headpat): reverse inertia settling (viewport 1).
+ 47 CAFE_SWITCH          t=0   wait   Pipeline(headpat): all viewports scanned (7 patted), advancing.
+ 48 CAFE_SWITCH          t=1   click  Pipeline(cafe_switch): click switch to cafe 2. score=1.000
+ 49 CAFE_SWITCH          t=2   wait   Pipeline(cafe_switch): waiting for cafe to load (tick 2).
+ 50 CAFE_SWITCH          t=3   click  Pipeline(cafe_switch): close popup. score=0.961
+ 51 CAFE_2_INVITE        t=0   wait   Pipeline(cafe_switch): arrived at cafe 2, advancing.
+ 52 CAFE_2_INVITE        t=1   click  Pipeline(cafe_invite): click invite ticket. score=0.987
+ 53 CAFE_2_INVITE        t=2   click  Pipeline(cafe_invite): click sort dropdown (left of icon). cafe=2
+ 54 CAFE_2_INVITE        t=3   click  Pipeline(cafe_invite): click 確認. best=咖啡厅momotalk排序选项_精选.png score=0.979
+ 55 CAFE_2_INVITE        t=4   click  Pipeline(cafe_invite): invite featured #2. badge_y=517 btn_y=561
+ 56 CAFE_2_INVITE        t=5   click  Pipeline(cafe_invite): confirm. sub=confirming score=0.596
+ 57 CAFE_2_INVITE        t=6   click  Pipeline(cafe_invite): blind-click MomoTalk X at (1586,100).
+ 58 CAFE_2_INVITE        t=7   wait   Pipeline(cafe_invite): MomoTalk closed, advancing.
+ 59 CAFE_2_HEADPAT       t=0   wait   Pipeline(cafe_invite): invite done (cafe 2), advancing.
+ 60 CAFE_2_HEADPAT       t=1   scroll Pipeline(headpat): zoom out cafe view (-5 clicks).
+ 61 CAFE_2_HEADPAT       t=2   wait   Pipeline(headpat): waiting for zoom animation to settle.
+ 62 CAFE_2_HEADPAT       t=3   click  Pipeline(headpat): HSV click bubble at (1705,603), viewport=scan_center.
+ 63 CAFE_2_HEADPAT       t=4   click  Pipeline(headpat): HSV click bubble at (1181,615), viewport=scan_center.
+ 64 CAFE_2_HEADPAT       t=5   click  Pipeline(headpat): HSV click bubble at (758,753), viewport=scan_center.
+ 65 CAFE_2_HEADPAT       t=6   click  Pipeline(headpat): HSV click bubble at (1953,801), viewport=scan_center.
+ 66 CAFE_2_HEADPAT       t=7   click  Pipeline(headpat): HSV click bubble at (2057,975), viewport=scan_center.
+ 67 CAFE_2_HEADPAT       t=8   wait   Pipeline(headpat): no new bubbles in scan_center, moving on.
+ 68 CAFE_2_HEADPAT       t=9   swipe  Pipeline(headpat): swipe to expose left_half.
+ 69 CAFE_2_HEADPAT       t=10  wait   Pipeline(headpat): waiting for swipe inertia (viewport 0).
+ 70 CAFE_2_HEADPAT       t=11  wait   Pipeline(headpat): no new bubbles in scan_0, moving on.
+ 71 CAFE_2_HEADPAT       t=12  swipe  Pipeline(headpat): reverse swipe from left_half back to center.
+ 72 CAFE_2_HEADPAT       t=13  wait   Pipeline(headpat): reverse inertia settling (viewport 0).
+ 73 CAFE_2_HEADPAT       t=14  swipe  Pipeline(headpat): swipe to expose right_half.
+ 74 CAFE_2_HEADPAT       t=15  wait   Pipeline(headpat): waiting for swipe inertia (viewport 1).
+ 75 CAFE_2_HEADPAT       t=16  click  Pipeline(headpat): HSV click bubble at (699,573), viewport=scan_1.
+ 76 CAFE_2_HEADPAT       t=17  wait   Pipeline(headpat): no new bubbles in scan_1, moving on.
+ 77 CAFE_2_HEADPAT       t=18  swipe  Pipeline(headpat): reverse swipe from right_half back to center.
+ 78 CAFE_2_HEADPAT       t=19  wait   Pipeline(headpat): reverse inertia settling (viewport 1).
+ 79 CAFE_EXIT            t=0   wait   Pipeline(headpat): all viewports scanned (6 patted), advancing.
+ 80 CAFE_EXIT            t=1   click  Pipeline(cafe_exit): click Home. score=0.994
+ 81 CAFE_EXIT            t=2   back   Pipeline(cafe_exit): press ESC to go back.
+ 82 SCHEDULE_ENTER       t=0   wait   Pipeline(cafe_exit): back in lobby.
+ 83 SCHEDULE_ENTER       t=1   wait   Pipeline(schedule_enter): schedule button not found.
+ 84 SCHEDULE_ENTER       t=2   wait   Pipeline(schedule_enter): schedule button not found.
+ 85 SCHEDULE_ENTER       t=3   wait   Pipeline(schedule_enter): schedule button not found.
+ 86 SCHEDULE_ENTER       t=4   wait   Pipeline(schedule_enter): schedule button not found.
+ 87 SCHEDULE_ENTER       t=5   wait   Pipeline(schedule_enter): schedule button not found.
+ 88 SCHEDULE_ENTER       t=6   wait   Pipeline(schedule_enter): schedule button not found.
+ 89 SCHEDULE_ENTER       t=7   wait   Pipeline(schedule_enter): schedule button not found.
+ 90 SCHEDULE_ENTER       t=8   wait   Pipeline(schedule_enter): schedule button not found.
+ 91 SCHEDULE_ENTER       t=9   wait   Pipeline(schedule_enter): schedule button not found.
+ 92 SCHEDULE_EXECUTE     t=0   wait   Pipeline(schedule_enter): schedule button not found, skipping.
+ 93 CLUB_ENTER           t=0   wait   Pipeline(schedule_exec): back in lobby, done.
+ 94 CLUB_ENTER           t=1   wait   Pipeline(club_enter): looking for club button.
+ 95 CLUB_ENTER           t=2   wait   Pipeline(club_enter): looking for club button.
+ 96 CLUB_ENTER           t=3   wait   Pipeline(club_enter): looking for club button.
+ 97 CLUB_ENTER           t=4   wait   Pipeline(club_enter): looking for club button.
+ 98 CLUB_ENTER           t=5   wait   Pipeline(club_enter): looking for club button.
+ 99 CLUB_ENTER           t=6   wait   Pipeline(club_enter): looking for club button.
+100 CLUB_ENTER           t=7   wait   Pipeline(club_enter): looking for club button.
+101 CLUB_CLAIM           t=0   wait   Pipeline(club_enter): club not found, skipping.
+102 CAMPAIGN_ENTER       t=0   wait   Pipeline(club_claim): back in lobby, done.
+103                      t=    click  Cafe headpat: yellow interaction marker detected; clicking slightly right/below to interact with the student.
+104 CAMPAIGN_ENTER       t=2   wait   Pipeline(campaign_enter): waiting.
+105 CAMPAIGN_BOUNTIES    t=0   wait   Pipeline(campaign_enter): inside campaign, advancing.
+106                      t=    click  Cafe headpat: yellow interaction marker detected; clicking slightly right/below to interact with the student.
+107                      t=    click  Cerebellum(autoclick): cancel. template=取消（可点Esc）.png score=0.384
+108                      t=    click  Cerebellum(fast): close notice/webview. template=内嵌公告的叉.png score=0.460
+109 CAMPAIGN_EXIT        t=0   wait   Pipeline(bounties): back in lobby.
+110 DONE                 t=0   wait   Pipeline(campaign_exit): back in lobby, done.
+111                      t=    click  Cerebellum(autoclick): confirm. template=确认(可以点space）.png score=0.350
+112                      t=    click  Cerebellum(delegate): close notice/webview. template=游戏内很多页面窗口的叉.png score=0.556
+113                      t=    wait   delegate: close_notice
+114                      t=    click  Cerebellum(delegate): close notice/webview. template=游戏内很多页面窗口的叉.png score=0.551
+115                      t=    click  Cerebellum(autoclick): confirm. template=确认(可以点space）.png score=0.360

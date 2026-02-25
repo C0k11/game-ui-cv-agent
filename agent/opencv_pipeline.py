@@ -831,18 +831,22 @@ class PipelineController:
                 f"Pipeline(cafe_earnings): earnings 0%, skipping. score={m_zero.score:.3f}")
 
         # Try cafe earnings button template
-        m = self._match(screenshot_path, "咖啡厅收益按钮.png", min_score=0.40)
+        # The button is usually in the bottom-right corner
+        earnings_roi = (int(sw * 0.70), int(sh * 0.75), sw, sh)
+        m = self._match(screenshot_path, "咖啡厅收益按钮.png", roi=earnings_roi, min_score=0.40)
         if m is not None:
+            # We found the button. Click it.
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(cafe_earnings): click earnings button. score={m.score:.3f}")
 
-        # NOTE: Removed blind click at (sw*0.08, sh*0.18) — it hits 公告 button
-        # on lobby if cafe detection was a false positive. Only use template matching.
-
-        # After a couple ticks, assume earnings done or not available
-        self._state.earnings_claimed = True
-        self._advance_phase()  # → CAFE_INVITE
-        return self._wait(200, "Pipeline(cafe_earnings): no earnings dialog, advancing.")
+        # If we have waited a few ticks and still don't see the earnings button or confirm,
+        # assume it's done or not available.
+        if self._state.ticks >= 5:
+            self._state.earnings_claimed = True
+            self._advance_phase()  # → CAFE_INVITE
+            return self._wait(200, "Pipeline(cafe_earnings): no earnings dialog, advancing.")
+        
+        return self._wait(400, "Pipeline(cafe_earnings): waiting for earnings button.")
 
     def _handle_cafe_invite(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Invite featured (精選) students via MomoTalk.
@@ -1154,15 +1158,14 @@ class PipelineController:
     # -- Headpat handler -------------------------------------------------------
 
     # -- Pan-and-Scan viewport definitions ------------------------------------
-    # 2-point diagonal: zoom out first, then one swipe left (covers left half
-    # = bottom-left + top-left) and one swipe right (covers right half =
-    # top-right + bottom-right).  Half the ticks of the old 4-corner approach.
+    # 2-point horizontal: zoom out first, then one swipe right (covers left half)
+    # and one swipe left (covers right half). The cafe is wide horizontally.
     _PAN_SCAN_VIEWPORTS = [
-        ("left_half",  +0.35, 0.0),   # swipe right → expose left side of map
-        ("right_half", -0.35, 0.0),   # swipe left  → expose right side of map
+        ("left_half",  +0.40, 0.0),   # swipe right → expose left side of map
+        ("right_half", -0.40, 0.0),   # swipe left  → expose right side of map
     ]
-    _SWIPE_DURATION_MS = 500  # slow swipe to avoid map inertia fly-away
-    _ZOOM_OUT_CLICKS = -5     # mouse wheel clicks to zoom out (negative = zoom out)
+    _SWIPE_DURATION_MS = 600  # slow swipe to avoid map inertia fly-away
+    _ZOOM_OUT_CLICKS = -6     # mouse wheel clicks to zoom out (negative = zoom out)
 
     def _handle_cafe_headpat(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
         """Tap all students with yellow interaction markers using HSV pan-and-scan.
@@ -1541,7 +1544,7 @@ class PipelineController:
         # In lobby → click schedule button
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.40)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.35)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
