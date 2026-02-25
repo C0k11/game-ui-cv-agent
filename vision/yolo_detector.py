@@ -19,26 +19,20 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from config import YOLO_MODEL_PATH as _CFG_YOLO_PATH
-except ImportError:
-    _CFG_YOLO_PATH = ""
-
-_DEFAULT_MODEL_PATH = os.environ.get(
-    "YOLO_MODEL_PATH",
-    _CFG_YOLO_PATH or r"D:\Project\ml_cache\models\yolo\best.pt",
-)
-
 _lock = threading.Lock()
-_cached_detector: Optional["YoloDetector"] = None
-_cached_path: str = ""
+# Dictionary mapping skill name to its cached detector instance
+_cached_detectors: Dict[str, 'YoloDetector'] = {}
+
+# The base directory where YOLO models are stored
+_ML_CACHE_DIR = Path(r"D:\Project\ml_cache\models\yolo")
 
 
 class YoloDetector:
     """Thin wrapper around ultralytics YOLO for game UI detection."""
 
-    def __init__(self, model_path: str = _DEFAULT_MODEL_PATH, device: str = "cuda"):
-        self._model_path = model_path
+    def __init__(self, skill_name: str, device: str = "cuda"):
+        self.skill_name = skill_name
+        self._model_path = str(_ML_CACHE_DIR / f"{skill_name}.pt")
         self._device = device
         self._model: Any = None
 
@@ -60,36 +54,31 @@ class YoloDetector:
             import numpy as np
             dummy = np.zeros((64, 64, 3), dtype=np.uint8)
             self._model(dummy, verbose=False)
-            print(f"[YoloDetector] loaded: {self._model_path}")
+            print(f"[YoloDetector] Loaded {self.skill_name} model from {self._model_path}")
             return True
         except Exception as e:
-            print(f"[YoloDetector] load failed: {type(e).__name__}: {e}")
-            self._model = None
+            print(f"[YoloDetector] Failed to load {self.skill_name} model: {e}")
             return False
 
-    def detect(self, image_path: str, conf: float = 0.5,
-               classes: Optional[List[int]] = None) -> List[Dict[str, Any]]:
-        """Run detection on an image. Returns list of detections.
-
-        Each detection: {"label": str, "bbox": [x1,y1,x2,y2],
-                         "center": (cx, cy), "conf": float, "cls": int}
+    def detect(self, image_path: str, conf: float = 0.5, classes: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+        """
+        Run inference and return list of detections:
+        [ {"bbox": [x1,y1,x2,y2], "center": (cx,cy), "conf": 0.9, "cls": 0}, ... ]
         """
         if not self._ensure_loaded():
             return []
+        
         try:
-            kwargs: Dict[str, Any] = {"verbose": False, "conf": conf}
-            if classes is not None:
-                kwargs["classes"] = classes
-            results = self._model(image_path, **kwargs)
-            detections: List[Dict[str, Any]] = []
-            for result in results:
-                names = result.names  # {0: "headpat_bubble", ...}
-                for box in result.boxes:
-                    cls_id = int(box.cls[0])
+            results = self._model(image_path, conf=conf, classes=classes, verbose=False)
+            detections = []
+            for r in results:
+                boxes = r.boxes
+                for box in boxes:
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
+                    cls_id = int(box.cls[0])
                     detections.append({
-                        "label": names.get(cls_id, f"class_{cls_id}"),
                         "bbox": [x1, y1, x2, y2],
                         "center": (int(cx), int(cy)),
                         "conf": float(box.conf[0]),
@@ -100,23 +89,51 @@ class YoloDetector:
             print(f"[YoloDetector] detect error: {type(e).__name__}: {e}")
             return []
 
-    def detect_headpat_bubbles(self, image_path: str, conf: float = 0.5
-                               ) -> List[Tuple[int, int]]:
+    def detect_headpat_bubbles(self, image_path: str, conf: float = 0.5) -> List[Tuple[int, int]]:
         """Convenience: detect headpat bubbles, return list of (cx, cy) centers."""
-        dets = self.detect(image_path, conf=conf, classes=[0])
-        return [d["center"] for d in dets]
+        if not self._ensure_loaded():
+            return []
+        cls_id = None
+        for k, v in self._model.names.items():
+            if v == "headpat_bubble":
+                cls_id = k
+                break
+        
+        # If the model doesn't have headpat_bubble yet, return empty list
+        if cls_id is None:
+            print(f"[YoloDetector] Warning: 'headpat_bubble' class not found in {self.skill_name} model.")
+            return []
+            
+        return self.detect(image_path, conf=conf, classes=[cls_id])
+
+    def detect_student_avatars(self, image_path: str, conf: float = 0.4) -> List[Dict[str, Any]]:
+        """Convenience: detect student avatars in Schedule, return full detection objects."""
+        if not self._ensure_loaded():
+            return []
+        cls_id = None
+        for k, v in self._model.names.items():
+            if v == "student_avatar":
+                cls_id = k
+                break
+        
+        # If the model doesn't have student_avatar yet, return empty list
+        if cls_id is None:
+            print(f"[YoloDetector] Warning: 'student_avatar' class not found in {self.skill_name} model.")
+            return []
+            
+        return self.detect(image_path, conf=conf, classes=[cls_id])
 
 
-def get_yolo_detector(model_path: str = _DEFAULT_MODEL_PATH,
-                      device: str = "cuda") -> Optional[YoloDetector]:
-    """Get or create a cached YoloDetector instance. Returns None if model not trained yet."""
-    global _cached_detector, _cached_path
+def get_yolo_detector(skill_name: str, device: str = "cuda") -> Optional[YoloDetector]:
+    """Get or create a cached YoloDetector instance for a specific skill. Returns None if model not trained yet."""
+    global _cached_detectors
     with _lock:
-        if _cached_detector is not None and _cached_path == model_path:
-            return _cached_detector
-        det = YoloDetector(model_path=model_path, device=device)
+        if skill_name in _cached_detectors:
+            return _cached_detectors[skill_name]
+        
+        det = YoloDetector(skill_name=skill_name, device=device)
         if not det.available:
             return None
-        _cached_detector = det
-        _cached_path = model_path
+            
+        _cached_detectors[skill_name] = det
         return det

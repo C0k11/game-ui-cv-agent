@@ -190,9 +190,9 @@ class PipelineController:
         self._yolo: Optional[Any] = None
         try:
             if get_yolo_detector is not None:
-                self._yolo = get_yolo_detector()
+                self._yolo = get_yolo_detector(skill_name="cafe")
                 if self._yolo is not None:
-                    print("[Pipeline] YOLO detector loaded for headpat.")
+                    print("[Pipeline] YOLO detector loaded for cafe.")
                 else:
                     print("[Pipeline] YOLO model not found (not trained yet), using VLM fallback.")
         except Exception as e:
@@ -1544,7 +1544,7 @@ class PipelineController:
         # In lobby → click schedule button
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.35)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.30)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
@@ -1563,60 +1563,140 @@ class PipelineController:
         return self._wait(500, "Pipeline(schedule_enter): waiting for lobby.")
 
     def _handle_schedule_execute(self, *, screenshot_path: str) -> Optional[Dict[str, Any]]:
-        """Execute schedule: click rooms, confirm, handle ticket exhaustion.
-
-        Strategy: Use template matching for confirm buttons and popups.
-        For room selection, click the leftmost/first available room area.
-        VLM fallback handles complex decisions (return None to defer).
-        """
+        """Execute schedule: check locks, YOLO snipe targets, confirm, handle ticket exhaustion."""
         sw, sh = self._get_size(screenshot_path)
         if sw <= 0 or sh <= 0:
             return self._wait(300, "Pipeline(schedule_exec): no screenshot.")
 
-        # If we ended up in lobby, schedule is done
         if self._is_lobby(screenshot_path):
             print("[Pipeline] schedule_execute: back in lobby, schedule done.")
-            self._advance_phase()  # → DONE
+            self._advance_phase()
             return self._wait(300, "Pipeline(schedule_exec): back in lobby, done.")
 
-        # Close any popup (ticket exhausted, reward, etc.)
-        m = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.75)
-        if m is not None:
-            self._state.sub_state = "popup_closed"
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(schedule_exec): close popup. score={m.score:.3f}")
-
-        # After closing a popup, if we see lobby nav, we're done
-        if self._state.sub_state == "popup_closed" and self._is_lobby(screenshot_path):
+        # 1. Handle "Ticket Exhausted / Purchase" popup
+        m_cancel = self._match(screenshot_path, "取消（可点Esc）.png", min_score=0.60)
+        if m_cancel:
+            print("[Pipeline] schedule: ticket exhausted popup detected, finishing schedule.")
             self._advance_phase()
-            return self._wait(300, "Pipeline(schedule_exec): done after popup close.")
+            return self._click(m_cancel.center[0], m_cancel.center[1], "Pipeline(schedule): cancel purchase, schedule done.")
 
-        # Confirm button (start schedule, result confirm, etc.)
+        # 2. General popups (e.g., level up, rewards)
+        m_close = self._match(screenshot_path, "游戏内很多页面窗口的叉.png", min_score=0.75)
+        if m_close is not None:
+            return self._click(m_close.center[0], m_close.center[1], f"Pipeline(schedule_exec): close popup. score={m_close.score:.3f}")
+
+        # 3. Room entry or reward confirm
         confirm_roi = (int(sw * 0.25), int(sh * 0.40), int(sw * 0.85), int(sh * 0.95))
-        m = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
-        if m is not None:
+        m_confirm = self._match(screenshot_path, "确认(可以点space）.png", roi=confirm_roi, min_score=0.50)
+        if m_confirm is not None:
             self._state.sub_state = "confirmed"
-            return self._click(m.center[0], m.center[1],
-                f"Pipeline(schedule_exec): confirm. score={m.score:.3f}")
+            return self._click(m_confirm.center[0], m_confirm.center[1], f"Pipeline(schedule_exec): confirm. score={m_confirm.score:.3f}")
 
-        # Tap center to skip animations (schedule result, etc.)
-        if self._state.sub_state == "confirmed" and self._state.ticks % 2 == 0:
-            return self._click(sw // 2, sh // 2,
-                "Pipeline(schedule_exec): tap to skip animation.")
+        # 4. Main Schedule Page Check
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.50)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.50)
+        if not m_all and not m_tickets:
+            # Tap center to skip animations if we just confirmed
+            if self._state.sub_state == "confirmed":
+                return self._click(sw // 2, sh // 2, "Pipeline(schedule_exec): tap to skip animation.")
+            # Otherwise wait for UI to settle
+            if self._state.ticks >= 40:
+                print("[Pipeline] schedule_execute: timeout, going back.")
+                act = self._try_go_back(screenshot_path, "Pipeline(schedule_exec)")
+                if act is not None:
+                    return act
+                self._advance_phase()
+                return self._wait(300, "Pipeline(schedule_exec): timeout.")
+            return self._wait(400, "Pipeline(schedule_exec): waiting for schedule UI.")
 
-        # Defer to VLM for room selection and complex decisions
-        # Return None so VLM takes over
-        if self._state.ticks >= 20:
-            # Timeout — go back to lobby
-            print("[Pipeline] schedule_execute: timeout, going back.")
-            act = self._try_go_back(screenshot_path, "Pipeline(schedule_exec)")
-            if act is not None:
-                return act
-            self._advance_phase()
-            return self._wait(300, "Pipeline(schedule_exec): timeout.")
+        # Clear confirmed state since we are back on the main schedule UI
+        self._state.sub_state = "scan"
 
-        # Let VLM handle room selection for the first several ticks
-        return None
+        # 5. Check for Locks (Priority 1: Level up academies)
+        m_lock = self._match(screenshot_path, "课程表锁.png", min_score=0.60)
+        if m_lock is not None:
+            # Click unlocked room above the lock
+            cx = m_lock.center[0]
+            cy = max(int(sh * 0.15), m_lock.center[1] - int(sh * 0.22))
+            return self._click(cx, cy, "Pipeline(schedule_exec): found lock, clicking unlocked room above it.")
+
+        # 6. YOLO + Avatar Sniping
+        import cv2
+        import numpy as np
+        import json
+        from pathlib import Path
+        
+        if getattr(self, "_avatar_matcher", None) is None:
+            from vision.avatar_matcher import AvatarMatcher
+            self._avatar_matcher = AvatarMatcher("data/captures/角色头像")
+        
+        from vision.yolo_detector import get_yolo_detector
+        yolo = get_yolo_detector(skill_name="schedule")
+
+        favorites = []
+        try:
+            config_path = Path("data/app_config.json")
+            if config_path.exists():
+                fav_data = json.loads(config_path.read_text("utf-8"))
+                favorites = fav_data.get("target_favorites", [])
+        except Exception:
+            pass
+
+        room_scores = [0] * 6
+        room_centers = [
+            (0.24 * sw, 0.34 * sh), (0.52 * sw, 0.34 * sh), (0.80 * sw, 0.34 * sh),
+            (0.24 * sw, 0.66 * sh), (0.52 * sw, 0.66 * sh), (0.80 * sw, 0.66 * sh)
+        ]
+        rooms = [
+            (0.05 * sw, 0.15 * sh, 0.38 * sw, 0.48 * sh),
+            (0.38 * sw, 0.15 * sh, 0.66 * sw, 0.48 * sh),
+            (0.66 * sw, 0.15 * sh, 0.95 * sw, 0.48 * sh),
+            (0.05 * sw, 0.50 * sh, 0.38 * sw, 0.85 * sh),
+            (0.38 * sw, 0.50 * sh, 0.66 * sw, 0.85 * sh),
+            (0.66 * sw, 0.50 * sh, 0.95 * sw, 0.85 * sh),
+        ]
+
+        img_bgr = cv2.imdecode(np.fromfile(screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if yolo and img_bgr is not None:
+            dets = yolo.detect_student_avatars(screenshot_path)
+            for d in dets:
+                cx, cy = d["center"]
+                bx1, by1, bx2, by2 = d["bbox"]
+                room_idx = -1
+                for i, (rx1, ry1, rx2, ry2) in enumerate(rooms):
+                    if rx1 <= cx <= rx2 and ry1 <= cy <= ry2:
+                        room_idx = i
+                        break
+                if room_idx == -1: continue
+
+                room_scores[room_idx] += 10
+                
+                if favorites:
+                    roi = img_bgr[int(by1):int(by2), int(bx1):int(bx2)]
+                    matched_name, score = self._avatar_matcher.match_avatar(roi, favorites)
+                    if matched_name and score > 0.65:
+                        print(f"[Schedule] Sniped '{matched_name}' in room {room_idx} (score: {score:.2f})")
+                        room_scores[room_idx] += 1000
+
+        max_score = max(room_scores)
+
+        # 7. Flip Page or Select Room
+        if max_score < 1000 and self._state.retries < 6:
+            # Try to flip to next academy
+            m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
+            if m_left is not None:
+                self._state.retries += 1
+                return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no targets, flip page ({self._state.retries}/6).")
+
+        # Found a target or checked all pages. Click best room!
+        self._state.retries = 0
+        if max_score > 0:
+            best_room = room_scores.index(max_score)
+            rx, ry = room_centers[best_room]
+            return self._click(int(rx), int(ry), f"Pipeline(schedule_exec): click room {best_room} (score {max_score}).")
+        
+        # Fallback if literally zero students anywhere
+        return self._click(int(room_centers[0][0]), int(room_centers[0][1]), "Pipeline(schedule_exec): no students found, click room 0.")
 
     # -----------------------------------------------------------------------
     # Club handlers
