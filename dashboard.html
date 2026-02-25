@@ -36,6 +36,13 @@
     textarea#goal { width: 100%; min-height: 140px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid #ddd; border-radius: 10px; }
     details > summary { cursor: pointer; user-select: none; }
     .muted { color: #666; }
+
+    .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(65px, 1fr)); gap: 8px; max-height: 400px; overflow-y: auto; padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
+    .char-item { display: flex; flex-direction: column; align-items: center; cursor: pointer; padding: 4px; border-radius: 6px; border: 2px solid transparent; transition: all 0.2s; user-select: none; }
+    .char-item:hover { background: #e0e0e0; }
+    .char-item.selected { border-color: #0ea5e9; background: #e0f2fe; }
+    .char-avatar { width: 50px; height: 50px; object-fit: cover; border-radius: 4px; pointer-events: none; }
+    .char-name { font-size: 10px; margin-top: 4px; text-align: center; word-break: break-all; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -376,7 +383,77 @@
       });
     });
 
+
+    let selectedFavorites = new Set();
+
+    async function loadFavorites() {
+      try {
+        const charRes = await api('/api/v1/characters/avatars');
+        const favRes = await api('/api/v1/config/favorites');
+        
+        const avatars = charRes.avatars || [];
+        const favorites = favRes.target_favorites || [];
+        selectedFavorites = new Set(favorites);
+
+        const grid = $('char_grid');
+        grid.innerHTML = '';
+
+        avatars.forEach(filename => {
+          const name = decodeURIComponent(filename.replace('.png', ''));
+          const isSelected = selectedFavorites.has(filename);
+          
+          const div = document.createElement('div');
+          div.className = 'char-item' + (isSelected ? ' selected' : '');
+          div.onclick = () => toggleFavorite(filename, div);
+          
+          const img = document.createElement('img');
+          img.className = 'char-avatar';
+          img.src = '/api/v1/captures/image?path=角色头像/' + encodeURIComponent(filename);
+          img.loading = 'lazy';
+          
+          const span = document.createElement('span');
+          span.className = 'char-name';
+          span.textContent = name;
+          
+          div.appendChild(img);
+          div.appendChild(span);
+          grid.appendChild(div);
+        });
+      } catch (e) {
+        console.error("Failed to load character favorites:", e);
+      }
+    }
+
+    function toggleFavorite(filename, el) {
+      if (selectedFavorites.has(filename)) {
+        selectedFavorites.delete(filename);
+        el.classList.remove('selected');
+      } else {
+        selectedFavorites.add(filename);
+        el.classList.add('selected');
+      }
+    }
+
+    if ($('btn_save_favorites')) {
+      $('btn_save_favorites').onclick = async () => {
+        try {
+          $('favorites_status').textContent = 'Saving...';
+          await api('/api/v1/config/favorites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_favorites: Array.from(selectedFavorites) })
+          });
+          $('favorites_status').textContent = 'Saved!';
+          setTimeout(() => $('favorites_status').textContent = '', 2000);
+        } catch (e) {
+          $('favorites_status').textContent = 'Error saving';
+          console.error(e);
+        }
+      };
+    }
+
     loadSaved();
+    loadFavorites();
     setInterval(refresh, 1200);
     refresh();
   </script>

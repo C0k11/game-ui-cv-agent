@@ -40,6 +40,11 @@ ANNOTATE_PATH = REPO_ROOT / "annotate.html"
 CAPTURES_DIR = REPO_ROOT / "data" / "captures"
 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
+CHARACTERS_DIR = CAPTURES_DIR / "角色头像"
+CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
+
+APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
+
 OCR_CACHE_VERSION = 2
 VLM_OCR_CACHE_VERSION = 1
 LOCAL_VLM_OCR_CACHE_VERSION = 1
@@ -911,6 +916,38 @@ def _safe_capture_path(rel: str) -> Path:
     if not str(p).startswith(str(base)):
         raise HTTPException(status_code=400, detail="invalid path")
     return p
+
+
+@app.get("/api/v1/config/favorites")
+def get_favorites() -> Dict[str, Any]:
+    if not APP_CONFIG_PATH.exists():
+        return {"target_favorites": []}
+    try:
+        data = json.loads(APP_CONFIG_PATH.read_text("utf-8"))
+        return {"target_favorites": data.get("target_favorites", [])}
+    except Exception:
+        return {"target_favorites": []}
+
+
+@app.post("/api/v1/config/favorites")
+def set_favorites(payload: Dict[str, Any]) -> Dict[str, Any]:
+    data = {}
+    if APP_CONFIG_PATH.exists():
+        try:
+            data = json.loads(APP_CONFIG_PATH.read_text("utf-8"))
+        except Exception:
+            pass
+    data["target_favorites"] = payload.get("target_favorites", [])
+    APP_CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
+    return {"status": "ok"}
+
+
+@app.get("/api/v1/characters/avatars")
+def list_character_avatars() -> Dict[str, Any]:
+    if not CHARACTERS_DIR.exists():
+        return {"avatars": []}
+    avatars = sorted([p.name for p in CHARACTERS_DIR.glob("*.png")])
+    return {"avatars": avatars}
 
 
 @app.get("/api/v1/captures/sessions")
