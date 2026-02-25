@@ -4476,6 +4476,19 @@ class VlmPolicyAgent:
             self._device.swipe_client(int(x1), int(y1), int(x2), int(y2), duration_ms=d)
             return
 
+        if a == "scroll":
+            target = action.get("target")
+            clicks = int(action.get("clicks", -3))
+            if isinstance(target, (list, tuple)) and len(target) == 2:
+                tx, ty = int(target[0]), int(target[1])
+                cx, cy = _scale_xy(tx, ty)
+                cx, cy = _clamp_xy(int(cx), int(cy))
+            else:
+                cx, cy = int(cw // 2), int(ch // 2)
+            if hasattr(self._device, "scroll_client"):
+                self._device.scroll_client(int(cx), int(cy), clicks=clicks)
+            return
+
         if a == "back":
             self._device.press_escape()
             return
