@@ -190,9 +190,9 @@ class PipelineController:
         self._yolo: Optional[Any] = None
         try:
             if get_yolo_detector is not None:
-                self._yolo = get_yolo_detector()
+                self._yolo = get_yolo_detector(skill_name="cafe")
                 if self._yolo is not None:
-                    print("[Pipeline] YOLO detector loaded for headpat.")
+                    print("[Pipeline] YOLO detector loaded for cafe.")
                 else:
                     print("[Pipeline] YOLO model not found (not trained yet), using VLM fallback.")
         except Exception as e:
@@ -1631,7 +1631,7 @@ class PipelineController:
             self._avatar_matcher = AvatarMatcher("data/captures/角色头像")
         
         from vision.yolo_detector import get_yolo_detector
-        yolo = get_yolo_detector()
+        yolo = get_yolo_detector(skill_name="schedule")
 
         favorites = []
         try:
