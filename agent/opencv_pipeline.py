@@ -1544,7 +1544,7 @@ class PipelineController:
         # In lobby → click schedule button
         if self._is_lobby(screenshot_path):
             roi_nav = (0, int(sh * 0.80), sw, sh)
-            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.35)
+            m = self._match(screenshot_path, "课程表.png", roi=roi_nav, min_score=0.30)
             if m is not None:
                 return self._click(m.center[0], m.center[1],
                     f"Pipeline(schedule_enter): click schedule. score={m.score:.3f}")
