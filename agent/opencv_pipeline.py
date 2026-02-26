@@ -1702,7 +1702,7 @@ class PipelineController:
         has_favorite = False
         
         if yolo and img_bgr is not None:
-            dets = yolo.detect_student_avatars(screenshot_path)
+            dets = yolo.detect_student_avatars(screenshot_path, conf=0.10)
             for d in dets:
                 cx, cy = d["center"]
                 bx1, by1, bx2, by2 = d["bbox"]
