@@ -59,7 +59,7 @@ def _center(bbox) -> Tuple[int, int]:
 def _detect_yellow_markers(
     screenshot_path: str,
     *,
-    min_area: int = 80,
+    min_area: int = 150,
     max_area: int = 12000,
     safe_roi: Optional[Tuple[int, int, int, int]] = None,
 ) -> List[Tuple[int, int, int, int]]:
@@ -90,6 +90,11 @@ def _detect_yellow_markers(
         if area < min_area or area > max_area:
             continue
         x, y, w, h = cv2.boundingRect(c)
+        
+        # Filter out tiny noise blobs that passed the area check (e.g. 10x20 pixels)
+        if w < 20 or h < 20:
+            continue
+            
         aspect = w / max(h, 1)
         if aspect > 3.0 or aspect < 0.2:
             continue
@@ -823,17 +828,16 @@ class PipelineController:
 
         # Check if earnings are 0% — no point clicking
         earnings_roi = (int(sw * 0.75), int(sh * 0.80), sw, sh)
-        m_zero = self._match(screenshot_path, "咖啡厅收益为0.png", roi=earnings_roi, min_score=0.50)
+        m_zero = self._match(screenshot_path, "咖啡厅收益为0.png", roi=earnings_roi, min_score=0.85)
         if m_zero is not None:
             self._state.earnings_claimed = True
             self._advance_phase()
-            return self._wait(200,
-                f"Pipeline(cafe_earnings): earnings 0%, skipping. score={m_zero.score:.3f}")
+            return self._wait(200, f"Pipeline(cafe_earnings): earnings 0%, skipping. score={m_zero.score:.3f}")
 
         # Try cafe earnings button template
         # The button is usually in the bottom-right corner
         earnings_roi = (int(sw * 0.70), int(sh * 0.75), sw, sh)
-        m = self._match(screenshot_path, "咖啡厅收益按钮.png", roi=earnings_roi, min_score=0.40)
+        m = self._match(screenshot_path, "咖啡厅收益按钮.png", roi=earnings_roi, min_score=0.70)
         if m is not None:
             # We found the button. Click it.
             return self._click(m.center[0], m.center[1],
@@ -1533,13 +1537,34 @@ class PipelineController:
             return self._click(m.center[0], m.center[1],
                 f"Pipeline(schedule_enter): confirm. score={m.score:.3f}")
 
+        # Check for Schale Office entry screen (课程表夏莱办公室入口.png)
+        # This sometimes appears after clicking Schedule from lobby before entering the actual rooms
+        m_schale = self._match(screenshot_path, "课程表夏莱办公室入口.png", min_score=0.60)
+        if m_schale is not None:
+            return self._click(m_schale.center[0], m_schale.center[1],
+                f"Pipeline(schedule_enter): enter Schale Office. score={m_schale.score:.3f}")
+
+        # Fallback for Schale Office if template fails (e.g. resolution differences)
+        # We can detect we are in the Schale Office entry screen if we are not in lobby, 
+        # not inside the actual schedule rooms, and we just clicked Schedule from lobby.
+        # But to be safe, we'll just click the coordinate if we timeout while waiting for schedule to load.
+        if not self._is_lobby(screenshot_path):
+            if self._state.ticks >= 8 and self._state.ticks % 3 == 0:
+                # Click the center of the Schale Office entry button area (approx ~65% width, 35% height in 16:9)
+                return self._click(int(sw * 0.65), int(sh * 0.35),
+                    f"Pipeline(schedule_enter): fallback click Schale Office entry (tick {self._state.ticks}).")
+
         # Already inside schedule? Check for back button + no lobby nav
         # (schedule is a sub-screen with Home button)
-        if not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path):
+        # Wait, Schale Office doesn't have a home button. We also need to check if we are in the main Schedule UI directly.
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.35)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
+        
+        if (not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path)) or m_all or m_tickets:
             # Likely inside schedule already
             if self._state.ticks >= 2:
                 self._advance_phase()  # → SCHEDULE_EXECUTE
-                return self._wait(300, "Pipeline(schedule_enter): inside sub-screen, advancing.")
+                return self._wait(300, "Pipeline(schedule_enter): inside schedule already, advancing.")
 
         # In lobby → click schedule button
         if self._is_lobby(screenshot_path):
@@ -1593,8 +1618,8 @@ class PipelineController:
             return self._click(m_confirm.center[0], m_confirm.center[1], f"Pipeline(schedule_exec): confirm. score={m_confirm.score:.3f}")
 
         # 4. Main Schedule Page Check
-        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.50)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.50)
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.35)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
         if not m_all and not m_tickets:
             # Tap center to skip animations if we just confirmed
             if self._state.sub_state == "confirmed":
