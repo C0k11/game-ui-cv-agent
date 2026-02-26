@@ -627,6 +627,14 @@ class PipelineController:
             self._advance_phase()
             return self._wait(300, "Pipeline(startup): lobby detected, advancing.")
 
+        # Fast-forward: already in schedule
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.30)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.30)
+        if m_all or m_tickets:
+            print("[Pipeline] Schedule UI detected during STARTUP, jumping to SCHEDULE_EXECUTE.")
+            self._enter_phase(Phase.SCHEDULE_EXECUTE)
+            return self._wait(200, "Pipeline(startup): schedule detected, jumping to SCHEDULE_EXECUTE.")
+
         # Fast-forward: on a subscreen (schedule, mission, etc.) → go Home
         if self._is_subscreen(screenshot_path):
             print("[Pipeline] Subscreen detected during STARTUP, navigating Home.")
@@ -1618,8 +1626,8 @@ class PipelineController:
             return self._click(m_confirm.center[0], m_confirm.center[1], f"Pipeline(schedule_exec): confirm. score={m_confirm.score:.3f}")
 
         # 4. Main Schedule Page Check
-        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.35)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.30)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.30)
         if not m_all and not m_tickets:
             # Tap center to skip animations if we just confirmed
             if self._state.sub_state == "confirmed":
