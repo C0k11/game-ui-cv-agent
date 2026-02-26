@@ -1649,9 +1649,18 @@ class PipelineController:
             return self._wait(400, "Pipeline(schedule_exec): waiting for schedule UI.")
 
         # Clear confirmed state since we are back on the main schedule UI
-        if self._state.sub_state not in ["scan_favs", "scan_locks", "scan_any"]:
+        if self._state.sub_state not in ["init_view", "scan_favs", "scan_locks", "scan_any"]:
+            if self._state.sub_state == "":
+                self._state.sub_state = "init_view"
+            else:
+                self._state.sub_state = "scan_favs"
+                self._state.retries = 0
+
+        if self._state.sub_state == "init_view":
             self._state.sub_state = "scan_favs"
             self._state.retries = 0
+            if m_all is not None:
+                return self._click(m_all.center[0], m_all.center[1], "Pipeline(schedule_exec): init view to All Schedule.")
 
         # YOLO + Avatar Sniping
         import cv2
