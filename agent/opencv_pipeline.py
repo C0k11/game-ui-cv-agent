@@ -629,9 +629,8 @@ class PipelineController:
 
         # Fast-forward: already in schedule
         m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.55)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
         m_schale = self._match(screenshot_path, "课程表夏莱办公室入口.png", min_score=0.65)
-        if m_all or m_tickets or m_schale:
+        if m_all or m_schale:
             print("[Pipeline] Schedule UI detected during STARTUP, jumping to SCHEDULE_EXECUTE.")
             self._enter_phase(Phase.SCHEDULE_EXECUTE)
             return self._wait(200, "Pipeline(startup): schedule detected, jumping to SCHEDULE_EXECUTE.")
@@ -1567,7 +1566,7 @@ class PipelineController:
         # (schedule is a sub-screen with Home button)
         # Wait, Schale Office doesn't have a home button. We also need to check if we are in the main Schedule UI directly.
         m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.55)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.45)
         
         if (not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path)) or m_all or m_tickets:
             # Likely inside schedule already
@@ -1633,7 +1632,7 @@ class PipelineController:
 
         # 4. Main Schedule Page Check
         m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.55)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.45)
         if not m_all and not m_tickets:
             # Tap center to skip animations if we just confirmed
             if self._state.sub_state == "confirmed":
