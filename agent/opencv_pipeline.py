@@ -835,8 +835,8 @@ class PipelineController:
                 f"Pipeline(cafe_earnings): confirm earnings. score={m.score:.3f}")
 
         # Check if earnings are 0% — no point clicking
-        earnings_roi = (int(sw * 0.75), int(sh * 0.80), sw, sh)
-        m_zero = self._match(screenshot_path, "咖啡厅收益为0.png", roi=earnings_roi, min_score=0.85)
+        earnings_roi = (int(sw * 0.65), int(sh * 0.30), sw, sh)
+        m_zero = self._match(screenshot_path, "咖啡厅收益为0.png", roi=earnings_roi, min_score=0.30)
         if m_zero is not None:
             self._state.earnings_claimed = True
             self._advance_phase()
@@ -844,8 +844,8 @@ class PipelineController:
 
         # Try cafe earnings button template
         # The button is usually in the bottom-right corner
-        earnings_roi = (int(sw * 0.70), int(sh * 0.75), sw, sh)
-        m = self._match(screenshot_path, "咖啡厅收益按钮.png", roi=earnings_roi, min_score=0.70)
+        earnings_roi = (int(sw * 0.70), int(sh * 0.80), sw, sh)
+        m = self._match(screenshot_path, "咖啡厅收益按钮.png", roi=earnings_roi, min_score=0.15)
         if m is not None:
             # We found the button. Click it.
             return self._click(m.center[0], m.center[1],
@@ -1701,7 +1701,7 @@ class PipelineController:
         has_favorite = False
         
         if yolo and img_bgr is not None:
-            dets = yolo.detect_student_avatars(screenshot_path, conf=0.10)
+            dets = yolo.detect_student_avatars(screenshot_path, conf=0.02)
             for d in dets:
                 cx, cy = d["center"]
                 bx1, by1, bx2, by2 = d["bbox"]
@@ -1726,7 +1726,8 @@ class PipelineController:
         max_score = max(room_scores)
 
         # Logic: 3 Passes (Favorites -> Locks -> Any)
-        
+        left_btn_roi = (0, int(sh * 0.40), int(sw * 0.10), int(sh * 0.60))
+
         if self._state.sub_state == "scan_favs":
             if has_favorite:
                 best_room = room_scores.index(max(room_scores))
@@ -1742,9 +1743,11 @@ class PipelineController:
                         "reason": "Pipeline(schedule_exec): scroll down before flip.",
                         "_pipeline": True,
                     }
-                m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
-                self._state.retries += 1
+                m_left = self._match(screenshot_path, "左切换.png", roi=left_btn_roi, min_score=0.45)
                 if m_left is not None:
+                    self._state.retries += 1
+                    # Give UI time to transition, so next tick we scan the new page
+                    self._state.ticks = 0
                     return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no favorites, flip page ({self._state.retries}/6).")
                 return self._wait(300, "Pipeline(schedule_exec): waiting to flip page.")
             else:
@@ -1764,9 +1767,10 @@ class PipelineController:
             if self._state.retries < 6:
                 if self._state.ticks % 2 == 0:
                     return {"action": "scroll", "target": [sw // 2, sh // 2], "clicks": -3, "reason": "Pipeline(schedule_exec): scroll down before flip.", "_pipeline": True}
-                m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
-                self._state.retries += 1
+                m_left = self._match(screenshot_path, "左切换.png", roi=left_btn_roi, min_score=0.45)
                 if m_left is not None:
+                    self._state.retries += 1
+                    self._state.ticks = 0
                     return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no locks, flip page ({self._state.retries}/6).")
                 return self._wait(300, "Pipeline(schedule_exec): waiting to flip page.")
             else:
@@ -1783,9 +1787,10 @@ class PipelineController:
             if self._state.retries < 6:
                 if self._state.ticks % 2 == 0:
                     return {"action": "scroll", "target": [sw // 2, sh // 2], "clicks": -3, "reason": "Pipeline(schedule_exec): scroll down before flip.", "_pipeline": True}
-                m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
-                self._state.retries += 1
+                m_left = self._match(screenshot_path, "左切换.png", roi=left_btn_roi, min_score=0.45)
                 if m_left is not None:
+                    self._state.retries += 1
+                    self._state.ticks = 0
                     return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no students, flip page ({self._state.retries}/6).")
                 return self._wait(300, "Pipeline(schedule_exec): waiting to flip page.")
             else:
