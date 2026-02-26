@@ -1719,7 +1719,7 @@ class PipelineController:
                 if favorites:
                     roi = img_bgr[int(by1):int(by2), int(bx1):int(bx2)]
                     matched_name, score = self._avatar_matcher.match_avatar(roi, favorites)
-                    if matched_name and score > 0.65:
+                    if matched_name and score > 0.30:
                         print(f"[Schedule] Sniped '{matched_name}' in room {room_idx} (score: {score:.2f})")
                         room_scores[room_idx] += 1000
                         has_favorite = True
