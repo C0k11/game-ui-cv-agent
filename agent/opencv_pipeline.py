@@ -628,9 +628,10 @@ class PipelineController:
             return self._wait(300, "Pipeline(startup): lobby detected, advancing.")
 
         # Fast-forward: already in schedule
-        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.30)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.30)
-        if m_all or m_tickets:
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.55)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
+        m_schale = self._match(screenshot_path, "课程表夏莱办公室入口.png", min_score=0.65)
+        if m_all or m_tickets or m_schale:
             print("[Pipeline] Schedule UI detected during STARTUP, jumping to SCHEDULE_EXECUTE.")
             self._enter_phase(Phase.SCHEDULE_EXECUTE)
             return self._wait(200, "Pipeline(startup): schedule detected, jumping to SCHEDULE_EXECUTE.")
@@ -1565,7 +1566,7 @@ class PipelineController:
         # Already inside schedule? Check for back button + no lobby nav
         # (schedule is a sub-screen with Home button)
         # Wait, Schale Office doesn't have a home button. We also need to check if we are in the main Schedule UI directly.
-        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.35)
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.55)
         m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
         
         if (not self._is_lobby(screenshot_path) and self._is_subscreen(screenshot_path)) or m_all or m_tickets:
@@ -1606,6 +1607,11 @@ class PipelineController:
             self._advance_phase()
             return self._wait(300, "Pipeline(schedule_exec): back in lobby, done.")
 
+        # 0. Check if we are still at the Schale Office entry screen
+        m_schale = self._match(screenshot_path, "课程表夏莱办公室入口.png", min_score=0.65)
+        if m_schale is not None:
+            return self._click(m_schale.center[0], m_schale.center[1], f"Pipeline(schedule_exec): enter Schale Office. score={m_schale.score:.3f}")
+
         # 1. Handle "Ticket Exhausted / Purchase" popup
         m_cancel = self._match(screenshot_path, "取消（可点Esc）.png", min_score=0.60)
         if m_cancel:
@@ -1626,8 +1632,8 @@ class PipelineController:
             return self._click(m_confirm.center[0], m_confirm.center[1], f"Pipeline(schedule_exec): confirm. score={m_confirm.score:.3f}")
 
         # 4. Main Schedule Page Check
-        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.30)
-        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.30)
+        m_all = self._match(screenshot_path, "全体课程表.png", min_score=0.55)
+        m_tickets = self._match(screenshot_path, "课程表票持有数量.png", min_score=0.35)
         if not m_all and not m_tickets:
             # Tap center to skip animations if we just confirmed
             if self._state.sub_state == "confirmed":
@@ -1729,8 +1735,8 @@ class PipelineController:
                         "_pipeline": True,
                     }
                 m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
+                self._state.retries += 1
                 if m_left is not None:
-                    self._state.retries += 1
                     return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no favorites, flip page ({self._state.retries}/6).")
                 return self._wait(300, "Pipeline(schedule_exec): waiting to flip page.")
             else:
@@ -1751,8 +1757,8 @@ class PipelineController:
                 if self._state.ticks % 2 == 0:
                     return {"action": "scroll", "target": [sw // 2, sh // 2], "clicks": -3, "reason": "Pipeline(schedule_exec): scroll down before flip.", "_pipeline": True}
                 m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
+                self._state.retries += 1
                 if m_left is not None:
-                    self._state.retries += 1
                     return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no locks, flip page ({self._state.retries}/6).")
                 return self._wait(300, "Pipeline(schedule_exec): waiting to flip page.")
             else:
@@ -1770,8 +1776,8 @@ class PipelineController:
                 if self._state.ticks % 2 == 0:
                     return {"action": "scroll", "target": [sw // 2, sh // 2], "clicks": -3, "reason": "Pipeline(schedule_exec): scroll down before flip.", "_pipeline": True}
                 m_left = self._match(screenshot_path, "左切换.png", min_score=0.60)
+                self._state.retries += 1
                 if m_left is not None:
-                    self._state.retries += 1
                     return self._click(m_left.center[0], m_left.center[1], f"Pipeline(schedule_exec): no students, flip page ({self._state.retries}/6).")
                 return self._wait(300, "Pipeline(schedule_exec): waiting to flip page.")
             else:
