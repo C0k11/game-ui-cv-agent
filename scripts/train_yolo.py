@@ -75,7 +75,7 @@ def main():
     print(f"Description: {AGENT_SKILLS[skill]['desc']}")
     
     # Dataset and Output paths specific to the skill
-    dataset_dir = ML_CACHE_DIR / "datasets" / skill
+    dataset_dir = ML_CACHE_DIR / "dataset" / skill
     output_dir = ML_CACHE_DIR / "runs" / skill
     production_pt = ML_CACHE_DIR / f"{skill}.pt"
 
