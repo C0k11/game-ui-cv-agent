@@ -79,10 +79,8 @@ class MailSkill(BaseSkill):
                 return action_click_box(mail_btn, "open mail from lobby")
             
             # Fallback: specific click for mail icon (usually near top right)
-            # Normalized coordinates for mail icon: approx (0.85, 0.05) or (0.9, 0.05)?
-            # Actually, standard lobby layout has mail near top right.
-            # Let's try clicking the icon area if text fails.
-            return action_click(0.82, 0.04, "click mail icon area")
+            # YOLO data (frame_000058) shows class 5 (Mail) at cx=0.89, cy=0.05
+            return action_click(0.89, 0.05, "click mail icon area")
 
         return action_wait(500, "entering mail")
 
