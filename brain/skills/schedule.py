@@ -85,16 +85,22 @@ class ScheduleSkill(BaseSkill):
         return action_wait(300, "schedule unknown state")
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._is_schedule(screen):
+        current = self.detect_current_screen(screen)
+        
+        if current == "Schedule":
             self.log("inside schedule")
             self.sub_state = "execute"
             return action_wait(500, "entered schedule")
 
-        if screen.is_lobby():
+        if current == "Lobby":
             nav = self._nav_to(screen, ["課程表", "课程表"])
             if nav:
                 return nav
             return action_wait(300, "waiting for schedule button")
+            
+        if current and current != "Schedule":
+            self.log(f"wrong screen '{current}', backing out")
+            return action_back(f"back from {current}")
 
         return action_wait(500, "entering schedule")
 

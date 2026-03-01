@@ -53,17 +53,14 @@ class BountySkill(BaseSkill):
         return action_wait(300, "bounty unknown state")
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        # Check if inside bounty screen (header)
-        bounty = screen.find_any_text(
-            ["懸賞通緝", "悬赏通缉", "通緝", "通缉", "Bounty"],
-            region=(0.0, 0.0, 0.3, 0.08), min_conf=0.6
-        )
-        if bounty:
+        current = self.detect_current_screen(screen)
+        
+        if current == "Bounty":
             self.log("inside bounty")
             self.sub_state = "sweep"
             return action_wait(500, "entered bounty")
 
-        if screen.is_lobby():
+        if current == "Lobby":
             # Click 任務 (Mission) on left sidebar or bottom nav
             # Usually bottom nav has 任務/Task if it's main nav
             # Or left sidebar if it's the mission menu
@@ -78,7 +75,13 @@ class BountySkill(BaseSkill):
             nav = self._nav_to(screen, ["任務", "任务"])
             if nav:
                 return nav
+            return action_wait(300, "waiting for bounty button")
 
+        if current and current != "Bounty" and current != "Mission":
+             self.log(f"wrong screen '{current}', backing out")
+             return action_back(f"back from {current}")
+
+        # If in Mission menu but not Bounty tab yet
         # Look for bounty tab in task menu (usually top or left tabs)
         bounty_tab = screen.find_any_text(
             ["懸賞", "悬赏", "通緝", "通缉"],

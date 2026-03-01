@@ -47,21 +47,22 @@ class ClubSkill(BaseSkill):
         return action_wait(300, "club unknown state")
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        # Check if inside club (header)
-        club_header = screen.find_any_text(
-            ["社團", "社团", "Club"],
-            region=(0.0, 0.0, 0.3, 0.08), min_conf=0.6
-        )
-        if club_header:
+        current = self.detect_current_screen(screen)
+        
+        if current == "Club":
             self.log("inside club")
             self.sub_state = "claim"
             return action_wait(500, "entered club")
 
-        if screen.is_lobby():
+        if current == "Lobby":
             nav = self._nav_to(screen, ["社團", "社团", "社交"])
             if nav:
                 return nav
             return action_wait(300, "waiting for club button")
+            
+        if current and current != "Club":
+            self.log(f"wrong screen '{current}', backing out")
+            return action_back(f"back from {current}")
 
         return action_wait(500, "entering club")
 

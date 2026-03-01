@@ -57,17 +57,14 @@ class MailSkill(BaseSkill):
         return action_wait(300, "mail unknown state")
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        # Check if inside mail (header)
-        mail_header = screen.find_any_text(
-            ["郵件", "邮件", "郵箱", "邮箱", "Mail"],
-            region=(0.0, 0.0, 0.3, 0.08), min_conf=0.6
-        )
-        if mail_header:
+        current = self.detect_current_screen(screen)
+        
+        if current == "Mail":
             self.log("inside mail")
             self.sub_state = "claim_mail"
             return action_wait(500, "entered mail")
 
-        if screen.is_lobby():
+        if current == "Lobby":
             # Try mail icon (usually top right or sidebar)
             # Or hidden in menu. Usually on main screen top right.
             # Use '郵件' text if visible.
@@ -81,6 +78,10 @@ class MailSkill(BaseSkill):
             # Fallback: specific click for mail icon (usually near top right)
             # YOLO data (frame_000058) shows class 5 (Mail) at cx=0.89, cy=0.05
             return action_click(0.89, 0.05, "click mail icon area")
+            
+        if current and current != "Mail":
+            self.log(f"wrong screen '{current}', backing out")
+            return action_back(f"back from {current}")
 
         return action_wait(500, "entering mail")
 

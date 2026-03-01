@@ -130,26 +130,22 @@ class LobbySkill(BaseSkill):
             return popup_action
 
         # ── Lobby check ──
-        if screen.is_lobby():
+        current_screen = self.detect_current_screen(screen)
+        if current_screen == "Lobby":
             self.log("lobby detected, no popups, done")
             return action_done("in lobby")
 
         # ── Already inside a sub-screen? ──
-        # If top-left header shows a known screen name, we are NOT in lobby.
-        # We should navigate back to lobby to ensure a clean state for the pipeline.
-        header = screen.find_any_text(
-            ["咖啡廳", "咖啡厅", "課程表", "课程表", "商店", "社團", "社团",
-             "任務", "任务", "懸賞通緝", "戰術對抗", "郵件", "邮件"],
-            region=(0.0, 0.0, 0.25, 0.08), min_conf=0.5
-        )
-        if header:
-            self.log(f"detected sub-screen '{header.text}', returning to lobby")
+        # If we detected a specific screen other than Lobby, we are deep in a menu.
+        # We should navigate back to lobby to ensure a clean state.
+        if current_screen and current_screen != "Lobby":
+            self.log(f"detected sub-screen '{current_screen}', returning to lobby")
             # Try YOLO Home button first
             home = screen.find_yolo_one("主界面按钮", min_conf=0.3)
             if home:
                 return action_click_yolo(home, "click home button")
             # Fallback to Back
-            return action_back(f"back from {header.text} to lobby")
+            return action_back(f"back from {current_screen} to lobby")
 
         # Timeout fallback
         if self.ticks >= self.max_ticks:

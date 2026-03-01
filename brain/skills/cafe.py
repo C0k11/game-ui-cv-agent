@@ -129,16 +129,22 @@ class CafeSkill(BaseSkill):
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         """Navigate from lobby to cafe."""
-        if self._is_cafe(screen):
+        current = self.detect_current_screen(screen)
+        
+        if current == "Cafe":
             self.log("inside cafe")
             self.sub_state = "earnings"
             return action_wait(500, "entered cafe")
-
-        if screen.is_lobby():
+            
+        if current == "Lobby":
             nav = self._nav_to(screen, ["咖啡廳", "咖啡厅", "咖啡"])
             if nav:
                 return nav
             return action_wait(300, "waiting for cafe button")
+            
+        if current and current != "Cafe":
+            self.log(f"wrong screen '{current}', backing out")
+            return action_back(f"back from {current}")
 
         return action_wait(500, "entering cafe")
 
