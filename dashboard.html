@@ -1,472 +1,874 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI Game Secretary</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; background: #fafafa; color: #111; }
-    .container { max-width: 1240px; margin: 0 auto; }
-    .topbar { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
-    .topbar h2 { margin: 0; font-size: 22px; }
-    .topbar .links { display: flex; gap: 12px; font-size: 13px; }
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AI Game Secretary</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f172a;--bg2:#1e293b;--bg3:#334155;--border:#475569;--text:#e2e8f0;--muted:#94a3b8;--accent:#3b82f6;--accent2:#2563eb;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--font:system-ui,-apple-system,'Segoe UI',sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex}
 
-    .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; align-items: flex-end; }
-    label { display: flex; flex-direction: column; font-size: 12px; color: #333; gap: 6px; }
-    input[type=text], input[type=number] { padding: 9px 10px; min-width: 180px; border: 1px solid #ddd; border-radius: 8px; }
-    .wide { min-width: 520px; flex: 1; }
+/* ── Sidebar ── */
+.sidebar{width:56px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px;flex-shrink:0;transition:width .2s}
+.sidebar .logo{font-size:20px;margin-bottom:8px;padding:8px 0}
+.nav-btn{width:44px;height:44px;border:none;background:transparent;color:var(--muted);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;transition:all .15s}
+.nav-btn:hover{background:var(--bg3);color:var(--text)}
+.nav-btn.active{background:var(--accent);color:#fff}
+.nav-btn .label{display:none}
+.sidebar-bottom{margin-top:auto}
 
-    .btn { padding: 10px 14px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
-    .btn:hover { background: #f7f7f7; }
-    .btn.primary { background: #0b5fff; border-color: #0b5fff; color: #fff; }
-    .btn.primary:hover { background: #0a55e5; }
-    .btn.danger { background: #fff; border-color: #f0b4b4; color: #b00020; }
-    .btn.danger:hover { background: #fff5f5; }
-    .btn.ghost { background: transparent; }
+/* ── Main ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.page{display:none;flex:1;overflow:auto;padding:20px}
+.page.active{display:flex;flex-direction:column}
+.page-title{font-size:20px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:10px}
 
-    .status { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px; border: 1px solid #ddd; background: #f6f6f6; font-size: 12px; }
-    .pill.ok { border-color: #b7e4c7; background: #ecfdf3; color: #0a7a2f; }
-    .pill.bad { border-color: #f0b4b4; background: #fff5f5; color: #b00020; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+/* ── Cards ── */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px}
+.card h3{font-size:14px;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
 
-    .logs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
-    textarea.log { width: 100%; height: 520px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid #ddd; border-radius: 10px; padding: 10px; }
-    textarea#goal { width: 100%; min-height: 140px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid #ddd; border-radius: 10px; }
-    details > summary { cursor: pointer; user-select: none; }
-    .muted { color: #666; }
+/* ── Form elements ── */
+.form-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.form-group input,.form-group textarea,.form-group select{padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;outline:none}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--accent)}
+.form-group textarea{min-height:100px;font-family:var(--mono);font-size:12px;resize:vertical}
+.form-group.wide{flex:1;min-width:300px}
+.check-row{display:flex;gap:16px;align-items:center;font-size:13px}
+.check-row label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)}
 
-    .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(65px, 1fr)); gap: 8px; max-height: 400px; overflow-y: auto; padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
-    .char-item { display: flex; flex-direction: column; align-items: center; cursor: pointer; padding: 4px; border-radius: 6px; border: 2px solid transparent; transition: all 0.2s; user-select: none; }
-    .char-item:hover { background: #e0e0e0; }
-    .char-item.selected { border-color: #0ea5e9; background: #e0f2fe; }
-    .char-avatar { width: 50px; height: 50px; object-fit: cover; border-radius: 4px; pointer-events: none; }
-    .char-name { font-size: 10px; margin-top: 4px; text-align: center; word-break: break-all; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; pointer-events: none; }
-  </style>
+/* ── Buttons ── */
+.btn{padding:8px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-family:var(--font);transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--border)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2)}
+.btn-danger{background:#991b1b;border-color:var(--red);color:#fff}
+.btn-danger:hover{background:var(--red)}
+.btn-success{background:#15803d;border-color:var(--green);color:#fff}
+.btn-success:hover{background:#16a34a}
+.btn-sm{padding:4px 10px;font-size:12px}
+
+/* ── Status pill ── */
+.pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.pill.ok{background:#052e16;color:var(--green);border:1px solid #15803d}
+.pill.bad{background:#450a0a;color:var(--red);border:1px solid #991b1b}
+.pill.idle{background:var(--bg3);color:var(--muted);border:1px solid var(--border)}
+
+/* ── Logs ── */
+.logs-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
+.log-box{display:flex;flex-direction:column;min-height:0}
+.log-box textarea{flex:1;width:100%;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);resize:none}
+
+/* ── Routine HUD ── */
+.routine-hud{padding:10px;border-radius:8px;background:#0c4a6e;border:1px solid #0369a1;margin-top:8px}
+.routine-hud.recovery{background:#450a0a;border-color:#991b1b}
+.progress-bar{width:100%;background:var(--bg3);height:6px;border-radius:3px;margin:6px 0}
+.progress-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .3s}
+
+/* ── Capture page ── */
+.capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
+.stat-card .num{font-size:28px;font-weight:700;color:var(--accent)}
+.stat-card .lbl{font-size:11px;color:var(--muted);margin-top:4px;text-transform:uppercase}
+
+/* ── Annotate page ── */
+.annotate-layout{display:flex;flex:1;gap:0;min-height:0;overflow:hidden}
+.ann-sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;padding:10px;flex-shrink:0;display:flex;flex-direction:column;gap:4px}
+.ann-sidebar h4{font-size:11px;color:var(--muted);text-transform:uppercase;margin:8px 0 4px;letter-spacing:.3px}
+.ann-canvas-area{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;background:#0a0a0a}
+.ann-canvas-area canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
+.class-item{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid transparent}
+.class-item:hover{background:var(--bg3)}
+.class-item.sel{border-color:var(--accent);background:#1e3a5f}
+.class-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.box-item{display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px}
+.box-item:hover{background:var(--bg3)}
+.box-item.sel{background:#1e3a5f;border:1px solid var(--accent)}
+.add-class-row{display:flex;gap:4px;margin:4px 0}
+.add-class-row input{flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none}
+.add-class-row input:focus{border-color:var(--accent)}
+.ann-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.ann-toolbar .info{font-size:12px;color:var(--muted)}
+.ann-help{font-size:10px;color:#64748b;line-height:1.5;padding:8px;margin-top:auto}
+.ann-help kbd{background:var(--bg3);padding:1px 4px;border-radius:2px;font-size:9px}
+
+/* ── Char grid ── */
+.char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;max-height:350px;overflow-y:auto;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px}
+.char-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:3px;border-radius:4px;border:2px solid transparent;transition:all .15s;user-select:none}
+.char-item:hover{background:var(--bg3)}
+.char-item.selected{border-color:var(--accent);background:#1e3a5f}
+.char-avatar{width:44px;height:44px;object-fit:cover;border-radius:3px;pointer-events:none}
+.char-name{font-size:9px;margin-top:2px;text-align:center;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;pointer-events:none}
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="topbar">
-      <h2>AI Game Secretary</h2>
-      <div class="links">
-        <a href="/annotate.html">Annotate</a>
-        <a href="/docs" class="muted" target="_blank" rel="noreferrer">API Docs</a>
+
+<!-- Sidebar Navigation -->
+<div class="sidebar">
+  <div class="logo" style="font-weight:700;font-size:14px;letter-spacing:-1px">GS</div>
+  <button class="nav-btn active" onclick="showPage('agent')" title="Agent Control">A</button>
+  <button class="nav-btn" onclick="showPage('capture')" title="Screen Capture">C</button>
+  <button class="nav-btn" onclick="showPage('annotate')" title="Label Editor">L</button>
+  <div class="sidebar-bottom">
+    <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API Docs">?</button>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- ════════════ AGENT PAGE ════════════ -->
+<div class="page active" id="page-agent">
+  <div class="page-title">Agent Control</div>
+  <div class="card">
+    <div class="form-row">
+      <div class="form-group" style="min-width:400px;flex:1">
+        <label>Game EXE Path</label>
+        <input id="game_exe_path" type="text" value="D:\SteamLibrary\steamapps\common\BlueArchive\BlueArchive.exe"/>
+      </div>
+      <div class="form-group">
+        <label>Window Title</label>
+        <input id="window_title" type="text" value="Blue Archive"/>
       </div>
     </div>
-
-    <div class="card">
-      <div class="row">
-        <label>Game EXE Path
-          <input id="game_exe_path" type="text" value="D:\\SteamLibrary\\steamapps\\common\\BlueArchive\\BlueArchive.exe" style="min-width:420px" />
-        </label>
-      </div>
-
-      <div class="row">
-        <label>Window Title
-          <input id="window_title" type="text" value="Blue Archive" />
-        </label>
-        <label>Steps (0=loop)
-          <input id="steps" type="number" value="0" />
-        </label>
-        <label>Step Sleep (s)
-          <input id="step_sleep_s" type="number" value="0.6" />
-        </label>
-        <label>VLM Max Side (0=off)
-          <input id="vlm_image_max_side" type="number" value="1280" />
-        </label>
-      </div>
-
-      <div class="row">
-        <label class="wide">Goal
-          <textarea id="goal">Keep the game running safely.</textarea>
-        </label>
-      </div>
-
-      <div class="row">
-        <label style="flex-direction:row; gap:8px; align-items:center; font-size:13px;">
-          <input id="dry_run" type="checkbox" checked /> Dry Run
-        </label>
-        <label style="flex-direction:row; gap:8px; align-items:center; font-size:13px;">
-          <input id="forbid_premium_currency" type="checkbox" checked /> Forbid Premium Currency
-        </label>
-        <label style="flex-direction:row; gap:8px; align-items:center; font-size:13px;">
-          <input id="exploration_click" type="checkbox" /> Exploration Click
-        </label>
-
-        <button id="btn_start" class="btn primary">Start</button>
-        <button id="btn_stop" class="btn danger">Stop</button>
-        <button id="btn_refresh" class="btn">Refresh</button>
-        <button id="btn_clear" class="btn ghost">Clear View</button>
-      </div>
-
-      <div class="row" style="margin-top: 2px;">
-        <span class="muted" style="font-size: 12px;">Presets:</span>
-        <button id="btn_preset_dryrun" class="btn">DryRun 80</button>
-        <button id="btn_preset_real" class="btn">Real Loop</button>
-        <button id="btn_goal_daily" class="btn">Daily Routine Template</button>
-      </div>
-
-      <div class="status" id="status">
-        <span class="pill" id="status_pill">Unknown</span>
-        <span class="mono" id="status_text">Status: ...</span>
-      </div>
-
-      <div id="routineHud" style="display: none; margin-top: 10px; padding: 10px; border-radius: 8px; background-color: #f0f9ff; border: 1px solid #bae6fd;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-          <span style="font-weight: bold; font-size: 1.1em;" id="routinePhase">Idle</span>
-          <span id="routineBadge" style="background: #0ea5e9; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em;">Normal</span>
-        </div>
-
-        <div style="width: 100%; background-color: #e0e0e0; height: 8px; border-radius: 4px; margin-bottom: 5px;">
-          <div id="routineProgressBar" style="width: 0%; height: 100%; background-color: #0ea5e9; border-radius: 4px; transition: width 0.3s;"></div>
-        </div>
-
-        <div style="font-size: 0.85em; color: #555; display: flex; justify-content: space-between;">
-          <span id="routineStepInfo">Step 0/0</span>
-          <span id="routineTurnInfo">Turns: 0/15</span>
-        </div>
-        <div id="routineRetryInfo" style="font-size: 0.85em; color: #d97706; display: none; margin-top: 2px;">
-          Retrying (0/0)
-        </div>
+    <div class="form-row">
+      <div class="form-group wide">
+        <label>Goal</label>
+        <textarea id="goal">Keep the game running safely.</textarea>
       </div>
     </div>
-
-    <details open style="margin-top: 12px;">
-      <summary class="muted">Schedule Favorites</summary>
-      <div style="margin-top: 8px;">
-        <div id="char_grid" class="char-grid"></div>
-        <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
-          <button id="btn_save_favorites" class="btn primary">Save Favorites</button>
-          <span id="favorites_status" class="muted" style="font-size: 12px;"></span>
-        </div>
+    <div class="form-row">
+      <div class="form-group"><label>Steps (0=loop)</label><input id="steps" type="number" value="0" style="width:90px"/></div>
+      <div class="form-group"><label>Step Sleep</label><input id="step_sleep_s" type="number" value="0.6" style="width:80px"/></div>
+    </div>
+    <div class="form-row" style="gap:16px">
+      <div class="check-row">
+        <label><input id="dry_run" type="checkbox" checked/> Dry Run</label>
+        <label><input id="forbid_premium_currency" type="checkbox" checked/> Forbid Premium</label>
+        <label><input id="exploration_click" type="checkbox"/> Exploration Click</label>
       </div>
-    </details>
-
-    <details open style="margin-top: 12px;">
-      <summary class="muted">Logs</summary>
-      <div class="logs">
-        <div>
-          <div><b>agent.out.log</b></div>
-          <textarea id="agent_out" class="log" readonly></textarea>
-        </div>
-        <div>
-          <div><b>agent.err.log</b></div>
-          <textarea id="agent_err" class="log" readonly></textarea>
-        </div>
+    </div>
+    <div class="form-row" style="margin-top:6px">
+      <button class="btn-primary btn" id="btn_start">Start</button>
+      <button class="btn-danger btn" id="btn_stop">Stop</button>
+      <button class="btn" id="btn_goal_daily">Daily Routine</button>
+      <div style="flex:1"></div>
+      <span class="pill idle" id="status_pill">Unknown</span>
+    </div>
+    <div id="status_text" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono);word-break:break-all;max-height:40px;overflow:hidden">Status: ...</div>
+    <div id="routineHud" class="routine-hud" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span id="routinePhase" style="font-weight:700">Idle</span>
+        <span id="routineBadge" class="pill ok" style="font-size:11px">Normal</span>
       </div>
-    </details>
+      <div class="progress-bar"><div id="routineProgressBar" class="progress-fill"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)">
+        <span id="routineStepInfo">Step 0/0</span>
+        <span id="routineTurnInfo">Turns: 0/15</span>
+      </div>
+      <div id="routineRetryInfo" style="font-size:11px;color:var(--yellow);display:none;margin-top:2px"></div>
+    </div>
   </div>
 
-  <script>
-    const $ = (id) => document.getElementById(id);
+  <details style="margin-bottom:12px">
+    <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">Schedule Favorites</summary>
+    <div class="card" style="margin-top:8px">
+      <div id="char_grid" class="char-grid"></div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" id="btn_save_favorites">Save Favorites</button>
+        <span id="favorites_status" style="font-size:11px;color:var(--muted)"></span>
+      </div>
+    </div>
+  </details>
 
-    const STORAGE_KEY = 'ai_game_secretary.dashboard.v1';
+  <div class="logs-grid" style="flex:1;min-height:200px">
+    <div class="log-box"><div style="font-size:12px;color:var(--muted);margin-bottom:4px">agent.out.log</div><textarea id="agent_out" readonly></textarea></div>
+    <div class="log-box"><div style="font-size:12px;color:var(--muted);margin-bottom:4px">agent.err.log</div><textarea id="agent_err" readonly></textarea></div>
+  </div>
+</div>
 
-    function loadSaved() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const s = JSON.parse(raw);
-        if (typeof s.game_exe_path === 'string') $('game_exe_path').value = s.game_exe_path;
-        if (typeof s.window_title === 'string') $('window_title').value = s.window_title;
-        if (typeof s.goal === 'string') $('goal').value = s.goal;
-        if (typeof s.steps === 'number') $('steps').value = String(s.steps);
-        if (typeof s.step_sleep_s === 'number') $('step_sleep_s').value = String(s.step_sleep_s);
-        if (typeof s.vlm_image_max_side === 'number') {
-          const v = s.vlm_image_max_side;
-          const off = Boolean(s._vlm_image_max_side_off);
-          if (v === 0 && !off) {
-            $('vlm_image_max_side').value = '1280';
-          } else {
-            $('vlm_image_max_side').value = String(v);
-          }
-        } else {
-          $('vlm_image_max_side').value = '1280';
-        }
-        if (typeof s.dry_run === 'boolean') $('dry_run').checked = s.dry_run;
-        if (typeof s.forbid_premium_currency === 'boolean') $('forbid_premium_currency').checked = s.forbid_premium_currency;
-        if (typeof s.exploration_click === 'boolean') $('exploration_click').checked = s.exploration_click;
-      } catch (e) {}
+<!-- ════════════ CAPTURE PAGE ════════════ -->
+<div class="page" id="page-capture">
+  <div class="page-title">Screen Capture</div>
+  <div class="capture-stats">
+    <div class="stat-card"><div class="num" id="cap_frames">0</div><div class="lbl">Frames</div></div>
+    <div class="stat-card"><div class="num" id="cap_status_text" style="font-size:16px;color:var(--muted)">Idle</div><div class="lbl">Status</div></div>
+    <div class="stat-card"><div class="num" id="cap_dataset" style="font-size:14px;color:var(--muted)">-</div><div class="lbl">Dataset</div></div>
+  </div>
+  <div class="card">
+    <h3>Capture Settings</h3>
+    <div class="form-row">
+      <div class="form-group"><label>Window Title</label><input id="cap_window" type="text" value="Blue Archive"/></div>
+      <div class="form-group"><label>Interval (sec)</label><input id="cap_interval" type="number" value="0.5" step="0.1" style="width:80px"/></div>
+      <button class="btn btn-success" id="btn_cap_start" style="align-self:flex-end">Start Capture</button>
+      <button class="btn btn-danger" id="btn_cap_stop" style="align-self:flex-end">Stop</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px" id="cap_error"></div>
+  </div>
+  <div class="card">
+    <h3>Existing Datasets</h3>
+    <div id="dataset_list" style="font-size:13px;color:var(--muted)">Loading...</div>
+  </div>
+</div>
+
+<!-- ════════════ ANNOTATE PAGE ════════════ -->
+<div class="page" id="page-annotate" style="padding:0;overflow:hidden">
+  <div class="ann-toolbar">
+    <div class="form-group" style="margin:0">
+      <select id="ann_dataset" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"><option value="">Select dataset...</option></select>
+    </div>
+    <button class="btn btn-sm" onclick="annPrev()">◀ Prev</button>
+    <span class="info" id="ann_counter">-</span>
+    <button class="btn btn-sm" onclick="annNext()">Next ▶</button>
+    <button class="btn btn-sm btn-primary" onclick="annSave()">Save</button>
+    <button class="btn btn-sm btn-danger" onclick="annDeleteImage()">Delete</button>
+    <button class="btn btn-sm" onclick="annJumpEmpty()">Skip empty</button>
+    <button class="btn btn-sm" onclick="annJumpLabeled()">Skip labeled</button>
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <button class="btn btn-sm" onclick="annZoomFit()" title="Fit to window">Fit</button>
+    <button class="btn btn-sm" onclick="annZoomIn()" title="Zoom in">+</button>
+    <button class="btn btn-sm" onclick="annZoomOut()" title="Zoom out">-</button>
+    <span class="info" id="ann_zoom">100%</span>
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
+    <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
+    <button class="btn btn-sm" id="btn_ocr_batch" onclick="annBatchOCR()" title="Batch scan all images">Batch</button>
+    <button class="btn btn-sm" id="btn_ocr_folder" onclick="annOpenOCRFolder()" title="Open OCR results folder">Open Folder</button>
+    <span class="info" id="ann_fileinfo">-</span>
+  </div>
+  <div class="annotate-layout">
+    <div class="ann-sidebar">
+      <h4>Classes</h4>
+      <div class="add-class-row">
+        <input type="text" id="ann_new_class" placeholder="new class..." onkeydown="if(event.key==='Enter')annAddClass()"/>
+        <button class="btn btn-sm btn-success" onclick="annAddClass()" style="padding:3px 6px">+</button>
+      </div>
+      <div id="ann_classlist"></div>
+      <h4>Boxes <span id="ann_boxcount"></span></h4>
+      <div id="ann_boxlist"></div>
+      <h4 id="ann_ocr_header" style="display:none">OCR <span id="ann_ocrcount"></span></h4>
+      <div id="ann_ocrlist"></div>
+      <div id="ann_ocr_edit" style="display:none;margin:4px 0">
+        <input type="text" id="ann_ocr_text" style="width:100%;padding:4px 6px;background:var(--bg);color:#00ffcc;border:1px solid #00ffcc;border-radius:3px;font-size:11px;outline:none" placeholder="edit text..."/>
+      </div>
+      <div class="ann-help">
+        <b>Controls:</b><br>
+        <kbd>A</kbd>/<kbd>D</kbd> navigate<br>
+        <kbd>Click</kbd> select box<br>
+        <kbd>Drag</kbd> move box<br>
+        <kbd>Drag corner</kbd> resize<br>
+        <kbd>Right-drag</kbd> draw new box<br>
+        <kbd>Del</kbd> remove box<br>
+        <kbd>0-9</kbd> change class<br>
+        <kbd>Ctrl+S</kbd> save<br>
+        <kbd>Shift+Del</kbd> delete image
+      </div>
+    </div>
+    <div class="ann-canvas-area">
+      <canvas id="ann_canvas"></canvas>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+const $ = id => document.getElementById(id);
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) { const t = await r.text(); throw new Error(`${r.status}: ${t}`); }
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('application/json') ? r.json() : r.text();
+}
+
+/* ── Page Navigation ── */
+let currentPage = 'agent';
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  $('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2}[name]].classList.add('active');
+  currentPage = name;
+  if (name === 'capture') refreshCapture();
+  if (name === 'annotate') annLoadDatasets();
+}
+
+/* ════════════════════════════════════════════════════
+   AGENT PAGE
+   ════════════════════════════════════════════════════ */
+const STORAGE_KEY = 'ai_game_secretary.dashboard.v2';
+const DAILY_ROUTINE_TEMPLATE = `[Routine]\n【目标】蔚蓝档案：日常收菜（排除总力战/大决战/制约解除决战）\n\n【总原则】\n- 先判断当前界面，优先关闭公告/签到等阻挡弹窗。\n- 优先处理红点/可领取/确认/开始/进入/跳过/一键领取等安全按钮。\n- 绝对不要点击：总力战/大决战/制约解除决战。\n- 绝对不要点击：充值/购买/招募/抽卡/青辉石/清輝石/Pyroxene。\n\n【流程】\n1) 大厅：处理弹窗 -> 观察红点\n2) 咖啡厅：领取收益 -> 依次点击黄色感叹号 -> 返回\n3) 日程：选最优区域 -> 确认 -> 返回\n4) 社团：领取AP -> 返回\n5) 悬赏通缉：选最高难度 -> 扫荡Max -> 确认 -> 返回\n6) 战术对抗赛：仅领奖 -> 返回\n7) 清体力：活动优先扫荡；否则主线Hard扫荡到体力不足\n8) 制造：领取完成品 -> 制造 -> 返回\n9) 邮箱&任务：一键领取 -> 返回\n\n【异常处理】\n- 不确定时：wait -> 点返回/关闭尝试回大厅。`;
+
+function agentPayload() {
+  return {
+    _ui_rev:3,
+    game_exe_path:$('game_exe_path').value.trim(),
+    window_title:$('window_title').value.trim(),
+    goal:$('goal').value.trim(),
+    steps:parseInt($('steps').value,10)||0,
+    step_sleep_s:parseFloat($('step_sleep_s').value)||0.6,
+    dry_run:$('dry_run').checked,
+    forbid_premium_currency:$('forbid_premium_currency').checked,
+    exploration_click:$('exploration_click').checked,
+  };
+}
+function saveAgent(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(agentPayload()))}catch(e){}}
+function loadAgent(){
+  try{
+    const s=JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if(!s)return;
+    if(s.game_exe_path)$('game_exe_path').value=s.game_exe_path;
+    if(s.window_title)$('window_title').value=s.window_title;
+    if(s.goal)$('goal').value=s.goal;
+    if(typeof s.steps==='number')$('steps').value=s.steps;
+    if(typeof s.step_sleep_s==='number')$('step_sleep_s').value=s.step_sleep_s;
+    if(typeof s.dry_run==='boolean')$('dry_run').checked=s.dry_run;
+    if(typeof s.forbid_premium_currency==='boolean')$('forbid_premium_currency').checked=s.forbid_premium_currency;
+    if(typeof s.exploration_click==='boolean')$('exploration_click').checked=s.exploration_click;
+  }catch(e){}
+}
+
+async function agentRefresh(){
+  try{
+    const st=await api('/api/v1/status');
+    const out=await api('/api/v1/logs?name=agent.out.log&lines=400');
+    const err=await api('/api/v1/logs?name=agent.err.log&lines=400');
+    $('agent_out').value=out; $('agent_err').value=err;
+    const le=st.last_error?String(st.last_error).slice(0,300):'';
+    const ok=Boolean(st.agent_running)&&!le;
+    $('status_pill').className='pill '+(ok?'ok':(st.agent_running?'bad':'idle'));
+    $('status_pill').textContent=ok?'Running':(st.agent_running?'Error':'Stopped');
+    const ps=st.pipeline_status||{};
+    const pp=st.pipeline_progress||{};
+    $('status_text').textContent=`running=${st.agent_running} error=${le} ticks=${ps.ticks||0}`;
+    // Pipeline HUD
+    const hud=$('routineHud');
+    if(!pp||!pp.running){hud.style.display='none';}
+    else{
+      hud.style.display='block';
+      hud.className='routine-hud';
+      $('routinePhase').textContent=pp.current_skill||'—';
+      const tot=(pp.total_skills>0)?pp.total_skills:6;
+      const si=pp.skill_index||0;
+      $('routineProgressBar').style.width=`${Math.min(((si+1)/tot)*100,100)}%`;
+      $('routineStepInfo').textContent=`Skill ${si+1}/${tot} (${pp.current_sub_state||''})`;
+      $('routineTurnInfo').textContent=`Ticks: ${pp.skill_ticks||0} / Total: ${pp.total_ticks||0}`;
+      $('routineBadge').textContent='Pipeline';
+      $('routineBadge').className='pill ok';
+      const ri=$('routineRetryInfo');
+      ri.style.display='none';
     }
+  }catch(e){
+    $('status_pill').className='pill bad';$('status_pill').textContent='Offline';
+    $('status_text').textContent='Status: '+e.message;
+  }
+}
 
-    function saveNow() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload()));
-      } catch (e) {}
-    }
+$('btn_start').onclick=async()=>{
+  $('status_pill').className='pill idle';$('status_pill').textContent='Starting...';
+  try{saveAgent();await api('/api/v1/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(agentPayload())})}
+  catch(e){$('status_pill').className='pill bad';$('status_pill').textContent='Failed';}
+  agentRefresh();
+};
+$('btn_stop').onclick=async()=>{try{await api('/api/v1/stop',{method:'POST'})}catch(e){}agentRefresh();};
+$('btn_goal_daily').onclick=()=>{$('goal').value=DAILY_ROUTINE_TEMPLATE;saveAgent();};
 
-    const DAILY_ROUTINE_TEMPLATE = `[Routine]\n【目标】蔚蓝档案：日常收菜（排除总力战/大决战/制约解除决战）
+['game_exe_path','window_title','steps','step_sleep_s','goal','dry_run','forbid_premium_currency','exploration_click'].forEach(id=>{
+  const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
+});
 
-【总原则】
-- 先判断当前界面是什么（大厅/二级菜单/弹窗），优先关闭公告/签到等阻挡弹窗。
-- 优先处理红点/可领取/确认/开始/进入/跳过/一键领取等“安全按钮”。
-- 绝对不要点击：总力战/大决战/制约解除决战（即使有红点也忽略）。
-- 绝对不要点击：充值/购买/招募/抽卡/青辉石/清輝石/Pyroxene 相关。
-
-【流程（状态机）】
-1) 大厅：处理弹窗 -> 观察咖啡厅/日程/社团/业务区红点
-2) 咖啡厅：领取收益 -> 依次点击所有黄色感叹号/对话气泡角色 -> 返回大厅
-3) 日程：优先点红点且Rank较高/最优的区域 -> 确认 -> 返回
-4) 社团：领取AP -> 返回
-5) 悬赏通缉：有票就选最高难度 -> 扫荡 -> Max -> 确认 -> 返回
-6) 战术对抗赛：仅领奖；如需要日课则打一场（进场后优先点跳过）-> 返回
-7) 清体力：活动期优先活动扫荡；否则主线/Hard收藏关卡扫荡到体力不足
-8) 制造：领取完成品 -> 有空位就制造 -> 确认 -> 返回
-9) 邮箱&任务：一键领取 -> 确认 -> 返回
-
-【异常处理】
-- 如果不确定/界面识别失败：先 wait；必要时点击“返回/关闭/X/空白安全区域”尝试回到大厅。`;
-
-    async function api(path, opts) {
-      const r = await fetch(path, opts);
-      if (!r.ok) {
-        const t = await r.text();
-        throw new Error(`${r.status} ${r.statusText}: ${t}`);
-      }
-      const ct = r.headers.get('content-type') || '';
-      if (ct.includes('application/json')) return await r.json();
-      return await r.text();
-    }
-
-    function payload() {
-      const vRaw = String($('vlm_image_max_side').value || '').trim();
-      const vParsed = parseInt(vRaw, 10);
-      const v = Number.isFinite(vParsed) ? vParsed : 0;
-      return {
-        _ui_rev: 2,
-        game_exe_path: $('game_exe_path').value.trim(),
-        window_title: $('window_title').value.trim(),
-        goal: $('goal').value.trim(),
-        steps: parseInt($('steps').value, 10) || 0,
-        step_sleep_s: parseFloat($('step_sleep_s').value) || 0.6,
-        vlm_image_max_side: v,
-        _vlm_image_max_side_off: (vRaw === '0'),
-        dry_run: $('dry_run').checked,
-        forbid_premium_currency: $('forbid_premium_currency').checked,
-        exploration_click: $('exploration_click').checked,
-      };
-    }
-
-    async function refresh() {
-      try {
-        const st = await api('/api/v1/status');
-        const out = await api('/api/v1/logs?name=agent.out.log&lines=400');
-        const err = await api('/api/v1/logs?name=agent.err.log&lines=400');
-        $('agent_out').value = out;
-        $('agent_err').value = err;
-        const la = st.last_action ? JSON.stringify(st.last_action).slice(0, 300) : '';
-        const le = st.last_error ? String(st.last_error).slice(0, 300) : '';
-        const ok = Boolean(st.agent_running) && !le;
-        $('status_pill').className = 'pill ' + (ok ? 'ok' : 'bad');
-        $('status_pill').textContent = ok ? 'Running' : (st.agent_running ? 'Error' : 'Stopped');
-        let cfgStr = '';
-        try {
-          const cfg = st.agent_cfg || null;
-          if (cfg) {
-            const g = (typeof cfg.goal === 'string') ? cfg.goal.replace(/\s+/g, ' ').slice(0, 140) : '';
-            cfgStr = ` cfg.goal=${g} cfg.steps=${cfg.steps} cfg.dry_run=${cfg.dry_run} cfg.vlm_image_max_side=${cfg.vlm_image_max_side}`;
-          }
-        } catch (e) {
-        }
-        $('status_text').textContent = `agent_running=${st.agent_running} type=${st.agent_type || ''} last_error=${le} last_action=${la}${cfgStr}`;
-
-        try {
-          const hud = $('routineHud');
-          const r = st.last_action && st.last_action._routine ? st.last_action._routine : null;
-          const active = Boolean(r && r.active);
-
-          if (!active) {
-            hud.style.display = 'none';
-          } else {
-            hud.style.display = 'block';
-            const badge = $('routineBadge');
-            const progressBar = $('routineProgressBar');
-            const retryDiv = $('routineRetryInfo');
-
-            $('routinePhase').textContent = String(r.step_name || 'Unknown');
-
-            const totalSteps = (typeof r.total_steps === 'number' && r.total_steps > 0) ? r.total_steps : 6;
-            const stepIndex = (typeof r.step_index === 'number' && r.step_index >= 0) ? r.step_index : 0;
-            const progressPct = ((stepIndex + 1) / totalSteps) * 100;
-            progressBar.style.width = `${Math.min(Math.max(progressPct, 0), 100)}%`;
-            $('routineStepInfo').textContent = `Step ${stepIndex + 1}/${totalSteps}`;
-
-            const maxTurns = (typeof r.max_turns_per_attempt === 'number' && r.max_turns_per_attempt > 0) ? r.max_turns_per_attempt : 15;
-            const turns = (typeof r.turns_in_current_attempt === 'number' && r.turns_in_current_attempt >= 0) ? r.turns_in_current_attempt : 0;
-            $('routineTurnInfo').textContent = `Turns: ${turns}/${maxTurns}`;
-
-            const inRecovery = Boolean(r.in_recovery_mode);
-            if (inRecovery) {
-              badge.textContent = 'RECOVERY MODE';
-              badge.style.backgroundColor = '#ef4444';
-              hud.style.backgroundColor = '#fef2f2';
-              hud.style.borderColor = '#fca5a5';
-              progressBar.style.backgroundColor = '#ef4444';
-            } else {
-              badge.textContent = 'Normal';
-              badge.style.backgroundColor = '#0ea5e9';
-              hud.style.backgroundColor = '#f0f9ff';
-              hud.style.borderColor = '#bae6fd';
-              progressBar.style.backgroundColor = '#0ea5e9';
-            }
-
-            const rc = (typeof r.current_step_retry_count === 'number') ? r.current_step_retry_count : 0;
-            const mr = (typeof r.max_retries === 'number' && r.max_retries >= 0) ? r.max_retries : 0;
-            if (rc > 0 && !inRecovery) {
-              retryDiv.style.display = 'block';
-              retryDiv.textContent = `⚠️ Retrying Step (${rc}/${mr})`;
-            } else {
-              retryDiv.style.display = 'none';
-            }
-          }
-        } catch (e) {
-        }
-      } catch (e) {
-        $('status_pill').className = 'pill bad';
-        $('status_pill').textContent = 'Offline';
-        $('status_text').textContent = 'Status: ' + e.message;
-      }
-    }
-
-    $('btn_start').onclick = async () => {
-      $('status_pill').className = 'pill';
-      $('status_pill').textContent = 'Starting';
-      $('status_text').textContent = 'Status: starting...';
-      try {
-        saveNow();
-        await api('/api/v1/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload())});
-      } catch (e) {
-        $('status_pill').className = 'pill bad';
-        $('status_pill').textContent = 'Start failed';
-        $('status_text').textContent = 'Status: start failed: ' + e.message;
-      }
-      await refresh();
-    };
-
-    $('btn_stop').onclick = async () => {
-      try {
-        await api('/api/v1/stop', { method: 'POST' });
-      } catch (e) {
-        $('status_pill').className = 'pill bad';
-        $('status_pill').textContent = 'Stop failed';
-        $('status_text').textContent = 'Status: stop failed: ' + e.message;
-      }
-      await refresh();
-    };
-
-    $('btn_refresh').onclick = refresh;
-
-    $('btn_clear').onclick = () => {
-      $('agent_out').value = '';
-      $('agent_err').value = '';
-    };
-
-    $('btn_preset_dryrun').onclick = () => {
-      $('steps').value = '80';
-      $('dry_run').checked = true;
-      $('forbid_premium_currency').checked = true;
-      $('exploration_click').checked = true;
-      $('vlm_image_max_side').value = '1280';
-      saveNow();
-    };
-
-    $('btn_preset_real').onclick = () => {
-      $('steps').value = '0';
-      $('dry_run').checked = false;
-      $('forbid_premium_currency').checked = true;
-      $('exploration_click').checked = true;
-      $('vlm_image_max_side').value = '1280';
-      saveNow();
-    };
-
-    $('btn_goal_daily').onclick = () => {
-      $('goal').value = DAILY_ROUTINE_TEMPLATE;
-      saveNow();
-    };
-
-    ['game_exe_path', 'window_title', 'steps', 'step_sleep_s', 'vlm_image_max_side', 'goal', 'dry_run', 'forbid_premium_currency', 'exploration_click'].forEach((id) => {
-      const el = $(id);
-      if (!el) return;
-      el.addEventListener('change', saveNow);
-      el.addEventListener('input', () => {
-        if (id === 'goal') saveNow();
-      });
+// Favorites
+let selectedFavorites=new Set();
+async function loadFavorites(){
+  try{
+    const cr=await api('/api/v1/characters/avatars');
+    const fr=await api('/api/v1/config/favorites');
+    selectedFavorites=new Set(fr.target_favorites||[]);
+    const grid=$('char_grid');grid.innerHTML='';
+    (cr.avatars||[]).forEach(fn=>{
+      const name=decodeURIComponent(fn.replace('.png',''));
+      const d=document.createElement('div');d.className='char-item'+(selectedFavorites.has(fn)?' selected':'');
+      d.onclick=()=>{if(selectedFavorites.has(fn)){selectedFavorites.delete(fn);d.classList.remove('selected')}else{selectedFavorites.add(fn);d.classList.add('selected')}};
+      const img=document.createElement('img');img.className='char-avatar';img.src='/api/v1/captures/image?path=角色头像/'+encodeURIComponent(fn);img.loading='lazy';
+      const sp=document.createElement('span');sp.className='char-name';sp.textContent=name;
+      d.appendChild(img);d.appendChild(sp);grid.appendChild(d);
     });
+  }catch(e){}
+}
+$('btn_save_favorites').onclick=async()=>{
+  try{$('favorites_status').textContent='Saving...';
+    await api('/api/v1/config/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_favorites:Array.from(selectedFavorites)})});
+    $('favorites_status').textContent='Saved!';setTimeout(()=>$('favorites_status').textContent='',2000);
+  }catch(e){$('favorites_status').textContent='Error';}
+};
 
+loadAgent(); loadFavorites(); setInterval(agentRefresh,1500); agentRefresh();
 
-    let selectedFavorites = new Set();
+/* ════════════════════════════════════════════════════
+   CAPTURE PAGE
+   ════════════════════════════════════════════════════ */
+let capTimer=null;
+async function refreshCapture(){
+  try{
+    const s=(await api('/api/v1/capture/status')).status;
+    $('cap_frames').textContent=s.frames||0;
+    $('cap_status_text').textContent=s.running?'Recording':'Idle';
+    $('cap_status_text').style.color=s.running?'var(--green)':'var(--muted)';
+    $('cap_dataset').textContent=s.dataset||'-';
+    $('cap_error').textContent=s.error||'';
+  }catch(e){$('cap_status_text').textContent='Offline';}
+  try{
+    const ds=await api('/api/v1/datasets');
+    const el=$('dataset_list');el.innerHTML='';
+    if(!ds.datasets||ds.datasets.length===0){el.textContent='No datasets yet.';}
+    else ds.datasets.forEach(d=>{
+      const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)';
+      row.innerHTML=`<span>${d.name}</span><span style="color:var(--accent)">${d.image_count} images</span>`;
+      row.style.cursor='pointer';
+      row.onclick=()=>{showPage('annotate');$('ann_dataset').value=d.name;annLoadDataset();};
+      el.appendChild(row);
+    });
+  }catch(e){}
+}
+$('btn_cap_start').onclick=async()=>{
+  try{
+    const r=await api('/api/v1/capture/start',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({window_title:$('cap_window').value,interval:parseFloat($('cap_interval').value)||0.5})});
+    if(capTimer)clearInterval(capTimer);
+    capTimer=setInterval(refreshCapture,500);
+    refreshCapture();
+  }catch(e){$('cap_error').textContent=e.message;}
+};
+$('btn_cap_stop').onclick=async()=>{
+  try{await api('/api/v1/capture/stop',{method:'POST'});}catch(e){}
+  if(capTimer){clearInterval(capTimer);capTimer=null;}
+  setTimeout(refreshCapture,300);
+};
 
-    async function loadFavorites() {
-      try {
-        const charRes = await api('/api/v1/characters/avatars');
-        const favRes = await api('/api/v1/config/favorites');
-        
-        const avatars = charRes.avatars || [];
-        const favorites = favRes.target_favorites || [];
-        selectedFavorites = new Set(favorites);
+/* ════════════════════════════════════════════════════
+   ANNOTATE PAGE — Zoom/Pan Canvas + OCR
+   ════════════════════════════════════════════════════ */
+const COLORS=["#ef4444","#22c55e","#3b82f6","#eab308","#a855f7","#06b6d4","#f97316","#8b5cf6","#10b981","#ec4899","#84cc16","#0ea5e9","#f43f5e","#4ade80","#818cf8","#facc15","#c084fc","#2dd4bf","#fb923c","#a3e635"];
+let ANN={
+  data:[],classes:[],idx:0,selIdx:-1,drawClass:0,dirty:false,
+  imgW:1,imgH:1,bgImg:null,dataset:'',
+  dragMode:null,dragStart:null,dragOrig:null,
+  ocrBoxes:null,ocrOn:false,ocrImageW:0,ocrImageH:0,
+  // zoom/pan: offX/offY = screen offset of image origin, zoom = screen px per image px
+  zoom:1,offX:0,offY:0,fitZoom:1
+};
+const HANDLE=7;
+const annCanvas=$('ann_canvas');
+const annCtx=annCanvas.getContext('2d');
+const annArea=document.querySelector('.ann-canvas-area');
 
-        const grid = $('char_grid');
-        grid.innerHTML = '';
+// ── coordinate helpers ──
+function img2scr(ix,iy){return{x:ix*ANN.zoom+ANN.offX,y:iy*ANN.zoom+ANN.offY};}
+function scr2img(sx,sy){return{x:(sx-ANN.offX)/ANN.zoom,y:(sy-ANN.offY)/ANN.zoom};}
+function annGetMouse(e){
+  const r=annCanvas.getBoundingClientRect();
+  const sx=(e.clientX-r.left)*(annCanvas.width/r.width);
+  const sy=(e.clientY-r.top)*(annCanvas.height/r.height);
+  return scr2img(sx,sy);
+}
+function annGetScreen(e){
+  const r=annCanvas.getBoundingClientRect();
+  return{x:(e.clientX-r.left)*(annCanvas.width/r.width),y:(e.clientY-r.top)*(annCanvas.height/r.height)};
+}
 
-        avatars.forEach(filename => {
-          const name = decodeURIComponent(filename.replace('.png', ''));
-          const isSelected = selectedFavorites.has(filename);
-          
-          const div = document.createElement('div');
-          div.className = 'char-item' + (isSelected ? ' selected' : '');
-          div.onclick = () => toggleFavorite(filename, div);
-          
-          const img = document.createElement('img');
-          img.className = 'char-avatar';
-          img.src = '/api/v1/captures/image?path=角色头像/' + encodeURIComponent(filename);
-          img.loading = 'lazy';
-          
-          const span = document.createElement('span');
-          span.className = 'char-name';
-          span.textContent = name;
-          
-          div.appendChild(img);
-          div.appendChild(span);
-          grid.appendChild(div);
-        });
-      } catch (e) {
-        console.error("Failed to load character favorites:", e);
-      }
+// ── zoom/pan controls ──
+function annResizeCanvas(){
+  const cw=annArea.clientWidth, ch=annArea.clientHeight;
+  if(annCanvas.width!==cw||annCanvas.height!==ch){annCanvas.width=cw;annCanvas.height=ch;}
+}
+function annZoomFit(){
+  if(!ANN.bgImg)return;
+  annResizeCanvas();
+  const cw=annCanvas.width,ch=annCanvas.height;
+  ANN.fitZoom=Math.min(cw/ANN.imgW,ch/ANN.imgH);
+  ANN.zoom=ANN.fitZoom;
+  ANN.offX=(cw-ANN.imgW*ANN.zoom)/2;
+  ANN.offY=(ch-ANN.imgH*ANN.zoom)/2;
+  annUpdateZoomLabel();annDraw();
+}
+function annZoomTo(newZoom,pivotSx,pivotSy){
+  // pivot: screen point that stays fixed
+  const imgP=scr2img(pivotSx,pivotSy);
+  ANN.zoom=Math.max(ANN.fitZoom*0.5,Math.min(20,newZoom));
+  ANN.offX=pivotSx-imgP.x*ANN.zoom;
+  ANN.offY=pivotSy-imgP.y*ANN.zoom;
+  annUpdateZoomLabel();annDraw();
+}
+function annZoomIn(){const c=annCanvas;annZoomTo(ANN.zoom*1.3,c.width/2,c.height/2);}
+function annZoomOut(){const c=annCanvas;annZoomTo(ANN.zoom/1.3,c.width/2,c.height/2);}
+function annUpdateZoomLabel(){$('ann_zoom').textContent=Math.round(ANN.zoom/ANN.fitZoom*100)+'%';}
+
+// ── data loading ──
+async function annLoadDatasets(){
+  try{
+    const ds=await api('/api/v1/datasets');
+    const sel=$('ann_dataset');const cur=sel.value;
+    sel.innerHTML='<option value="">Select dataset...</option>';
+    (ds.datasets||[]).forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;sel.appendChild(o);});
+    if(cur)sel.value=cur;
+  }catch(e){}
+}
+$('ann_dataset').onchange=()=>annLoadDataset();
+
+async function annLoadDataset(){
+  const ds=$('ann_dataset').value;if(!ds)return;
+  ANN.dataset=ds;
+  try{
+    const r=await api('/api/v1/datasets/images?dataset='+encodeURIComponent(ds));
+    ANN.data=r.images||[];ANN.classes=r.classes||[];
+    ANN.idx=0;ANN.selIdx=-1;ANN.dirty=false;
+    annBuildClassList();annLoadImage();
+  }catch(e){console.error(e);}
+}
+
+function annBuildClassList(){
+  const el=$('ann_classlist');el.innerHTML='';
+  ANN.classes.forEach((name,i)=>{
+    const d=document.createElement('div');d.className='class-item'+(i===ANN.drawClass?' sel':'');
+    d.innerHTML=`<div class="class-dot" style="background:${COLORS[i%COLORS.length]}"></div>${i}: ${name}`;
+    d.onclick=()=>{ANN.drawClass=i;annBuildClassList();};el.appendChild(d);
+  });
+}
+function annBuildBoxList(){
+  const el=$('ann_boxlist');el.innerHTML='';if(!ANN.data.length)return;
+  const labels=ANN.data[ANN.idx].labels;$('ann_boxcount').textContent=`(${labels.length})`;
+  labels.forEach((lb,i)=>{
+    const d=document.createElement('div');d.className='box-item'+(i===ANN.selIdx?' sel':'');
+    const cn=ANN.classes[lb.cls]||`cls_${lb.cls}`;
+    d.innerHTML=`<div class="class-dot" style="background:${COLORS[lb.cls%COLORS.length]}"></div>${cn}`;
+    d.onclick=()=>{ANN.selIdx=i;annDraw();};el.appendChild(d);
+  });
+}
+
+function annLoadImage(){
+  if(!ANN.data.length){annDraw();return;}
+  ANN.selIdx=-1;ocrSelIdx=-1;
+  ANN.bgImg=new Image();
+  ANN.bgImg.onload=()=>{
+    ANN.imgW=ANN.bgImg.width;ANN.imgH=ANN.bgImg.height;annZoomFit();
+    annUpdateOCRUI();annDraw();
+    // auto-scan if OCR on and this image has no OCR yet
+    if(ANN.ocrOn&&!annCurImg().ocr) annRunOCR();
+  };
+  ANN.bgImg.src=`/api/v1/datasets/image?dataset=${encodeURIComponent(ANN.dataset)}&filename=${encodeURIComponent(ANN.data[ANN.idx].img)}`;
+}
+function annCurImg(){return ANN.data[ANN.idx]||{};}
+
+// ── main draw (everything in screen space via zoom/pan transform) ──
+function annDraw(){
+  if(!ANN.bgImg||!ANN.data.length)return;
+  annResizeCanvas();
+  const ctx=annCtx,Z=ANN.zoom,ox=ANN.offX,oy=ANN.offY;
+  ctx.clearRect(0,0,annCanvas.width,annCanvas.height);
+  // checkerboard bg (optional, skip for speed)
+  // draw image
+  ctx.drawImage(ANN.bgImg,ox,oy,ANN.imgW*Z,ANN.imgH*Z);
+
+  // draw YOLO labels
+  const labels=ANN.data[ANN.idx].labels;
+  labels.forEach((lb,i)=>{
+    const x1=(lb.xc-lb.w/2)*ANN.imgW*Z+ox, y1=(lb.yc-lb.h/2)*ANN.imgH*Z+oy;
+    const bw=lb.w*ANN.imgW*Z, bh=lb.h*ANN.imgH*Z;
+    const color=COLORS[lb.cls%COLORS.length];const isSel=(i===ANN.selIdx);
+    ctx.fillStyle=color;ctx.globalAlpha=isSel?0.25:0.1;ctx.fillRect(x1,y1,bw,bh);ctx.globalAlpha=1;
+    ctx.strokeStyle=color;ctx.lineWidth=isSel?3:1.5;ctx.setLineDash([]);ctx.strokeRect(x1,y1,bw,bh);
+    const fs=Math.max(10,12);ctx.font=fs+'px sans-serif';
+    const cn=ANN.classes[lb.cls]||`cls_${lb.cls}`;
+    const tm=ctx.measureText(cn);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(x1,y1-fs-4,tm.width+6,fs+4);
+    ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(cn,x1+3,y1-4);
+    if(isSel){
+      [[x1,y1],[x1+bw,y1],[x1,y1+bh],[x1+bw,y1+bh]].forEach(([cx,cy])=>{
+        ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(cx,cy,HANDLE,0,Math.PI*2);ctx.fill();ctx.stroke();
+      });
     }
+  });
 
-    function toggleFavorite(filename, el) {
-      if (selectedFavorites.has(filename)) {
-        selectedFavorites.delete(filename);
-        el.classList.remove('selected');
-      } else {
-        selectedFavorites.add(filename);
-        el.classList.add('selected');
-      }
+  // draw OCR overlay
+  const _ocrData=annCurImg().ocr;
+  if(ANN.ocrOn&&_ocrData&&_ocrData.boxes){
+    _ocrData.boxes.forEach((ob,oi)=>{
+      const sx=ob.x1*ANN.imgW*Z+ox, sy=ob.y1*ANN.imgH*Z+oy;
+      const sw=(ob.x2-ob.x1)*ANN.imgW*Z, sh=(ob.y2-ob.y1)*ANN.imgH*Z;
+      const isSel=(oi===ocrSelIdx);
+      ctx.strokeStyle=isSel?'#ffff00':'#00ffcc';ctx.lineWidth=isSel?2.5:1.5;
+      ctx.setLineDash(isSel?[]:[3,3]);ctx.strokeRect(sx,sy,sw,sh);ctx.setLineDash([]);
+      if(isSel){ctx.fillStyle='#ffff00';ctx.globalAlpha=0.15;ctx.fillRect(sx,sy,sw,sh);ctx.globalAlpha=1;}
+      const fs=Math.max(9,11);ctx.font=fs+'px sans-serif';
+      const label=`${ob.text} (${(ob.confidence*100).toFixed(0)}%)`;
+      const tm2=ctx.measureText(label);
+      ctx.fillStyle=isSel?'rgba(80,80,0,0.9)':'rgba(0,0,0,0.8)';ctx.fillRect(sx,sy+sh,tm2.width+4,fs+4);
+      ctx.fillStyle=isSel?'#ffff00':'#00ffcc';ctx.fillText(label,sx+2,sy+sh+fs);
+    });
+  }
+
+  // draw in-progress box
+  if(ANN.dragMode==='draw'&&ANN.dragStart&&ANN.dragOrig){
+    const s1=img2scr(ANN.dragStart.x,ANN.dragStart.y),s2=img2scr(ANN.dragOrig.x,ANN.dragOrig.y);
+    const dx1=Math.min(s1.x,s2.x),dy1=Math.min(s1.y,s2.y);
+    const dw=Math.abs(s1.x-s2.x),dh=Math.abs(s1.y-s2.y);
+    ctx.strokeStyle=COLORS[ANN.drawClass%COLORS.length];ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.strokeRect(dx1,dy1,dw,dh);ctx.setLineDash([]);
+  }
+
+  // update info
+  $('ann_counter').textContent=`${ANN.idx+1} / ${ANN.data.length}`;
+  $('ann_fileinfo').textContent=ANN.data.length?`${ANN.data[ANN.idx].img} | ${labels.length} boxes | ${ANN.imgW}×${ANN.imgH}px${ANN.dirty?' [unsaved]':''}`:'-';
+  annBuildBoxList();
+}
+
+// ── hit testing (in image space) ──
+function annHitHandle(ix,iy){
+  if(ANN.selIdx<0)return null;
+  const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
+  const x1=(lb.xc-lb.w/2)*ANN.imgW, y1=(lb.yc-lb.h/2)*ANN.imgH;
+  const x2=x1+lb.w*ANN.imgW, y2=y1+lb.h*ANN.imgH;
+  const thr=(HANDLE+3)/ANN.zoom;
+  for(const[cx,cy,tag] of [[x1,y1,'resize-tl'],[x2,y1,'resize-tr'],[x1,y2,'resize-bl'],[x2,y2,'resize-br']])
+    if(Math.hypot(ix-cx,iy-cy)<=thr)return tag;
+  return null;
+}
+function annHitBox(ix,iy){
+  const labels=ANN.data[ANN.idx].labels;
+  for(let i=labels.length-1;i>=0;i--){
+    const lb=labels[i];
+    const x1=(lb.xc-lb.w/2)*ANN.imgW, y1=(lb.yc-lb.h/2)*ANN.imgH;
+    const x2=x1+lb.w*ANN.imgW, y2=y1+lb.h*ANN.imgH;
+    if(ix>=x1&&ix<=x2&&iy>=y1&&iy<=y2)return i;
+  }
+  return -1;
+}
+
+// ── mouse events ──
+annCanvas.addEventListener('mousedown',e=>{
+  if(!ANN.data.length)return;
+  // middle button = pan
+  if(e.button===1){e.preventDefault();ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};return;}
+  const pos=annGetMouse(e);
+  if(e.button===2){e.preventDefault();ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;}
+  const h=annHitHandle(pos.x,pos.y);
+  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h};return;}
+  const hit=annHitBox(pos.x,pos.y);
+  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annBuildOCRList();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h};return;}
+  // check OCR box hit
+  const ocrHit=annHitOCR(pos.x,pos.y);
+  if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annBuildOCRList();annDraw();return;}
+  ANN.selIdx=-1;ocrSelIdx=-1;annBuildOCRList();annDraw();
+});
+annCanvas.addEventListener('mousemove',e=>{
+  if(!ANN.dragMode)return;
+  if(ANN.dragMode==='pan'){
+    const cur=annGetScreen(e);
+    ANN.offX=ANN.dragOrig.offX+(cur.x-ANN.dragStart.x);
+    ANN.offY=ANN.dragOrig.offY+(cur.y-ANN.dragStart.y);
+    annDraw();return;
+  }
+  const pos=annGetMouse(e);
+  const dx=pos.x-ANN.dragStart.x, dy=pos.y-ANN.dragStart.y;
+  if(ANN.dragMode==='draw'){ANN.dragOrig=pos;annDraw();return;}
+  if(ANN.selIdx<0||!ANN.dragOrig)return;
+  const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
+  if(ANN.dragMode==='move'){lb.xc=ANN.dragOrig.xc+dx/ANN.imgW;lb.yc=ANN.dragOrig.yc+dy/ANN.imgH;ANN.dirty=true;annDraw();return;}
+  let ox1=(ANN.dragOrig.xc-ANN.dragOrig.w/2)*ANN.imgW, oy1=(ANN.dragOrig.yc-ANN.dragOrig.h/2)*ANN.imgH;
+  let ox2=ox1+ANN.dragOrig.w*ANN.imgW, oy2=oy1+ANN.dragOrig.h*ANN.imgH;
+  if(ANN.dragMode==='resize-tl'){ox1+=dx;oy1+=dy;}if(ANN.dragMode==='resize-tr'){ox2+=dx;oy1+=dy;}
+  if(ANN.dragMode==='resize-bl'){ox1+=dx;oy2+=dy;}if(ANN.dragMode==='resize-br'){ox2+=dx;oy2+=dy;}
+  const nx1=Math.min(ox1,ox2),ny1=Math.min(oy1,oy2),nx2=Math.max(ox1,ox2),ny2=Math.max(oy1,oy2);
+  lb.w=(nx2-nx1)/ANN.imgW;lb.h=(ny2-ny1)/ANN.imgH;lb.xc=(nx1+nx2)/2/ANN.imgW;lb.yc=(ny1+ny2)/2/ANN.imgH;
+  ANN.dirty=true;annDraw();
+});
+annCanvas.addEventListener('mouseup',e=>{
+  if(ANN.dragMode==='draw'&&ANN.dragStart&&ANN.dragOrig){
+    const bx1=Math.min(ANN.dragStart.x,ANN.dragOrig.x),by1=Math.min(ANN.dragStart.y,ANN.dragOrig.y);
+    const bw=Math.abs(ANN.dragStart.x-ANN.dragOrig.x),bh=Math.abs(ANN.dragStart.y-ANN.dragOrig.y);
+    if(bw>3&&bh>3){
+      ANN.data[ANN.idx].labels.push({cls:ANN.drawClass,xc:(bx1+bw/2)/ANN.imgW,yc:(by1+bh/2)/ANN.imgH,w:bw/ANN.imgW,h:bh/ANN.imgH});
+      ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;
     }
+  }
+  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;annDraw();
+});
+annCanvas.addEventListener('contextmenu',e=>e.preventDefault());
 
-    if ($('btn_save_favorites')) {
-      $('btn_save_favorites').onclick = async () => {
-        try {
-          $('favorites_status').textContent = 'Saving...';
-          await api('/api/v1/config/favorites', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_favorites: Array.from(selectedFavorites) })
-          });
-          $('favorites_status').textContent = 'Saved!';
-          setTimeout(() => $('favorites_status').textContent = '', 2000);
-        } catch (e) {
-          $('favorites_status').textContent = 'Error saving';
-          console.error(e);
-        }
-      };
+// scroll to zoom
+annCanvas.addEventListener('wheel',e=>{
+  if(!ANN.bgImg)return;e.preventDefault();
+  const scr=annGetScreen(e);
+  const factor=e.deltaY<0?1.15:1/1.15;
+  annZoomTo(ANN.zoom*factor,scr.x,scr.y);
+},{passive:false});
+
+// keyboard
+document.addEventListener('keydown',e=>{
+  if(currentPage!=='annotate'||!ANN.data.length)return;
+  if(e.ctrlKey&&e.key==='s'){e.preventDefault();annSave();return;}
+  if(e.key==='d'||e.key==='ArrowRight'){annNext();return;}
+  if(e.key==='a'||e.key==='ArrowLeft'){annPrev();return;}
+  if(e.key==='0'&&e.ctrlKey){e.preventDefault();annZoomFit();return;}
+  if(e.key==='='||e.key==='+'){annZoomIn();return;}
+  if(e.key==='-'){annZoomOut();return;}
+  if(e.shiftKey&&e.key==='Delete'){e.preventDefault();annDeleteImage();return;}
+  if((e.key==='Delete'||e.key==='Backspace')&&ocrSelIdx>=0){annDeleteOCRBox();return;}
+  if((e.key==='Delete'||e.key==='Backspace')&&ANN.selIdx>=0){ANN.data[ANN.idx].labels.splice(ANN.selIdx,1);ANN.selIdx=-1;ANN.dirty=true;annDraw();return;}
+  if(/^[0-9]$/.test(e.key)&&ANN.selIdx>=0&&!e.ctrlKey){ANN.data[ANN.idx].labels[ANN.selIdx].cls=parseInt(e.key);ANN.dirty=true;annDraw();return;}
+});
+
+// navigation
+function annAutoSave(fn){if(ANN.dirty)annSave();fn();annLoadImage();}
+function annNext(){annAutoSave(()=>{ANN.idx=(ANN.idx+1)%ANN.data.length;});}
+function annPrev(){annAutoSave(()=>{ANN.idx=(ANN.idx-1+ANN.data.length)%ANN.data.length;});}
+function annJumpEmpty(){annAutoSave(()=>{for(let i=1;i<=ANN.data.length;i++){const j=(ANN.idx+i)%ANN.data.length;if(ANN.data[j].labels.length===0){ANN.idx=j;return;}}});}
+function annJumpLabeled(){annAutoSave(()=>{for(let i=1;i<=ANN.data.length;i++){const j=(ANN.idx+i)%ANN.data.length;if(ANN.data[j].labels.length>0){ANN.idx=j;return;}}});}
+
+// save/delete
+async function annSave(){
+  if(!ANN.data.length)return;
+  const item=ANN.data[ANN.idx];
+  const lines=item.labels.map(lb=>`${lb.cls} ${lb.xc.toFixed(6)} ${lb.yc.toFixed(6)} ${lb.w.toFixed(6)} ${lb.h.toFixed(6)}`);
+  try{
+    await api('/api/v1/datasets/save_labels',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset:ANN.dataset,img:item.img,labels:lines.join('\n')})});
+    ANN.dirty=false;annDraw();
+  }catch(e){console.error('Save failed:',e);}
+}
+async function annDeleteImage(){
+  if(!ANN.data.length)return;
+  if(!confirm(`Delete ${ANN.data[ANN.idx].img}?`))return;
+  try{
+    await api('/api/v1/datasets/delete_image',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset:ANN.dataset,img:ANN.data[ANN.idx].img})});
+    ANN.data.splice(ANN.idx,1);if(!ANN.data.length)return;
+    if(ANN.idx>=ANN.data.length)ANN.idx=ANN.data.length-1;
+    ANN.dirty=false;annLoadImage();
+  }catch(e){console.error(e);}
+}
+async function annAddClass(){
+  const input=$('ann_new_class');const name=input.value.trim();if(!name)return;
+  if(ANN.classes.includes(name)){alert('Already exists');return;}
+  ANN.classes.push(name);ANN.drawClass=ANN.classes.length-1;input.value='';annBuildClassList();
+  try{await api('/api/v1/datasets/add_class',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dataset:ANN.dataset,name})});}catch(e){}
+}
+
+/* ── OCR overlay + editable + save ── */
+let ocrSelIdx=-1;
+
+// Run OCR on current image (always fresh from backend)
+async function annRunOCR(){
+  if(!ANN.data.length)return;
+  const cur=annCurImg();
+  $('btn_ocr').textContent='OCR...';
+  try{
+    const r=await api(`/api/v1/datasets/ocr?dataset=${encodeURIComponent(ANN.dataset)}&filename=${encodeURIComponent(cur.img)}`);
+    cur.ocr={boxes:r.boxes||[],imageW:r.image_w||0,imageH:r.image_h||0};
+  }catch(e){cur.ocr={boxes:[],imageW:0,imageH:0};console.error(e);}
+  ocrSelIdx=-1;annUpdateOCRUI();annDraw();
+}
+
+// Update all OCR UI (button text, sidebar list, edit field)
+function annUpdateOCRUI(){
+  const cur=annCurImg();
+  const boxes=(ANN.ocrOn&&cur.ocr)?cur.ocr.boxes:null;
+  $('btn_ocr').textContent=boxes?`OCR (${boxes.length})`:'OCR';
+  const header=$('ann_ocr_header'),list=$('ann_ocrlist'),edit=$('ann_ocr_edit');
+  if(!boxes||!ANN.ocrOn){header.style.display='none';list.innerHTML='';edit.style.display='none';return;}
+  header.style.display='';
+  $('ann_ocrcount').textContent=`(${boxes.length})`;
+  list.innerHTML='';
+  boxes.forEach((ob,i)=>{
+    const d=document.createElement('div');
+    d.className='box-item'+(i===ocrSelIdx?' sel':'');
+    d.style.color='#00ffcc';d.style.fontSize='10px';
+    d.innerHTML=`<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ob.text}</span><span style="color:var(--muted);font-size:9px">${(ob.confidence*100).toFixed(0)}%</span>`;
+    d.onclick=()=>{ocrSelIdx=i;annUpdateOCRUI();annDraw();};
+    list.appendChild(d);
+  });
+  if(ocrSelIdx>=0&&ocrSelIdx<boxes.length){
+    edit.style.display='';
+    const input=$('ann_ocr_text');
+    input.value=boxes[ocrSelIdx].text;
+    input.onchange=()=>{boxes[ocrSelIdx].text=input.value;annUpdateOCRUI();annDraw();};
+  } else { edit.style.display='none'; }
+}
+
+function annDeleteOCRBox(){
+  const cur=annCurImg();
+  if(!cur.ocr||ocrSelIdx<0||ocrSelIdx>=cur.ocr.boxes.length)return;
+  cur.ocr.boxes.splice(ocrSelIdx,1);
+  ocrSelIdx=-1;annUpdateOCRUI();annDraw();
+}
+
+function annHitOCR(ix,iy){
+  const cur=annCurImg();
+  if(!ANN.ocrOn||!cur.ocr)return -1;
+  for(let i=cur.ocr.boxes.length-1;i>=0;i--){
+    const ob=cur.ocr.boxes[i];
+    if(ix>=ob.x1*ANN.imgW&&ix<=ob.x2*ANN.imgW&&iy>=ob.y1*ANN.imgH&&iy<=ob.y2*ANN.imgH)return i;
+  }
+  return -1;
+}
+
+async function annToggleOCR(){
+  if(ANN.ocrOn){
+    // already on: if current image has OCR, re-scan; else turn off
+    const cur=annCurImg();
+    if(cur.ocr){
+      // re-scan (force fresh)
+      cur.ocr=null; await annRunOCR(); return;
     }
+    ANN.ocrOn=false;
+    $('btn_ocr').classList.remove('btn-primary');
+    $('btn_ocr').textContent='OCR';ocrSelIdx=-1;
+    annUpdateOCRUI();annDraw();
+  } else {
+    ANN.ocrOn=true;
+    $('btn_ocr').classList.add('btn-primary');
+    const cur=annCurImg();
+    if(!cur.ocr) await annRunOCR();
+    else { annUpdateOCRUI();annDraw(); }
+  }
+}
 
-    loadSaved();
-    loadFavorites();
-    setInterval(refresh, 1200);
-    refresh();
-  </script>
+async function annSaveOCR(){
+  const cur=annCurImg();
+  if(!cur.ocr||!cur.ocr.boxes.length){alert('Run OCR first');return;}
+  const cleanBoxes=cur.ocr.boxes.map(ob=>({text:ob.text,confidence:ob.confidence,x1:ob.x1,y1:ob.y1,x2:ob.x2,y2:ob.y2}));
+  try{
+    const r=await api('/api/v1/datasets/ocr/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset:ANN.dataset,filename:cur.img,
+        boxes:cleanBoxes,image_w:cur.ocr.imageW,image_h:cur.ocr.imageH})});
+    $('btn_ocr_save').textContent=`Saved (${r.total_images})`;
+    setTimeout(()=>{$('btn_ocr_save').textContent='Save OCR';},2000);
+  }catch(e){console.error(e);}
+}
+
+async function annBatchOCR(){
+  if(!ANN.dataset){alert('Select a dataset first');return;}
+  $('btn_ocr_batch').textContent='Scanning...';$('btn_ocr_batch').disabled=true;
+  try{
+    const r=await api('/api/v1/datasets/ocr/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset:ANN.dataset})});
+    alert(`Batch OCR done!\nScanned: ${r.scanned} new images\nTotal: ${r.total_images} images, ${r.total_texts} text regions\nSaved to: data/raw_images/${ANN.dataset}/ocr_results.json`);
+  }catch(e){alert('Batch failed: '+e.message);}
+  $('btn_ocr_batch').textContent='Batch';$('btn_ocr_batch').disabled=false;
+}
+
+async function annOpenOCRFolder(){
+  if(!ANN.dataset){alert('Select a dataset first');return;}
+  try{
+    await api('/api/v1/datasets/open_folder',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset:ANN.dataset})});
+  }catch(e){alert('Failed: '+e.message);}
+}
+
+// resize handler
+window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)annDraw();});
+</script>
 </body>
 </html>

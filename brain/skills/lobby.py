@@ -51,18 +51,9 @@ class LobbySkill(BaseSkill):
         # ── Popup detection (BEFORE lobby check) ──
         # Popups overlay on top of lobby, so bottom nav may be visible
         # even when a popup is blocking interaction.
+        # NOTE: All X/close button detection via YOLO only (OCR misdetects icons as "X")
 
-        # 1. OCR: look for "X" text in the top-right area (the close button)
-        x_ocr = screen.find_text_one(
-            r"^[Xx×]$", min_conf=0.4,
-            region=(0.70, 0.05, 1.0, 0.25)
-        )
-        if x_ocr:
-            self._popup_close_attempts += 1
-            self.log(f"close button detected via OCR 'X' at ({x_ocr.cx:.3f},{x_ocr.cy:.3f})")
-            return action_click_box(x_ocr, "close popup via OCR X")
-
-        # 2. YOLO: detect close buttons (叉叉, 叉叉1, 叉叉2, momotalk的叉叉)
+        # 1. YOLO: detect close buttons (叉叉, 叉叉1, 叉叉2, momotalk的叉叉)
         x_btn = screen.find_yolo_one("叉叉", min_conf=0.15)
         if x_btn:
             has_popup_text = screen.find_any_text(
@@ -142,6 +133,17 @@ class LobbySkill(BaseSkill):
         if screen.is_lobby():
             self.log("lobby detected, no popups, done")
             return action_done("in lobby")
+
+        # ── Already inside a sub-screen? ──
+        # If top-left header shows a known screen name, we're past the lobby
+        header = screen.find_any_text(
+            ["咖啡廳", "咖啡厅", "課程表", "课程表", "商店", "社團", "社团",
+             "任務", "任务", "懸賞通緝", "戰術對抗"],
+            region=(0.0, 0.0, 0.25, 0.08), min_conf=0.5
+        )
+        if header:
+            self.log(f"already inside '{header.text}', skipping lobby")
+            return action_done(f"already in {header.text}")
 
         # Timeout fallback
         if self.ticks >= self.max_ticks:

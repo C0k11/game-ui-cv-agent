@@ -317,7 +317,7 @@ class BaseSkill(ABC):
     def _nav_to(self, screen: ScreenState, nav_texts: List[str]) -> Optional[Dict[str, Any]]:
         """Click a bottom nav bar button by text."""
         for t in nav_texts:
-            hit = screen.find_text_one(t, region=screen.NAV_BAR, min_conf=0.7)
+            hit = screen.find_text_one(t, region=screen.NAV_BAR, min_conf=0.5)
             if hit:
                 self.log(f"nav click '{hit.text}'")
                 return action_click_box(hit, f"nav to '{hit.text}'")
