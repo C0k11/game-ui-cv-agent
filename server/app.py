@@ -1,34 +1,23 @@
 import json
 import os
+import sys
 import socket
 import subprocess
 import time
 import hashlib
 import threading
-import base64
-import tempfile
 import ctypes
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
-import requests
-from PIL import Image
-
-from config import (
-    HF_CACHE_DIR,
-    LOCAL_VLM_DEVICE,
-    LOCAL_VLM_MAX_NEW_TOKENS,
-    LOCAL_VLM_MODEL,
-    LOCAL_VLM_MODELS_DIR,
-    MODELS_DIR,
-)
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 LOGS_DIR = REPO_ROOT / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -40,21 +29,29 @@ ANNOTATE_PATH = REPO_ROOT / "annotate.html"
 CAPTURES_DIR = REPO_ROOT / "data" / "captures"
 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
+RAW_IMAGES_DIR = REPO_ROOT / "data" / "raw_images"
+RAW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
 CHARACTERS_DIR = CAPTURES_DIR / "角色头像"
 CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
 
 APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 
+# DXcam capture state
+_CAPTURE_LOCK = threading.Lock()
+_CAPTURE_THREAD = None
+_CAPTURE_RUNNING = False
+_CAPTURE_STATUS = {"running": False, "frames": 0, "dataset": "", "error": ""}
+
 OCR_CACHE_VERSION = 2
-VLM_OCR_CACHE_VERSION = 1
-LOCAL_VLM_OCR_CACHE_VERSION = 1
 
-_VISION_LOCK = threading.Lock()
-_VISION = None
-
-_VLM_AGENT_LOCK = threading.Lock()
-_VLM_AGENT = None
-_LAST_AGENT_START_ERROR = ""
+# ── Pipeline state ─────────────────────────────────────────────────────
+_PIPELINE_LOCK = threading.Lock()
+_PIPELINE = None          # brain.pipeline.DailyPipeline instance
+_PIPELINE_THREAD = None   # background worker thread
+_PIPELINE_RUNNING = False
+_PIPELINE_STATUS = {"running": False, "error": "", "ticks": 0}
+_LAST_PIPELINE_ERROR = ""
 
 
 def _pid_alive(pid: int) -> bool:
@@ -115,7 +112,7 @@ def _parent_watchdog() -> None:
             if not _pid_alive(pid):
                 print(f"DEBUG: Watchdog triggered. Parent {pid} gone. Exiting.", flush=True)
                 try:
-                    _stop_vlm_agent()
+                    _stop_pipeline()
                 except Exception:
                     pass
                 try:
@@ -145,73 +142,182 @@ except Exception as e:
     print(f"DEBUG: Watchdog start failed: {e}", flush=True)
 
 
-def _get_vision():
-    global _VISION
-    with _VISION_LOCK:
-        if _VISION is None:
-            from vision.florence_vision import FlorenceVision
+# ── Pipeline control ──────────────────────────────────────────────────
 
-            _VISION = FlorenceVision()
-        return _VISION
+def _start_pipeline(*, payload: Dict[str, Any]) -> None:
+    """Start the DailyPipeline in a background thread."""
+    global _PIPELINE, _PIPELINE_THREAD, _PIPELINE_RUNNING, _PIPELINE_STATUS
+    with _PIPELINE_LOCK:
+        if _PIPELINE_RUNNING:
+            return
+        from brain.pipeline import DailyPipeline
+        _PIPELINE = DailyPipeline()
+        _PIPELINE.start()
+        _PIPELINE_RUNNING = True
+        _PIPELINE_STATUS = {"running": True, "error": "", "ticks": 0}
 
+        window_title = str(payload.get("window_title") or "Blue Archive")
+        step_sleep = float(payload.get("step_sleep_s") or 0.6)
+        dry_run = bool(payload.get("dry_run") if payload.get("dry_run") is not None else True)
 
-def _get_vlm_agent():
-    global _VLM_AGENT
-    with _VLM_AGENT_LOCK:
-        return _VLM_AGENT
-
-
-def _start_vlm_agent(*, payload: Dict[str, Any]) -> None:
-    global _VLM_AGENT
-    with _VLM_AGENT_LOCK:
-        from agent.vlm_policy import VlmPolicyAgent, VlmPolicyConfig
-
-        vlm_image_max_side = payload.get("vlm_image_max_side")
-        try:
-            if vlm_image_max_side is not None:
-                vlm_image_max_side = int(vlm_image_max_side)
-        except Exception:
-            vlm_image_max_side = None
-
-        cfg = VlmPolicyConfig(
-            window_title=str(payload.get("window_title") or "Blue Archive"),
-            goal=str(payload.get("goal") or "Keep the game running safely."),
-            steps=int(payload.get("steps") or 0),
-            dry_run=bool(payload.get("dry_run") if payload.get("dry_run") is not None else True),
-            step_sleep_s=float(payload.get("step_sleep_s") or 0.6),
-            exploration_click=bool(payload.get("exploration_click") or False),
-            forbid_premium_currency=bool(payload.get("forbid_premium_currency") if payload.get("forbid_premium_currency") is not None else True),
+        _PIPELINE_THREAD = threading.Thread(
+            target=_pipeline_worker,
+            args=(window_title, step_sleep, dry_run),
+            daemon=True,
         )
+        _PIPELINE_THREAD.start()
 
-        if vlm_image_max_side is not None:
+
+def _stop_pipeline() -> None:
+    """Stop the running pipeline."""
+    global _PIPELINE, _PIPELINE_RUNNING
+    with _PIPELINE_LOCK:
+        _PIPELINE_RUNNING = False
+        if _PIPELINE is not None:
             try:
-                cfg.vlm_image_max_side = int(vlm_image_max_side)
+                _PIPELINE.stop()
             except Exception:
                 pass
+            _PIPELINE = None
+        _PIPELINE_STATUS["running"] = False
 
-        _VLM_AGENT = VlmPolicyAgent(cfg)
-        _VLM_AGENT.start()
 
+def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> None:
+    """Background thread: screenshot -> OCR -> skill decision -> execute action."""
+    global _PIPELINE_RUNNING, _PIPELINE_STATUS
+    try:
+        from scripts.win_capture import capture_client, find_window_by_title_substring
+        import cv2
+        import numpy as np
 
-def _stop_vlm_agent() -> None:
-    global _VLM_AGENT
-    with _VLM_AGENT_LOCK:
-        if _VLM_AGENT is None:
+        hwnd = find_window_by_title_substring(window_title)
+        if not hwnd:
+            _PIPELINE_STATUS["error"] = f"Window '{window_title}' not found"
+            _PIPELINE_RUNNING = False
+            _PIPELINE_STATUS["running"] = False
             return
+
+        _log_pipeline(f"Pipeline worker started. window='{window_title}' sleep={step_sleep} dry_run={dry_run}")
+
+        while _PIPELINE_RUNNING:
+            pipe = None
+            with _PIPELINE_LOCK:
+                pipe = _PIPELINE
+            if pipe is None or not pipe.is_running:
+                break
+
+            # 1. Capture screenshot (PIL Image)
+            pil_img = capture_client(hwnd)
+            if pil_img is None:
+                time.sleep(0.5)
+                continue
+
+            # Convert PIL -> numpy BGR for cv2
+            frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+            # Save to temp file for OCR
+            tmp_path = str(REPO_ROOT / "data" / "_pipeline_frame.jpg")
+            cv2.imwrite(tmp_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+            # 2. Pipeline tick
+            action = pipe.tick(tmp_path)
+            action_type = action.get("action", "")
+            reason = action.get("reason", "")
+            _PIPELINE_STATUS["ticks"] = pipe._total_ticks
+            _PIPELINE_STATUS["progress"] = pipe.progress
+
+            _log_pipeline(f"tick={pipe._total_ticks} action={action_type} reason={reason}")
+
+            # 3. Execute action (unless dry_run)
+            if not dry_run and action_type != "done":
+                _execute_pipeline_action(action, hwnd, frame.shape[1], frame.shape[0])
+
+            # 4. Sleep
+            if action_type == "wait":
+                wait_ms = action.get("duration_ms", 500)
+                time.sleep(max(0.1, wait_ms / 1000.0))
+            else:
+                time.sleep(max(0.1, step_sleep))
+
+    except Exception as e:
+        _PIPELINE_STATUS["error"] = f"{type(e).__name__}: {e}"
+        _log_pipeline(f"Pipeline worker error: {e}")
+        traceback.print_exc()
+    finally:
+        _PIPELINE_RUNNING = False
+        _PIPELINE_STATUS["running"] = False
+        _log_pipeline("Pipeline worker stopped.")
+
+
+_dpi_set = False
+
+def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_h: int) -> None:
+    """Convert normalized pipeline action to real input."""
+    global _dpi_set
+    from scripts.win_capture import get_client_rect_on_screen
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+    # Set DPI awareness once so coordinates are in physical pixels
+    if not _dpi_set:
         try:
-            _VLM_AGENT.stop()
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
         except Exception:
             pass
-        _VLM_AGENT = None
+        _dpi_set = True
+
+    action_type = action.get("action", "")
+
+    # Bring game window to foreground before any input
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.05)
+
+    if action_type == "click":
+        nx, ny = action.get("target", [0.5, 0.5])
+        rect = get_client_rect_on_screen(hwnd)
+        if rect:
+            cw = rect.right - rect.left
+            ch = rect.bottom - rect.top
+            sx = rect.left + int(nx * cw)
+            sy = rect.top + int(ny * ch)
+            print(f"[Click] norm=({nx:.3f},{ny:.3f}) rect=({rect.left},{rect.top},{rect.right},{rect.bottom}) cw={cw} ch={ch} screen=({sx},{sy})")
+            user32.SetCursorPos(sx, sy)
+            time.sleep(0.05)
+            user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
+            time.sleep(0.03)
+            user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+
+    elif action_type == "back":
+        # Send Escape key
+        user32.keybd_event(0x1B, 0, 0, 0)  # VK_ESCAPE down
+        time.sleep(0.03)
+        user32.keybd_event(0x1B, 0, 0x0002, 0)  # VK_ESCAPE up
+
+    elif action_type == "scroll":
+        nx, ny = action.get("target", [0.5, 0.5])
+        clicks = action.get("clicks", -3)
+        rect = get_client_rect_on_screen(hwnd)
+        if rect:
+            cw = rect.right - rect.left
+            ch = rect.bottom - rect.top
+            sx = rect.left + int(nx * cw)
+            sy = rect.top + int(ny * ch)
+            user32.SetCursorPos(sx, sy)
+            time.sleep(0.05)
+            user32.mouse_event(0x0800, 0, 0, int(clicks * 120), 0)  # MOUSEEVENTF_WHEEL
 
 
-def _tcp_listening(host: str, port: int, timeout_s: float = 0.4) -> bool:
+def _log_pipeline(msg: str) -> None:
+    """Append pipeline log message."""
     try:
-        with socket.create_connection((host, port), timeout=timeout_s):
-            return True
-    except OSError:
-        return False
+        log_path = LOGS_DIR / "agent.out.log"
+        with log_path.open("a", encoding="utf-8") as f:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass
 
+
+# ── Utility functions ─────────────────────────────────────────────────
 
 def _tail_text(path: Path, lines: int) -> str:
     if not path.exists():
@@ -236,232 +342,19 @@ def _write_state(name: str, state: Dict[str, Any]) -> None:
         pass
 
 
-_ollama_proc: Optional[subprocess.Popen] = None
-_agent_proc: Optional[subprocess.Popen] = None
-
-
-def ensure_ollama(*, host: str, port: int, models_dir: str, auto_pull: bool, model_tag: str) -> None:
-    global _ollama_proc
-
-    if _tcp_listening(host, port):
-        if auto_pull and model_tag:
-            _ollama_pull(models_dir=models_dir, model_tag=model_tag)
-        return
-
-    out_log = LOGS_DIR / "ollama.out.log"
-    err_log = LOGS_DIR / "ollama.err.log"
-    out_f = open(out_log, "ab", buffering=0)
-    err_f = open(err_log, "ab", buffering=0)
-
-    env = os.environ.copy()
-    if models_dir:
-        env["OLLAMA_MODELS"] = models_dir
-
-    try:
-        _ollama_proc = subprocess.Popen(
-            ["ollama", "serve"],
-            cwd=str(REPO_ROOT),
-            env=env,
-            stdout=out_f,
-            stderr=err_f,
-            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail="Ollama not found. Please install Ollama and ensure `ollama` is in PATH.") from e
-
-    _write_state(
-        "ollama.state.json",
-        {
-            "pid": _ollama_proc.pid,
-            "host": host,
-            "port": port,
-            "models_dir": models_dir,
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "note": "started_by_dashboard_server",
-        },
-    )
-
-    t0 = time.time()
-    while time.time() - t0 < 30:
-        if _tcp_listening(host, port):
-            break
-        if _ollama_proc.poll() is not None:
-            raise HTTPException(status_code=500, detail="Ollama exited early. See logs/ollama.err.log")
-        time.sleep(0.3)
-
-    if not _tcp_listening(host, port):
-        raise HTTPException(status_code=500, detail="Ollama did not open port 11434 in time. See logs/ollama.*.log")
-
-    if auto_pull and model_tag:
-        _ollama_pull(models_dir=models_dir, model_tag=model_tag)
-
+# ── Core routes ───────────────────────────────────────────────────────
 
 @app.post("/api/v1/shutdown")
 def shutdown_server() -> Dict[str, str]:
-    # Kill VLM subprocess SYNCHRONOUSLY before returning the response.
-    # CRITICAL: C# calls _proc.Kill() immediately after this response returns,
-    # which orphans the VLM subprocess (~1.4GB) if we haven't killed it yet.
-    # The previous approach (delayed thread) never executed because C# killed us first.
-    _kill_vlm_subprocess()
-
     def _do_exit():
         time.sleep(0.2)
         try:
-            _stop_vlm_agent()
+            _stop_pipeline()
         except Exception:
             pass
-        _kill_vlm_subprocess()  # retry in case first attempt missed
         os._exit(0)
     threading.Thread(target=_do_exit, daemon=True).start()
     return {"status": "shutting_down"}
-
-
-def _kill_vlm_subprocess() -> None:
-    """Terminate the VLM multiprocessing.Process that holds ~1.4GB memory."""
-    try:
-        from vision.local_vlm_runtime import _LOCAL_VLM, _LOCAL_VLM_LOCK
-        with _LOCAL_VLM_LOCK:
-            vlm = _LOCAL_VLM
-        if vlm is None:
-            return
-        # Try the clean shutdown method
-        if hasattr(vlm, "_shutdown_proc"):
-            vlm._shutdown_proc()
-        # Nuclear fallback: kill by PID if subprocess object is available
-        proc = getattr(vlm, "_proc", None)
-        if proc is not None:
-            pid = getattr(proc, "pid", None)
-            if pid is not None:
-                try:
-                    import signal
-                    os.kill(pid, signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    pass
-    except Exception:
-        pass
-
-
-@app.post("/api/v1/vlm/ensure")
-def ensure_vlm(payload: Dict[str, Any]) -> Dict[str, Any]:
-    base_url = str(payload.get("base_url") or "http://127.0.0.1:11434").strip()
-    models_dir = str(payload.get("models_dir") or os.environ.get("OLLAMA_MODELS") or r"D:\\Project\\ml_cache\\models").strip()
-    model_tag = str(payload.get("model") or payload.get("model_tag") or os.environ.get("VLM_MODEL") or "").strip()
-    auto_pull = bool(payload.get("auto_pull") if payload.get("auto_pull") is not None else False)
-
-    try:
-        u = urlparse(base_url)
-        host = u.hostname or "127.0.0.1"
-        port = int(u.port or 11434)
-    except Exception:
-        host = "127.0.0.1"
-        port = 11434
-
-    ensure_ollama(host=host, port=port, models_dir=models_dir, auto_pull=auto_pull, model_tag=model_tag)
-    return {"ok": True, "base_url": f"http://{host}:{port}", "models_dir": models_dir, "model": model_tag, "auto_pull": auto_pull}
-
-
-@app.get("/api/v1/vlm/tags")
-def vlm_tags(base_url: str = Query("")) -> Dict[str, Any]:
-    bu = (base_url or os.environ.get("VLM_BASE_URL") or os.environ.get("LLM_BASE_URL") or "http://127.0.0.1:11434").strip()
-    url = bu.rstrip("/") + "/api/tags"
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to query ollama tags: {e}")
-
-
-def _ollama_pull(*, models_dir: str, model_tag: str) -> None:
-    if not model_tag:
-        return
-
-    out_log = LOGS_DIR / "ollama_pull.out.log"
-    err_log = LOGS_DIR / "ollama_pull.err.log"
-
-    env = os.environ.copy()
-    if models_dir:
-        env["OLLAMA_MODELS"] = models_dir
-
-    with open(out_log, "ab", buffering=0) as out_f, open(err_log, "ab", buffering=0) as err_f:
-        p = subprocess.run(
-            ["ollama", "pull", model_tag],
-            cwd=str(REPO_ROOT),
-            env=env,
-            stdout=out_f,
-            stderr=err_f,
-        )
-        if p.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"ollama pull failed (exit={p.returncode}). See logs/ollama_pull.err.log")
-
-
-def start_agent(
-    *,
-    llm_base_url: str,
-    llm_model: str,
-    adb_serial: str,
-    steps: int,
-    od_queries: Optional[List[str]],
-    ollama_models_dir: str,
-) -> None:
-    global _agent_proc
-
-    if _agent_proc is not None and _agent_proc.poll() is None:
-        return
-
-    out_log = LOGS_DIR / "agent.out.log"
-    err_log = LOGS_DIR / "agent.err.log"
-    out_f = open(out_log, "ab", buffering=0)
-    err_f = open(err_log, "ab", buffering=0)
-
-    env = os.environ.copy()
-    env["LLM_BASE_URL"] = llm_base_url
-    env["LLM_MODEL"] = llm_model
-    if adb_serial:
-        env["ADB_SERIAL"] = adb_serial
-    if ollama_models_dir:
-        env["OLLAMA_MODELS"] = ollama_models_dir
-
-    args: List[str] = ["py", "main.py", "--llm-base-url", llm_base_url, "--llm-model", llm_model]
-    if steps > 0:
-        args += ["--steps", str(steps)]
-    if od_queries:
-        for q in od_queries:
-            args += ["--od", q]
-
-    _agent_proc = subprocess.Popen(
-        args,
-        cwd=str(REPO_ROOT),
-        env=env,
-        stdout=out_f,
-        stderr=err_f,
-        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-    )
-
-    _write_state(
-        "agent.state.json",
-        {
-            "pid": _agent_proc.pid,
-            "llm_base_url": llm_base_url,
-            "llm_model": llm_model,
-            "adb_serial": adb_serial,
-            "od_queries": od_queries or [],
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "note": "started_by_dashboard_server",
-        },
-    )
-
-
-def stop_agent() -> None:
-    global _agent_proc
-    if _agent_proc is None:
-        return
-    try:
-        if _agent_proc.poll() is None:
-            _agent_proc.kill()
-    except Exception:
-        pass
-    _agent_proc = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -499,412 +392,33 @@ def annotate() -> FileResponse:
 
 @app.get("/api/v1/status")
 def status() -> Dict[str, Any]:
-    agent = _get_vlm_agent()
-    agent_running = bool(agent is not None and getattr(agent, "is_running")())
-    last_action = None
-    last_error = ""
-    agent_cfg = None
-    try:
-        if agent is not None:
-            last_action = getattr(agent, "last_action")
-            last_error = getattr(agent, "last_error")
-            cfg = getattr(agent, "cfg", None)
-            if cfg is not None:
-                agent_cfg = {
-                    "window_title": getattr(cfg, "window_title", None),
-                    "goal": getattr(cfg, "goal", None),
-                    "steps": getattr(cfg, "steps", None),
-                    "dry_run": getattr(cfg, "dry_run", None),
-                    "step_sleep_s": getattr(cfg, "step_sleep_s", None),
-                    "vlm_image_max_side": getattr(cfg, "vlm_image_max_side", None),
-                    "exploration_click": getattr(cfg, "exploration_click", None),
-                    "forbid_premium_currency": getattr(cfg, "forbid_premium_currency", None),
-                    "model": getattr(cfg, "model", None),
-                }
-    except Exception:
-        pass
+    pipeline_running = _PIPELINE_RUNNING
+    last_error = _PIPELINE_STATUS.get("error", "")
+    if not pipeline_running and not last_error and _LAST_PIPELINE_ERROR:
+        last_error = _LAST_PIPELINE_ERROR
 
-    try:
-        if not agent_running and not last_error:
-            global _LAST_AGENT_START_ERROR
-            if _LAST_AGENT_START_ERROR:
-                last_error = str(_LAST_AGENT_START_ERROR)
-    except Exception:
-        pass
+    progress = None
+    pipe = None
+    with _PIPELINE_LOCK:
+        pipe = _PIPELINE
+    if pipe is not None:
+        try:
+            progress = pipe.progress
+        except Exception:
+            pass
+
     return {
         "server_pid": os.getpid(),
         "server_started_at": round(_SERVER_STARTED_AT, 3),
-        "ollama_listening": False,
-        "agent_running": agent_running,
-        "agent_pid": None,
-        "agent_type": "vlm_policy",
-        "agent_cfg": agent_cfg,
-        "last_action": last_action,
+        "agent_running": pipeline_running,
+        "agent_type": "pipeline",
+        "pipeline_status": _PIPELINE_STATUS,
+        "pipeline_progress": progress,
         "last_error": last_error,
     }
 
 
-@app.get("/api/v1/debug/vision")
-def debug_vision() -> Dict[str, Any]:
-    data: Dict[str, Any] = {}
-    try:
-        import transformers
-
-        data["transformers_version"] = getattr(transformers, "__version__", None)
-        try:
-            from transformers import PreTrainedModel
-
-            data["pretrainedmodel_has__supports_sdpa"] = hasattr(PreTrainedModel, "_supports_sdpa")
-        except Exception as e:
-            data["pretrainedmodel_has__supports_sdpa"] = f"error: {e}"
-
-        try:
-            from transformers.generation.utils import GenerationMixin
-
-            data["generationmixin_has__supports_sdpa"] = hasattr(GenerationMixin, "_supports_sdpa")
-        except Exception as e:
-            data["generationmixin_has__supports_sdpa"] = f"error: {e}"
-    except Exception as e:
-        data["transformers_import_error"] = str(e)
-
-    data["vision_loaded"] = _VISION is not None
-    return data
-
-
-@app.post("/api/v1/local_vlm/warmup")
-def local_vlm_warmup(
-    model: str = Query(""),
-    models_dir: str = Query(""),
-    hf_home: str = Query(""),
-    device: str = Query(""),
-    max_new_tokens: int = Query(64),
-) -> Dict[str, Any]:
-    m = (model or os.environ.get("LOCAL_VLM_MODEL") or LOCAL_VLM_MODEL or "").strip()
-    if not m:
-        raise HTTPException(status_code=400, detail="model is required (query model=... or env LOCAL_VLM_MODEL)")
-
-    md = (
-        models_dir
-        or os.environ.get("LOCAL_VLM_MODELS_DIR")
-        or LOCAL_VLM_MODELS_DIR
-        or os.environ.get("MODELS_DIR")
-        or MODELS_DIR
-        or r"D:\\Project\\ml_cache\\models\\vlm"
-    ).strip()
-    hh = (hf_home or os.environ.get("HF_HOME") or HF_CACHE_DIR or r"D:\\Project\\ml_cache\\huggingface").strip()
-    dev = (device or os.environ.get("LOCAL_VLM_DEVICE") or LOCAL_VLM_DEVICE or "cuda").strip()
-
-    mnt = int(max_new_tokens) if max_new_tokens else 64
-    if mnt < 16:
-        mnt = 16
-
-    t0 = time.time()
-    from vision.local_vlm_runtime import get_local_vlm
-
-    engine = get_local_vlm(model=m, models_dir=md, hf_home=hh, device=dev)
-
-    tmp_path = ""
-    try:
-        fd, tmp_path = tempfile.mkstemp(prefix="vlm_warmup_", suffix=".png")
-        os.close(fd)
-        im = Image.new("RGB", (32, 32), (255, 255, 255))
-        im.save(tmp_path)
-
-        prompt = "Return JSON only: {\"items\": []}."
-        res = engine.ocr(image_path=tmp_path, prompt=prompt, max_new_tokens=mnt)
-        raw = str(res.get("raw") or "")
-    finally:
-        try:
-            if tmp_path:
-                os.remove(tmp_path)
-        except Exception:
-            pass
-
-    return {
-        "ok": True,
-        "model": m,
-        "device": dev,
-        "models_dir": md,
-        "hf_home": hh,
-        "max_new_tokens": mnt,
-        "elapsed_s": round(time.time() - t0, 3),
-        "raw_head": raw.strip().replace("\n", " ")[:200],
-    }
-
-
-@app.on_event("startup")
-def _startup_local_vlm_warmup() -> None:
-    if (os.environ.get("LOCAL_VLM_WARMUP") or "").strip() != "1":
-        return
-    try:
-        local_vlm_warmup()
-    except Exception as e:
-        try:
-            print(f"local_vlm warmup failed: {e}")
-        except Exception:
-            pass
-
-
-@app.get("/api/v1/local_vlm/ocr")
-def local_vlm_ocr(
-    path: str = Query(...),
-    model: str = Query(""),
-    models_dir: str = Query(""),
-    hf_home: str = Query(""),
-    device: str = Query(""),
-    max_new_tokens: int = Query(2048),
-    strict: bool = Query(False),
-    force: bool = Query(False),
-    debug: bool = Query(False),
-) -> Dict[str, Any]:
-    rel = (path or "").replace("\\", "/")
-    img = _safe_capture_path(rel)
-    if not img.exists() or not img.is_file():
-        raise HTTPException(status_code=404, detail="image not found")
-
-    m = (model or os.environ.get("LOCAL_VLM_MODEL") or LOCAL_VLM_MODEL or "").strip()
-    if not m:
-        raise HTTPException(status_code=400, detail="model is required (query model=... or env LOCAL_VLM_MODEL)")
-
-    md = (
-        models_dir
-        or os.environ.get("LOCAL_VLM_MODELS_DIR")
-        or LOCAL_VLM_MODELS_DIR
-        or os.environ.get("MODELS_DIR")
-        or MODELS_DIR
-        or r"D:\\Project\\ml_cache\\models\\vlm"
-    ).strip()
-    hh = (hf_home or os.environ.get("HF_HOME") or HF_CACHE_DIR or r"D:\\Project\\ml_cache\\huggingface").strip()
-    dev = (device or os.environ.get("LOCAL_VLM_DEVICE") or LOCAL_VLM_DEVICE or "cuda").strip()
-    mnt = int(max_new_tokens) if max_new_tokens else int(LOCAL_VLM_MAX_NEW_TOKENS)
-    if mnt < 64:
-        mnt = 64
-
-    cache_path = _local_vlm_ocr_cache_path(rel, m)
-    if (not debug) and (not force) and cache_path.exists():
-        try:
-            return json.loads(cache_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    try:
-        try:
-            with Image.open(img) as im:
-                w, h = im.size
-        except Exception:
-            w, h = 0, 0
-
-        prompt = (
-            "You are an OCR engine. Extract all visible text regions from the image and return JSON only. "
-            "Return format: {\"items\": [{\"label\": <text>, \"bbox\": [x1,y1,x2,y2]}]}. "
-            "bbox must be pixel coordinates in the original image. "
-            f"Image size: width={w}, height={h}. "
-            "Do not include any extra keys. Do not wrap in markdown."
-        )
-
-        from vision.local_vlm_runtime import get_local_vlm
-
-        engine = get_local_vlm(model=m, models_dir=md, hf_home=hh, device=dev)
-        res = engine.ocr(image_path=str(img), prompt=prompt, max_new_tokens=mnt)
-        raw = str(res.get("raw") or "")
-        if not raw.strip():
-            parsed = None
-            parse_error = "empty content from local_vlm"
-        else:
-            try:
-                parsed = _parse_json_content(raw)
-                parse_error = ""
-            except Exception as e:
-                parsed = None
-                parse_error = str(e)
-
-        items = []
-        if isinstance(parsed, dict) and isinstance(parsed.get("items"), list):
-            items = parsed.get("items")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"local_vlm ocr failed: {e}")
-
-    data: Dict[str, Any] = {"image": rel, "model": m, "items": items}
-    if debug:
-        data["debug"] = {
-            "raw": raw[:2000],
-            "parse_error": parse_error,
-            "models_dir": md,
-            "hf_home": hh,
-            "device": dev,
-            "max_new_tokens": mnt,
-        }
-
-    if parse_error:
-        data["error"] = {"type": "parse_error", "message": parse_error, "raw_head": raw.strip().replace("\n", " ")[:400]}
-        if (not debug) and strict:
-            raise HTTPException(status_code=500, detail=f"local_vlm output is not valid json: {parse_error}")
-
-    try:
-        if (not debug) and (not parse_error):
-            cache_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
-
-    return data
-
-
-@app.get("/api/v1/vlm/ocr")
-def vlm_ocr(
-    path: str = Query(...),
-    model: str = Query(""),
-    base_url: str = Query(""),
-    timeout_s: int = Query(1800),
-    keep_alive: str = Query("10m"),
-    num_ctx: int = Query(8192),
-    num_predict: int = Query(2048),
-    num_gpu: int = Query(99),
-    strict: bool = Query(False),
-    force: bool = Query(False),
-    debug: bool = Query(False),
-) -> Dict[str, Any]:
-    rel = (path or "").replace("\\", "/")
-    img = _safe_capture_path(rel)
-    if not img.exists() or not img.is_file():
-        raise HTTPException(status_code=404, detail="image not found")
-
-    m = (model or os.environ.get("VLM_MODEL") or os.environ.get("LLM_MODEL") or "").strip()
-    if not m:
-        raise HTTPException(status_code=400, detail="model is required (query model=... or env VLM_MODEL)")
-
-    bu = (base_url or os.environ.get("VLM_BASE_URL") or os.environ.get("LLM_BASE_URL") or "http://127.0.0.1:11434").strip()
-
-    cache_path = _vlm_ocr_cache_path(rel, m)
-    if (not debug) and (not force) and cache_path.exists():
-        try:
-            return json.loads(cache_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    try:
-        ts = int(timeout_s) if timeout_s else 1800
-        if ts < 30:
-            ts = 30
-        nc = int(num_ctx) if num_ctx else 8192
-        if nc < 512:
-            nc = 512
-
-        np = int(num_predict) if num_predict else 2048
-        if np < 64:
-            np = 64
-
-        ng = int(num_gpu) if num_gpu else 0
-        if ng < 0:
-            ng = 0
-
-        try:
-            res = _ollama_vlm_ocr(
-                image_path=img,
-                model=m,
-                base_url=bu,
-                timeout_s=ts,
-                keep_alive=keep_alive,
-                num_ctx=nc,
-                num_predict=np,
-                num_gpu=ng,
-            )
-        except requests.RequestException as e:
-            if ng > 0:
-                try:
-                    res = _ollama_vlm_ocr(
-                        image_path=img,
-                        model=m,
-                        base_url=bu,
-                        timeout_s=ts,
-                        keep_alive=keep_alive,
-                        num_ctx=nc,
-                        num_predict=np,
-                        num_gpu=0,
-                    )
-                    res["fallback"] = {"num_gpu": 0, "request_error": str(e)}
-                except requests.RequestException as e2:
-                    if debug:
-                        return {
-                            "image": rel,
-                            "model": m,
-                            "items": [],
-                            "error": {"type": "ollama_request_failed", "message": str(e)},
-                            "fallback": {"num_gpu": 0, "error": str(e2)},
-                        }
-                    raise HTTPException(status_code=500, detail=f"ollama request failed: {e}; fallback(num_gpu=0) failed: {e2}")
-            else:
-                if debug:
-                    return {
-                        "image": rel,
-                        "model": m,
-                        "items": [],
-                        "error": {"type": "ollama_request_failed", "message": str(e)},
-                    }
-                raise
-
-        if res.get("parse_error") and (ng > 0) and ("empty content" in str(res.get("parse_error"))):
-            res2 = _ollama_vlm_ocr(
-                image_path=img,
-                model=m,
-                base_url=bu,
-                timeout_s=ts,
-                keep_alive=keep_alive,
-                num_ctx=nc,
-                num_predict=np,
-                num_gpu=0,
-            )
-            if not res2.get("parse_error"):
-                res = res2
-            else:
-                res["fallback"] = {"num_gpu": 0, "parse_error": str(res2.get("parse_error") or "")}
-
-        parsed = res.get("parsed") or {}
-        items = parsed.get("items")
-        if not isinstance(items, list):
-            items = []
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"ollama request failed: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"vlm ocr failed: {e}")
-
-    data: Dict[str, Any] = {"image": rel, "model": m, "items": items}
-    if debug:
-        data["debug"] = res
-
-    if res.get("parse_error"):
-        raw = str(res.get("raw") or "")
-        head = raw.strip().replace("\n", " ")[:400]
-        data["error"] = {"type": "parse_error", "message": str(res.get("parse_error")), "raw_head": head}
-        if (not debug) and strict:
-            raise HTTPException(status_code=500, detail=f"vlm output is not valid json: {res.get('parse_error')}; raw_head={head}")
-
-    try:
-        if (not debug) and (not res.get("parse_error")):
-            cache_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
-
-    return data
-
-
-@app.post("/api/v1/vision/reload")
-def reload_vision() -> Dict[str, Any]:
-    global _VISION
-    try:
-        import importlib
-
-        import vision.florence_vision as florence_vision
-
-        importlib.reload(florence_vision)
-    except Exception:
-        pass
-
-    with _VISION_LOCK:
-        _VISION = None
-
-    return {"ok": True}
-
+# ── Capture path helpers ──────────────────────────────────────────────
 
 def _safe_capture_path(rel: str) -> Path:
     rel = (rel or "").replace("\\", "/").lstrip("/")
@@ -917,6 +431,16 @@ def _safe_capture_path(rel: str) -> Path:
         raise HTTPException(status_code=400, detail="invalid path")
     return p
 
+
+def _ocr_cache_path(rel: str) -> Path:
+    key = f"v{OCR_CACHE_VERSION}:{rel}"
+    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    cache_dir = CAPTURES_DIR / "_cache" / "ocr"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{h}.json"
+
+
+# ── Config / Favorites ────────────────────────────────────────────────
 
 @app.get("/api/v1/config/favorites")
 def get_favorites() -> Dict[str, Any]:
@@ -942,6 +466,8 @@ def set_favorites(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"status": "ok"}
 
 
+# ── Characters ────────────────────────────────────────────────────────
+
 @app.get("/api/v1/characters/avatars")
 def list_character_avatars() -> Dict[str, Any]:
     if not CHARACTERS_DIR.exists():
@@ -949,6 +475,8 @@ def list_character_avatars() -> Dict[str, Any]:
     avatars = sorted([p.name for p in CHARACTERS_DIR.glob("*.png")])
     return {"avatars": avatars}
 
+
+# ── Captures ──────────────────────────────────────────────────────────
 
 @app.get("/api/v1/captures/sessions")
 def list_sessions() -> Dict[str, Any]:
@@ -987,236 +515,7 @@ def get_image(path: str = Query(...)) -> FileResponse:
     return FileResponse(str(p))
 
 
-def _ocr_cache_path(rel: str) -> Path:
-    key = f"v{OCR_CACHE_VERSION}:{rel}"
-    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-    cache_dir = CAPTURES_DIR / "_cache" / "ocr"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{h}.json"
-
-
-def _vlm_ocr_cache_path(rel: str, model: str) -> Path:
-    key = f"v{VLM_OCR_CACHE_VERSION}:{model}:{rel}"
-    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-    cache_dir = CAPTURES_DIR / "_cache" / "vlm_ocr"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{h}.json"
-
-
-def _local_vlm_ocr_cache_path(rel: str, model: str) -> Path:
-    key = f"v{LOCAL_VLM_OCR_CACHE_VERSION}:{model}:{rel}"
-    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-    cache_dir = CAPTURES_DIR / "_cache" / "local_vlm_ocr"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{h}.json"
-
-
-def _parse_json_content(content: str) -> Dict[str, Any]:
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        pass
-
-    s = (content or "").strip()
-    if s.startswith("```"):
-        parts = s.split("```")
-        if len(parts) >= 3:
-            s = parts[1]
-            if "\n" in s:
-                s = s.split("\n", 1)[1]
-            s = s.strip()
-
-    l = s.find("{")
-    r = s.rfind("}")
-    if l != -1 and r != -1 and r > l:
-        return json.loads(s[l : r + 1])
-
-    raise json.JSONDecodeError("Unable to parse JSON", content, 0)
-
-
-def _ollama_vlm_ocr(
-    *,
-    image_path: Path,
-    model: str,
-    base_url: str,
-    timeout_s: int,
-    keep_alive: str,
-    num_ctx: int,
-    num_predict: int,
-    num_gpu: int,
-) -> Dict[str, Any]:
-    try:
-        with Image.open(image_path) as im:
-            w, h = im.size
-    except Exception:
-        w, h = 0, 0
-
-    img_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
-    prompt = (
-        "You are an OCR engine. Extract all visible text regions from the image and return JSON only. "
-        "Return format: {\"items\": [{\"label\": <text>, \"bbox\": [x1,y1,x2,y2]}]}. "
-        "bbox must be pixel coordinates in the original image. "
-        f"Image size: width={w}, height={h}. "
-        "Do not include any extra keys. Do not wrap in markdown."
-    )
-
-    base = base_url.rstrip("/")
-    url = base + "/api/chat"
-    def _call_chat(use_format_json: bool) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "model": model,
-            "stream": False,
-            "keep_alive": keep_alive,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images": [img_b64],
-                }
-            ],
-            "options": {
-                "temperature": 0.0,
-                "num_ctx": num_ctx,
-                "num_predict": num_predict,
-                "num_gpu": num_gpu,
-            },
-        }
-        if use_format_json:
-            payload["format"] = "json"
-
-        resp = requests.post(url, json=payload, timeout=(10, timeout_s))
-        resp.raise_for_status()
-        return resp.json()
-
-    def _call_generate() -> Dict[str, Any]:
-        url2 = base + "/api/generate"
-        payload: Dict[str, Any] = {
-            "model": model,
-            "stream": False,
-            "keep_alive": keep_alive,
-            "prompt": prompt,
-            "images": [img_b64],
-            "options": {
-                "temperature": 0.0,
-                "num_ctx": num_ctx,
-                "num_predict": num_predict,
-                "num_gpu": num_gpu,
-            },
-        }
-        resp = requests.post(url2, json=payload, timeout=(10, timeout_s))
-        resp.raise_for_status()
-        return resp.json()
-
-    data = _call_chat(False)
-    msg = data.get("message") if isinstance(data.get("message"), dict) else {}
-    content = (msg.get("content") or "") if isinstance(msg, dict) else ""
-    if not content.strip():
-        data2 = _call_chat(True)
-        msg2 = data2.get("message") if isinstance(data2.get("message"), dict) else {}
-        content2 = (msg2.get("content") or "") if isinstance(msg2, dict) else ""
-        if content2.strip():
-            data = data2
-            msg = msg2
-            content = content2
-
-    if not content.strip():
-        tool_calls = msg.get("tool_calls") if isinstance(msg, dict) else None
-        if isinstance(tool_calls, list) and tool_calls:
-            tc0 = tool_calls[0] if isinstance(tool_calls[0], dict) else {}
-            fn = tc0.get("function") if isinstance(tc0.get("function"), dict) else {}
-            args = fn.get("arguments") if isinstance(fn, dict) else None
-            if isinstance(args, dict):
-                return {
-                    "raw": "",
-                    "parsed": args,
-                    "parse_error": "",
-                    "ollama": {"model": data.get("model"), "done_reason": data.get("done_reason"), "message": msg},
-                }
-            if isinstance(args, str) and args.strip():
-                try:
-                    parsed = _parse_json_content(args)
-                    return {
-                        "raw": args,
-                        "parsed": parsed,
-                        "parse_error": "",
-                        "ollama": {"model": data.get("model"), "done_reason": data.get("done_reason"), "message": msg},
-                    }
-                except Exception:
-                    pass
-
-        try:
-            data3 = _call_generate()
-            content3 = data3.get("response") or ""
-            if isinstance(content3, str) and content3.strip():
-                data = data3
-                content = content3
-        except Exception:
-            pass
-
-    if not content.strip():
-        return {
-            "raw": "",
-            "parsed": None,
-            "parse_error": f"empty content from ollama: keys={list(data.keys())}",
-            "ollama": {"model": data.get("model"), "done_reason": data.get("done_reason"), "message": msg},
-        }
-
-    try:
-        parsed = _parse_json_content(content)
-        return {
-            "raw": content,
-            "parsed": parsed,
-            "parse_error": "",
-            "ollama": {"model": data.get("model"), "done_reason": data.get("done_reason"), "message": msg},
-        }
-    except Exception as e:
-        return {
-            "raw": content,
-            "parsed": None,
-            "parse_error": str(e),
-            "ollama": {"model": data.get("model"), "done_reason": data.get("done_reason"), "message": msg},
-        }
-
-
-@app.get("/api/v1/vision/ocr")
-def vision_ocr(path: str = Query(...), force: bool = Query(False), debug: bool = Query(False)) -> Dict[str, Any]:
-    rel = (path or "").replace("\\", "/")
-    img = _safe_capture_path(rel)
-    if not img.exists() or not img.is_file():
-        raise HTTPException(status_code=404, detail="image not found")
-
-    cache_path = _ocr_cache_path(rel)
-    if (not debug) and (not force) and cache_path.exists():
-        try:
-            return json.loads(cache_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    try:
-        v = _get_vision()
-        items = v.analyze_screen(str(img), od_queries=None, enable_ocr=True)
-    except ImportError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"vision dependencies missing: {e}. Please install requirements.txt (einops, timm).",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"vision ocr failed: {e}")
-
-    data: Dict[str, Any] = {"image": rel, "items": items}
-    if debug:
-        try:
-            data["debug"] = v.ocr_debug(str(img))
-        except Exception as e:
-            data["debug_error"] = str(e)
-
-    try:
-        if not debug:
-            cache_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
-    return data
-
+# ── Annotations ───────────────────────────────────────────────────────
 
 def _labels_path_for_image(rel: str) -> Path:
     rel = rel.replace("\\", "/").lstrip("/")
@@ -1337,208 +636,384 @@ def next_unlabeled(
     return {"session": session, "filename": None, "image": None}
 
 
-@app.post("/api/v1/vision/ocr_index/build")
-def build_ocr_index(
-    session: str = Query(...),
-    compute_missing: bool = Query(False),
-) -> Dict[str, Any]:
-    session = os.path.basename((session or "").strip())
-    if not session:
-        raise HTTPException(status_code=400, detail="session is required")
+# ── Dataset & Label Editor APIs ──────────────────────────────────────────
 
-    d = _safe_capture_path(session)
-    if not d.exists() or not d.is_dir():
-        raise HTTPException(status_code=404, detail="session not found")
+def _safe_dataset_path(name: str) -> Path:
+    name = os.path.basename((name or "").strip())
+    if not name:
+        raise HTTPException(status_code=400, detail="dataset name required")
+    p = (RAW_IMAGES_DIR / name).resolve()
+    if not str(p).startswith(str(RAW_IMAGES_DIR.resolve())):
+        raise HTTPException(status_code=400, detail="invalid dataset name")
+    return p
 
-    out_path = d / "ocr_index.jsonl"
-    images = sorted([p.name for p in d.glob("*.png")])
 
-    written = 0
-    missing = 0
-    errors = 0
+@app.get("/api/v1/datasets")
+def list_datasets() -> Dict[str, Any]:
+    datasets = []
+    for d in sorted(RAW_IMAGES_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        # Count jpg files (may be in root or /frames subfolder)
+        jpg_count = len(list(d.glob("*.jpg")))
+        frames_dir = d / "frames"
+        if frames_dir.is_dir():
+            jpg_count += len(list(frames_dir.glob("*.jpg")))
+        if jpg_count == 0:
+            continue
+        datasets.append({"name": d.name, "image_count": jpg_count})
+    return {"datasets": datasets}
 
-    v = None
-    if compute_missing:
-        v = _get_vision()
 
-    with out_path.open("w", encoding="utf-8") as f:
-        for name in images:
-            rel = f"{session}/{name}".replace("\\", "/")
-            cache_path = _ocr_cache_path(rel)
-            data: Optional[Dict[str, Any]] = None
-
-            if cache_path.exists():
-                try:
-                    data = json.loads(cache_path.read_text(encoding="utf-8"))
-                except Exception:
-                    data = None
-
-            if data is None:
-                missing += 1
-                if not compute_missing:
+@app.get("/api/v1/datasets/images")
+def list_dataset_images(dataset: str = Query(...)) -> Dict[str, Any]:
+    d = _safe_dataset_path(dataset)
+    if not d.exists():
+        raise HTTPException(status_code=404, detail="dataset not found")
+    # Images may be in root or /frames subfolder
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    images = sorted([p.name for p in img_dir.glob("*.jpg")])
+    # Load classes
+    classes_file = img_dir / "classes.txt"
+    classes = []
+    if classes_file.exists():
+        classes = [c for c in classes_file.read_text(encoding="utf-8").strip().split("\n") if c.strip()]
+    # Load labels per image
+    items = []
+    for img_name in images:
+        label_path = img_dir / Path(img_name).with_suffix(".txt")
+        labels = []
+        if label_path.exists():
+            for line in label_path.read_text().strip().split("\n"):
+                if not line.strip():
                     continue
-                try:
-                    items = v.analyze_screen(str(_safe_capture_path(rel)), od_queries=None, enable_ocr=True)
-                    data = {"image": rel, "items": items}
-                    try:
-                        cache_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-                    except Exception:
-                        pass
-                except Exception:
-                    errors += 1
-                    continue
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    labels.append({
+                        "cls": int(parts[0]),
+                        "xc": float(parts[1]), "yc": float(parts[2]),
+                        "w": float(parts[3]), "h": float(parts[4]),
+                    })
+        items.append({"img": img_name, "labels": labels})
+    return {"dataset": dataset, "classes": classes, "images": items}
 
-            rec = {"image": rel, "items": data.get("items") or []}
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            written += 1
 
-    return {
-        "ok": True,
-        "session": session,
-        "out": str(out_path.relative_to(CAPTURES_DIR).as_posix()),
-        "total_images": len(images),
-        "written": written,
-        "missing": missing,
-        "errors": errors,
+@app.get("/api/v1/datasets/image")
+def get_dataset_image(dataset: str = Query(...), filename: str = Query(...)) -> FileResponse:
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    filename = os.path.basename(filename)
+    p = img_dir / filename
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+    return FileResponse(str(p), media_type="image/jpeg")
+
+
+@app.post("/api/v1/datasets/save_labels")
+def save_dataset_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
+    dataset = str(payload.get("dataset") or "")
+    img_name = str(payload.get("img") or "")
+    label_text = str(payload.get("labels") or "")
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    label_path = img_dir / Path(os.path.basename(img_name)).with_suffix(".txt")
+    label_path.write_text(label_text, encoding="utf-8")
+    return {"ok": True}
+
+
+@app.post("/api/v1/datasets/add_class")
+def add_dataset_class(payload: Dict[str, Any]) -> Dict[str, Any]:
+    dataset = str(payload.get("dataset") or "")
+    new_name = str(payload.get("name") or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="class name required")
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    classes_file = img_dir / "classes.txt"
+    existing = []
+    if classes_file.exists():
+        existing = [c for c in classes_file.read_text(encoding="utf-8").strip().split("\n") if c.strip()]
+    if new_name not in existing:
+        existing.append(new_name)
+        classes_file.write_text("\n".join(existing) + "\n", encoding="utf-8")
+    return {"ok": True, "id": len(existing) - 1}
+
+
+@app.post("/api/v1/datasets/delete_image")
+def delete_dataset_image(payload: Dict[str, Any]) -> Dict[str, Any]:
+    dataset = str(payload.get("dataset") or "")
+    img_name = str(payload.get("img") or "")
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    fname = os.path.basename(img_name)
+    img_path = img_dir / fname
+    label_path = img_dir / Path(fname).with_suffix(".txt")
+    deleted = []
+    if img_path.exists():
+        img_path.unlink()
+        deleted.append(fname)
+    if label_path.exists():
+        label_path.unlink()
+        deleted.append(label_path.name)
+    return {"ok": True, "deleted": deleted}
+
+
+# ── OCR API ───────────────────────────────────────────────────────────
+
+_OCR_ENGINE = None
+_OCR_LOCK = threading.Lock()
+
+def _get_ocr():
+    global _OCR_ENGINE
+    with _OCR_LOCK:
+        if _OCR_ENGINE is None:
+            from rapidocr_onnxruntime import RapidOCR
+            _OCR_ENGINE = RapidOCR()
+        return _OCR_ENGINE
+
+@app.get("/api/v1/datasets/ocr")
+def dataset_ocr(dataset: str = Query(...), filename: str = Query(...)):
+    """Run RapidOCR on a single image, return text boxes with pixel + normalized coords."""
+    img_path = (RAW_IMAGES_DIR / dataset / filename).resolve()
+    if not img_path.exists():
+        raise HTTPException(404, "Image not found")
+    try:
+        import cv2
+        img = cv2.imread(str(img_path))
+        if img is None:
+            raise HTTPException(400, "Cannot read image")
+        ocr = _get_ocr()
+        result, _ = ocr(img)
+        boxes = []
+        h, w = img.shape[:2]
+        if result:
+            for line in result:
+                pts, text, conf = line
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                px1, py1 = int(min(xs)), int(min(ys))
+                px2, py2 = int(max(xs)), int(max(ys))
+                boxes.append({
+                    "text": text,
+                    "confidence": round(float(conf), 3),
+                    "x1": px1 / w, "y1": py1 / h,
+                    "x2": px2 / w, "y2": py2 / h,
+                    "px1": px1, "py1": py1, "px2": px2, "py2": py2,
+                })
+        return {"ok": True, "boxes": boxes, "count": len(boxes),
+                "image_w": w, "image_h": h}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": False, "error": str(e), "boxes": [], "count": 0}
+
+
+@app.post("/api/v1/datasets/open_folder")
+def dataset_open_folder(payload: Dict[str, Any]):
+    """Open the dataset folder in the system file explorer."""
+    dataset = payload.get("dataset", "")
+    ds_dir = RAW_IMAGES_DIR / dataset
+    if not ds_dir.exists():
+        raise HTTPException(404, "Dataset not found")
+    subprocess.Popen(["explorer", str(ds_dir.resolve())])
+    return {"ok": True, "path": str(ds_dir.resolve())}
+
+
+@app.post("/api/v1/datasets/ocr/save")
+def dataset_ocr_save(payload: Dict[str, Any]):
+    """Save OCR results for an image to the dataset's ocr_results.json."""
+    dataset = payload.get("dataset", "")
+    filename = payload.get("filename", "")
+    boxes = payload.get("boxes", [])
+    image_w = payload.get("image_w", 0)
+    image_h = payload.get("image_h", 0)
+    ds_dir = RAW_IMAGES_DIR / dataset
+    if not ds_dir.exists():
+        raise HTTPException(404, "Dataset not found")
+    ocr_path = ds_dir / "ocr_results.json"
+    data = {}
+    if ocr_path.exists():
+        try:
+            data = json.loads(ocr_path.read_text("utf-8"))
+        except Exception:
+            data = {}
+    data[filename] = {
+        "image_w": image_w, "image_h": image_h,
+        "boxes": boxes,
+        "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    ocr_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+    total_images = len(data)
+    total_texts = sum(len(v.get("boxes", [])) for v in data.values())
+    return {"ok": True, "total_images": total_images, "total_texts": total_texts}
 
 
-@app.post("/api/v1/local_vlm/ocr_index/build")
-def build_local_vlm_ocr_index(
-    session: str = Query(...),
-    model: str = Query(""),
-    compute_missing: bool = Query(False),
-) -> Dict[str, Any]:
-    session = os.path.basename((session or "").strip())
-    if not session:
-        raise HTTPException(status_code=400, detail="session is required")
-
-    d = _safe_capture_path(session)
-    if not d.exists() or not d.is_dir():
-        raise HTTPException(status_code=404, detail="session not found")
-
-    m = (model or os.environ.get("LOCAL_VLM_MODEL") or LOCAL_VLM_MODEL or "").strip()
-    if compute_missing and not m:
-        raise HTTPException(status_code=400, detail="model is required when compute_missing=1")
-
-    out_path = d / "local_vlm_ocr_index.jsonl"
-    images = sorted([p.name for p in d.glob("*.png")])
-
-    written = 0
-    missing = 0
-    errors = 0
-
-    with out_path.open("w", encoding="utf-8") as f:
-        for name in images:
-            rel = f"{session}/{name}".replace("\\", "/")
-            cache_path = _local_vlm_ocr_cache_path(rel, m or "") if m else None
-            data: Optional[Dict[str, Any]] = None
-
-            if cache_path is not None and cache_path.exists():
-                try:
-                    data = json.loads(cache_path.read_text(encoding="utf-8"))
-                except Exception:
-                    data = None
-
-            if data is None:
-                missing += 1
-                if not compute_missing:
-                    continue
-                try:
-                    data = local_vlm_ocr(path=rel, model=m, debug=False, force=True)
-                except Exception:
-                    errors += 1
-                    continue
-
-            rec = {"image": rel, "model": data.get("model") or m, "items": data.get("items") or []}
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            written += 1
-
-    return {
-        "ok": True,
-        "session": session,
-        "out": str(out_path.relative_to(CAPTURES_DIR).as_posix()),
-        "total_images": len(images),
-        "written": written,
-        "missing": missing,
-        "errors": errors,
-    }
+@app.post("/api/v1/datasets/ocr/batch")
+def dataset_ocr_batch(payload: Dict[str, Any]):
+    """Batch scan all images in a dataset with OCR, save results."""
+    dataset = payload.get("dataset", "")
+    ds_dir = RAW_IMAGES_DIR / dataset
+    if not ds_dir.exists():
+        raise HTTPException(404, "Dataset not found")
+    import cv2
+    ocr = _get_ocr()
+    ocr_path = ds_dir / "ocr_results.json"
+    data = {}
+    if ocr_path.exists():
+        try:
+            data = json.loads(ocr_path.read_text("utf-8"))
+        except Exception:
+            data = {}
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    imgs = sorted(f for f in ds_dir.iterdir() if f.suffix.lower() in exts)
+    scanned = 0
+    for img_path in imgs:
+        fname = img_path.name
+        if fname in data:
+            continue  # skip already scanned
+        img = cv2.imread(str(img_path))
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        result, _ = ocr(img)
+        boxes = []
+        if result:
+            for line in result:
+                pts, text, conf = line
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                px1, py1 = int(min(xs)), int(min(ys))
+                px2, py2 = int(max(xs)), int(max(ys))
+                boxes.append({
+                    "text": text, "confidence": round(float(conf), 3),
+                    "x1": px1 / w, "y1": py1 / h,
+                    "x2": px2 / w, "y2": py2 / h,
+                    "px1": px1, "py1": py1, "px2": px2, "py2": py2,
+                })
+        data[fname] = {
+            "image_w": w, "image_h": h,
+            "boxes": boxes,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        scanned += 1
+    ocr_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+    total_images = len(data)
+    total_texts = sum(len(v.get("boxes", [])) for v in data.values())
+    return {"ok": True, "scanned": scanned, "total_images": total_images,
+            "total_texts": total_texts}
 
 
-@app.post("/api/v1/vlm/ocr_index/build")
-def build_vlm_ocr_index(
-    session: str = Query(...),
-    model: str = Query(""),
-    base_url: str = Query(""),
-    compute_missing: bool = Query(False),
-) -> Dict[str, Any]:
-    session = os.path.basename((session or "").strip())
-    if not session:
-        raise HTTPException(status_code=400, detail="session is required")
+# ── DXcam Capture APIs ──────────────────────────────────────────────────
 
-    d = _safe_capture_path(session)
-    if not d.exists() or not d.is_dir():
-        raise HTTPException(status_code=404, detail="session not found")
+def _capture_worker(dataset_name: str, interval: float, window_title: str):
+    global _CAPTURE_RUNNING, _CAPTURE_STATUS
+    try:
+        import dxcam
+        import cv2
+        from vision.window import GameWindow
 
-    m = (model or os.environ.get("VLM_MODEL") or os.environ.get("LLM_MODEL") or "").strip()
-    if compute_missing and not m:
-        raise HTTPException(status_code=400, detail="model is required when compute_missing=1")
+        # Make this thread DPI-aware so win32gui returns physical pixels
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_DPI_AWARE
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
 
-    bu = (base_url or os.environ.get("VLM_BASE_URL") or os.environ.get("LLM_BASE_URL") or "http://127.0.0.1:11434").strip()
+        gw = GameWindow(window_title)
+        if not gw.find_window():
+            _CAPTURE_STATUS["error"] = f"Window '{window_title}' not found"
+            _CAPTURE_STATUS["running"] = False
+            _CAPTURE_RUNNING = False
+            return
 
-    out_path = d / "vlm_ocr_index.jsonl"
-    images = sorted([p.name for p in d.glob("*.png")])
+        region = gw.get_region()
+        camera = dxcam.create(output_idx=0, output_color="BGR")
 
-    written = 0
-    missing = 0
-    errors = 0
+        # DXcam output size (scaled desktop resolution)
+        dxcam_w = camera.width
+        dxcam_h = camera.height
 
-    with out_path.open("w", encoding="utf-8") as f:
-        for name in images:
-            rel = f"{session}/{name}".replace("\\", "/")
-            cache_path = _vlm_ocr_cache_path(rel, m or "") if m else None
-            data: Optional[Dict[str, Any]] = None
+        # Get physical screen resolution via win32api
+        phys_w = ctypes.windll.user32.GetSystemMetrics(0)
+        phys_h = ctypes.windll.user32.GetSystemMetrics(1)
 
-            if cache_path is not None and cache_path.exists():
-                try:
-                    data = json.loads(cache_path.read_text(encoding="utf-8"))
-                except Exception:
-                    data = None
+        # Calculate DPI scale factor and remap region
+        if region and phys_w > 0 and dxcam_w > 0:
+            scale_x = dxcam_w / phys_w
+            scale_y = dxcam_h / phys_h
+            l, t, r, b = region
+            region = (
+                max(0, int(l * scale_x)),
+                max(0, int(t * scale_y)),
+                min(dxcam_w, int(r * scale_x)),
+                min(dxcam_h, int(b * scale_y)),
+            )
+            _CAPTURE_STATUS["error"] = ""
+            _CAPTURE_STATUS["info"] = f"region={region} dxcam={dxcam_w}x{dxcam_h} phys={phys_w}x{phys_h}"
+        else:
+            region = None  # fallback: capture full screen
 
-            if data is None:
-                missing += 1
-                if not compute_missing:
-                    continue
-                try:
-                    res = _ollama_vlm_ocr(image_path=_safe_capture_path(rel), model=m, base_url=bu, timeout_s=600)
-                    parsed = res.get("parsed") or {}
-                    items = parsed.get("items")
-                    if not isinstance(items, list):
-                        items = []
-                    data = {"image": rel, "model": m, "items": items}
-                    try:
-                        if cache_path is not None:
-                            cache_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-                    except Exception:
-                        pass
-                except Exception:
-                    errors += 1
-                    continue
+        out_dir = RAW_IMAGES_DIR / dataset_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _CAPTURE_STATUS["dataset"] = dataset_name
+        _CAPTURE_STATUS["error"] = ""
 
-            rec = {"image": rel, "model": data.get("model") or m, "items": data.get("items") or []}
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            written += 1
+        count = 0
+        while _CAPTURE_RUNNING:
+            t0 = time.time()
+            frame = camera.grab(region=region)
+            if frame is not None:
+                fp = out_dir / f"frame_{count:06d}.jpg"
+                cv2.imwrite(str(fp), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                count += 1
+                _CAPTURE_STATUS["frames"] = count
+            elapsed = time.time() - t0
+            time.sleep(max(0, interval - elapsed))
 
-    return {
-        "ok": True,
-        "session": session,
-        "out": str(out_path.relative_to(CAPTURES_DIR).as_posix()),
-        "total_images": len(images),
-        "written": written,
-        "missing": missing,
-        "errors": errors,
-    }
+        del camera
+    except Exception as e:
+        _CAPTURE_STATUS["error"] = str(e)
+    finally:
+        _CAPTURE_STATUS["running"] = False
+        _CAPTURE_RUNNING = False
 
+
+@app.post("/api/v1/capture/start")
+def capture_start(payload: Dict[str, Any]) -> Dict[str, Any]:
+    global _CAPTURE_THREAD, _CAPTURE_RUNNING, _CAPTURE_STATUS
+    with _CAPTURE_LOCK:
+        if _CAPTURE_RUNNING:
+            return {"ok": False, "error": "already running", "status": _CAPTURE_STATUS}
+        interval = float(payload.get("interval", 0.5))
+        window_title = str(payload.get("window_title", "Blue Archive"))
+        from datetime import datetime
+        ds_name = "run_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        _CAPTURE_RUNNING = True
+        _CAPTURE_STATUS = {"running": True, "frames": 0, "dataset": ds_name, "error": ""}
+        _CAPTURE_THREAD = threading.Thread(
+            target=_capture_worker,
+            args=(ds_name, interval, window_title),
+            daemon=True,
+        )
+        _CAPTURE_THREAD.start()
+    return {"ok": True, "status": _CAPTURE_STATUS}
+
+
+@app.post("/api/v1/capture/stop")
+def capture_stop() -> Dict[str, Any]:
+    global _CAPTURE_RUNNING
+    _CAPTURE_RUNNING = False
+    return {"ok": True, "status": _CAPTURE_STATUS}
+
+
+@app.get("/api/v1/capture/status")
+def capture_status_api() -> Dict[str, Any]:
+    return {"status": _CAPTURE_STATUS}
+
+
+# ── Game launch ───────────────────────────────────────────────────────
 
 def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
     """Launch game exe if not already running. Returns a short status message."""
@@ -1574,10 +1049,12 @@ def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
     return "launched"
 
 
+# ── Agent Start / Stop ────────────────────────────────────────────────
+
 @app.post("/api/v1/start")
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
-    global _LAST_AGENT_START_ERROR
-    _LAST_AGENT_START_ERROR = ""
+    global _LAST_PIPELINE_ERROR
+    _LAST_PIPELINE_ERROR = ""
     # --- clear logs ---
     try:
         for fn in ("agent.out.log", "agent.err.log"):
@@ -1599,24 +1076,27 @@ def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
             f.write(f"[game_launch] {_game_launch_status}\n")
     except Exception:
         pass
+    # --- stop any existing pipeline ---
     try:
-        agent = _get_vlm_agent()
-        if agent is not None and getattr(agent, "is_running")():
-            _stop_vlm_agent()
+        if _PIPELINE_RUNNING:
+            _stop_pipeline()
     except Exception:
         pass
+    # --- start new pipeline ---
     try:
-        _start_vlm_agent(payload=payload)
+        _start_pipeline(payload=payload)
     except Exception:
-        _LAST_AGENT_START_ERROR = traceback.format_exc(limit=20)
+        _LAST_PIPELINE_ERROR = traceback.format_exc(limit=20)
     return status()
 
 
 @app.post("/api/v1/stop")
 def api_stop() -> Dict[str, Any]:
-    _stop_vlm_agent()
+    _stop_pipeline()
     return status()
 
+
+# ── Logs ──────────────────────────────────────────────────────────────
 
 @app.get("/api/v1/logs")
 def api_logs(
