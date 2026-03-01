@@ -12,7 +12,8 @@ from typing import Any, Dict
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box, action_wait, action_back, action_done,
+    action_click, action_click_box, action_click_yolo,
+    action_wait, action_back, action_done,
 )
 
 
@@ -27,10 +28,8 @@ class ScheduleSkill(BaseSkill):
         self._tickets_used = 0
 
     def _is_schedule(self, screen: ScreenState) -> bool:
-        """Detect schedule UI: header or 全体課程表."""
-        return (screen.has_text("課程表", region=(0.0, 0.0, 0.3, 0.08), min_conf=0.6) or
-                screen.has_text("课程表", region=(0.0, 0.0, 0.3, 0.08), min_conf=0.6) or
-                screen.has_text("全体", min_conf=0.6))
+        """Detect schedule UI: header shows 課程表."""
+        return screen.has_text("課程表", region=(0.0, 0.0, 0.3, 0.08), min_conf=0.5)
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -39,12 +38,39 @@ class ScheduleSkill(BaseSkill):
             self.log("timeout")
             return action_done("schedule timeout")
 
+        # ── Popup handling ──
+        
+        # Ticket exhausted popup
+        no_ticket = screen.find_any_text(
+            ["日程券不足", "日程券已用完", "不足", "購買"],
+            min_conf=0.6
+        )
+        if no_ticket:
+            # Confirm or Close
+            confirm = screen.find_any_text(["確認", "确认"], region=screen.CENTER, min_conf=0.7)
+            if confirm:
+                self.log(f"tickets exhausted ({self._tickets_used} used), confirming popup")
+                self.sub_state = "exit"
+                return action_click_box(confirm, "confirm no tickets")
+            
+            x_btn = screen.find_yolo_one("叉叉", min_conf=0.3)
+            if x_btn:
+                self.log(f"tickets exhausted, closing popup via X")
+                self.sub_state = "exit"
+                return action_click_yolo(x_btn, "close ticket popup")
+                
+            self.sub_state = "exit"
+            return action_click(0.5, 0.8, "dismiss ticket popup")
+
+        # Generic popups
         popup = self._handle_common_popups(screen)
         if popup:
             return popup
 
         if screen.is_loading():
             return action_wait(800, "schedule loading")
+
+        # ── State machine ──
 
         if self.sub_state == "":
             self.sub_state = "enter"
@@ -62,51 +88,46 @@ class ScheduleSkill(BaseSkill):
         if self._is_schedule(screen):
             self.log("inside schedule")
             self.sub_state = "execute"
-            return action_wait(300, "entered schedule")
+            return action_wait(500, "entered schedule")
 
         if screen.is_lobby():
             nav = self._nav_to(screen, ["課程表", "课程表"])
             if nav:
                 return nav
+            return action_wait(300, "waiting for schedule button")
 
         return action_wait(500, "entering schedule")
 
     def _execute(self, screen: ScreenState) -> Dict[str, Any]:
-        # Check for ticket exhausted popup
-        no_ticket = screen.find_any_text(
-            ["日程券不足", "日程券已用完", "不足"],
-            min_conf=0.6
-        )
-        if no_ticket:
-            self.log(f"tickets exhausted after {self._tickets_used} uses")
-            self.sub_state = "exit"
-            # Close the popup first
-            confirm = screen.find_any_text(["確認", "确认"], region=screen.CENTER, min_conf=0.7)
-            if confirm:
-                return action_click_box(confirm, "confirm no tickets")
-            return action_back("close ticket popup")
+        """Select rooms and start schedule."""
+        if not self._is_schedule(screen):
+            return action_wait(500, "waiting for schedule UI")
 
-        # Look for start button
+        # 1. If 'Start Schedule' button is visible, click it
         start = screen.find_any_text(
             ["開始日程", "开始日程", "開始"],
-            min_conf=0.6
+            min_conf=0.6,
+            region=(0.5, 0.6, 1.0, 1.0) # Usually bottom right
         )
         if start:
             self.log(f"starting schedule #{self._tickets_used + 1}")
             self._tickets_used += 1
             return action_click_box(start, "start schedule")
 
-        # Look for room selection - click any available room
-        # Rooms show as clickable areas; for now just wait for UI
-        if self._is_schedule(screen):
-            # Click center to interact with schedule UI
-            return action_click(0.5, 0.5, "interact with schedule room")
-
-        if screen.is_lobby():
-            self.log("back in lobby, schedule done")
-            return action_done("schedule complete")
-
-        return action_wait(500, "schedule executing")
+        # 2. Select a room
+        # Try to find 'Rank' or 'LV' text indicating a room
+        # Prioritize higher ranks if possible, but for now just pick the first valid one
+        room_indicator = screen.find_any_text(["Rank", "LV", "Lv", "RANK"], min_conf=0.5)
+        if room_indicator:
+            self.log(f"selecting room at ({room_indicator.cx:.2f}, {room_indicator.cy:.2f})")
+            return action_click_box(room_indicator, "select room via Rank text")
+        
+        # Fallback: click predefined room slots (middle of screen)
+        # 3-4 rooms usually stacked vertically
+        if self.ticks % 3 == 0:
+            return action_click(0.6, 0.5, "select middle room (fallback)")
+        
+        return action_wait(500, "scanning for rooms")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
