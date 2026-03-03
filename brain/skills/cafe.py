@@ -26,7 +26,7 @@ from brain.skills.base import (
 # Min confidence for headpat markers (real marks score 0.50-0.90, false positives 0.15-0.40)
 _HEADPAT_CONF = 0.40
 # Max consecutive empty scans before giving up on headpats
-_MAX_EMPTY_SCANS = 3
+_MAX_EMPTY_SCANS = 5
 # Max headpats per floor (cafe typically has 3-5 students per floor)
 _MAX_HEADPATS_PER_FLOOR = 5
 
@@ -41,6 +41,7 @@ class CafeSkill(BaseSkill):
         self._earnings_attempts: int = 0
         self._invite_attempted: bool = False
         self._invite_ticks: int = 0
+        self._invite_stage: int = 0  # 0=open ticket, 1=click invite, 2=confirm, 3=done
 
     def reset(self) -> None:
         super().reset()
@@ -50,6 +51,7 @@ class CafeSkill(BaseSkill):
         self._earnings_attempts = 0
         self._invite_attempted = False
         self._invite_ticks = 0
+        self._invite_stage = 0
 
     def _is_cafe(self, screen: ScreenState) -> bool:
         """Detect cafe interior: header '咖啡廳' or '移動至' button visible."""
@@ -74,24 +76,16 @@ class CafeSkill(BaseSkill):
 
         # Earnings popup: only triggers on popup-specific text
         # (NOT '咖啡廳收益' which is a permanent label on cafe main screen)
-        # Skip if we already claimed — prevents infinite loop when inventory is full
-        # and the game keeps reopening the popup after dismiss.
+        # Skip if we already claimed — prevents infinite loop when inventory is full.
         if not self._earnings_claimed and screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
-            self._earnings_attempts += 1
-            if self._earnings_attempts > 3:
-                self.log("earnings claim failed 3 times (inventory full?), skipping")
-                self._earnings_claimed = True
-                # Close the popup via YOLO X or ESC
-                x_btn = screen.find_yolo_one("叉叉1", min_conf=0.3)
-                if x_btn:
-                    return action_click_yolo(x_btn, "close earnings popup after failures")
-                return action_back("dismiss earnings popup after failures")
             claim_btn = screen.find_any_text(["領取", "领取"], min_conf=0.7)
             if claim_btn:
-                self.log(f"earnings popup detected, clicking claim (attempt {self._earnings_attempts})")
+                self.log("earnings popup detected, clicking claim")
+                self._earnings_claimed = True
                 return action_click_box(claim_btn, "claim earnings from popup")
             # OCR can miss the claim text on some frames; use stable popup button coordinate.
-            self.log(f"earnings popup detected, claim text missing -> click claim fallback (attempt {self._earnings_attempts})")
+            self.log("earnings popup detected, claim text missing -> click claim fallback")
+            self._earnings_claimed = True
             return action_click(0.5, 0.734, "claim earnings fallback")
 
         # Tutorial/説明 popup (cafe 2F first visit)
@@ -216,9 +210,14 @@ class CafeSkill(BaseSkill):
         return action_wait(300, "no earnings visible, moving to invite")
 
     def _invite(self, screen: ScreenState) -> Dict[str, Any]:
-        """Try inviting a student once before headpat loop."""
+        """Try inviting a student before headpat loop.
+
+        Stages: 0=open ticket panel, 1=click 邀請, 2=confirm invite, 3=done
+        """
         if self._invite_attempted:
             self.sub_state = "headpat"
+            self._headpat_count = 0
+            self._empty_scans = 0
             return action_wait(300, "invite done/skip, starting headpat")
 
         if not self._is_cafe(screen):
@@ -226,22 +225,57 @@ class CafeSkill(BaseSkill):
 
         self._invite_ticks += 1
 
-        # If invite list is open, click the first 邀請 button.
-        invite_btn = screen.find_any_text(["邀請", "邀请"], region=(0.35, 0.10, 0.90, 0.90), min_conf=0.65)
-        if invite_btn:
-            self.log("invite list detected, clicking 邀請")
-            self._invite_attempted = True
-            return action_click_box(invite_btn, "invite student")
+        # Stage 2: Confirm the invite in the confirmation popup
+        if self._invite_stage == 2:
+            confirm = screen.find_any_text(
+                ["確認", "确认", "確定", "确定"],
+                region=screen.CENTER, min_conf=0.7
+            )
+            if confirm:
+                self.log("confirming student invite")
+                self._invite_stage = 3
+                self._invite_attempted = True
+                return action_click_box(confirm, "confirm invite")
+            # If no confirm button yet, wait for popup
+            if self._invite_ticks >= 15:
+                self.log("invite confirm timeout, skipping")
+                self._invite_attempted = True
+            return action_wait(400, "waiting for invite confirm popup")
 
-        # On cafe main screen, click invite ticket area in bottom-right panel.
+        # Stage 1: Invite list is open, click the first 邀請 button
+        if self._invite_stage == 1:
+            invite_btn = screen.find_any_text(
+                ["邀請", "邀请"],
+                region=(0.50, 0.20, 0.70, 0.90), min_conf=0.65
+            )
+            if invite_btn:
+                self.log(f"clicking 邀請 at ({invite_btn.cx:.2f},{invite_btn.cy:.2f})")
+                self._invite_stage = 2
+                return action_click_box(invite_btn, "invite student")
+            if self._invite_ticks >= 10:
+                self.log("invite list not found, skipping")
+                self._invite_attempted = True
+            return action_wait(400, "waiting for invite list")
+
+        # Stage 0: Open the invite ticket panel from cafe main screen
         ticket = screen.find_any_text(
-            ["邀請券", "邀请券", "客外邀請劵", "客外邀请券", "可使用"],
+            ["邀請券", "邀请券", "客外邀請劈", "客外邀请券", "可使用"],
             region=(0.55, 0.78, 0.78, 0.98),
-            min_conf=0.65,
+            min_conf=0.60,
         )
         if ticket:
             self.log("clicking invite ticket")
+            self._invite_stage = 1
             return action_click_box(ticket, "open invite ticket")
+
+        # Also check if invite list is already open (e.g. from previous attempt)
+        invite_btn = screen.find_any_text(
+            ["邀請", "邀请"],
+            region=(0.50, 0.20, 0.70, 0.90), min_conf=0.65
+        )
+        if invite_btn:
+            self._invite_stage = 1
+            return action_wait(200, "invite list already open")
 
         if self._invite_ticks >= 6:
             self.log("invite UI not found, skipping invite")

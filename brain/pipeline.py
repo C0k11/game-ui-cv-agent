@@ -57,29 +57,39 @@ _YOLO_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "_yolo_full.pt
 # Prefer the ml_cache path if it exists
 _YOLO_ML_CACHE = Path(r"D:\Project\ml_cache\models\yolo\full.pt")
 
+_yolo_load_attempted = False
+
 def _get_yolo():
     """Get or create YOLO model (thread-safe singleton). Returns None if unavailable."""
-    global _yolo_model, _yolo_lock
+    global _yolo_model, _yolo_lock, _yolo_load_attempted
     import threading
     if _yolo_lock is None:
         _yolo_lock = threading.Lock()
     with _yolo_lock:
         if _yolo_model is not None:
             return _yolo_model
+        if _yolo_load_attempted:
+            return None
+        _yolo_load_attempted = True
         model_path = None
         if _YOLO_ML_CACHE.is_file():
             model_path = _YOLO_ML_CACHE
         elif _YOLO_MODEL_PATH.is_file():
             model_path = _YOLO_MODEL_PATH
         if model_path is None:
+            print(f"[Pipeline] YOLO model NOT found at {_YOLO_ML_CACHE} or {_YOLO_MODEL_PATH}")
             return None
         try:
             from ultralytics import YOLO
             _yolo_model = YOLO(str(model_path))
-            print(f"[Pipeline] YOLO model loaded from {model_path}")
+            # Warm-up inference to catch early errors
+            import numpy as np
+            _yolo_model(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
+            print(f"[Pipeline] YOLO model loaded OK from {model_path} (classes: {_yolo_model.names})")
             return _yolo_model
         except Exception as e:
-            print(f"[Pipeline] YOLO load failed: {e}")
+            print(f"[Pipeline] YOLO load FAILED: {type(e).__name__}: {e}")
+            import traceback; traceback.print_exc()
             return None
 
 
@@ -119,12 +129,13 @@ def read_screen(screenshot_path: str) -> ScreenState:
                 y2=max(ys) / h,
             ))
 
-    # YOLO detection
+    # YOLO detection — pass the in-memory image (numpy array) instead of
+    # the file path to avoid potential path-encoding issues on Windows.
     yolo_boxes: List[YoloBox] = []
     yolo = _get_yolo()
     if yolo is not None:
         try:
-            yolo_results = yolo(screenshot_path, conf=0.15, verbose=False)
+            yolo_results = yolo(img, conf=0.15, verbose=False)
             for r in yolo_results:
                 for box in r.boxes:
                     bx1, by1, bx2, by2 = box.xyxy[0].tolist()
@@ -140,7 +151,8 @@ def read_screen(screenshot_path: str) -> ScreenState:
                         y2=by2 / h,
                     ))
         except Exception as e:
-            print(f"[Pipeline] YOLO detect error: {e}")
+            print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
+            import traceback; traceback.print_exc()
 
     return ScreenState(
         ocr_boxes=boxes,
