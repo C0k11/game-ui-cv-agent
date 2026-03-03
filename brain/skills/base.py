@@ -165,40 +165,6 @@ class ScreenState:
     # Center dialog area
     CENTER = (0.25, 0.15, 0.75, 0.85)
 
-    def detect_current_screen(self, screen: ScreenState) -> Optional[str]:
-        """Detect current screen based on top-left header text.
-        
-        Returns the screen name (e.g. 'Cafe', 'Schedule', 'Lobby') if detected,
-        or None if unknown.
-        """
-        # 1. Check Lobby (bottom nav)
-        if self.is_lobby():
-            return "Lobby"
-
-        # 2. Check headers (top-left region usually)
-        # Region: x=0.0-0.3, y=0.0-0.15
-        header_region = (0.0, 0.0, 0.3, 0.15)
-        
-        headers = {
-            "Cafe": ["咖啡廳", "咖啡厅"],
-            "Schedule": ["課程表", "课程表", "全体課程", "全体课程"],
-            "Shop": ["商店"],
-            "Club": ["社團", "社团", "Club"],
-            "Mission": ["任務", "任务"],
-            "Bounty": ["懸賞通緝", "悬赏通缉", "通緝", "通缉", "Bounty"],
-            "PVP": ["戰術對抗", "战术对抗", "戰術大賽", "战术大赛"],
-            "Mail": ["郵件", "邮件", "郵箱", "邮箱", "Mail"],
-            "Craft": ["製造", "制造", "Craft"],
-            "Student": ["學生", "学生", "Student"],
-            "Formation": ["部隊", "编队", "部隊編成"],
-        }
-
-        for screen_name, texts in headers.items():
-            if screen.find_any_text(texts, region=header_region, min_conf=0.6):
-                return screen_name
-                
-        return None
-
     def is_lobby(self) -> bool:
         """Detect if we're on the main lobby screen.
 
@@ -306,6 +272,30 @@ class BaseSkill(ABC):
         Returns action dict. Return action_done() when skill is complete.
         """
         ...
+
+    def detect_current_screen(self, screen: ScreenState) -> Optional[str]:
+        """Detect current screen based on OCR header and nav bar cues."""
+        if screen.is_lobby():
+            return "Lobby"
+
+        header_region = (0.0, 0.0, 0.3, 0.15)
+        headers = {
+            "Cafe": ["咖啡廳", "咖啡厅"],
+            "Schedule": ["課程表", "课程表", "全体課程", "全体课程"],
+            "Shop": ["商店"],
+            "Club": ["社團", "社团", "Club"],
+            "Mission": ["任務", "任务"],
+            "Bounty": ["懸賞通緝", "悬赏通缉", "通緝", "通缉", "Bounty"],
+            "PVP": ["戰術對抗", "战术对抗", "戰術大賽", "战术大赛"],
+            "Mail": ["郵件", "邮件", "郵箱", "邮箱", "Mail"],
+            "Craft": ["製造", "制造", "Craft"],
+            "Student": ["學生", "学生", "Student"],
+            "Formation": ["部隊", "编队", "部隊編成"],
+        }
+        for screen_name, texts in headers.items():
+            if screen.find_any_text(texts, region=header_region, min_conf=0.6):
+                return screen_name
+        return None
 
     def _handle_common_popups(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         """Handle common popups that can appear in any skill.

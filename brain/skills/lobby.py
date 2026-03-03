@@ -130,16 +130,26 @@ class LobbySkill(BaseSkill):
                 return action_click_box(confirm, "confirm skip")
             return action_click(0.6, 0.7, "confirm skip (fallback)")
 
-        # 4. Check-in popup (到簿/签到)
-        checkin = screen.find_any_text(["到簿", "签到", "簽到"], min_conf=0.7)
+        # 4. Check-in popup (到簿/签到/ARONA每日签到)
+        checkin = screen.find_any_text(
+            ["到簿", "签到", "簽到", "ARONA", "彩奈", "每日签到", "每日簽到"],
+            min_conf=0.7
+        )
         if checkin:
             close_area = screen.find_any_text(
-                ["今日不再"],
+                ["今日不再", "今日不再提示", "今日不再顯示", "今日不再显示"],
                 region=(0.15, 0.65, 0.35, 0.80), min_conf=0.8
             )
             if close_area:
                 self.log("check-in popup: click '今日不再' to dismiss")
                 return action_click_box(close_area, "dismiss check-in today")
+            continue_hint = screen.find_any_text(
+                ["点击屏幕", "點擊螢幕", "轻触屏幕", "輕觸螢幕", "继续", "繼續"],
+                min_conf=0.7,
+            )
+            if continue_hint:
+                self.log("check-in popup: tap to continue")
+                return action_click(0.5, 0.8, "check-in: tap to continue")
             self.log("check-in popup: dismiss")
             return action_click(0.95, 0.05, "close check-in popup")
 
