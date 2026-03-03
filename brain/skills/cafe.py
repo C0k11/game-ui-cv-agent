@@ -78,6 +78,10 @@ class CafeSkill(BaseSkill):
                 self.log("earnings popup detected, clicking claim")
                 self._earnings_claimed = True
                 return action_click_box(claim_btn, "claim earnings from popup")
+            # OCR can miss the claim text on some frames; use stable popup button coordinate.
+            self.log("earnings popup detected, claim text missing -> click claim fallback")
+            self._earnings_claimed = True
+            return action_click(0.5, 0.734, "claim earnings fallback")
             x_btn = screen.find_yolo_one("叉叉1", min_conf=0.3)
             if x_btn:
                 self.log("closing earnings popup via X")
@@ -186,6 +190,11 @@ class CafeSkill(BaseSkill):
 
         # If earnings popup is open but no claim button (already claimed?)
         if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
+            # OCR might miss claim text; click known claim position before closing.
+            self.log("earnings popup open but no claim OCR, clicking fallback claim")
+            self._earnings_claimed = True
+            return action_click(0.5, 0.734, "claim earnings fallback")
+
             # Close the popup
             x_btn = screen.find_yolo_one("叉叉1", min_conf=0.3)
             if x_btn:
