@@ -38,6 +38,7 @@ class CafeSkill(BaseSkill):
         self._headpat_count: int = 0
         self._empty_scans: int = 0
         self._earnings_claimed: bool = False
+        self._earnings_attempts: int = 0
         self._invite_attempted: bool = False
         self._invite_ticks: int = 0
 
@@ -46,6 +47,7 @@ class CafeSkill(BaseSkill):
         self._headpat_count = 0
         self._empty_scans = 0
         self._earnings_claimed = False
+        self._earnings_attempts = 0
         self._invite_attempted = False
         self._invite_ticks = 0
 
@@ -72,15 +74,24 @@ class CafeSkill(BaseSkill):
 
         # Earnings popup: only triggers on popup-specific text
         # (NOT '咖啡廳收益' which is a permanent label on cafe main screen)
-        if screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
+        # Skip if we already claimed — prevents infinite loop when inventory is full
+        # and the game keeps reopening the popup after dismiss.
+        if not self._earnings_claimed and screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
+            self._earnings_attempts += 1
+            if self._earnings_attempts > 3:
+                self.log("earnings claim failed 3 times (inventory full?), skipping")
+                self._earnings_claimed = True
+                # Close the popup via YOLO X or ESC
+                x_btn = screen.find_yolo_one("叉叉1", min_conf=0.3)
+                if x_btn:
+                    return action_click_yolo(x_btn, "close earnings popup after failures")
+                return action_back("dismiss earnings popup after failures")
             claim_btn = screen.find_any_text(["領取", "领取"], min_conf=0.7)
             if claim_btn:
-                self.log("earnings popup detected, clicking claim")
-                self._earnings_claimed = True
+                self.log(f"earnings popup detected, clicking claim (attempt {self._earnings_attempts})")
                 return action_click_box(claim_btn, "claim earnings from popup")
             # OCR can miss the claim text on some frames; use stable popup button coordinate.
-            self.log("earnings popup detected, claim text missing -> click claim fallback")
-            self._earnings_claimed = True
+            self.log(f"earnings popup detected, claim text missing -> click claim fallback (attempt {self._earnings_attempts})")
             return action_click(0.5, 0.734, "claim earnings fallback")
 
         # Tutorial/説明 popup (cafe 2F first visit)
@@ -281,7 +292,7 @@ class CafeSkill(BaseSkill):
 
         # OCR fallback when YOLO has no detections at all in this frame.
         if len(screen.yolo_boxes) == 0:
-            lv_hits = screen.find_text(r"Lv\\.?\\d+", region=(0.22, 0.30, 0.78, 0.78), min_conf=0.75)
+            lv_hits = screen.find_text(r"Lv\.?\d+", region=(0.22, 0.30, 0.78, 0.78), min_conf=0.75)
             if lv_hits:
                 self._empty_scans = 0
                 lv_hits = sorted(lv_hits, key=lambda b: (b.cy, b.cx))

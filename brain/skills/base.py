@@ -302,25 +302,38 @@ class BaseSkill(ABC):
 
         Returns an action if a popup was handled, None otherwise.
         """
-        # Close generic X buttons (叉叉) - common popups
-        # Confirm dialogs (確認/Space)
+        # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
             ["確認", "确认", "確定", "确定"],
             region=screen.CENTER, min_conf=0.8
         )
         if confirm:
-            # Check if there's also a 取消 (cancel) - if so, be careful
             cancel = screen.find_any_text(
                 ["取消"],
                 region=screen.CENTER, min_conf=0.8
             )
             if cancel:
-                # Dialog with confirm+cancel - only confirm if safe
-                # (subclass should handle specific dialogs)
                 return None
-            # Simple confirm-only popup (rewards, level up, etc.)
             self.log(f"confirm popup: '{confirm.text}'")
             return action_click_box(confirm, f"confirm popup '{confirm.text}'")
+
+        # Single-char confirm button (確/确) — game sometimes renders
+        # only one character for the confirm button (e.g. inventory-full popup).
+        # Only click if there's supporting popup body text nearby.
+        single_confirm = screen.find_any_text(
+            ["確", "确"],
+            region=(0.35, 0.65, 0.65, 0.80), min_conf=0.9
+        )
+        if single_confirm:
+            popup_body = screen.find_any_text(
+                ["背包已满", "背包已滿", "整理背包", "道具背包",
+                 "已達上限", "已达上限", "空間不足", "空间不足",
+                 "超過上限", "超过上限"],
+                region=screen.CENTER, min_conf=0.6
+            )
+            if popup_body:
+                self.log(f"single-char confirm popup: '{single_confirm.text}' (body: '{popup_body.text}')")
+                return action_click_box(single_confirm, f"confirm popup '{single_confirm.text}'")
 
         # "是否跳過" (skip) dialog - always confirm
         skip = screen.find_text_one("跳過", region=screen.CENTER, min_conf=0.8)
