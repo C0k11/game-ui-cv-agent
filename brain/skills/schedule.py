@@ -41,9 +41,12 @@ class ScheduleSkill(BaseSkill):
         # ── Popup handling ──
         
         # Ticket exhausted popup
+        # Keep this strict and center-scoped to avoid false positives from lobby text
+        # like "購買青輝石" on side banners.
         no_ticket = screen.find_any_text(
-            ["日程券不足", "日程券已用完", "不足", "購買"],
-            min_conf=0.6
+            ["日程券不足", "日程券已用完", "沒有日程券", "没有日程券", "日程券"],
+            region=screen.CENTER,
+            min_conf=0.6,
         )
         if no_ticket:
             # Confirm or Close

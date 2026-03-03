@@ -38,12 +38,16 @@ class CafeSkill(BaseSkill):
         self._headpat_count: int = 0
         self._empty_scans: int = 0
         self._earnings_claimed: bool = False
+        self._invite_attempted: bool = False
+        self._invite_ticks: int = 0
 
     def reset(self) -> None:
         super().reset()
         self._headpat_count = 0
         self._empty_scans = 0
         self._earnings_claimed = False
+        self._invite_attempted = False
+        self._invite_ticks = 0
 
     def _is_cafe(self, screen: ScreenState) -> bool:
         """Detect cafe interior: header '咖啡廳' or '移動至' button visible."""
@@ -69,6 +73,11 @@ class CafeSkill(BaseSkill):
         # Earnings popup: only triggers on popup-specific text
         # (NOT '咖啡廳收益' which is a permanent label on cafe main screen)
         if screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
+            claim_btn = screen.find_any_text(["領取", "领取"], min_conf=0.7)
+            if claim_btn:
+                self.log("earnings popup detected, clicking claim")
+                self._earnings_claimed = True
+                return action_click_box(claim_btn, "claim earnings from popup")
             x_btn = screen.find_yolo_one("叉叉1", min_conf=0.3)
             if x_btn:
                 self.log("closing earnings popup via X")
@@ -114,6 +123,8 @@ class CafeSkill(BaseSkill):
             return self._enter(screen)
         if self.sub_state == "earnings":
             return self._earnings(screen)
+        if self.sub_state == "invite":
+            return self._invite(screen)
         if self.sub_state == "headpat":
             return self._headpat(screen)
         if self.sub_state == "switch":
@@ -158,9 +169,10 @@ class CafeSkill(BaseSkill):
         4. Popup closes automatically or via X
         """
         if self._earnings_claimed:
-            self.sub_state = "headpat"
+            self.sub_state = "invite"
+            self._invite_ticks = 0
             self._empty_scans = 0
-            return action_wait(300, "earnings done, starting headpat")
+            return action_wait(300, "earnings done, moving to invite")
 
         if not self._is_cafe(screen):
             return action_wait(500, "waiting for cafe UI")
@@ -198,9 +210,46 @@ class CafeSkill(BaseSkill):
 
         # No earnings indicators — skip
         self._earnings_claimed = True
-        self.sub_state = "headpat"
+        self.sub_state = "invite"
+        self._invite_ticks = 0
         self._empty_scans = 0
-        return action_wait(300, "no earnings visible, moving to headpat")
+        return action_wait(300, "no earnings visible, moving to invite")
+
+    def _invite(self, screen: ScreenState) -> Dict[str, Any]:
+        """Try inviting a student once before headpat loop."""
+        if self._invite_attempted:
+            self.sub_state = "headpat"
+            return action_wait(300, "invite done/skip, starting headpat")
+
+        if not self._is_cafe(screen):
+            return action_wait(500, "waiting for cafe UI (invite)")
+
+        self._invite_ticks += 1
+
+        # If invite list is open, click the first 邀請 button.
+        invite_btn = screen.find_any_text(["邀請", "邀请"], region=(0.35, 0.10, 0.90, 0.90), min_conf=0.65)
+        if invite_btn:
+            self.log("invite list detected, clicking 邀請")
+            self._invite_attempted = True
+            return action_click_box(invite_btn, "invite student")
+
+        # On cafe main screen, click invite ticket area in bottom-right panel.
+        ticket = screen.find_any_text(
+            ["邀請券", "邀请券", "客外邀請劵", "客外邀请券", "可使用"],
+            region=(0.55, 0.78, 0.78, 0.98),
+            min_conf=0.65,
+        )
+        if ticket:
+            self.log("clicking invite ticket")
+            return action_click_box(ticket, "open invite ticket")
+
+        if self._invite_ticks >= 6:
+            self.log("invite UI not found, skipping invite")
+            self._invite_attempted = True
+            self.sub_state = "headpat"
+            return action_wait(300, "invite skipped")
+
+        return action_wait(400, "waiting for invite UI")
 
     def _headpat(self, screen: ScreenState) -> Dict[str, Any]:
         """Tap students with yellow exclamation marks (角色可摸头黄色感叹号).
@@ -229,7 +278,9 @@ class CafeSkill(BaseSkill):
                 return action_wait(300, "headpat2 max reached, exiting")
 
         # Find headpat markers via YOLO
-        mark = screen.find_yolo_one("感叹号", min_conf=_HEADPAT_CONF)
+        mark = screen.find_yolo_one("角色可摸头黄色感叹号", min_conf=_HEADPAT_CONF)
+        if not mark:
+            mark = screen.find_yolo_one("感叹号", min_conf=_HEADPAT_CONF)
         if mark:
             self._empty_scans = 0
             self._headpat_count += 1
@@ -238,6 +289,20 @@ class CafeSkill(BaseSkill):
             click_y = mark.cy
             self.log(f"headpat #{self._headpat_count}: conf={mark.confidence:.2f} marker=({mark.cx:.2f},{mark.cy:.2f}) click=({click_x:.2f},{click_y:.2f})")
             return action_click(click_x, click_y, f"headpat student #{self._headpat_count}")
+
+        # OCR fallback when YOLO has no detections at all in this frame.
+        if len(screen.yolo_boxes) == 0:
+            lv_hits = screen.find_text(r"Lv\\.?\\d+", region=(0.22, 0.30, 0.78, 0.78), min_conf=0.75)
+            if lv_hits:
+                self._empty_scans = 0
+                lv_hits = sorted(lv_hits, key=lambda b: (b.cy, b.cx))
+                idx = min(self._headpat_count, len(lv_hits) - 1)
+                target = lv_hits[idx]
+                self._headpat_count += 1
+                click_x = target.cx
+                click_y = max(target.cy - 0.08, 0.20)
+                self.log(f"headpat fallback #{self._headpat_count}: click above LV at ({click_x:.2f},{click_y:.2f})")
+                return action_click(click_x, click_y, f"headpat fallback #{self._headpat_count}")
 
         # No marks found this tick
         self._empty_scans += 1
