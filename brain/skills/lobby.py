@@ -35,9 +35,26 @@ class LobbySkill(BaseSkill):
         if screen.is_loading():
             return action_wait(1000, "loading screen")
 
+        # Popup hints used to avoid misfiring TAP TO START while a popup is open
+        popup_hint = screen.find_any_text(
+            ["今日不再", "今日不再提示", "Main News", "Patch Notes", "Maintenance",
+             "Pick-Up", "Official", "Webpage", "通知"],
+            min_conf=0.7
+        )
+
+        # Strong user preference: if "今日不再提示" exists, click it first.
+        # This suppresses repeat popups for the day.
+        do_not_show = screen.find_any_text(
+            ["今日不再", "今日不再提示", "今日不再顯示", "今日不再显示", "今日不再示"],
+            region=(0.10, 0.62, 0.40, 0.82), min_conf=0.75
+        )
+        if do_not_show:
+            self.log("popup: click 今日不再提示")
+            return action_click_box(do_not_show, "popup: do not show again today")
+
         # Title screen: "TAP TO START"
         tap = screen.find_text_one("TAP.*START", min_conf=0.8)
-        if tap:
+        if tap and not popup_hint:
             self.log("title screen: tap to start")
             return action_click(0.5, 0.85, "tap to start")
 
@@ -60,7 +77,7 @@ class LobbySkill(BaseSkill):
                 ["Main News", "Update", "Events", "Patch Notes",
                  "Maintenance", "Pick-Up", "Official", "Discord",
                  "Webpage", "My Office", "到簿", "签到", "簽到",
-                 "通知"],
+                 "通知", "今日不再", "公告"],
                 min_conf=0.7
             )
             if has_popup_text:
@@ -68,11 +85,24 @@ class LobbySkill(BaseSkill):
                 self.log(f"popup detected (YOLO {x_btn.cls_name} + '{has_popup_text.text}'), clicking X")
                 return action_click_yolo(x_btn, f"close popup via YOLO {x_btn.cls_name}")
 
+        # 2.5 OCR fallback for close X (only when popup hints exist)
+        # Keep this constrained to avoid old false positives.
+        if popup_hint:
+            x_ocr = screen.find_text_one(
+                r"^[Xx×]$",
+                region=(0.72, 0.08, 0.90, 0.28),
+                min_conf=0.75,
+            )
+            if x_ocr:
+                self._popup_close_attempts += 1
+                self.log("popup detected (OCR X fallback), clicking X")
+                return action_click_box(x_ocr, "close popup via OCR X fallback")
+
         # 3. Announcement popup (公告) — detect via OCR text, hardcoded X positions
         news = screen.find_any_text(
             ["Main News", "Patch Notes", "Maintenance", "Pick-Up",
              "Webpage Open", "My Office", "Official Twitter",
-             "Official Forum"],
+             "Official Forum", "公告"],
             min_conf=0.7
         )
         if news:
