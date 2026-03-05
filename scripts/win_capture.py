@@ -66,6 +66,35 @@ def _ensure_dpi_awareness() -> None:
 _ensure_dpi_awareness()
 
 
+class _dpi_aware_context:
+    """Context manager: temporarily set thread DPI awareness to per-monitor v2.
+
+    This ensures GetClientRect returns *physical* pixels even when the process
+    DPI awareness is unaware or system-aware. Essential for correct BitBlt
+    capture on high-DPI displays (e.g. 150%/200% scaling).
+    """
+    __slots__ = ("_old",)
+
+    def __enter__(self):
+        self._old = None
+        try:
+            # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+            user32.SetThreadDpiAwarenessContext.argtypes = (ctypes.c_void_p,)
+            user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+            self._old = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        if self._old is not None:
+            try:
+                user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(self._old))
+            except Exception:
+                pass
+        return False
+
+
 EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -155,11 +184,12 @@ def _is_window_visible(hwnd: int) -> bool:
 
 def _client_area(hwnd: int) -> int:
     try:
-        rect = wintypes.RECT()
-        if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
-            return 0
-        w = int(rect.right - rect.left)
-        h = int(rect.bottom - rect.top)
+        with _dpi_aware_context():
+            rect = wintypes.RECT()
+            if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+                return 0
+            w = int(rect.right - rect.left)
+            h = int(rect.bottom - rect.top)
         return max(0, w) * max(0, h)
     except Exception:
         return 0
@@ -273,13 +303,14 @@ def find_window_by_title_substring(title_substring: str) -> Optional[int]:
 
 
 def get_client_rect_on_screen(hwnd: int) -> Rect:
-    rect = wintypes.RECT()
-    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
-        raise OSError(ctypes.get_last_error())
+    with _dpi_aware_context():
+        rect = wintypes.RECT()
+        if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+            raise OSError(ctypes.get_last_error())
 
-    pt = wintypes.POINT(0, 0)
-    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
-        raise OSError(ctypes.get_last_error())
+        pt = wintypes.POINT(0, 0)
+        if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
+            raise OSError(ctypes.get_last_error())
 
     left = int(pt.x)
     top = int(pt.y)
@@ -290,9 +321,10 @@ def get_client_rect_on_screen(hwnd: int) -> Rect:
 
 def capture_client(hwnd: int) -> Image.Image:
     def _capture_window_dc() -> Image.Image:
-        rect = wintypes.RECT()
-        if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
-            raise OSError(ctypes.get_last_error())
+        with _dpi_aware_context():
+            rect = wintypes.RECT()
+            if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+                raise OSError(ctypes.get_last_error())
 
         w = int(rect.right - rect.left)
         h = int(rect.bottom - rect.top)
@@ -351,7 +383,8 @@ def capture_client(hwnd: int) -> Image.Image:
         return img
 
     def _capture_desktop_dc() -> Image.Image:
-        r = get_client_rect_on_screen(hwnd)
+        with _dpi_aware_context():
+            r = get_client_rect_on_screen(hwnd)
         w = int(r.right - r.left)
         h = int(r.bottom - r.top)
         if w <= 0 or h <= 0:
