@@ -222,11 +222,15 @@ class ArenaSkill(BaseSkill):
           - 時間獎勵 +80/分  →  領取獎勵  (累積量 reward, y≈0.52)
           - 每日獎勵 --:--    →  領取獎勵  (持有票券 reward, y≈0.64)
         OCR often reads the yellow buttons as just "领取" (2 chars), not "領取獎勵".
-        Use find_text to get ALL matches, click one per tick (topmost first).
+
+        Strategy: click bottom (daily) first, then click top (time) once.
+        The time reward regenerates instantly, so limit to max 3 total clicks
+        to avoid wasting ticks in an infinite claim loop.
         """
         self._claim_ticks += 1
 
-        if self._claim_ticks > 15:
+        # Hard limit: 3 actual clicks is enough (1 daily + 1 time + 1 buffer)
+        if self._claim_clicks >= 3 or self._claim_ticks > 10:
             self.log(f"reward claim done ({self._claim_clicks} clicks)")
             self.sub_state = "check_tickets"
             return action_wait(300, "claim rewards done")

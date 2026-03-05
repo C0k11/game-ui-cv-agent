@@ -52,7 +52,7 @@ _MAX_HEADPATS_PER_FLOOR = 7
 class CafeSkill(BaseSkill):
     def __init__(self):
         super().__init__("Cafe")
-        self.max_ticks = 100
+        self.max_ticks = 140
         self._headpat_count: int = 0
         self._empty_scans: int = 0
         self._earnings_claimed: bool = False
@@ -399,7 +399,10 @@ class CafeSkill(BaseSkill):
             return action_click(0.913, 0.893, "open earnings via FULL")
 
         # Also try earnings label if percentage is not 0
-        earn_label = screen.find_text_one("咖啡廳收益", min_conf=0.5)
+        earn_label = screen.find_any_text(
+            ["咖啡廳收益", "咖啡收益", "咖啡厅收益"],
+            min_conf=0.5
+        )
         if earn_label:
             self.log("clicking '咖啡廳收益' to open earnings popup")
             return action_click_box(earn_label, "open earnings popup")

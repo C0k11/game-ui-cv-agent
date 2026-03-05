@@ -119,11 +119,43 @@ class FarmingSkill(BaseSkill):
 
         return action_wait(300, "farming unknown state")
 
+    def _is_campaign_hub(self, screen: ScreenState) -> bool:
+        """Detect the campaign hub (grid of modes) vs actual stage list.
+
+        Campaign hub has: 懸賞通緝, 總力戰, 劇情, Area XX, 特殊任務, 學園交流會.
+        Stage list has: Normal/Hard tabs, stage numbers, 關卡目錄.
+        """
+        hub_markers = screen.find_any_text(
+            ["劇情", "总力", "總力", "綜合術", "綜合術", "學園交流",
+             "制約解除", "大決", "特殊任務"],
+            min_conf=0.5
+        )
+        if hub_markers:
+            return True
+        # Also check for "Area XX" text which is unique to campaign hub
+        area = screen.find_text_one(r"Area\s*\d+", min_conf=0.5)
+        if area:
+            return True
+        return False
+
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         current = self.detect_current_screen(screen)
 
         if current == "Mission":
-            self.log("inside mission menu")
+            # Distinguish campaign hub (grid) from stage list (Normal/Hard tabs)
+            if self._is_campaign_hub(screen):
+                self.log("on campaign hub, need to click 任務 card to enter stage list")
+                # Click the "任務" card in the campaign hub grid
+                # It's in the top-center area with "Area XX" text below it
+                mission_card = screen.find_any_text(
+                    ["任務", "任务"],
+                    region=(0.40, 0.15, 0.70, 0.35), min_conf=0.7
+                )
+                if mission_card:
+                    return action_click_box(mission_card, "click 任務 card on campaign hub")
+                # Fallback: click the known position of 任務 card
+                return action_click(0.56, 0.24, "click 任務 card (hardcoded)")
+            self.log("inside mission stage list")
             self.sub_state = "select_hard"
             return action_wait(300, "entered mission")
 

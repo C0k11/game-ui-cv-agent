@@ -351,6 +351,33 @@ class EventFarmingSkill(BaseSkill):
             min_conf=0.5
         )
 
+        # ── Check for EXPIRED event ──
+        # If "活動期間已結束" or "已結束" visible, this event is over — back out
+        expired = screen.find_any_text(
+            ["已結束", "已结束", "活動期間已結束", "活动期间已结束"],
+            min_conf=0.5
+        )
+        if expired:
+            self.log(f"event EXPIRED: '{expired.text}', backing out")
+            return action_back("back from expired event")
+
+        # ── Non-夏莱 event type: Story/Quest/Challenge tabs ──
+        # These events show tabs like "Story", "Quest", "Challenge" at top-right
+        # and have 劇情/商店/任務/抽卡 buttons at bottom
+        story_tab = screen.find_any_text(
+            ["Story", "Quest", "Challenge"],
+            min_conf=0.6
+        )
+        quest_btn = screen.find_any_text(
+            ["任務", "任务"],
+            region=(0.15, 0.80, 0.50, 0.98), min_conf=0.7
+        )
+        if story_tab and quest_btn:
+            self.log("non-夏莱 event type (Story/Quest tabs), clicking 任務")
+            self.sub_state = "check_normal"
+            self._checked_normal = True
+            return action_click_box(quest_btn, "click 任務 on story event page")
+
         if event_header or item_method:
             self.log("on 活動 page (夏莱 event type)")
 

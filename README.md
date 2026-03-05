@@ -1,4 +1,4 @@
-# AI Game Secretary
+# 私人碧蓝档案助手
 
 **碧蓝档案 (Blue Archive)** 全自动日常助手 — 纯本地运行，OCR + YOLO 驱动，无需云端 API。
 

@@ -343,12 +343,12 @@ def main() -> None:
     print(f"[Info] Pipeline started with {len(pipe._skill_order)} skills")
 
     # 3b. Start YOLO overlay on game window
-    overlay = None
+    yolo_overlay = None
     if not args.no_overlay:
         try:
             from scripts.yolo_overlay import YoloOverlay
-            overlay = YoloOverlay(cap.render_hwnd)
-            overlay.start()
+            yolo_overlay = YoloOverlay(cap.render_hwnd)
+            yolo_overlay.start()
             print(f"[Info] YOLO overlay started on render_hwnd={cap.render_hwnd}")
         except Exception as e:
             print(f"[WARN] YOLO overlay failed: {e}")
@@ -359,6 +359,9 @@ def main() -> None:
     tick_interval = 0.5  # Pipeline tick every 500ms (OCR+YOLO is ~200ms)
     last_tick_time = 0.0
     last_action: Dict[str, Any] = {"action": "wait", "reason": "starting"}
+    cached_yolo_boxes: list = []  # cached from last pipeline tick
+    cached_skill_name: str = "\u2014"
+    cached_sub_state: str = ""
     fps_counter = 0
     fps_time = time.perf_counter()
     fps_display = 0.0
@@ -400,18 +403,21 @@ def main() -> None:
                 reason = action.get("reason", "")
 
                 skill = pipe.current_skill
-                skill_name = skill.name if skill else "—"
-                sub_state = skill.sub_state if skill else ""
+                cached_skill_name = skill.name if skill else "\u2014"
+                cached_sub_state = skill.sub_state if skill else ""
 
-                print(f"[t{pipe._total_ticks:04d}] {skill_name}/{sub_state}: {action_type} — {reason[:60]}")
+                # Cache YOLO boxes from this tick for overlay drawing
+                screen = pipe.last_screen
+                cached_yolo_boxes = list(screen.yolo_boxes) if screen else []
+
+                print(f"[t{pipe._total_ticks:04d}] {cached_skill_name}/{cached_sub_state}: {action_type} \u2014 {reason[:60]}")
 
                 # Update native overlay with YOLO boxes
-                if overlay and overlay.is_alive:
-                    screen = pipe.last_screen
-                    if screen and screen.yolo_boxes:
-                        overlay.update(screen.yolo_boxes)
+                if yolo_overlay and yolo_overlay.is_alive:
+                    if cached_yolo_boxes:
+                        yolo_overlay.update(cached_yolo_boxes)
                     else:
-                        overlay.update([])
+                        yolo_overlay.update([])
 
                 # Execute action
                 if not args.dry_run and action_type not in ("done", "wait"):
@@ -428,37 +434,25 @@ def main() -> None:
                 else:
                     tick_interval = 0.5
 
-            # Draw overlay
+            # Draw overlay using CACHED YOLO boxes (no re-inference!)
             if not args.no_overlay:
-                from brain.pipeline import read_screen_from_frame
-                # Use cached screen state from last tick for overlay
-                # (avoid running YOLO again just for drawing)
-                skill = pipe.current_skill
-                skill_name = skill.name if skill else "—"
-                sub_state = skill.sub_state if skill else ""
-
-                # Quick YOLO-only pass for real-time tracking overlay
-                from brain.pipeline import _run_yolo_on_image
-                fh, fw = frame.shape[:2]
-                yolo_boxes = _run_yolo_on_image(frame, fw, fh)
-
-                overlay = draw_overlay(
+                drawn = draw_overlay(
                     frame,
-                    yolo_boxes=yolo_boxes,
+                    yolo_boxes=cached_yolo_boxes,
                     ocr_boxes=[],  # skip OCR boxes in overlay (too noisy)
                     action=last_action,
-                    skill_name=skill_name,
-                    sub_state=sub_state,
+                    skill_name=cached_skill_name,
+                    sub_state=cached_sub_state,
                     fps=fps_display,
                 )
 
                 # Scale down for display
                 if args.overlay_scale != 1.0:
-                    dw = int(overlay.shape[1] * args.overlay_scale)
-                    dh = int(overlay.shape[0] * args.overlay_scale)
-                    overlay = cv2.resize(overlay, (dw, dh), interpolation=cv2.INTER_AREA)
+                    dw = int(drawn.shape[1] * args.overlay_scale)
+                    dh = int(drawn.shape[0] * args.overlay_scale)
+                    drawn = cv2.resize(drawn, (dw, dh), interpolation=cv2.INTER_AREA)
 
-                cv2.imshow(window_name, overlay)
+                cv2.imshow(window_name, drawn)
 
             # Handle keyboard
             key = cv2.waitKey(1) & 0xFF
@@ -475,9 +469,9 @@ def main() -> None:
     except KeyboardInterrupt:
         print("[Info] Interrupted.")
     finally:
-        if overlay:
+        if yolo_overlay:
             try:
-                overlay.stop()
+                yolo_overlay.stop()
             except Exception:
                 pass
         pipe.stop()

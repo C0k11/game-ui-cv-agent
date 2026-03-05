@@ -134,7 +134,7 @@ class CraftSkill(BaseSkill):
             return action_wait(300, "quick craft timeout")
 
         if self._craft_started:
-            # After clicking 開始製造, wait for confirm popup
+            # After clicking start, check for confirm popup OR craft completion
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确"],
                 region=screen.CENTER, min_conf=0.7
@@ -144,6 +144,30 @@ class CraftSkill(BaseSkill):
                 self.sub_state = "claim_after"
                 self._craft_ticks = 0
                 return action_click_box(confirm, "confirm craft")
+
+            # Craft may complete without confirm popup — check for reward/claim
+            claim = screen.find_any_text(
+                ["一次領取", "一次领取", "一鍵領取", "一键领取",
+                 "全部領取", "全部领取"],
+                min_conf=0.6
+            )
+            if claim:
+                self.log("craft completed, claiming")
+                self.sub_state = "claim_after"
+                self._craft_ticks = 0
+                return action_click_box(claim, "claim after quick craft")
+
+            # Check if we're back on the main craft screen (craft completed silently)
+            if self._craft_ticks >= 5 and self._is_craft_screen(screen):
+                open_btn = screen.find_any_text(
+                    ["次開放", "次开放"],
+                    min_conf=0.5
+                )
+                if open_btn:
+                    self.log("craft done, back on main screen")
+                    self.sub_state = "claim_after"
+                    self._craft_ticks = 0
+                    return action_wait(300, "craft completed, claiming")
 
             return action_wait(500, "waiting for craft confirm popup")
 
@@ -157,6 +181,17 @@ class CraftSkill(BaseSkill):
             self._craft_started = True
             return action_click_box(start, "start craft")
 
+        # Look for "第X次開放" button (alternative start button text)
+        # OCR reads e.g. "第1次開放", "第2次開放"
+        open_btn = screen.find_any_text(
+            ["次開放", "次开放"],
+            min_conf=0.5
+        )
+        if open_btn:
+            self.log(f"clicking '{open_btn.text}' to start craft")
+            self._craft_started = True
+            return action_click_box(open_btn, "start craft (次開放)")
+
         # Look for 快速製造 / 快速制造 button
         quick = screen.find_any_text(
             ["快速製造", "快速制造"],
@@ -166,8 +201,8 @@ class CraftSkill(BaseSkill):
             self.log("clicking 快速製造")
             return action_click_box(quick, "click quick craft")
 
-        # No quick craft button — maybe all slots in use or not available
-        self.log("no quick craft button found")
+        # No craft buttons — maybe all slots in use or not available
+        self.log("no craft buttons found")
         self.sub_state = "exit"
         return action_wait(300, "no quick craft available")
 
