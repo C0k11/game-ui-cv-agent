@@ -23,10 +23,12 @@ class LobbySkill(BaseSkill):
         super().__init__("Lobby")
         self.max_ticks = 40
         self._popup_close_attempts = 0
+        self._lobby_confirm_frames = 0  # consecutive frames with lobby nav visible
 
     def reset(self) -> None:
         super().reset()
         self._popup_close_attempts = 0
+        self._lobby_confirm_frames = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -52,8 +54,9 @@ class LobbySkill(BaseSkill):
             self.log("popup: click 今日不再提示")
             return action_click_box(do_not_show, "popup: do not show again today")
 
-        # Title screen: "TAP TO START"
-        tap = screen.find_text_one("TAP.*START", min_conf=0.8)
+        # Title screen: "TOUCH TO START" / "TAP TO START"
+        # OCR often merges to "TOUCHTOSTART" — match all variants
+        tap = screen.find_text_one("(?:TOUCH|TAP).*START", min_conf=0.8)
         if tap and not popup_hint:
             self.log("title screen: tap to start")
             return action_click(0.5, 0.85, "tap to start")
@@ -71,7 +74,10 @@ class LobbySkill(BaseSkill):
         # NOTE: All X/close button detection via YOLO only (OCR misdetects icons as "X")
 
         # 1. YOLO: detect close buttons (叉叉, 叉叉1, 叉叉2, momotalk的叉叉)
-        x_btn = screen.find_yolo_one("叉叉", min_conf=0.15)
+        # Filter out fullscreen toggle button at top-right (x>0.93, y<0.20)
+        # which YOLO misclassifies as 叉叉1.
+        x_btn = screen.find_yolo_one("叉叉", min_conf=0.15,
+                                      region=(0.0, 0.0, 0.93, 1.0))
         if x_btn:
             has_popup_text = screen.find_any_text(
                 ["Main News", "Update", "Events", "Patch Notes",
@@ -99,12 +105,21 @@ class LobbySkill(BaseSkill):
                 return action_click_box(x_ocr, "close popup via OCR X fallback")
 
         # 3. Announcement popup (公告) — detect via OCR text, hardcoded X positions
+        # NOTE: "公告" is ALSO a permanent lobby sidebar button (x~0.05, y~0.25).
+        # Only treat it as a popup indicator when it appears in the center area,
+        # not on the left sidebar.  English texts are popup-only so no filter needed.
         news = screen.find_any_text(
             ["Main News", "Patch Notes", "Maintenance", "Pick-Up",
              "Webpage Open", "My Office", "Official Twitter",
-             "Official Forum", "公告"],
+             "Official Forum"],
             min_conf=0.7
         )
+        if not news:
+            news = screen.find_any_text(
+                ["公告"],
+                region=(0.15, 0.05, 0.85, 0.30),
+                min_conf=0.7
+            )
         if news:
             self._popup_close_attempts += 1
             # X button position from YOLO training label (叉叉2 on frame_000056)
@@ -130,9 +145,13 @@ class LobbySkill(BaseSkill):
                 return action_click_box(confirm, "confirm skip")
             return action_click(0.6, 0.7, "confirm skip (fallback)")
 
-        # 4. Check-in popup (到簿/签到/ARONA每日签到)
+        # 4. Check-in popup (到簿/签到/每日签到)
+        # NOTE: Do NOT include standalone "ARONA" — it appears on the title
+        # screen logo and causes false positives.  Only match ARONA when
+        # combined with 签到 context (e.g. "ARONA每日签到").
         checkin = screen.find_any_text(
-            ["到簿", "签到", "簽到", "ARONA", "彩奈", "每日签到", "每日簽到"],
+            ["到簿", "签到", "簽到", "彩奈", "每日签到", "每日簽到",
+             "ARONA每日", "ARONA签到", "ARONA簽到"],
             min_conf=0.7
         )
         if checkin:
@@ -169,11 +188,16 @@ class LobbySkill(BaseSkill):
         if popup_action:
             return popup_action
 
-        # ── Lobby check ──
+        # ── Lobby check (require 3 consecutive clean frames) ──
         current_screen = self.detect_current_screen(screen)
         if current_screen == "Lobby":
-            self.log("lobby detected, no popups, done")
-            return action_done("in lobby")
+            self._lobby_confirm_frames += 1
+            if self._lobby_confirm_frames >= 3:
+                self.log(f"lobby confirmed ({self._lobby_confirm_frames} clean frames), done")
+                return action_done("in lobby")
+            return action_wait(300, f"lobby detected, confirming ({self._lobby_confirm_frames}/3)")
+        else:
+            self._lobby_confirm_frames = 0
 
         # ── Already inside a sub-screen? ──
         # If we detected a specific screen other than Lobby, we are deep in a menu.

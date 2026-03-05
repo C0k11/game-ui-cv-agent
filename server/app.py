@@ -186,7 +186,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
     """Background thread: screenshot -> OCR -> skill decision -> execute action."""
     global _PIPELINE_RUNNING, _PIPELINE_STATUS
     try:
-        from scripts.win_capture import capture_client, find_window_by_title_substring
+        from scripts.win_capture import (
+            capture_client, find_window_by_title_substring,
+            find_largest_visible_child,
+        )
         import cv2
         import numpy as np
 
@@ -197,7 +200,31 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _PIPELINE_STATUS["running"] = False
             return
 
-        _log_pipeline(f"Pipeline worker started. window='{window_title}' sleep={step_sleep} dry_run={dry_run}")
+        # For emulators (MuMu, etc.), capture from the render child window
+        # so the toolbar/tabs are excluded and coordinates map correctly.
+        render_hwnd = hwnd
+        try:
+            child = find_largest_visible_child(int(hwnd))
+            if child:
+                render_hwnd = int(child)
+                _log_pipeline(f"Using render child hwnd={render_hwnd} (parent={hwnd})")
+        except Exception:
+            pass
+
+        # Store top-level hwnd for SetForegroundWindow (child windows can't be foregrounded)
+        _set_parent_hwnd(int(hwnd))
+
+        # Start YOLO overlay on the render window
+        _overlay = None
+        try:
+            from scripts.yolo_overlay import YoloOverlay
+            _overlay = YoloOverlay(render_hwnd)
+            _overlay.start()
+            _log_pipeline(f"YOLO overlay started on render_hwnd={render_hwnd}")
+        except Exception as e:
+            _log_pipeline(f"YOLO overlay unavailable: {e}")
+
+        _log_pipeline(f"Pipeline worker started. window='{window_title}' hwnd={hwnd} render={render_hwnd} sleep={step_sleep} dry_run={dry_run}")
 
         while _PIPELINE_RUNNING:
             pipe = None
@@ -206,8 +233,23 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             if pipe is None or not pipe.is_running:
                 break
 
-            # 1. Capture screenshot (PIL Image)
-            pil_img = capture_client(hwnd)
+            # 1. Capture screenshot from render child (PIL Image)
+            try:
+                pil_img = capture_client(render_hwnd)
+            except OSError:
+                # Handle invalid/stale hwnd — re-resolve
+                render_hwnd = hwnd
+                try:
+                    new_hwnd = find_window_by_title_substring(window_title)
+                    if new_hwnd:
+                        hwnd = new_hwnd
+                        child = find_largest_visible_child(int(hwnd))
+                        render_hwnd = int(child) if child else int(hwnd)
+                except Exception:
+                    pass
+                time.sleep(0.5)
+                continue
+
             if pil_img is None:
                 time.sleep(0.5)
                 continue
@@ -215,12 +257,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # Convert PIL -> numpy BGR for cv2
             frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
-            # Save to temp file for OCR
+            # Save to temp file for trajectory
             tmp_path = str(REPO_ROOT / "data" / "_pipeline_frame.jpg")
             cv2.imwrite(tmp_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-            # 2. Pipeline tick
-            action = pipe.tick(tmp_path)
+            # 2. Pipeline tick (use in-memory frame, skip re-reading file)
+            action = pipe.tick_from_frame(frame, screenshot_path=tmp_path)
             action_type = action.get("action", "")
             reason = action.get("reason", "")
             _PIPELINE_STATUS["ticks"] = pipe._total_ticks
@@ -228,9 +270,17 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             _log_pipeline(f"tick={pipe._total_ticks} action={action_type} reason={reason}")
 
+            # Update YOLO overlay with latest detections
+            if _overlay and _overlay.is_alive:
+                screen = pipe.last_screen
+                if screen and screen.yolo_boxes:
+                    _overlay.update(screen.yolo_boxes)
+                else:
+                    _overlay.update([])
+
             # 3. Execute action (unless dry_run)
             if not dry_run and action_type != "done":
-                _execute_pipeline_action(action, hwnd, frame.shape[1], frame.shape[0])
+                _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0])
 
             # 4. Sleep
             if action_type == "wait":
@@ -244,16 +294,39 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _log_pipeline(f"Pipeline worker error: {e}")
         traceback.print_exc()
     finally:
+        if _overlay:
+            try:
+                _overlay.stop()
+            except Exception:
+                pass
         _PIPELINE_RUNNING = False
         _PIPELINE_STATUS["running"] = False
         _log_pipeline("Pipeline worker stopped.")
 
 
 _dpi_set = False
+_parent_hwnd: Optional[int] = None  # top-level window (for SetForegroundWindow)
+
+
+def _set_parent_hwnd(hwnd: int) -> None:
+    """Store the top-level parent hwnd for SetForegroundWindow."""
+    global _parent_hwnd
+    _parent_hwnd = hwnd
+
+
+def _MAKELPARAM(x: int, y: int) -> int:
+    """Pack two 16-bit values into a 32-bit LPARAM."""
+    return (int(y) << 16) | (int(x) & 0xFFFF)
+
 
 def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_h: int) -> None:
-    """Convert normalized pipeline action to real input."""
+    """Convert normalized pipeline action to real input.
+
+    Uses PostMessage to the render child window for reliable emulator input.
+    Falls back to SetCursorPos + mouse_event if PostMessage fails.
+    """
     global _dpi_set
+    import random
     from scripts.win_capture import get_client_rect_on_screen
     user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -267,40 +340,81 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
 
     action_type = action.get("action", "")
 
-    # Bring game window to foreground before any input
-    user32.SetForegroundWindow(hwnd)
+    # Bring top-level parent window to foreground
+    fg_hwnd = _parent_hwnd if _parent_hwnd else hwnd
+    try:
+        user32.SetForegroundWindow(fg_hwnd)
+    except Exception:
+        pass
     time.sleep(0.05)
+
+    # Get client rect for coordinate conversion
+    try:
+        rect = get_client_rect_on_screen(hwnd)
+        cw = rect.right - rect.left
+        ch = rect.bottom - rect.top
+    except Exception:
+        rect = None
+        cw = ch = 0
+
+    WM_LBUTTONDOWN = 0x0201
+    WM_LBUTTONUP = 0x0202
+    WM_MOUSEMOVE = 0x0200
+    MK_LBUTTON = 0x0001
 
     if action_type == "click":
         nx, ny = action.get("target", [0.5, 0.5])
-        rect = get_client_rect_on_screen(hwnd)
-        if rect:
-            cw = rect.right - rect.left
-            ch = rect.bottom - rect.top
-            sx = rect.left + int(nx * cw)
-            sy = rect.top + int(ny * ch)
-            print(f"[Click] norm=({nx:.3f},{ny:.3f}) rect=({rect.left},{rect.top},{rect.right},{rect.bottom}) cw={cw} ch={ch} screen=({sx},{sy})")
-            user32.SetCursorPos(sx, sy)
-            time.sleep(0.05)
-            user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
-            time.sleep(0.03)
-            user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+        if rect and cw > 0 and ch > 0:
+            # Client-relative pixel coordinates for PostMessage
+            cx = int(nx * cw) + random.randint(-3, 3)
+            cy = int(ny * ch) + random.randint(-3, 3)
+            lparam = _MAKELPARAM(cx, cy)
+            print(f"[Click] norm=({nx:.3f},{ny:.3f}) client=({cx},{cy}) cw={cw} ch={ch}")
+
+            # PostMessage: works for emulators without stealing focus/cursor
+            user32.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
+            time.sleep(0.04)
+            user32.PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam)
 
     elif action_type == "back":
-        # Send Escape key
-        user32.keybd_event(0x1B, 0, 0, 0)  # VK_ESCAPE down
-        time.sleep(0.03)
-        user32.keybd_event(0x1B, 0, 0x0002, 0)  # VK_ESCAPE up
+        # Send Escape key via PostMessage
+        WM_KEYDOWN = 0x0100
+        WM_KEYUP = 0x0101
+        VK_ESCAPE = 0x1B
+        user32.PostMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 0x00010001)
+        time.sleep(0.04)
+        user32.PostMessageW(hwnd, WM_KEYUP, VK_ESCAPE, 0xC0010001)
+
+    elif action_type == "swipe":
+        frm = action.get("from", [0.5, 0.5])
+        to = action.get("to", [0.5, 0.5])
+        dur_ms = action.get("duration_ms", 400)
+        if rect and cw > 0 and ch > 0:
+            cx1 = int(frm[0] * cw)
+            cy1 = int(frm[1] * ch)
+            cx2 = int(to[0] * cw)
+            cy2 = int(to[1] * ch)
+            steps = max(10, dur_ms // 16)
+            print(f"[Swipe] from=({frm[0]:.3f},{frm[1]:.3f}) to=({to[0]:.3f},{to[1]:.3f}) steps={steps}")
+
+            user32.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, _MAKELPARAM(cx1, cy1))
+            for i in range(1, steps + 1):
+                t = i / steps
+                mx = int(cx1 + (cx2 - cx1) * t)
+                my = int(cy1 + (cy2 - cy1) * t)
+                user32.PostMessageW(hwnd, WM_MOUSEMOVE, MK_LBUTTON, _MAKELPARAM(mx, my))
+                time.sleep(dur_ms / 1000.0 / steps)
+            user32.PostMessageW(hwnd, WM_LBUTTONUP, 0, _MAKELPARAM(cx2, cy2))
 
     elif action_type == "scroll":
         nx, ny = action.get("target", [0.5, 0.5])
         clicks = action.get("clicks", -3)
-        rect = get_client_rect_on_screen(hwnd)
-        if rect:
-            cw = rect.right - rect.left
-            ch = rect.bottom - rect.top
-            sx = rect.left + int(nx * cw)
-            sy = rect.top + int(ny * ch)
+        if rect and cw > 0 and ch > 0:
+            cx = int(nx * cw)
+            cy = int(ny * ch)
+            # SetCursorPos fallback for scroll (PostMessage scroll is unreliable)
+            sx = rect.left + cx
+            sy = rect.top + cy
             user32.SetCursorPos(sx, sy)
             time.sleep(0.05)
             user32.mouse_event(0x0800, 0, 0, int(clicks * 120), 0)  # MOUSEEVENTF_WHEEL

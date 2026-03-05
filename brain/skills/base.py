@@ -279,15 +279,31 @@ class BaseSkill(ABC):
             return "Lobby"
 
         header_region = (0.0, 0.0, 0.3, 0.15)
+
+        # Check "任務" header first — but disambiguate Daily Tasks vs Campaign.
+        # Daily Tasks has tabs: 全體/每天/每週/成就/挑戰任務 in the tab bar area.
+        # Campaign (mission hub) does NOT have these tabs.
+        mission_header = screen.find_any_text(
+            ["任務", "任务"], region=header_region, min_conf=0.6
+        )
+        if mission_header:
+            daily_tabs = screen.find_any_text(
+                ["全體", "全体", "每天", "每週", "每周", "挑戰任務", "挑战任务"],
+                region=(0.35, 0.10, 1.0, 0.20), min_conf=0.6
+            )
+            if daily_tabs:
+                return "DailyTasks"
+            return "Mission"
+
         headers = {
             "Cafe": ["咖啡廳", "咖啡厅"],
             "Schedule": ["課程表", "课程表", "全体課程", "全体课程"],
             "Shop": ["商店"],
             "Club": ["社團", "社团", "Club"],
-            "Mission": ["任務", "任务"],
-            "Bounty": ["懸賞通緝", "悬赏通缉", "通緝", "通缉", "Bounty"],
-            "PVP": ["戰術對抗", "战术对抗", "戰術大賽", "战术大赛"],
-            "Mail": ["郵件", "邮件", "郵箱", "邮箱", "Mail"],
+            "Bounty": ["懸賞通緝", "悬赏通缉", "懸賞", "悬赏", "通緝", "通缉", "悬通", "Bounty"],
+            "PVP": ["戰術對抗", "战术对抗", "戰術大賽", "战术大赛", "術大赛", "術大賽", "大賽", "大赛"],
+            "Mail": ["郵件", "邮件", "郵箱", "邮箱", "信箱", "Mail"],
+            "Event": ["活動", "活动"],
             "Craft": ["製造", "制造", "Craft"],
             "Student": ["學生", "学生", "Student"],
             "Formation": ["部隊", "编队", "部隊編成"],
@@ -304,7 +320,7 @@ class BaseSkill(ABC):
         """
         # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
-            ["確認", "确认", "確定", "确定"],
+            ["確認", "确认", "確定", "确定", "確", "确"],
             region=screen.CENTER, min_conf=0.8
         )
         if confirm:

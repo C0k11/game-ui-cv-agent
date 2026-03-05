@@ -32,7 +32,10 @@ class YoloDetector:
 
     def __init__(self, skill_name: str, device: str = "cuda"):
         self.skill_name = skill_name
-        self._model_path = str(_ML_CACHE_DIR / f"{skill_name}.pt")
+        # Prefer TensorRT engine over PyTorch .pt
+        engine_path = _ML_CACHE_DIR / f"{skill_name}.engine"
+        pt_path = _ML_CACHE_DIR / f"{skill_name}.pt"
+        self._model_path = str(engine_path) if engine_path.is_file() else str(pt_path)
         self._device = device
         self._model: Any = None
 
