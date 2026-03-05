@@ -39,6 +39,7 @@ class BountySkill(BaseSkill):
         self._sweep_stage = 0
         self._sweep_attempts = 0
         self._stage_ticks = 0
+        self._loc_ticks = 0
         self._enter_attempts = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
@@ -88,6 +89,8 @@ class BountySkill(BaseSkill):
             return self._enter(screen)
         if self.sub_state == "check_tickets":
             return self._check_tickets(screen)
+        if self.sub_state == "select_location":
+            return self._select_location(screen)
         if self.sub_state == "select_stage":
             return self._select_stage(screen)
         if self.sub_state == "sweep":
@@ -197,6 +200,12 @@ class BountySkill(BaseSkill):
         OCR reads "懸賞通緝票券 6/6" as "通票券6/6".
         Must filter to ticket-related text to avoid matching AP "57/240".
         """
+        # Check if "持有票券" label exists (confirms we're on bounty screen)
+        has_ticket_label = screen.find_any_text(
+            ["持有票券", "票券"],
+            region=(0.0, 0.08, 0.25, 0.20), min_conf=0.7
+        )
+
         for box in screen.ocr_boxes:
             if box.confidence < 0.5:
                 continue
@@ -206,7 +215,10 @@ class BountySkill(BaseSkill):
             # Prioritize ticket-specific text (票券/剩余/次數)
             # Exclude top-bar AP/currency which also has X/Y format
             is_ticket = any(k in box.text for k in ["票券", "剩余", "剩餘", "次數", "次数"])
-            if is_ticket or (box.cy > 0.15 and "/" in box.text and int(m.group(2)) <= 20):
+            # Also match if "持有票券" label nearby and box is in ticket area
+            if not is_ticket and has_ticket_label and box.cy > 0.10 and box.cy < 0.20:
+                is_ticket = True
+            if is_ticket or (box.cy > 0.10 and "/" in box.text and int(m.group(2)) <= 20):
                 remaining = int(m.group(1))
                 total = int(m.group(2))
                 self._tickets_remaining = remaining
@@ -215,16 +227,63 @@ class BountySkill(BaseSkill):
                     self.log("no tickets remaining, exiting")
                     self.sub_state = "exit"
                     return action_wait(300, "no bounty tickets")
-                self.sub_state = "select_stage"
-                return action_wait(300, f"have {remaining} tickets, selecting stage")
+                self.sub_state = "select_location"
+                return action_wait(300, f"have {remaining} tickets, selecting location")
 
         # If we can't parse tickets after a few ticks, proceed anyway
         if self.ticks > 10:
-            self.log("couldn't parse ticket count, proceeding to select stage")
-            self.sub_state = "select_stage"
+            self.log("couldn't parse ticket count, proceeding to select location")
+            self.sub_state = "select_location"
             return action_wait(300, "ticket parse timeout")
 
         return action_wait(500, "looking for ticket count")
+
+    def _select_location(self, screen: ScreenState) -> Dict[str, Any]:
+        """Select a bounty location from LocationSelect screen.
+
+        The bounty LocationSelect shows 3 location cards:
+        - 高架公路 (~y 0.22-0.27)
+        - 沙漠鐵道 (~y 0.38-0.43)
+        - 教室 (~y 0.54-0.59)
+
+        Click the first available location to enter its stage list.
+        If already past LocationSelect (stage list visible with 入場), skip ahead.
+        """
+        self._loc_ticks = getattr(self, '_loc_ticks', 0) + 1
+
+        # Already in stage list? (入場 buttons visible → skip to select_stage)
+        enter_btns = [
+            b for b in screen.ocr_boxes
+            if b.confidence >= 0.6 and b.cx > 0.70
+            and ("入場" in b.text or "入场" in b.text)
+        ]
+        if enter_btns:
+            self.log("already in stage list, skipping to select_stage")
+            self.sub_state = "select_stage"
+            self._stage_ticks = 0
+            return action_wait(300, "stage list visible")
+
+        # Look for location names and click them
+        locations = screen.find_any_text(
+            ["高架公路", "沙漠鐵道", "沙漠铁道", "教室"],
+            region=(0.70, 0.15, 1.0, 0.70), min_conf=0.7
+        )
+        if locations:
+            self.log(f"clicking location '{locations.text}'")
+            return action_click_box(locations, f"select bounty location '{locations.text}'")
+
+        # Fallback: click first location card area
+        if self._loc_ticks > 3:
+            self.log("clicking first location (fallback)")
+            return action_click(0.90, 0.25, "click first bounty location (fallback)")
+
+        if self._loc_ticks > 6:
+            self.log("location select timeout, trying select_stage anyway")
+            self.sub_state = "select_stage"
+            self._stage_ticks = 0
+            return action_wait(300, "location select timeout")
+
+        return action_wait(500, "waiting for location select")
 
     def _select_stage(self, screen: ScreenState) -> Dict[str, Any]:
         """Select the last (highest) stage from the stage list (關卡目錄).
