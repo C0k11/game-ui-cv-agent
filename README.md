@@ -18,8 +18,8 @@
 ### 安装
 
 ```powershell
-git clone https://github.com/C0k11/ai-game-secretary.git
-cd ai-game-secretary
+git clone https://github.com/C0k11/blue-archive-assistant.git
+cd blue-archive-assistant
 pip install -r requirements.txt
 pip install rapidocr_onnxruntime   # OCR 引擎
 ```
