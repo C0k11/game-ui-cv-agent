@@ -1017,57 +1017,35 @@ def dataset_ocr_batch(payload: Dict[str, Any]):
             "total_texts": total_texts}
 
 
-# ── DXcam Capture APIs ──────────────────────────────────────────────────
+# ── Screen Capture APIs (BitBlt) ──────────────────────────────────────
 
 def _capture_worker(dataset_name: str, interval: float, window_title: str):
+    """Capture game window via BitBlt (same method as mumu_runner.py).
+
+    Previous implementation used DXcam which had DPI scaling issues with
+    MuMu emulator, causing cropped/misaligned screenshots. BitBlt captures
+    the correct full game client area regardless of DPI settings.
+    """
     global _CAPTURE_RUNNING, _CAPTURE_STATUS
     try:
-        import dxcam
         import cv2
-        from vision.window import GameWindow
+        import numpy as np
+        from scripts.win_capture import (
+            find_window_by_title_substring,
+            find_largest_visible_child,
+            capture_client,
+        )
 
-        # Make this thread DPI-aware so win32gui returns physical pixels
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_DPI_AWARE
-        except Exception:
-            try:
-                ctypes.windll.user32.SetProcessDPIAware()
-            except Exception:
-                pass
-
-        gw = GameWindow(window_title)
-        if not gw.find_window():
+        hwnd = find_window_by_title_substring(window_title)
+        if not hwnd:
             _CAPTURE_STATUS["error"] = f"Window '{window_title}' not found"
             _CAPTURE_STATUS["running"] = False
             _CAPTURE_RUNNING = False
             return
 
-        region = gw.get_region()
-        camera = dxcam.create(output_idx=0, output_color="BGR")
-
-        # DXcam output size (scaled desktop resolution)
-        dxcam_w = camera.width
-        dxcam_h = camera.height
-
-        # Get physical screen resolution via win32api
-        phys_w = ctypes.windll.user32.GetSystemMetrics(0)
-        phys_h = ctypes.windll.user32.GetSystemMetrics(1)
-
-        # Calculate DPI scale factor and remap region
-        if region and phys_w > 0 and dxcam_w > 0:
-            scale_x = dxcam_w / phys_w
-            scale_y = dxcam_h / phys_h
-            l, t, r, b = region
-            region = (
-                max(0, int(l * scale_x)),
-                max(0, int(t * scale_y)),
-                min(dxcam_w, int(r * scale_x)),
-                min(dxcam_h, int(b * scale_y)),
-            )
-            _CAPTURE_STATUS["error"] = ""
-            _CAPTURE_STATUS["info"] = f"region={region} dxcam={dxcam_w}x{dxcam_h} phys={phys_w}x{phys_h}"
-        else:
-            region = None  # fallback: capture full screen
+        # For MuMu, the game renders in the largest visible child window
+        child = find_largest_visible_child(hwnd)
+        target_hwnd = child if child else hwnd
 
         out_dir = RAW_IMAGES_DIR / dataset_name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1077,16 +1055,23 @@ def _capture_worker(dataset_name: str, interval: float, window_title: str):
         count = 0
         while _CAPTURE_RUNNING:
             t0 = time.time()
-            frame = camera.grab(region=region)
-            if frame is not None:
+            try:
+                pil_img = capture_client(target_hwnd)
+                frame_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
                 fp = out_dir / f"frame_{count:06d}.jpg"
-                cv2.imwrite(str(fp), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                cv2.imwrite(str(fp), frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
                 count += 1
                 _CAPTURE_STATUS["frames"] = count
+            except Exception as cap_err:
+                _CAPTURE_STATUS["error"] = f"capture error: {cap_err}"
+                # Re-find window in case it was resized/moved
+                hwnd = find_window_by_title_substring(window_title)
+                if hwnd:
+                    child = find_largest_visible_child(hwnd)
+                    target_hwnd = child if child else hwnd
             elapsed = time.time() - t0
             time.sleep(max(0, interval - elapsed))
 
-        del camera
     except Exception as e:
         _CAPTURE_STATUS["error"] = str(e)
     finally:
@@ -1101,7 +1086,7 @@ def capture_start(payload: Dict[str, Any]) -> Dict[str, Any]:
         if _CAPTURE_RUNNING:
             return {"ok": False, "error": "already running", "status": _CAPTURE_STATUS}
         interval = float(payload.get("interval", 0.5))
-        window_title = str(payload.get("window_title", "Blue Archive"))
+        window_title = str(payload.get("window_title", "MuMu"))
         from datetime import datetime
         ds_name = "run_" + datetime.now().strftime("%Y%m%d_%H%M%S")
         _CAPTURE_RUNNING = True
