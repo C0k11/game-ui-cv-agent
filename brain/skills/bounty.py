@@ -60,10 +60,13 @@ class BountySkill(BaseSkill):
             cancel = screen.find_any_text(["取消"], min_conf=0.7)
             if cancel:
                 return action_click_box(cancel, "cancel AP purchase")
-            x_btn = screen.find_yolo_one("叉叉", min_conf=0.3,
-                                          region=(0.0, 0.0, 0.93, 1.0))
-            if x_btn:
-                return action_click_yolo(x_btn, "close AP popup")
+            close_btn = self._find_florence_hit(
+                screen,
+                ["close button icon", "close dialog x button", "x close icon"],
+                region=(0.0, 0.0, 0.93, 0.30),
+            )
+            if close_btn:
+                return action_click_box(close_btn, "close AP popup")
             return action_back("dismiss AP popup")
 
         # Sweep result popup — dismiss and continue

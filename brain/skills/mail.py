@@ -15,7 +15,7 @@ from typing import Any, Dict
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box, action_click_yolo,
+    action_click, action_click_box,
     action_wait, action_back, action_done,
 )
 
@@ -75,10 +75,13 @@ class MailSkill(BaseSkill):
             return action_wait(500, "entered mail")
 
         if current == "Lobby":
-            # Try YOLO mail icon first
-            mail_yolo = screen.find_yolo_one("邮箱", min_conf=0.3)
-            if mail_yolo:
-                return action_click_yolo(mail_yolo, "open mail via YOLO")
+            mail_icon = self._find_florence_hit(
+                screen,
+                ["mail icon", "mail button", "envelope icon"],
+                region=(0.78, 0.0, 1.0, 0.18),
+            )
+            if mail_icon:
+                return action_click_box(mail_icon, "open mail via Florence")
 
             # Try OCR text
             mail_btn = screen.find_any_text(

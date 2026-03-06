@@ -67,6 +67,12 @@ _YOLO_ML_CACHE = Path(r"D:\Project\ml_cache\models\yolo\full.pt")
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
 _yolo_status = "not_attempted"
+_YOLO_ALLOWED_SUBSTRINGS = (
+    "角色头像",
+    "角色可摸头黄色感叹号",
+    "感叹号",
+    "Emoticon_Action",
+)
 
 def _get_yolo():
     """Get or create YOLO model (thread-safe singleton). Returns None if unavailable."""
@@ -155,6 +161,9 @@ def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
                 bx1, by1, bx2, by2 = box.xyxy[0].tolist()
                 cls_id = int(box.cls[0])
                 cls_name = yolo.names.get(cls_id, str(cls_id))
+                cls_low = str(cls_name).lower()
+                if not any(token.lower() in cls_low for token in _YOLO_ALLOWED_SUBSTRINGS):
+                    continue
                 yolo_boxes.append(YoloBox(
                     cls_id=cls_id,
                     cls_name=cls_name,
@@ -168,6 +177,47 @@ def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
         print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
         import traceback; traceback.print_exc()
     return yolo_boxes
+
+
+def _find_florence_hit(screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> Optional[OcrBox]:
+    if not screen.screenshot_path:
+        return None
+    try:
+        import cv2
+        import numpy as np
+        from vision.florence_vision import get_florence_vision
+
+        img = cv2.imdecode(np.fromfile(screen.screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        rx1, ry1, rx2, ry2 = region or (0.0, 0.0, 1.0, 1.0)
+        x1 = max(0, int(rx1 * w))
+        y1 = max(0, int(ry1 * h))
+        x2 = min(w, int(rx2 * w))
+        y2 = min(h, int(ry2 * h))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        crop = img[y1:y2, x1:x2]
+        hits = get_florence_vision().detect_open_vocabulary(crop, queries)
+        boxes: List[OcrBox] = []
+        for hit in hits:
+            bbox = hit.get("bbox")
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+            bx1, by1, bx2, by2 = [float(v) for v in bbox]
+            nx1 = min(max((x1 + bx1) / w, 0.0), 1.0)
+            ny1 = min(max((y1 + by1) / h, 0.0), 1.0)
+            nx2 = min(max((x1 + bx2) / w, 0.0), 1.0)
+            ny2 = min(max((y1 + by2) / h, 0.0), 1.0)
+            if nx2 <= nx1 or ny2 <= ny1:
+                continue
+            boxes.append(OcrBox(text=str(hit.get("query") or hit.get("label") or queries[0]), confidence=float(hit.get("score") or 0.5), x1=nx1, y1=ny1, x2=nx2, y2=ny2))
+        if not boxes:
+            return None
+        return max(boxes, key=lambda b: (b.confidence, b.w * b.h))
+    except Exception:
+        return None
 
 
 def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "") -> ScreenState:
@@ -416,12 +466,14 @@ class DailyPipeline:
             # Click on the TAP TO CONTINUE text itself — NOT center (0.5,0.5)
             # which lands on reward cards that absorb clicks without dismissing.
             if self._interceptor_streak > 5:
-                # Escalate: try X button at top-right of popup
-                x_btn = screen.find_yolo_one("叉叉", min_conf=0.3)
-                if x_btn:
+                close_btn = _find_florence_hit(
+                    screen,
+                    ["close button icon", "close dialog x button", "x close icon"],
+                    region=(0.62, 0.06, 0.94, 0.28),
+                )
+                if close_btn:
                     print(f"[Interceptor] P2 TAP TO CONTINUE stuck, clicking X")
-                    from brain.skills.base import action_click_yolo
-                    return action_click_yolo(x_btn, "interceptor: close reward X")
+                    return action_click_box(close_btn, "interceptor: close reward X")
                 # Fallback: click bottom-left corner (outside cards)
                 print(f"[Interceptor] P2 TAP TO CONTINUE stuck, clicking corner")
                 return action_click(0.15, 0.85, f"interceptor: tap corner ({tap_continue.text})")
@@ -508,18 +560,19 @@ class DailyPipeline:
                     print(f"[Interceptor] P1 popup: clicking 今日不再提示")
                     return action_click_box(do_not_show, "interceptor: do not show again today")
 
-                # Try YOLO X button first (works for both strong & weak)
-                x_btn = screen.find_yolo_one("叉叉", min_conf=0.25,
-                                              region=(0.0, 0.0, 0.93, 1.0))
-                if x_btn:
+                close_btn = _find_florence_hit(
+                    screen,
+                    ["close button icon", "close dialog x button", "x close icon"],
+                    region=(0.0, 0.0, 0.93, 0.35),
+                )
+                if close_btn:
                     self._interceptor_streak += 1
-                    print(f"[Interceptor] P1 stale popup: '{popup_text.text}' + YOLO X, clicking X")
+                    print(f"[Interceptor] P1 stale popup: '{popup_text.text}' + Florence X, clicking X")
                     if self._interceptor_streak > 8:
                         print("[Interceptor] P1 popup won't close after 8 attempts, ESC burst")
                         self._interceptor_streak = 0
                         return action_back("interceptor: ESC burst (popup stuck)")
-                    from brain.skills.base import action_click_yolo
-                    return action_click_yolo(x_btn, f"interceptor: close stale popup ({popup_text.text})")
+                    return action_click_box(close_btn, f"interceptor: close stale popup ({popup_text.text})")
 
                 # No YOLO X detected — hardcoded X fallback.
                 # ONLY use hardcoded fallback for STRONG indicators.

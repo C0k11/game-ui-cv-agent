@@ -52,6 +52,31 @@ _PIPELINE_THREAD = None   # background worker thread
 _PIPELINE_RUNNING = False
 _PIPELINE_STATUS = {"running": False, "error": "", "ticks": 0}
 _LAST_PIPELINE_ERROR = ""
+_DISPLAY_SYNC_HZ = 240.0
+_INPUT_POLL_HZ = 8000.0
+_TIMER_RES_ENABLED = False
+
+
+def _enable_high_resolution_timer() -> None:
+    global _TIMER_RES_ENABLED
+    if _TIMER_RES_ENABLED:
+        return
+    try:
+        ctypes.WinDLL("winmm", use_last_error=True).timeBeginPeriod(1)
+        _TIMER_RES_ENABLED = True
+    except Exception:
+        pass
+
+
+def _high_res_sleep(seconds: float) -> None:
+    delay = float(seconds)
+    if delay <= 0:
+        return
+    end_t = time.perf_counter() + delay
+    if delay > 0.003:
+        time.sleep(max(0.0, delay - 0.0015))
+    while time.perf_counter() < end_t:
+        pass
 
 
 def _pid_alive(pid: int) -> bool:
@@ -193,6 +218,8 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         import cv2
         import numpy as np
 
+        _enable_high_resolution_timer()
+
         hwnd = find_window_by_title_substring(window_title)
         if not hwnd:
             _PIPELINE_STATUS["error"] = f"Window '{window_title}' not found"
@@ -247,11 +274,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         render_hwnd = int(child) if child else int(hwnd)
                 except Exception:
                     pass
-                time.sleep(0.5)
+                _high_res_sleep(0.25)
                 continue
 
             if pil_img is None:
-                time.sleep(0.5)
+                _high_res_sleep(0.25)
                 continue
 
             # Convert PIL -> numpy BGR for cv2
@@ -285,9 +312,9 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # 4. Sleep
             if action_type == "wait":
                 wait_ms = action.get("duration_ms", 500)
-                time.sleep(max(0.1, wait_ms / 1000.0))
+                _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, wait_ms / 1000.0))
             else:
-                time.sleep(max(0.1, step_sleep))
+                _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
 
     except Exception as e:
         _PIPELINE_STATUS["error"] = f"{type(e).__name__}: {e}"
@@ -329,6 +356,7 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
     import random
     from scripts.win_capture import get_client_rect_on_screen
     user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _enable_high_resolution_timer()
 
     # Set DPI awareness once so coordinates are in physical pixels
     if not _dpi_set:
@@ -346,7 +374,7 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
         user32.SetForegroundWindow(fg_hwnd)
     except Exception:
         pass
-    time.sleep(0.05)
+    _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
 
     # Get client rect for coordinate conversion
     try:
@@ -361,20 +389,30 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
     WM_LBUTTONUP = 0x0202
     WM_MOUSEMOVE = 0x0200
     MK_LBUTTON = 0x0001
+    MOUSEEVENTF_LEFTDOWN = 0x0002
+    MOUSEEVENTF_LEFTUP = 0x0004
+    MOUSEEVENTF_WHEEL = 0x0800
+
+    def _screen_xy(nx: float, ny: float):
+        if not rect or cw <= 0 or ch <= 0:
+            return None
+        cx = int(nx * cw) + random.randint(-2, 2)
+        cy = int(ny * ch) + random.randint(-2, 2)
+        sx = rect.left + cx
+        sy = rect.top + cy
+        return cx, cy, sx, sy
 
     if action_type == "click":
         nx, ny = action.get("target", [0.5, 0.5])
-        if rect and cw > 0 and ch > 0:
-            # Client-relative pixel coordinates for PostMessage
-            cx = int(nx * cw) + random.randint(-3, 3)
-            cy = int(ny * ch) + random.randint(-3, 3)
-            lparam = _MAKELPARAM(cx, cy)
+        coords = _screen_xy(nx, ny)
+        if coords:
+            cx, cy, sx, sy = coords
             print(f"[Click] norm=({nx:.3f},{ny:.3f}) client=({cx},{cy}) cw={cw} ch={ch}")
-
-            # PostMessage: works for emulators without stealing focus/cursor
-            user32.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
-            time.sleep(0.04)
-            user32.PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam)
+            user32.SetCursorPos(sx, sy)
+            _high_res_sleep(1.0 / _INPUT_POLL_HZ)
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            _high_res_sleep(max(1.0 / _INPUT_POLL_HZ, 1.0 / (_DISPLAY_SYNC_HZ * 2.0)))
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
     elif action_type == "back":
         # Send Escape key via PostMessage
@@ -382,42 +420,41 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
         WM_KEYUP = 0x0101
         VK_ESCAPE = 0x1B
         user32.PostMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 0x00010001)
-        time.sleep(0.04)
+        _high_res_sleep(max(1.0 / _INPUT_POLL_HZ, 1.0 / _DISPLAY_SYNC_HZ))
         user32.PostMessageW(hwnd, WM_KEYUP, VK_ESCAPE, 0xC0010001)
 
     elif action_type == "swipe":
         frm = action.get("from", [0.5, 0.5])
         to = action.get("to", [0.5, 0.5])
         dur_ms = action.get("duration_ms", 400)
-        if rect and cw > 0 and ch > 0:
-            cx1 = int(frm[0] * cw)
-            cy1 = int(frm[1] * ch)
-            cx2 = int(to[0] * cw)
-            cy2 = int(to[1] * ch)
-            steps = max(10, dur_ms // 16)
+        coords1 = _screen_xy(frm[0], frm[1])
+        coords2 = _screen_xy(to[0], to[1])
+        if coords1 and coords2:
+            cx1, cy1, sx1, sy1 = coords1
+            cx2, cy2, sx2, sy2 = coords2
+            steps = max(12, int((dur_ms / 1000.0) * _DISPLAY_SYNC_HZ))
             print(f"[Swipe] from=({frm[0]:.3f},{frm[1]:.3f}) to=({to[0]:.3f},{to[1]:.3f}) steps={steps}")
 
-            user32.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, _MAKELPARAM(cx1, cy1))
+            user32.SetCursorPos(sx1, sy1)
+            _high_res_sleep(1.0 / _INPUT_POLL_HZ)
+            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
             for i in range(1, steps + 1):
                 t = i / steps
-                mx = int(cx1 + (cx2 - cx1) * t)
-                my = int(cy1 + (cy2 - cy1) * t)
-                user32.PostMessageW(hwnd, WM_MOUSEMOVE, MK_LBUTTON, _MAKELPARAM(mx, my))
-                time.sleep(dur_ms / 1000.0 / steps)
-            user32.PostMessageW(hwnd, WM_LBUTTONUP, 0, _MAKELPARAM(cx2, cy2))
+                mx = int(sx1 + (sx2 - sx1) * t)
+                my = int(sy1 + (sy2 - sy1) * t)
+                user32.SetCursorPos(mx, my)
+                _high_res_sleep(dur_ms / 1000.0 / steps)
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
     elif action_type == "scroll":
         nx, ny = action.get("target", [0.5, 0.5])
         clicks = action.get("clicks", -3)
-        if rect and cw > 0 and ch > 0:
-            cx = int(nx * cw)
-            cy = int(ny * ch)
-            # SetCursorPos fallback for scroll (PostMessage scroll is unreliable)
-            sx = rect.left + cx
-            sy = rect.top + cy
+        coords = _screen_xy(nx, ny)
+        if coords:
+            _, _, sx, sy = coords
             user32.SetCursorPos(sx, sy)
-            time.sleep(0.05)
-            user32.mouse_event(0x0800, 0, 0, int(clicks * 120), 0)  # MOUSEEVENTF_WHEEL
+            _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
+            user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(clicks * 120), 0)
 
 
 def _log_pipeline(msg: str) -> None:
@@ -870,6 +907,93 @@ def delete_dataset_image(payload: Dict[str, Any]) -> Dict[str, Any]:
         label_path.unlink()
         deleted.append(label_path.name)
     return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/v1/datasets/florence_suggest")
+def dataset_florence_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
+    dataset = str(payload.get("dataset") or "")
+    img_name = str(payload.get("img") or "")
+    labels = [str(x).strip() for x in (payload.get("labels") or []) if str(x).strip()]
+    limit = max(1, min(int(payload.get("limit") or 24), 64))
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    img_path = img_dir / Path(os.path.basename(img_name))
+    if not img_path.exists() or not img_path.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+    if not labels:
+        classes_file = img_dir / "classes.txt"
+        if classes_file.exists():
+            labels = [c.strip() for c in classes_file.read_text(encoding="utf-8").splitlines() if c.strip()]
+    labels = labels[:24]
+    if not labels:
+        raise HTTPException(status_code=400, detail="no classes available for Florence suggestions")
+
+    def _iou(a, b) -> float:
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        ix1 = max(ax1, bx1)
+        iy1 = max(ay1, by1)
+        ix2 = min(ax2, bx2)
+        iy2 = min(ay2, by2)
+        if ix2 <= ix1 or iy2 <= iy1:
+            return 0.0
+        inter = float((ix2 - ix1) * (iy2 - iy1))
+        area_a = float(max(0, ax2 - ax1) * max(0, ay2 - ay1))
+        area_b = float(max(0, bx2 - bx1) * max(0, by2 - by1))
+        denom = area_a + area_b - inter
+        if denom <= 0:
+            return 0.0
+        return inter / denom
+
+    try:
+        import cv2
+
+        img = cv2.imread(str(img_path))
+        if img is None:
+            raise HTTPException(status_code=400, detail="cannot read image")
+        h, w = img.shape[:2]
+        from vision.florence_vision import get_florence_vision
+
+        raw = get_florence_vision().suggest_labels(str(img_path), labels)
+        kept: List[Dict[str, Any]] = []
+        for item in raw:
+            bbox = item.get("bbox") or []
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+            box = [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])]
+            if box[2] <= box[0] or box[3] <= box[1]:
+                continue
+            if any(item.get("label") == old.get("label") and _iou(box, old.get("bbox") or [0, 0, 0, 0]) > 0.6 for old in kept):
+                continue
+            kept.append({
+                "label": str(item.get("label") or ""),
+                "score": float(item.get("score") or 1.0),
+                "bbox": box,
+            })
+            if len(kept) >= limit:
+                break
+
+        suggestions = []
+        for item in kept:
+            x1, y1, x2, y2 = item["bbox"]
+            suggestions.append({
+                "label": item["label"],
+                "score": item["score"],
+                "x1": x1 / w,
+                "y1": y1 / h,
+                "x2": x2 / w,
+                "y2": y2 / h,
+                "xc": ((x1 + x2) / 2.0) / w,
+                "yc": ((y1 + y2) / 2.0) / h,
+                "w": (x2 - x1) / w,
+                "h": (y2 - y1) / h,
+                "bbox": [x1, y1, x2, y2],
+            })
+        return {"ok": True, "suggestions": suggestions, "count": len(suggestions), "labels_used": labels}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": False, "error": str(e), "suggestions": [], "count": 0, "labels_used": labels}
 
 
 # ── OCR API ───────────────────────────────────────────────────────────

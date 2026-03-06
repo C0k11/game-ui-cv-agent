@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box, action_click_yolo, action_back, action_wait, action_done,
+    action_click, action_click_box, action_back, action_wait, action_done,
 )
 
 
@@ -76,8 +76,11 @@ class LobbySkill(BaseSkill):
         # 1. YOLO: detect close buttons (叉叉, 叉叉1, 叉叉2, momotalk的叉叉)
         # Filter out fullscreen toggle button at top-right (x>0.93, y<0.20)
         # which YOLO misclassifies as 叉叉1.
-        x_btn = screen.find_yolo_one("叉叉", min_conf=0.15,
-                                      region=(0.0, 0.0, 0.93, 1.0))
+        x_btn = self._find_florence_hit(
+            screen,
+            ["close button icon", "close dialog x button", "x close icon"],
+            region=(0.0, 0.0, 0.93, 0.35),
+        )
         if x_btn:
             has_popup_text = screen.find_any_text(
                 ["Main News", "Update", "Events", "Patch Notes",
@@ -88,8 +91,8 @@ class LobbySkill(BaseSkill):
             )
             if has_popup_text:
                 self._popup_close_attempts += 1
-                self.log(f"popup detected (YOLO {x_btn.cls_name} + '{has_popup_text.text}'), clicking X")
-                return action_click_yolo(x_btn, f"close popup via YOLO {x_btn.cls_name}")
+                self.log(f"popup detected (Florence + '{has_popup_text.text}'), clicking X")
+                return action_click_box(x_btn, "close popup via Florence")
 
         # 2.5 OCR fallback for close X (only when popup hints exist)
         # Keep this constrained to avoid old false positives.
@@ -204,11 +207,13 @@ class LobbySkill(BaseSkill):
         # We should navigate back to lobby to ensure a clean state.
         if current_screen and current_screen != "Lobby":
             self.log(f"detected sub-screen '{current_screen}', returning to lobby")
-            # Try YOLO Home button first
-            home = screen.find_yolo_one("主界面按钮", min_conf=0.3)
+            home = self._find_florence_hit(
+                screen,
+                ["home button icon", "main lobby home button"],
+                region=(0.80, 0.0, 1.0, 0.20),
+            )
             if home:
-                return action_click_yolo(home, "click home button")
-            # Fallback to Back
+                return action_click_box(home, "click home button")
             return action_back(f"back from {current_screen} to lobby")
 
         # Timeout fallback

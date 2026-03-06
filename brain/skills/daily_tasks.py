@@ -21,7 +21,7 @@ from typing import Any, Dict
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box, action_click_yolo,
+    action_click, action_click_box,
     action_wait, action_back, action_done,
 )
 
@@ -121,10 +121,13 @@ class DailyTasksSkill(BaseSkill):
             if tasks_btn:
                 return action_click_box(tasks_btn, "click tasks from lobby")
 
-            # Try YOLO task icon
-            task_yolo = screen.find_yolo_one("任务按钮", min_conf=0.3)
-            if task_yolo:
-                return action_click_yolo(task_yolo, "click task icon via YOLO")
+            task_icon = self._find_florence_hit(
+                screen,
+                ["tasks icon", "mission button", "daily tasks button"],
+                region=(0.0, 0.18, 0.22, 0.50),
+            )
+            if task_icon:
+                return action_click_box(task_icon, "click task icon via Florence")
 
             # Fallback: tasks button is often in bottom-left area or sidebar
             # Try nav bar
@@ -190,12 +193,15 @@ class DailyTasksSkill(BaseSkill):
         These are usually small chest icons along an activity progress bar.
         They become claimable (glow/animate) when activity points reach thresholds.
         """
-        # Look for chest-related YOLO detections
-        chest = screen.find_yolo_one("宝箱", min_conf=0.3)
+        chest = self._find_florence_hit(
+            screen,
+            ["claimable chest icon", "reward chest", "activity chest"],
+            region=(0.20, 0.05, 0.90, 0.24),
+        )
         if chest:
             self.log(f"clicking activity chest at ({chest.cx:.2f},{chest.cy:.2f})")
             self._chests_claimed += 1
-            return action_click_yolo(chest, "claim activity chest")
+            return action_click_box(chest, "claim activity chest")
 
         # OCR fallback: look for activity progress text and click chest areas
         # Activity bar is usually at top of tasks screen (y: 0.10-0.20)

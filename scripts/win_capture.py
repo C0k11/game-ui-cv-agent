@@ -302,6 +302,58 @@ def find_window_by_title_substring(title_substring: str) -> Optional[int]:
     return int(candidates[0][2])
 
 
+def _find_yolo_overlay_windows() -> list[int]:
+    hits: list[int] = []
+
+    def _cb(hwnd: int, lparam: int) -> bool:
+        try:
+            if not _is_window_visible(hwnd):
+                return True
+            title = (_get_window_text(int(hwnd)) or "").strip()
+            cls = (_get_class_name(int(hwnd)) or "").strip()
+            if title == "YOLO Overlay" or cls.startswith("YoloOverlay_"):
+                hits.append(int(hwnd))
+        except Exception:
+            pass
+        return True
+
+    try:
+        user32.EnumWindows(EnumWindowsProc(_cb), 0)
+    except Exception:
+        return []
+    return hits
+
+
+class _hidden_yolo_overlays:
+    __slots__ = ("_hwnds",)
+
+    def __enter__(self):
+        self._hwnds = []
+        try:
+            SW_HIDE = 0
+            for hwnd in _find_yolo_overlay_windows():
+                try:
+                    user32.ShowWindow(int(hwnd), SW_HIDE)
+                    self._hwnds.append(int(hwnd))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            SW_SHOWNA = 8
+            for hwnd in self._hwnds:
+                try:
+                    user32.ShowWindow(int(hwnd), SW_SHOWNA)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return False
+
+
 def get_client_rect_on_screen(hwnd: int) -> Rect:
     with _dpi_aware_context():
         rect = wintypes.RECT()
@@ -468,21 +520,22 @@ def capture_client(hwnd: int) -> Image.Image:
     except Exception:
         mode = "auto"
 
-    if mode == "desktop":
-        return _capture_desktop_dc()
-    if mode == "window":
-        return _capture_window_dc()
+    with _hidden_yolo_overlays():
+        if mode == "desktop":
+            return _capture_desktop_dc()
+        if mode == "window":
+            return _capture_window_dc()
 
-    img0 = _capture_window_dc()
-    try:
-        img1 = _capture_desktop_dc()
-        if not _is_nearly_black(img1):
-            if _is_nearly_black(img0):
-                return img1
-            s0 = _sig(img0)
-            s1 = _sig(img1)
-            if s0 and s1 and s0 != s1:
-                return img1
-    except Exception:
-        pass
-    return img0
+        img0 = _capture_window_dc()
+        try:
+            img1 = _capture_desktop_dc()
+            if not _is_nearly_black(img1):
+                if _is_nearly_black(img0):
+                    return img1
+                s0 = _sig(img0)
+                s1 = _sig(img1)
+                if s0 and s1 and s0 != s1:
+                    return img1
+        except Exception:
+            pass
+        return img0

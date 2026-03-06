@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from brain.skills.base import (
     BaseSkill, ScreenState, OcrBox,
-    action_click, action_click_box, action_click_yolo,
+    action_click, action_click_box,
     action_wait, action_back, action_done,
 )
 
@@ -44,6 +44,7 @@ _LOCATION_NAMES = [
 _RIGHT_ARROW_POS = (0.99, 0.50)   # Right edge ">" arrow for location switch
 _ROSTER_X_POS = (0.89, 0.14)      # X close button on roster overlay
 _BUILD_CENTER_POS = (0.50, 0.50)  # Center hexagon in location detail
+_ROSTER_TAB_POS = (0.84, 0.91)
 
 
 def _load_target_favorites() -> List[str]:
@@ -84,11 +85,12 @@ class ScheduleSkill(BaseSkill):
         self._starting_location: str = ""
         self._switch_ticks: int = 0
         self._execute_ticks: int = 0
+        self._start_clicked: bool = False
+        self._roster_scan_ticks: int = 0
         self._avatar_matcher = None
         self._best_match_score: float = -1.0
         self._stale_ticks: int = 0
-        self._start_clicked: bool = False
-        self._roster_scan_ticks: int = 0
+        self._florence_matcher = None
 
     def reset(self) -> None:
         super().reset()
@@ -108,6 +110,7 @@ class ScheduleSkill(BaseSkill):
         self._best_match_score = -1.0
         self._stale_ticks = 0
         self._roster_scan_ticks = 0
+        self._florence_matcher = None
         if self._target_favorites:
             self.log(f"target favorites loaded: {len(self._target_favorites)} characters")
         # Lazy-init avatar matcher
@@ -142,10 +145,11 @@ class ScheduleSkill(BaseSkill):
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
         """Check roster overlay for target characters via YOLO + template matching.
 
-        Crops each YOLO '角色头像' bounding box from the screenshot and compares
-        against the user's target_favorites using AvatarMatcher.
+        First pass: AvatarMatcher (fast template + histogram).
+        Second pass fallback: Florence pairwise comparison against local favorite
+        reference portraits when template matching is inconclusive.
         """
-        if not self._target_favorites or self._avatar_matcher is None:
+        if not self._target_favorites:
             return False
 
         avatars = screen.find_yolo("角色头像", min_conf=0.4)
@@ -176,19 +180,21 @@ class ScheduleSkill(BaseSkill):
             roi = img[by1:by2, bx1:bx2]
             if roi.size == 0:
                 continue
-            matched_name, score = self._avatar_matcher.match_avatar(
-                roi, self._target_favorites
-            )
-            if matched_name and score > best_overall_score:
-                best_overall_score = score
-                best_overall_name = matched_name
-                best_overall_pos = (av.cx, av.cy)
-            if matched_name and score > _AVATAR_MATCH_THRESHOLD:
-                self.log(
-                    f"AVATAR MATCH: '{matched_name}' score={score:.2f} "
-                    f"at ({av.cx:.2f},{av.cy:.2f})"
+            if self._avatar_matcher is not None:
+                matched_name, score = self._avatar_matcher.match_avatar(
+                    roi, self._target_favorites
                 )
-                return True
+                if matched_name and score > best_overall_score:
+                    best_overall_score = score
+                    best_overall_name = matched_name
+                    best_overall_pos = (av.cx, av.cy)
+                if matched_name and score > _AVATAR_MATCH_THRESHOLD:
+                    self._target_found = True
+                    self.log(
+                        f"AVATAR MATCH: '{matched_name}' score={score:.2f} "
+                        f"at ({av.cx:.2f},{av.cy:.2f})"
+                    )
+                    return True
         # Log best non-matching score for debugging
         if best_overall_name:
             self.log(
@@ -196,6 +202,38 @@ class ScheduleSkill(BaseSkill):
                 f"at ({best_overall_pos[0]:.2f},{best_overall_pos[1]:.2f}) "
                 f"(threshold={_AVATAR_MATCH_THRESHOLD})"
             )
+
+        # Florence fallback: use local favorite portraits as pairwise references.
+        try:
+            if self._florence_matcher is None:
+                from vision.florence_vision import get_florence_reference_matcher
+                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
+                self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
+                self.log("Florence reference matcher loaded for roster scan")
+        except Exception as e:
+            self.log(f"Florence matcher unavailable: {e}")
+            self._florence_matcher = None
+
+        if self._florence_matcher is None:
+            return False
+
+        florence_candidates = sorted(avatars, key=lambda b: b.confidence, reverse=True)[:6]
+        for av in florence_candidates:
+            bx1 = max(0, int(av.x1 * w))
+            by1 = max(0, int(av.y1 * h))
+            bx2 = min(w, int(av.x2 * w))
+            by2 = min(h, int(av.y2 * h))
+            roi = img[by1:by2, bx1:bx2]
+            if roi.size == 0:
+                continue
+            matched_name, score = self._florence_matcher.match_candidate(roi, self._target_favorites)
+            if matched_name and score > 0.5:
+                self._target_found = True
+                self.log(
+                    f"FLORENCE MATCH: '{matched_name}' score={score:.2f} "
+                    f"at ({av.cx:.2f},{av.cy:.2f})"
+                )
+                return True
         return False
 
     # ── Screen detection helpers ──
@@ -267,6 +305,26 @@ class ScheduleSkill(BaseSkill):
             return True
         return False
 
+    def _find_schedule_close(self, screen: ScreenState) -> Optional[OcrBox]:
+        close = self._find_florence_hit(
+            screen,
+            ["close button icon", "close dialog x button", "x close icon"],
+            region=(0.72, 0.02, 0.94, 0.28),
+        )
+        if close:
+            return close
+        return screen.find_text_one(r"^[Xx×]$", region=(0.72, 0.02, 0.94, 0.28), min_conf=0.7)
+
+    def _find_schedule_switch_arrow(self, screen: ScreenState) -> Optional[OcrBox]:
+        arrow = self._find_florence_hit(
+            screen,
+            ["right arrow button", "next location arrow", "switch location arrow"],
+            region=(0.86, 0.28, 1.0, 0.72),
+        )
+        if arrow:
+            return arrow
+        return screen.find_text_one(">", region=(0.90, 0.35, 1.0, 0.65), min_conf=0.7)
+
     def _close_roster_action(self, screen: ScreenState, next_state: str, reason: str) -> Dict[str, Any]:
         """Helper to close the roster overlay and transition to next_state.
 
@@ -274,12 +332,10 @@ class ScheduleSkill(BaseSkill):
         (OCR X detection skipped per project rule: all X buttons via YOLO only.)
         """
         self._roster_open = False
-        # Filter out fullscreen toggle button at top-right (x>0.93)
-        x_yolo = screen.find_yolo_one("叉叉", min_conf=0.3,
-                                       region=(0.0, 0.0, 0.93, 1.0))
-        if x_yolo:
+        close_btn = self._find_schedule_close(screen)
+        if close_btn:
             self.sub_state = next_state
-            return action_click_yolo(x_yolo, f"close roster X ({reason})")
+            return action_click_box(close_btn, f"close roster X ({reason})")
         self.sub_state = next_state
         return action_click(*_ROSTER_X_POS, f"close roster X fallback ({reason})")
 
@@ -309,11 +365,10 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"tickets exhausted ({self._tickets_used} used)")
                 self.sub_state = "exit"
                 return action_click_box(confirm, "confirm no tickets")
-            x_btn = screen.find_yolo_one("叉叉", min_conf=0.3,
-                                         region=(0.0, 0.0, 0.93, 1.0))
-            if x_btn:
+            close_btn = self._find_schedule_close(screen)
+            if close_btn:
                 self.sub_state = "exit"
-                return action_click_yolo(x_btn, "close ticket popup")
+                return action_click_box(close_btn, "close ticket popup")
             self.sub_state = "exit"
             return action_click(0.5, 0.8, "dismiss ticket popup")
 
@@ -530,28 +585,29 @@ class ScheduleSkill(BaseSkill):
             self._roster_scan_ticks += 1
 
             if self._roster_scan_ticks == 1:
-                # First scan tick: parse tickets and check locks
-                locks = screen.find_yolo("锁", min_conf=0.3)
-                if locks:
-                    self.log(f"found {len(locks)} locked slots in this location")
+                self._target_found = False
                 self._parse_tickets(screen)
                 return action_wait(300, "scanning roster (1/3)")
 
             if self._roster_scan_ticks == 2:
                 # Second scan tick: avatar matching
-                if self._target_favorites and self._avatar_matcher:
+                if self._target_favorites:
                     self._check_roster_avatars(screen)
                 return action_wait(300, "scanning roster avatars (2/3)")
 
-            # Third tick: done scanning — close roster and execute
+            # Third tick: done scanning — execute only if favorite found,
+            # otherwise switch to the next location.
             self._roster_scan_ticks = 0
             self._locations_checked += 1
             if cur_loc:
                 self._visited_locations.add(cur_loc)
 
-            self.log(f"location '{cur_loc}' (#{self._locations_checked}), closing roster to execute")
             self._switch_ticks = 0
-            return self._close_roster_action(screen, "execute", "to execute")
+            if self._target_found:
+                self.log(f"favorite found in '{cur_loc}', closing roster to execute")
+                return self._close_roster_action(screen, "execute", "favorite found")
+            self.log(f"no favorite found in '{cur_loc}' (#{self._locations_checked}), switching location")
+            return self._close_roster_action(screen, "switch_location", "no favorite found")
 
         # Not in roster overlay — open it if we haven't yet
         if not self._roster_open:
@@ -560,24 +616,27 @@ class ScheduleSkill(BaseSkill):
                 region=(0.60, 0.80, 1.0, 1.0),
                 min_conf=0.5
             )
+            if not full_tab:
+                full_tab = self._find_florence_hit(
+                    screen,
+                    ["full schedule roster button", "全體課程表 button", "全体课程表 button"],
+                    region=(0.60, 0.78, 1.0, 1.0),
+                )
             if full_tab:
                 self.log(f"clicking '{full_tab.text}' to view roster")
                 self._roster_open = True
                 self._roster_scan_ticks = 0
                 return action_click_box(full_tab, "open full schedule roster")
 
-            # If start button is visible, skip roster and execute
-            start = screen.find_any_text(
-                ["課程表開始", "课程表開始", "课程表开始",
-                 "開始日程", "开始日程", "START"],
-                min_conf=0.6
-            )
-            if start:
-                self.log("start button visible, executing")
-                self.sub_state = "execute"
-                return action_wait(200, "start visible in location")
+            if self._wait_ticks < 2:
+                self._wait_ticks += 1
+                return action_wait(300, "looking for 全體課程表")
 
-            return action_wait(400, "looking for 全體課程表")
+            self.log("full roster button not found, clicking roster fallback area")
+            self._roster_open = True
+            self._roster_scan_ticks = 0
+            self._wait_ticks = 0
+            return action_click(*_ROSTER_TAB_POS, "open full schedule roster fallback")
 
         # Roster was opened but overlay detection failed (YOLO/OCR miss).
         # Give it a few ticks grace period before giving up.
@@ -585,13 +644,12 @@ class ScheduleSkill(BaseSkill):
         if self._roster_scan_ticks <= 3:
             return action_wait(400, f"waiting for roster overlay to appear ({self._roster_scan_ticks}/3)")
 
-        # Roster detection failed after grace period — skip roster, go execute
-        self.log("roster overlay not detected after opening, skipping to execute")
+        self.log("roster overlay not detected after opening, switching location")
         self._roster_open = False
         self._roster_scan_ticks = 0
         self._locations_checked += 1
-        self.sub_state = "execute"
-        return action_wait(300, "roster detection failed, executing directly")
+        self.sub_state = "switch_location"
+        return action_wait(300, "roster detection failed, switching")
 
     def _switch_location(self, screen: ScreenState) -> Dict[str, Any]:
         """Switch to next location using right arrow or back to Location Select."""
@@ -606,34 +664,14 @@ class ScheduleSkill(BaseSkill):
             self.sub_state = "select_location"
             return action_wait(300, "back at location select")
 
-        # Try YOLO arrows first
-        right = screen.find_yolo_one("右切换", min_conf=0.3)
+        right = self._find_schedule_switch_arrow(screen)
         if right:
-            self.log("clicking 右切換 via YOLO")
+            self.log("clicking right switch")
             self.sub_state = "check_roster"
             self._roster_open = False
             self._wait_ticks = 0
             self._roster_scan_ticks = 0
-            return action_click_yolo(right, "right switch via YOLO")
-
-        left = screen.find_yolo_one("左切换", min_conf=0.3)
-        if left:
-            self.log("clicking 左切換 via YOLO")
-            self.sub_state = "check_roster"
-            self._roster_open = False
-            self._wait_ticks = 0
-            self._roster_scan_ticks = 0
-            return action_click_yolo(left, "left switch via YOLO")
-
-        # OCR fallback: detect ">" arrow text on screen
-        gt_arrow = screen.find_text_one(">", region=(0.90, 0.35, 1.0, 0.65), min_conf=0.7)
-        if gt_arrow:
-            self.log("clicking > arrow via OCR")
-            self.sub_state = "check_roster"
-            self._roster_open = False
-            self._wait_ticks = 0
-            self._roster_scan_ticks = 0
-            return action_click_box(gt_arrow, "right arrow via OCR")
+            return action_click_box(right, "right switch")
 
         # Hardcoded fallback: click right arrow position (visible as ">" on right edge)
         if self._switch_ticks <= 3:

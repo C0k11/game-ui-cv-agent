@@ -108,9 +108,13 @@ class ArenaSkill(BaseSkill):
             )
             if vs_marker:
                 self.log("opponent popup unexpectedly open, closing")
-                x_btn = screen.find_yolo_one("叉叉", min_conf=0.3)
-                if x_btn:
-                    return action_click_yolo(x_btn, "close opponent popup")
+                close_btn = self._find_florence_hit(
+                    screen,
+                    ["close button icon", "close dialog x button", "x close icon"],
+                    region=(0.62, 0.06, 0.94, 0.28),
+                )
+                if close_btn:
+                    return action_click_box(close_btn, "close opponent popup")
                 return action_back("close opponent popup")
 
         if self.sub_state == "":

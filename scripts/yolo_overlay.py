@@ -283,6 +283,7 @@ class YoloOverlay:
                 return 1
             if msg == WM_TIMER:
                 self._sync_position()
+                _user32.InvalidateRect(hwnd, None, True)
                 return 0
             if msg == WM_CLOSE:
                 _user32.KillTimer(hwnd, 1)
@@ -328,8 +329,7 @@ class YoloOverlay:
             self._overlay_hwnd, _CK, 0, LWA_COLORKEY,
         )
 
-        # Timer: re-sync overlay position every 200 ms
-        _user32.SetTimer(self._overlay_hwnd, 1, 200, None)
+        _user32.SetTimer(self._overlay_hwnd, 1, 4, None)
 
         print(f"[Overlay] Started overlay={self._overlay_hwnd} "
               f"target={self._target_hwnd} size={w}x{h}")

@@ -14,6 +14,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -253,17 +254,94 @@ class BaseSkill(ABC):
         self.ticks: int = 0
         self.max_ticks: int = 60  # timeout per skill
         self._log_lines: List[str] = []
+        self._florence_vision = None
+        self._florence_det_cache: Dict[str, List[OcrBox]] = {}
 
     def reset(self) -> None:
         """Reset skill state for a fresh run."""
         self.sub_state = ""
         self.ticks = 0
         self._log_lines = []
+        self._florence_det_cache = {}
 
     def log(self, msg: str) -> None:
         line = f"[{self.name}] {msg}"
         self._log_lines.append(line)
         print(line)
+
+    def _load_screen_image(self, screen: ScreenState):
+        try:
+            import cv2
+            import numpy as np
+            img = cv2.imdecode(np.fromfile(screen.screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                return None, 0, 0
+            h, w = img.shape[:2]
+            return img, w, h
+        except Exception:
+            return None, 0, 0
+
+    def _get_florence_vision(self):
+        if self._florence_vision is None:
+            from vision.florence_vision import get_florence_vision
+            self._florence_vision = get_florence_vision()
+        return self._florence_vision
+
+    def _find_florence_hits(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> List[OcrBox]:
+        clean_queries = [str(q).strip() for q in queries if str(q).strip()]
+        if not clean_queries:
+            return []
+        img, w, h = self._load_screen_image(screen)
+        if img is None or w <= 0 or h <= 0:
+            return []
+        rx1, ry1, rx2, ry2 = region or (0.0, 0.0, 1.0, 1.0)
+        x1 = max(0, int(rx1 * w))
+        y1 = max(0, int(ry1 * h))
+        x2 = min(w, int(rx2 * w))
+        y2 = min(h, int(ry2 * h))
+        if x2 <= x1 or y2 <= y1:
+            return []
+        key = f"{screen.timestamp:.6f}|{x1}|{y1}|{x2}|{y2}|{'||'.join(clean_queries)}"
+        cached = self._florence_det_cache.get(key)
+        if cached is not None:
+            return list(cached)
+        crop = img[y1:y2, x1:x2]
+        try:
+            results = self._get_florence_vision().detect_open_vocabulary(crop, clean_queries)
+        except Exception as e:
+            self.log(f"Florence detect unavailable: {e}")
+            self._florence_det_cache[key] = []
+            return []
+        hits: List[OcrBox] = []
+        rw = max(1, x2 - x1)
+        rh = max(1, y2 - y1)
+        for item in results:
+            bbox = item.get("bbox")
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+            bx1, by1, bx2, by2 = [float(v) for v in bbox]
+            nx1 = (x1 + bx1) / w
+            ny1 = (y1 + by1) / h
+            nx2 = (x1 + bx2) / w
+            ny2 = (y1 + by2) / h
+            nx1 = min(max(nx1, 0.0), 1.0)
+            ny1 = min(max(ny1, 0.0), 1.0)
+            nx2 = min(max(nx2, 0.0), 1.0)
+            ny2 = min(max(ny2, 0.0), 1.0)
+            if nx2 <= nx1 or ny2 <= ny1:
+                continue
+            query = str(item.get("query") or item.get("label") or clean_queries[0])
+            area_ratio = ((bx2 - bx1) / rw) * ((by2 - by1) / rh)
+            conf = max(0.1, min(1.0, float(item.get("score") or area_ratio or 0.5)))
+            hits.append(OcrBox(text=query, confidence=conf, x1=nx1, y1=ny1, x2=nx2, y2=ny2))
+        self._florence_det_cache[key] = list(hits)
+        return hits
+
+    def _find_florence_hit(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> Optional[OcrBox]:
+        hits = self._find_florence_hits(screen, queries, region=region)
+        if not hits:
+            return None
+        return max(hits, key=lambda b: (b.confidence, b.w * b.h))
 
     @abstractmethod
     def tick(self, screen: ScreenState) -> Dict[str, Any]:

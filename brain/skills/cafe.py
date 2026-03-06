@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box, action_click_yolo,
+    action_click, action_click_box,
     action_wait, action_back, action_done, action_swipe,
 )
 
@@ -68,6 +68,8 @@ class CafeSkill(BaseSkill):
         self._headpat_cooldown: int = 0
         self._1f_headpat_started: bool = False  # True once 1F headpat phase begins
         self._1f_done: bool = False  # True once 1F headpat is complete (switch to 2F)
+        self._florence_matcher = None
+        self._florence_vision = None
 
     def reset(self) -> None:
         super().reset()
@@ -84,6 +86,8 @@ class CafeSkill(BaseSkill):
         self._headpat_cooldown = 0
         self._1f_headpat_started = False
         self._1f_done = False
+        self._florence_matcher = None
+        self._florence_vision = None
         self._target_favorites = _load_target_favorites()
         if self._target_favorites:
             self.log(f"loaded {len(self._target_favorites)} favorite characters")
@@ -97,19 +101,7 @@ class CafeSkill(BaseSkill):
                 self.log(f"avatar matcher init failed: {e}")
                 self._avatar_matcher = None
 
-    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns) -> Optional[Any]:
-        """Scan YOLO-detected avatars in the invite list and match against favorites.
-
-        Returns the invite button (OcrBox) nearest to the matched favorite avatar,
-        or None if no favorite is found.
-        """
-        if not self._target_favorites or self._avatar_matcher is None:
-            return None
-
-        avatars = screen.find_yolo("角色头像", min_conf=0.3)
-        if not avatars:
-            return None
-
+    def _load_screen_image(self, screen: ScreenState):
         try:
             import cv2
             import numpy as np
@@ -118,40 +110,117 @@ class CafeSkill(BaseSkill):
                 cv2.IMREAD_COLOR
             )
             if img is None:
-                return None
+                return None, 0, 0
             h, w = img.shape[:2]
+            return img, w, h
         except Exception:
+            return None, 0, 0
+
+    def _find_nearest_invite_button(self, invite_btns, avatar_cy: float) -> Optional[Any]:
+        best_btn = None
+        best_dist = 999.0
+        for btn in invite_btns:
+            dist = abs(btn.cy - avatar_cy)
+            if dist < best_dist:
+                best_dist = dist
+                best_btn = btn
+        if best_btn and best_dist < 0.10:
+            return best_btn
+        return None
+
+    def _find_close_button(self, screen: ScreenState, region=(0.62, 0.06, 0.94, 0.30)) -> Optional[Any]:
+        close = self._find_florence_hit(
+            screen,
+            ["close button icon", "close dialog x button", "x close icon"],
+            region=region,
+        )
+        if close:
+            return close
+        return screen.find_text_one(r"^[Xx×]$", region=region, min_conf=0.7)
+
+    def _invite_avatar_roi(self, img, w: int, h: int, invite_btn) -> Optional[Any]:
+        cy = int(invite_btn.cy * h)
+        x1 = max(0, int(0.04 * w))
+        x2 = min(w, int(0.22 * w))
+        y1 = max(0, cy - int(0.085 * h))
+        y2 = min(h, cy + int(0.085 * h))
+        roi = img[y1:y2, x1:x2]
+        if roi is None or getattr(roi, "size", 0) == 0:
+            return None
+        return roi
+
+    def _florence_button_enabled(self, screen: ScreenState, region, *, hint: str, default: bool = True) -> bool:
+        img, w, h = self._load_screen_image(screen)
+        if img is None or w <= 0 or h <= 0:
+            return default
+        rx1, ry1, rx2, ry2 = region
+        x1 = max(0, int(rx1 * w))
+        y1 = max(0, int(ry1 * h))
+        x2 = min(w, int(rx2 * w))
+        y2 = min(h, int(ry2 * h))
+        crop = img[y1:y2, x1:x2]
+        if crop.size == 0:
+            return default
+        try:
+            if self._florence_vision is None:
+                from vision.florence_vision import get_florence_vision
+                self._florence_vision = get_florence_vision()
+                self.log("Florence vision loaded for cafe button-state checks")
+            return self._florence_vision.classify_button_enabled(crop, hint=hint, default=default)
+        except Exception as e:
+            self.log(f"Florence button-state unavailable: {e}")
+            return default
+
+    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns) -> Optional[Any]:
+        """Scan YOLO-detected avatars in the invite list and match against favorites.
+
+        Returns the invite button (OcrBox) nearest to the matched favorite avatar,
+        or None if no favorite is found.
+        """
+        if not self._target_favorites:
             return None
 
-        # Only consider avatars in the invite list area (left half, y 0.20-0.90)
-        list_avatars = [a for a in avatars if a.cx < 0.50 and 0.15 < a.cy < 0.90]
-        if not list_avatars:
+        if not invite_btns:
             return None
 
-        for av in list_avatars:
-            bx1 = max(0, int(av.x1 * w))
-            by1 = max(0, int(av.y1 * h))
-            bx2 = min(w, int(av.x2 * w))
-            by2 = min(h, int(av.y2 * h))
-            roi = img[by1:by2, bx1:bx2]
+        img, w, h = self._load_screen_image(screen)
+        if img is None:
+            return None
+
+        candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)
+        for btn in candidate_buttons:
+            roi = self._invite_avatar_roi(img, w, h, btn)
             if roi.size == 0:
                 continue
-            matched_name, score = self._avatar_matcher.match_avatar(
-                roi, self._target_favorites
-            )
-            if matched_name and score > _AVATAR_MATCH_THRESHOLD:
-                self.log(f"FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({av.cx:.2f},{av.cy:.2f})")
-                # Find the invite button closest in Y to this avatar
-                best_btn = None
-                best_dist = 999.0
-                for btn in invite_btns:
-                    dist = abs(btn.cy - av.cy)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_btn = btn
-                if best_btn and best_dist < 0.10:
-                    return best_btn
-                self.log(f"matched avatar but no nearby invite button (dist={best_dist:.2f})")
+            if self._avatar_matcher is not None:
+                matched_name, score = self._avatar_matcher.match_avatar(
+                    roi, self._target_favorites
+                )
+                if matched_name and score > _AVATAR_MATCH_THRESHOLD:
+                    self.log(f"FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
+                    return btn
+
+        try:
+            if self._florence_matcher is None:
+                from vision.florence_vision import get_florence_reference_matcher
+                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
+                self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
+                self.log("Florence reference matcher loaded for cafe invite list")
+        except Exception as e:
+            self.log(f"Florence matcher unavailable in cafe: {e}")
+            self._florence_matcher = None
+
+        if self._florence_matcher is None:
+            return None
+
+        for btn in candidate_buttons[:6]:
+            roi = self._invite_avatar_roi(img, w, h, btn)
+            if roi.size == 0:
+                continue
+            matched_name, score = self._florence_matcher.match_candidate(roi, self._target_favorites)
+            if matched_name and score > 0.5:
+                self.log(f"FLORENCE FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
+                return btn
 
         return None
 
@@ -185,10 +254,22 @@ class CafeSkill(BaseSkill):
                 self.log("earnings popup detected, clicking claim")
                 self._earnings_claimed = True
                 return action_click_box(claim_btn, "claim earnings from popup")
-            # OCR can miss the claim text on some frames; use stable popup button coordinate.
-            self.log("earnings popup detected, claim text missing -> click claim fallback")
+            enabled = self._florence_button_enabled(
+                screen,
+                (0.35, 0.66, 0.66, 0.80),
+                hint="earnings claim button",
+                default=True,
+            )
+            if enabled:
+                self.log("earnings popup detected, claim text missing -> click claim fallback")
+                self._earnings_claimed = True
+                return action_click(0.5, 0.734, "claim earnings fallback")
+            self.log("earnings popup detected but Florence says button is disabled")
             self._earnings_claimed = True
-            return action_click(0.5, 0.734, "claim earnings fallback")
+            close_btn = self._find_close_button(screen)
+            if close_btn:
+                return action_click_box(close_btn, "close earnings popup (disabled)")
+            return action_wait(300, "earnings popup disabled")
 
         # Tutorial/説明 popup (cafe 2F first visit)
         # OCR sometimes only detects single char '明' instead of '說明'.
@@ -206,9 +287,9 @@ class CafeSkill(BaseSkill):
             if confirm:
                 self.log("dismissing tutorial popup")
                 return action_click_box(confirm, "dismiss tutorial")
-            x_btn = screen.find_yolo_one("叉叉", min_conf=0.3)
-            if x_btn:
-                return action_click_yolo(x_btn, "close tutorial X")
+            close_btn = self._find_close_button(screen)
+            if close_btn:
+                return action_click_box(close_btn, "close tutorial X")
 
         # Notification popup (通知) — e.g. invite cooldown, generic alerts
         # Has "通知" title + "確" button, no cancel; always safe to dismiss.
@@ -223,11 +304,11 @@ class CafeSkill(BaseSkill):
                 if self.sub_state == "invite":
                     self._invite_attempted = True
                 return action_click_box(confirm, "dismiss notification")
-            x_btn = screen.find_yolo_one("叉叉", min_conf=0.3)
-            if x_btn:
+            close_btn = self._find_close_button(screen)
+            if close_btn:
                 if self.sub_state == "invite":
                     self._invite_attempted = True
-                return action_click_yolo(x_btn, "close notification X")
+                return action_click_box(close_btn, "close notification X")
 
         # Rank-up / bond level up popup (好感度升級 / 羈絆升級)
         # OCR often misreads 羈絆升級 as 鲜升級 due to stylized font.
@@ -368,10 +449,10 @@ class CafeSkill(BaseSkill):
             self.log(f"earnings 0% ({zero_pct.text}), skipping")
             self._earnings_claimed = True
             # Only close popup if earnings popup is actually open (收益 text visible)
-            if screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
-                x_btn = screen.find_yolo_one("叉叉", min_conf=0.4)
-                if x_btn and 0.15 < x_btn.cy < 0.25:
-                    return action_click_yolo(x_btn, "close earnings popup (0%)")
+            if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
+                close_btn = self._find_close_button(screen)
+                if close_btn:
+                    return action_click_box(close_btn, "close earnings popup (0%)")
             self.sub_state = "invite"
             self._invite_next_state = "headpat"
             self._invite_ticks = 0
@@ -386,7 +467,24 @@ class CafeSkill(BaseSkill):
 
         # If earnings popup is open but no claim button (already claimed?)
         if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
-            # OCR might miss claim text; click known claim position before closing.
+            # OCR might miss claim text. Ask Florence whether the claim button is
+            # enabled before using the fallback click.
+            enabled = self._florence_button_enabled(
+                screen,
+                (0.35, 0.66, 0.66, 0.80),
+                hint="earnings claim button",
+                default=True,
+            )
+            if not enabled:
+                self.log("earnings popup button appears disabled, skipping claim")
+                self._earnings_claimed = True
+                close_btn = self._find_close_button(screen)
+                if close_btn:
+                    return action_click_box(close_btn, "close earnings popup (disabled)")
+                self.sub_state = "invite"
+                self._invite_next_state = "headpat"
+                self._invite_ticks = 0
+                return action_wait(300, "earnings button disabled, skipping")
             self.log("earnings popup open but no claim OCR, clicking fallback claim")
             self._earnings_claimed = True
             return action_click(0.5, 0.734, "claim earnings fallback")
@@ -504,10 +602,10 @@ class CafeSkill(BaseSkill):
 
         # Close any leftover earnings popup before invite (first tick only)
         if self._invite_ticks == 1:
-            if screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
-                x_btn = screen.find_yolo_one("叉叉", min_conf=0.4)
-                if x_btn and 0.15 < x_btn.cy < 0.25:
-                    return action_click_yolo(x_btn, "close earnings popup before invite")
+            if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
+                close_btn = self._find_close_button(screen)
+                if close_btn:
+                    return action_click_box(close_btn, "close earnings popup before invite")
 
         # Stage 0: Open the invite ticket panel from cafe main screen
         # Skip if cooldown timer (HH:MM:SS) visible near the REGULAR ticket area.
@@ -541,6 +639,20 @@ class CafeSkill(BaseSkill):
             self._invite_stage = 1
             self._invite_ticks = 0
             return action_click_box(ticket, "open invite ticket")
+
+        # OCR found no usable ticket text. Ask Florence whether the regular invite
+        # ticket area looks disabled / on cooldown before waiting longer.
+        invite_enabled = self._florence_button_enabled(
+            screen,
+            (0.55, 0.88, 0.78, 0.98),
+            hint="regular invite ticket",
+            default=True,
+        )
+        if not invite_enabled:
+            self.log("invite ticket appears disabled/cooldown, skipping invite")
+            self._invite_attempted = True
+            self.sub_state = self._invite_next_state
+            return action_wait(300, "invite ticket disabled")
 
         # Also check if invite list is already open (e.g. from previous attempt)
         invite_btn = screen.find_any_text(
@@ -719,13 +831,20 @@ class CafeSkill(BaseSkill):
             self.log("back in lobby, cafe done")
             return action_done("cafe complete")
 
-        # Click back button or home button if YOLO detects them
-        back = screen.find_yolo_one("返回键", min_conf=0.3)
+        back = self._find_florence_hit(
+            screen,
+            ["back button icon", "back arrow button", "return button"],
+            region=(0.0, 0.0, 0.18, 0.18),
+        )
         if back:
-            return action_click_yolo(back, "cafe exit: click back button")
+            return action_click_box(back, "cafe exit: click back button")
 
-        home = screen.find_yolo_one("主界面按钮", min_conf=0.3)
+        home = self._find_florence_hit(
+            screen,
+            ["home button icon", "main lobby home button"],
+            region=(0.82, 0.0, 1.0, 0.18),
+        )
         if home:
-            return action_click_yolo(home, "cafe exit: click home button")
+            return action_click_box(home, "cafe exit: click home button")
 
         return action_back("cafe exit: press ESC")
