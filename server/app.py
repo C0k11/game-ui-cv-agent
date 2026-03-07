@@ -8,6 +8,8 @@ import hashlib
 import threading
 import ctypes
 import traceback
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -37,6 +39,25 @@ CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
 
 APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 
+_SKILL_OPTIONS: List[Dict[str, str]] = [
+    {"id": "lobby", "label": "大厅恢复 / 弹窗清理"},
+    {"id": "ap_overflow", "label": "高 AP 溢出保护"},
+    {"id": "cafe", "label": "咖啡厅收益 / 邀请 / 摸头"},
+    {"id": "schedule", "label": "课程表"},
+    {"id": "club", "label": "社团 AP"},
+    {"id": "shop", "label": "商店日常"},
+    {"id": "craft", "label": "制造"},
+    {"id": "event_farming", "label": "活动清体力"},
+    {"id": "bounty", "label": "悬赏通缉"},
+    {"id": "arena", "label": "战术对抗赛"},
+    {"id": "mail", "label": "邮件领取"},
+    {"id": "daily_tasks", "label": "每日任务"},
+    {"id": "hard_farming", "label": "Hard 刷取"},
+    {"id": "event_farming_2", "label": "二次回马枪清体力"},
+]
+_DEFAULT_SKILL_ORDER = [item["id"] for item in _SKILL_OPTIONS]
+_VALID_SKILL_IDS = set(_DEFAULT_SKILL_ORDER)
+
 # DXcam capture state
 _CAPTURE_LOCK = threading.Lock()
 _CAPTURE_THREAD = None
@@ -55,6 +76,181 @@ _LAST_PIPELINE_ERROR = ""
 _DISPLAY_SYNC_HZ = 240.0
 _INPUT_POLL_HZ = 8000.0
 _TIMER_RES_ENABLED = False
+_PIPELINE_RUN_META: Dict[str, Any] = {}
+
+
+def _normalize_profile_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if not name:
+        return "default"
+    return name[:64]
+
+
+def _normalize_skill_order(values: Any) -> List[str]:
+    order: List[str] = []
+    seen: Set[str] = set()
+    if isinstance(values, list):
+        for item in values:
+            skill_id = str(item or "").strip()
+            if skill_id in _VALID_SKILL_IDS and skill_id not in seen:
+                order.append(skill_id)
+                seen.add(skill_id)
+    if not order:
+        return list(_DEFAULT_SKILL_ORDER)
+    return order
+
+
+def _default_profile_settings() -> Dict[str, Any]:
+    return {
+        "account_label": "",
+        "game_exe_path": "",
+        "window_title": "MuMu",
+        "goal": "",
+        "steps": 0,
+        "step_sleep_s": 0.6,
+        "dry_run": True,
+        "forbid_premium_currency": True,
+        "exploration_click": False,
+        "notify_on_finish": False,
+        "notify_webhook_url": "",
+        "target_favorites": [],
+        "skill_order": list(_DEFAULT_SKILL_ORDER),
+    }
+
+
+def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
+    raw = dict(value or {})
+    data = _default_profile_settings()
+    data["account_label"] = str(raw.get("account_label") or "").strip()
+    data["game_exe_path"] = str(raw.get("game_exe_path") or "").strip()
+    data["window_title"] = str(raw.get("window_title") or "MuMu").strip() or "MuMu"
+    data["goal"] = str(raw.get("goal") or "").strip()
+    try:
+        data["steps"] = max(0, int(raw.get("steps") or 0))
+    except Exception:
+        data["steps"] = 0
+    try:
+        data["step_sleep_s"] = max(0.0, float(raw.get("step_sleep_s") or 0.6))
+    except Exception:
+        data["step_sleep_s"] = 0.6
+    data["dry_run"] = bool(raw.get("dry_run") if raw.get("dry_run") is not None else True)
+    data["forbid_premium_currency"] = bool(raw.get("forbid_premium_currency") if raw.get("forbid_premium_currency") is not None else True)
+    data["exploration_click"] = bool(raw.get("exploration_click") if raw.get("exploration_click") is not None else False)
+    data["notify_on_finish"] = bool(raw.get("notify_on_finish") if raw.get("notify_on_finish") is not None else False)
+    data["notify_webhook_url"] = str(raw.get("notify_webhook_url") or "").strip()
+    favs: List[str] = []
+    seen_favs: Set[str] = set()
+    for item in raw.get("target_favorites") or []:
+        name = str(item or "").strip()
+        if not name or name in seen_favs:
+            continue
+        favs.append(name)
+        seen_favs.add(name)
+    data["target_favorites"] = favs
+    data["skill_order"] = _normalize_skill_order(raw.get("skill_order"))
+    return data
+
+
+def _load_app_config() -> Dict[str, Any]:
+    data: Dict[str, Any] = {}
+    if APP_CONFIG_PATH.exists():
+        try:
+            data = json.loads(APP_CONFIG_PATH.read_text("utf-8"))
+        except Exception:
+            data = {}
+    profiles_raw = data.get("profiles")
+    profiles: Dict[str, Any] = profiles_raw if isinstance(profiles_raw, dict) else {}
+    if not profiles:
+        profiles = {"default": {}}
+    active_profile = _normalize_profile_name(data.get("active_profile") or next(iter(profiles.keys()), "default"))
+    normalized_profiles: Dict[str, Dict[str, Any]] = {}
+    for profile_name, profile_data in profiles.items():
+        normalized_profiles[_normalize_profile_name(profile_name)] = _normalize_profile_settings(profile_data)
+    if active_profile not in normalized_profiles:
+        normalized_profiles[active_profile] = _default_profile_settings()
+    root_favorites = data.get("target_favorites")
+    if isinstance(root_favorites, list) and not normalized_profiles[active_profile].get("target_favorites"):
+        normalized_profiles[active_profile]["target_favorites"] = _normalize_profile_settings({"target_favorites": root_favorites})["target_favorites"]
+    data["profiles"] = normalized_profiles
+    data["active_profile"] = active_profile
+    data["target_favorites"] = list(normalized_profiles[active_profile].get("target_favorites") or [])
+    return data
+
+
+def _save_app_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = _load_app_config()
+    cfg.update(dict(data or {}))
+    active_profile = _normalize_profile_name(cfg.get("active_profile") or "default")
+    profiles_raw = cfg.get("profiles") or {}
+    normalized_profiles: Dict[str, Dict[str, Any]] = {}
+    for profile_name, profile_data in dict(profiles_raw).items():
+        normalized_profiles[_normalize_profile_name(profile_name)] = _normalize_profile_settings(profile_data)
+    if active_profile not in normalized_profiles:
+        normalized_profiles[active_profile] = _default_profile_settings()
+    cfg["profiles"] = normalized_profiles
+    cfg["active_profile"] = active_profile
+    cfg["target_favorites"] = list(normalized_profiles[active_profile].get("target_favorites") or [])
+    APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    APP_CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), "utf-8")
+    return cfg
+
+
+def _get_active_profile_settings() -> tuple[str, Dict[str, Any], Dict[str, Any]]:
+    cfg = _load_app_config()
+    active_profile = _normalize_profile_name(cfg.get("active_profile") or "default")
+    profiles = cfg.get("profiles") or {}
+    profile = _normalize_profile_settings(profiles.get(active_profile) or {})
+    return active_profile, profile, cfg
+
+
+def _post_json(url: str, payload: Dict[str, Any]) -> None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        str(url),
+        data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        resp.read(1)
+
+
+def _notify_pipeline_finished(status_name: str, summary: str, progress: Optional[Dict[str, Any]], meta: Dict[str, Any]) -> None:
+    webhook_url = str(meta.get("notify_webhook_url") or "").strip()
+    if not webhook_url or not bool(meta.get("notify_on_finish")):
+        return
+    account_label = str(meta.get("account_label") or meta.get("profile_name") or "default").strip() or "default"
+    profile_name = str(meta.get("profile_name") or "default").strip() or "default"
+    results = list((progress or {}).get("results") or [])
+    total_skills = int((progress or {}).get("total_skills") or len(meta.get("skill_names") or []))
+    done_count = len([row for row in results if str(row.get("status") or "") == "done"])
+    text = "\n".join([
+        f"[私人碧蓝档案助手] {account_label}",
+        f"状态: {status_name}",
+        f"档案: {profile_name}",
+        f"完成技能: {done_count}/{total_skills}",
+        summary or "(no summary)",
+    ])
+    low = webhook_url.lower()
+    if "discord.com/api/webhooks" in low:
+        _post_json(webhook_url, {"content": text})
+        return
+    if "api.telegram.org" in low and "sendmessage" in low:
+        _post_json(webhook_url, {"text": text})
+        return
+    _post_json(
+        webhook_url,
+        {
+            "title": f"私人碧蓝档案助手 · {account_label}",
+            "status": status_name,
+            "profile_name": profile_name,
+            "account_label": account_label,
+            "done_skills": done_count,
+            "total_skills": total_skills,
+            "summary": summary,
+            "results": results,
+        },
+    )
 
 
 def _enable_high_resolution_timer() -> None:
@@ -171,19 +367,38 @@ except Exception as e:
 
 def _start_pipeline(*, payload: Dict[str, Any]) -> None:
     """Start the DailyPipeline in a background thread."""
-    global _PIPELINE, _PIPELINE_THREAD, _PIPELINE_RUNNING, _PIPELINE_STATUS
+    global _PIPELINE, _PIPELINE_THREAD, _PIPELINE_RUNNING, _PIPELINE_STATUS, _PIPELINE_RUN_META
     with _PIPELINE_LOCK:
         if _PIPELINE_RUNNING:
             return
         from brain.pipeline import DailyPipeline
-        _PIPELINE = DailyPipeline()
+        active_profile, profile_settings, _ = _get_active_profile_settings()
+        skill_names = _normalize_skill_order(payload.get("skill_order") or profile_settings.get("skill_order"))
+        _PIPELINE = DailyPipeline(skill_names=skill_names)
         _PIPELINE.start()
         _PIPELINE_RUNNING = True
-        _PIPELINE_STATUS = {"running": True, "error": "", "ticks": 0}
 
-        window_title = str(payload.get("window_title") or "Blue Archive")
-        step_sleep = float(payload.get("step_sleep_s") or 0.6)
-        dry_run = bool(payload.get("dry_run") if payload.get("dry_run") is not None else True)
+        window_title = str(payload.get("window_title") or profile_settings.get("window_title") or "Blue Archive")
+        step_sleep = float(payload.get("step_sleep_s") or profile_settings.get("step_sleep_s") or 0.6)
+        dry_run = bool(payload.get("dry_run") if payload.get("dry_run") is not None else profile_settings.get("dry_run", True))
+        account_label = str(payload.get("account_label") or profile_settings.get("account_label") or active_profile).strip()
+        _PIPELINE_RUN_META = {
+            "profile_name": active_profile,
+            "account_label": account_label,
+            "notify_on_finish": bool(payload.get("notify_on_finish") if payload.get("notify_on_finish") is not None else profile_settings.get("notify_on_finish")),
+            "notify_webhook_url": str(payload.get("notify_webhook_url") or profile_settings.get("notify_webhook_url") or "").strip(),
+            "skill_names": list(skill_names),
+            "window_title": window_title,
+            "dry_run": dry_run,
+        }
+        _PIPELINE_STATUS = {
+            "running": True,
+            "error": "",
+            "ticks": 0,
+            "profile_name": active_profile,
+            "account_label": account_label,
+            "skill_order": list(skill_names),
+        }
 
         _PIPELINE_THREAD = threading.Thread(
             target=_pipeline_worker,
@@ -215,6 +430,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             capture_client, find_window_by_title_substring,
             find_largest_visible_child,
         )
+        from mumu_runner import AdbInput
         import cv2
         import numpy as np
 
@@ -251,7 +467,49 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         except Exception as e:
             _log_pipeline(f"YOLO overlay unavailable: {e}")
 
+        adb = None
+        android_w, android_h = 1280, 720
+        if not dry_run:
+            try:
+                adb_serial = str(os.environ.get("ADB_SERIAL") or "").strip()
+                adb_host = "127.0.0.1"
+                adb_port = 7555
+                if ":" in adb_serial:
+                    host_part, port_part = adb_serial.rsplit(":", 1)
+                    adb_host = host_part.strip() or adb_host
+                    try:
+                        adb_port = max(1, int(port_part.strip()))
+                    except Exception:
+                        pass
+                adb = AdbInput(host=adb_host, port=adb_port)
+                if not adb.connect():
+                    _log_pipeline(f"ADB connect failed ({adb_host}:{adb_port}); switching pipeline to dry-run")
+                    adb = None
+                    dry_run = True
+                else:
+                    try:
+                        android_w, android_h = adb.screen_size()
+                    except Exception:
+                        pass
+                    _log_pipeline(f"ADB ready {adb_host}:{adb_port} size={android_w}x{android_h}")
+            except Exception as e:
+                _log_pipeline(f"ADB unavailable: {e}; switching pipeline to dry-run")
+                adb = None
+                dry_run = True
+
         _log_pipeline(f"Pipeline worker started. window='{window_title}' hwnd={hwnd} render={render_hwnd} sleep={step_sleep} dry_run={dry_run}")
+
+        # OCR + YOLO lazy-load on first use (no pre-warm to avoid deadlocks).
+        # Florence pre-warm in background thread (needed for Lobby + Schedule avatar matching).
+        def _prewarm_florence():
+            try:
+                from vision.florence_vision import get_florence_vision
+                fv = get_florence_vision()
+                print(f"[Pipeline] Florence pre-warm: ready (device={fv.cfg.device})", flush=True)
+            except Exception as e:
+                print(f"[Pipeline] Florence pre-warm failed: {e}", flush=True)
+        threading.Thread(target=_prewarm_florence, daemon=True).start()
+        _florence_prewarm_started = True
 
         while _PIPELINE_RUNNING:
             pipe = None
@@ -260,29 +518,37 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             if pipe is None or not pipe.is_running:
                 break
 
-            # 1. Capture screenshot from render child (PIL Image)
-            try:
-                pil_img = capture_client(render_hwnd)
-            except OSError:
-                # Handle invalid/stale hwnd — re-resolve
-                render_hwnd = hwnd
+            # 1. Capture screenshot. Prefer direct ADB screencap because MuMu
+            # window/DC capture may return occluded desktop content or black frames.
+            frame = None
+            if adb is not None:
                 try:
-                    new_hwnd = find_window_by_title_substring(window_title)
-                    if new_hwnd:
-                        hwnd = new_hwnd
-                        child = find_largest_visible_child(int(hwnd))
-                        render_hwnd = int(child) if child else int(hwnd)
+                    frame = adb.capture_frame()
                 except Exception:
-                    pass
-                _high_res_sleep(0.25)
-                continue
+                    frame = None
+            if frame is None:
+                try:
+                    pil_img = capture_client(render_hwnd)
+                except OSError:
+                    # Handle invalid/stale hwnd — re-resolve
+                    render_hwnd = hwnd
+                    try:
+                        new_hwnd = find_window_by_title_substring(window_title)
+                        if new_hwnd:
+                            hwnd = new_hwnd
+                            child = find_largest_visible_child(int(hwnd))
+                            render_hwnd = int(child) if child else int(hwnd)
+                    except Exception:
+                        pass
+                    _high_res_sleep(0.25)
+                    continue
 
-            if pil_img is None:
-                _high_res_sleep(0.25)
-                continue
+                if pil_img is None:
+                    _high_res_sleep(0.25)
+                    continue
 
-            # Convert PIL -> numpy BGR for cv2
-            frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                # Convert PIL -> numpy BGR for cv2
+                frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
             # Save to temp file for trajectory
             tmp_path = str(REPO_ROOT / "data" / "_pipeline_frame.jpg")
@@ -297,17 +563,51 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             _log_pipeline(f"tick={pipe._total_ticks} action={action_type} reason={reason}")
 
-            # Update YOLO overlay with latest detections
+            # Model pre-warm threads already started at worker init (above main loop)
+
+            # Update overlay with latest detections (YOLO + Florence + template)
+            # Only show headpat boxes when in Cafe skill to avoid phantom boxes
             if _overlay and _overlay.is_alive:
                 screen = pipe.last_screen
-                if screen and screen.yolo_boxes:
-                    _overlay.update(screen.yolo_boxes)
+                current_skill_name = pipe.current_skill.name if pipe.current_skill else ""
+                in_cafe = current_skill_name == "Cafe"
+                if screen and (screen.yolo_boxes or screen.florence_boxes or screen.template_hits):
+                    overlay_boxes: List[Any] = []
+                    for yb in screen.yolo_boxes:
+                        # Filter headpat_bubble boxes to cafe-only
+                        if hasattr(yb, "cls_name") and "headpat" in yb.cls_name.lower() and not in_cafe:
+                            continue
+                        overlay_boxes.append(yb)
+                    overlay_boxes.extend(
+                        {
+                            "cls": f"Florence:{box.text}",
+                            "conf": box.confidence,
+                            "x1": box.x1,
+                            "y1": box.y1,
+                            "x2": box.x2,
+                            "y2": box.y2,
+                        }
+                        for box in screen.florence_boxes
+                    )
+                    if in_cafe:
+                        overlay_boxes.extend(
+                            {
+                                "cls": h.label,
+                                "conf": h.confidence,
+                                "x1": h.x1,
+                                "y1": h.y1,
+                                "x2": h.x2,
+                                "y2": h.y2,
+                            }
+                            for h in screen.template_hits
+                        )
+                    _overlay.update(overlay_boxes)
                 else:
                     _overlay.update([])
 
             # 3. Execute action (unless dry_run)
             if not dry_run and action_type != "done":
-                _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0])
+                _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
 
             # 4. Sleep
             if action_type == "wait":
@@ -321,11 +621,34 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _log_pipeline(f"Pipeline worker error: {e}")
         traceback.print_exc()
     finally:
+        summary = ""
+        progress = None
+        pipe = None
+        with _PIPELINE_LOCK:
+            pipe = _PIPELINE
+        if pipe is not None:
+            try:
+                summary = pipe.get_summary()
+            except Exception:
+                summary = ""
+            try:
+                progress = pipe.progress
+            except Exception:
+                progress = None
         if _overlay:
             try:
                 _overlay.stop()
             except Exception:
                 pass
+        try:
+            status_name = "error" if _PIPELINE_STATUS.get("error") else "stopped"
+            total_skills = int((progress or {}).get("total_skills") or 0)
+            done_skills = len(list((progress or {}).get("results") or []))
+            if status_name != "error" and total_skills > 0 and done_skills >= total_skills:
+                status_name = "completed"
+            _notify_pipeline_finished(status_name, summary, progress, dict(_PIPELINE_RUN_META))
+        except Exception as notify_err:
+            _log_pipeline(f"Pipeline notify skipped: {notify_err}")
         _PIPELINE_RUNNING = False
         _PIPELINE_STATUS["running"] = False
         _log_pipeline("Pipeline worker stopped.")
@@ -346,7 +669,7 @@ def _MAKELPARAM(x: int, y: int) -> int:
     return (int(y) << 16) | (int(x) & 0xFFFF)
 
 
-def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_h: int) -> None:
+def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_h: int, adb: Any = None, android_w: int = 0, android_h: int = 0) -> None:
     """Convert normalized pipeline action to real input.
 
     Uses PostMessage to the render child window for reliable emulator input.
@@ -367,6 +690,35 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
         _dpi_set = True
 
     action_type = action.get("action", "")
+
+    if adb is not None and android_w > 0 and android_h > 0:
+        if action_type == "click":
+            nx, ny = action.get("target", [0.5, 0.5])
+            adb.tap(int(nx * android_w), int(ny * android_h))
+            return
+        if action_type == "back":
+            adb.back()
+            return
+        if action_type == "swipe":
+            frm = action.get("from", [0.5, 0.5])
+            to = action.get("to", [0.5, 0.5])
+            dur_ms = int(action.get("duration_ms", 400) or 400)
+            adb.swipe(
+                int(frm[0] * android_w), int(frm[1] * android_h),
+                int(to[0] * android_w), int(to[1] * android_h),
+                dur_ms,
+            )
+            return
+        if action_type == "scroll":
+            nx, ny = action.get("target", [0.5, 0.5])
+            clicks = int(action.get("clicks", -3) or -3)
+            delta = max(80, min(int(android_h * 0.28), 40 * max(1, abs(clicks))))
+            x = int(nx * android_w)
+            y = int(ny * android_h)
+            y1 = max(0, min(android_h - 1, y + delta if clicks < 0 else y - delta))
+            y2 = max(0, min(android_h - 1, y - delta if clicks < 0 else y + delta))
+            adb.swipe(x, y1, x, y2, max(250, min(900, 120 + abs(clicks) * 40)))
+            return
 
     # Bring top-level parent window to foreground
     fg_hwnd = _parent_hwnd if _parent_hwnd else hwnd
@@ -565,6 +917,7 @@ def status() -> Dict[str, Any]:
         "agent_type": "pipeline",
         "pipeline_status": _PIPELINE_STATUS,
         "pipeline_progress": progress,
+        "pipeline_run_meta": _PIPELINE_RUN_META,
         "last_error": last_error,
     }
 
@@ -593,28 +946,64 @@ def _ocr_cache_path(rel: str) -> Path:
 
 # ── Config / Favorites ────────────────────────────────────────────────
 
+@app.get("/api/v1/config")
+def get_app_config() -> Dict[str, Any]:
+    active_profile, profile, cfg = _get_active_profile_settings()
+    return {
+        "active_profile": active_profile,
+        "profile": profile,
+        "profiles": cfg.get("profiles") or {},
+        "skill_options": list(_SKILL_OPTIONS),
+    }
+
+
+@app.post("/api/v1/config")
+def set_app_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = _load_app_config()
+    profiles = dict(cfg.get("profiles") or {})
+    if isinstance(payload.get("profiles"), dict):
+        profiles = { _normalize_profile_name(name): _normalize_profile_settings(data) for name, data in dict(payload.get("profiles") or {}).items() }
+    target_profile = _normalize_profile_name(payload.get("profile_name") or payload.get("active_profile") or cfg.get("active_profile") or "default")
+    active_profile = _normalize_profile_name(payload.get("active_profile") or target_profile)
+    if target_profile not in profiles:
+        profiles[target_profile] = _default_profile_settings()
+    if isinstance(payload.get("profile"), dict):
+        merged = dict(profiles.get(target_profile) or {})
+        merged.update(dict(payload.get("profile") or {}))
+        profiles[target_profile] = _normalize_profile_settings(merged)
+    delete_profile = _normalize_profile_name(payload.get("delete_profile") or "") if payload.get("delete_profile") else ""
+    if delete_profile and delete_profile in profiles and len(profiles) > 1:
+        del profiles[delete_profile]
+        if active_profile == delete_profile:
+            active_profile = next(iter(profiles.keys()), "default")
+    cfg["profiles"] = profiles
+    cfg["active_profile"] = active_profile if active_profile in profiles else next(iter(profiles.keys()), "default")
+    saved = _save_app_config(cfg)
+    active_profile, profile, cfg = _get_active_profile_settings()
+    return {
+        "ok": True,
+        "active_profile": active_profile,
+        "profile": profile,
+        "profiles": cfg.get("profiles") or {},
+        "skill_options": list(_SKILL_OPTIONS),
+        "saved": saved.get("active_profile") == active_profile,
+    }
+
 @app.get("/api/v1/config/favorites")
 def get_favorites() -> Dict[str, Any]:
-    if not APP_CONFIG_PATH.exists():
-        return {"target_favorites": []}
-    try:
-        data = json.loads(APP_CONFIG_PATH.read_text("utf-8"))
-        return {"target_favorites": data.get("target_favorites", [])}
-    except Exception:
-        return {"target_favorites": []}
+    active_profile, profile, _ = _get_active_profile_settings()
+    return {"active_profile": active_profile, "target_favorites": profile.get("target_favorites", [])}
 
 
 @app.post("/api/v1/config/favorites")
 def set_favorites(payload: Dict[str, Any]) -> Dict[str, Any]:
-    data = {}
-    if APP_CONFIG_PATH.exists():
-        try:
-            data = json.loads(APP_CONFIG_PATH.read_text("utf-8"))
-        except Exception:
-            pass
-    data["target_favorites"] = payload.get("target_favorites", [])
-    APP_CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
-    return {"status": "ok"}
+    active_profile, profile, cfg = _get_active_profile_settings()
+    profiles = dict(cfg.get("profiles") or {})
+    merged = dict(profile)
+    merged["target_favorites"] = payload.get("target_favorites", [])
+    profiles[active_profile] = _normalize_profile_settings(merged)
+    _save_app_config({"profiles": profiles, "active_profile": active_profile})
+    return {"status": "ok", "active_profile": active_profile, "target_favorites": profiles[active_profile].get("target_favorites", [])}
 
 
 # ── Characters ────────────────────────────────────────────────────────
@@ -1141,23 +1530,24 @@ def dataset_ocr_batch(payload: Dict[str, Any]):
             "total_texts": total_texts}
 
 
-# ── Screen Capture APIs (BitBlt) ──────────────────────────────────────
+# ── Screen Capture APIs (DXcam) ──────────────────────────────────────
 
 def _capture_worker(dataset_name: str, interval: float, window_title: str):
-    """Capture game window via BitBlt (same method as mumu_runner.py).
+    """Capture game screen via DXcam (Desktop Duplication API).
 
-    Previous implementation used DXcam which had DPI scaling issues with
-    MuMu emulator, causing cropped/misaligned screenshots. BitBlt captures
-    the correct full game client area regardless of DPI settings.
+    DXcam captures the monitor output directly, which works for GPU-rendered
+    MuMu windows as long as they are visible on screen.
     """
     global _CAPTURE_RUNNING, _CAPTURE_STATUS
     try:
         import cv2
         import numpy as np
+        import dxcam
+        import ctypes
+        import ctypes.wintypes as wt
         from scripts.win_capture import (
             find_window_by_title_substring,
             find_largest_visible_child,
-            capture_client,
         )
 
         hwnd = find_window_by_title_substring(window_title)
@@ -1167,9 +1557,21 @@ def _capture_worker(dataset_name: str, interval: float, window_title: str):
             _CAPTURE_RUNNING = False
             return
 
-        # For MuMu, the game renders in the largest visible child window
         child = find_largest_visible_child(hwnd)
         target_hwnd = child if child else hwnd
+
+        # Get screen-space rect for DXcam region
+        rc = wt.RECT()
+        ctypes.windll.user32.GetWindowRect(target_hwnd, ctypes.byref(rc))
+        region = (rc.left, rc.top, rc.right, rc.bottom)
+
+        camera = dxcam.create(output_idx=0, output_color="BGR")
+        test_frame = camera.grab(region=region)
+        if test_frame is None:
+            _CAPTURE_STATUS["error"] = "DXcam grab returned None"
+            _CAPTURE_STATUS["running"] = False
+            _CAPTURE_RUNNING = False
+            return
 
         out_dir = RAW_IMAGES_DIR / dataset_name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1180,19 +1582,17 @@ def _capture_worker(dataset_name: str, interval: float, window_title: str):
         while _CAPTURE_RUNNING:
             t0 = time.time()
             try:
-                pil_img = capture_client(target_hwnd)
-                frame_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-                fp = out_dir / f"frame_{count:06d}.jpg"
-                cv2.imwrite(str(fp), frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-                count += 1
-                _CAPTURE_STATUS["frames"] = count
+                # Re-read window rect in case it moved
+                ctypes.windll.user32.GetWindowRect(target_hwnd, ctypes.byref(rc))
+                region = (rc.left, rc.top, rc.right, rc.bottom)
+                frame = camera.grab(region=region)
+                if frame is not None:
+                    fp = out_dir / f"frame_{count:06d}.jpg"
+                    cv2.imwrite(str(fp), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    count += 1
+                    _CAPTURE_STATUS["frames"] = count
             except Exception as cap_err:
                 _CAPTURE_STATUS["error"] = f"capture error: {cap_err}"
-                # Re-find window in case it was resized/moved
-                hwnd = find_window_by_title_substring(window_title)
-                if hwnd:
-                    child = find_largest_visible_child(hwnd)
-                    target_hwnd = child if child else hwnd
             elapsed = time.time() - t0
             time.sleep(max(0, interval - elapsed))
 
@@ -1278,6 +1678,20 @@ def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     global _LAST_PIPELINE_ERROR
     _LAST_PIPELINE_ERROR = ""
+    active_profile, profile_settings, cfg = _get_active_profile_settings()
+    effective_payload = dict(profile_settings)
+    effective_payload.update(dict(payload or {}))
+    if payload.get("active_profile"):
+        active_profile = _normalize_profile_name(payload.get("active_profile"))
+        cfg["active_profile"] = active_profile
+    profiles = dict(cfg.get("profiles") or {})
+    profiles[active_profile] = _normalize_profile_settings(effective_payload)
+    cfg["profiles"] = profiles
+    cfg["active_profile"] = active_profile
+    _save_app_config(cfg)
+    effective_payload["active_profile"] = active_profile
+    effective_payload["profile_name"] = active_profile
+    effective_payload["skill_order"] = _normalize_skill_order(effective_payload.get("skill_order"))
     # --- clear logs ---
     try:
         for fn in ("agent.out.log", "agent.err.log"):
@@ -1290,7 +1704,7 @@ def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     # --- auto-launch game ---
     _game_launch_status = ""
     try:
-        _game_launch_status = _maybe_launch_game(str(payload.get("game_exe_path") or ""))
+        _game_launch_status = _maybe_launch_game(str(effective_payload.get("game_exe_path") or ""))
     except Exception:
         _game_launch_status = f"exception: {traceback.format_exc(limit=5)}"
     try:
@@ -1307,7 +1721,7 @@ def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
         pass
     # --- start new pipeline ---
     try:
-        _start_pipeline(payload=payload)
+        _start_pipeline(payload=effective_payload)
     except Exception:
         _LAST_PIPELINE_ERROR = traceback.format_exc(limit=20)
     return status()

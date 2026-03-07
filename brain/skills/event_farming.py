@@ -261,19 +261,29 @@ class EventFarmingSkill(BaseSkill):
             # If "距離獎勵" is visible, that's the OLD event reward claim — wait.
 
             # Check for old event reward banner → wait for rotation
+            # Also check for "距離獎勵領取結束" which OCR may split into partial matches
             old_reward = screen.find_any_text(
-                ["距離獎勵", "距离奖励", "獎勵領取", "奖励领取"],
-                region=(0.75, 0.0, 1.0, 0.25), min_conf=0.4
+                ["距離獎勵", "距离奖励", "獎勵領取", "奖励领取", "獎勵結束", "奖励结束"],
+                region=(0.55, 0.0, 1.0, 0.30), min_conf=0.4
             )
             if old_reward:
-                self.log("old event reward banner visible, waiting for rotation")
+                self.log(f"old event reward banner visible ('{old_reward.text}'), waiting for rotation")
                 return action_wait(1500, "waiting for event banner to rotate")
 
             # Check for current event banner → click it
+            # Must contain "還剩" or "还剩" (time remaining) to distinguish from reward banners
             current_event = screen.find_any_text(
-                ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩"],
-                region=(0.75, 0.0, 1.0, 0.25), min_conf=0.4
+                ["距離結束還剩", "距离结束还剩"],
+                region=(0.55, 0.0, 1.0, 0.30), min_conf=0.4
             )
+            if not current_event:
+                # Looser match but verify it has "剩" (remaining) not "獎" (reward)
+                maybe = screen.find_any_text(
+                    ["結束還剩", "结束还剩"],
+                    region=(0.55, 0.0, 1.0, 0.30), min_conf=0.4
+                )
+                if maybe and "獎" not in maybe.text and "奖" not in maybe.text:
+                    current_event = maybe
             if current_event:
                 self.log(f"current event banner: '{current_event.text}', clicking")
                 # Click the event banner area (below the timer text)
@@ -361,7 +371,11 @@ class EventFarmingSkill(BaseSkill):
             min_conf=0.5
         )
         if expired:
-            self.log(f"event EXPIRED: '{expired.text}', backing out")
+            self._expired_count = getattr(self, '_expired_count', 0) + 1
+            if self._expired_count >= 3:
+                self.log(f"event EXPIRED ({self._expired_count}x), marking done")
+                return action_done("event expired, skipping")
+            self.log(f"event EXPIRED: '{expired.text}', backing out ({self._expired_count})")
             return action_back("back from expired event")
 
         # ── Non-夏莱 event type: Story/Quest/Challenge tabs ──

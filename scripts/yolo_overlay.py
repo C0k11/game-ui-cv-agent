@@ -1,11 +1,19 @@
 """Transparent YOLO bounding-box overlay on game window.
 
-Creates a Win32 layered window positioned exactly on top of a target
-game window.  Draws YOLO detection boxes with class labels in real-time.
-The overlay is click-through (WS_EX_TRANSPARENT) so it never interferes
-with game input.
+Architecture (v2 — "cheat-grade" render pipeline):
+  - Detection boxes are stored as **normalized 0-1 coordinates** relative
+    to the game client area.  They are never converted to absolute screen
+    coordinates until the instant of drawing.
+  - A Win32 timer fires at ~240 Hz (4 ms).  Every tick it:
+        1. Reads the game window's current screen position (GetWindowRect).
+        2. Moves the overlay to match (SetWindowPos).
+        3. Invalidates the overlay for a WM_PAINT.
+    Because position is re-read every tick, the overlay "sticks" to the
+    game window with zero perceptible lag — even while dragging.
+  - Box data is pushed from the AI thread via ``update()`` (lock-free
+    swap of a list reference).  The render loop never waits on AI.
 
-Usage (standalone test — draws random boxes on MuMu):
+Usage (standalone test — draws live YOLO boxes on MuMu):
     py scripts/yolo_overlay.py --title "MuMu"
 
 Usage (from code):
@@ -29,6 +37,8 @@ _user32 = ctypes.windll.user32
 _gdi32 = ctypes.windll.gdi32
 _kernel32 = ctypes.windll.kernel32
 
+_LRESULT = getattr(wt, "LRESULT", ctypes.c_ssize_t)
+
 # Window style constants
 WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
@@ -42,6 +52,9 @@ LWA_COLORKEY = 0x00000001
 HWND_TOPMOST = -1
 SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
 
 CS_HREDRAW = 0x0002
 CS_VREDRAW = 0x0001
@@ -62,10 +75,15 @@ DT_LEFT = 0x0000
 DT_NOCLIP = 0x0100
 FW_BOLD = 700
 
+# Timer interval in ms.  4 ms ≈ 250 Hz render refresh.
+_TIMER_MS = 4
+
 WNDPROC = ctypes.WINFUNCTYPE(
-    ctypes.c_long, wt.HWND, ctypes.c_uint, wt.WPARAM, wt.LPARAM
+    _LRESULT, wt.HWND, ctypes.c_uint, wt.WPARAM, wt.LPARAM
 )
 
+_user32.DefWindowProcW.argtypes = [wt.HWND, ctypes.c_uint, wt.WPARAM, wt.LPARAM]
+_user32.DefWindowProcW.restype = _LRESULT
 
 class WNDCLASSEXW(ctypes.Structure):
     _fields_ = [
@@ -82,7 +100,6 @@ class WNDCLASSEXW(ctypes.Structure):
         ("lpszClassName", wt.LPCWSTR),
         ("hIconSm", wt.HICON),
     ]
-
 
 class PAINTSTRUCT(ctypes.Structure):
     _fields_ = [
@@ -107,8 +124,21 @@ def _colorref(r: int, g: int, b: int) -> int:
     return r | (g << 8) | (b << 16)
 
 
+def _is_florence_label(cls_name: str) -> bool:
+    return str(cls_name).startswith("Florence:")
+
+
+def _display_label(cls_name: str) -> str:
+    raw = str(cls_name or "")
+    if _is_florence_label(raw):
+        return f"Florence | {raw.split(':', 1)[1].strip()}"
+    return raw
+
+
 def _class_colorref(cls_name: str) -> int:
     """Vivid, deterministic colour for a YOLO class name."""
+    if _is_florence_label(str(cls_name)):
+        return _colorref(127, 255, 0)
     if cls_name not in _cls_colors:
         h = hash(cls_name) % 360
         r, g, b = colorsys.hsv_to_rgb(h / 360.0, 0.9, 1.0)
@@ -122,7 +152,17 @@ def _class_colorref(cls_name: str) -> int:
 # ── Overlay class ──────────────────────────────────────────────────────
 
 class YoloOverlay:
-    """Transparent overlay window for real-time YOLO bbox visualisation."""
+    """Transparent overlay window for real-time YOLO bbox visualisation.
+
+    Render loop runs at ~250 Hz via Win32 timer.  Every tick:
+      1. Query target window's screen rect (zero-cost Win32 call).
+      2. SetWindowPos to keep overlay pixel-locked on top.
+      3. InvalidateRect → WM_PAINT draws boxes using cached normalized
+         coordinates multiplied by the *current* client size.
+
+    Detection data is pushed from the AI thread via ``update()`` using a
+    simple reference swap (no contention with the render thread).
+    """
 
     def __init__(self, target_hwnd: int):
         self._target_hwnd = int(target_hwnd)
@@ -134,7 +174,16 @@ class YoloOverlay:
         self._wndproc_ref = None          # prevent GC of callback
         self._tx = self._ty = 0
         self._tw = self._th = 0
+        # SORT tracker + velocity prediction + EMA smoothing
+        # max_age=4: survive brief detection gaps
+        # alpha=0.85: tight lock-on (85% new position + 15% old)
+        try:
+            from scripts.box_tracker import BoxTracker
+            self._tracker = BoxTracker(max_age=5, min_hits=1, max_center_dist=1.5, alpha=0.85, high_conf=0.25)
+        except Exception:
+            self._tracker = None
         self._cls_name = f"YoloOverlay_{id(self)}"
+        self._dirty = True                # force first paint
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -158,7 +207,11 @@ class YoloOverlay:
         return self._thread is not None and self._thread.is_alive()
 
     def update(self, yolo_boxes: list) -> None:
-        """Push new detection boxes — thread-safe."""
+        """Push new detection boxes — thread-safe (lock-free swap).
+
+        Runs SORT tracker + exponential smoothing so boxes glide
+        instead of jumping between frames.
+        """
         parsed: List[Tuple[str, float, float, float, float, float]] = []
         for b in yolo_boxes:
             if hasattr(b, "cls_name"):
@@ -170,16 +223,20 @@ class YoloOverlay:
                     b.get("x1", 0), b.get("y1", 0),
                     b.get("x2", 0), b.get("y2", 0),
                 ))
+        # Apply tracker for smooth lock-on effect
+        if self._tracker is not None:
+            parsed = self._tracker.update(parsed)
         with self._lock:
             self._boxes = parsed
-        hwnd = self._overlay_hwnd
-        if hwnd and _user32.IsWindow(hwnd):
-            _user32.InvalidateRect(hwnd, None, True)
+            self._dirty = True
 
     # ── Win32 internals ─────────────────────────────────────────────
 
     def _target_rect(self) -> Tuple[int, int, int, int]:
-        """Screen-space client rect of target window."""
+        """Screen-space client rect of target window.
+
+        Uses ClientToScreen for accurate per-monitor-DPI positioning.
+        """
         try:
             from scripts.win_capture import get_client_rect_on_screen
             r = get_client_rect_on_screen(self._target_hwnd)
@@ -188,16 +245,33 @@ class YoloOverlay:
             return 0, 0, 0, 0
 
     def _sync_position(self) -> None:
+        """Reposition overlay to match target window — called at 250 Hz.
+
+        Always queries the *current* window position so the overlay
+        tracks window drags with sub-frame latency.  Only issues
+        SetWindowPos when position or size actually changed (avoids
+        unnecessary compositor work).
+        """
         x, y, w, h = self._target_rect()
         if w <= 0 or h <= 0:
             return
-        if (x, y, w, h) != (self._tx, self._ty, self._tw, self._th):
+
+        moved = (x != self._tx or y != self._ty)
+        resized = (w != self._tw or h != self._th)
+
+        if moved or resized:
             self._tx, self._ty, self._tw, self._th = x, y, w, h
             _user32.SetWindowPos(
                 self._overlay_hwnd, HWND_TOPMOST,
                 x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW,
             )
-            _user32.InvalidateRect(self._overlay_hwnd, None, True)
+            # Size changed → must repaint (boxes scale with client area)
+            self._dirty = True
+
+        # Always repaint every tick for persistent lock-on visual.
+        # Boxes are drawn fresh each frame and cleared next frame,
+        # giving a continuous "locked on" effect at 250Hz.
+        _user32.InvalidateRect(self._overlay_hwnd, None, False)
 
     def _on_paint(self, hwnd: int) -> None:
         ps = PAINTSTRUCT()
@@ -216,8 +290,8 @@ class YoloOverlay:
             _user32.EndPaint(hwnd, ctypes.byref(ps))
             return
 
-        with self._lock:
-            boxes = list(self._boxes)
+        # Snapshot current boxes (reference read is atomic in CPython)
+        boxes = self._boxes
 
         _gdi32.SetBkMode(hdc, TRANSPARENT_BK)
 
@@ -231,32 +305,59 @@ class YoloOverlay:
 
         null_brush = _gdi32.GetStockObject(NULL_BRUSH)
 
+        def _draw_line(x1: int, y1: int, x2: int, y2: int) -> None:
+            pt = wt.POINT()
+            _gdi32.MoveToEx(hdc, int(x1), int(y1), ctypes.byref(pt))
+            _gdi32.LineTo(hdc, int(x2), int(y2))
+
         for cls_name, conf, bx1, by1, bx2, by2 in boxes:
             px1, py1 = int(bx1 * w), int(by1 * h)
             px2, py2 = int(bx2 * w), int(by2 * h)
             color = _class_colorref(cls_name)
+            label = _display_label(cls_name)
+            is_florence = _is_florence_label(cls_name)
 
-            # Bounding box
-            pen = _gdi32.CreatePen(PS_SOLID, 3, color)
+            pen = _gdi32.CreatePen(PS_SOLID, 3 if is_florence else 3, color)
             old_pen = _gdi32.SelectObject(hdc, pen)
             old_br = _gdi32.SelectObject(hdc, null_brush)
-            _gdi32.Rectangle(hdc, px1, py1, px2, py2)
+            if is_florence:
+                bw = max(1, px2 - px1)
+                bh = max(1, py2 - py1)
+                seg = max(12, min(28, bw // 4, bh // 4))
+                _draw_line(px1, py1, px1 + seg, py1)
+                _draw_line(px1, py1, px1, py1 + seg)
+                _draw_line(px2, py1, px2 - seg, py1)
+                _draw_line(px2, py1, px2, py1 + seg)
+                _draw_line(px1, py2, px1 + seg, py2)
+                _draw_line(px1, py2, px1, py2 - seg)
+                _draw_line(px2, py2, px2 - seg, py2)
+                _draw_line(px2, py2, px2, py2 - seg)
+            else:
+                _gdi32.Rectangle(hdc, px1, py1, px2, py2)
             _gdi32.SelectObject(hdc, old_pen)
             _gdi32.SelectObject(hdc, old_br)
             _gdi32.DeleteObject(pen)
 
-            # Label: background + text
-            label = f"{cls_name} {conf:.2f}"
+            label = f"{label} {conf:.2f}"
             lbl_w = len(label) * (font_h * 6 // 10) + 6
             lbl_h = font_h + 4
-            lbl_rc = wt.RECT(px1, max(0, py1 - lbl_h), px1 + lbl_w, py1)
-            bg = _gdi32.CreateSolidBrush(_colorref(30, 30, 30))
+            lbl_top = max(0, py1 - lbl_h - (2 if is_florence else 0))
+            lbl_bottom = lbl_top + lbl_h
+            lbl_rc = wt.RECT(px1, lbl_top, px1 + lbl_w, lbl_bottom)
+            bg_color = _colorref(12, 24, 12) if is_florence else _colorref(30, 30, 30)
+            bg = _gdi32.CreateSolidBrush(bg_color)
             _user32.FillRect(hdc, ctypes.byref(lbl_rc), bg)
             _gdi32.DeleteObject(bg)
 
+            if is_florence:
+                accent_rc = wt.RECT(px1, lbl_top, px1 + lbl_w, min(lbl_bottom, lbl_top + 3))
+                accent = _gdi32.CreateSolidBrush(color)
+                _user32.FillRect(hdc, ctypes.byref(accent_rc), accent)
+                _gdi32.DeleteObject(accent)
+
             _gdi32.SetTextColor(hdc, color)
-            txt_rc = wt.RECT(px1 + 3, max(0, py1 - lbl_h + 2),
-                             px1 + lbl_w, py1)
+            txt_rc = wt.RECT(px1 + 3, lbl_top + 2,
+                             px1 + lbl_w, lbl_bottom)
             _user32.DrawTextW(hdc, label, -1,
                               ctypes.byref(txt_rc), DT_LEFT | DT_NOCLIP)
 
@@ -267,11 +368,16 @@ class YoloOverlay:
     # ── Thread entry point ──────────────────────────────────────────
 
     def _run(self) -> None:
-        # DPI awareness
+        # DPI awareness (per-monitor v2 for accurate positioning)
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            _user32.SetThreadDpiAwarenessContext.argtypes = (ctypes.c_void_p,)
+            _user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+            _user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
         except Exception:
-            pass
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except Exception:
+                pass
 
         hinstance = _kernel32.GetModuleHandleW(None)
 
@@ -281,9 +387,11 @@ class YoloOverlay:
                 return 0
             if msg == WM_ERASEBKGND:
                 return 1
+            if msg == WM_APP_REDRAW:
+                self._dirty = True
+                return 0
             if msg == WM_TIMER:
                 self._sync_position()
-                _user32.InvalidateRect(hwnd, None, True)
                 return 0
             if msg == WM_CLOSE:
                 _user32.KillTimer(hwnd, 1)
@@ -329,10 +437,11 @@ class YoloOverlay:
             self._overlay_hwnd, _CK, 0, LWA_COLORKEY,
         )
 
-        _user32.SetTimer(self._overlay_hwnd, 1, 4, None)
+        # 250 Hz timer — drives position sync + repaint
+        _user32.SetTimer(self._overlay_hwnd, 1, _TIMER_MS, None)
 
         print(f"[Overlay] Started overlay={self._overlay_hwnd} "
-              f"target={self._target_hwnd} size={w}x{h}")
+              f"target={self._target_hwnd} size={w}x{h} timer={_TIMER_MS}ms")
 
         # Message pump (blocks until WM_QUIT)
         msg = wt.MSG()

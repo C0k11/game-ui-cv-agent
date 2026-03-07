@@ -22,6 +22,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import unquote
 
 from brain.skills.base import (
     BaseSkill, ScreenState, OcrBox,
@@ -53,7 +54,24 @@ def _load_target_favorites() -> List[str]:
         cfg_path = Path(__file__).resolve().parents[2] / "data" / "app_config.json"
         if cfg_path.exists():
             data = json.loads(cfg_path.read_text("utf-8"))
-            return data.get("target_favorites", [])
+            raw = data.get("target_favorites", [])
+            normalized: List[str] = []
+            seen: Set[str] = set()
+            for item in raw:
+                name = str(item or "").strip()
+                if not name:
+                    continue
+                candidates = [name]
+                decoded = unquote(name)
+                if decoded and decoded != name:
+                    candidates.append(decoded)
+                for candidate in candidates:
+                    key = candidate.lower()
+                    if key in seen:
+                        continue
+                    normalized.append(candidate)
+                    seen.add(key)
+            return normalized
     except Exception:
         pass
     return []
@@ -72,7 +90,7 @@ _MAX_LOCATIONS_FULL_CIRCLE = 12
 class ScheduleSkill(BaseSkill):
     def __init__(self):
         super().__init__("Schedule")
-        self.max_ticks = 200
+        self.max_ticks = 120
         self._tickets_used: int = 0
         self._tickets_remaining: int = -1  # -1 = unknown
         self._locations_checked: int = 0
@@ -110,7 +128,6 @@ class ScheduleSkill(BaseSkill):
         self._best_match_score = -1.0
         self._stale_ticks = 0
         self._roster_scan_ticks = 0
-        self._florence_matcher = None
         if self._target_favorites:
             self.log(f"target favorites loaded: {len(self._target_favorites)} characters")
         # Lazy-init avatar matcher
@@ -123,6 +140,11 @@ class ScheduleSkill(BaseSkill):
             except Exception as e:
                 self.log(f"avatar matcher init failed: {e}")
                 self._avatar_matcher = None
+        # Florence matcher is lazily initialized on first use in
+        # _check_roster_avatars() to avoid blocking the pipeline worker
+        # thread during skill reset (model load can take 30-120s).
+        self._florence_matcher = None
+        self._matched_avatar_pos: Optional[Tuple[float, float]] = None  # where the matched avatar is on popup
 
     # ── Ticket parsing ──
 
@@ -142,19 +164,96 @@ class ScheduleSkill(BaseSkill):
 
     # ── Avatar matching ──
 
+    def _fallback_roster_avatar_boxes(self, screen: ScreenState) -> List[OcrBox]:
+        candidates: List[OcrBox] = []
+        seen: Set[Tuple[int, int]] = set()
+        level_hits = [
+            box for box in screen.ocr_boxes
+            if box.confidence >= 0.6 and re.match(r"^L[vV]\.?(\d+)$", box.text.strip())
+        ]
+        for level in level_hits:
+            card_x1 = max(0.06, level.x1 - 0.02)
+            card_y1 = max(0.18, level.y1 - 0.01)
+            card_x2 = min(0.93, card_x1 + 0.28)
+            card_y2 = min(0.84, card_y1 + 0.18)
+            locked = any(
+                hit.confidence >= 0.6
+                and "需要RANK" in hit.text
+                and card_x1 <= hit.cx <= card_x2
+                and card_y1 <= hit.cy <= card_y2
+                for hit in screen.ocr_boxes
+            )
+            if locked:
+                continue
+            usable_x1 = card_x1 + (card_x2 - card_x1) * 0.02
+            usable_x2 = card_x2 - (card_x2 - card_x1) * 0.02
+            avatar_y1 = card_y1 + (card_y2 - card_y1) * 0.45
+            avatar_y2 = card_y1 + (card_y2 - card_y1) * 0.92
+            cell_w = max(0.02, (usable_x2 - usable_x1) / 4.0)
+            for idx in range(4):
+                x1 = usable_x1 + idx * cell_w
+                x2 = min(usable_x2, usable_x1 + (idx + 1) * cell_w)
+                key = (int((x1 + x2) * 500), int((avatar_y1 + avatar_y2) * 500))
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(
+                    OcrBox(
+                        text=f"roster_avatar_{len(candidates) + 1}",
+                        confidence=0.3,
+                        x1=x1,
+                        y1=avatar_y1,
+                        x2=x2,
+                        y2=avatar_y2,
+                    )
+                )
+        return candidates
+
+    def _check_avatar_status(self, roi) -> dict:
+        """Detect green checkmark and heart+number on an avatar ROI via HSV.
+
+        Returns dict with:
+            'has_checkmark': bool  — green tick overlay (schedule already running)
+            'has_heart': bool      — pink/red heart overlay (affection indicator)
+        """
+        import cv2
+        import numpy as np
+        if roi is None or roi.size == 0:
+            return {"has_checkmark": False, "has_heart": False}
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        h, w = roi.shape[:2]
+        pixels = h * w
+        # Green checkmark: H=35-85, S>80, V>100 (bright green)
+        green_mask = cv2.inRange(hsv, np.array([35, 80, 100]), np.array([85, 255, 255]))
+        green_ratio = green_mask.sum() / 255 / max(1, pixels)
+        # Red/pink heart: H=0-10 or H=160-180, S>80, V>80
+        red_lo = cv2.inRange(hsv, np.array([0, 80, 80]), np.array([10, 255, 255]))
+        red_hi = cv2.inRange(hsv, np.array([160, 80, 80]), np.array([180, 255, 255]))
+        heart_mask = cv2.bitwise_or(red_lo, red_hi)
+        heart_ratio = heart_mask.sum() / 255 / max(1, pixels)
+        return {
+            "has_checkmark": green_ratio > 0.02,  # 2% green pixels = checkmark
+            "has_heart": heart_ratio > 0.01,       # 1% red pixels = heart
+        }
+
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
         """Check roster overlay for target characters via YOLO + template matching.
 
         First pass: AvatarMatcher (fast template + histogram).
         Second pass fallback: Florence pairwise comparison against local favorite
         reference portraits when template matching is inconclusive.
+        Also detects avatar status (green checkmark, heart) via HSV.
         """
         if not self._target_favorites:
             return False
 
         avatars = screen.find_yolo("角色头像", min_conf=0.4)
         if not avatars:
-            return False
+            avatars = self._fallback_roster_avatar_boxes(screen)
+            if avatars:
+                self.log(f"using {len(avatars)} fallback roster avatar candidates")
+            if not avatars:
+                return False
 
         try:
             import cv2
@@ -172,6 +271,8 @@ class ScheduleSkill(BaseSkill):
         best_overall_name = None
         best_overall_score = -1.0
         best_overall_pos = (0.0, 0.0)
+        best_overall_box = None
+        best_overall_roi = None
         for av in avatars:
             bx1 = max(0, int(av.x1 * w))
             by1 = max(0, int(av.y1 * h))
@@ -188,11 +289,20 @@ class ScheduleSkill(BaseSkill):
                     best_overall_score = score
                     best_overall_name = matched_name
                     best_overall_pos = (av.cx, av.cy)
+                    best_overall_box = av
+                    best_overall_roi = roi.copy()
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
+                    status = self._check_avatar_status(roi)
                     self._target_found = True
+                    self._matched_avatar_pos = (av.cx, av.cy)
+                    status_str = ""
+                    if status["has_checkmark"]:
+                        status_str += " [✓scheduled]"
+                    if status["has_heart"]:
+                        status_str += " [♥affection]"
                     self.log(
                         f"AVATAR MATCH: '{matched_name}' score={score:.2f} "
-                        f"at ({av.cx:.2f},{av.cy:.2f})"
+                        f"at ({av.cx:.2f},{av.cy:.2f}){status_str}"
                     )
                     return True
         # Log best non-matching score for debugging
@@ -203,45 +313,55 @@ class ScheduleSkill(BaseSkill):
                 f"(threshold={_AVATAR_MATCH_THRESHOLD})"
             )
 
-        # Florence fallback: use local favorite portraits as pairwise references.
-        try:
-            if self._florence_matcher is None:
-                from vision.florence_vision import get_florence_reference_matcher
-                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
-                self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
-                self.log("Florence reference matcher loaded for roster scan")
-        except Exception as e:
-            self.log(f"Florence matcher unavailable: {e}")
-            self._florence_matcher = None
-
-        if self._florence_matcher is None:
+        if best_overall_name is None or best_overall_roi is None or best_overall_box is None:
             return False
 
-        florence_candidates = sorted(avatars, key=lambda b: b.confidence, reverse=True)[:6]
-        for av in florence_candidates:
-            bx1 = max(0, int(av.x1 * w))
-            by1 = max(0, int(av.y1 * h))
-            bx2 = min(w, int(av.x2 * w))
-            by2 = min(h, int(av.y2 * h))
-            roi = img[by1:by2, bx1:bx2]
-            if roi.size == 0:
-                continue
-            matched_name, score = self._florence_matcher.match_candidate(roi, self._target_favorites)
-            if matched_name and score > 0.5:
-                self._target_found = True
-                self.log(
-                    f"FLORENCE MATCH: '{matched_name}' score={score:.2f} "
-                    f"at ({av.cx:.2f},{av.cy:.2f})"
+        # Lazy-init Florence matcher on first use.
+        # Use non-blocking check so the worker thread doesn't stall for
+        # minutes while the pre-warm thread loads the model.
+        if self._florence_matcher is None:
+            try:
+                from vision.florence_vision import is_florence_ready, get_florence_reference_matcher
+                if not is_florence_ready():
+                    self.log("Florence model still loading, skipping Florence match this tick")
+                    return False
+                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
+                self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
+                self.log("Florence reference matcher loaded for schedule")
+            except Exception as e:
+                self.log(f"Florence matcher init failed: {e}")
+                return False
+
+        florence_name, florence_score = self._florence_matcher.match_candidate(best_overall_roi, [best_overall_name])
+        if florence_name and florence_score > 0.5:
+            self._target_found = True
+            self._matched_avatar_pos = (best_overall_box.cx, best_overall_box.cy)
+            screen.add_florence_boxes([
+                OcrBox(
+                    text=f"favorite {florence_name}",
+                    confidence=float(florence_score),
+                    x1=best_overall_box.x1,
+                    y1=best_overall_box.y1,
+                    x2=best_overall_box.x2,
+                    y2=best_overall_box.y2,
                 )
-                return True
+            ])
+            self.log(
+                f"FLORENCE MATCH: '{florence_name}' score={florence_score:.2f} "
+                f"at ({best_overall_box.cx:.2f},{best_overall_box.cy:.2f})"
+            )
+            return True
         return False
 
     # ── Screen detection helpers ──
 
     def _is_schedule(self, screen: ScreenState) -> bool:
         """Detect schedule UI: header shows 課程 (traditional) or 课程 (simplified)."""
-        return (screen.has_text("課程", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5) or
-                screen.has_text("课程", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5))
+        return (
+            screen.has_text("課程", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)
+            or screen.has_text("课程", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)
+            or screen.has_text("程表", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)
+        )
 
     def _is_location_select(self, screen: ScreenState) -> bool:
         """Detect Location Select screen (list of all locations).
@@ -267,18 +387,27 @@ class ScheduleSkill(BaseSkill):
         """
         # Full title match (widened region)
         title = screen.find_any_text(
-            ["全體課程表", "全体课程表", "全體課程", "全体课程"],
+            ["全體課程表", "全体课程表", "全體課程", "全体课程", "全體程表", "全体程表"],
             region=(0.20, 0.02, 0.80, 0.25),
             min_conf=0.5
         )
         if title:
             return True
+        partial_title = screen.find_any_text(
+            ["程表"],
+            region=(0.20, 0.02, 0.80, 0.25),
+            min_conf=0.6
+        )
+        if partial_title and self._roster_open:
+            return True
+        if self._is_location_select(screen):
+            return False
         # Fallback: roster overlay shows room rows ("教室" / "房間" text in center)
         # plus the overlay has a dark background with student avatars
         room_label = screen.find_any_text(
             ["教室", "房間", "房间"],
             region=(0.05, 0.15, 0.50, 0.85),
-            min_conf=0.6
+            min_conf=0.55
         )
         if room_label and self._roster_open:
             return True
@@ -442,14 +571,18 @@ class ScheduleSkill(BaseSkill):
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         current = self.detect_current_screen(screen)
+        roster_overlay = self._is_roster_overlay(screen)
+        inside_location = self._is_inside_location(screen)
+        location_select = self._is_location_select(screen)
+        in_schedule = self._is_schedule(screen)
 
-        if current == "Schedule":
+        if current == "Schedule" or in_schedule or roster_overlay or inside_location or location_select:
             self.log("inside schedule")
-            self.sub_state = "select_location"
+            self.sub_state = "check_roster" if (roster_overlay or inside_location) else "select_location"
             return action_wait(500, "entered schedule")
 
         if current == "Lobby":
-            nav = self._nav_to(screen, ["課程表", "课程表"])
+            nav = self._nav_to(screen, ["課程表", "课程表", "課程", "课程", "程表"])
             if nav:
                 return nav
             return action_wait(300, "waiting for schedule button")
@@ -471,6 +604,14 @@ class ScheduleSkill(BaseSkill):
             return action_wait(500, "waiting for schedule UI")
         self._stale_ticks = 0
 
+        if self._is_roster_overlay(screen):
+            self.log("roster already open while selecting location, switching back to check_roster")
+            self.sub_state = "check_roster"
+            self._roster_open = True
+            self._roster_scan_ticks = 0
+            self._wait_ticks = 0
+            return action_wait(300, "roster already open")
+
         # If we're actually inside a location (not Location Select), go check it
         if self._is_inside_location(screen):
             self.log("already inside a location, checking roster")
@@ -488,12 +629,19 @@ class ScheduleSkill(BaseSkill):
         # Full-circle safety: if we've cycled through too many locations, execute
         if self._locations_checked >= _MAX_LOCATIONS_FULL_CIRCLE:
             self.log(f"full circle done ({self._locations_checked} locations), entering for execute")
+            for loc_name in _LOCATION_NAMES:
+                loc = screen.find_text_one(loc_name, min_conf=0.6)
+                if loc:
+                    self.sub_state = "execute"
+                    self._execute_ticks = 0
+                    return action_click_box(loc, "enter location for fallback execute")
             rank_hits = screen.find_text("RANK", min_conf=0.7)
             if rank_hits:
                 rank_hits.sort(key=lambda b: b.cy)
+                target = rank_hits[0]
                 self.sub_state = "execute"
                 self._execute_ticks = 0
-                return action_click_box(rank_hits[0], "enter location for fallback execute")
+                return action_click(min(target.cx + 0.18, 0.75), target.cy, "enter location for fallback execute")
             self.log("no locations found, exiting")
             self.sub_state = "exit"
             return action_wait(300, "no locations found")
@@ -551,7 +699,7 @@ class ScheduleSkill(BaseSkill):
             self.sub_state = "check_roster"
             self._roster_open = False
             self._wait_ticks = 0
-            return action_click_box(target, "enter location via RANK (all visited)")
+            return action_click(min(target.cx + 0.18, 0.75), target.cy, "enter location via RANK (all visited)")
 
         return action_wait(500, "looking for locations")
 
@@ -565,7 +713,8 @@ class ScheduleSkill(BaseSkill):
 
     def _check_roster(self, screen: ScreenState) -> Dict[str, Any]:
         """Inside a location: open roster, check for targets/locks, decide."""
-        if not self._is_schedule(screen):
+        roster_overlay = self._is_roster_overlay(screen)
+        if not roster_overlay and not self._is_schedule(screen):
             self._wait_ticks += 1
             if self._wait_ticks > 5:
                 self.sub_state = "select_location"
@@ -580,7 +729,7 @@ class ScheduleSkill(BaseSkill):
         # Tick 1: parse tickets & check locks
         # Tick 2: avatar matching (YOLO + template compare)
         # Tick 3: close roster and proceed to execute
-        if self._is_roster_overlay(screen):
+        if roster_overlay:
             self._roster_open = True
             self._roster_scan_ticks += 1
 
@@ -603,9 +752,19 @@ class ScheduleSkill(BaseSkill):
                 self._visited_locations.add(cur_loc)
 
             self._switch_ticks = 0
-            if self._target_found:
-                self.log(f"favorite found in '{cur_loc}', closing roster to execute")
-                return self._close_roster_action(screen, "execute", "favorite found")
+            if self._target_found and self._matched_avatar_pos:
+                # Click the location card TITLE area (above the avatar) on the popup.
+                # From OCR data: titles are at y≈0.30 (row1) vs avatars at y≈0.40 (row1),
+                # titles at y≈0.51 (row2) vs avatars at y≈0.63 (row2). ~0.10 offset.
+                ax, ay = self._matched_avatar_pos
+                click_y = max(0.12, ay - 0.10)
+                self.log(f"favorite found, clicking location title at ({ax:.2f},{click_y:.2f}) on popup")
+                self._roster_open = False
+                self._roster_scan_ticks = 0
+                self.sub_state = "execute"
+                self._execute_ticks = 0
+                self._start_clicked = False
+                return action_click(ax, click_y, f"click location card title")
             self.log(f"no favorite found in '{cur_loc}' (#{self._locations_checked}), switching location")
             return self._close_roster_action(screen, "switch_location", "no favorite found")
 
@@ -641,6 +800,20 @@ class ScheduleSkill(BaseSkill):
         # Roster was opened but overlay detection failed (YOLO/OCR miss).
         # Give it a few ticks grace period before giving up.
         self._roster_scan_ticks += 1
+        retry_tab = screen.find_any_text(
+            ["全體課程表", "全体课程表"],
+            region=(0.60, 0.80, 1.0, 1.0),
+            min_conf=0.5
+        )
+        if not retry_tab:
+            retry_tab = self._find_florence_hit(
+                screen,
+                ["full schedule roster button", "全體課程表 button", "全体课程表 button"],
+                region=(0.60, 0.78, 1.0, 1.0),
+            )
+        if retry_tab and self._roster_scan_ticks <= 2:
+            self.log("roster overlay missing after open, retrying roster button")
+            return action_click_box(retry_tab, "retry open full schedule roster")
         if self._roster_scan_ticks <= 3:
             return action_wait(400, f"waiting for roster overlay to appear ({self._roster_scan_ticks}/3)")
 
@@ -699,20 +872,38 @@ class ScheduleSkill(BaseSkill):
         """
         self._execute_ticks += 1
 
+        # Hard limit: if we've been in execute for too many ticks, bail out
+        if self._execute_ticks > 30:
+            self.log("execute stuck for 30+ ticks, switching location")
+            self.sub_state = "switch_location"
+            self._execute_ticks = 0
+            self._start_clicked = False
+            self._switch_ticks = 0
+            return action_wait(300, "execute stuck, switching")
+
         if not self._is_schedule(screen):
-            self._animation_ticks += 1
-            if self._animation_ticks > 8:
-                return action_click(0.5, 0.5, "tap to skip animation")
-            if self._animation_ticks > 15:
-                # Animation done — switch to next location and execute there
-                self._animation_ticks = 0
-                self._start_clicked = False
-                self.sub_state = "switch_location"
-                self._target_found = False
-                self._roster_open = False
-                self._switch_ticks = 0
-                return action_wait(500, "animation done, switching to next location")
-            return action_wait(500, "waiting for schedule UI")
+            # Before assuming we left schedule UI, check if the start button is visible
+            # (e.g. 課程表資訊 popup is open over the schedule view)
+            start_visible = screen.find_any_text(
+                ["課程表開始", "课程表開始", "课程表开始", "開始", "开始"],
+                min_conf=0.5,
+            )
+            if start_visible:
+                # Start button found despite not detecting schedule header
+                pass  # Fall through to normal start-button logic below
+            else:
+                self._animation_ticks += 1
+                if self._animation_ticks > 8:
+                    return action_click(0.5, 0.5, "tap to skip animation")
+                if self._animation_ticks > 15:
+                    self._animation_ticks = 0
+                    self._start_clicked = False
+                    self.sub_state = "switch_location"
+                    self._target_found = False
+                    self._roster_open = False
+                    self._switch_ticks = 0
+                    return action_wait(500, "animation done, switching to next location")
+                return action_wait(500, "waiting for schedule UI")
 
         self._animation_ticks = 0
 
@@ -723,14 +914,32 @@ class ScheduleSkill(BaseSkill):
             self.sub_state = "exit"
             return action_wait(300, "tickets exhausted")
 
-        # If roster is still showing, close it first
+        # If roster overlay (全體課程表 popup) is showing, close it first
         if self._is_roster_overlay(screen):
-            return self._close_roster_action(screen, "execute", "before execute")
+            self._roster_open = False
+            return self._close_roster_action(screen, "execute", "close roster before execute")
 
-        # If at Location Select, need to enter a location first
+        # If at Location Select (not inside a location), re-enter one
         if self._is_location_select(screen):
+            self.log("back at location select after execute, re-selecting")
             self.sub_state = "select_location"
+            self._execute_ticks = 0
+            self._start_clicked = False
             return action_wait(300, "back at location select, re-selecting")
+
+        report_popup = screen.find_any_text(
+            ["課程表報告", "课程表报告", "課程表資訊", "课程表信息", "課程表信息"],
+            region=screen.CENTER, min_conf=0.5
+        )
+        report_confirm = screen.find_any_text(
+            ["確認", "确认"],
+            region=(0.30, 0.60, 0.70, 0.90), min_conf=0.5
+        )
+        if report_popup or report_confirm:
+            if report_confirm:
+                self.log("confirming schedule report popup")
+                return action_click_box(report_confirm, "confirm schedule report")
+            return action_wait(300, "waiting for schedule report confirm")
 
         # After clicking start, wait a few ticks for animation to begin
         if getattr(self, '_start_clicked', False):
@@ -752,7 +961,7 @@ class ScheduleSkill(BaseSkill):
             # Partial match "開始"/"开始" in the popup area (bottom-center)
             start = screen.find_any_text(
                 ["開始", "开始"],
-                region=(0.30, 0.65, 0.70, 0.85),
+                region=(0.25, 0.60, 0.75, 0.95),
                 min_conf=0.6,
             )
         if start:
@@ -763,41 +972,15 @@ class ScheduleSkill(BaseSkill):
             self._execute_ticks = 0
             return action_click_box(start, "start schedule")
 
-        # Click a room hexagon to open room info popup.
-        # Room hexagons have small reward numbers (e.g. "20", "23", "30") on them.
-        # Use OCR to find these numbers in the building area and click them.
-        room_nums = [
-            box for box in screen.ocr_boxes
-            if re.match(r'^\d{1,2}$', box.text.strip())
-            and 0.10 < box.cx < 0.70
-            and 0.15 < box.cy < 0.70
-            and box.confidence > 0.95
+        # Try clicking various positions on the building to open room info popup.
+        # Buildings differ per location, so cycle through common positions.
+        _CLICK_POSITIONS = [
+            (0.40, 0.40), (0.50, 0.38), (0.45, 0.50),
+            (0.55, 0.45), (0.35, 0.35), (0.50, 0.55),
         ]
-        if room_nums:
-            idx = (self._execute_ticks - 1) % len(room_nums)
-            target = room_nums[idx]
-            self.log(f"clicking room hexagon (reward={target.text}) at ({target.cx:.2f},{target.cy:.2f})")
-            return action_click_box(target, f"click room (reward={target.text})")
-
-        # Fallback: try generic building center positions if no numbers found
-        _BUILDING_CLICK_POS = [
-            (0.35, 0.40, "building left"),
-            (0.50, 0.45, "building center"),
-            (0.40, 0.55, "building lower-left"),
-        ]
-        fb_idx = min(self._execute_ticks - 1, len(_BUILDING_CLICK_POS) - 1)
-        if self._execute_ticks <= len(_BUILDING_CLICK_POS) + 3:
-            x, y, desc = _BUILDING_CLICK_POS[min(fb_idx, len(_BUILDING_CLICK_POS) - 1)]
-            self.log(f"no room numbers found, trying {desc}")
-            return action_click(x, y, f"open room: {desc}")
-
-        # If still no luck, switch to next location via arrow
-        self.log("can't find start button, switching to next location")
-        self.sub_state = "switch_location"
-        self._execute_ticks = 0
-        self._switch_ticks = 0
-        self._target_found = False
-        return action_wait(300, "can't start, switching location")
+        idx = (self._execute_ticks - 1) % len(_CLICK_POSITIONS)
+        x, y = _CLICK_POSITIONS[idx]
+        return action_click(x, y, f"click building pos {idx}")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():

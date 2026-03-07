@@ -60,7 +60,8 @@ def _get_ocr():
 _yolo_model = None
 _yolo_lock = None
 _YOLO_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "_yolo_full.pt"
-# Prefer TensorRT engine > PyTorch .pt
+# Prefer custom headpat model > TensorRT > full.pt
+_YOLO_HEADPAT = Path(r"D:\Project\ml_cache\models\yolo\headpat.pt")
 _YOLO_TRT_ENGINE = Path(r"D:\Project\ml_cache\models\yolo\full.engine")
 _YOLO_ML_CACHE = Path(r"D:\Project\ml_cache\models\yolo\full.pt")
 
@@ -72,10 +73,15 @@ _YOLO_ALLOWED_SUBSTRINGS = (
     "角色可摸头黄色感叹号",
     "感叹号",
     "Emoticon_Action",
+    "headpat_bubble",
 )
 
 def _get_yolo():
-    """Get or create YOLO model (thread-safe singleton). Returns None if unavailable."""
+    """Get or create YOLO model (lazy singleton). Only loads on first call.
+
+    Deferred loading so startup is fast; model loads when Cafe headpat
+    first needs it (~30s one-time cost).
+    """
     global _yolo_model, _yolo_lock, _yolo_load_attempts, _yolo_status
     import threading
     if _yolo_lock is None:
@@ -86,9 +92,9 @@ def _get_yolo():
         if _yolo_load_attempts >= _MAX_YOLO_LOAD_ATTEMPTS:
             return None
         _yolo_load_attempts += 1
-        attempt = _yolo_load_attempts
-        # Build candidate list: TensorRT engine first, then PyTorch .pt fallbacks
         candidates = []
+        if _YOLO_HEADPAT.is_file():
+            candidates.append(_YOLO_HEADPAT)
         if _YOLO_TRT_ENGINE.is_file():
             candidates.append(_YOLO_TRT_ENGINE)
         if _YOLO_ML_CACHE.is_file():
@@ -96,10 +102,9 @@ def _get_yolo():
         if _YOLO_MODEL_PATH.is_file():
             candidates.append(_YOLO_MODEL_PATH)
         if not candidates:
-            _yolo_status = f"model_not_found (attempt {attempt})"
-            print(f"[Pipeline] YOLO model NOT found at {_YOLO_TRT_ENGINE}, {_YOLO_ML_CACHE} or {_YOLO_MODEL_PATH}")
+            _yolo_status = "model_not_found"
+            print(f"[Pipeline] YOLO model NOT found")
             return None
-        # Try each candidate — if .engine fails (e.g. TensorRT not installed), fall back to .pt
         from ultralytics import YOLO
         import numpy as np
         for model_path in candidates:
@@ -108,23 +113,35 @@ def _get_yolo():
                 m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
                 _yolo_model = m
                 _yolo_status = f"loaded_ok ({len(m.names)} classes)"
-                print(f"[Pipeline] YOLO model loaded OK from {model_path} (classes: {m.names})")
+                print(f"[Pipeline] YOLO loaded from {model_path}")
                 return _yolo_model
             except Exception as e:
-                print(f"[Pipeline] YOLO load failed for {model_path}: {type(e).__name__}: {e}")
-                if model_path != candidates[-1]:
-                    print(f"[Pipeline] Trying next candidate...")
+                print(f"[Pipeline] YOLO load failed for {model_path}: {e}")
                 continue
-        _yolo_model = None
-        _yolo_status = f"all_candidates_failed (attempt {attempt})"
-        print(f"[Pipeline] YOLO: all {len(candidates)} candidates failed")
+        _yolo_status = "all_candidates_failed"
         return None
 
 
+_OCR_WORK_W = 1280  # Downscale wide frames for faster OCR
+
+
 def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
-    """Run OCR on a BGR numpy array and return normalized OcrBox list."""
+    """Run OCR on a BGR numpy array and return normalized OcrBox list.
+
+    Downscales frames wider than _OCR_WORK_W for speed (4K→1280px ≈ 9x faster).
+    Coordinates are normalized 0-1 so the caller is resolution-independent.
+    """
+    import cv2
     ocr = _get_ocr()
-    result, _ = ocr(img)
+    # Downscale for speed if frame is very wide (e.g. 3840px 4K)
+    ocr_img = img
+    ocr_w, ocr_h = w, h
+    if w > _OCR_WORK_W:
+        ratio = _OCR_WORK_W / w
+        ocr_h = max(1, int(h * ratio))
+        ocr_w = _OCR_WORK_W
+        ocr_img = cv2.resize(img, (ocr_w, ocr_h), interpolation=cv2.INTER_AREA)
+    result, _ = ocr(ocr_img)
     boxes: List[OcrBox] = []
     if result:
         for line in result:
@@ -137,17 +154,28 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
             boxes.append(OcrBox(
                 text=text,
                 confidence=conf,
-                x1=min(xs) / w,
-                y1=min(ys) / h,
-                x2=max(xs) / w,
-                y2=max(ys) / h,
+                x1=min(xs) / ocr_w,
+                y1=min(ys) / ocr_h,
+                x2=max(xs) / ocr_w,
+                y2=max(ys) / ocr_h,
             ))
     return boxes
 
 
 def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
-    """Run YOLO on a BGR numpy array and return normalized YoloBox list."""
+    """Run YOLO on a BGR numpy array and return normalized YoloBox list.
+
+    Non-blocking: if YOLO is still loading in the pre-warm thread, returns
+    empty immediately instead of blocking the pipeline worker.
+    """
     yolo_boxes: List[YoloBox] = []
+    # Non-blocking check: if lock is held (pre-warm loading), skip this tick
+    if _yolo_lock is not None and _yolo_model is None:
+        acquired = _yolo_lock.acquire(blocking=False)
+        if not acquired:
+            # Pre-warm thread is loading YOLO, skip silently
+            return yolo_boxes
+        _yolo_lock.release()
     yolo = _get_yolo()
     if yolo is None:
         if not getattr(_run_yolo_on_image, '_warned', False):
@@ -215,9 +243,33 @@ def _find_florence_hit(screen: ScreenState, queries: List[str], *, region: Optio
             boxes.append(OcrBox(text=str(hit.get("query") or hit.get("label") or queries[0]), confidence=float(hit.get("score") or 0.5), x1=nx1, y1=ny1, x2=nx2, y2=ny2))
         if not boxes:
             return None
+        screen.add_florence_boxes(boxes)
         return max(boxes, key=lambda b: (b.confidence, b.w * b.h))
     except Exception:
         return None
+
+
+def _run_template_matching(frame_bgr) -> List:
+    """Run headpat bubble detection via HSV color filtering. Returns list of TemplateHitBox."""
+    from brain.skills.base import TemplateHitBox
+    hits = []
+    try:
+        from vision.template_matcher import find_headpat_bubbles
+        # Restrict to cafe play area (exclude UI bars + left sidebar icons)
+        raw = find_headpat_bubbles(frame_bgr, threshold=0.78,
+                                   region=(0.12, 0.25, 0.98, 0.80))
+        for h in raw:
+            hits.append(TemplateHitBox(
+                label=h.label,
+                confidence=h.confidence,
+                x1=h.x1, y1=h.y1,
+                x2=h.x2, y2=h.y2,
+            ))
+    except Exception as e:
+        if not getattr(_run_template_matching, '_warned', False):
+            print(f"[Pipeline] Template matching error: {e}")
+            _run_template_matching._warned = True
+    return hits
 
 
 def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "") -> ScreenState:
@@ -230,9 +282,11 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "") -> ScreenSta
     h, w = frame_bgr.shape[:2]
     ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
     yolo_boxes = _run_yolo_on_image(frame_bgr, w, h)
+    template_hits = _run_template_matching(frame_bgr)
     return ScreenState(
         ocr_boxes=ocr_boxes,
         yolo_boxes=yolo_boxes,
+        template_hits=template_hits,
         image_w=w,
         image_h=h,
         screenshot_path=screenshot_path,
@@ -342,6 +396,7 @@ class DailyPipeline:
         self._traj_dir: Optional[Path] = None
         self._interceptor_streak: int = 0  # consecutive interceptor fires
         self._last_sub_state: str = ""
+        self._last_wait_reason: str = ""
         self._stuck_counter: int = 0  # ticks in same sub_state
         self._consecutive_timeouts: int = 0  # skills that timed out in a row
 
@@ -394,6 +449,56 @@ class DailyPipeline:
         self._running = False
         print("[Pipeline] Stopped")
 
+    def _start_current_skill(self) -> None:
+        """Reset and start the currently selected skill."""
+        if not self._running:
+            return
+        skill = self.current_skill
+        if skill is None:
+            self._running = False
+            return
+        try:
+            skill.reset()
+        except Exception as e:
+            print(f"[Pipeline] Failed to reset skill '{skill.name}': {e}")
+            raise
+        self._skill_start_time = time.time()
+        self._retry_count = 0
+        self._last_sub_state = ""
+        self._last_wait_reason = ""
+        self._stuck_counter = 0
+        print(f"[Pipeline] Starting skill '{skill.name}'")
+
+    def _advance_skill(self, status: str) -> None:
+        """Record current skill result and advance to the next skill."""
+        skill = self.current_skill
+        if skill is None:
+            self._running = False
+            return
+        duration_s = max(0.0, time.time() - self._skill_start_time)
+        self._results.append(
+            SkillResult(
+                skill_name=skill.name,
+                status=status,
+                ticks=skill.ticks,
+                duration_s=duration_s,
+            )
+        )
+        if status == "timeout":
+            self._consecutive_timeouts += 1
+        else:
+            self._consecutive_timeouts = 0
+        self._current_idx += 1
+        self._retry_count = 0
+        self._last_sub_state = ""
+        self._last_wait_reason = ""
+        self._stuck_counter = 0
+        if self._current_idx >= len(self._skill_order):
+            self._running = False
+            print("[Pipeline] All skills complete")
+            return
+        self._start_current_skill()
+
     def _global_interceptor(self, screen: ScreenState, skill: BaseSkill) -> Optional[Dict[str, Any]]:
         """Global interceptor — runs BEFORE every skill tick.
 
@@ -441,6 +546,34 @@ class DailyPipeline:
                 return action_click_box(cancel, "interceptor: cancel exit dialog")
             # Fallback: press ESC to dismiss (ESC = cancel in this dialog)
             return action_back("interceptor: dismiss exit dialog")
+
+        # ── P1: In-game announcement popup (内嵌公告) ──
+        # Detected by "主要消息" text in lower-left area. X button at top-right (0.98, 0.04).
+        announcement = screen.find_any_text(
+            ["主要消息", "主要消息", "Maintenance Notice", "Ban Notice"],
+            region=(0.02, 0.55, 0.35, 0.70), min_conf=0.6
+        )
+        if announcement:
+            self._interceptor_streak += 1
+            # Announcement is a WebView overlay that absorbs ALL touch events.
+            # Only Android BACK key can close it. This triggers exit dialog ("是否結束"),
+            # which P0 handler catches on the NEXT tick and clicks 取消 → lobby restored.
+            print(f"[Interceptor] P1 内嵌公告 '{announcement.text}', BACK to close WebView")
+            return action_back(f"interceptor: close announcement WebView")
+
+        # ── P1: Generic popup with X close button ──
+        # Popups like 全體課程表, 通知, 課程表資訊 etc. have an X button.
+        popup_titles = screen.find_any_text(
+            ["全體課程表", "全体课程表", "課程表資訊", "课程表资讯", "課程表報告", "课程表报告"],
+            region=(0.20, 0.05, 0.80, 0.25), min_conf=0.6
+        )
+        if popup_titles and skill.name != "Schedule":
+            x_btn = screen.find_text_one("X", region=(0.85, 0.05, 0.95, 0.20), min_conf=0.4)
+            if x_btn:
+                print(f"[Interceptor] P1 stale popup '{popup_titles.text}', clicking X")
+                return action_click_box(x_btn, f"interceptor: close popup X ({popup_titles.text})")
+            print(f"[Interceptor] P1 stale popup '{popup_titles.text}', hardcoded X")
+            return action_click(0.890, 0.142, f"interceptor: close popup ({popup_titles.text})")
 
         # ── P2: Account / Student Level Up ──
         # Full-screen "Level Up" / "Touch to Continue" effect
@@ -597,76 +730,6 @@ class DailyPipeline:
         self._interceptor_streak = 0
         return None
 
-    def _start_current_skill(self) -> None:
-        """Reset and start the current skill."""
-        skill = self.current_skill
-        if skill:
-            skill.reset()
-            self._skill_start_time = time.time()
-            print(f"[Pipeline] Starting skill: {skill.name} ({self._current_idx + 1}/{len(self._skill_order)})")
-
-    def _advance_skill(self, status: str) -> None:
-        """Record result and move to next skill."""
-        skill = self.current_skill
-        if skill:
-            result = SkillResult(
-                skill_name=skill.name,
-                status=status,
-                ticks=skill.ticks,
-                duration_s=time.time() - self._skill_start_time,
-            )
-            self._results.append(result)
-            print(f"[Pipeline] Skill '{skill.name}' {status} ({skill.ticks} ticks, {result.duration_s:.1f}s)")
-
-        # Track consecutive timeouts for game restart
-        if status == "timeout":
-            self._consecutive_timeouts += 1
-            if self._consecutive_timeouts >= 3:
-                print(f"[Pipeline] {self._consecutive_timeouts} consecutive timeouts — attempting game restart")
-                self._restart_game()
-                return
-        else:
-            self._consecutive_timeouts = 0
-
-        self._current_idx += 1
-        self._retry_count = 0
-
-        if self._current_idx >= len(self._skill_order):
-            self._running = False
-            print(f"[Pipeline] All skills complete! Total ticks: {self._total_ticks}")
-            for r in self._results:
-                print(f"  {r.skill_name}: {r.status} ({r.ticks} ticks, {r.duration_s:.1f}s)")
-        else:
-            self._start_current_skill()
-
-    def _restart_game(self) -> None:
-        """Kill game process and reset pipeline to lobby skill.
-
-        Called when multiple consecutive skills timeout, indicating the game
-        is stuck or crashed. Kills the process and resets pipeline to start
-        from lobby (which handles TAP TO START and popups).
-        """
-        import subprocess
-        # Try common Blue Archive process names (Steam version)
-        for proc_name in ["BlueArchive.exe", "HD-Player.exe", "blue_archive.exe"]:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", proc_name],
-                    capture_output=True, timeout=5
-                )
-                print(f"[Pipeline] Killed {proc_name}")
-            except Exception:
-                pass
-
-        print("[Pipeline] Game restart: resetting to lobby, waiting 15s for relaunch")
-        time.sleep(15)  # Wait for game to fully close
-
-        # Reset pipeline to start from lobby
-        self._current_idx = 0
-        self._consecutive_timeouts = 0
-        self._retry_count = 0
-        self._start_current_skill()
-
     def tick(self, screenshot_path: str) -> Dict[str, Any]:
         """Process one frame. Returns an action dict for the executor.
 
@@ -707,31 +770,53 @@ class DailyPipeline:
             self._save_trajectory(screenshot_path, screen, skill, intercept)
             return intercept
 
-        # ── State lockout: detect stuck skill ──
-        if skill.sub_state == self._last_sub_state:
-            self._stuck_counter += 1
-        else:
-            self._last_sub_state = skill.sub_state
-            self._stuck_counter = 0
-        # If same sub_state for 20+ ticks, burst ESC to break out.
-        # CRITICAL: Do NOT send ESC when on lobby — ESC on lobby opens
-        # the "是否結束？" exit dialog which can cause cascading failures.
-        if self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
-            if screen.is_lobby():
-                print(f"[Pipeline] Skill '{skill.name}' stuck on lobby for {self._stuck_counter} ticks, skipping ESC (unsafe on lobby)")
-            else:
-                print(f"[Pipeline] Skill '{skill.name}' stuck in '{skill.sub_state}' for {self._stuck_counter} ticks, ESC burst")
-                return action_back(f"ESC burst: stuck in {skill.sub_state}")
-
         # Let skill decide
         action = skill.tick(screen)
         action_type = action.get("action", "")
+        action_reason = str(action.get("reason", "") or "")
+
+        # ── State lockout: detect truly stuck repeated waits ──
+        same_wait = (
+            action_type == "wait"
+            and skill.sub_state == self._last_sub_state
+            and action_reason == self._last_wait_reason
+        )
+        if same_wait:
+            self._stuck_counter += 1
+        else:
+            self._stuck_counter = 0
+        self._last_sub_state = skill.sub_state
+        self._last_wait_reason = action_reason if action_type == "wait" else ""
+
+        # If the exact same wait reason repeats for 20+ ticks, burst ESC to break out.
+        # CRITICAL: Do NOT send ESC when on lobby — ESC on lobby opens
+        # the "是否結束？" exit dialog which can cause cascading failures.
+        if action_type == "wait" and self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
+            if screen.is_lobby():
+                print(f"[Pipeline] Skill '{skill.name}' repeating wait on lobby for {self._stuck_counter} ticks, skipping ESC (unsafe on lobby)")
+            else:
+                print(
+                    f"[Pipeline] Skill '{skill.name}' repeating wait '{action_reason}' "
+                    f"in '{skill.sub_state}' for {self._stuck_counter} ticks, ESC burst"
+                )
+                action = action_back(f"ESC burst: stuck in {skill.sub_state}")
+                action_type = action.get("action", "")
+                action_reason = str(action.get("reason", "") or "")
 
         # Save trajectory
         self._save_trajectory(screenshot_path, screen, skill, action)
 
         # Skill finished
         if action_type == "done":
+            if "timeout" in action_reason.lower():
+                if self._retry_count < self._max_retries:
+                    self._retry_count += 1
+                    print(f"[Pipeline] Skill '{skill.name}' reported timeout, retry {self._retry_count}")
+                    skill.reset()
+                    return action_wait(500, f"skill '{skill.name}' retry")
+                print(f"[Pipeline] Skill '{skill.name}' reported timeout, skipping")
+                self._advance_skill("timeout")
+                return action_wait(300, f"skill '{skill.name}' timed out, skipping")
             self._advance_skill("done")
             return action_wait(300, f"skill '{skill.name}' done, advancing")
 
@@ -742,10 +827,9 @@ class DailyPipeline:
                 print(f"[Pipeline] Skill '{skill.name}' timeout, retry {self._retry_count}")
                 skill.reset()
                 return action_wait(500, f"skill '{skill.name}' retry")
-            else:
-                print(f"[Pipeline] Skill '{skill.name}' timeout, skipping")
-                self._advance_skill("timeout")
-                return action_wait(300, f"skill '{skill.name}' timed out, skipping")
+            print(f"[Pipeline] Skill '{skill.name}' timeout, skipping")
+            self._advance_skill("timeout")
+            return action_wait(300, f"skill '{skill.name}' timed out, skipping")
 
         # Tag action with pipeline metadata
         action["_pipeline"] = True

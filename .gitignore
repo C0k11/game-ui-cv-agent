@@ -38,3 +38,8 @@ data/_pipeline_frame.jpg
 data/florence_assets/
 data/raw_images/
 data/yolo_datasets/
+data/yolo_battle_dataset/
+data/yolo_headpat_dataset/
+data/yolo_training/
+*.pt
+!scripts/*.py

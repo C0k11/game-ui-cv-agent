@@ -14,10 +14,12 @@ Key YOLO classes:
 - 叉叉1 (cls 1): close button on earnings/popups
 """
 from __future__ import annotations
-
+import importlib.util
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
@@ -32,7 +34,24 @@ def _load_target_favorites() -> List[str]:
         cfg_path = Path(__file__).resolve().parents[2] / "data" / "app_config.json"
         if cfg_path.exists():
             data = json.loads(cfg_path.read_text("utf-8"))
-            return data.get("target_favorites", [])
+            raw = data.get("target_favorites", [])
+            normalized: List[str] = []
+            seen = set()
+            for item in raw:
+                name = str(item or "").strip()
+                if not name:
+                    continue
+                candidates = [name]
+                decoded = unquote(name)
+                if decoded and decoded != name:
+                    candidates.append(decoded)
+                for candidate in candidates:
+                    key = candidate.lower()
+                    if key in seen:
+                        continue
+                    normalized.append(candidate)
+                    seen.add(key)
+            return normalized
     except Exception:
         pass
     return []
@@ -44,15 +63,25 @@ _AVATAR_MATCH_THRESHOLD = 0.50
 # 1F marks score ~0.40+, but 2F marks only score 0.18-0.26. Use 0.15 to catch both.
 _HEADPAT_CONF = 0.15
 # Max consecutive empty scans before giving up on headpats
-_MAX_EMPTY_SCANS = 5
+_MAX_EMPTY_SCANS = 12
 # Max headpats per floor (cafe typically has 3-5 students per floor)
 _MAX_HEADPATS_PER_FLOOR = 7
+_INVITE_MATCH_BUTTON_LIMIT = 4
+_INVITE_MATCH_FAVORITE_LIMIT = 12
+_INVITE_MATCH_TIME_BUDGET_S = 0.75
+
+
+def _has_florence_runtime() -> bool:
+    return (
+        importlib.util.find_spec("einops") is not None
+        and importlib.util.find_spec("timm") is not None
+    )
 
 
 class CafeSkill(BaseSkill):
     def __init__(self):
         super().__init__("Cafe")
-        self.max_ticks = 140
+        self.max_ticks = 100
         self._headpat_count: int = 0
         self._empty_scans: int = 0
         self._earnings_claimed: bool = False
@@ -187,14 +216,19 @@ class CafeSkill(BaseSkill):
         if img is None:
             return None
 
-        candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)
+        candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
+        target_names = self._target_favorites[:_INVITE_MATCH_FAVORITE_LIMIT]
+        deadline = time.perf_counter() + _INVITE_MATCH_TIME_BUDGET_S
         for btn in candidate_buttons:
+            if time.perf_counter() >= deadline:
+                self.log("invite avatar matching budget exhausted before template scan finished")
+                return None
             roi = self._invite_avatar_roi(img, w, h, btn)
             if roi.size == 0:
                 continue
             if self._avatar_matcher is not None:
                 matched_name, score = self._avatar_matcher.match_avatar(
-                    roi, self._target_favorites
+                    roi, target_names
                 )
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
                     self.log(f"FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
@@ -202,6 +236,9 @@ class CafeSkill(BaseSkill):
 
         try:
             if self._florence_matcher is None:
+                if not _has_florence_runtime():
+                    self.log("Florence matcher skipped in cafe: missing einops/timm")
+                    return None
                 from vision.florence_vision import get_florence_reference_matcher
                 avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
                 self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
@@ -213,11 +250,14 @@ class CafeSkill(BaseSkill):
         if self._florence_matcher is None:
             return None
 
-        for btn in candidate_buttons[:6]:
+        for btn in candidate_buttons:
+            if time.perf_counter() >= deadline:
+                self.log("invite Florence matching budget exhausted")
+                return None
             roi = self._invite_avatar_roi(img, w, h, btn)
             if roi.size == 0:
                 continue
-            matched_name, score = self._florence_matcher.match_candidate(roi, self._target_favorites)
+            matched_name, score = self._florence_matcher.match_candidate(roi, target_names)
             if matched_name and score > 0.5:
                 self.log(f"FLORENCE FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
                 return btn
@@ -273,11 +313,14 @@ class CafeSkill(BaseSkill):
 
         # Tutorial/説明 popup (cafe 2F first visit)
         # OCR sometimes only detects single char '明' instead of '說明'.
-        tutorial = screen.find_text_one("說明", region=(0.3, 0.1, 0.7, 0.3), min_conf=0.7)
+        tutorial = screen.find_any_text(
+            ["說明", "说明", "説明", "明"],
+            region=(0.3, 0.1, 0.7, 0.3), min_conf=0.5
+        )
         if not tutorial:
             tutorial = screen.find_any_text(
-                ["訪問學生目錄", "訪問學生", "訪间學生"],
-                region=screen.CENTER, min_conf=0.6
+                ["訪問學生目錄", "訪問學生", "訪问学生目录", "訪间學生", "訪周學生目緣", "訪周學生", "學生目緣"],
+                region=screen.CENTER, min_conf=0.5
             )
         if tutorial:
             confirm = screen.find_any_text(
@@ -296,19 +339,21 @@ class CafeSkill(BaseSkill):
         notif = screen.find_text_one("通知", region=(0.35, 0.15, 0.65, 0.30), min_conf=0.8)
         if notif:
             confirm = screen.find_any_text(
-                ["確認", "确认", "確", "确"],
-                region=screen.CENTER, min_conf=0.7
+                ["確認", "确认", "確定", "确定"],
+                region=(0.35, 0.62, 0.65, 0.78), min_conf=0.7
             )
+            if not confirm:
+                confirm = screen.find_text_one(
+                    r"^[確确]$",
+                    region=(0.44, 0.62, 0.56, 0.78), min_conf=0.8
+                )
             if confirm:
                 self.log(f"notification popup, clicking confirm (sub={self.sub_state})")
-                if self.sub_state == "invite":
-                    self._invite_attempted = True
                 return action_click_box(confirm, "dismiss notification")
             close_btn = self._find_close_button(screen)
             if close_btn:
-                if self.sub_state == "invite":
-                    self._invite_attempted = True
                 return action_click_box(close_btn, "close notification X")
+            return action_click(0.5, 0.70, "dismiss notification fallback")
 
         # Rank-up / bond level up popup (好感度升級 / 羈絆升級)
         # OCR often misreads 羈絆升級 as 鲜升級 due to stylized font.
@@ -320,7 +365,6 @@ class CafeSkill(BaseSkill):
         # Detected via stat text at bottom (治愈力/最大體力) which OCR reads reliably.
         # GUARD: exclude student profile screen which also shows 最大體力 but has
         # unique markers like 基本情報, EX技能, Tip!, 神秘解放.
-        # Student profile screen: has unique markers like 基本情報, EX技能, 神秘解放.
         # NOTE: Do NOT include "Tip!" — it also appears on loading tip screens.
         student_profile = screen.find_any_text(
             ["基本情報", "EX技能", "神秘解放"],
@@ -388,8 +432,8 @@ class CafeSkill(BaseSkill):
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         """Navigate from lobby to cafe."""
         current = self.detect_current_screen(screen)
-        
-        if current == "Cafe":
+
+        if current == "Cafe" or self._is_cafe(screen):
             # If 1F headpat was already done (kicked to lobby by bond level-up),
             # skip earnings/invite and go straight to switch to 2F.
             if self._1f_done:
@@ -399,8 +443,8 @@ class CafeSkill(BaseSkill):
                 self._empty_scans = 0
                 self._pan_phase = 0
                 return action_wait(300, "skip to cafe 2F")
-            if self._1f_headpat_started:
-                self.log("re-entered cafe, resuming headpat")
+            if self._1f_headpat_started or self._headpat_count > 0:
+                self.log(f"re-entered cafe, resuming headpat ({self._headpat_count} pats kept)")
                 self.sub_state = "headpat"
                 self._empty_scans = 0
                 self._pan_phase = 0
@@ -443,7 +487,7 @@ class CafeSkill(BaseSkill):
         # Check for 0% earnings — skip claim entirely
         # OCR reads "0.0%" or "0.0 %" at bottom-right; regex ^0\.0 avoids matching "100.0%"
         zero_pct = screen.find_text_one(
-            r"^0\.0", region=(0.85, 0.88, 0.98, 0.98), min_conf=0.8
+            r"^0\.0", region=(0.85, 0.88, 0.98, 0.98), min_conf=0.7
         )
         if zero_pct:
             self.log(f"earnings 0% ({zero_pct.text}), skipping")
@@ -467,6 +511,20 @@ class CafeSkill(BaseSkill):
 
         # If earnings popup is open but no claim button (already claimed?)
         if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
+            zero_rows = screen.find_text(
+                r"^0\s*/\s*\d",
+                region=(0.22, 0.54, 0.78, 0.66), min_conf=0.75
+            )
+            if len(zero_rows) >= 2:
+                self.log("earnings popup shows empty storage rows, closing disabled popup")
+                self._earnings_claimed = True
+                close_btn = self._find_close_button(screen)
+                if close_btn:
+                    return action_click_box(close_btn, "close empty earnings popup")
+                self.sub_state = "invite"
+                self._invite_next_state = "headpat"
+                self._invite_ticks = 0
+                return action_wait(300, "empty earnings popup, skipping")
             # OCR might miss claim text. Ask Florence whether the claim button is
             # enabled before using the fallback click.
             enabled = self._florence_button_enabled(
@@ -520,8 +578,9 @@ class CafeSkill(BaseSkill):
         """
         if self._invite_attempted:
             self.sub_state = self._invite_next_state
-            self._headpat_count = 0
             self._empty_scans = 0
+            if self._invite_next_state != "headpat" or not self._1f_headpat_started:
+                self._headpat_count = 0
             if self._invite_next_state == "headpat":
                 self._1f_headpat_started = True
             return action_wait(300, f"invite done/skip, starting {self._invite_next_state}")
@@ -621,9 +680,9 @@ class CafeSkill(BaseSkill):
 
         # Find the REGULAR invite ticket (not the paid 額外邀請券)
         # OCR reads 額外 as "额外", "客外", or "額外" — exclude all variants.
-        _EXTRA_PREFIXES = ("客外", "额外", "額外", "客")
+        _EXTRA_PREFIXES = ("客外", "额外", "額外", "客", "外")
         ticket_hits = screen.find_text(
-            "邀請券", region=(0.55, 0.88, 0.78, 0.98), min_conf=0.60
+            "邀請券", region=(0.62, 0.88, 0.78, 0.98), min_conf=0.60
         )
         ticket = None
         for hit in ticket_hits:
@@ -689,10 +748,17 @@ class CafeSkill(BaseSkill):
                 if self.sub_state == "headpat2":
                     self.log("back in lobby during headpat2, done")
                     return action_done("back in lobby")
+                if self._headpat_count >= 5:
+                    self._1f_done = True
+                    self.log(f"lobby during headpat1 after {self._headpat_count} pats, resuming from cafe 2F")
                 # On 1F headpat: lobby means we got kicked out — try to re-enter cafe
                 self.log("lobby during headpat1, re-entering cafe")
                 self.sub_state = "enter"
                 return action_wait(300, "re-enter cafe from lobby")
+            if self.sub_state == "headpat2":
+                self.log("lost cafe during headpat2, exiting cafe flow")
+                self.sub_state = "exit"
+                return action_wait(300, "exit cafe after headpat2 recovery")
             return action_wait(300, "waiting for cafe")
 
         # Check if we've hit the per-floor headpat limit
@@ -728,35 +794,30 @@ class CafeSkill(BaseSkill):
             self._headpat_cooldown -= 1
             return action_wait(500, f"waiting for headpat animation ({self._headpat_cooldown} left)")
 
-        # Find headpat markers via YOLO
-        mark = screen.find_yolo_one("角色可摸头黄色感叹号", min_conf=_HEADPAT_CONF)
+        # Find headpat markers — use YOLO first (most accurate for this icon),
+        # then template matching as fallback.
+        # YOLO detects 角色可摸头黄色感叹号 reliably even at low confidence.
+        mark = screen.find_yolo_one("headpat_bubble", min_conf=_HEADPAT_CONF)
+        if not mark:
+            mark = screen.find_yolo_one("角色可摸头黄色感叹号", min_conf=_HEADPAT_CONF)
         if not mark:
             mark = screen.find_yolo_one("感叹号", min_conf=_HEADPAT_CONF)
+        if not mark:
+            # Template matching fallback (restricted to game area)
+            tmpl = screen.find_template_one("headpat", min_conf=0.82,
+                                            region=(0.12, 0.25, 0.98, 0.80))
+            if tmpl:
+                mark = tmpl
+
         if mark:
             self._empty_scans = 0
             self._headpat_count += 1
-            self._headpat_cooldown = 2  # Wait 2 ticks (~1s) for animation
-            # The yellow ! mark floats ABOVE the student, offset slightly LEFT.
-            # The student's head is to the RIGHT of the mark center.
-            # Click right-of-center and at the bottom of the mark to hit the head.
-            click_x = mark.cx + 0.03
-            click_y = mark.y2
+            self._headpat_cooldown = 1  # Wait 1 tick (~0.5s) for animation
+            # Click slightly below and right of the bubble center to hit the student
+            click_x = mark.cx + 0.02
+            click_y = mark.cy + 0.06
             self.log(f"headpat #{self._headpat_count}: conf={mark.confidence:.2f} marker=({mark.cx:.2f},{mark.cy:.2f}) click=({click_x:.2f},{click_y:.2f})")
             return action_click(click_x, click_y, f"headpat student #{self._headpat_count}")
-
-        # OCR fallback when YOLO has no detections at all in this frame.
-        if len(screen.yolo_boxes) == 0:
-            lv_hits = screen.find_text(r"Lv\.?\d+", region=(0.22, 0.30, 0.78, 0.78), min_conf=0.75)
-            if lv_hits:
-                self._empty_scans = 0
-                lv_hits = sorted(lv_hits, key=lambda b: (b.cy, b.cx))
-                idx = min(self._headpat_count, len(lv_hits) - 1)
-                target = lv_hits[idx]
-                self._headpat_count += 1
-                click_x = target.cx
-                click_y = max(target.cy - 0.08, 0.20)
-                self.log(f"headpat fallback #{self._headpat_count}: click above LV at ({click_x:.2f},{click_y:.2f})")
-                return action_click(click_x, click_y, f"headpat fallback #{self._headpat_count}")
 
         # Bond progress bar overlay ("在咖啡獲得學生的羈絆點數 X/Y") reduces
         # YOLO confidence for headpat marks. Don't count empty scans while visible.
