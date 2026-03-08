@@ -115,6 +115,7 @@ class CafeSkill(BaseSkill):
         self._headpat_cooldown = 0
         self._1f_headpat_started = False
         self._1f_done = False
+        self._switch_wait_ticks = 0
         self._florence_matcher = None
         self._florence_vision = None
         self._target_favorites = _load_target_favorites()
@@ -879,8 +880,13 @@ class CafeSkill(BaseSkill):
         if tap:
             return action_click(0.5, 0.85, "tap to start during cafe switch")
 
-        if self.ticks % 10 == 0:
-            self.log("switch timeout, skipping 2F")
+        # Use a dedicated counter instead of self.ticks (which counts total skill ticks)
+        if not hasattr(self, '_switch_wait_ticks'):
+            self._switch_wait_ticks = 0
+        self._switch_wait_ticks += 1
+        if self._switch_wait_ticks > 8:
+            self.log("switch timeout after 8 ticks, skipping 2F")
+            self._switch_wait_ticks = 0
             self.sub_state = "exit"
             return action_wait(200, "switch timeout")
 

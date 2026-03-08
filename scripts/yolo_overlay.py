@@ -174,9 +174,8 @@ class YoloOverlay:
         self._wndproc_ref = None          # prevent GC of callback
         self._tx = self._ty = 0
         self._tw = self._th = 0
-        # SORT tracker + velocity prediction + EMA smoothing
-        # max_age=4: survive brief detection gaps
-        # alpha=0.85: tight lock-on (85% new position + 15% old)
+        # ByteTrack tracker: same config everywhere (battle, cafe, schedule)
+        # max_age=5, alpha=0.85, freeze-coast, same-class NMS
         try:
             from scripts.box_tracker import BoxTracker
             self._tracker = BoxTracker(max_age=5, min_hits=1, max_center_dist=1.5, alpha=0.85, high_conf=0.25)

@@ -333,7 +333,7 @@ class ScheduleSkill(BaseSkill):
                 return False
 
         florence_name, florence_score = self._florence_matcher.match_candidate(best_overall_roi, [best_overall_name])
-        if florence_name and florence_score > 0.5:
+        if florence_name and florence_score > 0.70:
             self._target_found = True
             self._matched_avatar_pos = (best_overall_box.cx, best_overall_box.cy)
             screen.add_florence_boxes([
@@ -972,8 +972,13 @@ class ScheduleSkill(BaseSkill):
             self._execute_ticks = 0
             return action_click_box(start, "start schedule")
 
+        # Safety: if we've been clicking building positions for too long, bail out
+        if self._execute_ticks > 15:
+            self.log("execute timeout after 15 ticks, exiting schedule")
+            self.sub_state = "exit"
+            return action_wait(200, "execute timeout")
+
         # Try clicking various positions on the building to open room info popup.
-        # Buildings differ per location, so cycle through common positions.
         _CLICK_POSITIONS = [
             (0.40, 0.40), (0.50, 0.38), (0.45, 0.50),
             (0.55, 0.45), (0.35, 0.35), (0.50, 0.55),
