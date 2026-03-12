@@ -70,10 +70,31 @@ class OcrBox:
 # ── Screen state ────────────────────────────────────────────────────────
 
 @dataclass
+class TemplateHitBox:
+    """Template matching result (normalized 0-1 coords)."""
+    label: str
+    confidence: float
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+    @property
+    def cx(self) -> float:
+        return (self.x1 + self.x2) / 2
+
+    @property
+    def cy(self) -> float:
+        return (self.y1 + self.y2) / 2
+
+
+@dataclass
 class ScreenState:
     """Snapshot of what's on screen right now."""
     ocr_boxes: List[OcrBox] = field(default_factory=list)
     yolo_boxes: List[YoloBox] = field(default_factory=list)
+    florence_boxes: List[OcrBox] = field(default_factory=list)
+    template_hits: List[TemplateHitBox] = field(default_factory=list)
     image_w: int = 0
     image_h: int = 0
     screenshot_path: str = ""
@@ -154,6 +175,55 @@ class ScreenState:
 
     def has_yolo(self, cls_name: str, **kwargs) -> bool:
         return len(self.find_yolo(cls_name, **kwargs)) > 0
+
+    # ── Template match helpers ──
+
+    def find_template(self, label: str, *, min_conf: float = 0.5,
+                      region: Optional[Tuple[float, float, float, float]] = None) -> List[TemplateHitBox]:
+        """Find template hits by label."""
+        results = []
+        for h in self.template_hits:
+            if h.confidence < min_conf:
+                continue
+            if label.lower() not in h.label.lower():
+                continue
+            if region:
+                rx1, ry1, rx2, ry2 = region
+                if h.cx < rx1 or h.cx > rx2 or h.cy < ry1 or h.cy > ry2:
+                    continue
+            results.append(h)
+        return sorted(results, key=lambda h: h.confidence, reverse=True)
+
+    def find_template_one(self, label: str, **kwargs) -> Optional[TemplateHitBox]:
+        """Find best template hit by label."""
+        hits = self.find_template(label, **kwargs)
+        return hits[0] if hits else None
+
+    def add_florence_boxes(self, boxes: List[OcrBox]) -> None:
+        if not boxes:
+            return
+        seen = {
+            (
+                box.text,
+                round(box.x1, 4),
+                round(box.y1, 4),
+                round(box.x2, 4),
+                round(box.y2, 4),
+            )
+            for box in self.florence_boxes
+        }
+        for box in boxes:
+            key = (
+                box.text,
+                round(box.x1, 4),
+                round(box.y1, 4),
+                round(box.x2, 4),
+                round(box.y2, 4),
+            )
+            if key in seen:
+                continue
+            self.florence_boxes.append(box)
+            seen.add(key)
 
     # ── Region constants for Blue Archive ──
 
@@ -283,8 +353,11 @@ class BaseSkill(ABC):
 
     def _get_florence_vision(self):
         if self._florence_vision is None:
-            from vision.florence_vision import get_florence_vision
-            self._florence_vision = get_florence_vision()
+            from vision.florence_vision import get_florence_vision_nowait
+            fv = get_florence_vision_nowait()
+            if fv is None:
+                raise RuntimeError("Florence model still loading")
+            self._florence_vision = fv
         return self._florence_vision
 
     def _find_florence_hits(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> List[OcrBox]:
@@ -304,6 +377,7 @@ class BaseSkill(ABC):
         key = f"{screen.timestamp:.6f}|{x1}|{y1}|{x2}|{y2}|{'||'.join(clean_queries)}"
         cached = self._florence_det_cache.get(key)
         if cached is not None:
+            screen.add_florence_boxes(cached)
             return list(cached)
         crop = img[y1:y2, x1:x2]
         try:
@@ -334,6 +408,7 @@ class BaseSkill(ABC):
             area_ratio = ((bx2 - bx1) / rw) * ((by2 - by1) / rh)
             conf = max(0.1, min(1.0, float(item.get("score") or area_ratio or 0.5)))
             hits.append(OcrBox(text=query, confidence=conf, x1=nx1, y1=ny1, x2=nx2, y2=ny2))
+        screen.add_florence_boxes(hits)
         self._florence_det_cache[key] = list(hits)
         return hits
 
@@ -362,7 +437,7 @@ class BaseSkill(ABC):
         # Daily Tasks has tabs: 全體/每天/每週/成就/挑戰任務 in the tab bar area.
         # Campaign (mission hub) does NOT have these tabs.
         mission_header = screen.find_any_text(
-            ["任務", "任务"], region=header_region, min_conf=0.6
+            ["任務", "任务"], region=header_region, min_conf=0.5
         )
         if mission_header:
             daily_tabs = screen.find_any_text(
@@ -371,6 +446,20 @@ class BaseSkill(ABC):
             )
             if daily_tabs:
                 return "DailyTasks"
+            return "Mission"
+
+        # Fallback: campaign hub detection via grid markers (OCR often misses 任務 header)
+        # Campaign hub shows: 懸賞通緝, 總力戰, 劇情, Area XX, 特殊任務, 學園交流會, 戰術大賽
+        hub_markers = screen.find_any_text(
+            ["懸賞通緝", "悬赏通缉", "總力戰", "总力战", "大決戰", "大决战",
+             "學園交流會", "学园交流会", "戰術大賽", "战术大赛", "特殊任務", "特殊任务",
+             "制約解除", "劇情", "剧情"],
+            min_conf=0.5
+        )
+        if hub_markers:
+            return "Mission"
+        area_marker = screen.find_text_one(r"Area\s*\d+", min_conf=0.5)
+        if area_marker:
             return "Mission"
 
         headers = {

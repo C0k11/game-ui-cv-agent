@@ -698,8 +698,13 @@ class CafeSkill(BaseSkill):
         # OCR reads 額外 as "额外", "客外", or "額外" — exclude all variants.
         _EXTRA_PREFIXES = ("客外", "额外", "額外", "客", "外")
         ticket_hits = screen.find_text(
-            "邀請券", region=(0.62, 0.88, 0.78, 0.98), min_conf=0.60
+            "邀請券", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.50
         )
+        # OCR frequently misreads 邀請券 as 邀睛券
+        if not ticket_hits:
+            ticket_hits = screen.find_text(
+                "邀睛券", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.50
+            )
         ticket = None
         for hit in ticket_hits:
             if not any(p in hit.text for p in _EXTRA_PREFIXES):
@@ -707,7 +712,7 @@ class CafeSkill(BaseSkill):
                 break
         if not ticket:
             ticket = screen.find_text_one(
-                "可使用", region=(0.55, 0.88, 0.78, 0.98), min_conf=0.60
+                "可使用", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.50
             )
         if ticket:
             self.log(f"clicking invite ticket '{ticket.text}' at ({ticket.cx:.2f},{ticket.cy:.2f})")

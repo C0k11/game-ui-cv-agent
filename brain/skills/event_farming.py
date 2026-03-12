@@ -221,9 +221,11 @@ class EventFarmingSkill(BaseSkill):
             # Priority: click the top-left event banner ("距離結束還剩X天")
             # to enter the event directly, bypassing scan_bonuses flow.
             # This enters the event's own mission page with its stage list.
+            # OCR frequently misreads 還 as 遗/道/違 — include all variants.
             event_banner = screen.find_any_text(
-                ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩"],
-                region=(0.0, 0.05, 0.30, 0.25), min_conf=0.4
+                ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩",
+                 "距離结束遗剩", "距離结束道剩", "结束遗剩", "結束遗剩"],
+                region=(0.0, 0.05, 0.30, 0.25), min_conf=0.3
             )
             if event_banner:
                 self.log(f"campaign hub: clicking event banner '{event_banner.text}'")
@@ -273,14 +275,16 @@ class EventFarmingSkill(BaseSkill):
             # Check for current event banner → click it
             # Must contain "還剩" or "还剩" (time remaining) to distinguish from reward banners
             current_event = screen.find_any_text(
-                ["距離結束還剩", "距离结束还剩"],
-                region=(0.55, 0.0, 1.0, 0.30), min_conf=0.4
+                ["距離結束還剩", "距离结束还剩",
+                 "距離结束遗剩", "距離结束道剩", "距離结束違剩",
+                 "結束還剩", "结束还剩", "结束遗剩"],
+                region=(0.55, 0.0, 1.0, 0.30), min_conf=0.3
             )
             if not current_event:
-                # Looser match but verify it has "剩" (remaining) not "獎" (reward)
+                # Looser match: any text containing "剩" + number pattern near event banner
                 maybe = screen.find_any_text(
-                    ["結束還剩", "结束还剩"],
-                    region=(0.55, 0.0, 1.0, 0.30), min_conf=0.4
+                    ["結束還剩", "结束还剩", "结束遗剩", "結束遗剩"],
+                    region=(0.55, 0.0, 1.0, 0.30), min_conf=0.3
                 )
                 if maybe and "獎" not in maybe.text and "奖" not in maybe.text:
                     current_event = maybe
@@ -343,8 +347,9 @@ class EventFarmingSkill(BaseSkill):
         # Still on campaign hub → banner click may not have registered
         if current == "Mission":
             event_banner = screen.find_any_text(
-                ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩"],
-                region=(0.0, 0.05, 0.30, 0.25), min_conf=0.4
+                ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩",
+                 "距離结束遗剩", "距離结束道剩", "结束遗剩", "結束遗剩"],
+                region=(0.0, 0.05, 0.30, 0.25), min_conf=0.3
             )
             if event_banner:
                 return action_click(event_banner.cx, event_banner.cy + 0.08,

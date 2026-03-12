@@ -974,19 +974,7 @@ class ScheduleSkill(BaseSkill):
             self.sub_state = "exit"
             return action_wait(300, "tickets exhausted")
 
-        # If roster overlay (全體課程表 popup) is showing, close it first
-        if self._is_roster_overlay(screen):
-            self._roster_open = False
-            return self._close_roster_action(screen, "execute", "close roster before execute")
-
-        # If at Location Select (not inside a location), re-enter one
-        if self._is_location_select(screen):
-            self.log("back at location select after execute, re-selecting")
-            self.sub_state = "select_location"
-            self._execute_ticks = 0
-            self._start_clicked = False
-            return action_wait(300, "back at location select, re-selecting")
-
+        # ── PRIORITY 1: Report popup (schedule just finished) ──
         report_popup = screen.find_any_text(
             ["課程表報告", "课程表报告", "課程表資訊", "课程表信息", "課程表信息"],
             region=screen.CENTER, min_conf=0.5
@@ -1006,24 +994,14 @@ class ScheduleSkill(BaseSkill):
                 return action_click_box(report_confirm, "confirm schedule report")
             return action_wait(300, "waiting for schedule report confirm")
 
-        # After clicking start, wait a few ticks for animation to begin
-        if getattr(self, '_start_clicked', False):
-            if self._execute_ticks > 4:
-                # Start didn't trigger — reset and try again
-                self.log("start click didn't trigger, retrying")
-                self._start_clicked = False
-                self._execute_ticks = 0
-            return action_wait(500, "waiting for schedule to start")
-
-        # Look for start button in room info popup
-        # The button text is "课程表開始" or "課程表開始", sometimes OCR reads partial
+        # ── PRIORITY 2: Start button (room info popup is open) ──
+        # Check for start button BEFORE anything else to avoid closing popups we need.
         start = screen.find_any_text(
             ["課程表開始", "课程表開始", "课程表开始",
              "開始日程", "开始日程", "START"],
             min_conf=0.5,
         )
         if not start:
-            # Partial match "開始"/"开始" in the popup area (bottom-center)
             start = screen.find_any_text(
                 ["開始", "开始"],
                 region=(0.25, 0.60, 0.75, 0.95),
@@ -1037,16 +1015,41 @@ class ScheduleSkill(BaseSkill):
             self._execute_ticks = 0
             return action_click_box(start, "start schedule")
 
-        # Safety: if we've been clicking building positions for too long, bail out
-        if self._execute_ticks > 15:
-            self.log("execute timeout after 15 ticks, exiting schedule")
-            self.sub_state = "exit"
-            return action_wait(200, "execute timeout")
+        # After clicking start, wait a few ticks for animation to begin
+        if getattr(self, '_start_clicked', False):
+            if self._execute_ticks > 4:
+                self.log("start click didn't trigger, retrying")
+                self._start_clicked = False
+                self._execute_ticks = 0
+            return action_wait(500, "waiting for schedule to start")
 
-        # Try clicking various positions on the building to open room info popup.
+        # ── PRIORITY 3: If at Location Select, re-enter one ──
+        if self._is_location_select(screen):
+            self.log("back at location select after execute, re-selecting")
+            self.sub_state = "select_location"
+            self._execute_ticks = 0
+            self._start_clicked = False
+            return action_wait(300, "back at location select, re-selecting")
+
+        # ── PRIORITY 4: If roster overlay still showing, close it ──
+        # Only check after first 2 ticks to avoid closing roster during transition
+        if self._execute_ticks > 2 and self._is_roster_overlay(screen):
+            self._roster_open = False
+            return self._close_roster_action(screen, "execute", "close roster before execute")
+
+        # ── PRIORITY 5: Click building to open room info popup ──
+        if self._execute_ticks > 20:
+            self.log("execute timeout after 20 ticks, going back to check_roster")
+            self.sub_state = "check_roster"
+            self._execute_ticks = 0
+            self._start_clicked = False
+            self._roster_open = False
+            return action_wait(200, "execute timeout, retry via roster")
+
+        # Click building center positions to trigger room info popup
         _CLICK_POSITIONS = [
-            (0.40, 0.40), (0.50, 0.38), (0.45, 0.50),
-            (0.55, 0.45), (0.35, 0.35), (0.50, 0.55),
+            (0.45, 0.40), (0.50, 0.35), (0.40, 0.45),
+            (0.55, 0.42), (0.50, 0.50), (0.45, 0.35),
         ]
         idx = (self._execute_ticks - 1) % len(_CLICK_POSITIONS)
         x, y = _CLICK_POSITIONS[idx]
