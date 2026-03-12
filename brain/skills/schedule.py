@@ -850,9 +850,10 @@ class ScheduleSkill(BaseSkill):
         # Detect current location name (visible in building detail header)
         cur_loc = self._detect_current_location(screen)
 
-        # ── Roster overlay is showing: detect room statuses and pick best room ──
-        # Adapted from reference lesson.py: use pixel color at fixed grid positions
-        # to detect available/done/locked rooms, then click the best one directly.
+        # ── Roster overlay: close it and go to execute (click rooms on map) ──
+        # Simpler approach: close the roster, then use the location map to find
+        # rooms. The map shows avatars with affection numbers — clicking them
+        # opens the room info popup with the 開始 button.
         if roster_overlay:
             self._roster_open = True
             self._roster_scan_ticks += 1
@@ -860,101 +861,21 @@ class ScheduleSkill(BaseSkill):
             if self._roster_scan_ticks == 1:
                 self._target_found = False
                 self._parse_tickets(screen)
-                # Detect room statuses via pixel color (reference approach)
-                self._room_statuses = self._get_room_statuses(screen)
-                status_summary = " | ".join(
-                    f"R{i}:{s}" for i, s in enumerate(self._room_statuses)
-                )
-                self.log(f"room statuses: {status_summary}")
-                return action_wait(300, "scanning roster rooms")
+                return action_wait(300, "scanning roster tickets")
 
             if self._roster_scan_ticks == 2:
-                # Avatar matching for favorite students (if configured)
                 if self._target_favorites:
                     self._check_roster_avatars(screen)
                 return action_wait(300, "scanning roster avatars")
 
-            # Tick 3: pick best room and click it directly in the popup grid
+            # Done scanning — close roster and go to execute on the location map
             self._roster_scan_ticks = 0
             self._locations_checked += 1
             if cur_loc:
                 self._visited_locations.add(cur_loc)
             self._switch_ticks = 0
-
-            # Get room statuses (may have been set in tick 1)
-            statuses = getattr(self, '_room_statuses', ["unknown"] * 9)
-            available_count = sum(1 for s in statuses if s == "available")
-
-            if available_count == 0:
-                self.log(f"no available rooms in '{cur_loc}', switching location")
-                return self._close_roster_action(screen, "switch_location", "no available rooms")
-
-            # If favorite was found by avatar matching, find which room it's in
-            # and click that room if it's available
-            if self._target_found and self._matched_avatar_pos:
-                ax, ay = self._matched_avatar_pos
-                # Find closest room card to the matched avatar position
-                best_dist = 999.0
-                best_room = -1
-                for i, (rx, ry) in enumerate(_ROOM_CLICK_POS):
-                    dist = abs(ax - rx) + abs(ay - ry)
-                    if dist < best_dist and statuses[i] == "available":
-                        best_dist = dist
-                        best_room = i
-                if best_room >= 0:
-                    rx, ry = _ROOM_CLICK_POS[best_room]
-                    self.log(f"favorite in room {best_room}, clicking ({rx:.3f},{ry:.3f})")
-                    self._roster_open = False
-                    self.sub_state = "execute"
-                    self._execute_ticks = 0
-                    self._start_clicked = False
-                    return action_click(rx, ry, f"click favorite room {best_room}")
-
-            # No favorite → pick best available room via OCR room names
-            # Detect room name labels in the roster popup, pick the best available one.
-            _ROOM_NAMES_LIST = [
-                "視聽室", "體育館", "圖書館",
-                "教室", "實驗室", "射擊場",
-                "載具庫",
-            ]
-            # Try to find room names via OCR and click the best available one
-            best_room_box = None
-            best_room_idx = -1
-            for i in range(len(statuses) - 1, -1, -1):  # reverse = prefer higher tier
-                if statuses[i] != "available":
-                    continue
-                # Try OCR match for this room
-                if i < len(_ROOM_NAMES_LIST):
-                    name = _ROOM_NAMES_LIST[i]
-                    hit = screen.find_text_one(name, region=(0.08, 0.15, 0.92, 0.85), min_conf=0.45)
-                    if hit:
-                        best_room_box = hit
-                        best_room_idx = i
-                        break
-                # Fallback to grid position
-                if best_room_idx < 0:
-                    best_room_idx = i
-                    break
-
-            if best_room_box:
-                self.log(f"picking room {best_room_idx} '{best_room_box.text}' via OCR at ({best_room_box.cx:.3f},{best_room_box.cy:.3f})")
-                self._roster_open = False
-                self.sub_state = "execute"
-                self._execute_ticks = 0
-                self._start_clicked = False
-                return action_click_box(best_room_box, f"click room {best_room_idx} via OCR")
-            elif best_room_idx >= 0:
-                rx, ry = _ROOM_CLICK_POS[best_room_idx]
-                self.log(f"picking room {best_room_idx} (grid fallback) at ({rx:.3f},{ry:.3f})")
-                self._roster_open = False
-                self.sub_state = "execute"
-                self._execute_ticks = 0
-                self._start_clicked = False
-                return action_click(rx, ry, f"click room {best_room_idx} grid")
-
-            # Fallback: no room found despite available_count > 0
-            self.log("room selection failed, switching location")
-            return self._close_roster_action(screen, "switch_location", "room selection failed")
+            self.log("closing roster, will click rooms on location map")
+            return self._close_roster_action(screen, "execute", "go to location map")
 
         # Not in roster overlay — open it if we haven't yet
         if not self._roster_open:
@@ -1156,37 +1077,27 @@ class ScheduleSkill(BaseSkill):
             self._execute_ticks = 0
             return action_wait(300, "back at location select")
 
-        # ── PRIORITY 4: Roster still visible → click room card again ──
-        # After clicking a room card, game may briefly show roster then
-        # transition to room info popup. Wait a few ticks before retrying.
+        # ── PRIORITY 4: Roster still visible → close it first ──
         if self._is_roster_overlay(screen):
-            if self._execute_ticks <= 3:
-                return action_wait(400, "waiting for room info popup to open")
-            # Roster still showing after 3 ticks → room click didn't register.
-            # Re-detect rooms and click again.
-            statuses = self._get_room_statuses(screen)
-            best = self._choose_best_room(statuses)
-            if best >= 0:
-                rx, ry = _ROOM_CLICK_POS[best]
-                self.log(f"re-clicking room {best} in roster at ({rx:.3f},{ry:.3f})")
-                return action_click(rx, ry, f"retry click room {best}")
             self._roster_open = False
-            return self._close_roster_action(screen, "check_roster", "no available rooms on retry")
+            return self._close_roster_action(screen, "execute", "close roster in execute")
 
-        # ── PRIORITY 5: Inside location view (room info popup should open) ──
-        # The room info popup (課程表資訊) has the 開始 button.
-        # If we're in the location view but no popup, click the building center
-        # to trigger the room info popup.
-        info_popup = screen.find_any_text(
-            ["課程表資訊", "课程表资讯", "課程表信息"],
-            region=(0.20, 0.05, 0.80, 0.30), min_conf=0.5
+        # ── PRIORITY 5: On location map — click avatar numbers to open room popup ──
+        # OCR detects affection numbers (10-30) near avatars on the isometric map.
+        # Clicking them opens the room info popup with 開始 button.
+        avatar_nums = screen.find_text(
+            r"^\d{1,2}$", region=(0.05, 0.20, 0.95, 0.85), min_conf=0.50
         )
-        if info_popup:
-            # Room info popup is open but 開始 button not found yet — wait
-            return action_wait(300, "room info popup visible, looking for start")
+        avatar_nums = [b for b in avatar_nums if b.text.isdigit() and 5 <= int(b.text) <= 40]
+        if avatar_nums:
+            idx = (self._execute_ticks - 1) % len(avatar_nums)
+            target = avatar_nums[idx]
+            self.log(f"clicking avatar '{target.text}' at ({target.cx:.2f},{target.cy:.2f})")
+            return action_click(target.cx, target.cy - 0.03,
+                                f"click avatar {target.text} on map")
 
-        # Click building center to open room info popup
-        return action_click(0.50, 0.44, f"click building center for room info")
+        # Fallback: click building center area
+        return action_click(0.50, 0.44, "click building center for room info")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
