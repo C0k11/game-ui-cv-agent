@@ -180,6 +180,18 @@ class FarmingSkill(BaseSkill):
         if current and current not in ("Mission", "DailyTasks"):
             return action_back(f"back from {current}")
 
+        # Fallback: detect campaign hub even if detect_current_screen fails
+        # (OCR sometimes can't read the 任務 header)
+        if self._is_campaign_hub(screen):
+            self.log("campaign hub detected (no header), clicking 任務 card")
+            mission_card = screen.find_any_text(
+                ["任務", "任务"],
+                region=(0.40, 0.15, 0.70, 0.35), min_conf=0.5
+            )
+            if mission_card:
+                return action_click_box(mission_card, "click 任務 card (hub fallback)")
+            return action_click(0.56, 0.24, "click 任務 card (hardcoded fallback)")
+
         return action_wait(500, "entering mission")
 
     def _select_hard(self, screen: ScreenState) -> Dict[str, Any]:
