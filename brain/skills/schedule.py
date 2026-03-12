@@ -1075,24 +1075,27 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "tickets exhausted")
 
         # ── PRIORITY 1: Report popup (schedule just finished) ──
+        # OCR often misses the stylized 確認 button on blue background.
+        # If we see the report title, click the confirm button at known position.
+        report_popup = screen.find_any_text(
+            ["課程表報告", "课程表报告"],
+            region=(0.30, 0.10, 0.70, 0.30), min_conf=0.5
+        )
         report_confirm = screen.find_any_text(
             ["確認", "确认"],
             region=(0.30, 0.60, 0.70, 0.90), min_conf=0.5
         )
-        report_popup = screen.find_any_text(
-            ["課程表報告", "课程表报告"],
-            region=screen.CENTER, min_conf=0.5
-        )
         if report_popup or report_confirm:
+            self.log(f"schedule report confirmed (ticket #{self._tickets_used})")
+            self._start_clicked = False
+            self._execute_ticks = 0
+            self._roster_open = False
+            self._roster_scan_ticks = 0
+            self.sub_state = "check_roster"
             if report_confirm:
-                self.log(f"schedule report confirmed (ticket #{self._tickets_used})")
-                self._start_clicked = False
-                self._execute_ticks = 0
-                self._roster_open = False
-                self._roster_scan_ticks = 0
-                self.sub_state = "check_roster"
                 return action_click_box(report_confirm, "confirm schedule report")
-            return action_wait(300, "waiting for report confirm")
+            # OCR missed 確認 button — click at known position (center-bottom of popup)
+            return action_click(0.50, 0.82, "confirm schedule report (hardcoded)")
 
         # ── PRIORITY 2: Start button (room info popup open) ──
         start = screen.find_any_text(
