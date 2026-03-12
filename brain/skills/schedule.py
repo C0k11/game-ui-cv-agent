@@ -1047,7 +1047,23 @@ class ScheduleSkill(BaseSkill):
             self._roster_open = False
             return action_wait(200, "execute timeout, retry via roster")
 
-        # Click building center positions to trigger room info popup
+        # Click avatar/room positions on the isometric location map.
+        # OCR detects affection numbers (10-30) near avatars on the map.
+        # Click on these numbers to open that room's info popup with 開始 button.
+        avatar_nums = screen.find_text(
+            r"^\d{1,2}$", region=(0.05, 0.20, 0.95, 0.85), min_conf=0.50
+        )
+        # Filter to likely affection numbers (10-35 range)
+        avatar_nums = [b for b in avatar_nums if b.text.isdigit() and 5 <= int(b.text) <= 40]
+        if avatar_nums:
+            # Pick one to click — rotate through them
+            idx = (self._execute_ticks - 1) % len(avatar_nums)
+            target = avatar_nums[idx]
+            self.log(f"clicking avatar number '{target.text}' at ({target.cx:.2f},{target.cy:.2f})")
+            return action_click(target.cx, target.cy - 0.03,
+                                f"click avatar {target.text} on map")
+
+        # Fallback: hardcoded positions if OCR finds no numbers
         _CLICK_POSITIONS = [
             (0.45, 0.40), (0.50, 0.35), (0.40, 0.45),
             (0.55, 0.42), (0.50, 0.50), (0.45, 0.35),
