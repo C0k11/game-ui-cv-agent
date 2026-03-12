@@ -559,24 +559,26 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _dxcam_camera = None
 
         # ── High-FPS YOLO detection thread (battle-grade) ──
-        # Runs YOLO at DXcam speed (~30+ FPS) independently of pipeline ticks.
-        # Feeds overlay with ByteTrack-tracked boxes for smooth lock-on rendering.
-        # Also stores latest YOLO results for pipeline ticks to read.
-        _yolo_latest_boxes = []  # shared: latest YOLO results for pipeline
+        # Owns DXcam exclusively (not thread-safe for concurrent grab).
+        # Runs YOLO at ~30 FPS, feeds overlay with ByteTrack-tracked boxes.
+        # Shares latest YOLO results AND latest frame with pipeline tick.
+        _yolo_latest_boxes = []    # shared: latest YOLO results
+        _yolo_latest_frame = None  # shared: latest DXcam frame for pipeline tick
         _yolo_latest_lock = threading.Lock()
         _yolo_thread_running = True
 
         def _yolo_highfps_thread():
             """DXcam → YOLO → tracker → overlay, like battle_overlay_demo.py."""
-            nonlocal _yolo_latest_boxes, _yolo_thread_running
+            nonlocal _yolo_latest_boxes, _yolo_latest_frame, _yolo_thread_running
             from brain.pipeline import _run_yolo_on_image
             _log_pipeline("YOLO high-FPS thread started")
-            _yolo_fps_target = 30  # target FPS for YOLO detection
+            _yolo_fps_target = 30
             _interval = 1.0 / _yolo_fps_target
             _frame_count = 0
             while _yolo_thread_running and _PIPELINE_RUNNING:
                 t0 = time.perf_counter()
                 frame = None
+                # DXcam is sole owner of this thread — no concurrent access
                 if _dxcam_camera is not None:
                     try:
                         import ctypes.wintypes as _wt3
@@ -594,9 +596,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     continue
                 h, w = frame.shape[:2]
                 yolo_boxes = _run_yolo_on_image(frame, w, h)
-                # Store latest for pipeline ticks
+                # Share both YOLO results AND frame with pipeline tick
                 with _yolo_latest_lock:
                     _yolo_latest_boxes = yolo_boxes
+                    _yolo_latest_frame = frame
                 # Feed overlay (tracker is inside overlay.update)
                 if _overlay and _overlay.is_alive:
                     pipe_ref = None
@@ -632,18 +635,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             _tick_counter += 1
 
-            # 1. Capture: DXcam first (fast), ADB fallback, BitBlt last resort
+            # 1. Capture: read latest frame from YOLO high-FPS thread (DXcam),
+            #    ADB fallback, BitBlt last resort.
+            #    DXcam is owned exclusively by the YOLO thread — do NOT grab here.
             frame = None
-            if _dxcam_camera is not None:
-                try:
-                    # Re-read window rect in case it moved
-                    import ctypes.wintypes as _wt2
-                    _rc2 = _wt2.RECT()
-                    ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_rc2))
-                    _dxcam_region = (_rc2.left, _rc2.top, _rc2.right, _rc2.bottom)
-                    frame = _dxcam_camera.grab(region=_dxcam_region)
-                except Exception:
-                    frame = None
+            with _yolo_latest_lock:
+                if _yolo_latest_frame is not None:
+                    frame = _yolo_latest_frame.copy()
             if frame is None and adb is not None:
                 try:
                     frame = adb.capture_frame()
