@@ -289,15 +289,17 @@ def _run_template_matching(frame_bgr) -> List:
 
 def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
                            skip_ocr: bool = False,
-                           prev_ocr_boxes=None) -> ScreenState:
+                           prev_ocr_boxes=None,
+                           injected_yolo_boxes=None) -> ScreenState:
     """Build ScreenState from an in-memory BGR numpy array (no file I/O).
 
     Used by the MuMu runner for zero-copy capture → detect pipeline.
 
     Args:
         skip_ocr: if True, skip OCR (expensive ~50ms) and reuse prev_ocr_boxes.
-                  YOLO + template still run every frame (~3ms).
         prev_ocr_boxes: OCR boxes from a previous tick to reuse when skip_ocr=True.
+        injected_yolo_boxes: pre-computed YOLO boxes from high-FPS thread.
+            If provided, skip running YOLO here (already done at high FPS).
     """
     if frame_bgr is None:
         return ScreenState(screenshot_path=screenshot_path)
@@ -306,7 +308,10 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
         ocr_boxes = prev_ocr_boxes
     else:
         ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
-    yolo_boxes = _run_yolo_on_image(frame_bgr, w, h)
+    if injected_yolo_boxes is not None:
+        yolo_boxes = injected_yolo_boxes
+    else:
+        yolo_boxes = _run_yolo_on_image(frame_bgr, w, h)
     template_hits = _run_template_matching(frame_bgr)
     return ScreenState(
         ocr_boxes=ocr_boxes,
@@ -812,16 +817,20 @@ class DailyPipeline:
 
     def tick_from_frame(self, frame_bgr, *, screenshot_path: str = "",
                         skip_ocr: bool = False,
-                        prev_ocr_boxes=None) -> Dict[str, Any]:
+                        prev_ocr_boxes=None,
+                        injected_yolo_boxes=None) -> Dict[str, Any]:
         """Process one in-memory BGR frame. Returns an action dict.
 
         Args:
-            skip_ocr: skip expensive OCR, reuse prev_ocr_boxes. YOLO still runs.
+            skip_ocr: skip expensive OCR, reuse prev_ocr_boxes.
             prev_ocr_boxes: cached OCR boxes from a previous tick.
+            injected_yolo_boxes: pre-computed YOLO boxes from high-FPS thread.
+                If provided, skip running YOLO in read_screen_from_frame.
         """
         screen = read_screen_from_frame(frame_bgr, screenshot_path=screenshot_path,
                                         skip_ocr=skip_ocr,
-                                        prev_ocr_boxes=prev_ocr_boxes)
+                                        prev_ocr_boxes=prev_ocr_boxes,
+                                        injected_yolo_boxes=injected_yolo_boxes)
         return self._tick_with_screen(screen, screenshot_path=screenshot_path)
 
     @property

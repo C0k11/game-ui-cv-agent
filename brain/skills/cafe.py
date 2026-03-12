@@ -63,7 +63,7 @@ _AVATAR_MATCH_THRESHOLD = 0.50
 # 1F marks score ~0.40+, but 2F marks only score 0.18-0.26. Use 0.15 to catch both.
 _HEADPAT_CONF = 0.15
 # Max consecutive empty scans before giving up on headpats
-_MAX_EMPTY_SCANS = 12
+_MAX_EMPTY_SCANS = 4
 # Max headpats per floor (cafe typically has 3-5 students per floor)
 _MAX_HEADPATS_PER_FLOOR = 7
 _INVITE_MATCH_BUTTON_LIMIT = 4
@@ -645,12 +645,17 @@ class CafeSkill(BaseSkill):
 
         # Stage 1: Invite list is open, find favorite student or click first
         if self._invite_stage == 1:
+            # OCR frequently misreads 邀請 as 邀睛
             invite_btns = screen.find_text(
-                "邀請", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.65
+                "邀請", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
             )
             if not invite_btns:
                 invite_btns = screen.find_text(
-                    "邀请", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.65
+                    "邀请", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
+                )
+            if not invite_btns:
+                invite_btns = screen.find_text(
+                    "邀睛", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
                 )
             if invite_btns:
                 # Try to find a favorite student via avatar matching
