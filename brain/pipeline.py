@@ -572,13 +572,42 @@ class DailyPipeline:
             # Fallback: press ESC to dismiss (ESC = cancel in this dialog)
             return action_back("interceptor: dismiss exit dialog")
 
+        # ── P0.5: Settings popup (選項) ──
+        # Accidentally opened settings. Has X at top-right. Detect "選項"/"选项" header.
+        # Must check BEFORE check-in calendar (彩奈 appears in Mail "From彩奈" too).
+        settings_popup = screen.find_any_text(
+            ["選項", "选项"],
+            region=(0.30, 0.05, 0.70, 0.18), min_conf=0.6
+        )
+        if settings_popup:
+            print(f"[Interceptor] P0.5 Settings popup: '{settings_popup.text}', clicking X")
+            self._interceptor_streak += 1
+            return action_click(0.83, 0.09, f"interceptor: close settings popup")
+
+        # ── P0.5: Updates / Patch Notes WebView ──
+        updates = screen.find_any_text(
+            ["Updates", "Patch Notes"],
+            region=(0.30, 0.04, 0.70, 0.14), min_conf=0.5
+        )
+        if updates:
+            print(f"[Interceptor] P0.5 Updates WebView: '{updates.text}', BACK to close")
+            self._interceptor_streak += 1
+            return action_back(f"interceptor: close Updates WebView ({updates.text})")
+
         # ── P0.5: Daily check-in calendar (彩奈签到簿) ──
         # Full-screen popup with NO close button. Just click anywhere to dismiss.
-        # Detected by "簽到" / "签到" / "彩奈" text, or "第1天" / "第2天" grid.
+        # IMPORTANT: "彩奈" restricted to TITLE area (top-center) to avoid matching
+        # Mail "From彩奈" text. Use "簽到/到薄/到簿" or "第N天" grid as primary.
         checkin = screen.find_any_text(
-            ["簽到", "签到", "彩奈", "到薄", "到簿"],
+            ["簽到", "签到", "到薄", "到簿"],
             min_conf=0.5
         )
+        if not checkin:
+            # "彩奈" only in title area (top-center), NOT in mail list
+            checkin = screen.find_any_text(
+                ["彩奈"],
+                region=(0.35, 0.05, 0.85, 0.25), min_conf=0.6
+            )
         if not checkin:
             checkin = screen.find_any_text(
                 ["第1天", "第2天", "第3天"],
@@ -588,18 +617,6 @@ class DailyPipeline:
             print(f"[Interceptor] P0.5 daily check-in calendar: '{checkin.text}', clicking to dismiss")
             self._interceptor_streak += 1
             return action_click(0.5, 0.5, f"interceptor: dismiss check-in calendar ({checkin.text})")
-
-        # ── P0.5: Updates / Patch Notes WebView ──
-        # In-game WebView (same system as 主要消息). X button absorbs clicks unreliably.
-        # BACK key closes it reliably → triggers exit dialog → P0 handler clicks 取消.
-        updates = screen.find_any_text(
-            ["Updates", "Patch Notes"],
-            region=(0.30, 0.04, 0.70, 0.14), min_conf=0.5
-        )
-        if updates:
-            print(f"[Interceptor] P0.5 Updates WebView: '{updates.text}', BACK to close")
-            self._interceptor_streak += 1
-            return action_back(f"interceptor: close Updates WebView ({updates.text})")
 
         # ── P1: In-game announcement popup (内嵌公告) ──
         # Detected by "主要消息" text in lower-left area. X button at top-right (0.98, 0.04).

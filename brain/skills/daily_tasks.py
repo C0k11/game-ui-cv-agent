@@ -138,10 +138,24 @@ class DailyTasksSkill(BaseSkill):
             # Last resort: some servers have it accessible via mission menu
             mission = screen.find_any_text(
                 ["任務", "任务"],
-                region=screen.LEFT_SIDE, min_conf=0.7
+                region=screen.LEFT_SIDE, min_conf=0.5
             )
             if mission:
                 return action_click_box(mission, "click mission sidebar")
+
+            # Detect "2/8" or similar task counter on lobby left sidebar
+            # The 任務 icon OCR often fails but shows the counter badge
+            task_counter = screen.find_text_one(
+                r"^\d/\d$",
+                region=(0.0, 0.20, 0.15, 0.40), min_conf=0.5
+            )
+            if task_counter:
+                return action_click(task_counter.cx, task_counter.cy,
+                                    f"click task counter badge ({task_counter.text})")
+
+            # Hardcoded fallback: lobby 任務 sidebar icon position
+            if self.ticks > 10:
+                return action_click(0.04, 0.30, "click tasks sidebar (hardcoded)")
 
             return action_wait(300, "looking for tasks button")
 
