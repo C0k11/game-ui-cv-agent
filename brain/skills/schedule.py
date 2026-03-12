@@ -47,6 +47,30 @@ _ROSTER_X_POS = (0.89, 0.14)      # X close button on roster overlay
 _BUILD_CENTER_POS = (0.50, 0.50)  # Center hexagon in location detail
 _ROSTER_TAB_POS = (0.84, 0.91)
 
+# ── reference-derived room grid positions in 全體課程表 popup ──
+# Converted from reference lesson.py 1280×720 absolute → normalized 0-1.
+# 9 rooms in a 3×3 grid. Click to open room info popup with 開始 button.
+_ROOM_CLICK_POS = [
+    (0.240, 0.357), (0.509, 0.357), (0.777, 0.357),  # row 1
+    (0.240, 0.567), (0.509, 0.567), (0.777, 0.567),  # row 2
+    (0.240, 0.778), (0.509, 0.778), (0.770, 0.778),  # row 3
+]
+# Pixel-color status check positions (top-left corner of each room card).
+# White (250-255 all channels) = available, grey (230-249) = done,
+# dark (31-160) = locked, medium grey (197-217) = no activity.
+_ROOM_STATUS_POS = [
+    (0.226, 0.283), (0.502, 0.283), (0.770, 0.283),  # row 1
+    (0.226, 0.499), (0.502, 0.499), (0.770, 0.499),  # row 2
+    (0.226, 0.710), (0.502, 0.710), (0.770, 0.710),  # row 3
+]
+# Relationship/affection count positions (near avatar icons in each room card).
+# reference checks RGB for pink/red heart icon presence.
+_ROOM_AFFECTION_POS = [
+    (0.346, 0.410), (0.615, 0.410), (0.885, 0.410),  # row 1 (CN: 443/720, 290/720)
+    (0.346, 0.613), (0.615, 0.613), (0.885, 0.613),  # row 2
+    (0.346, 0.821), (0.615, 0.821), (0.885, 0.821),  # row 3
+]
+
 
 def _load_target_favorites() -> List[str]:
     """Load target character names from app_config.json."""
@@ -208,6 +232,65 @@ class ScheduleSkill(BaseSkill):
                     )
                 )
         return candidates
+
+    def _get_room_statuses(self, screen: ScreenState) -> List[str]:
+        """Detect status of all 9 rooms in 全體課程表 popup via pixel color.
+
+        Adapted from reference lesson.py get_lesson_each_region_status().
+        Checks pixel color at fixed positions in the roster popup grid:
+          - White (250-255 RGB) = "available" (can schedule here)
+          - Grey (220-249 RGB) = "done" (already scheduled)
+          - Dark (31-160 RGB) = "locked" (need higher RANK)
+          - Medium grey (197-217 RGB) = "no_activity"
+
+        Returns list of 9 status strings.
+        """
+        import cv2
+        import numpy as np
+        try:
+            img = cv2.imdecode(
+                np.fromfile(screen.screenshot_path, dtype=np.uint8),
+                cv2.IMREAD_COLOR
+            )
+            if img is None:
+                return ["unknown"] * 9
+            h, w = img.shape[:2]
+        except Exception:
+            return ["unknown"] * 9
+
+        statuses = []
+        for i, (nx, ny) in enumerate(_ROOM_STATUS_POS):
+            px, py = int(nx * w), int(ny * h)
+            px = min(max(px, 0), w - 1)
+            py = min(max(py, 0), h - 1)
+            b, g, r = img[py, px]  # BGR
+            if r >= 245 and g >= 245 and b >= 245:
+                statuses.append("available")
+            elif 220 <= r <= 249 and 220 <= g <= 249 and 220 <= b <= 249:
+                statuses.append("done")
+            elif r <= 160 and g <= 160 and b <= 160 and r >= 31:
+                statuses.append("locked")
+            elif 197 <= r <= 220 and 197 <= g <= 220 and 195 <= b <= 218:
+                statuses.append("no_activity")
+            else:
+                statuses.append("unknown")
+        return statuses
+
+    def _choose_best_room(self, statuses: List[str]) -> int:
+        """Choose the best available room to schedule.
+
+        Adapted from reference lesson.py choose_lesson():
+        - Prefer rooms with higher tier (bottom rows = higher tier rewards)
+        - Among available rooms, pick the last one (higher index = better tier)
+
+        Returns room index (0-8) or -1 if none available.
+        """
+        best = -1
+        for i in range(8, -1, -1):
+            if statuses[i] == "available":
+                best = i
+                break
+        return best
 
     def _check_avatar_status(self, roi) -> dict:
         """Detect green checkmark and heart+number on an avatar ROI via HSV.
@@ -773,10 +856,9 @@ class ScheduleSkill(BaseSkill):
         # Detect current location name (visible in building detail header)
         cur_loc = self._detect_current_location(screen)
 
-        # If roster overlay is showing, analyze over multiple ticks before closing.
-        # Tick 1: parse tickets & check locks
-        # Tick 2: avatar matching (YOLO + template compare)
-        # Tick 3: close roster and proceed to execute
+        # ── Roster overlay is showing: detect room statuses and pick best room ──
+        # Adapted from reference lesson.py: use pixel color at fixed grid positions
+        # to detect available/done/locked rooms, then click the best one directly.
         if roster_overlay:
             self._roster_open = True
             self._roster_scan_ticks += 1
@@ -784,49 +866,70 @@ class ScheduleSkill(BaseSkill):
             if self._roster_scan_ticks == 1:
                 self._target_found = False
                 self._parse_tickets(screen)
-                return action_wait(300, "scanning roster (1/3)")
+                # Detect room statuses via pixel color (reference approach)
+                self._room_statuses = self._get_room_statuses(screen)
+                status_summary = " | ".join(
+                    f"R{i}:{s}" for i, s in enumerate(self._room_statuses)
+                )
+                self.log(f"room statuses: {status_summary}")
+                return action_wait(300, "scanning roster rooms")
 
             if self._roster_scan_ticks == 2:
-                # Second scan tick: avatar matching
+                # Avatar matching for favorite students (if configured)
                 if self._target_favorites:
                     self._check_roster_avatars(screen)
-                return action_wait(300, "scanning roster avatars (2/3)")
+                return action_wait(300, "scanning roster avatars")
 
-            # Third tick: done scanning — execute only if favorite found,
-            # otherwise switch to the next location.
+            # Tick 3: pick best room and click it directly in the popup grid
             self._roster_scan_ticks = 0
             self._locations_checked += 1
             if cur_loc:
                 self._visited_locations.add(cur_loc)
-
             self._switch_ticks = 0
+
+            # Get room statuses (may have been set in tick 1)
+            statuses = getattr(self, '_room_statuses', ["unknown"] * 9)
+            available_count = sum(1 for s in statuses if s == "available")
+
+            if available_count == 0:
+                self.log(f"no available rooms in '{cur_loc}', switching location")
+                return self._close_roster_action(screen, "switch_location", "no available rooms")
+
+            # If favorite was found by avatar matching, find which room it's in
+            # and click that room if it's available
             if self._target_found and self._matched_avatar_pos:
-                # Click the location card TITLE area (above the avatar) on the popup.
-                # From OCR data: titles are at y≈0.30 (row1) vs avatars at y≈0.40 (row1),
-                # titles at y≈0.51 (row2) vs avatars at y≈0.63 (row2). ~0.10 offset.
                 ax, ay = self._matched_avatar_pos
-                click_y = max(0.12, ay - 0.10)
-                self.log(f"favorite found, clicking location title at ({ax:.2f},{click_y:.2f}) on popup")
+                # Find closest room card to the matched avatar position
+                best_dist = 999.0
+                best_room = -1
+                for i, (rx, ry) in enumerate(_ROOM_CLICK_POS):
+                    dist = abs(ax - rx) + abs(ay - ry)
+                    if dist < best_dist and statuses[i] == "available":
+                        best_dist = dist
+                        best_room = i
+                if best_room >= 0:
+                    rx, ry = _ROOM_CLICK_POS[best_room]
+                    self.log(f"favorite in room {best_room}, clicking ({rx:.3f},{ry:.3f})")
+                    self._roster_open = False
+                    self.sub_state = "execute"
+                    self._execute_ticks = 0
+                    self._start_clicked = False
+                    return action_click(rx, ry, f"click favorite room {best_room}")
+
+            # No favorite → pick best available room (highest tier = highest index)
+            best_room = self._choose_best_room(statuses)
+            if best_room >= 0:
+                rx, ry = _ROOM_CLICK_POS[best_room]
+                self.log(f"picking room {best_room} (best available) at ({rx:.3f},{ry:.3f})")
                 self._roster_open = False
-                self._roster_scan_ticks = 0
                 self.sub_state = "execute"
                 self._execute_ticks = 0
                 self._start_clicked = False
-                return action_click(ax, click_y, f"click location card title")
-            # No favorite found — pick lowest affection number visible on popup
-            lowest_num = self._find_lowest_affection_card(screen)
-            if lowest_num:
-                ax, ay = lowest_num
-                click_y = max(0.12, ay - 0.10)
-                self.log(f"no favorite, picking lowest affection at ({ax:.2f},{click_y:.2f})")
-                self._roster_open = False
-                self._roster_scan_ticks = 0
-                self.sub_state = "execute"
-                self._execute_ticks = 0
-                self._start_clicked = False
-                return action_click(ax, click_y, "click lowest affection location")
-            self.log(f"no favorite found in '{cur_loc}' (#{self._locations_checked}), switching location")
-            return self._close_roster_action(screen, "switch_location", "no favorite found")
+                return action_click(rx, ry, f"click best room {best_room}")
+
+            # Fallback: no room found despite available_count > 0
+            self.log("room selection failed, switching location")
+            return self._close_roster_action(screen, "switch_location", "room selection failed")
 
         # Not in roster overlay — open it if we haven't yet
         if not self._roster_open:
@@ -924,33 +1027,33 @@ class ScheduleSkill(BaseSkill):
         return action_wait(400, "looking for switch arrows")
 
     def _execute(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click start button to run schedule.
+        """Wait for room info popup → click 開始 → animation → report → confirm → loop.
 
-        Flow: click building center → room info popup opens → click 课程表開始 → animation
-        The "课程表開始" (Start Schedule) button appears in the room info popup,
-        NOT as a standalone button on the building detail view.
+        Adapted from reference lesson.py start_lesson():
+        After clicking a room card in 全體課程表 popup, the game opens
+        a room info popup (課程表資訊) with a 開始 (Start) button at the bottom.
+        Click 開始 → schedule animation plays → report popup → confirm → done.
         """
         self._execute_ticks += 1
 
-        # Hard limit: if we've been in execute for too many ticks, bail out
-        if self._execute_ticks > 30:
-            self.log("execute stuck for 30+ ticks, switching location")
-            self.sub_state = "switch_location"
+        # Hard limit
+        if self._execute_ticks > 25:
+            self.log("execute stuck for 25+ ticks, going back to check_roster")
+            self.sub_state = "check_roster"
             self._execute_ticks = 0
             self._start_clicked = False
-            self._switch_ticks = 0
-            return action_wait(300, "execute stuck, switching")
+            self._roster_open = False
+            self._roster_scan_ticks = 0
+            return action_wait(300, "execute stuck, retry via roster")
 
+        # ── Handle non-schedule screens (animation, bond popups, etc.) ──
         if not self._is_schedule(screen):
-            # Before assuming we left schedule UI, check if the start button is visible
-            # (e.g. 課程表資訊 popup is open over the schedule view)
             start_visible = screen.find_any_text(
                 ["課程表開始", "课程表開始", "课程表开始", "開始", "开始"],
                 min_conf=0.5,
             )
             if start_visible:
-                # Start button found despite not detecting schedule header
-                pass  # Fall through to normal start-button logic below
+                pass  # Fall through to start-button logic
             else:
                 self._animation_ticks += 1
                 if self._animation_ticks > 8:
@@ -958,44 +1061,40 @@ class ScheduleSkill(BaseSkill):
                 if self._animation_ticks > 15:
                     self._animation_ticks = 0
                     self._start_clicked = False
-                    self.sub_state = "switch_location"
-                    self._target_found = False
+                    self.sub_state = "check_roster"
                     self._roster_open = False
-                    self._switch_ticks = 0
-                    return action_wait(500, "animation done, switching to next location")
+                    self._roster_scan_ticks = 0
+                    return action_wait(500, "animation done, back to roster")
                 return action_wait(500, "waiting for schedule UI")
 
         self._animation_ticks = 0
-
-        # Parse tickets whenever schedule UI is visible
         self._parse_tickets(screen)
         if self._tickets_remaining == 0:
-            self.log("no tickets remaining after execute, exiting")
+            self.log("no tickets remaining, exiting")
             self.sub_state = "exit"
             return action_wait(300, "tickets exhausted")
 
         # ── PRIORITY 1: Report popup (schedule just finished) ──
-        report_popup = screen.find_any_text(
-            ["課程表報告", "课程表报告", "課程表資訊", "课程表信息", "課程表信息"],
-            region=screen.CENTER, min_conf=0.5
-        )
         report_confirm = screen.find_any_text(
             ["確認", "确认"],
             region=(0.30, 0.60, 0.70, 0.90), min_conf=0.5
         )
+        report_popup = screen.find_any_text(
+            ["課程表報告", "课程表报告"],
+            region=screen.CENTER, min_conf=0.5
+        )
         if report_popup or report_confirm:
             if report_confirm:
-                self.log(f"confirming schedule report (ticket #{self._tickets_used}), back to check_roster")
+                self.log(f"schedule report confirmed (ticket #{self._tickets_used})")
                 self._start_clicked = False
                 self._execute_ticks = 0
                 self._roster_open = False
                 self._roster_scan_ticks = 0
                 self.sub_state = "check_roster"
                 return action_click_box(report_confirm, "confirm schedule report")
-            return action_wait(300, "waiting for schedule report confirm")
+            return action_wait(300, "waiting for report confirm")
 
-        # ── PRIORITY 2: Start button (room info popup is open) ──
-        # Check for start button BEFORE anything else to avoid closing popups we need.
+        # ── PRIORITY 2: Start button (room info popup open) ──
         start = screen.find_any_text(
             ["課程表開始", "课程表開始", "课程表开始",
              "開始日程", "开始日程", "START"],
@@ -1015,62 +1114,51 @@ class ScheduleSkill(BaseSkill):
             self._execute_ticks = 0
             return action_click_box(start, "start schedule")
 
-        # After clicking start, wait a few ticks for animation to begin
-        if getattr(self, '_start_clicked', False):
+        # After clicking start, wait for animation
+        if self._start_clicked:
             if self._execute_ticks > 4:
                 self.log("start click didn't trigger, retrying")
                 self._start_clicked = False
                 self._execute_ticks = 0
             return action_wait(500, "waiting for schedule to start")
 
-        # ── PRIORITY 3: If at Location Select, re-enter one ──
+        # ── PRIORITY 3: Location Select → re-enter ──
         if self._is_location_select(screen):
-            self.log("back at location select after execute, re-selecting")
             self.sub_state = "select_location"
             self._execute_ticks = 0
-            self._start_clicked = False
-            return action_wait(300, "back at location select, re-selecting")
+            return action_wait(300, "back at location select")
 
-        # ── PRIORITY 4: If roster overlay still showing, close it ──
-        # Delay 6+ ticks: after clicking roster card, the overlay lingers during
-        # transition animation (3-4 ticks). Building clicks need time to fire first.
-        if self._execute_ticks > 6 and self._is_roster_overlay(screen):
+        # ── PRIORITY 4: Roster still visible → click room card again ──
+        # After clicking a room card, game may briefly show roster then
+        # transition to room info popup. Wait a few ticks before retrying.
+        if self._is_roster_overlay(screen):
+            if self._execute_ticks <= 3:
+                return action_wait(400, "waiting for room info popup to open")
+            # Roster still showing after 3 ticks → room click didn't register.
+            # Re-detect rooms and click again.
+            statuses = self._get_room_statuses(screen)
+            best = self._choose_best_room(statuses)
+            if best >= 0:
+                rx, ry = _ROOM_CLICK_POS[best]
+                self.log(f"re-clicking room {best} in roster at ({rx:.3f},{ry:.3f})")
+                return action_click(rx, ry, f"retry click room {best}")
             self._roster_open = False
-            return self._close_roster_action(screen, "execute", "close roster before execute")
+            return self._close_roster_action(screen, "check_roster", "no available rooms on retry")
 
-        # ── PRIORITY 5: Click building to open room info popup ──
-        if self._execute_ticks > 20:
-            self.log("execute timeout after 20 ticks, going back to check_roster")
-            self.sub_state = "check_roster"
-            self._execute_ticks = 0
-            self._start_clicked = False
-            self._roster_open = False
-            return action_wait(200, "execute timeout, retry via roster")
-
-        # Click avatar/room positions on the isometric location map.
-        # OCR detects affection numbers (10-30) near avatars on the map.
-        # Click on these numbers to open that room's info popup with 開始 button.
-        avatar_nums = screen.find_text(
-            r"^\d{1,2}$", region=(0.05, 0.20, 0.95, 0.85), min_conf=0.50
+        # ── PRIORITY 5: Inside location view (room info popup should open) ──
+        # The room info popup (課程表資訊) has the 開始 button.
+        # If we're in the location view but no popup, click the building center
+        # to trigger the room info popup.
+        info_popup = screen.find_any_text(
+            ["課程表資訊", "课程表资讯", "課程表信息"],
+            region=(0.20, 0.05, 0.80, 0.30), min_conf=0.5
         )
-        # Filter to likely affection numbers (10-35 range)
-        avatar_nums = [b for b in avatar_nums if b.text.isdigit() and 5 <= int(b.text) <= 40]
-        if avatar_nums:
-            # Pick one to click — rotate through them
-            idx = (self._execute_ticks - 1) % len(avatar_nums)
-            target = avatar_nums[idx]
-            self.log(f"clicking avatar number '{target.text}' at ({target.cx:.2f},{target.cy:.2f})")
-            return action_click(target.cx, target.cy - 0.03,
-                                f"click avatar {target.text} on map")
+        if info_popup:
+            # Room info popup is open but 開始 button not found yet — wait
+            return action_wait(300, "room info popup visible, looking for start")
 
-        # Fallback: hardcoded positions if OCR finds no numbers
-        _CLICK_POSITIONS = [
-            (0.45, 0.40), (0.50, 0.35), (0.40, 0.45),
-            (0.55, 0.42), (0.50, 0.50), (0.45, 0.35),
-        ]
-        idx = (self._execute_ticks - 1) % len(_CLICK_POSITIONS)
-        x, y = _CLICK_POSITIONS[idx]
-        return action_click(x, y, f"click building pos {idx}")
+        # Click building center to open room info popup
+        return action_click(0.50, 0.44, f"click building center for room info")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
