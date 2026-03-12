@@ -570,53 +570,67 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         def _yolo_highfps_thread():
             """DXcam → YOLO → tracker → overlay, like battle_overlay_demo.py."""
             nonlocal _yolo_latest_boxes, _yolo_latest_frame, _yolo_thread_running
-            from brain.pipeline import _run_yolo_on_image
+            # Wait for pipeline to start and YOLO model to lazy-load on first tick
+            time.sleep(5)
+            try:
+                from brain.pipeline import _run_yolo_on_image
+            except Exception as e:
+                _log_pipeline(f"YOLO high-FPS thread import failed: {e}")
+                return
             _log_pipeline("YOLO high-FPS thread started")
             _yolo_fps_target = 30
             _interval = 1.0 / _yolo_fps_target
             _frame_count = 0
+            _errors = 0
             while _yolo_thread_running and _PIPELINE_RUNNING:
-                t0 = time.perf_counter()
-                frame = None
-                # DXcam is sole owner of this thread — no concurrent access
-                if _dxcam_camera is not None:
-                    try:
-                        import ctypes.wintypes as _wt3
-                        _rc3 = _wt3.RECT()
-                        ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_rc3))
-                        rgn = (_rc3.left, _rc3.top, _rc3.right, _rc3.bottom)
-                        frame = _dxcam_camera.grab(region=rgn)
-                    except Exception:
-                        frame = None
-                if frame is None:
-                    time.sleep(0.01)
-                    continue
-                if frame.mean() < 10:
-                    time.sleep(0.01)
-                    continue
-                h, w = frame.shape[:2]
-                yolo_boxes = _run_yolo_on_image(frame, w, h)
-                # Share both YOLO results AND frame with pipeline tick
-                with _yolo_latest_lock:
-                    _yolo_latest_boxes = yolo_boxes
-                    _yolo_latest_frame = frame
-                # Feed overlay (tracker is inside overlay.update)
-                if _overlay and _overlay.is_alive:
-                    pipe_ref = None
-                    with _PIPELINE_LOCK:
-                        pipe_ref = _PIPELINE
-                    current_skill = pipe_ref.current_skill.name if pipe_ref and pipe_ref.current_skill else ""
-                    in_cafe = current_skill == "Cafe"
-                    overlay_out = []
-                    for yb in yolo_boxes:
-                        if hasattr(yb, "cls_name") and "headpat" in yb.cls_name.lower() and not in_cafe:
-                            continue
-                        overlay_out.append(yb)
-                    _overlay.update(overlay_out)
-                _frame_count += 1
-                elapsed = time.perf_counter() - t0
-                sleep_t = max(0, _interval - elapsed)
-                time.sleep(sleep_t)
+                try:
+                    t0 = time.perf_counter()
+                    frame = None
+                    if _dxcam_camera is not None:
+                        try:
+                            import ctypes.wintypes as _wt3
+                            _rc3 = _wt3.RECT()
+                            ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_rc3))
+                            rgn = (_rc3.left, _rc3.top, _rc3.right, _rc3.bottom)
+                            frame = _dxcam_camera.grab(region=rgn)
+                        except Exception:
+                            frame = None
+                    if frame is None:
+                        time.sleep(0.01)
+                        continue
+                    if frame.mean() < 10:
+                        time.sleep(0.01)
+                        continue
+                    h, w = frame.shape[:2]
+                    yolo_boxes = _run_yolo_on_image(frame, w, h)
+                    with _yolo_latest_lock:
+                        _yolo_latest_boxes = yolo_boxes
+                        _yolo_latest_frame = frame
+                    if _overlay and _overlay.is_alive:
+                        pipe_ref = None
+                        with _PIPELINE_LOCK:
+                            pipe_ref = _PIPELINE
+                        skill_name = pipe_ref.current_skill.name if pipe_ref and pipe_ref.current_skill else ""
+                        in_cafe = skill_name == "Cafe"
+                        overlay_out = []
+                        for yb in yolo_boxes:
+                            if hasattr(yb, "cls_name") and "headpat" in yb.cls_name.lower() and not in_cafe:
+                                continue
+                            overlay_out.append(yb)
+                        _overlay.update(overlay_out)
+                    _frame_count += 1
+                    _errors = 0
+                    elapsed = time.perf_counter() - t0
+                    sleep_t = max(0, _interval - elapsed)
+                    time.sleep(sleep_t)
+                except Exception as e:
+                    _errors += 1
+                    if _errors <= 3:
+                        _log_pipeline(f"YOLO high-FPS error #{_errors}: {e}")
+                    time.sleep(0.5)
+                    if _errors > 20:
+                        _log_pipeline("YOLO high-FPS too many errors, stopping")
+                        break
             _log_pipeline(f"YOLO high-FPS thread stopped ({_frame_count} frames)")
 
         _yolo_hfps = threading.Thread(target=_yolo_highfps_thread, daemon=True)
