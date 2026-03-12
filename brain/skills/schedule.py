@@ -1032,8 +1032,9 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "back at location select, re-selecting")
 
         # ── PRIORITY 4: If roster overlay still showing, close it ──
-        # Only check after first 2 ticks to avoid closing roster during transition
-        if self._execute_ticks > 2 and self._is_roster_overlay(screen):
+        # Delay 6+ ticks: after clicking roster card, the overlay lingers during
+        # transition animation (3-4 ticks). Building clicks need time to fire first.
+        if self._execute_ticks > 6 and self._is_roster_overlay(screen):
             self._roster_open = False
             return self._close_roster_action(screen, "execute", "close roster before execute")
 
