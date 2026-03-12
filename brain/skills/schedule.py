@@ -850,10 +850,8 @@ class ScheduleSkill(BaseSkill):
         # Detect current location name (visible in building detail header)
         cur_loc = self._detect_current_location(screen)
 
-        # ── Roster overlay: close it and go to execute (click rooms on map) ──
-        # Simpler approach: close the roster, then use the location map to find
-        # rooms. The map shows avatars with affection numbers — clicking them
-        # opens the room info popup with the 開始 button.
+        # ── Roster overlay: scan rooms and click an available one directly ──
+        # Click OCR-detected room names in the popup to navigate to room info.
         if roster_overlay:
             self._roster_open = True
             self._roster_scan_ticks += 1
@@ -868,14 +866,41 @@ class ScheduleSkill(BaseSkill):
                     self._check_roster_avatars(screen)
                 return action_wait(300, "scanning roster avatars")
 
-            # Done scanning — close roster and go to execute on the location map
+            # Tick 3+: click a room name in the popup to open room info
             self._roster_scan_ticks = 0
             self._locations_checked += 1
             if cur_loc:
                 self._visited_locations.add(cur_loc)
             self._switch_ticks = 0
-            self.log("closing roster, will click rooms on location map")
-            return self._close_roster_action(screen, "execute", "go to location map")
+
+            # Find room names via OCR and click one (prefer higher tier = later in list)
+            _ROOM_NAMES = [
+                "視聽室", "體育館", "圖書館",
+                "教室", "實驗室", "射擊場",
+                "載具庫",
+                # Simplified variants
+                "视听室", "体育馆", "图书馆",
+                "实验室", "射击场", "载具库",
+            ]
+            found_rooms = []
+            for name in _ROOM_NAMES:
+                hit = screen.find_text_one(name, region=(0.08, 0.15, 0.92, 0.85), min_conf=0.40)
+                if hit:
+                    found_rooms.append(hit)
+
+            if found_rooms:
+                # Click the last found room (higher tier rooms are listed later)
+                target = found_rooms[-1]
+                self.log(f"clicking room '{target.text}' at ({target.cx:.3f},{target.cy:.3f}) in roster popup")
+                self._roster_open = False
+                self.sub_state = "execute"
+                self._execute_ticks = 0
+                self._start_clicked = False
+                return action_click_box(target, f"click room {target.text}")
+
+            # No room names found — switch to next location
+            self.log("no room names found in roster, switching location")
+            return self._close_roster_action(screen, "switch_location", "no rooms found")
 
         # Not in roster overlay — open it if we haven't yet
         if not self._roster_open:
