@@ -982,15 +982,17 @@ class ScheduleSkill(BaseSkill):
         """
         self._execute_ticks += 1
 
-        # Hard limit
-        if self._execute_ticks > 25:
-            self.log("execute stuck for 25+ ticks, going back to check_roster")
-            self.sub_state = "check_roster"
+        # Hard limit: if no start button after many building clicks, this location
+        # likely has all rooms done. Switch to next location instead of looping.
+        if self._execute_ticks > 12:
+            self.log("no start button found after 12 ticks, switching location")
+            self.sub_state = "switch_location"
             self._execute_ticks = 0
             self._start_clicked = False
             self._roster_open = False
             self._roster_scan_ticks = 0
-            return action_wait(300, "execute stuck, retry via roster")
+            self._switch_ticks = 0
+            return action_wait(300, "execute timeout, try next location")
 
         # ── Handle non-schedule screens (animation, bond popups, etc.) ──
         if not self._is_schedule(screen):
