@@ -610,8 +610,11 @@ class EventFarmingSkill(BaseSkill):
             self.log(f"global event detected: '{event_timer.text}'")
 
         # Find all "活動進行中" / "活动进行中" badges
+        # OCR misreads 動→勤 frequently
         event_badges = screen.find_text("活動進行", min_conf=0.5)
         event_badges += screen.find_text("活动进行", min_conf=0.5)
+        event_badges += screen.find_text("活勤進行", min_conf=0.5)
+        event_badges += screen.find_text("活勤进行", min_conf=0.5)
 
         # Find the campaign section labels and check which ones have badges near them
         special_label = screen.find_any_text(
@@ -665,44 +668,65 @@ class EventFarmingSkill(BaseSkill):
         dy = label.cy - badge.cy  # badge usually above label
         return dx < 0.20 and -0.05 < dy < 0.15
 
+    # Campaign hub button positions (normalized, measured from MuMu 3840x2160).
+    # OCR is unreliable on this screen — use hardcoded positions as fallback.
+    _HUB_NORMAL_MISSIONS = (0.62, 0.28)    # 任務 (Area 29) button
+    _HUB_SPECIAL_MISSIONS = (0.55, 0.67)   # 特殊任務 button
+    _HUB_BOUNTY = (0.56, 0.54)             # 懸賞通緝 button
+
     def _enter_target(self, screen: ScreenState) -> Dict[str, Any]:
         """Click the chosen target in campaign menu."""
+        self._enter_attempts += 1
+
         if self._target == "special":
             btn = screen.find_any_text(
-                ["特殊任務", "特殊任务", "Special"],
-                min_conf=0.6
+                ["特殊任務", "特殊任务", "特殊任", "Special"],
+                min_conf=0.5
             )
             if btn:
                 self.log("entering 特殊任務")
                 self.sub_state = "select_credit"
                 return action_click_box(btn, "click special missions")
+            # Hardcoded fallback
+            if self._enter_attempts > 2:
+                self.log("OCR miss, clicking 特殊任務 at hardcoded position")
+                self.sub_state = "select_credit"
+                return action_click(*self._HUB_SPECIAL_MISSIONS, "click special missions (hardcoded)")
 
         elif self._target == "normal":
-            # Find 任務 but NOT 特殊任務
-            for box in screen.find_text("任務", min_conf=0.6):
-                if "特殊" not in box.text and "懸賞" not in box.text:
+            for box in screen.find_text("任務", min_conf=0.5):
+                if "特殊" not in box.text and "懸賞" not in box.text and "悬" not in box.text:
                     self.log("entering 任務")
                     self.sub_state = "scroll_bottom"
                     return action_click_box(box, "click normal missions")
-            for box in screen.find_text("任务", min_conf=0.6):
-                if "特殊" not in box.text and "悬赏" not in box.text:
-                    self.sub_state = "scroll_bottom"
-                    return action_click_box(box, "click normal missions")
+            # Also try "Area" text which is near the normal missions button
+            area_hit = screen.find_text_one("Area", min_conf=0.6)
+            if area_hit and area_hit.cy < 0.40:
+                self.log("entering normal missions via Area text")
+                self.sub_state = "scroll_bottom"
+                return action_click_box(area_hit, "click normal missions via Area")
+            if self._enter_attempts > 2:
+                self.log("OCR miss, clicking 任務 at hardcoded position")
+                self.sub_state = "scroll_bottom"
+                return action_click(*self._HUB_NORMAL_MISSIONS, "click normal missions (hardcoded)")
 
         elif self._target == "hard_fallback":
-            # Fall back: find Normal/Hard missions entry in campaign hub
-            # Look for 任務 (not 特殊, not 懸賞) in the campaign hub
-            for box in screen.find_text("任務", min_conf=0.6):
-                if "特殊" not in box.text and "懸賞" not in box.text and "挑戰" not in box.text:
+            # Same as normal but go to hard tab after
+            for box in screen.find_text("任務", min_conf=0.5):
+                if "特殊" not in box.text and "懸賞" not in box.text and "悬" not in box.text:
                     self.log("entering normal missions for hard fallback")
                     self.sub_state = "select_hard_tab"
                     return action_click_box(box, "click normal missions")
-            for box in screen.find_text("任务", min_conf=0.6):
-                if "特殊" not in box.text and "悬赏" not in box.text and "挑战" not in box.text:
-                    self.sub_state = "select_hard_tab"
-                    return action_click_box(box, "click normal missions")
+            area_hit = screen.find_text_one("Area", min_conf=0.6)
+            if area_hit and area_hit.cy < 0.40:
+                self.log("entering normal missions via Area text (hard fallback)")
+                self.sub_state = "select_hard_tab"
+                return action_click_box(area_hit, "click normal missions via Area")
+            if self._enter_attempts > 2:
+                self.log("OCR miss, clicking 任務 at hardcoded position (hard fallback)")
+                self.sub_state = "select_hard_tab"
+                return action_click(*self._HUB_NORMAL_MISSIONS, "click normal missions (hardcoded)")
 
-        # If can't find target, try scrolling in campaign menu
         return action_wait(500, f"looking for {self._target}")
 
     def _select_credit(self, screen: ScreenState) -> Dict[str, Any]:

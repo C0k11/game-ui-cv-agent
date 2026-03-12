@@ -79,8 +79,17 @@ class ShopSkill(BaseSkill):
         return action_wait(300, "shop unknown state")
 
     def _is_shop(self, screen: ScreenState) -> bool:
-        return (screen.has_text("商店", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.6) or
-                screen.has_text("Shop", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.6))
+        if (screen.has_text("商店", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5) or
+                screen.has_text("Shop", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)):
+            return True
+        if screen.find_any_text(["一般", "青輝石", "青辉石"], region=(0.0, 0.10, 0.20, 0.40), min_conf=0.6):
+            filter_toggle = screen.find_any_text(["濾器", "滤器", "OFF"], region=(0.68, 0.08, 0.86, 0.16), min_conf=0.6)
+            select_all = screen.find_any_text(["全部選擇", "全部选择", "全部擇", "全部摆"], region=(0.84, 0.08, 1.0, 0.16), min_conf=0.55)
+            if filter_toggle or select_all:
+                return True
+        if screen.find_any_text(["購買", "购买"], region=(0.45, 0.35, 0.98, 0.95), min_conf=0.6):
+            return True
+        return False
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         current = self.detect_current_screen(screen)
@@ -200,35 +209,22 @@ class ShopSkill(BaseSkill):
         # OCR reads it as "選購買" or "選擇購買" — look in bottom-right area
         if not self._purchased:
             bulk_buy = screen.find_any_text(
-                ["選擇購買", "选择购买", "選購買", "选购买"],
-                region=(0.80, 0.88, 1.0, 0.96), min_conf=0.5
+                ["選擇購買", "选择购买", "選購買", "选购买", "擇購買", "择购买"],
+                region=(0.75, 0.85, 1.0, 0.98), min_conf=0.4
             )
             if bulk_buy:
                 self.log(f"clicking bulk purchase '{bulk_buy.text}' at ({bulk_buy.cx:.2f},{bulk_buy.cy:.2f})")
                 return action_click_box(bulk_buy, "bulk purchase (選擇購買)")
 
-            # Fallback: if "現在選" or "取消選" visible in bottom bar,
-            # the 選擇購買 button should be at the far right
+            # Fallback: if selection bar visible OR we've waited long enough,
+            # click the hardcoded position for 選擇購買 button
             selection_bar = screen.find_any_text(
-                ["現在選", "取消選"],
-                region=(0.40, 0.88, 0.85, 0.96), min_conf=0.6
+                ["現在選", "取消選", "商品"],
+                region=(0.30, 0.85, 0.85, 0.98), min_conf=0.5
             )
-            if selection_bar:
-                self.log("selection bar visible, clicking 選擇購買 at hardcoded position")
+            if selection_bar or self._purchase_ticks >= 3:
+                self.log("clicking 選擇購買 at hardcoded position")
                 return action_click(0.91, 0.92, "bulk purchase (hardcoded)")
-
-            # If shop is showing normal view (individual 購買 visible, no selection bar)
-            # then the purchase was already handled by the pipeline interceptor.
-            # Detect: shop header visible + individual 購買 buttons + no selection bar
-            if self._is_shop(screen) and self._purchase_ticks >= 3:
-                indiv_buy = screen.find_any_text(
-                    ["購買"], region=(0.45, 0.40, 0.95, 0.55), min_conf=0.6
-                )
-                if indiv_buy:
-                    self.log("purchase already handled (interceptor), exiting")
-                    self._purchased = True
-                    self.sub_state = "exit"
-                    return action_wait(300, "purchase complete (interceptor)")
 
         return action_wait(400, "looking for 選擇購買 button")
 

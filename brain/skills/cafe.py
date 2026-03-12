@@ -802,14 +802,20 @@ class CafeSkill(BaseSkill):
                 self.sub_state = "exit"
                 return action_wait(300, "headpat2 max reached, exiting")
 
-        # Camera panning: swipe to reveal corners before scanning
+        # Phase 0: zoom out first (reference pattern — pinch out to see all students)
+        # Then pan to reveal corners. Zoom out makes headpat bubbles visible.
         if self._pan_phase == 0:
             self._pan_phase = 1
             self._empty_scans = 0
+            self.log("zoom out cafe view (scroll to zoom out)")
+            return action_scroll(0.50, 0.40, -5, "zoom out cafe")
+        if self._pan_phase == 1:
+            self._pan_phase = 2
+            self._empty_scans = 0
             self.log("pan camera: drag right→left to reveal left corner")
             return action_swipe(0.75, 0.45, 0.25, 0.45, 500, "pan camera right")
-        if self._pan_phase == 2:
-            self._pan_phase = 3
+        if self._pan_phase == 3:
+            self._pan_phase = 4
             self._empty_scans = 0
             self.log("pan camera: drag left→right to reveal right corner")
             return action_swipe(0.25, 0.45, 0.75, 0.45, 500, "pan camera left")
@@ -860,8 +866,8 @@ class CafeSkill(BaseSkill):
 
         # After a few empty scans, advance to next pan phase
         if self._empty_scans >= _MAX_EMPTY_SCANS:
-            if self._pan_phase < 4:
-                # Advance pan phase: 1→2 (will pan left next), 3→4 (done panning)
+            if self._pan_phase < 5:
+                # Advance pan phase: 2→3 (will pan left next), 4→5 (done panning)
                 self._pan_phase += 1
                 self._empty_scans = 0
                 self.log(f"empty scans exhausted, advancing pan phase to {self._pan_phase}")

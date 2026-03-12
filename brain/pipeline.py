@@ -35,6 +35,7 @@ from brain.skills.event_farming import EventFarmingSkill
 from brain.skills.daily_tasks import DailyTasksSkill
 from brain.skills.shop import ShopSkill
 from brain.skills.craft import CraftSkill
+from brain.skills.momo_talk import MomoTalkSkill
 
 
 # ── OCR Engine (singleton) ──────────────────────────────────────────────
@@ -383,7 +384,8 @@ class DailyPipeline:
         "cafe",             # 3.  Collect earnings, headpat students
         "schedule",         # 4.  Run schedules with tickets
         "club",             # 5.  Claim club AP (社交→社團)
-        "shop",             # 6.  Buy daily items (一般 tab, select all, purchase)
+        "momo_talk",        # 6.  Auto-complete unread MomoTalk conversations
+        "shop",             # 7.  Buy daily items (一般 tab, select all, purchase)
         "craft",            # 7.  Quick-craft items + claim finished crafts
         "event_farming",    # 8.  Burn AP first when entering campaign
         "bounty",           # 9.  Sweep bounty tickets (3 branches)
@@ -405,6 +407,7 @@ class DailyPipeline:
             "club": ClubSkill(),
             "shop": ShopSkill(),
             "craft": CraftSkill(),
+            "momo_talk": MomoTalkSkill(),
             "bounty": BountySkill(),
             "arena": ArenaSkill(),
             "event_farming": EventFarmingSkill(),       # event-aware (always farms)
