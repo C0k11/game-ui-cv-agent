@@ -910,16 +910,47 @@ class ScheduleSkill(BaseSkill):
                     self._start_clicked = False
                     return action_click(rx, ry, f"click favorite room {best_room}")
 
-            # No favorite → pick best available room (highest tier = highest index)
-            best_room = self._choose_best_room(statuses)
-            if best_room >= 0:
-                rx, ry = _ROOM_CLICK_POS[best_room]
-                self.log(f"picking room {best_room} (best available) at ({rx:.3f},{ry:.3f})")
+            # No favorite → pick best available room via OCR room names
+            # Detect room name labels in the roster popup, pick the best available one.
+            _ROOM_NAMES_LIST = [
+                "視聽室", "體育館", "圖書館",
+                "教室", "實驗室", "射擊場",
+                "載具庫",
+            ]
+            # Try to find room names via OCR and click the best available one
+            best_room_box = None
+            best_room_idx = -1
+            for i in range(len(statuses) - 1, -1, -1):  # reverse = prefer higher tier
+                if statuses[i] != "available":
+                    continue
+                # Try OCR match for this room
+                if i < len(_ROOM_NAMES_LIST):
+                    name = _ROOM_NAMES_LIST[i]
+                    hit = screen.find_text_one(name, region=(0.08, 0.15, 0.92, 0.85), min_conf=0.45)
+                    if hit:
+                        best_room_box = hit
+                        best_room_idx = i
+                        break
+                # Fallback to grid position
+                if best_room_idx < 0:
+                    best_room_idx = i
+                    break
+
+            if best_room_box:
+                self.log(f"picking room {best_room_idx} '{best_room_box.text}' via OCR at ({best_room_box.cx:.3f},{best_room_box.cy:.3f})")
                 self._roster_open = False
                 self.sub_state = "execute"
                 self._execute_ticks = 0
                 self._start_clicked = False
-                return action_click(rx, ry, f"click best room {best_room}")
+                return action_click_box(best_room_box, f"click room {best_room_idx} via OCR")
+            elif best_room_idx >= 0:
+                rx, ry = _ROOM_CLICK_POS[best_room_idx]
+                self.log(f"picking room {best_room_idx} (grid fallback) at ({rx:.3f},{ry:.3f})")
+                self._roster_open = False
+                self.sub_state = "execute"
+                self._execute_ticks = 0
+                self._start_clicked = False
+                return action_click(rx, ry, f"click room {best_room_idx} grid")
 
             # Fallback: no room found despite available_count > 0
             self.log("room selection failed, switching location")
