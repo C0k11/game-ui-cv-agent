@@ -1082,9 +1082,11 @@ class ScheduleSkill(BaseSkill):
             self._roster_open = False
             return self._close_roster_action(screen, "execute", "close roster in execute")
 
-        # ── PRIORITY 5: On location map — click avatar numbers to open room popup ──
-        # OCR detects affection numbers (10-30) near avatars on the isometric map.
-        # Clicking them opens the room info popup with 開始 button.
+        # ── PRIORITY 5: On location map — click building areas to open room popup ──
+        # The isometric map shows buildings at various positions. Click the
+        # building area (above the avatar icons) to open room info popup.
+        # Use OCR-detected avatar numbers to locate buildings, then click
+        # significantly above them (the building is above the avatar icon).
         avatar_nums = screen.find_text(
             r"^\d{1,2}$", region=(0.05, 0.20, 0.95, 0.85), min_conf=0.50
         )
@@ -1092,12 +1094,21 @@ class ScheduleSkill(BaseSkill):
         if avatar_nums:
             idx = (self._execute_ticks - 1) % len(avatar_nums)
             target = avatar_nums[idx]
-            self.log(f"clicking avatar '{target.text}' at ({target.cx:.2f},{target.cy:.2f})")
-            return action_click(target.cx, target.cy - 0.03,
-                                f"click avatar {target.text} on map")
+            # Click well above the avatar number — the building body is ~0.10 higher
+            click_y = max(0.15, target.cy - 0.10)
+            self.log(f"clicking building above avatar '{target.text}' at ({target.cx:.2f},{click_y:.2f})")
+            return action_click(target.cx, click_y,
+                                f"click building above avatar {target.text}")
 
-        # Fallback: click building center area
-        return action_click(0.50, 0.44, "click building center for room info")
+        # Fallback: cycle through building positions on the isometric map
+        _MAP_BUILDINGS = [
+            (0.25, 0.35), (0.45, 0.30), (0.65, 0.35),  # top row buildings
+            (0.20, 0.50), (0.50, 0.45), (0.80, 0.45),  # middle row
+            (0.30, 0.65), (0.60, 0.60),                  # bottom row
+        ]
+        idx = (self._execute_ticks - 1) % len(_MAP_BUILDINGS)
+        x, y = _MAP_BUILDINGS[idx]
+        return action_click(x, y, f"click building area {idx}")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
