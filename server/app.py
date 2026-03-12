@@ -511,6 +511,58 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         threading.Thread(target=_prewarm_florence, daemon=True).start()
         _florence_prewarm_started = True
 
+        # DXcam for fast capture (Desktop Duplication API)
+        # Detect which monitor the MuMu window is on for multi-monitor support
+        _dxcam_camera = None
+        _dxcam_region = None
+        try:
+            import dxcam as _dxcam_mod
+            import ctypes.wintypes as _wt
+
+            # Find which monitor the window center is on
+            _dxcam_rc = _wt.RECT()
+            ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_dxcam_rc))
+            win_cx = (_dxcam_rc.left + _dxcam_rc.right) // 2
+            win_cy = (_dxcam_rc.top + _dxcam_rc.bottom) // 2
+
+            _monitor_idx = 0
+            try:
+                _MONITOR_DEFAULTTONEAREST = 2
+                hmon = ctypes.windll.user32.MonitorFromPoint(
+                    ctypes.wintypes.POINT(win_cx, win_cy), _MONITOR_DEFAULTTONEAREST
+                )
+                # Enumerate monitors to find index
+                _monitors = []
+                _MONITORENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.wintypes.RECT), ctypes.c_long)
+                def _enum_cb(hMon, hdc, lprc, lParam):
+                    _monitors.append(hMon)
+                    return 1
+                ctypes.windll.user32.EnumDisplayMonitors(None, None, _MONITORENUMPROC(_enum_cb), 0)
+                for i, m in enumerate(_monitors):
+                    if m == hmon:
+                        _monitor_idx = i
+                        break
+                _log_pipeline(f"Window on monitor {_monitor_idx} (of {len(_monitors)})")
+            except Exception:
+                _monitor_idx = 0
+
+            _dxcam_camera = _dxcam_mod.create(output_idx=_monitor_idx, output_color="BGR")
+            _dxcam_region = (_dxcam_rc.left, _dxcam_rc.top, _dxcam_rc.right, _dxcam_rc.bottom)
+            _test = _dxcam_camera.grab(region=_dxcam_region)
+            if _test is not None:
+                _log_pipeline(f"DXcam capture OK: {_test.shape[1]}x{_test.shape[0]} (monitor {_monitor_idx})")
+            else:
+                _dxcam_camera = None
+                _log_pipeline("DXcam grab returned None, falling back to ADB/BitBlt")
+        except Exception as e:
+            _log_pipeline(f"DXcam unavailable ({e}), falling back to ADB/BitBlt")
+            _dxcam_camera = None
+
+        # OCR runs every N ticks (expensive ~50ms), YOLO runs every tick (~3ms)
+        _OCR_INTERVAL = 3  # run OCR every 3rd tick
+        _prev_ocr_boxes = None
+        _tick_counter = 0
+
         while _PIPELINE_RUNNING:
             pipe = None
             with _PIPELINE_LOCK:
@@ -518,10 +570,21 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             if pipe is None or not pipe.is_running:
                 break
 
-            # 1. Capture screenshot. Prefer direct ADB screencap because MuMu
-            # window/DC capture may return occluded desktop content or black frames.
+            _tick_counter += 1
+
+            # 1. Capture: DXcam first (fast), ADB fallback, BitBlt last resort
             frame = None
-            if adb is not None:
+            if _dxcam_camera is not None:
+                try:
+                    # Re-read window rect in case it moved
+                    import ctypes.wintypes as _wt2
+                    _rc2 = _wt2.RECT()
+                    ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_rc2))
+                    _dxcam_region = (_rc2.left, _rc2.top, _rc2.right, _rc2.bottom)
+                    frame = _dxcam_camera.grab(region=_dxcam_region)
+                except Exception:
+                    frame = None
+            if frame is None and adb is not None:
                 try:
                     frame = adb.capture_frame()
                 except Exception:
@@ -529,33 +592,31 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             if frame is None:
                 try:
                     pil_img = capture_client(render_hwnd)
-                except OSError:
-                    # Handle invalid/stale hwnd — re-resolve
-                    render_hwnd = hwnd
-                    try:
-                        new_hwnd = find_window_by_title_substring(window_title)
-                        if new_hwnd:
-                            hwnd = new_hwnd
-                            child = find_largest_visible_child(int(hwnd))
-                            render_hwnd = int(child) if child else int(hwnd)
-                    except Exception:
-                        pass
-                    _high_res_sleep(0.25)
-                    continue
+                    if pil_img is not None:
+                        frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                except Exception:
+                    pass
+            if frame is None:
+                _high_res_sleep(0.1)
+                continue
 
-                if pil_img is None:
-                    _high_res_sleep(0.25)
-                    continue
-
-                # Convert PIL -> numpy BGR for cv2
-                frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            # Skip black/loading frames (DXcam returns black during transitions)
+            if frame.mean() < 10:
+                _high_res_sleep(0.1)
+                continue
 
             # Save to temp file for trajectory
             tmp_path = str(REPO_ROOT / "data" / "_pipeline_frame.jpg")
             cv2.imwrite(tmp_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-            # 2. Pipeline tick (use in-memory frame, skip re-reading file)
-            action = pipe.tick_from_frame(frame, screenshot_path=tmp_path)
+            # 2. Pipeline tick — YOLO every frame, OCR every N frames
+            skip_ocr = (_tick_counter % _OCR_INTERVAL != 0) and _prev_ocr_boxes is not None
+            action = pipe.tick_from_frame(frame, screenshot_path=tmp_path,
+                                          skip_ocr=skip_ocr,
+                                          prev_ocr_boxes=_prev_ocr_boxes)
+            # Cache OCR boxes for reuse on YOLO-only ticks
+            if not skip_ocr and pipe.last_screen:
+                _prev_ocr_boxes = pipe.last_screen.ocr_boxes
             action_type = action.get("action", "")
             reason = action.get("reason", "")
             _PIPELINE_STATUS["ticks"] = pipe._total_ticks

@@ -332,8 +332,11 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"Florence matcher init failed: {e}")
                 return False
 
-        florence_name, florence_score = self._florence_matcher.match_candidate(best_overall_roi, [best_overall_name])
-        if florence_name and florence_score > 0.70:
+        # Florence matching disabled — too many false positives on small roster avatars
+        # (e.g. misidentifies random characters as favorites, even with green checkmarks)
+        # Using lowest-affection fallback instead.
+        florence_name, florence_score = None, 0.0
+        if False and florence_name and florence_score > 0.70:
             self._target_found = True
             self._matched_avatar_pos = (best_overall_box.cx, best_overall_box.cy)
             screen.add_florence_boxes([
@@ -352,6 +355,37 @@ class ScheduleSkill(BaseSkill):
             )
             return True
         return False
+
+    def _find_lowest_affection_card(self, screen: ScreenState):
+        """Find the location card with lowest affection number in roster popup.
+
+        Affection numbers appear as small digits (10-30) near avatar icons.
+        Returns (cx, cy) of the lowest-numbered avatar, or None.
+        """
+        import re
+        # Find all small numbers in the roster popup area (affection scores)
+        candidates = []
+        for box in screen.ocr_boxes:
+            text = box.text.strip()
+            # Affection numbers are 1-2 digit numbers, typically 10-30
+            if not re.match(r"^\d{1,2}$", text):
+                continue
+            val = int(text)
+            if val < 1 or val > 50:
+                continue
+            # Must be in the roster popup area
+            if box.cy < 0.15 or box.cy > 0.85 or box.cx < 0.08 or box.cx > 0.92:
+                continue
+            candidates.append((val, box.cx, box.cy))
+
+        if not candidates:
+            return None
+
+        # Pick the lowest affection number
+        candidates.sort(key=lambda c: c[0])
+        val, cx, cy = candidates[0]
+        self.log(f"lowest affection: {val} at ({cx:.2f},{cy:.2f})")
+        return (cx, cy)
 
     # ── Screen detection helpers ──
 
@@ -722,6 +756,20 @@ class ScheduleSkill(BaseSkill):
 
         self._wait_ticks = 0
 
+        # Recovery: if roster was open but now it's gone (accidentally closed),
+        # try to re-open the 全體課程表 button
+        if not roster_overlay and self._roster_open:
+            self.log("roster was open but closed unexpectedly, re-opening")
+            self._roster_open = False
+            self._roster_scan_ticks = 0
+            full_tab = screen.find_any_text(
+                ["全體課程表", "全体课程表"],
+                region=(0.60, 0.80, 1.0, 1.0), min_conf=0.5
+            )
+            if full_tab:
+                return action_click_box(full_tab, "re-open roster after accidental close")
+            return action_wait(300, "looking for roster button to re-open")
+
         # Detect current location name (visible in building detail header)
         cur_loc = self._detect_current_location(screen)
 
@@ -765,6 +813,18 @@ class ScheduleSkill(BaseSkill):
                 self._execute_ticks = 0
                 self._start_clicked = False
                 return action_click(ax, click_y, f"click location card title")
+            # No favorite found — pick lowest affection number visible on popup
+            lowest_num = self._find_lowest_affection_card(screen)
+            if lowest_num:
+                ax, ay = lowest_num
+                click_y = max(0.12, ay - 0.10)
+                self.log(f"no favorite, picking lowest affection at ({ax:.2f},{click_y:.2f})")
+                self._roster_open = False
+                self._roster_scan_ticks = 0
+                self.sub_state = "execute"
+                self._execute_ticks = 0
+                self._start_clicked = False
+                return action_click(ax, click_y, "click lowest affection location")
             self.log(f"no favorite found in '{cur_loc}' (#{self._locations_checked}), switching location")
             return self._close_roster_action(screen, "switch_location", "no favorite found")
 
@@ -937,7 +997,12 @@ class ScheduleSkill(BaseSkill):
         )
         if report_popup or report_confirm:
             if report_confirm:
-                self.log("confirming schedule report popup")
+                self.log(f"confirming schedule report (ticket #{self._tickets_used}), back to check_roster")
+                self._start_clicked = False
+                self._execute_ticks = 0
+                self._roster_open = False
+                self._roster_scan_ticks = 0
+                self.sub_state = "check_roster"
                 return action_click_box(report_confirm, "confirm schedule report")
             return action_wait(300, "waiting for schedule report confirm")
 

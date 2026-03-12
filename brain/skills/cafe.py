@@ -397,6 +397,15 @@ class CafeSkill(BaseSkill):
                 self.log("bond notification screen, tapping to dismiss")
                 return action_click(0.5, 0.5, "dismiss bond notification")
 
+        # Furniture edit mode recovery: click "結束編輯模式" to escape
+        edit_btn = screen.find_any_text(
+            ["結束編輯模式", "结束编辑模式", "結束編輯"],
+            region=(0.80, 0.05, 1.0, 0.18), min_conf=0.5
+        )
+        if edit_btn:
+            self.log("EDIT MODE detected, clicking exit button")
+            return action_click_box(edit_btn, "exit furniture edit mode")
+
         # Generic popups (confirm/cancel dialogs)
         popup = self._handle_common_popups(screen)
         if popup:
@@ -512,12 +521,18 @@ class CafeSkill(BaseSkill):
 
         # If earnings popup is open but no claim button (already claimed?)
         if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
+            # Check for zero-balance rows "0 / NNN" anywhere in popup
             zero_rows = screen.find_text(
                 r"^0\s*/\s*\d",
-                region=(0.22, 0.54, 0.78, 0.66), min_conf=0.75
+                region=(0.20, 0.40, 0.80, 0.75), min_conf=0.60
             )
-            if len(zero_rows) >= 2:
-                self.log("earnings popup shows empty storage rows, closing disabled popup")
+            # Also check for "0.0 %" indicating no earnings
+            zero_pct_in_popup = screen.find_text(
+                r"^0\.0",
+                region=(0.20, 0.40, 0.80, 0.75), min_conf=0.60
+            )
+            if len(zero_rows) >= 2 or len(zero_pct_in_popup) >= 2:
+                self.log(f"earnings popup all zero ({len(zero_rows)} zero rows, {len(zero_pct_in_popup)} zero pcts), closing")
                 self._earnings_claimed = True
                 close_btn = self._find_close_button(screen)
                 if close_btn:
@@ -526,13 +541,13 @@ class CafeSkill(BaseSkill):
                 self._invite_next_state = "headpat"
                 self._invite_ticks = 0
                 return action_wait(300, "empty earnings popup, skipping")
-            # OCR might miss claim text. Ask Florence whether the claim button is
-            # enabled before using the fallback click.
+            # Florence check whether the claim button is enabled.
+            # DEFAULT=FALSE: if Florence can't tell, assume disabled (safer than clicking blindly)
             enabled = self._florence_button_enabled(
                 screen,
                 (0.35, 0.66, 0.66, 0.80),
                 hint="earnings claim button",
-                default=True,
+                default=False,
             )
             if not enabled:
                 self.log("earnings popup button appears disabled, skipping claim")
@@ -544,7 +559,7 @@ class CafeSkill(BaseSkill):
                 self._invite_next_state = "headpat"
                 self._invite_ticks = 0
                 return action_wait(300, "earnings button disabled, skipping")
-            self.log("earnings popup open but no claim OCR, clicking fallback claim")
+            self.log("earnings popup open, claim enabled, clicking")
             self._earnings_claimed = True
             return action_click(0.5, 0.734, "claim earnings fallback")
 
@@ -814,9 +829,9 @@ class CafeSkill(BaseSkill):
             self._empty_scans = 0
             self._headpat_count += 1
             self._headpat_cooldown = 1  # Wait 1 tick (~0.5s) for animation
-            # Click slightly below and right of the bubble center to hit the student
-            click_x = mark.cx + 0.02
-            click_y = mark.cy + 0.06
+            # Click slightly right of the bubble (student body is just right of bubble)
+            click_x = mark.cx + 0.03
+            click_y = mark.cy + 0.02
             self.log(f"headpat #{self._headpat_count}: conf={mark.confidence:.2f} marker=({mark.cx:.2f},{mark.cy:.2f}) click=({click_x:.2f},{click_y:.2f})")
             return action_click(click_x, click_y, f"headpat student #{self._headpat_count}")
 
@@ -860,6 +875,21 @@ class CafeSkill(BaseSkill):
 
     def _switch_floor(self, screen: ScreenState) -> Dict[str, Any]:
         """Switch from cafe 1F to 2F."""
+        # Already on 2F? (button says "移動至1號店" = we're on 2F)
+        already_2f = screen.find_any_text(
+            ["移動至1號店", "移动至1号店", "1號店"],
+            region=(0.0, 0.03, 0.25, 0.12), min_conf=0.5
+        )
+        if already_2f:
+            self.log("already on 2F, skipping switch")
+            self._invite_attempted = False
+            self._invite_ticks = 0
+            self._invite_stage = 0
+            self._invite_next_state = "headpat2"
+            self.sub_state = "invite"
+            self._empty_scans = 0
+            return action_wait(300, "already on 2F, starting invite")
+
         switch = screen.find_any_text(
             ["移動至2號店", "移动至2号店", "2號店", "2号店"],
             min_conf=0.5
