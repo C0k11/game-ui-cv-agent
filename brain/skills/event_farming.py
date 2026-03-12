@@ -775,6 +775,28 @@ class EventFarmingSkill(BaseSkill):
 
     def _select_hard_tab(self, screen: ScreenState) -> Dict[str, Any]:
         """Click Hard tab inside normal missions (hard_fallback path)."""
+        # Detect if we're on the campaign HUB (懸賞通緝/總力戰 visible) instead of
+        # inside a mission page. Campaign hub has no Hard tab → bail out.
+        hub_indicators = screen.find_any_text(
+            ["懸賞通緝", "悬赏通缉", "總力戰", "总力战", "大決戰", "大决战",
+             "學園交流會", "学园交流会", "戰術大賽", "战术大赛"],
+            min_conf=0.5
+        )
+        if hub_indicators:
+            self._hard_tab_attempts = getattr(self, '_hard_tab_attempts', 0) + 1
+            if self._hard_tab_attempts > 3:
+                self.log("on campaign hub (no Hard tab here), exiting")
+                self.sub_state = "exit"
+                return action_wait(200, "campaign hub has no Hard tab, exiting")
+            # Try clicking 任務 entry to enter normal missions
+            mission_entry = screen.find_any_text(
+                ["任務", "任务"],
+                region=(0.35, 0.20, 0.65, 0.40), min_conf=0.6
+            )
+            if mission_entry:
+                return action_click_box(mission_entry, "click normal missions from hub")
+            return action_wait(500, "on campaign hub, looking for mission entry")
+
         # Look for Hard tab
         hard = screen.find_any_text(
             ["困難", "困难", "Hard", "HARD"],
@@ -799,6 +821,13 @@ class EventFarmingSkill(BaseSkill):
         if sweep:
             self.sub_state = "scroll_bottom"
             return action_wait(200, "already in stage list")
+
+        # Timeout after too many attempts
+        self._hard_tab_attempts = getattr(self, '_hard_tab_attempts', 0) + 1
+        if self._hard_tab_attempts > 20:
+            self.log("Hard tab not found after 20 attempts, exiting")
+            self.sub_state = "exit"
+            return action_wait(200, "Hard tab timeout")
 
         return action_wait(500, "looking for Hard tab")
 

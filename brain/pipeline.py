@@ -192,14 +192,29 @@ def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
                 cls_low = str(cls_name).lower()
                 if not any(token.lower() in cls_low for token in _YOLO_ALLOWED_SUBSTRINGS):
                     continue
+                nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h
+                # Filter headpat_bubble: only accept in cafe play area
+                # (reject detections on popups, earnings icons, UI overlays)
+                if "headpat" in cls_low:
+                    # Cafe play area: x 0.05-0.95, y 0.15-0.85
+                    # Reject if center is in popup overlay zone (center screen)
+                    bcx = (nx1 + nx2) / 2
+                    bcy = (ny1 + ny2) / 2
+                    if bcy < 0.15 or bcy > 0.85:
+                        continue  # In top/bottom UI bars
+                    # Reject very small boxes (UI icons, not real bubbles)
+                    bw = nx2 - nx1
+                    bh = ny2 - ny1
+                    if bw < 0.02 or bh < 0.02:
+                        continue
                 yolo_boxes.append(YoloBox(
                     cls_id=cls_id,
                     cls_name=cls_name,
                     confidence=float(box.conf[0]),
-                    x1=bx1 / w,
-                    y1=by1 / h,
-                    x2=bx2 / w,
-                    y2=by2 / h,
+                    x1=nx1,
+                    y1=ny1,
+                    x2=nx2,
+                    y2=ny2,
                 ))
     except Exception as e:
         print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")

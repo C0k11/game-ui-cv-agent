@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>AI Game Secretary</title>
+<title>私人碧蓝档案助手</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#0f172a;--bg2:#1e293b;--bg3:#334155;--border:#475569;--text:#e2e8f0;--muted:#94a3b8;--accent:#3b82f6;--accent2:#2563eb;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--font:system-ui,-apple-system,'Segoe UI',sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
@@ -94,6 +94,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .ann-toolbar .info{font-size:12px;color:var(--muted)}
 .ann-help{font-size:10px;color:#64748b;line-height:1.5;padding:8px;margin-top:auto}
 .ann-help kbd{background:var(--bg3);padding:1px 4px;border-radius:2px;font-size:9px}
+.assistant-sub{font-size:12px;color:var(--muted);margin:-10px 0 14px 0}
+.profile-actions{display:flex;gap:6px;align-items:center}
+.skill-list{display:flex;flex-direction:column;gap:8px}
+.skill-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+.skill-row.off{opacity:.55}
+.skill-row .skill-main{display:flex;align-items:center;gap:8px;flex:1}
+.skill-row .skill-handle{font-family:var(--mono);color:var(--muted);font-size:12px;min-width:18px;text-align:center}
+.skill-row .skill-label{font-size:13px}
+.skill-row .skill-id{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.skill-row .skill-actions{display:flex;gap:4px}
+.profile-hint{font-size:11px;color:var(--muted);margin-top:6px}
 
 /* ── Char grid ── */
 .char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;max-height:350px;overflow-y:auto;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px}
@@ -108,12 +119,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 <!-- Sidebar Navigation -->
 <div class="sidebar">
-  <div class="logo" style="font-weight:700;font-size:14px;letter-spacing:-1px">GS</div>
-  <button class="nav-btn active" onclick="showPage('agent')" title="Agent Control">A</button>
-  <button class="nav-btn" onclick="showPage('capture')" title="Screen Capture">C</button>
-  <button class="nav-btn" onclick="showPage('annotate')" title="Label Editor">L</button>
+  <div class="logo" style="font-weight:700;font-size:14px;letter-spacing:-1px">BA</div>
+  <button class="nav-btn active" onclick="showPage('agent')" title="助手控制台">A</button>
+  <button class="nav-btn" onclick="showPage('capture')" title="采集中心">C</button>
+  <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
   <div class="sidebar-bottom">
-    <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API Docs">?</button>
+    <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API 文档">?</button>
   </div>
 </div>
 
@@ -121,8 +132,27 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 <!-- ════════════ AGENT PAGE ════════════ -->
 <div class="page active" id="page-agent">
-  <div class="page-title">Agent Control</div>
+  <div class="page-title">私人碧蓝档案助手</div>
+  <div class="assistant-sub">纯本地日常收菜工作台：多档案、多账号标记、日常流程编排、收藏角色、Florence/YOLO 联合观测。</div>
   <div class="card">
+    <div class="form-row">
+      <div class="form-group" style="min-width:260px">
+        <label>配置档案</label>
+        <div class="profile-actions">
+          <select id="profile_select" style="min-width:180px"></select>
+          <button class="btn btn-sm" id="btn_profile_new">新建</button>
+          <button class="btn btn-sm btn-danger" id="btn_profile_delete">删除</button>
+        </div>
+      </div>
+      <div class="form-group" style="min-width:220px">
+        <label>账号标记</label>
+        <input id="account_label" type="text" placeholder="例：主号 / 国际服小号"/>
+      </div>
+      <div class="form-group wide">
+        <label>完成通知 Webhook</label>
+        <input id="notify_webhook_url" type="text" placeholder="Discord / Telegram / 自定义 webhook URL"/>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group" style="min-width:400px;flex:1">
         <label>Game EXE Path</label>
@@ -135,8 +165,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     </div>
     <div class="form-row">
       <div class="form-group wide">
-        <label>Goal</label>
-        <textarea id="goal">Keep the game running safely.</textarea>
+        <label>日常目标指令</label>
+        <textarea id="goal">保持碧蓝档案日常流程稳定、安全、可回退，优先完成收菜与领奖，不触碰抽卡/氪金相关按钮。</textarea>
       </div>
     </div>
     <div class="form-row">
@@ -146,17 +176,21 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <div class="form-row" style="gap:16px">
       <div class="check-row">
         <label><input id="dry_run" type="checkbox" checked/> Dry Run</label>
-        <label><input id="forbid_premium_currency" type="checkbox" checked/> Forbid Premium</label>
-        <label><input id="exploration_click" type="checkbox"/> Exploration Click</label>
+        <label><input id="forbid_premium_currency" type="checkbox" checked/> 禁止高级货币 / 抽卡点击</label>
+        <label><input id="exploration_click" type="checkbox"/> 探索性点击</label>
+        <label><input id="notify_on_finish" type="checkbox"/> 完成后通知</label>
       </div>
     </div>
     <div class="form-row" style="margin-top:6px">
       <button class="btn-primary btn" id="btn_start">Start</button>
       <button class="btn-danger btn" id="btn_stop">Stop</button>
-      <button class="btn" id="btn_goal_daily">Daily Routine</button>
+      <button class="btn" id="btn_goal_daily">填入日常模板</button>
+      <button class="btn" id="btn_profile_save">保存档案</button>
       <div style="flex:1"></div>
+      <span id="profile_status" style="font-size:11px;color:var(--muted);margin-right:8px"></span>
       <span class="pill idle" id="status_pill">Unknown</span>
     </div>
+    <div class="profile-hint">档案会保存窗口标题、账号标记、通知地址、技能顺序和收藏角色，适合主号/小号/不同模拟器配置一键切换。</div>
     <div id="status_text" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono);word-break:break-all;max-height:40px;overflow:hidden">Status: ...</div>
     <div id="routineHud" class="routine-hud" style="display:none">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -172,12 +206,24 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     </div>
   </div>
 
+  <details open style="margin-bottom:12px">
+    <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">日常流程编排</summary>
+    <div class="card" style="margin-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="font-size:12px;color:var(--muted)">按顺序执行你启用的收菜模块；支持拖曳替代方案前的上下微调。</div>
+        <button class="btn btn-sm" id="btn_skills_reset">恢复默认顺序</button>
+      </div>
+      <div id="skill_list" class="skill-list"></div>
+      <div id="skill_plan_status" class="profile-hint"></div>
+    </div>
+  </details>
+
   <details style="margin-bottom:12px">
-    <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">Schedule Favorites</summary>
+    <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">课程表 / 咖啡厅收藏角色</summary>
     <div class="card" style="margin-top:8px">
       <div id="char_grid" class="char-grid"></div>
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary btn-sm" id="btn_save_favorites">Save Favorites</button>
+        <button class="btn btn-primary btn-sm" id="btn_save_favorites">保存收藏角色</button>
         <span id="favorites_status" style="font-size:11px;color:var(--muted)"></span>
       </div>
     </div>
@@ -299,12 +345,134 @@ function showPage(name) {
 /* ════════════════════════════════════════════════════
    AGENT PAGE
    ════════════════════════════════════════════════════ */
-const STORAGE_KEY = 'ai_game_secretary.dashboard.v2';
+const STORAGE_KEY = 'private_ba_assistant.dashboard.v3';
+let APP_CFG={active_profile:'default',profile:{},profiles:{},skill_options:[]};
 const DAILY_ROUTINE_TEMPLATE = `[Routine]\n【目标】蔚蓝档案：日常收菜（排除总力战/大决战/制约解除决战）\n\n【总原则】\n- 先判断当前界面，优先关闭公告/签到等阻挡弹窗。\n- 优先处理红点/可领取/确认/开始/进入/跳过/一键领取等安全按钮。\n- 绝对不要点击：总力战/大决战/制约解除决战。\n- 绝对不要点击：充值/购买/招募/抽卡/青辉石/清輝石/Pyroxene。\n\n【流程】\n1) 大厅：处理弹窗 -> 观察红点\n2) 咖啡厅：领取收益 -> 依次点击黄色感叹号 -> 返回\n3) 日程：选最优区域 -> 确认 -> 返回\n4) 社团：领取AP -> 返回\n5) 悬赏通缉：选最高难度 -> 扫荡Max -> 确认 -> 返回\n6) 战术对抗赛：仅领奖 -> 返回\n7) 清体力：活动优先扫荡；否则主线Hard扫荡到体力不足\n8) 制造：领取完成品 -> 制造 -> 返回\n9) 邮箱&任务：一键领取 -> 返回\n\n【异常处理】\n- 不确定时：wait -> 点返回/关闭尝试回大厅。`;
+
+function currentProfileName(){return ($('profile_select')?.value||APP_CFG.active_profile||'default').trim()||'default';}
+function getSkillListOrder(){
+  return Array.from(document.querySelectorAll('#skill_list .skill-row')).map(row=>row.dataset.skill).filter(Boolean);
+}
+function getSelectedSkillOrder(){
+  return Array.from(document.querySelectorAll('#skill_list .skill-row'))
+    .filter(row=>row.querySelector('input[type="checkbox"]')?.checked)
+    .map(row=>row.dataset.skill)
+    .filter(Boolean);
+}
+function updateSkillPlanStatus(){
+  const order=getSelectedSkillOrder();
+  $('skill_plan_status').textContent=order.length?`当前会执行 ${order.length} 个日常模块：${order.join(' → ')}`:'当前未启用任何日常模块';
+}
+function renderSkillList(order, selectedIds){
+  const options=APP_CFG.skill_options||[];
+  const desired=[];
+  const seen=new Set();
+  (order||[]).forEach(id=>{if(options.find(x=>x.id===id)&&!seen.has(id)){desired.push(id);seen.add(id);}});
+  options.forEach(opt=>{if(!seen.has(opt.id))desired.push(opt.id);});
+  const selected=new Set(Array.isArray(selectedIds)?selectedIds:(order||[]));
+  const el=$('skill_list');
+  el.innerHTML='';
+  desired.forEach((id,idx)=>{
+    const opt=options.find(x=>x.id===id)||{id,label:id};
+    const row=document.createElement('div');
+    row.className='skill-row'+(selected.has(id)?'':' off');
+    row.dataset.skill=id;
+    row.innerHTML=`<div class="skill-main">
+      <input type="checkbox" ${selected.has(id)?'checked':''}/>
+      <span class="skill-handle">${String(idx+1).padStart(2,'0')}</span>
+      <div>
+        <div class="skill-label">${opt.label}</div>
+        <div class="skill-id">${opt.id}</div>
+      </div>
+    </div>
+    <div class="skill-actions">
+      <button class="btn btn-sm">↑</button>
+      <button class="btn btn-sm">↓</button>
+    </div>`;
+    const cb=row.querySelector('input[type="checkbox"]');
+    cb.onchange=()=>{row.classList.toggle('off',!cb.checked);saveAgent();updateSkillPlanStatus();};
+    const [upBtn,downBtn]=row.querySelectorAll('.skill-actions button');
+    upBtn.onclick=()=>moveSkillRow(id,-1);
+    downBtn.onclick=()=>moveSkillRow(id,1);
+    const handle=row.querySelector('.skill-handle');
+    if(handle)handle.textContent=String(idx+1).padStart(2,'0');
+    upBtn.disabled=idx===0;
+    downBtn.disabled=idx===desired.length-1;
+    el.appendChild(row);
+  });
+  updateSkillPlanStatus();
+}
+function moveSkillRow(skillId,dir){
+  const order=getSkillListOrder();
+  const idx=order.indexOf(skillId);
+  if(idx<0)return;
+  const target=idx+dir;
+  if(target<0||target>=order.length)return;
+  const selected=getSelectedSkillOrder();
+  const [item]=order.splice(idx,1);
+  order.splice(target,0,item);
+  renderSkillList(order,selected);
+  saveAgent();
+}
+function fillAgentFromProfile(profile){
+  const p=profile||{};
+  if($('account_label'))$('account_label').value=p.account_label||'';
+  if($('game_exe_path'))$('game_exe_path').value=p.game_exe_path||'';
+  if($('window_title'))$('window_title').value=p.window_title||'MuMu';
+  if($('goal'))$('goal').value=p.goal||$('goal').value;
+  if($('steps'))$('steps').value=typeof p.steps==='number'?p.steps:0;
+  if($('step_sleep_s'))$('step_sleep_s').value=typeof p.step_sleep_s==='number'?p.step_sleep_s:0.6;
+  if($('dry_run'))$('dry_run').checked=Boolean(p.dry_run);
+  if($('forbid_premium_currency'))$('forbid_premium_currency').checked=p.forbid_premium_currency!==false;
+  if($('exploration_click'))$('exploration_click').checked=Boolean(p.exploration_click);
+  if($('notify_on_finish'))$('notify_on_finish').checked=Boolean(p.notify_on_finish);
+  if($('notify_webhook_url'))$('notify_webhook_url').value=p.notify_webhook_url||'';
+  renderSkillList(p.skill_order||[], p.skill_order||[]);
+}
+async function loadServerConfig(){
+  const cfg=await api('/api/v1/config');
+  APP_CFG=cfg||APP_CFG;
+  const sel=$('profile_select');
+  sel.innerHTML='';
+  Object.keys(APP_CFG.profiles||{}).forEach(name=>{
+    const opt=document.createElement('option');opt.value=name;opt.textContent=name;sel.appendChild(opt);
+  });
+  sel.value=APP_CFG.active_profile||'default';
+  fillAgentFromProfile((APP_CFG.profiles||{})[sel.value]||APP_CFG.profile||{});
+}
+async function saveProfileConfig(showText='已保存档案'){
+  const payload={
+    active_profile:currentProfileName(),
+    profile_name:currentProfileName(),
+    profile:{
+      account_label:$('account_label').value.trim(),
+      game_exe_path:$('game_exe_path').value.trim(),
+      window_title:$('window_title').value.trim(),
+      goal:$('goal').value.trim(),
+      steps:parseInt($('steps').value,10)||0,
+      step_sleep_s:parseFloat($('step_sleep_s').value)||0.6,
+      dry_run:$('dry_run').checked,
+      forbid_premium_currency:$('forbid_premium_currency').checked,
+      exploration_click:$('exploration_click').checked,
+      notify_on_finish:$('notify_on_finish').checked,
+      notify_webhook_url:$('notify_webhook_url').value.trim(),
+      target_favorites:Array.from(selectedFavorites),
+      skill_order:getSelectedSkillOrder(),
+    }
+  };
+  const res=await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  APP_CFG=res||APP_CFG;
+  if($('profile_select'))$('profile_select').value=APP_CFG.active_profile||currentProfileName();
+  $('profile_status').textContent=showText;
+  setTimeout(()=>{$('profile_status').textContent='';},1800);
+  return res;
+}
 
 function agentPayload() {
   return {
-    _ui_rev:3,
+    _ui_rev:4,
+    active_profile:currentProfileName(),
+    account_label:$('account_label').value.trim(),
     game_exe_path:$('game_exe_path').value.trim(),
     window_title:$('window_title').value.trim(),
     goal:$('goal').value.trim(),
@@ -313,9 +481,12 @@ function agentPayload() {
     dry_run:$('dry_run').checked,
     forbid_premium_currency:$('forbid_premium_currency').checked,
     exploration_click:$('exploration_click').checked,
+    notify_on_finish:$('notify_on_finish').checked,
+    notify_webhook_url:$('notify_webhook_url').value.trim(),
+    skill_order:getSelectedSkillOrder(),
   };
 }
-function saveAgent(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(agentPayload()))}catch(e){}}
+function saveAgent(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(agentPayload()))}catch(e){}try{api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName(),profile_name:currentProfileName(),profile:agentPayload()})})}catch(e){}}
 function loadAgent(){
   try{
     const s=JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -325,9 +496,12 @@ function loadAgent(){
     if(s.goal)$('goal').value=s.goal;
     if(typeof s.steps==='number')$('steps').value=s.steps;
     if(typeof s.step_sleep_s==='number')$('step_sleep_s').value=s.step_sleep_s;
+    if(s.account_label)$('account_label').value=s.account_label;
     if(typeof s.dry_run==='boolean')$('dry_run').checked=s.dry_run;
     if(typeof s.forbid_premium_currency==='boolean')$('forbid_premium_currency').checked=s.forbid_premium_currency;
     if(typeof s.exploration_click==='boolean')$('exploration_click').checked=s.exploration_click;
+    if(typeof s.notify_on_finish==='boolean')$('notify_on_finish').checked=s.notify_on_finish;
+    if(s.notify_webhook_url)$('notify_webhook_url').value=s.notify_webhook_url;
   }catch(e){}
 }
 
@@ -343,7 +517,8 @@ async function agentRefresh(){
     $('status_pill').textContent=ok?'Running':(st.agent_running?'Error':'Stopped');
     const ps=st.pipeline_status||{};
     const pp=st.pipeline_progress||{};
-    $('status_text').textContent=`running=${st.agent_running} error=${le} ticks=${ps.ticks||0}`;
+    const meta=st.pipeline_run_meta||{};
+    $('status_text').textContent=`running=${st.agent_running} profile=${meta.profile_name||ps.profile_name||'-'} account=${meta.account_label||ps.account_label||'-'} error=${le} ticks=${ps.ticks||0}`;
     // Pipeline HUD
     const hud=$('routineHud');
     if(!pp||!pp.running){hud.style.display='none';}
@@ -369,14 +544,27 @@ async function agentRefresh(){
 
 $('btn_start').onclick=async()=>{
   $('status_pill').className='pill idle';$('status_pill').textContent='Starting...';
-  try{saveAgent();await api('/api/v1/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(agentPayload())})}
+  try{saveAgent();await saveProfileConfig('启动前已同步档案');await api('/api/v1/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(agentPayload())})}
   catch(e){$('status_pill').className='pill bad';$('status_pill').textContent='Failed';}
   agentRefresh();
 };
 $('btn_stop').onclick=async()=>{try{await api('/api/v1/stop',{method:'POST'})}catch(e){}agentRefresh();};
 $('btn_goal_daily').onclick=()=>{$('goal').value=DAILY_ROUTINE_TEMPLATE;saveAgent();};
+$('btn_profile_save').onclick=async()=>{try{await saveProfileConfig()}catch(e){$('profile_status').textContent='保存失败';}};
+$('btn_profile_new').onclick=async()=>{
+  const name=(prompt('输入新档案名称','default')||'').trim();
+  if(!name)return;
+  try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:name,profile_name:name,profile:agentPayload()})});await loadServerConfig();await loadFavorites();saveAgent();$('profile_status').textContent='已新建档案';setTimeout(()=>{$('profile_status').textContent='';},1800);}catch(e){$('profile_status').textContent='新建失败';}
+};
+$('btn_profile_delete').onclick=async()=>{
+  const name=currentProfileName();
+  if(!name||!confirm(`删除档案 ${name} ?`))return;
+  try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delete_profile:name})});await loadServerConfig();await loadFavorites();saveAgent();$('profile_status').textContent='已删除档案';setTimeout(()=>{$('profile_status').textContent='';},1800);}catch(e){$('profile_status').textContent='删除失败';}
+};
+$('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName()})});await loadServerConfig();await loadFavorites();saveAgent();}catch(e){$('profile_status').textContent='切换失败';}};
+ $('btn_skills_reset').onclick=async()=>{const defaults=(APP_CFG.skill_options||[]).map(x=>x.id);renderSkillList(defaults,defaults);saveAgent();try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill_order:defaults})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}};
 
-['game_exe_path','window_title','steps','step_sleep_s','goal','dry_run','forbid_premium_currency','exploration_click'].forEach(id=>{
+['game_exe_path','window_title','steps','step_sleep_s','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
 });
 
@@ -401,11 +589,18 @@ async function loadFavorites(){
 $('btn_save_favorites').onclick=async()=>{
   try{$('favorites_status').textContent='Saving...';
     await api('/api/v1/config/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_favorites:Array.from(selectedFavorites)})});
+    await saveProfileConfig('已同步收藏角色');
     $('favorites_status').textContent='Saved!';setTimeout(()=>$('favorites_status').textContent='',2000);
   }catch(e){$('favorites_status').textContent='Error';}
 };
 
-loadAgent(); loadFavorites(); setInterval(agentRefresh,1500); agentRefresh();
+loadAgent();
+(async()=>{
+  try{await loadServerConfig();}catch(e){console.error(e);}
+  try{await loadFavorites();}catch(e){console.error(e);}
+  setInterval(agentRefresh,1500);
+  agentRefresh();
+})();
 
 /* ════════════════════════════════════════════════════
    CAPTURE PAGE
