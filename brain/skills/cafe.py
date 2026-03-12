@@ -24,7 +24,7 @@ from urllib.parse import unquote
 from brain.skills.base import (
     BaseSkill, ScreenState,
     action_click, action_click_box,
-    action_wait, action_back, action_done, action_swipe,
+    action_wait, action_back, action_done, action_swipe, action_scroll,
 )
 
 
