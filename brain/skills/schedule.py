@@ -47,28 +47,22 @@ _ROSTER_X_POS = (0.89, 0.14)      # X close button on roster overlay
 _BUILD_CENTER_POS = (0.50, 0.50)  # Center hexagon in location detail
 _ROSTER_TAB_POS = (0.84, 0.91)
 
-# ── reference-derived room grid positions in 全體課程表 popup ──
-# Converted from reference lesson.py 1280×720 absolute → normalized 0-1.
-# 9 rooms in a 3×3 grid. Click to open room info popup with 開始 button.
+# ── Room grid positions in 全體課程表 popup ──
+# Measured from actual MuMu 3840×2160 screenshots (normalized 0-1).
+# Room names: row1 y≈0.29, row2 y≈0.50, row3 y≈0.70
+# Columns: x≈0.19, x≈0.46, x≈0.73
+# Click center of each room card (slightly below the name).
 _ROOM_CLICK_POS = [
-    (0.240, 0.357), (0.509, 0.357), (0.777, 0.357),  # row 1
-    (0.240, 0.567), (0.509, 0.567), (0.777, 0.567),  # row 2
-    (0.240, 0.778), (0.509, 0.778), (0.770, 0.778),  # row 3
+    (0.19, 0.34), (0.46, 0.34), (0.73, 0.34),  # row 1: 視聽室, 體育館, 圖書館
+    (0.19, 0.55), (0.46, 0.55), (0.73, 0.55),  # row 2: 教室, 實驗室, 射擊場
+    (0.19, 0.74), (0.46, 0.74), (0.73, 0.74),  # row 3: 載具庫, (empty), (empty)
 ]
-# Pixel-color status check positions (top-left corner of each room card).
-# White (250-255 all channels) = available, grey (230-249) = done,
-# dark (31-160) = locked, medium grey (197-217) = no activity.
+# Status check positions: top-left area of each room card border.
+# White=available, grey=done, dark=locked.
 _ROOM_STATUS_POS = [
-    (0.226, 0.283), (0.502, 0.283), (0.770, 0.283),  # row 1
-    (0.226, 0.499), (0.502, 0.499), (0.770, 0.499),  # row 2
-    (0.226, 0.710), (0.502, 0.710), (0.770, 0.710),  # row 3
-]
-# Relationship/affection count positions (near avatar icons in each room card).
-# reference checks RGB for pink/red heart icon presence.
-_ROOM_AFFECTION_POS = [
-    (0.346, 0.410), (0.615, 0.410), (0.885, 0.410),  # row 1 (CN: 443/720, 290/720)
-    (0.346, 0.613), (0.615, 0.613), (0.885, 0.613),  # row 2
-    (0.346, 0.821), (0.615, 0.821), (0.885, 0.821),  # row 3
+    (0.11, 0.27), (0.38, 0.27), (0.65, 0.27),  # row 1
+    (0.11, 0.48), (0.38, 0.48), (0.65, 0.48),  # row 2
+    (0.11, 0.68), (0.38, 0.68), (0.65, 0.68),  # row 3
 ]
 
 
