@@ -272,15 +272,25 @@ def _run_template_matching(frame_bgr) -> List:
     return hits
 
 
-def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "") -> ScreenState:
+def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
+                           skip_ocr: bool = False,
+                           prev_ocr_boxes=None) -> ScreenState:
     """Build ScreenState from an in-memory BGR numpy array (no file I/O).
 
     Used by the MuMu runner for zero-copy capture → detect pipeline.
+
+    Args:
+        skip_ocr: if True, skip OCR (expensive ~50ms) and reuse prev_ocr_boxes.
+                  YOLO + template still run every frame (~3ms).
+        prev_ocr_boxes: OCR boxes from a previous tick to reuse when skip_ocr=True.
     """
     if frame_bgr is None:
         return ScreenState(screenshot_path=screenshot_path)
     h, w = frame_bgr.shape[:2]
-    ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
+    if skip_ocr and prev_ocr_boxes is not None:
+        ocr_boxes = prev_ocr_boxes
+    else:
+        ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
     yolo_boxes = _run_yolo_on_image(frame_bgr, w, h)
     template_hits = _run_template_matching(frame_bgr)
     return ScreenState(
@@ -547,6 +557,35 @@ class DailyPipeline:
             # Fallback: press ESC to dismiss (ESC = cancel in this dialog)
             return action_back("interceptor: dismiss exit dialog")
 
+        # ── P0.5: Daily check-in calendar (彩奈签到簿) ──
+        # Full-screen popup with NO close button. Just click anywhere to dismiss.
+        # Detected by "簽到" / "签到" / "彩奈" text, or "第1天" / "第2天" grid.
+        checkin = screen.find_any_text(
+            ["簽到", "签到", "彩奈", "到薄", "到簿"],
+            min_conf=0.5
+        )
+        if not checkin:
+            checkin = screen.find_any_text(
+                ["第1天", "第2天", "第3天"],
+                region=(0.25, 0.10, 0.80, 0.35), min_conf=0.6
+            )
+        if checkin:
+            print(f"[Interceptor] P0.5 daily check-in calendar: '{checkin.text}', clicking to dismiss")
+            self._interceptor_streak += 1
+            return action_click(0.5, 0.5, f"interceptor: dismiss check-in calendar ({checkin.text})")
+
+        # ── P0.5: Updates / Patch Notes WebView ──
+        # In-game WebView (same system as 主要消息). X button absorbs clicks unreliably.
+        # BACK key closes it reliably → triggers exit dialog → P0 handler clicks 取消.
+        updates = screen.find_any_text(
+            ["Updates", "Patch Notes"],
+            region=(0.30, 0.04, 0.70, 0.14), min_conf=0.5
+        )
+        if updates:
+            print(f"[Interceptor] P0.5 Updates WebView: '{updates.text}', BACK to close")
+            self._interceptor_streak += 1
+            return action_back(f"interceptor: close Updates WebView ({updates.text})")
+
         # ── P1: In-game announcement popup (内嵌公告) ──
         # Detected by "主要消息" text in lower-left area. X button at top-right (0.98, 0.04).
         announcement = screen.find_any_text(
@@ -739,12 +778,18 @@ class DailyPipeline:
         screen = read_screen(screenshot_path)
         return self._tick_with_screen(screen, screenshot_path=screenshot_path)
 
-    def tick_from_frame(self, frame_bgr, *, screenshot_path: str = "") -> Dict[str, Any]:
+    def tick_from_frame(self, frame_bgr, *, screenshot_path: str = "",
+                        skip_ocr: bool = False,
+                        prev_ocr_boxes=None) -> Dict[str, Any]:
         """Process one in-memory BGR frame. Returns an action dict.
 
-        Used by the MuMu runner for zero-copy capture → detect pipeline.
+        Args:
+            skip_ocr: skip expensive OCR, reuse prev_ocr_boxes. YOLO still runs.
+            prev_ocr_boxes: cached OCR boxes from a previous tick.
         """
-        screen = read_screen_from_frame(frame_bgr, screenshot_path=screenshot_path)
+        screen = read_screen_from_frame(frame_bgr, screenshot_path=screenshot_path,
+                                        skip_ocr=skip_ocr,
+                                        prev_ocr_boxes=prev_ocr_boxes)
         return self._tick_with_screen(screen, screenshot_path=screenshot_path)
 
     @property
