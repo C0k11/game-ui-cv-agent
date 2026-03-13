@@ -79,7 +79,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .ann-sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;padding:10px;flex-shrink:0;display:flex;flex-direction:column;gap:4px}
 .ann-sidebar h4{font-size:11px;color:var(--muted);text-transform:uppercase;margin:8px 0 4px;letter-spacing:.3px}
 .ann-canvas-area{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;background:#0a0a0a}
-.ann-canvas-area canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
+.ann-canvas-area canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain;touch-action:none}
 .class-item{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid transparent}
 .class-item:hover{background:var(--bg3)}
 .class-item.sel{border-color:var(--accent);background:#1e3a5f}
@@ -990,6 +990,7 @@ annCanvas.addEventListener('pointerdown',e=>{
   // middle button = pan
   if(e.button===1){e.preventDefault();ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};annCanvas.setPointerCapture(e.pointerId);return;}
   const pos=annGetMouse(e);
+  // right-click = draw (any shape)
   if(e.button===2){
     e.preventDefault();
     annCanvas.setPointerCapture(e.pointerId);
@@ -997,14 +998,19 @@ annCanvas.addEventListener('pointerdown',e=>{
     if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];return;}
     ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;
   }
+  // left-click: try handle/box hit first, then fall through to draw if nothing hit
   const h=annHitHandle(pos.x,pos.y);
-  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0};return;}
+  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0};annCanvas.setPointerCapture(e.pointerId);return;}
   const hit=annHitBox(pos.x,pos.y);
-  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annBuildOCRList();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};return;}
+  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annBuildOCRList();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   // check OCR box hit
   const ocrHit=annHitOCR(pos.x,pos.y);
   if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annBuildOCRList();annDraw();return;}
-  ANN.selIdx=-1;ocrSelIdx=-1;annBuildOCRList();annDraw();
+  // left-click on empty space = draw (same as right-click)
+  annCanvas.setPointerCapture(e.pointerId);
+  const shape=($('ann_shape')||{}).value||'rect';
+  if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];ANN.selIdx=-1;annDraw();return;}
+  ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;ANN.selIdx=-1;annDraw();
 });
 annCanvas.addEventListener('pointermove',e=>{
   if(!ANN.dragMode)return;
