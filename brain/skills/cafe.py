@@ -947,7 +947,9 @@ class CafeSkill(BaseSkill):
             mark = screen.find_template_one("headpat", min_conf=0.78,
                                             region=(0.12, 0.25, 0.98, 0.80))
         if not mark:
-            # YOLO fallback
+            # YOLO fallback — try dedicated emoticon model first, then full model classes
+            mark = screen.find_yolo_one("Emoticon_Action", min_conf=_HEADPAT_CONF)
+        if not mark:
             mark = screen.find_yolo_one("headpat_bubble", min_conf=_HEADPAT_CONF)
         if not mark:
             mark = screen.find_yolo_one("角色可摸头黄色感叹号", min_conf=_HEADPAT_CONF)

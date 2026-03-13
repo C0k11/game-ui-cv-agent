@@ -65,11 +65,12 @@ def _get_ocr():
 
 # ── YOLO Detector (singleton) ───────────────────────────────────────
 
-_yolo_model = None
+_yolo_models = []   # list of loaded YOLO model objects
 _yolo_lock = None
 _YOLO_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "_yolo_full.pt"
-# Only battle_heads model kept; other YOLO models removed (template-first pipeline).
+# Battle + headpat models loaded in parallel
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
+_YOLO_EMOTICON = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
 
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
@@ -83,24 +84,26 @@ _YOLO_ALLOWED_SUBSTRINGS = (
 )
 
 def _get_yolo():
-    """Get or create YOLO model (lazy singleton). Only loads on first call.
+    """Get or create YOLO model(s) (lazy singleton). Only loads on first call.
 
-    Deferred loading so startup is fast; model loads when Cafe headpat
-    first needs it (~30s one-time cost).
+    Loads all available model files (battle_heads + emoticon + full).
+    Returns the first model for backward compat; _yolo_models holds all.
     """
-    global _yolo_model, _yolo_lock, _yolo_load_attempts, _yolo_status
+    global _yolo_models, _yolo_lock, _yolo_load_attempts, _yolo_status
     import threading
     if _yolo_lock is None:
         _yolo_lock = threading.Lock()
     with _yolo_lock:
-        if _yolo_model is not None:
-            return _yolo_model
+        if _yolo_models:
+            return _yolo_models[0]
         if _yolo_load_attempts >= _MAX_YOLO_LOAD_ATTEMPTS:
             return None
         _yolo_load_attempts += 1
         candidates = []
         if _YOLO_BATTLE_HEADS.is_file():
             candidates.append(_YOLO_BATTLE_HEADS)
+        if _YOLO_EMOTICON.is_file():
+            candidates.append(_YOLO_EMOTICON)
         if _YOLO_MODEL_PATH.is_file():
             candidates.append(_YOLO_MODEL_PATH)
         if not candidates:
@@ -109,17 +112,20 @@ def _get_yolo():
             return None
         from ultralytics import YOLO
         import numpy as np
+        loaded_names = []
         for model_path in candidates:
             try:
                 m = YOLO(str(model_path))
                 m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
-                _yolo_model = m
-                _yolo_status = f"loaded_ok ({len(m.names)} classes)"
+                _yolo_models.append(m)
+                loaded_names.append(f"{model_path.stem}({len(m.names)}cls)")
                 print(f"[Pipeline] YOLO loaded from {model_path}")
-                return _yolo_model
             except Exception as e:
                 print(f"[Pipeline] YOLO load failed for {model_path}: {e}")
                 continue
+        if _yolo_models:
+            _yolo_status = f"loaded_ok: {', '.join(loaded_names)}"
+            return _yolo_models[0]
         _yolo_status = "all_candidates_failed"
         return None
 
@@ -167,60 +173,57 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
 def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
     """Run YOLO on a BGR numpy array and return normalized YoloBox list.
 
+    Runs ALL loaded models (battle_heads + emoticon + full) and merges results.
     Non-blocking: if YOLO is still loading in the pre-warm thread, returns
     empty immediately instead of blocking the pipeline worker.
     """
     yolo_boxes: List[YoloBox] = []
     # Non-blocking check: if lock is held (pre-warm loading), skip this tick
-    if _yolo_lock is not None and _yolo_model is None:
+    if _yolo_lock is not None and not _yolo_models:
         acquired = _yolo_lock.acquire(blocking=False)
         if not acquired:
-            # Pre-warm thread is loading YOLO, skip silently
             return yolo_boxes
         _yolo_lock.release()
-    yolo = _get_yolo()
-    if yolo is None:
+    _get_yolo()  # ensure models are loaded
+    if not _yolo_models:
         if not getattr(_run_yolo_on_image, '_warned', False):
             print(f"[Pipeline] YOLO unavailable: {_yolo_status}")
             _run_yolo_on_image._warned = True
         return yolo_boxes
-    try:
-        yolo_results = yolo(img, conf=0.15, verbose=False)
-        for r in yolo_results:
-            for box in r.boxes:
-                bx1, by1, bx2, by2 = box.xyxy[0].tolist()
-                cls_id = int(box.cls[0])
-                cls_name = yolo.names.get(cls_id, str(cls_id))
-                cls_low = str(cls_name).lower()
-                if not any(token.lower() in cls_low for token in _YOLO_ALLOWED_SUBSTRINGS):
-                    continue
-                nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h
-                # Filter headpat_bubble: only accept in cafe play area
-                # (reject detections on popups, earnings icons, UI overlays)
-                if "headpat" in cls_low:
-                    # Cafe play area: x 0.05-0.95, y 0.15-0.85
-                    # Reject if center is in popup overlay zone (center screen)
-                    bcx = (nx1 + nx2) / 2
-                    bcy = (ny1 + ny2) / 2
-                    if bcy < 0.15 or bcy > 0.85:
-                        continue  # In top/bottom UI bars
-                    # Reject very small boxes (UI icons, not real bubbles)
-                    bw = nx2 - nx1
-                    bh = ny2 - ny1
-                    if bw < 0.02 or bh < 0.02:
+    for yolo in _yolo_models:
+        try:
+            yolo_results = yolo(img, conf=0.15, verbose=False)
+            for r in yolo_results:
+                for box in r.boxes:
+                    bx1, by1, bx2, by2 = box.xyxy[0].tolist()
+                    cls_id = int(box.cls[0])
+                    cls_name = yolo.names.get(cls_id, str(cls_id))
+                    cls_low = str(cls_name).lower()
+                    if not any(token.lower() in cls_low for token in _YOLO_ALLOWED_SUBSTRINGS):
                         continue
-                yolo_boxes.append(YoloBox(
-                    cls_id=cls_id,
-                    cls_name=cls_name,
-                    confidence=float(box.conf[0]),
-                    x1=nx1,
-                    y1=ny1,
-                    x2=nx2,
-                    y2=ny2,
-                ))
-    except Exception as e:
-        print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
-        import traceback; traceback.print_exc()
+                    nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h
+                    # Filter headpat/emoticon: only accept in cafe play area
+                    if "headpat" in cls_low or "emoticon" in cls_low:
+                        bcx = (nx1 + nx2) / 2
+                        bcy = (ny1 + ny2) / 2
+                        if bcy < 0.15 or bcy > 0.85:
+                            continue
+                        bw = nx2 - nx1
+                        bh = ny2 - ny1
+                        if bw < 0.02 or bh < 0.02:
+                            continue
+                    yolo_boxes.append(YoloBox(
+                        cls_id=cls_id,
+                        cls_name=cls_name,
+                        confidence=float(box.conf[0]),
+                        x1=nx1,
+                        y1=ny1,
+                        x2=nx2,
+                        y2=ny2,
+                    ))
+        except Exception as e:
+            print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
+            import traceback; traceback.print_exc()
     return yolo_boxes
 
 
