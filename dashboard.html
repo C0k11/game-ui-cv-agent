@@ -318,6 +318,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <kbd>R + drag</kbd> rotate selected<br>
         <kbd>Del</kbd> remove box<br>
         <kbd>0-9</kbd> change class<br>
+        <kbd>Ctrl+C</kbd> copy box<br>
+        <kbd>Ctrl+V</kbd> paste box<br>
+        <kbd>Ctrl+D</kbd> duplicate box<br>
         <kbd>Ctrl+S</kbd> save<br>
         <kbd>Shift+Del</kbd> delete image
       </div>
@@ -672,7 +675,8 @@ let ANN={
   // zoom/pan: offX/offY = screen offset of image origin, zoom = screen px per image px
   zoom:1,offX:0,offY:0,fitZoom:1,
   rotateKey:false,  // true while R is held down
-  polyPoints:null   // freehand polygon points during drawing [{x,y}...]
+  polyPoints:null,  // freehand polygon points during drawing [{x,y}...]
+  clipboard:null    // copied label for Ctrl+C/V
 };
 const HANDLE=7;
 const ROT_HANDLE_DIST=28; // px from top-center to rotation handle
@@ -812,11 +816,27 @@ function annDraw(){
       const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(lbl_scr.x,lbl_scr.y-fs-4,tm.width+6,fs+4);
       ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,lbl_scr.x+3,lbl_scr.y-4);
       if(isSel){
+        // vertex handles (white)
         lb.points.forEach(p=>{
           const ps=img2scr(p.x*ANN.imgW,p.y*ANN.imgH);
           ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
           ctx.beginPath();ctx.arc(ps.x,ps.y,HANDLE-1,0,Math.PI*2);ctx.fill();ctx.stroke();
         });
+        // bounding-box corner handles (cyan, for uniform scale)
+        const bxs=lb.points.map(p=>p.x*ANN.imgW),bys=lb.points.map(p=>p.y*ANN.imgH);
+        const bbx1=Math.min(...bxs),bby1=Math.min(...bys),bbx2=Math.max(...bxs),bby2=Math.max(...bys);
+        for(const[cx,cy] of [[bbx1,bby1],[bbx2,bby1],[bbx1,bby2],[bbx2,bby2]]){
+          const cs=img2scr(cx,cy);
+          ctx.fillStyle='#06b6d4';ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+          ctx.beginPath();ctx.rect(cs.x-HANDLE+1,cs.y-HANDLE+1,(HANDLE-1)*2,(HANDLE-1)*2);ctx.fill();ctx.stroke();
+        }
+        // rotation handle (yellow, above top center)
+        const rtx=(bbx1+bbx2)/2, rty=bby1-ROT_HANDLE_DIST/Z;
+        const rts=img2scr(rtx,rty), rtb=img2scr((bbx1+bbx2)/2,bby1);
+        ctx.strokeStyle='#ffff00';ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.moveTo(rtb.x,rtb.y);ctx.lineTo(rts.x,rts.y);ctx.stroke();
+        ctx.fillStyle='#ffff00';ctx.strokeStyle='#333';ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.arc(rts.x,rts.y,HANDLE+1,0,Math.PI*2);ctx.fill();ctx.stroke();
       }
       ctx.restore();
       return; // skip rect/ellipse path
@@ -920,10 +940,19 @@ function annHitHandle(ix,iy){
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
   if((lb.shape||'rect')==='polygon'&&lb.points&&lb.points.length>=3){
     const thr=(HANDLE+3)/ANN.zoom;
+    // vertex handles first (highest priority)
     for(let i=0;i<lb.points.length;i++){
       const px=lb.points[i].x*ANN.imgW, py=lb.points[i].y*ANN.imgH;
       if(Math.hypot(ix-px,iy-py)<=thr)return 'poly-vertex-'+i;
     }
+    // bounding-box corner handles for uniform scale
+    const xs=lb.points.map(p=>p.x*ANN.imgW),ys=lb.points.map(p=>p.y*ANN.imgH);
+    const bx1=Math.min(...xs),by1=Math.min(...ys),bx2=Math.max(...xs),by2=Math.max(...ys);
+    for(const[hx,hy,tag] of [[bx1,by1,'poly-scale-tl'],[bx2,by1,'poly-scale-tr'],[bx1,by2,'poly-scale-bl'],[bx2,by2,'poly-scale-br']])
+      if(Math.hypot(ix-hx,iy-hy)<=thr)return tag;
+    // rotation handle (above top center of bounding box)
+    const rcx=(bx1+bx2)/2, rcy=by1-ROT_HANDLE_DIST/ANN.zoom;
+    if(Math.hypot(ix-rcx,iy-rcy)<=thr+3/ANN.zoom)return 'poly-rotate';
     return null;
   }
   const hw=lb.w*ANN.imgW/2, hh=lb.h*ANN.imgH/2;
@@ -964,6 +993,14 @@ function _pointInPolygon(px,py,pts){
     if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi))inside=!inside;
   }
   return inside;
+}
+
+// Update polygon bounding box from points
+function _updatePolyBBox(lb){
+  if(!lb.points||lb.points.length<3)return;
+  const xs=lb.points.map(p=>p.x),ys=lb.points.map(p=>p.y);
+  const bx1=Math.min(...xs),by1=Math.min(...ys),bx2=Math.max(...xs),by2=Math.max(...ys);
+  lb.xc=(bx1+bx2)/2;lb.yc=(by1+by2)/2;lb.w=bx2-bx1;lb.h=by2-by1;
 }
 
 // Simplify polygon (Ramer-Douglas-Peucker)
@@ -1054,11 +1091,44 @@ annCanvas.addEventListener('pointermove',e=>{
     if(vi>=0&&vi<lb.points.length){
       lb.points[vi].x=ANN.dragOrig.points[vi].x+dx/ANN.imgW;
       lb.points[vi].y=ANN.dragOrig.points[vi].y+dy/ANN.imgH;
-      // Update bounding box
-      const xs=lb.points.map(p=>p.x),ys=lb.points.map(p=>p.y);
-      const bx1=Math.min(...xs),by1=Math.min(...ys),bx2=Math.max(...xs),by2=Math.max(...ys);
-      lb.xc=(bx1+bx2)/2;lb.yc=(by1+by2)/2;lb.w=bx2-bx1;lb.h=by2-by1;
+      _updatePolyBBox(lb);
     }
+    ANN.dirty=true;annDraw();return;
+  }
+  // Polygon uniform scale (corner drag)
+  if(ANN.dragMode.startsWith('poly-scale-')&&lb.shape==='polygon'&&lb.points&&ANN.dragOrig.points){
+    const cx=ANN.dragOrig.xc, cy=ANN.dragOrig.yc;
+    const origXs=ANN.dragOrig.points.map(p=>p.x),origYs=ANN.dragOrig.points.map(p=>p.y);
+    const origW=Math.max(...origXs)-Math.min(...origXs), origH=Math.max(...origYs)-Math.min(...origYs);
+    if(origW>0&&origH>0){
+      const corner=ANN.dragMode.slice(11); // tl/tr/bl/br
+      const oCornerX=corner.endsWith('r')?Math.max(...origXs):Math.min(...origXs);
+      const oCornerY=corner.startsWith('b')?Math.max(...origYs):Math.min(...origYs);
+      const newCornerX=oCornerX+dx/ANN.imgW, newCornerY=oCornerY+dy/ANN.imgH;
+      const sx=Math.abs(newCornerX-cx)/Math.abs(oCornerX-cx)||1;
+      const sy=Math.abs(newCornerY-cy)/Math.abs(oCornerY-cy)||1;
+      const s=Math.max(0.1,Math.min(sx,sy)); // uniform scale
+      for(let i=0;i<lb.points.length;i++){
+        lb.points[i].x=cx+(ANN.dragOrig.points[i].x-cx)*s;
+        lb.points[i].y=cy+(ANN.dragOrig.points[i].y-cy)*s;
+      }
+      _updatePolyBBox(lb);
+    }
+    ANN.dirty=true;annDraw();return;
+  }
+  // Polygon rotation
+  if(ANN.dragMode==='poly-rotate'&&lb.shape==='polygon'&&lb.points&&ANN.dragOrig.points){
+    const cx=ANN.dragOrig.xc*ANN.imgW, cy=ANN.dragOrig.yc*ANN.imgH;
+    const angle=Math.atan2(pos.x-cx,-(pos.y-cy));
+    const origAngle=Math.atan2(ANN.dragStart.x-cx,-(ANN.dragStart.y-cy));
+    const da=angle-origAngle;
+    const cosA=Math.cos(da),sinA=Math.sin(da);
+    for(let i=0;i<lb.points.length;i++){
+      const ox=ANN.dragOrig.points[i].x*ANN.imgW-cx, oy=ANN.dragOrig.points[i].y*ANN.imgH-cy;
+      lb.points[i].x=(cx+ox*cosA-oy*sinA)/ANN.imgW;
+      lb.points[i].y=(cy+ox*sinA+oy*cosA)/ANN.imgH;
+    }
+    _updatePolyBBox(lb);
     ANN.dirty=true;annDraw();return;
   }
   // Resize in local (unrotated) space
@@ -1122,9 +1192,12 @@ annCanvas.addEventListener('wheel',e=>{
 document.addEventListener('keydown',e=>{
   if(currentPage!=='annotate'||!ANN.data.length)return;
   if(e.ctrlKey&&e.key==='s'){e.preventDefault();annSave();return;}
+  if(e.ctrlKey&&e.key==='c'&&ANN.selIdx>=0){e.preventDefault();ANN.clipboard=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));return;}
+  if(e.ctrlKey&&e.key==='v'&&ANN.clipboard){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.clipboard));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;annDraw();return;}
+  if(e.ctrlKey&&e.key==='d'&&ANN.selIdx>=0){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;annDraw();return;}
+  if(e.ctrlKey&&e.key==='0'){e.preventDefault();annZoomFit();return;}
   if(e.key==='d'||e.key==='ArrowRight'){annNext();return;}
   if(e.key==='a'||e.key==='ArrowLeft'){annPrev();return;}
-  if(e.key==='0'&&e.ctrlKey){e.preventDefault();annZoomFit();return;}
   if(e.key==='='||e.key==='+'){annZoomIn();return;}
   if(e.key==='-'){annZoomOut();return;}
   if(e.shiftKey&&e.key==='Delete'){e.preventDefault();annDeleteImage();return;}
