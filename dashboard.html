@@ -1002,10 +1002,10 @@ annCanvas.addEventListener('pointerdown',e=>{
   const h=annHitHandle(pos.x,pos.y);
   if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0};annCanvas.setPointerCapture(e.pointerId);return;}
   const hit=annHitBox(pos.x,pos.y);
-  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annBuildOCRList();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
+  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annUpdateOCRUI();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   // check OCR box hit
   const ocrHit=annHitOCR(pos.x,pos.y);
-  if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annBuildOCRList();annDraw();return;}
+  if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annUpdateOCRUI();annDraw();return;}
   // left-click on empty space = draw (same as right-click)
   annCanvas.setPointerCapture(e.pointerId);
   const shape=($('ann_shape')||{}).value||'rect';
@@ -1021,9 +1021,10 @@ annCanvas.addEventListener('pointermove',e=>{
     annDraw();return;
   }
   const pos=annGetMouse(e);
-  const dx=pos.x-ANN.dragStart.x, dy=pos.y-ANN.dragStart.y;
   if(ANN.dragMode==='draw'){ANN.dragOrig=pos;annDraw();return;}
   if(ANN.dragMode==='draw_poly'){ANN.polyPoints.push(pos);annDraw();return;}
+  if(!ANN.dragStart)return;
+  const dx=pos.x-ANN.dragStart.x, dy=pos.y-ANN.dragStart.y;
   if(ANN.selIdx<0||!ANN.dragOrig)return;
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
   if(ANN.dragMode==='rotate'){
