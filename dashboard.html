@@ -918,7 +918,14 @@ function _toLocalBox(ix,iy,lb){
 function annHitHandle(ix,iy){
   if(ANN.selIdx<0)return null;
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
-  if((lb.shape||'rect')==='polygon')return null; // polygons: move only, no corner/rotation handles
+  if((lb.shape||'rect')==='polygon'&&lb.points&&lb.points.length>=3){
+    const thr=(HANDLE+3)/ANN.zoom;
+    for(let i=0;i<lb.points.length;i++){
+      const px=lb.points[i].x*ANN.imgW, py=lb.points[i].y*ANN.imgH;
+      if(Math.hypot(ix-px,iy-py)<=thr)return 'poly-vertex-'+i;
+    }
+    return null;
+  }
   const hw=lb.w*ANN.imgW/2, hh=lb.h*ANN.imgH/2;
   const local=_toLocalBox(ix,iy,lb);
   const thr=(HANDLE+3)/ANN.zoom;
@@ -1000,7 +1007,7 @@ annCanvas.addEventListener('pointerdown',e=>{
   }
   // left-click: try handle/box hit first, then fall through to draw if nothing hit
   const h=annHitHandle(pos.x,pos.y);
-  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0};annCanvas.setPointerCapture(e.pointerId);return;}
+  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   const hit=annHitBox(pos.x,pos.y);
   if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annUpdateOCRUI();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   // check OCR box hit
@@ -1038,6 +1045,19 @@ annCanvas.addEventListener('pointermove',e=>{
     if(lb.shape==='polygon'&&lb.points&&ANN.dragOrig.points){
       const ddx=dx/ANN.imgW,ddy=dy/ANN.imgH;
       for(let i=0;i<lb.points.length;i++){lb.points[i].x=ANN.dragOrig.points[i].x+ddx;lb.points[i].y=ANN.dragOrig.points[i].y+ddy;}
+    }
+    ANN.dirty=true;annDraw();return;
+  }
+  // Polygon vertex drag
+  if(ANN.dragMode.startsWith('poly-vertex-')&&lb.shape==='polygon'&&lb.points&&ANN.dragOrig.points){
+    const vi=parseInt(ANN.dragMode.split('-')[2]);
+    if(vi>=0&&vi<lb.points.length){
+      lb.points[vi].x=ANN.dragOrig.points[vi].x+dx/ANN.imgW;
+      lb.points[vi].y=ANN.dragOrig.points[vi].y+dy/ANN.imgH;
+      // Update bounding box
+      const xs=lb.points.map(p=>p.x),ys=lb.points.map(p=>p.y);
+      const bx1=Math.min(...xs),by1=Math.min(...ys),bx2=Math.max(...xs),by2=Math.max(...ys);
+      lb.xc=(bx1+bx2)/2;lb.yc=(by1+by2)/2;lb.w=bx2-bx1;lb.h=by2-by1;
     }
     ANN.dirty=true;annDraw();return;
   }
