@@ -542,6 +542,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         # Detect which monitor the MuMu window is on for multi-monitor support
         _dxcam_camera = None
         _dxcam_region = None
+        _mon_offset_x, _mon_offset_y = 0, 0  # monitor origin for multi-monitor coord conversion
         try:
             import dxcam as _dxcam_mod
             import ctypes.wintypes as _wt
@@ -574,7 +575,32 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _monitor_idx = 0
 
             _dxcam_camera = _dxcam_mod.create(output_idx=_monitor_idx, output_color="BGR")
-            _dxcam_region = (_dxcam_rc.left, _dxcam_rc.top, _dxcam_rc.right, _dxcam_rc.bottom)
+            # Convert virtual screen coords to monitor-relative coords
+            # On multi-monitor, GetWindowRect returns virtual coords (e.g. x=3840 on monitor 2)
+            # but DXcam expects coords relative to the specific monitor's origin.
+            _mon_offset_x, _mon_offset_y = 0, 0
+            try:
+                class _MONITORINFO(ctypes.Structure):
+                    _fields_ = [
+                        ("cbSize", ctypes.c_ulong),
+                        ("rcMonitor", _wt.RECT),
+                        ("rcWork", _wt.RECT),
+                        ("dwFlags", ctypes.c_ulong),
+                    ]
+                _mi = _MONITORINFO()
+                _mi.cbSize = ctypes.sizeof(_MONITORINFO)
+                if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(_mi)):
+                    _mon_offset_x = _mi.rcMonitor.left
+                    _mon_offset_y = _mi.rcMonitor.top
+                    _log_pipeline(f"Monitor {_monitor_idx} origin: ({_mon_offset_x}, {_mon_offset_y})")
+            except Exception:
+                pass
+            _dxcam_region = (
+                _dxcam_rc.left - _mon_offset_x,
+                _dxcam_rc.top - _mon_offset_y,
+                _dxcam_rc.right - _mon_offset_x,
+                _dxcam_rc.bottom - _mon_offset_y,
+            )
             _test = _dxcam_camera.grab(region=_dxcam_region)
             if _test is not None:
                 _log_pipeline(f"DXcam capture OK: {_test.shape[1]}x{_test.shape[0]} (monitor {_monitor_idx})")
@@ -618,7 +644,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                             import ctypes.wintypes as _wt3
                             _rc3 = _wt3.RECT()
                             ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_rc3))
-                            rgn = (_rc3.left, _rc3.top, _rc3.right, _rc3.bottom)
+                            rgn = (
+                                _rc3.left - _mon_offset_x,
+                                _rc3.top - _mon_offset_y,
+                                _rc3.right - _mon_offset_x,
+                                _rc3.bottom - _mon_offset_y,
+                            )
                             frame = _dxcam_camera.grab(region=rgn)
                         except Exception:
                             frame = None

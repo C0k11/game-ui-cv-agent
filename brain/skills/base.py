@@ -94,10 +94,15 @@ class ScreenState:
     ocr_boxes: List[OcrBox] = field(default_factory=list)
     yolo_boxes: List[YoloBox] = field(default_factory=list)
     template_hits: List[TemplateHitBox] = field(default_factory=list)
+    florence_boxes: List[OcrBox] = field(default_factory=list)
     image_w: int = 0
     image_h: int = 0
     screenshot_path: str = ""
     timestamp: float = field(default_factory=time.time)
+
+    def add_florence_boxes(self, boxes: List[OcrBox]) -> None:
+        """Append Florence detection boxes."""
+        self.florence_boxes.extend(boxes)
 
     # ── OCR text search helpers ──
 
