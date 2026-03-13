@@ -36,10 +36,36 @@ Thumbs.db
 data/trajectories_archive_v1.zip
 data/_pipeline_frame.jpg
 data/florence_assets/
+data/florence_ui_dataset/
 data/raw_images/
 data/yolo_datasets/
 data/yolo_battle_dataset/
 data/yolo_headpat_dataset/
 data/yolo_training/
+data/_adb_check.png
+data/_check_frame.png
 *.pt
 !scripts/*.py
+
+# Il2CppDumper / reverse-engineering tools (local only)
+Il2CppDumper*/
+Il2CppDumper*.exe
+Il2CppDumper*.dll
+Il2CppDumper*.json
+Il2CppDumper*.pdb
+Il2CppDumper\ GUI*
+Mono.Cecil*.dll
+ghidra*.py
+ida*.py
+hopper*.py
+il2cpp_header_to_*.py
+config.json
+Changelog.txt
+images/
+tools/
+
+# reference study reference (local only)
+study/ref/
+
+# Debug / one-off scripts
+scripts/_*.py

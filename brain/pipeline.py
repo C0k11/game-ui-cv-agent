@@ -36,6 +36,13 @@ from brain.skills.daily_tasks import DailyTasksSkill
 from brain.skills.shop import ShopSkill
 from brain.skills.craft import CraftSkill
 from brain.skills.momo_talk import MomoTalkSkill
+from brain.skills.event_activity import EventActivitySkill
+from brain.skills.total_assault import TotalAssaultSkill
+from brain.skills.pass_reward import PassRewardSkill
+from brain.skills.joint_firing_drill import JointFiringDrillSkill
+from brain.skills.story_cleanup import StoryCleanupSkill
+from brain.skills.campaign_push import CampaignPushSkill
+from brain.skills.ap_planning import ApPlanningSkill
 
 
 # ── OCR Engine (singleton) ──────────────────────────────────────────────
@@ -61,10 +68,8 @@ def _get_ocr():
 _yolo_model = None
 _yolo_lock = None
 _YOLO_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "_yolo_full.pt"
-# Prefer custom headpat model > TensorRT > full.pt
-_YOLO_HEADPAT = Path(r"D:\Project\ml_cache\models\yolo\headpat.pt")
-_YOLO_TRT_ENGINE = Path(r"D:\Project\ml_cache\models\yolo\full.engine")
-_YOLO_ML_CACHE = Path(r"D:\Project\ml_cache\models\yolo\full.pt")
+# Only battle_heads model kept; other YOLO models removed (template-first pipeline).
+_YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
 
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
@@ -94,12 +99,8 @@ def _get_yolo():
             return None
         _yolo_load_attempts += 1
         candidates = []
-        if _YOLO_HEADPAT.is_file():
-            candidates.append(_YOLO_HEADPAT)
-        if _YOLO_TRT_ENGINE.is_file():
-            candidates.append(_YOLO_TRT_ENGINE)
-        if _YOLO_ML_CACHE.is_file():
-            candidates.append(_YOLO_ML_CACHE)
+        if _YOLO_BATTLE_HEADS.is_file():
+            candidates.append(_YOLO_BATTLE_HEADS)
         if _YOLO_MODEL_PATH.is_file():
             candidates.append(_YOLO_MODEL_PATH)
         if not candidates:
@@ -266,13 +267,13 @@ def _find_florence_hit(screen: ScreenState, queries: List[str], *, region: Optio
 
 
 def _run_template_matching(frame_bgr) -> List:
-    """Run headpat bubble detection via HSV color filtering. Returns list of TemplateHitBox."""
+    """Run headpat bubble detection via happy_face templates. Returns list of TemplateHitBox."""
     from brain.skills.base import TemplateHitBox
     hits = []
     try:
         from vision.template_matcher import find_headpat_bubbles
         # Restrict to cafe play area (exclude UI bars + left sidebar icons)
-        raw = find_headpat_bubbles(frame_bgr, threshold=0.78,
+        raw = find_headpat_bubbles(frame_bgr, threshold=0.75,
                                    region=(0.12, 0.25, 0.98, 0.80))
         for h in raw:
             hits.append(TemplateHitBox(
@@ -356,6 +357,7 @@ class SkillResult:
     status: str  # "done", "timeout", "error"
     ticks: int
     duration_s: float
+    reason: str = ""
 
 
 class DailyPipeline:
@@ -381,24 +383,46 @@ class DailyPipeline:
     DEFAULT_SKILLS = [
         "lobby",            # 1.  Login, close popups, confirm lobby
         "ap_overflow",      # 2.  Emergency farm if AP≥900 (prevents cafe block)
-        "cafe",             # 3.  Collect earnings, headpat students
-        "schedule",         # 4.  Run schedules with tickets
-        "club",             # 5.  Claim club AP (社交→社團)
-        "momo_talk",        # 6.  Auto-complete unread MomoTalk conversations
-        "shop",             # 7.  Buy daily items (一般 tab, select all, purchase)
-        "craft",            # 7.  Quick-craft items + claim finished crafts
-        "event_farming",    # 8.  Burn AP first when entering campaign
-        "bounty",           # 9.  Sweep bounty tickets (3 branches)
-        "arena",            # 10. PvP fights + claim rewards
-        "mail",             # 11. Collect mail rewards (AP, items)
-        "daily_tasks",      # 12. Claim daily task rewards + activity chests
-        "hard_farming",     # 13. Hard mode shard farming (remaining AP)
-        "event_farming_2",  # 14. 回马枪: second event sweep with collected AP
+        "event_activity",   # 3.  Event story/challenge/grid cleanup
+        "event_farming",    # 4.  Burn AP in event missions
+        "cafe",             # 5.  Collect earnings, headpat students
+        "schedule",         # 6.  Run schedules with tickets
+        "club",             # 7.  Claim club AP (社交→社團)
+        "momo_talk",        # 8.  Auto-complete unread MomoTalk conversations
+        "shop",             # 9.  Buy daily items (一般 tab, select all, purchase)
+        "craft",            # 10. Quick-craft items + claim finished crafts
+        "story_cleanup",    # 11. Main/group/mini story cleanup pass
+        "bounty",           # 12. Sweep bounty tickets (3 branches)
+        "arena",            # 13. PvP fights + claim rewards
+        "joint_firing_drill",  # 14. Tactical exam / joint firing drill tickets
+        "total_assault",    # 15. Total assault tickets + season/point rewards
+        "mail",             # 16. Collect mail rewards (AP, items)
+        "daily_tasks",      # 17. Claim daily task rewards + activity chests
+        "pass_reward",      # 18. Claim battle pass mission/reward tabs
+        "ap_planning",      # 19. Free AP claim + optional AP purchase planning
+        "hard_farming",     # 20. Hard mode shard farming (remaining AP)
+        "event_farming_2",  # 21. 回马枪: second event sweep with collected AP
+        "campaign_push",    # 22. Campaign progression fallback AP sink
     ]
 
     TRAJECTORIES_DIR = Path(__file__).resolve().parents[1] / "data" / "trajectories"
 
-    def __init__(self, skill_names: Optional[List[str]] = None):
+    def __init__(self, skill_names: Optional[List[str]] = None,
+                 profile_options: Optional[Dict[str, Any]] = None):
+        opts = dict(profile_options or {})
+        try:
+            ap_purchase_limit = max(0, int(opts.get("ap_purchase_limit") or 0))
+        except Exception:
+            ap_purchase_limit = 0
+        try:
+            campaign_push_steps = int(opts.get("steps") or 0)
+        except Exception:
+            campaign_push_steps = 0
+        if campaign_push_steps <= 0:
+            campaign_push_steps = 3
+        campaign_push_steps = min(campaign_push_steps, 30)
+        forbid_premium_currency = bool(opts.get("forbid_premium_currency", True))
+
         self._skill_registry: Dict[str, BaseSkill] = {
             "lobby": LobbySkill(),
             "ap_overflow": EventFarmingSkill(ap_threshold=900),  # only farms if AP≥900
@@ -408,12 +432,22 @@ class DailyPipeline:
             "shop": ShopSkill(),
             "craft": CraftSkill(),
             "momo_talk": MomoTalkSkill(),
+            "story_cleanup": StoryCleanupSkill(),
+            "event_activity": EventActivitySkill(),
             "bounty": BountySkill(),
             "arena": ArenaSkill(),
+            "joint_firing_drill": JointFiringDrillSkill(),
+            "total_assault": TotalAssaultSkill(),
             "event_farming": EventFarmingSkill(),       # event-aware (always farms)
+            "ap_planning": ApPlanningSkill(
+                forbid_premium_currency=forbid_premium_currency,
+                paid_purchase_limit=ap_purchase_limit,
+            ),
             "hard_farming": FarmingSkill(),              # Hard mode shard farming
+            "campaign_push": CampaignPushSkill(max_pushes=campaign_push_steps),
             "mail": MailSkill(),
             "daily_tasks": DailyTasksSkill(),
+            "pass_reward": PassRewardSkill(),
             "event_farming_2": EventFarmingSkill(),      # 回马枪 second pass
         }
 
@@ -430,6 +464,7 @@ class DailyPipeline:
         self._interceptor_streak: int = 0  # consecutive interceptor fires
         self._last_sub_state: str = ""
         self._last_wait_reason: str = ""
+        self._last_action_reason: str = ""
         self._stuck_counter: int = 0  # ticks in same sub_state
         self._consecutive_timeouts: int = 0  # skills that timed out in a row
 
@@ -456,8 +491,14 @@ class DailyPipeline:
             "total_skills": len(self._skill_order),
             "skill_ticks": skill.ticks if skill else 0,
             "total_ticks": self._total_ticks,
+            "current_reason": self._last_action_reason,
             "results": [
-                {"skill": r.skill_name, "status": r.status, "ticks": r.ticks}
+                {
+                    "skill": r.skill_name,
+                    "status": r.status,
+                    "ticks": r.ticks,
+                    "reason": r.reason,
+                }
                 for r in self._results
             ],
         }
@@ -502,7 +543,7 @@ class DailyPipeline:
         self._stuck_counter = 0
         print(f"[Pipeline] Starting skill '{skill.name}'")
 
-    def _advance_skill(self, status: str) -> None:
+    def _advance_skill(self, status: str, reason: str = "") -> None:
         """Record current skill result and advance to the next skill."""
         skill = self.current_skill
         if skill is None:
@@ -515,6 +556,7 @@ class DailyPipeline:
                 status=status,
                 ticks=skill.ticks,
                 duration_s=duration_s,
+                reason=str(reason or ""),
             )
         )
         if status == "timeout":
@@ -863,6 +905,7 @@ class DailyPipeline:
         action = skill.tick(screen)
         action_type = action.get("action", "")
         action_reason = str(action.get("reason", "") or "")
+        self._last_action_reason = action_reason
 
         # ── State lockout: detect truly stuck repeated waits ──
         same_wait = (
@@ -904,9 +947,13 @@ class DailyPipeline:
                     skill.reset()
                     return action_wait(500, f"skill '{skill.name}' retry")
                 print(f"[Pipeline] Skill '{skill.name}' reported timeout, skipping")
-                self._advance_skill("timeout")
+                self._advance_skill("timeout", action_reason)
+                if action_reason:
+                    return action_wait(300, f"skill '{skill.name}' timed out, skipping ({action_reason})")
                 return action_wait(300, f"skill '{skill.name}' timed out, skipping")
-            self._advance_skill("done")
+            self._advance_skill("done", action_reason)
+            if action_reason:
+                return action_wait(300, f"skill '{skill.name}' done ({action_reason}), advancing")
             return action_wait(300, f"skill '{skill.name}' done, advancing")
 
         # Timeout check
@@ -917,7 +964,7 @@ class DailyPipeline:
                 skill.reset()
                 return action_wait(500, f"skill '{skill.name}' retry")
             print(f"[Pipeline] Skill '{skill.name}' timeout, skipping")
-            self._advance_skill("timeout")
+            self._advance_skill("timeout", "max ticks exceeded")
             return action_wait(300, f"skill '{skill.name}' timed out, skipping")
 
         # Tag action with pipeline metadata
@@ -984,7 +1031,10 @@ class DailyPipeline:
         lines = [f"Pipeline: {'Running' if self._running else 'Stopped'}"]
         lines.append(f"Total ticks: {self._total_ticks}")
         for r in self._results:
-            lines.append(f"  {r.skill_name}: {r.status} ({r.ticks} ticks, {r.duration_s:.1f}s)")
+            if r.reason:
+                lines.append(f"  {r.skill_name}: {r.status} ({r.ticks} ticks, {r.duration_s:.1f}s) - {r.reason}")
+            else:
+                lines.append(f"  {r.skill_name}: {r.status} ({r.ticks} ticks, {r.duration_s:.1f}s)")
         skill = self.current_skill
         if skill:
             lines.append(f"  {skill.name}: in progress ({skill.ticks} ticks, sub={skill.sub_state})")

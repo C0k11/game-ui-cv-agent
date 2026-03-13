@@ -10,6 +10,8 @@ class AvatarMatcher:
 
     def __init__(self, avatars_dir: str):
         self.avatars_dir = Path(avatars_dir)
+        # Pre-cropped face directory (preferred, faster, no alpha needed)
+        self.crop_dir = self.avatars_dir.parent / "角色头像_crop"
         # Cache stores (bgr_image, alpha_mask, hsv_hist) tuples
         self.cache: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
 
@@ -21,22 +23,51 @@ class AvatarMatcher:
         if name in self.cache:
             return self.cache[name]
 
+        # Prefer pre-cropped face images (fast, no alpha needed)
+        crop_path = self.crop_dir / f"{name}.png" if self.crop_dir.is_dir() else None
+        if crop_path and not crop_path.exists():
+            # Try stripping .png suffix from name (config stores 'Wakamo.png')
+            base = name[:-4] if name.lower().endswith(".png") else name
+            crop_path = self.crop_dir / f"{base}.png"
+
+        if crop_path and crop_path.exists():
+            img = cv2.imdecode(np.fromfile(str(crop_path), dtype=np.uint8), cv2.IMREAD_COLOR)
+            if img is not None:
+                sz = self._REF_SIZE
+                bgr = cv2.resize(img, (sz, sz), interpolation=cv2.INTER_AREA)
+                alpha = self._circular_mask(sz, sz)
+                hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+                hist = cv2.calcHist([hsv], [0, 1], alpha, [30, 32], [0, 180, 0, 256])
+                cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+                self.cache[name] = (bgr, alpha, hist)
+                return self.cache[name]
+
+        # Fallback: load full portrait with alpha and crop internally
         path = self.avatars_dir / f"{name}.png"
         if not path.exists():
             path = self.avatars_dir / name
         if not path.exists():
             return None
 
-        # Load with alpha channel (IMREAD_UNCHANGED)
         img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-        if img is None or img.shape[-1] != 4:
+        if img is None:
             return None
+        if len(img.shape) < 3 or img.shape[2] != 4:
+            # No alpha — use as-is with circular mask
+            bgr = img if len(img.shape) == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            sz = self._REF_SIZE
+            bgr = cv2.resize(bgr, (sz, sz), interpolation=cv2.INTER_AREA)
+            alpha = self._circular_mask(sz, sz)
+            hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+            hist = cv2.calcHist([hsv], [0, 1], alpha, [30, 32], [0, 180, 0, 256])
+            cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+            self.cache[name] = (bgr, alpha, hist)
+            return self.cache[name]
 
         h, w = img.shape[:2]
 
         # Wiki portraits are bust shots (456×404); roster thumbnails show the FACE.
         # Crop to the upper-center square (face area) before matching.
-        # Face is typically in the top 65% vertically, center 75% horizontally.
         crop_top = 0
         crop_bot = int(h * 0.65)
         crop_left = int(w * 0.125)
@@ -52,21 +83,18 @@ class AvatarMatcher:
             off = (ch - cw) // 2
             img = img[off:off + cw, :]
 
-        # Resize to standard reference size
         sz = self._REF_SIZE
         img = cv2.resize(img, (sz, sz), interpolation=cv2.INTER_AREA)
 
         bgr = img[:, :, :3]
         alpha = img[:, :, 3].copy()
 
-        # Apply circular mask (roster thumbnails are circular)
         cy_c, cx_c = sz // 2, sz // 2
         radius = sz // 2
         yy, xx = np.ogrid[:sz, :sz]
         circ = ((xx - cx_c) ** 2 + (yy - cy_c) ** 2) <= radius ** 2
         alpha[~circ] = 0
 
-        # Pre-compute HSV histogram for histogram comparison
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         mask8 = (alpha > 0).astype(np.uint8) * 255
         hist = cv2.calcHist([hsv], [0, 1], mask8, [30, 32], [0, 180, 0, 256])

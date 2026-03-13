@@ -45,6 +45,8 @@ class EventFarmingSkill(BaseSkill):
         self.max_ticks = 120
         self._ap_threshold = ap_threshold  # 0 = always farm, >0 = only if AP >= threshold
         self._current_ap: int = -1
+        self._ap_before: int = -1
+        self._ap_after: int = -1
         self._has_event: bool = False
         self._event_on_special: bool = False
         self._event_on_normal: bool = False
@@ -59,10 +61,13 @@ class EventFarmingSkill(BaseSkill):
         self._checked_normal: bool = False  # True after entering 任務 to check for 活動進行中
         self._checked_special: bool = False  # True after entering 特殊任務 to check
         self._checked_hard_tab: bool = False  # True after switching to Hard tab in 任務
+        self._hard_stage_list_seen: int = 0
 
     def reset(self) -> None:
         super().reset()
         self._current_ap = -1
+        self._ap_before = -1
+        self._ap_after = -1
         self._has_event = False
         self._event_on_special = False
         self._event_on_normal = False
@@ -77,6 +82,7 @@ class EventFarmingSkill(BaseSkill):
         self._checked_normal = False
         self._checked_special = False
         self._checked_hard_tab = False
+        self._hard_stage_list_seen = 0
 
     # ── AP reading ─────────────────────────────────────────────────────
 
@@ -114,13 +120,6 @@ class EventFarmingSkill(BaseSkill):
             cancel = screen.find_any_text(["取消"], min_conf=0.7)
             if cancel:
                 return action_click_box(cancel, "cancel AP purchase")
-            close_btn = self._find_florence_hit(
-                screen,
-                ["close button icon", "close dialog x button", "x close icon"],
-                region=(0.0, 0.0, 0.93, 0.30),
-            )
-            if close_btn:
-                return action_click_box(close_btn, "close AP popup")
             return action_back("dismiss AP popup")
 
         # Sweep result popup → dismiss
@@ -180,6 +179,10 @@ class EventFarmingSkill(BaseSkill):
         """Gate: skip farming if AP below threshold."""
         if self._ap_threshold <= 0:
             # No threshold — always proceed
+            if screen.is_lobby():
+                ap = self._parse_ap(screen)
+                if ap >= 0:
+                    self._ap_before = ap
             self.sub_state = "enter_campaign"
             return action_wait(200, "no AP threshold, proceeding")
 
@@ -189,6 +192,8 @@ class EventFarmingSkill(BaseSkill):
 
         ap = self._parse_ap(screen)
         self._current_ap = ap
+        if ap >= 0:
+            self._ap_before = ap
         if ap < 0:
             # Can't read AP — try once more, then proceed anyway
             self.log("could not read AP, proceeding anyway")
@@ -804,6 +809,19 @@ class EventFarmingSkill(BaseSkill):
 
     def _select_hard_tab(self, screen: ScreenState) -> Dict[str, Any]:
         """Click Hard tab inside normal missions (hard_fallback path)."""
+        if screen.is_lobby():
+            self.log("hard fallback drifted to lobby, re-entering campaign")
+            self._hard_tab_attempts = 0
+            self._hard_stage_list_seen = 0
+            self._enter_attempts = 0
+            self.sub_state = "enter_campaign"
+            return action_wait(300, "re-enter campaign from lobby")
+
+        touch_to_start = screen.find_text_one("TOUCH\\s*TO\\s*START", min_conf=0.6)
+        if touch_to_start:
+            self.log("hard fallback reached title screen, tapping to return")
+            return action_click(0.5, 0.86, "tap to start from title")
+
         # Detect if we're on the campaign HUB (懸賞通緝/總力戰 visible) instead of
         # inside a mission page. Campaign hub has no Hard tab → bail out.
         hub_indicators = screen.find_any_text(
@@ -813,6 +831,7 @@ class EventFarmingSkill(BaseSkill):
         )
         if hub_indicators:
             self._hard_tab_attempts = getattr(self, '_hard_tab_attempts', 0) + 1
+            self._hard_stage_list_seen = 0
             if self._hard_tab_attempts > 3:
                 self.log("on campaign hub (no Hard tab here), exiting")
                 self.sub_state = "exit"
@@ -833,6 +852,7 @@ class EventFarmingSkill(BaseSkill):
         )
         if hard:
             self.log("clicking Hard tab")
+            self._hard_stage_list_seen = 0
             self.sub_state = "scroll_bottom"
             return action_click_box(hard, "select Hard tab")
 
@@ -843,13 +863,30 @@ class EventFarmingSkill(BaseSkill):
         )
         if normal:
             self.log("Normal tab visible, clicking right for Hard")
+            self._hard_stage_list_seen = 0
             return action_click(min(normal.cx + 0.15, 0.9), normal.cy, "click Hard tab area")
 
         # Maybe we're already in a stage list
         sweep = screen.find_any_text(["掃蕩", "扫荡", "Sweep"], min_conf=0.6)
         if sweep:
+            self._hard_stage_list_seen = 0
             self.sub_state = "scroll_bottom"
             return action_wait(200, "already in stage list")
+
+        stage_id = screen.find_text_one(r"\d+\-\d+", min_conf=0.5)
+        stage_entry = screen.find_any_text(
+            ["入場", "入场"],
+            region=(0.78, 0.22, 0.98, 0.80),
+            min_conf=0.5,
+        )
+        if stage_id and stage_entry:
+            self._hard_stage_list_seen = getattr(self, '_hard_stage_list_seen', 0) + 1
+            if self._hard_stage_list_seen <= 2:
+                self.log("stage list visible but Hard OCR missed, clicking Hard tab fallback")
+                return action_click(0.84, 0.22, "click Hard tab area (fallback)")
+            self.log("stage list persists after Hard fallback, assuming Hard selected")
+            self.sub_state = "scroll_bottom"
+            return action_wait(200, "assume Hard stage list ready")
 
         # Timeout after too many attempts
         self._hard_tab_attempts = getattr(self, '_hard_tab_attempts', 0) + 1
@@ -904,12 +941,29 @@ class EventFarmingSkill(BaseSkill):
                 enter_buttons.append(box)
 
         if enter_buttons:
-            # Pick the one with highest Y (bottom-most = last stage)
-            bottom_btn = max(enter_buttons, key=lambda b: b.cy)
-            self.log(f"clicking bottom 入場 at y={bottom_btn.cy:.2f}")
+            remaining_boxes = screen.find_text(r"[剩余餘].*[次數数].*(\d+)\s*[/|]\s*(\d+)", min_conf=0.5)
+            available_buttons: List[OcrBox] = []
+            for btn in enter_buttons:
+                remaining = None
+                for box in remaining_boxes:
+                    if abs(box.cy - btn.cy) < 0.08 and box.cx < btn.cx:
+                        m = re.search(r"(\d+)\s*[/|]\s*(\d+)", box.text)
+                        if m:
+                            remaining = int(m.group(1))
+                            break
+                if remaining is None or remaining > 0:
+                    available_buttons.append(btn)
+
+            if not available_buttons:
+                self.log("all visible hard stages are out of attempts, exiting safely")
+                self.sub_state = "exit"
+                return action_wait(200, "no hard stages with attempts left")
+
+            bottom_btn = max(available_buttons, key=lambda b: b.cy)
+            self.log(f"clicking bottom available 入場 at y={bottom_btn.cy:.2f}")
             self.sub_state = "sweep"
             self._sweep_stage = 0
-            return action_click_box(bottom_btn, f"click bottom 入場 button")
+            return action_click_box(bottom_btn, f"click bottom available 入場 button")
 
         # No 入場 found — maybe 關卡目錄 not visible, try waiting
         self.log("no 入場 buttons found")
@@ -965,6 +1019,20 @@ class EventFarmingSkill(BaseSkill):
 
         # Stage 1: Click 掃蕩開始
         if self._sweep_stage == 1:
+            notify = screen.find_any_text(
+                ["通知"],
+                region=(0.3, 0.1, 0.7, 0.3), min_conf=0.6
+            )
+            if notify:
+                confirm = screen.find_any_text(
+                    ["確認", "确认", "確定", "确定", "確", "确", "Confirm"],
+                    region=(0.3, 0.3, 0.8, 0.92), min_conf=0.5
+                )
+                self._sweep_stage = 2
+                if confirm:
+                    return action_click_box(confirm, "confirm sweep (stage1 popup)")
+                return action_click(0.60, 0.74, "confirm sweep (stage1 hardcoded)")
+
             sweep_start = screen.find_any_text(
                 ["掃蕩開始", "扫荡开始"],
                 min_conf=0.5
@@ -988,17 +1056,49 @@ class EventFarmingSkill(BaseSkill):
                     self._sweep_stage = 2
                     return action_click_box(box, "click 掃蕩開始 (partial OCR)")
 
+            for box in screen.find_text("蕩", min_conf=0.45):
+                if 0.45 < box.cy < 0.66 and box.cx > 0.55:
+                    self._sweep_stage = 2
+                    return action_click_box(box, "click 掃蕩開始 (single-char OCR)")
+            for box in screen.find_text("荡", min_conf=0.45):
+                if 0.45 < box.cy < 0.66 and box.cx > 0.55:
+                    self._sweep_stage = 2
+                    return action_click_box(box, "click 掃蕩開始 (single-char OCR)")
+
             # Fallback: look for 掃蕩 text in the panel
             for box in screen.find_text("掃蕩", min_conf=0.5):
                 if box.cy > 0.25 and box.cx > 0.5:
                     self._sweep_stage = 2
                     return action_click_box(box, "click sweep start")
+            for box in screen.find_text("扫荡", min_conf=0.5):
+                if box.cy > 0.25 and box.cx > 0.5:
+                    self._sweep_stage = 2
+                    return action_click_box(box, "click sweep start")
+            # Final fallback: the upper blue sweep button is stable in this popup.
+            if screen.find_any_text(["MAX", "MIN"], region=(0.55, 0.35, 0.92, 0.52), min_conf=0.6):
+                self._sweep_stage = 2
+                return action_click(0.73, 0.58, "click 掃蕩開始 (hardcoded upper button)")
             return action_wait(400, "looking for 掃蕩開始")
 
         # Stage 2: Confirm sweep dialog ("通知: 要使用XAP掃蕩Y次嗎？")
         # This dialog has 取消(Esc) and 確認(Space) buttons.
         # The global interceptor may also handle this, but we handle it here too.
         if self._sweep_stage == 2:
+            restore_prompt = screen.find_any_text(
+                ["恢復挑", "恢复挑", "青輝石", "青辉石", "可購買0次", "可购买0次"],
+                region=(0.30, 0.28, 0.72, 0.62), min_conf=0.55
+            )
+            if restore_prompt:
+                cancel_restore = screen.find_any_text(
+                    ["取消"],
+                    region=(0.28, 0.60, 0.52, 0.82), min_conf=0.55
+                )
+                self.log("challenge restore dialog detected, cancelling to avoid spending gems")
+                self.sub_state = "exit"
+                if cancel_restore:
+                    return action_click_box(cancel_restore, "cancel challenge restore dialog")
+                return action_click(0.41, 0.70, "cancel challenge restore dialog (fallback)")
+
             # Look for 確認 button in center area (the confirm dialog)
             # OCR sometimes reads 確認 as single char 確, so match both.
             confirm = screen.find_any_text(
@@ -1012,11 +1112,19 @@ class EventFarmingSkill(BaseSkill):
             # Check if the 通知 dialog is visible (sweep confirm)
             notify = screen.find_any_text(
                 ["通知"],
-                region=(0.3, 0.1, 0.7, 0.3), min_conf=0.7
+                region=(0.3, 0.1, 0.7, 0.3), min_conf=0.55
             )
-            if notify:
-                # Dialog visible but 確認 not found yet — wait
-                return action_wait(300, "confirm dialog visible, looking for 確認")
+            cancel = screen.find_any_text(
+                ["取消"],
+                region=(0.28, 0.58, 0.52, 0.82), min_conf=0.55
+            )
+            ap_prompt = screen.find_any_text(
+                ["要使用", "AP"],
+                region=(0.32, 0.38, 0.68, 0.56), min_conf=0.55
+            )
+            if notify or cancel or ap_prompt:
+                # Dialog visible but OCR missed the confirm button — click fixed confirm spot.
+                return action_click(0.60, 0.74, "confirm sweep (hardcoded)")
 
             # Check if sweep result already appeared (interceptor handled confirm)
             sweep_done = screen.find_any_text(
@@ -1062,7 +1170,28 @@ class EventFarmingSkill(BaseSkill):
         return action_wait(400, "sweep processing")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
+        touch_to_start = screen.find_text_one("TOUCH\\s*TO\\s*START", min_conf=0.6)
+        if touch_to_start:
+            return action_click(0.5, 0.86, "tap to start during event_farming exit")
+
         if screen.is_lobby():
-            self.log(f"done ({self._sweep_count} sweeps, ap_empty={self._ap_empty}, target={self._target})")
-            return action_done("event_farming complete")
+            ap_now = self._parse_ap(screen)
+            if ap_now >= 0:
+                self._ap_after = ap_now
+            ap_span = f"{self._ap_before}->{self._ap_after}" if self._ap_before >= 0 and self._ap_after >= 0 else "unknown"
+            ap_spent = 0
+            if self._ap_before >= 0 and self._ap_after >= 0:
+                ap_spent = max(0, self._ap_before - self._ap_after)
+
+            if not self._ap_empty and self._sweep_count <= 0 and ap_spent <= 0:
+                reason = f"event_farming no_sweep (target={self._target}, AP {ap_span})"
+                self.log(reason)
+                return action_done(reason)
+
+            reason = (
+                f"event_farming complete (target={self._target}, sweeps={self._sweep_count}, "
+                f"ap_empty={self._ap_empty}, ap_spent={ap_spent}, AP {ap_span})"
+            )
+            self.log(reason)
+            return action_done(reason)
         return action_back("event_farming exit: back to lobby")

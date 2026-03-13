@@ -93,7 +93,6 @@ class ScreenState:
     """Snapshot of what's on screen right now."""
     ocr_boxes: List[OcrBox] = field(default_factory=list)
     yolo_boxes: List[YoloBox] = field(default_factory=list)
-    florence_boxes: List[OcrBox] = field(default_factory=list)
     template_hits: List[TemplateHitBox] = field(default_factory=list)
     image_w: int = 0
     image_h: int = 0
@@ -199,32 +198,6 @@ class ScreenState:
         hits = self.find_template(label, **kwargs)
         return hits[0] if hits else None
 
-    def add_florence_boxes(self, boxes: List[OcrBox]) -> None:
-        if not boxes:
-            return
-        seen = {
-            (
-                box.text,
-                round(box.x1, 4),
-                round(box.y1, 4),
-                round(box.x2, 4),
-                round(box.y2, 4),
-            )
-            for box in self.florence_boxes
-        }
-        for box in boxes:
-            key = (
-                box.text,
-                round(box.x1, 4),
-                round(box.y1, 4),
-                round(box.x2, 4),
-                round(box.y2, 4),
-            )
-            if key in seen:
-                continue
-            self.florence_boxes.append(box)
-            seen.add(key)
-
     # ── Region constants for Blue Archive ──
 
     # Bottom navigation bar (咖啡廳, 課程表, 學生, 编辑, 社交, 製造, 商店, 招募)
@@ -324,99 +297,25 @@ class BaseSkill(ABC):
         self.ticks: int = 0
         self.max_ticks: int = 60  # timeout per skill
         self._log_lines: List[str] = []
-        self._florence_vision = None
-        self._florence_det_cache: Dict[str, List[OcrBox]] = {}
 
     def reset(self) -> None:
         """Reset skill state for a fresh run."""
         self.sub_state = ""
         self.ticks = 0
         self._log_lines = []
-        self._florence_det_cache = {}
 
     def log(self, msg: str) -> None:
         line = f"[{self.name}] {msg}"
         self._log_lines.append(line)
         print(line)
 
-    def _load_screen_image(self, screen: ScreenState):
-        try:
-            import cv2
-            import numpy as np
-            img = cv2.imdecode(np.fromfile(screen.screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if img is None:
-                return None, 0, 0
-            h, w = img.shape[:2]
-            return img, w, h
-        except Exception:
-            return None, 0, 0
-
-    def _get_florence_vision(self):
-        if self._florence_vision is None:
-            from vision.florence_vision import get_florence_vision_nowait
-            fv = get_florence_vision_nowait()
-            if fv is None:
-                raise RuntimeError("Florence model still loading")
-            self._florence_vision = fv
-        return self._florence_vision
-
     def _find_florence_hits(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> List[OcrBox]:
-        clean_queries = [str(q).strip() for q in queries if str(q).strip()]
-        if not clean_queries:
-            return []
-        img, w, h = self._load_screen_image(screen)
-        if img is None or w <= 0 or h <= 0:
-            return []
-        rx1, ry1, rx2, ry2 = region or (0.0, 0.0, 1.0, 1.0)
-        x1 = max(0, int(rx1 * w))
-        y1 = max(0, int(ry1 * h))
-        x2 = min(w, int(rx2 * w))
-        y2 = min(h, int(ry2 * h))
-        if x2 <= x1 or y2 <= y1:
-            return []
-        key = f"{screen.timestamp:.6f}|{x1}|{y1}|{x2}|{y2}|{'||'.join(clean_queries)}"
-        cached = self._florence_det_cache.get(key)
-        if cached is not None:
-            screen.add_florence_boxes(cached)
-            return list(cached)
-        crop = img[y1:y2, x1:x2]
-        try:
-            results = self._get_florence_vision().detect_open_vocabulary(crop, clean_queries)
-        except Exception as e:
-            self.log(f"Florence detect unavailable: {e}")
-            self._florence_det_cache[key] = []
-            return []
-        hits: List[OcrBox] = []
-        rw = max(1, x2 - x1)
-        rh = max(1, y2 - y1)
-        for item in results:
-            bbox = item.get("bbox")
-            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-                continue
-            bx1, by1, bx2, by2 = [float(v) for v in bbox]
-            nx1 = (x1 + bx1) / w
-            ny1 = (y1 + by1) / h
-            nx2 = (x1 + bx2) / w
-            ny2 = (y1 + by2) / h
-            nx1 = min(max(nx1, 0.0), 1.0)
-            ny1 = min(max(ny1, 0.0), 1.0)
-            nx2 = min(max(nx2, 0.0), 1.0)
-            ny2 = min(max(ny2, 0.0), 1.0)
-            if nx2 <= nx1 or ny2 <= ny1:
-                continue
-            query = str(item.get("query") or item.get("label") or clean_queries[0])
-            area_ratio = ((bx2 - bx1) / rw) * ((by2 - by1) / rh)
-            conf = max(0.1, min(1.0, float(item.get("score") or area_ratio or 0.5)))
-            hits.append(OcrBox(text=query, confidence=conf, x1=nx1, y1=ny1, x2=nx2, y2=ny2))
-        screen.add_florence_boxes(hits)
-        self._florence_det_cache[key] = list(hits)
-        return hits
+        """Deprecated — Florence removed. Always returns empty list."""
+        return []
 
     def _find_florence_hit(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> Optional[OcrBox]:
-        hits = self._find_florence_hits(screen, queries, region=region)
-        if not hits:
-            return None
-        return max(hits, key=lambda b: (b.confidence, b.w * b.h))
+        """Deprecated — Florence removed. Always returns None."""
+        return None
 
     @abstractmethod
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
@@ -448,20 +347,6 @@ class BaseSkill(ABC):
                 return "DailyTasks"
             return "Mission"
 
-        # Fallback: campaign hub detection via grid markers (OCR often misses 任務 header)
-        # Campaign hub shows: 懸賞通緝, 總力戰, 劇情, Area XX, 特殊任務, 學園交流會, 戰術大賽
-        hub_markers = screen.find_any_text(
-            ["懸賞通緝", "悬赏通缉", "總力戰", "总力战", "大決戰", "大决战",
-             "學園交流會", "学园交流会", "戰術大賽", "战术大赛", "特殊任務", "特殊任务",
-             "制約解除", "劇情", "剧情"],
-            min_conf=0.5
-        )
-        if hub_markers:
-            return "Mission"
-        area_marker = screen.find_text_one(r"Area\s*\d+", min_conf=0.5)
-        if area_marker:
-            return "Mission"
-
         headers = {
             "Cafe": ["咖啡廳", "咖啡厅"],
             "Schedule": ["課程表", "课程表", "全体課程", "全体课程"],
@@ -469,6 +354,8 @@ class BaseSkill(ABC):
             "Club": ["社團", "社团", "Club"],
             "Bounty": ["懸賞通緝", "悬赏通缉", "懸賞", "悬赏", "通緝", "通缉", "悬通", "Bounty"],
             "PVP": ["戰術對抗", "战术对抗", "戰術大賽", "战术大赛", "術大赛", "術大賽", "大賽", "大赛"],
+            "TotalAssault": ["總力戰", "总力战", "大決戰", "大决战"],
+            "Pass": ["通行證", "通行证", "Pass", "PASS"],
             "Mail": ["郵件", "邮件", "郵箱", "邮箱", "信箱", "Mail"],
             "Event": ["活動", "活动"],
             "Craft": ["製造", "制造", "Craft"],
@@ -478,6 +365,33 @@ class BaseSkill(ABC):
         for screen_name, texts in headers.items():
             if screen.find_any_text(texts, region=header_region, min_conf=0.6):
                 return screen_name
+
+        # Fallback: campaign hub detection via grid markers (OCR often misses 任務 header)
+        # Keep this AFTER specific header checks to avoid classifying total assault/pass as Mission.
+        hub_markers = screen.find_any_text(
+            ["懸賞通緝", "悬赏通缉", "學園交流會", "学园交流会",
+             "戰術大賽", "战术大赛", "特殊任務", "特殊任务",
+             "制約解除", "劇情", "剧情"],
+            min_conf=0.5
+        )
+        if hub_markers:
+            return "Mission"
+        area_marker = screen.find_text_one(r"Area\s*\d+", min_conf=0.5)
+        if area_marker:
+            return "Mission"
+        stage_tabs = screen.find_any_text(
+            ["Normal", "Hard"],
+            region=(0.50, 0.16, 0.98, 0.28),
+            min_conf=0.6,
+        )
+        stage_id = screen.find_text_one(r"\d+\-\d+", min_conf=0.5)
+        entry_btn = screen.find_any_text(
+            ["入場", "入场"],
+            region=(0.78, 0.22, 0.98, 0.78),
+            min_conf=0.5,
+        )
+        if stage_tabs and (stage_id or entry_btn or area_marker):
+            return "Mission"
         return None
 
     def _handle_common_popups(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
@@ -485,6 +399,49 @@ class BaseSkill(ABC):
 
         Returns an action if a popup was handled, None otherwise.
         """
+        # Notification modal (通知): OCR confidence can be low (~0.55-0.70),
+        # and this dialog may have both 取消/確認 buttons. Treat it as safe
+        # to dismiss so skills don't stall in enter states.
+        notification = screen.find_text_one(
+            "通知", region=(0.30, 0.12, 0.70, 0.32), min_conf=0.55
+        )
+        if notification:
+            # Check if this is a cafe invite confirmation — MUST confirm, not cancel
+            invite_hint = screen.find_text_one(
+                r"邀.*咖啡", region=screen.CENTER, min_conf=0.5
+            )
+            confirm_btn = screen.find_any_text(
+                ["確認", "确认", "確定", "确定", "確", "确", "OK"],
+                region=(0.42, 0.60, 0.74, 0.82),
+                min_conf=0.55,
+            )
+            if invite_hint and confirm_btn:
+                self.log("notification popup (invite): clicking confirm")
+                return action_click_box(confirm_btn, "confirm invite notification")
+
+            cancel_btn = screen.find_any_text(
+                ["取消"],
+                region=(0.28, 0.60, 0.56, 0.82),
+                min_conf=0.55,
+            )
+            # If it's an invite popup but confirm OCR missed, use fallback position
+            if invite_hint and cancel_btn:
+                self.log("notification popup (invite): confirm fallback click")
+                return action_click(0.598, 0.701, "confirm invite notification fallback")
+
+            # Non-invite notification: cancel is safe
+            if cancel_btn:
+                self.log("notification popup: clicking cancel to close")
+                return action_click_box(cancel_btn, "dismiss notification popup (cancel)")
+
+            if confirm_btn:
+                self.log("notification popup: clicking confirm")
+                return action_click_box(confirm_btn, "dismiss notification popup (confirm)")
+
+            if invite_hint:
+                self.log("notification popup (invite hint): fallback dismiss tap")
+                return action_click(0.5, 0.70, "dismiss notification popup fallback")
+
         # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
             ["確認", "确认", "確定", "确定", "確", "确"],

@@ -42,18 +42,26 @@ APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "lobby", "label": "大厅恢复 / 弹窗清理"},
     {"id": "ap_overflow", "label": "高 AP 溢出保护"},
+    {"id": "event_activity", "label": "活动剧情 / 挑战 / 走格子"},
+    {"id": "event_farming", "label": "活动清体力"},
     {"id": "cafe", "label": "咖啡厅收益 / 邀请 / 摸头"},
     {"id": "schedule", "label": "课程表"},
     {"id": "club", "label": "社团 AP"},
+    {"id": "momo_talk", "label": "MomoTalk 消息"},
     {"id": "shop", "label": "商店日常"},
     {"id": "craft", "label": "制造"},
-    {"id": "event_farming", "label": "活动清体力"},
+    {"id": "story_cleanup", "label": "主线 / 小组 / 迷你剧情清理"},
     {"id": "bounty", "label": "悬赏通缉"},
     {"id": "arena", "label": "战术对抗赛"},
+    {"id": "joint_firing_drill", "label": "战术考试 / 联合火力演习"},
+    {"id": "total_assault", "label": "总力战 / 大决战"},
     {"id": "mail", "label": "邮件领取"},
     {"id": "daily_tasks", "label": "每日任务"},
+    {"id": "pass_reward", "label": "通行证奖励"},
+    {"id": "ap_planning", "label": "AP 规划 / 每日免费体力"},
     {"id": "hard_farming", "label": "Hard 刷取"},
     {"id": "event_farming_2", "label": "二次回马枪清体力"},
+    {"id": "campaign_push", "label": "主线推进 / 兜底清体力"},
 ]
 _DEFAULT_SKILL_ORDER = [item["id"] for item in _SKILL_OPTIONS]
 _VALID_SKILL_IDS = set(_DEFAULT_SKILL_ORDER)
@@ -110,6 +118,7 @@ def _default_profile_settings() -> Dict[str, Any]:
         "step_sleep_s": 0.6,
         "dry_run": True,
         "forbid_premium_currency": True,
+        "ap_purchase_limit": 0,
         "exploration_click": False,
         "notify_on_finish": False,
         "notify_webhook_url": "",
@@ -135,6 +144,10 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
         data["step_sleep_s"] = 0.6
     data["dry_run"] = bool(raw.get("dry_run") if raw.get("dry_run") is not None else True)
     data["forbid_premium_currency"] = bool(raw.get("forbid_premium_currency") if raw.get("forbid_premium_currency") is not None else True)
+    try:
+        data["ap_purchase_limit"] = max(0, int(raw.get("ap_purchase_limit") or 0))
+    except Exception:
+        data["ap_purchase_limit"] = 0
     data["exploration_click"] = bool(raw.get("exploration_click") if raw.get("exploration_click") is not None else False)
     data["notify_on_finish"] = bool(raw.get("notify_on_finish") if raw.get("notify_on_finish") is not None else False)
     data["notify_webhook_url"] = str(raw.get("notify_webhook_url") or "").strip()
@@ -374,7 +387,18 @@ def _start_pipeline(*, payload: Dict[str, Any]) -> None:
         from brain.pipeline import DailyPipeline
         active_profile, profile_settings, _ = _get_active_profile_settings()
         skill_names = _normalize_skill_order(payload.get("skill_order") or profile_settings.get("skill_order"))
-        _PIPELINE = DailyPipeline(skill_names=skill_names)
+        profile_options = dict(profile_settings)
+        for key in [
+            "steps",
+            "goal",
+            "forbid_premium_currency",
+            "ap_purchase_limit",
+            "exploration_click",
+        ]:
+            if payload.get(key) is not None:
+                profile_options[key] = payload.get(key)
+
+        _PIPELINE = DailyPipeline(skill_names=skill_names, profile_options=profile_options)
         _PIPELINE.start()
         _PIPELINE_RUNNING = True
 
@@ -390,6 +414,9 @@ def _start_pipeline(*, payload: Dict[str, Any]) -> None:
             "skill_names": list(skill_names),
             "window_title": window_title,
             "dry_run": dry_run,
+            "forbid_premium_currency": bool(profile_options.get("forbid_premium_currency", True)),
+            "ap_purchase_limit": int(profile_options.get("ap_purchase_limit") or 0),
+            "steps": int(profile_options.get("steps") or 0),
         }
         _PIPELINE_STATUS = {
             "running": True,
@@ -639,6 +666,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _OCR_INTERVAL = 3  # run OCR every 3rd tick
         _prev_ocr_boxes = None
         _tick_counter = 0
+        _inline_yolo_logged = False
 
         while _PIPELINE_RUNNING:
             pipe = None
@@ -683,9 +711,18 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             # 2. Pipeline tick — OCR at tick rate, YOLO from high-FPS thread
             skip_ocr = (_tick_counter % _OCR_INTERVAL != 0) and _prev_ocr_boxes is not None
-            # Inject latest YOLO results from high-FPS thread
-            with _yolo_latest_lock:
-                _injected_yolo = list(_yolo_latest_boxes)
+            # Inject YOLO from high-FPS thread only when DXcam feed is active.
+            # If DXcam is unavailable, pass None so pipeline runs inline YOLO
+            # on the captured frame instead of permanently using empty boxes.
+            _injected_yolo = None
+            if _dxcam_camera is not None:
+                with _yolo_latest_lock:
+                    if _yolo_latest_frame is not None:
+                        _injected_yolo = list(_yolo_latest_boxes)
+            else:
+                if not _inline_yolo_logged:
+                    _log_pipeline("DXcam unavailable: running YOLO inline at pipeline tick rate")
+                    _inline_yolo_logged = True
             action = pipe.tick_from_frame(frame, screenshot_path=tmp_path,
                                           skip_ocr=skip_ocr,
                                           prev_ocr_boxes=_prev_ocr_boxes,
@@ -1367,11 +1404,27 @@ def list_dataset_images(dataset: str = Query(...)) -> Dict[str, Any]:
                     continue
                 parts = line.strip().split()
                 if len(parts) >= 5:
-                    labels.append({
+                    lb = {
                         "cls": int(parts[0]),
                         "xc": float(parts[1]), "yc": float(parts[2]),
                         "w": float(parts[3]), "h": float(parts[4]),
-                    })
+                    }
+                    if len(parts) >= 6:
+                        try:
+                            lb["angle"] = float(parts[5])
+                        except ValueError:
+                            lb["angle"] = 0
+                    if len(parts) >= 7:
+                        lb["shape"] = parts[6]
+                    if lb.get("shape") == "polygon" and len(parts) >= 8:
+                        try:
+                            lb["points"] = [
+                                {"x": float(c.split(",")[0]), "y": float(c.split(",")[1])}
+                                for c in parts[7].split(";") if "," in c
+                            ]
+                        except (ValueError, IndexError):
+                            lb["points"] = []
+                    labels.append(lb)
         items.append({"img": img_name, "labels": labels})
     return {"dataset": dataset, "classes": classes, "images": items}
 

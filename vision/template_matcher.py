@@ -191,10 +191,21 @@ class TemplateMatcher:
 
 # ── Named template registry ─────────────────────────────────────────
 #
-# Each entry: (filename_in_captures, label, scales, threshold)
+# Each entry: (relative_path, label, scales, threshold)
+# relative_path is resolved against multiple search roots (see _resolve_template_path).
 # Templates are lazy-loaded on first use.
 
+_TEMPLATE_SEARCH_ROOTS = [
+    _REPO_ROOT / "images" / "CN",
+    _REPO_ROOT / "data" / "captures",
+    _REPO_ROOT / "images",
+]
+
 _TEMPLATE_DEFS = {
+    "happy_face1": ("cafe/happy_face1.png", "happy_face", [0.5, 0.6, 0.7, 0.8, 0.9, 1.0], 0.75),
+    "happy_face2": ("cafe/happy_face2.png", "happy_face", [0.5, 0.6, 0.7, 0.8, 0.9, 1.0], 0.75),
+    "happy_face3": ("cafe/happy_face3.png", "happy_face", [0.5, 0.6, 0.7, 0.8, 0.9, 1.0], 0.75),
+    "happy_face4": ("cafe/happy_face4.png", "happy_face", [0.5, 0.6, 0.7, 0.8, 0.9, 1.0], 0.75),
     "headpat": ("Emoticon_Action.png", "headpat_bubble", [0.5, 0.6, 0.7, 0.8, 0.9, 1.0], 0.78),
     "红点": ("红点.png", "红点", [0.3, 0.5, 0.7, 1.0], 0.80),
     "黄点": ("黄点.png", "黄点", [0.3, 0.5, 0.7, 1.0], 0.80),
@@ -214,6 +225,15 @@ _TEMPLATE_DEFS = {
 _template_cache: dict = {}
 
 
+def _resolve_template_path(filename: str) -> Optional[Path]:
+    """Search multiple roots for a template file."""
+    for root in _TEMPLATE_SEARCH_ROOTS:
+        candidate = root / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def get_template_matcher(name: str) -> Optional[TemplateMatcher]:
     """Get a named template matcher. Returns None if template file not found."""
     if name in _template_cache:
@@ -222,8 +242,8 @@ def get_template_matcher(name: str) -> Optional[TemplateMatcher]:
     if defn is None:
         return None
     filename, label, scales, threshold = defn
-    tmpl_path = _REPO_ROOT / "data" / "captures" / filename
-    if not tmpl_path.exists():
+    tmpl_path = _resolve_template_path(filename)
+    if tmpl_path is None:
         _template_cache[name] = None
         return None
     try:
@@ -237,14 +257,27 @@ def get_template_matcher(name: str) -> Optional[TemplateMatcher]:
 
 def find_headpat_bubbles(
     frame_bgr: np.ndarray,
-    threshold: float = 0.78,
+    threshold: float = 0.75,
     region: Optional[Tuple[float, float, float, float]] = None,
 ) -> List[TemplateHit]:
-    """Find headpat bubbles via template matching on downscaled frame."""
-    matcher = get_template_matcher("headpat")
-    if matcher is None:
-        return []
-    return matcher.match(frame_bgr, threshold=threshold, max_hits=8, region=region)
+    """Find headpat bubbles via happy_face template matching (primary).
+
+    Uses all 4 happy_face templates from reference for robust detection.
+    Falls back to Emoticon_Action if happy_face templates are missing.
+    """
+    all_hits: List[TemplateHit] = []
+    for i in range(1, 5):
+        matcher = get_template_matcher(f"happy_face{i}")
+        if matcher is not None:
+            hits = matcher.match(frame_bgr, threshold=threshold, max_hits=8, region=region)
+            all_hits.extend(hits)
+    if not all_hits:
+        fallback = get_template_matcher("headpat")
+        if fallback is not None:
+            all_hits = fallback.match(frame_bgr, threshold=0.78, max_hits=8, region=region)
+    all_hits = _nms(all_hits, iou_thresh=0.3)
+    all_hits.sort(key=lambda h: h.confidence, reverse=True)
+    return all_hits[:8]
 
 
 def find_template_by_name(
@@ -259,3 +292,101 @@ def find_template_by_name(
     if matcher is None:
         return []
     return matcher.match(frame_bgr, threshold=threshold, max_hits=max_hits, region=region)
+
+
+# ── Lesson affection student template matching ──────────────────────
+#
+# template-based: load small face templates from images/CN/lesson_affection/
+# and match them against cropped room regions in the 全體課程表 popup.
+
+_LESSON_AFFECTION_DIR = _REPO_ROOT / "images" / "CN" / "lesson_affection"
+_lesson_affection_cache: dict = {}  # name -> BGR np.ndarray or None
+
+
+def _load_lesson_affection_template(name: str) -> Optional[np.ndarray]:
+    """Load a single lesson affection template by student name."""
+    if name in _lesson_affection_cache:
+        return _lesson_affection_cache[name]
+    path = _LESSON_AFFECTION_DIR / f"{name}.png"
+    if not path.exists():
+        _lesson_affection_cache[name] = None
+        return None
+    raw = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if raw is None:
+        _lesson_affection_cache[name] = None
+        return None
+    if len(raw.shape) > 2 and raw.shape[2] == 4:
+        bgr = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+    else:
+        bgr = raw
+    _lesson_affection_cache[name] = bgr
+    return bgr
+
+
+def get_available_lesson_affection_names() -> List[str]:
+    """Return list of all available student template names."""
+    if not _LESSON_AFFECTION_DIR.is_dir():
+        return []
+    return [p.stem for p in _LESSON_AFFECTION_DIR.glob("*.png")]
+
+
+def match_lesson_affection_in_region(
+    frame_bgr: np.ndarray,
+    region_px: Tuple[int, int, int, int],
+    target_names: Optional[List[str]] = None,
+    threshold: float = 0.75,
+) -> List[Tuple[str, float, Tuple[int, int]]]:
+    """Match student face templates in a pixel-coordinate region of the frame.
+
+    Follows reference lesson.py match() approach:
+    - Crop the frame to the region
+    - For each target student template, run cv2.matchTemplate
+    - Return matches above threshold as (name, confidence, (cx, cy))
+      where cx/cy are pixel coordinates in the FULL frame.
+
+    Args:
+        frame_bgr: Full screenshot as BGR numpy array.
+        region_px: (x1, y1, x2, y2) in pixels.
+        target_names: List of student names to search for. If None, search all.
+        threshold: Minimum match confidence (default 0.75, same as reference).
+
+    Returns:
+        List of (student_name, confidence, (center_x, center_y)) tuples,
+        sorted by confidence descending.
+    """
+    x1, y1, x2, y2 = region_px
+    h, w = frame_bgr.shape[:2]
+    x1 = max(0, min(x1, w))
+    y1 = max(0, min(y1, h))
+    x2 = max(0, min(x2, w))
+    y2 = max(0, min(y2, h))
+    if x2 <= x1 or y2 <= y1:
+        return []
+
+    crop = frame_bgr[y1:y2, x1:x2]
+    if crop.size == 0:
+        return []
+
+    names = target_names if target_names else get_available_lesson_affection_names()
+    results: List[Tuple[str, float, Tuple[int, int]]] = []
+
+    for name in names:
+        tmpl = _load_lesson_affection_template(name)
+        if tmpl is None:
+            continue
+        th, tw = tmpl.shape[:2]
+        if tw >= crop.shape[1] or th >= crop.shape[0]:
+            continue
+        try:
+            similarity = cv2.matchTemplate(crop, tmpl, cv2.TM_CCOEFF_NORMED)
+        except cv2.error:
+            continue
+        _, max_val, _, max_loc = cv2.minMaxLoc(similarity)
+        if max_val >= threshold:
+            # Center of matched template in full-frame pixel coords
+            cx = x1 + max_loc[0] + tw // 2
+            cy = y1 + max_loc[1] + th // 2
+            results.append((name, float(max_val), (cx, cy)))
+
+    results.sort(key=lambda r: r[1], reverse=True)
+    return results

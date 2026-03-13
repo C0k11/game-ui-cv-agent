@@ -24,16 +24,23 @@ from brain.skills.base import (
 class CraftSkill(BaseSkill):
     def __init__(self):
         super().__init__("Craft")
-        self.max_ticks = 40
+        self.max_ticks = 80
         self._claim_count: int = 0
         self._craft_started: bool = False
         self._craft_ticks: int = 0
+        self._craft_cycles: int = 0
+        self._max_crafts: int = 3
+        self._pending_cycle_started: bool = False
+        self._accel_clicks: int = 0
 
     def reset(self) -> None:
         super().reset()
         self._claim_count = 0
         self._craft_started = False
         self._craft_ticks = 0
+        self._craft_cycles = 0
+        self._pending_cycle_started = False
+        self._accel_clicks = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -130,10 +137,21 @@ class CraftSkill(BaseSkill):
 
         if self._craft_ticks > 12:
             self.log("quick craft phase timeout")
-            self.sub_state = "exit"
+            self.sub_state = "claim_after"
+            self._craft_ticks = 0
             return action_wait(300, "quick craft timeout")
 
         if self._craft_started:
+            if self._accel_clicks < 2:
+                accel = screen.find_any_text(
+                    ["立即完成", "马上完成", "馬上完成", "立刻完成", "加速", "Acceleration"],
+                    min_conf=0.55
+                )
+                if accel:
+                    self._accel_clicks += 1
+                    self.log(f"using acceleration ({self._accel_clicks}/2)")
+                    return action_click_box(accel, "use acceleration ticket")
+
             # After clicking start, check for confirm popup OR craft completion
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确"],
@@ -141,6 +159,9 @@ class CraftSkill(BaseSkill):
             )
             if confirm:
                 self.log("confirming craft")
+                if self._pending_cycle_started:
+                    self._craft_cycles += 1
+                    self._pending_cycle_started = False
                 self.sub_state = "claim_after"
                 self._craft_ticks = 0
                 return action_click_box(confirm, "confirm craft")
@@ -153,6 +174,9 @@ class CraftSkill(BaseSkill):
             )
             if claim:
                 self.log("craft completed, claiming")
+                if self._pending_cycle_started:
+                    self._craft_cycles += 1
+                    self._pending_cycle_started = False
                 self.sub_state = "claim_after"
                 self._craft_ticks = 0
                 return action_click_box(claim, "claim after quick craft")
@@ -165,6 +189,9 @@ class CraftSkill(BaseSkill):
                 )
                 if open_btn:
                     self.log("craft done, back on main screen")
+                    if self._pending_cycle_started:
+                        self._craft_cycles += 1
+                        self._pending_cycle_started = False
                     self.sub_state = "claim_after"
                     self._craft_ticks = 0
                     return action_wait(300, "craft completed, claiming")
@@ -179,6 +206,7 @@ class CraftSkill(BaseSkill):
         if start:
             self.log("clicking 開始製造")
             self._craft_started = True
+            self._pending_cycle_started = True
             return action_click_box(start, "start craft")
 
         # Look for "第X次開放" button (alternative start button text)
@@ -190,6 +218,7 @@ class CraftSkill(BaseSkill):
         if open_btn:
             self.log(f"clicking '{open_btn.text}' to start craft")
             self._craft_started = True
+            self._pending_cycle_started = True
             return action_click_box(open_btn, "start craft (次開放)")
 
         # Look for 快速製造 / 快速制造 button
@@ -211,7 +240,21 @@ class CraftSkill(BaseSkill):
         self._craft_ticks += 1
 
         if self._craft_ticks > 8:
-            self.log("post-craft claim done")
+            self.log("post-craft claim phase timeout")
+            # Continue crafting more slots if quick craft is still available.
+            if self._craft_cycles < self._max_crafts:
+                has_next = screen.find_any_text(
+                    ["快速製造", "快速制造", "開始製造", "开始制造", "次開放", "次开放"],
+                    min_conf=0.5
+                )
+                if has_next:
+                    self.log(f"continuing craft cycle {self._craft_cycles + 1}/{self._max_crafts}")
+                    self.sub_state = "quick_craft"
+                    self._craft_started = False
+                    self._pending_cycle_started = False
+                    self._accel_clicks = 0
+                    self._craft_ticks = 0
+                    return action_wait(250, "continue next craft cycle")
             self.sub_state = "exit"
             return action_wait(300, "post-craft claim done")
 
@@ -227,12 +270,26 @@ class CraftSkill(BaseSkill):
             return action_click_box(claim, "claim post-craft items")
 
         # No claim button — done
-        self.log(f"craft complete ({self._claim_count} claims)")
+        if self._craft_cycles < self._max_crafts:
+            has_next = screen.find_any_text(
+                ["快速製造", "快速制造", "開始製造", "开始制造", "次開放", "次开放"],
+                min_conf=0.5
+            )
+            if has_next:
+                self.log(f"starting next craft cycle {self._craft_cycles + 1}/{self._max_crafts}")
+                self.sub_state = "quick_craft"
+                self._craft_started = False
+                self._pending_cycle_started = False
+                self._accel_clicks = 0
+                self._craft_ticks = 0
+                return action_wait(250, "continue crafting")
+
+        self.log(f"craft complete ({self._claim_count} claims, {self._craft_cycles} cycles)")
         self.sub_state = "exit"
         return action_wait(300, "post-craft claim complete")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
-            self.log(f"done ({self._claim_count} claims)")
+            self.log(f"done ({self._claim_count} claims, {self._craft_cycles} cycles)")
             return action_done("craft complete")
         return action_back("craft exit: back to lobby")

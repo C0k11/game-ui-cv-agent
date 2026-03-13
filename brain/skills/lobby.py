@@ -24,11 +24,17 @@ class LobbySkill(BaseSkill):
         self.max_ticks = 40
         self._popup_close_attempts = 0
         self._lobby_confirm_frames = 0  # consecutive frames with lobby nav visible
+        self._start_flow_active = False
+        self._blank_intro_taps = 0
+        self._story_skip_armed = 0
 
     def reset(self) -> None:
         super().reset()
         self._popup_close_attempts = 0
         self._lobby_confirm_frames = 0
+        self._start_flow_active = False
+        self._blank_intro_taps = 0
+        self._story_skip_armed = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -43,12 +49,24 @@ class LobbySkill(BaseSkill):
              "Pick-Up", "Official", "Webpage", "通知"],
             min_conf=0.7
         )
+        story_auto = screen.find_any_text(["AUTO"], region=(0.72, 0.0, 0.92, 0.14), min_conf=0.65)
+        story_menu = screen.find_any_text(["MENU"], region=(0.82, 0.0, 1.0, 0.14), min_conf=0.65)
+        story_skip = screen.find_any_text(["SKIP", "Skip", "跳過", "跳过"], min_conf=0.65)
+        story_skip_prompt = screen.find_any_text(
+            ["是否略過", "是否略过", "略過此", "略过此", "略此情"],
+            region=screen.CENTER, min_conf=0.6
+        )
+        story_summary = screen.find_any_text(
+            ["概要", "序幕"],
+            region=screen.CENTER, min_conf=0.6
+        )
 
         # Strong user preference: if "今日不再提示" exists, click it first.
         # This suppresses repeat popups for the day.
         do_not_show = screen.find_any_text(
-            ["今日不再", "今日不再提示", "今日不再顯示", "今日不再显示", "今日不再示"],
-            region=(0.10, 0.62, 0.40, 0.82), min_conf=0.75
+            ["今日不再", "今日不再提示", "今日不再顯示", "今日不再显示",
+             "今日不再示", "今日不再題示", "今日不再题示"],
+            region=(0.02, 0.60, 0.40, 0.99), min_conf=0.65
         )
         if do_not_show:
             self.log("popup: click 今日不再提示")
@@ -58,8 +76,81 @@ class LobbySkill(BaseSkill):
         # OCR often merges to "TOUCHTOSTART" — match all variants
         tap = screen.find_text_one("(?:TOUCH|TAP).*START", min_conf=0.8)
         if tap and not popup_hint:
+            self._start_flow_active = True
+            self._blank_intro_taps = 0
             self.log("title screen: tap to start")
             return action_click(0.5, 0.85, "tap to start")
+
+        if self._start_flow_active and not screen.ocr_boxes and not screen.yolo_boxes:
+            self._blank_intro_taps += 1
+            if self._blank_intro_taps <= 6:
+                self.log(f"startup intro: tap to advance ({self._blank_intro_taps}/6)")
+                return action_click(0.5, 0.85, "advance startup intro")
+            return action_wait(500, "waiting for startup intro")
+        if screen.ocr_boxes or screen.yolo_boxes:
+            self._blank_intro_taps = 0
+
+        browser_hint = screen.find_any_text(
+            ["discord.com/", "Blue Archive Official", "Official(GL)", "Official (GL)"],
+            min_conf=0.7
+        )
+        if browser_hint:
+            browser_close = screen.find_text_one(
+                r"^[Xx×]$",
+                region=(0.0, 0.0, 0.08, 0.12),
+                min_conf=0.55,
+            )
+            if browser_close:
+                self.log("browser view detected → close")
+                return action_click_box(browser_close, "close in-game browser")
+            self.log("browser view detected → back")
+            return action_back("close in-game browser")
+
+        if story_skip_prompt or (story_summary and screen.find_any_text(["取消"], region=screen.CENTER, min_conf=0.6)):
+            self._story_skip_armed = 0
+            confirm = screen.find_any_text(
+                ["確認", "确认", "確定", "确定", "確", "确"],
+                region=(0.5, 0.6, 0.75, 0.82), min_conf=0.6
+            )
+            if confirm:
+                self.log("story skip popup → confirm")
+                return action_click_box(confirm, "confirm story skip")
+            return action_click(0.61, 0.73, "confirm story skip (fallback)")
+
+        if self._story_skip_armed > 0 and story_auto and story_menu:
+            self._story_skip_armed -= 1
+            self.log("story skip prompt assumed → confirm fallback")
+            return action_click(0.61, 0.73, "confirm story skip (armed fallback)")
+
+        if story_skip:
+            self._story_skip_armed = 0
+            self.log("story screen → click skip")
+            return action_click_box(story_skip, "skip story during lobby recovery")
+
+        if story_auto and story_menu:
+            self._story_skip_armed = 2
+            self.log("story/cutscene detected during lobby recovery → open skip prompt")
+            return action_back("open story skip prompt")
+
+        self._story_skip_armed = 0
+
+        mission_info = screen.find_any_text(
+            ["任務資訊", "任务资讯"],
+            region=(0.25, 0.08, 0.75, 0.22), min_conf=0.5
+        )
+        mission_max = screen.find_any_text(["MAX"], region=(0.75, 0.38, 0.92, 0.52), min_conf=0.65)
+        mission_min = screen.find_any_text(["MIN"], region=(0.52, 0.38, 0.70, 0.52), min_conf=0.65)
+        if mission_info or (mission_max and mission_min):
+            popup_x = screen.find_text_one(
+                r"^[Xx×]$",
+                region=(0.82, 0.08, 0.95, 0.22),
+                min_conf=0.5,
+            )
+            if popup_x:
+                self.log("mission info popup detected during lobby recovery → close X")
+                return action_click_box(popup_x, "close mission info popup")
+            self.log("mission info popup detected during lobby recovery → close fallback")
+            return action_click(0.883, 0.159, "close mission info popup (fallback)")
 
         # ── Popup give-up check ──
         # If we've tried many times to close a popup and failed,
@@ -71,41 +162,24 @@ class LobbySkill(BaseSkill):
         # ── Popup detection (BEFORE lobby check) ──
         # Popups overlay on top of lobby, so bottom nav may be visible
         # even when a popup is blocking interaction.
-        # NOTE: All X/close button detection via YOLO only (OCR misdetects icons as "X")
-
-        # 1. YOLO: detect close buttons (叉叉, 叉叉1, 叉叉2, momotalk的叉叉)
-        # Filter out fullscreen toggle button at top-right (x>0.93, y<0.20)
-        # which YOLO misclassifies as 叉叉1.
-        x_btn = self._find_florence_hit(
-            screen,
-            ["close button icon", "close dialog x button", "x close icon"],
-            region=(0.0, 0.0, 0.93, 0.35),
+        # OCR-based close button detection for popups
+        has_popup_text = screen.find_any_text(
+            ["Main News", "Update", "Events", "Patch Notes",
+             "Maintenance", "Pick-Up", "Official", "Discord",
+             "Webpage", "My Office", "到簿", "签到", "簽到",
+             "通知", "今日不再", "公告"],
+            min_conf=0.7
         )
-        if x_btn:
-            has_popup_text = screen.find_any_text(
-                ["Main News", "Update", "Events", "Patch Notes",
-                 "Maintenance", "Pick-Up", "Official", "Discord",
-                 "Webpage", "My Office", "到簿", "签到", "簽到",
-                 "通知", "今日不再", "公告"],
-                min_conf=0.7
-            )
-            if has_popup_text:
-                self._popup_close_attempts += 1
-                self.log(f"popup detected (Florence + '{has_popup_text.text}'), clicking X")
-                return action_click_box(x_btn, "close popup via Florence")
-
-        # 2.5 OCR fallback for close X (only when popup hints exist)
-        # Keep this constrained to avoid old false positives.
-        if popup_hint:
-            x_ocr = screen.find_text_one(
+        if has_popup_text:
+            x_ocr_btn = screen.find_text_one(
                 r"^[Xx×]$",
-                region=(0.72, 0.08, 0.90, 0.28),
-                min_conf=0.75,
+                region=(0.72, 0.0, 0.98, 0.30),
+                min_conf=0.55,
             )
-            if x_ocr:
+            if x_ocr_btn:
                 self._popup_close_attempts += 1
-                self.log("popup detected (OCR X fallback), clicking X")
-                return action_click_box(x_ocr, "close popup via OCR X fallback")
+                self.log(f"popup detected (OCR X + '{has_popup_text.text}'), clicking X")
+                return action_click_box(x_ocr_btn, "close popup via OCR X")
 
         # 3. Announcement popup (公告) — detect via OCR text, hardcoded X positions
         # NOTE: "公告" is ALSO a permanent lobby sidebar button (x~0.05, y~0.25).
@@ -114,7 +188,7 @@ class LobbySkill(BaseSkill):
         news = screen.find_any_text(
             ["Main News", "Patch Notes", "Maintenance", "Pick-Up",
              "Webpage Open", "My Office", "Official Twitter",
-             "Official Forum"],
+             "Official Forum", "更新消息", "更新資訊", "更新资讯"],
             min_conf=0.7
         )
         if not news:
@@ -125,11 +199,18 @@ class LobbySkill(BaseSkill):
             )
         if news:
             self._popup_close_attempts += 1
-            # X button position from YOLO training label (叉叉2 on frame_000056)
+            news_x = screen.find_text_one(
+                r"^[Xx×]$",
+                region=(0.94, 0.0, 1.0, 0.10),
+                min_conf=0.55,
+            )
+            if news_x:
+                self.log("announcement popup: click OCR X")
+                return action_click_box(news_x, "close announcement popup via OCR")
             positions = [
-                (0.8735, 0.1575),  # Exact YOLO label center
-                (0.87, 0.16),      # Slight variant
-                (0.88, 0.15),      # Slight variant
+                (0.969, 0.068),
+                (0.966, 0.072),
+                (0.972, 0.064),
             ]
             idx = (self._popup_close_attempts - 1) % len(positions)
             px, py = positions[idx]
@@ -176,15 +257,20 @@ class LobbySkill(BaseSkill):
             return action_click(0.95, 0.05, "close check-in popup")
 
         # 5. Generic "通知" (notification) popup
-        notice = screen.find_text_one("通知", region=screen.CENTER, min_conf=0.8)
+        notice = screen.find_any_text(
+            ["通知", "無法再恢復", "无法再恢复", "挑戰次數", "挑战次数"],
+            region=screen.CENTER, min_conf=0.55
+        )
         if notice:
             confirm = screen.find_any_text(
                 ["確認", "确认", "確", "确"],
-                region=screen.CENTER, min_conf=0.7
+                region=screen.CENTER, min_conf=0.55
             )
             if confirm:
                 self.log("notification: confirm")
                 return action_click_box(confirm, "confirm notification")
+            self.log("notification: confirm fallback")
+            return action_click(0.50, 0.73, "confirm notification (fallback)")
 
         # 6. Common popup handler
         popup_action = self._handle_common_popups(screen)
@@ -194,6 +280,7 @@ class LobbySkill(BaseSkill):
         # ── Lobby check (require 3 consecutive clean frames) ──
         current_screen = self.detect_current_screen(screen)
         if current_screen == "Lobby":
+            self._start_flow_active = False
             self._lobby_confirm_frames += 1
             if self._lobby_confirm_frames >= 3:
                 self.log(f"lobby confirmed ({self._lobby_confirm_frames} clean frames), done")
@@ -207,14 +294,8 @@ class LobbySkill(BaseSkill):
         # We should navigate back to lobby to ensure a clean state.
         if current_screen and current_screen != "Lobby":
             self.log(f"detected sub-screen '{current_screen}', returning to lobby")
-            home = self._find_florence_hit(
-                screen,
-                ["home button icon", "main lobby home button"],
-                region=(0.80, 0.0, 1.0, 0.20),
-            )
-            if home:
-                return action_click_box(home, "click home button")
             return action_back(f"back from {current_screen} to lobby")
+
 
         # Timeout fallback
         if self.ticks >= self.max_ticks:

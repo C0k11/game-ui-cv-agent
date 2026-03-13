@@ -57,6 +57,11 @@ _ROOM_CLICK_POS = [
     (0.19, 0.55), (0.46, 0.55), (0.73, 0.55),  # row 2: 教室, 實驗室, 射擊場
     (0.19, 0.74), (0.46, 0.74), (0.73, 0.74),  # row 3: 載具庫, (empty), (empty)
 ]
+_ROOM_SLOT_NAMES = [
+    "視聽室", "體育館", "圖書館",
+    "教室", "實驗室", "射擊場",
+    "載具庫", "room8", "room9",
+]
 # Status check positions: top-left area of each room card border.
 # White=available, grey=done, dark=locked.
 _ROOM_STATUS_POS = [
@@ -67,7 +72,12 @@ _ROOM_STATUS_POS = [
 
 
 def _load_target_favorites() -> List[str]:
-    """Load target character names from app_config.json."""
+    """Load target character names from app_config.json.
+
+    Generates multiple name variants for each entry so that both config-style
+    names (e.g. 'Toki_(Bunny_Girl).png') and reference template-style names
+    (e.g. 'Toki (Bunny Girl)') are included for matching.
+    """
     try:
         cfg_path = Path(__file__).resolve().parents[2] / "data" / "app_config.json"
         if cfg_path.exists():
@@ -83,7 +93,19 @@ def _load_target_favorites() -> List[str]:
                 decoded = unquote(name)
                 if decoded and decoded != name:
                     candidates.append(decoded)
-                for candidate in candidates:
+                # Generate variants: strip .png, replace _ with space
+                expanded: List[str] = []
+                for c in candidates:
+                    expanded.append(c)
+                    stripped = c
+                    if stripped.lower().endswith(".png"):
+                        stripped = stripped[:-4]
+                    if stripped != c:
+                        expanded.append(stripped)
+                    spaced = stripped.replace("_", " ")
+                    if spaced != stripped:
+                        expanded.append(spaced)
+                for candidate in expanded:
                     key = candidate.lower()
                     if key in seen:
                         continue
@@ -95,14 +117,28 @@ def _load_target_favorites() -> List[str]:
     return []
 
 
-# Minimum match score for avatar template matching.
-# Archive used 0.30 but roster thumbnails are small/compressed, causing false
-# positives at 0.30-0.48 (e.g. Kisaki matching many unrelated characters).
-# Raised to 0.55 to eliminate false positives on roster overlay.
+# Minimum match score for lesson affection template matching.
+# reference uses 0.75; we use the same threshold for per-room student detection.
+_AFFECTION_MATCH_THRESHOLD = 0.75
+# Legacy avatar matcher threshold (kept as fallback).
 _AVATAR_MATCH_THRESHOLD = 0.55
 # Max locations to cycle through before executing at current (full circle).
 # Blue Archive has ~10 schedule locations; 12 gives safety margin.
 _MAX_LOCATIONS_FULL_CIRCLE = 12
+
+# ── Per-room student detect regions (from reference lesson.py) ──
+# Base resolution 1280×720; each room card in the 3×3 roster popup grid
+# has a student avatar area at these pixel offsets.
+# Room j: x1 = 285 + 344*(j%3), y1 = 240 + 152*(j//3), w=161, h=52
+_ROOM_DETECT_REGIONS_1280 = []
+for _j in range(9):
+    _rx1 = 285 + 344 * (_j % 3)
+    _ry1 = 240 + 152 * (_j // 3)
+    _ROOM_DETECT_REGIONS_1280.append((_rx1, _ry1, _rx1 + 161, _ry1 + 52))
+# Normalized 0-1 versions
+_ROOM_DETECT_REGIONS_NORM = [
+    (r[0]/1280, r[1]/720, r[2]/1280, r[3]/720) for r in _ROOM_DETECT_REGIONS_1280
+]
 
 
 class ScheduleSkill(BaseSkill):
@@ -126,7 +162,7 @@ class ScheduleSkill(BaseSkill):
         self._avatar_matcher = None
         self._best_match_score: float = -1.0
         self._stale_ticks: int = 0
-        self._florence_matcher = None
+        self._matched_room_idx: int = -1  # room index where favorite was found
 
     def reset(self) -> None:
         super().reset()
@@ -146,6 +182,7 @@ class ScheduleSkill(BaseSkill):
         self._best_match_score = -1.0
         self._stale_ticks = 0
         self._roster_scan_ticks = 0
+        self._matched_room_idx = -1
         if self._target_favorites:
             self.log(f"target favorites loaded: {len(self._target_favorites)} characters")
         # Lazy-init avatar matcher
@@ -158,10 +195,6 @@ class ScheduleSkill(BaseSkill):
             except Exception as e:
                 self.log(f"avatar matcher init failed: {e}")
                 self._avatar_matcher = None
-        # Florence matcher is lazily initialized on first use in
-        # _check_roster_avatars() to avoid blocking the pipeline worker
-        # thread during skill reset (model load can take 30-120s).
-        self._florence_matcher = None
         self._matched_avatar_pos: Optional[Tuple[float, float]] = None  # where the matched avatar is on popup
 
     # ── Ticket parsing ──
@@ -257,7 +290,15 @@ class ScheduleSkill(BaseSkill):
             px, py = int(nx * w), int(ny * h)
             px = min(max(px, 0), w - 1)
             py = min(max(py, 0), h - 1)
-            b, g, r = img[py, px]  # BGR
+            x1 = max(0, px - 2)
+            y1 = max(0, py - 2)
+            x2 = min(w, px + 3)
+            y2 = min(h, py + 3)
+            patch = img[y1:y2, x1:x2]
+            if patch.size == 0:
+                statuses.append("unknown")
+                continue
+            b, g, r = patch.mean(axis=(0, 1))  # BGR averaged over 5x5 patch
             if r >= 245 and g >= 245 and b >= 245:
                 statuses.append("available")
             elif 220 <= r <= 249 and 220 <= g <= 249 and 220 <= b <= 249:
@@ -314,23 +355,14 @@ class ScheduleSkill(BaseSkill):
         }
 
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
-        """Check roster overlay for target characters via YOLO + template matching.
+        """Check roster overlay for target characters via per-room template matching.
 
-        First pass: AvatarMatcher (fast template + histogram).
-        Second pass fallback: Florence pairwise comparison against local favorite
-        reference portraits when template matching is inconclusive.
-        Also detects avatar status (green checkmark, heart) via HSV.
+        Uses template-based approach: for each of the 9 room slots in the roster
+        popup, crop the student detect region and run match_lesson_affection_in_region
+        against configured favorite student templates. No YOLO or Florence dependency.
         """
         if not self._target_favorites:
             return False
-
-        avatars = screen.find_yolo("角色头像", min_conf=0.4)
-        if not avatars:
-            avatars = self._fallback_roster_avatar_boxes(screen)
-            if avatars:
-                self.log(f"using {len(avatars)} fallback roster avatar candidates")
-            if not avatars:
-                return False
 
         try:
             import cv2
@@ -345,92 +377,78 @@ class ScheduleSkill(BaseSkill):
         except Exception:
             return False
 
-        best_overall_name = None
-        best_overall_score = -1.0
-        best_overall_pos = (0.0, 0.0)
-        best_overall_box = None
-        best_overall_roi = None
-        for av in avatars:
-            bx1 = max(0, int(av.x1 * w))
-            by1 = max(0, int(av.y1 * h))
-            bx2 = min(w, int(av.x2 * w))
-            by2 = min(h, int(av.y2 * h))
-            roi = img[by1:by2, bx1:bx2]
-            if roi.size == 0:
+        try:
+            from vision.template_matcher import match_lesson_affection_in_region
+        except ImportError:
+            self.log("match_lesson_affection_in_region not available")
+            return False
+
+        # Get room statuses to only scan available rooms
+        statuses = self._get_room_statuses(screen)
+
+        best_name = None
+        best_score = -1.0
+        best_room = -1
+
+        for room_idx in range(9):
+            if statuses[room_idx] not in ("available", "unknown"):
                 continue
-            if self._avatar_matcher is not None:
+            # Convert normalized region to pixel coords
+            nr = _ROOM_DETECT_REGIONS_NORM[room_idx]
+            px1 = int(nr[0] * w)
+            py1 = int(nr[1] * h)
+            px2 = int(nr[2] * w)
+            py2 = int(nr[3] * h)
+
+            matches = match_lesson_affection_in_region(
+                img, (px1, py1, px2, py2),
+                target_names=self._target_favorites,
+                threshold=_AFFECTION_MATCH_THRESHOLD,
+            )
+            if matches:
+                name, score, (cx, cy) = matches[0]
+                self.log(
+                    f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
+                    f"found '{name}' score={score:.2f}"
+                )
+                if score > best_score:
+                    best_name = name
+                    best_score = score
+                    best_room = room_idx
+
+        if best_name and best_room >= 0:
+            self._target_found = True
+            self._matched_room_idx = best_room
+            self.log(
+                f"FAVORITE MATCH: '{best_name}' score={best_score:.2f} "
+                f"in room {best_room} ({_ROOM_SLOT_NAMES[best_room]})"
+            )
+            return True
+
+        # Fallback: try legacy AvatarMatcher if lesson affection templates missed
+        if self._avatar_matcher is not None:
+            avatars = self._fallback_roster_avatar_boxes(screen)
+            for av in avatars:
+                bx1 = max(0, int(av.x1 * w))
+                by1 = max(0, int(av.y1 * h))
+                bx2 = min(w, int(av.x2 * w))
+                by2 = min(h, int(av.y2 * h))
+                roi = img[by1:by2, bx1:bx2]
+                if roi.size == 0:
+                    continue
                 matched_name, score = self._avatar_matcher.match_avatar(
                     roi, self._target_favorites
                 )
-                if matched_name and score > best_overall_score:
-                    best_overall_score = score
-                    best_overall_name = matched_name
-                    best_overall_pos = (av.cx, av.cy)
-                    best_overall_box = av
-                    best_overall_roi = roi.copy()
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
-                    status = self._check_avatar_status(roi)
                     self._target_found = True
                     self._matched_avatar_pos = (av.cx, av.cy)
-                    status_str = ""
-                    if status["has_checkmark"]:
-                        status_str += " [✓scheduled]"
-                    if status["has_heart"]:
-                        status_str += " [♥affection]"
                     self.log(
-                        f"AVATAR MATCH: '{matched_name}' score={score:.2f} "
-                        f"at ({av.cx:.2f},{av.cy:.2f}){status_str}"
+                        f"AVATAR FALLBACK: '{matched_name}' score={score:.2f} "
+                        f"at ({av.cx:.2f},{av.cy:.2f})"
                     )
                     return True
-        # Log best non-matching score for debugging
-        if best_overall_name:
-            self.log(
-                f"avatar best={best_overall_name} score={best_overall_score:.2f} "
-                f"at ({best_overall_pos[0]:.2f},{best_overall_pos[1]:.2f}) "
-                f"(threshold={_AVATAR_MATCH_THRESHOLD})"
-            )
 
-        if best_overall_name is None or best_overall_roi is None or best_overall_box is None:
-            return False
-
-        # Lazy-init Florence matcher on first use.
-        # Use non-blocking check so the worker thread doesn't stall for
-        # minutes while the pre-warm thread loads the model.
-        if self._florence_matcher is None:
-            try:
-                from vision.florence_vision import is_florence_ready, get_florence_reference_matcher
-                if not is_florence_ready():
-                    self.log("Florence model still loading, skipping Florence match this tick")
-                    return False
-                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
-                self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
-                self.log("Florence reference matcher loaded for schedule")
-            except Exception as e:
-                self.log(f"Florence matcher init failed: {e}")
-                return False
-
-        # Florence matching disabled — too many false positives on small roster avatars
-        # (e.g. misidentifies random characters as favorites, even with green checkmarks)
-        # Using lowest-affection fallback instead.
-        florence_name, florence_score = None, 0.0
-        if False and florence_name and florence_score > 0.70:
-            self._target_found = True
-            self._matched_avatar_pos = (best_overall_box.cx, best_overall_box.cy)
-            screen.add_florence_boxes([
-                OcrBox(
-                    text=f"favorite {florence_name}",
-                    confidence=float(florence_score),
-                    x1=best_overall_box.x1,
-                    y1=best_overall_box.y1,
-                    x2=best_overall_box.x2,
-                    y2=best_overall_box.y2,
-                )
-            ])
-            self.log(
-                f"FLORENCE MATCH: '{florence_name}' score={florence_score:.2f} "
-                f"at ({best_overall_box.cx:.2f},{best_overall_box.cy:.2f})"
-            )
-            return True
+        self.log(f"no favorite found in roster (scanned {sum(1 for s in statuses if s in ('available','unknown'))} rooms)")
         return False
 
     def _find_lowest_affection_card(self, screen: ScreenState):
@@ -546,23 +564,11 @@ class ScheduleSkill(BaseSkill):
         return False
 
     def _find_schedule_close(self, screen: ScreenState) -> Optional[OcrBox]:
-        close = self._find_florence_hit(
-            screen,
-            ["close button icon", "close dialog x button", "x close icon"],
-            region=(0.72, 0.02, 0.94, 0.28),
-        )
-        if close:
-            return close
+        """Find roster close button via OCR only (no Florence)."""
         return screen.find_text_one(r"^[Xx×]$", region=(0.72, 0.02, 0.94, 0.28), min_conf=0.7)
 
     def _find_schedule_switch_arrow(self, screen: ScreenState) -> Optional[OcrBox]:
-        arrow = self._find_florence_hit(
-            screen,
-            ["right arrow button", "next location arrow", "switch location arrow"],
-            region=(0.86, 0.28, 1.0, 0.72),
-        )
-        if arrow:
-            return arrow
+        """Find right switch arrow via OCR only (no Florence)."""
         return screen.find_text_one(">", region=(0.90, 0.35, 1.0, 0.65), min_conf=0.7)
 
     def _close_roster_action(self, screen: ScreenState, next_state: str, reason: str) -> Dict[str, Any]:
@@ -873,7 +879,36 @@ class ScheduleSkill(BaseSkill):
                 self._visited_locations.add(cur_loc)
             self._switch_ticks = 0
 
-            # Find room names via OCR and click one (prefer higher tier = later in list)
+            # PRIORITY: if favorite student was found in a specific room, click that room
+            if self._target_found and self._matched_room_idx >= 0:
+                fav_slot = self._matched_room_idx
+                slot_name = _ROOM_SLOT_NAMES[fav_slot]
+                click_x, click_y = _ROOM_CLICK_POS[fav_slot]
+                self.log(f"clicking FAVORITE room '{slot_name}' idx={fav_slot}")
+                self._roster_open = False
+                self._matched_room_idx = -1
+                self.sub_state = "execute"
+                self._execute_ticks = 0
+                self._start_clicked = False
+                return action_click(click_x, click_y, f"click favorite room {slot_name}")
+
+            # template-based primary path: use fixed-position pixel color checks to find
+            # the best available room slot, then click its normalized slot position.
+            statuses = self._get_room_statuses(screen)
+            best_slot = self._choose_best_room(statuses)
+            if any(s != "unknown" for s in statuses):
+                self.log(f"room statuses: {statuses}")
+            if best_slot >= 0:
+                slot_name = _ROOM_SLOT_NAMES[best_slot]
+                click_x, click_y = _ROOM_CLICK_POS[best_slot]
+                self.log(f"pixel-selected room '{slot_name}' idx={best_slot} at ({click_x:.3f},{click_y:.3f})")
+                self._roster_open = False
+                self.sub_state = "execute"
+                self._execute_ticks = 0
+                self._start_clicked = False
+                return action_click(click_x, click_y, f"click room slot {slot_name}")
+
+            # OCR fallback: find room names via OCR and click one (prefer higher tier = later in list)
             _ROOM_NAMES = [
                 "視聽室", "體育館", "圖書館",
                 "教室", "實驗室", "射擊場",
@@ -909,12 +944,6 @@ class ScheduleSkill(BaseSkill):
                 region=(0.60, 0.80, 1.0, 1.0),
                 min_conf=0.5
             )
-            if not full_tab:
-                full_tab = self._find_florence_hit(
-                    screen,
-                    ["full schedule roster button", "全體課程表 button", "全体课程表 button"],
-                    region=(0.60, 0.78, 1.0, 1.0),
-                )
             if full_tab:
                 self.log(f"clicking '{full_tab.text}' to view roster")
                 self._roster_open = True
@@ -939,12 +968,6 @@ class ScheduleSkill(BaseSkill):
             region=(0.60, 0.80, 1.0, 1.0),
             min_conf=0.5
         )
-        if not retry_tab:
-            retry_tab = self._find_florence_hit(
-                screen,
-                ["full schedule roster button", "全體課程表 button", "全体课程表 button"],
-                region=(0.60, 0.78, 1.0, 1.0),
-            )
         if retry_tab and self._roster_scan_ticks <= 2:
             self.log("roster overlay missing after open, retrying roster button")
             return action_click_box(retry_tab, "retry open full schedule roster")
@@ -1021,6 +1044,16 @@ class ScheduleSkill(BaseSkill):
 
         # ── Handle non-schedule screens (animation, bond popups, etc.) ──
         if not self._is_schedule(screen):
+            if screen.is_lobby():
+                self.log("drifted to lobby during schedule execute, re-entering schedule")
+                self._animation_ticks = 0
+                self._execute_ticks = 0
+                self._start_clicked = False
+                self._roster_open = False
+                self._roster_scan_ticks = 0
+                self.sub_state = "enter"
+                return action_wait(300, "re-enter schedule from lobby")
+
             start_visible = screen.find_any_text(
                 ["課程表開始", "课程表開始", "课程表开始", "開始", "开始"],
                 min_conf=0.5,
@@ -1070,6 +1103,16 @@ class ScheduleSkill(BaseSkill):
             # OCR missed 確認 button — click at known position (center-bottom of popup)
             return action_click(0.50, 0.82, "confirm schedule report (hardcoded)")
 
+        # If we already clicked 開始, do not click it repeatedly every tick.
+        # Wait a few ticks for transition/animation before retrying.
+        if self._start_clicked:
+            if self._execute_ticks > 4:
+                self.log("start click didn't trigger, retrying")
+                self._start_clicked = False
+                self._execute_ticks = 0
+            else:
+                return action_wait(500, "waiting for schedule to start")
+
         # ── PRIORITY 2: Start button (room info popup open) ──
         start = screen.find_any_text(
             ["課程表開始", "课程表開始", "课程表开始",
@@ -1089,14 +1132,6 @@ class ScheduleSkill(BaseSkill):
             self._start_clicked = True
             self._execute_ticks = 0
             return action_click_box(start, "start schedule")
-
-        # After clicking start, wait for animation
-        if self._start_clicked:
-            if self._execute_ticks > 4:
-                self.log("start click didn't trigger, retrying")
-                self._start_clicked = False
-                self._execute_ticks = 0
-            return action_wait(500, "waiting for schedule to start")
 
         # ── PRIORITY 3: Location Select → re-enter ──
         if self._is_location_select(screen):

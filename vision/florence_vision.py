@@ -13,6 +13,30 @@ from PIL import Image
 from transformers import AutoModelForCausalLM, AutoProcessor
 
 
+_FLORENCE_QUERY_ALIASES: Dict[str, List[str]] = {
+    "关闭按钮": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "左切换": ["left switch arrow button", "left arrow button", "previous page arrow", "left navigation arrow", "左箭头按钮"],
+    "右切换": ["right switch arrow button", "right arrow button", "next page arrow", "right navigation arrow", "右箭头按钮"],
+    "邮件箱": ["mail icon", "mail button", "envelope icon", "mail inbox button", "邮箱图标"],
+    "邮箱": ["mail icon", "mail button", "envelope icon", "mail inbox button", "邮箱图标"],
+    "返回键": ["back button icon", "back arrow button", "return button", "back navigation button", "返回按钮"],
+    "返回按钮": ["back button icon", "back arrow button", "return button", "back navigation button", "返回按钮"],
+    "主界面按钮": ["home button icon", "main lobby home button", "home navigation button", "主页按钮"],
+    "主页按钮": ["home button icon", "main lobby home button", "home navigation button", "主页按钮"],
+    "home按钮": ["home button icon", "main lobby home button", "home navigation button", "主页按钮"],
+    "锁": ["lock icon", "padlock icon", "locked slot icon", "锁图标"],
+    "课程表锁": ["lock icon", "padlock icon", "locked slot icon", "锁图标"],
+    "叉叉": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "叉叉1": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "叉叉2": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "momotalk的叉叉": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "公告叉叉": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "内嵌公告的叉": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "游戏内很多页面窗口的叉": ["close button icon", "close dialog x button", "x close icon", "popup close button", "关闭按钮"],
+    "全体课程表": ["full schedule roster button", "full schedule roster tab", "all students schedule tab", "全体课程表按钮"],
+}
+
+
 try:
     from transformers import PreTrainedModel
 
@@ -123,9 +147,35 @@ def _to_pil_rgb(image: Any) -> Image.Image:
     raise TypeError(f"Unsupported image type: {type(image)!r}")
 
 
+def _normalize_query_key(query: Any) -> str:
+    text = str(query or "").strip().lower()
+    return re.sub(r"\s+", "", text)
+
+
+def expand_florence_queries(queries: Sequence[str]) -> List[Tuple[str, str]]:
+    expanded: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for raw in queries:
+        canonical = str(raw or "").strip()
+        if not canonical:
+            continue
+        key = _normalize_query_key(canonical)
+        aliases = list(_FLORENCE_QUERY_ALIASES.get(key) or [])
+        if canonical not in aliases:
+            aliases.append(canonical)
+        for alias in aliases:
+            pair = (canonical, str(alias).strip())
+            if not pair[1] or pair in seen:
+                continue
+            seen.add(pair)
+            expanded.append(pair)
+    return expanded
+
+
 @dataclass
 class FlorenceConfig:
     model_id: str = os.environ.get("FLORENCE_MODEL_ID", "microsoft/Florence-2-large-ft")
+    adapter_dir: str = os.environ.get("FLORENCE_ADAPTER_DIR", "")
     device: str = os.environ.get("FLORENCE_DEVICE", "cuda")
     dtype: torch.dtype = torch.float16
     cache_dir: str = os.environ.get("FLORENCE_CACHE_DIR", r"D:\Project\ml_cache\models")
@@ -178,6 +228,12 @@ class FlorenceVision:
             if last_err is not None:
                 raise last_err
             raise RuntimeError("Failed to load Florence model")
+        if self.cfg.adapter_dir:
+            adapter_path = Path(str(self.cfg.adapter_dir)).expanduser()
+            if adapter_path.exists():
+                from peft import PeftModel
+
+                self.model = PeftModel.from_pretrained(self.model, str(adapter_path))
         try:
             if hasattr(self.model, "generation_config") and self.model.generation_config is not None:
                 self.model.generation_config.use_cache = False
@@ -268,18 +324,24 @@ class FlorenceVision:
     def detect_open_vocabulary(self, image: Any, queries: Sequence[str]) -> List[Dict[str, Any]]:
         pil = _to_pil_rgb(image)
         results: List[Dict[str, Any]] = []
-        for q in queries:
-            query = str(q).strip()
-            if not query:
+        seen_hits = set()
+        for query, alias in expand_florence_queries(queries):
+            if not alias:
                 continue
-            parsed = self.run_task(pil, f"<OPEN_VOCABULARY_DETECTION> {query}")
+            parsed = self.run_task(pil, f"<OPEN_VOCABULARY_DETECTION> {alias}")
             items = _extract_items(parsed)
             for it in items:
+                bbox = _to_xyxy(it.get("bbox"))
+                hit_key = (query, alias, tuple(bbox or []))
+                if hit_key in seen_hits:
+                    continue
+                seen_hits.add(hit_key)
                 it.setdefault("type", "od")
                 it.setdefault("query", query)
+                it.setdefault("matched_query", alias)
                 it.setdefault("label", str(it.get("label") or query))
                 it.setdefault("score", 1.0)
-            results.extend(items)
+                results.append(it)
         return results
 
     def suggest_labels(self, image: Any, labels: Sequence[str]) -> List[Dict[str, Any]]:
@@ -381,10 +443,41 @@ _FLORENCE_KEY = ""
 _FLORENCE_MATCHERS: Dict[str, FlorenceReferenceMatcher] = {}
 
 
+def is_florence_ready() -> bool:
+    """Return True if the Florence singleton is loaded and ready (non-blocking)."""
+    if _FLORENCE is not None:
+        return True
+    acquired = _FLORENCE_LOCK.acquire(blocking=False)
+    if acquired:
+        _FLORENCE_LOCK.release()
+        return _FLORENCE is not None
+    return False
+
+
+def get_florence_vision_nowait(cfg: Optional[FlorenceConfig] = None) -> Optional[FlorenceVision]:
+    """Return the Florence singleton if ready, or None (never blocks)."""
+    if _FLORENCE is not None:
+        return _FLORENCE
+    acquired = _FLORENCE_LOCK.acquire(blocking=False)
+    if not acquired:
+        return None
+    try:
+        if _FLORENCE is not None:
+            return _FLORENCE
+        # Lock acquired and model not loaded — trigger load now
+        return get_florence_vision(cfg)
+    finally:
+        if _FLORENCE_LOCK.locked():
+            try:
+                _FLORENCE_LOCK.release()
+            except RuntimeError:
+                pass
+
+
 def get_florence_vision(cfg: Optional[FlorenceConfig] = None) -> FlorenceVision:
     global _FLORENCE, _FLORENCE_KEY
     cfg = cfg or FlorenceConfig()
-    key = f"{cfg.model_id}|{cfg.device}|{cfg.cache_dir}|{cfg.dtype}|{cfg.max_new_tokens}|{cfg.num_beams}"
+    key = f"{cfg.model_id}|{cfg.adapter_dir}|{cfg.device}|{cfg.cache_dir}|{cfg.dtype}|{cfg.max_new_tokens}|{cfg.num_beams}"
     with _FLORENCE_LOCK:
         if _FLORENCE is None or _FLORENCE_KEY != key:
             _FLORENCE = FlorenceVision(cfg)
@@ -393,10 +486,24 @@ def get_florence_vision(cfg: Optional[FlorenceConfig] = None) -> FlorenceVision:
 
 
 def get_florence_reference_matcher(reference_dir: str, cfg: Optional[FlorenceConfig] = None) -> FlorenceReferenceMatcher:
+    """Get or create a reference matcher.  Non-blocking: raises if model not ready."""
     ref_key = str(Path(reference_dir).resolve())
-    with _FLORENCE_LOCK:
+    # Fast path: already cached
+    cached = _FLORENCE_MATCHERS.get(ref_key)
+    if cached is not None:
+        return cached
+    # Need Florence vision — fail fast if not ready
+    fv = get_florence_vision_nowait(cfg)
+    if fv is None:
+        raise RuntimeError("Florence model still loading, matcher unavailable")
+    acquired = _FLORENCE_LOCK.acquire(blocking=False)
+    if not acquired:
+        raise RuntimeError("Florence lock held, matcher unavailable")
+    try:
         matcher = _FLORENCE_MATCHERS.get(ref_key)
         if matcher is None:
-            matcher = FlorenceReferenceMatcher(get_florence_vision(cfg), ref_key)
+            matcher = FlorenceReferenceMatcher(fv, ref_key)
             _FLORENCE_MATCHERS[ref_key] = matcher
         return matcher
+    finally:
+        _FLORENCE_LOCK.release()

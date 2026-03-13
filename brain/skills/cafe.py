@@ -3,19 +3,21 @@
 Flow:
 1. ENTER: From lobby, click 咖啡廳 in nav bar
 2. EARNINGS: Click 收益 area to claim accumulated credits/AP
-3. HEADPAT: YOLO-detect 角色可摸头黄色感叹号 (yellow !) and click each one
-4. SWITCH: Click 移動至2號店 to go to cafe 2F
-5. HEADPAT2: Same headpat logic on 2F
-6. EXIT: Press back until lobby
+3. INVITE: Use invitation ticket (favorite student priority)
+4. HEADPAT: Template-match happy_face markers and click each student
+5. SWITCH: Click 移動至2號店 to go to cafe 2F
+6. INVITE2 + HEADPAT2: Same invite + headpat logic on 2F
+7. EXIT: Press back until lobby
 
-Key YOLO classes:
-- 角色可摸头黄色感叹号 (cls 10): yellow ! above student = headpat target
-- 提升好感度的后的爱心 (cls 15): heart after headpat = success
-- 叉叉1 (cls 1): close button on earnings/popups
+Detection priority:
+- Primary: happy_face template matching (4 templates, threshold 0.75)
+- Fallback: Emoticon_Action template, then YOLO headpat_bubble
+- Panning: 1F left→right, 2F right→left (template-based)
 """
 from __future__ import annotations
 import importlib.util
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -82,6 +84,7 @@ class CafeSkill(BaseSkill):
     def __init__(self):
         super().__init__("Cafe")
         self.max_ticks = 100
+        self._enter_attempts: int = 0
         self._headpat_count: int = 0
         self._empty_scans: int = 0
         self._earnings_claimed: bool = False
@@ -102,6 +105,7 @@ class CafeSkill(BaseSkill):
 
     def reset(self) -> None:
         super().reset()
+        self._enter_attempts = 0
         self._headpat_count = 0
         self._empty_scans = 0
         self._earnings_claimed = False
@@ -159,14 +163,7 @@ class CafeSkill(BaseSkill):
         return None
 
     def _find_close_button(self, screen: ScreenState, region=(0.62, 0.06, 0.94, 0.30)) -> Optional[Any]:
-        close = self._find_florence_hit(
-            screen,
-            ["close button icon", "close dialog x button", "x close icon"],
-            region=region,
-        )
-        if close:
-            return close
-        return screen.find_text_one(r"^[Xx×]$", region=region, min_conf=0.7)
+        return screen.find_text_one(r"^[Xx×]$", region=region, min_conf=0.55)
 
     def _invite_avatar_roi(self, img, w: int, h: int, invite_btn) -> Optional[Any]:
         cy = int(invite_btn.cy * h)
@@ -276,6 +273,55 @@ class CafeSkill(BaseSkill):
         if screen.find_any_text(["編輯模式", "编辑模式", "禮物", "家具資訊"], min_conf=0.5):
             return True
         return False
+
+    def _looks_like_lobby(self, screen: ScreenState) -> bool:
+        """Fallback lobby detector when strict screen classification misses."""
+        nav_tokens = ["課程", "课程", "社交", "商店", "製造", "制造", "招募", "學生", "学生"]
+        hits = 0
+        for token in nav_tokens:
+            if screen.find_text_one(token, region=screen.NAV_BAR, min_conf=0.5):
+                hits += 1
+        return hits >= 2
+
+    def _invite_confirm_visible(self, screen: ScreenState) -> bool:
+        """Detect if the invite confirmation popup is still on screen."""
+        if screen.find_text_one(r"邀.*咖啡", region=screen.CENTER, min_conf=0.5):
+            return True
+        if screen.find_any_text(["要把正在拜訪", "要把正在拜访"], region=screen.CENTER, min_conf=0.5):
+            return True
+        cancel_btn = screen.find_any_text(["取消"], region=(0.28, 0.60, 0.52, 0.80), min_conf=0.6)
+        target_store = screen.find_any_text(["1號店", "1号店", "2號店", "2号店"], region=screen.CENTER, min_conf=0.5)
+        return bool(cancel_btn and target_store)
+
+    def _invite_list_visible(self, screen: ScreenState) -> bool:
+        """Detect if the MomoTalk invite list overlay is still open."""
+        momo = screen.find_any_text(["MomoTalk"], region=(0.25, 0.08, 0.58, 0.18), min_conf=0.6)
+        if momo:
+            return True
+        invite_btn = screen.find_any_text(["邀請", "邀请", "邀睛"], region=(0.50, 0.20, 0.70, 0.90), min_conf=0.5)
+        student_label = screen.find_text_one(r"學生.{0,3}\d", region=(0.25, 0.16, 0.52, 0.28), min_conf=0.55)
+        return bool(invite_btn and student_label)
+
+    def _recover_invite_overlay(self, screen: ScreenState, phase_name: str) -> Optional[Dict[str, Any]]:
+        """If invite UI is still visible, dismiss it before proceeding."""
+        if self._invite_confirm_visible(screen):
+            confirm = screen.find_any_text(
+                ["確認", "确认", "確定", "确定", "確", "确"],
+                region=(0.42, 0.60, 0.74, 0.82), min_conf=0.55
+            )
+            if confirm:
+                self.log(f"invite confirm still visible before {phase_name}, clicking confirm")
+                return action_click_box(confirm, f"confirm invite before {phase_name}")
+            self.log(f"invite confirm still visible before {phase_name}, fallback confirm")
+            return action_click(0.598, 0.701, f"confirm invite before {phase_name} (fallback)")
+        if self._invite_list_visible(screen):
+            close_btn = self._find_close_button(screen, region=(0.56, 0.04, 0.90, 0.24))
+            if close_btn:
+                self.log(f"invite list still visible before {phase_name}, closing")
+                return action_click_box(close_btn, f"close invite list before {phase_name}")
+            self.log(f"invite list still visible before {phase_name}, pressing back")
+            return action_back(f"close invite list before {phase_name}")
+        return None
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -441,9 +487,11 @@ class CafeSkill(BaseSkill):
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         """Navigate from lobby to cafe."""
+        self._enter_attempts += 1
         current = self.detect_current_screen(screen)
 
         if current == "Cafe" or self._is_cafe(screen):
+            self._enter_attempts = 0
             # If 1F headpat was already done (kicked to lobby by bond level-up),
             # skip earnings/invite and go straight to switch to 2F.
             if self._1f_done:
@@ -462,16 +510,24 @@ class CafeSkill(BaseSkill):
             self.log("inside cafe")
             self.sub_state = "earnings"
             return action_wait(500, "entered cafe")
-            
-        if current == "Lobby":
+
+        if current == "Lobby" or self._looks_like_lobby(screen):
             nav = self._nav_to(screen, ["咖啡廳", "咖啡厅", "咖啡"])
             if nav:
                 return nav
+            if self._enter_attempts >= 3:
+                # Bottom nav first slot is cafe in BA lobby.
+                return action_click(0.08, 0.95, "click cafe nav (hardcoded fallback)")
             return action_wait(300, "waiting for cafe button")
-            
+
         if current and current != "Cafe":
             self.log(f"wrong screen '{current}', backing out")
             return action_back(f"back from {current}")
+
+        if self._enter_attempts > 8:
+            if self._looks_like_lobby(screen):
+                return action_click(0.08, 0.95, "force click cafe nav from lobby-like screen")
+            return action_back("recover from unknown screen before entering cafe")
 
         return action_wait(500, "entering cafe")
 
@@ -493,6 +549,23 @@ class CafeSkill(BaseSkill):
 
         if not self._is_cafe(screen):
             return action_wait(500, "waiting for cafe UI")
+
+        def _read_earnings_pct() -> float:
+            pct_hits = screen.find_text(
+                r"(\d{1,3}(?:\.\d+)?)\s*%",
+                region=(0.83, 0.86, 0.99, 0.99),
+                min_conf=0.5,
+            )
+            best = -1.0
+            for hit in pct_hits:
+                m = re.search(r"(\d{1,3}(?:\.\d+)?)", hit.text)
+                if not m:
+                    continue
+                try:
+                    best = max(best, float(m.group(1)))
+                except Exception:
+                    continue
+            return best
 
         # Check for 0% earnings — skip claim entirely
         # OCR reads "0.0%" or "0.0 %" at bottom-right; regex ^0\.0 avoids matching "100.0%"
@@ -570,14 +643,34 @@ class CafeSkill(BaseSkill):
             self.log("FULL detected, clicking earnings area")
             return action_click(0.913, 0.893, "open earnings via FULL")
 
+        # OCR on this label is noisy (e.g. 咖啡魔收益). Match broader regex.
+        earn_label_regex = screen.find_text_one(
+            r"咖啡.*收益",
+            region=(0.82, 0.84, 0.99, 0.98),
+            min_conf=0.45,
+        )
+        if earn_label_regex:
+            self._earnings_attempts += 1
+            self.log(f"clicking earnings area via regex label '{earn_label_regex.text}'")
+            return action_click_box(earn_label_regex, "open earnings popup (regex label)")
+
         # Also try earnings label if percentage is not 0
         earn_label = screen.find_any_text(
             ["咖啡廳收益", "咖啡收益", "咖啡厅收益"],
             min_conf=0.5
         )
         if earn_label:
+            self._earnings_attempts += 1
             self.log("clicking '咖啡廳收益' to open earnings popup")
             return action_click_box(earn_label, "open earnings popup")
+
+        # Last fallback: if visible percentage is >0, try opening earnings by fixed spot.
+        # template-based fixed click is much more stable than OCR-only in this corner.
+        pct_val = _read_earnings_pct()
+        if pct_val > 0.0 and self._earnings_attempts < 3:
+            self._earnings_attempts += 1
+            self.log(f"earnings percent {pct_val:.1f}% detected, opening earnings by fixed spot")
+            return action_click(0.913, 0.893, f"open earnings via percent {pct_val:.1f}%")
 
         # No earnings indicators — skip
         self._earnings_claimed = True
@@ -593,6 +686,10 @@ class CafeSkill(BaseSkill):
         Stages: 0=open ticket panel, 1=click 邀請, 2=confirm invite, 3=done
         """
         if self._invite_attempted:
+            # GUARD: don't transition to headpat while invite UI is still showing
+            recover = self._recover_invite_overlay(screen, self._invite_next_state)
+            if recover:
+                return recover
             self.sub_state = self._invite_next_state
             self._empty_scans = 0
             if self._invite_next_state != "headpat" or not self._1f_headpat_started:
@@ -675,6 +772,10 @@ class CafeSkill(BaseSkill):
                 self._invite_stage = 2
                 self._invite_ticks = 0
                 return action_click_box(btn, "invite student (no fav match)")
+            if self._invite_ticks in (4, 8):
+                self.log("invite list missing, retry opening ticket panel")
+                self._invite_stage = 0
+                return action_click(0.69, 0.93, "re-open invite ticket (list missing)")
             if self._invite_ticks >= 10:
                 self.log("invite list not found, skipping")
                 self._invite_attempted = True
@@ -725,20 +826,6 @@ class CafeSkill(BaseSkill):
             self._invite_ticks = 0
             return action_click_box(ticket, "open invite ticket")
 
-        # OCR found no usable ticket text. Ask Florence whether the regular invite
-        # ticket area looks disabled / on cooldown before waiting longer.
-        invite_enabled = self._florence_button_enabled(
-            screen,
-            (0.55, 0.88, 0.78, 0.98),
-            hint="regular invite ticket",
-            default=True,
-        )
-        if not invite_enabled:
-            self.log("invite ticket appears disabled/cooldown, skipping invite")
-            self._invite_attempted = True
-            self.sub_state = self._invite_next_state
-            return action_wait(300, "invite ticket disabled")
-
         # Also check if invite list is already open (e.g. from previous attempt)
         invite_btn = screen.find_any_text(
             ["邀請", "邀请"],
@@ -749,7 +836,11 @@ class CafeSkill(BaseSkill):
             self._invite_ticks = 0
             return action_wait(200, "invite list already open")
 
-        if self._invite_ticks >= 6:
+        if self._invite_ticks in (3, 6):
+            self.log("invite UI unresolved, retry fixed click on regular ticket")
+            return action_click(0.69, 0.93, "open invite ticket (hardcoded retry)")
+
+        if self._invite_ticks >= 10:
             self.log("invite UI not found, skipping invite")
             self._invite_attempted = True
             self.sub_state = self._invite_next_state
@@ -758,13 +849,17 @@ class CafeSkill(BaseSkill):
         return action_wait(400, "waiting for invite UI")
 
     def _headpat(self, screen: ScreenState) -> Dict[str, Any]:
-        """Tap students with yellow exclamation marks (角色可摸头黄色感叹号).
+        """Tap students with happy_face template markers (primary) or YOLO (fallback).
 
-        Camera panning: students can be in corners that are off-screen.
-        Phase 0: pan right (drag from right→left) to reveal left corner, then scan.
-        Phase 1: pan left (drag from left→right) to reveal right corner, then scan.
-        Phase 2: pan back to center, then scan.
-        Phase 3: done panning, scan only.
+        Camera panning order (template-based):
+        - 1F: left→right (pan left first to reveal left corner, then right)
+        - 2F: right→left (pan right first to reveal right corner, then left)
+        Phase 0: zoom out.
+        Phase 1: pan first direction, then scan.
+        Phase 2: scan current view.
+        Phase 3: pan opposite direction, then scan.
+        Phase 4: scan current view.
+        Phase 5: done panning, scan only.
 
         After _MAX_EMPTY_SCANS consecutive ticks with no marks in current view,
         advance pan phase. When all phases exhausted, move on.
@@ -787,6 +882,11 @@ class CafeSkill(BaseSkill):
                 return action_wait(300, "exit cafe after headpat2 recovery")
             return action_wait(300, "waiting for cafe")
 
+        # GUARD: if invite overlay leaked into headpat state, dismiss it first
+        recover = self._recover_invite_overlay(screen, self.sub_state)
+        if recover:
+            return recover
+
         # Check if we've hit the per-floor headpat limit
         if self._headpat_count >= _MAX_HEADPATS_PER_FLOOR:
             if self.sub_state == "headpat":
@@ -804,6 +904,7 @@ class CafeSkill(BaseSkill):
 
         # Phase 0: zoom out first (reference pattern — pinch out to see all students)
         # Then pan to reveal corners. Zoom out makes headpat bubbles visible.
+        is_2f = (self.sub_state == "headpat2")
         if self._pan_phase == 0:
             self._pan_phase = 1
             self._empty_scans = 0
@@ -812,13 +913,25 @@ class CafeSkill(BaseSkill):
         if self._pan_phase == 1:
             self._pan_phase = 2
             self._empty_scans = 0
-            self.log("pan camera: drag right→left to reveal left corner")
-            return action_swipe(0.75, 0.45, 0.25, 0.45, 500, "pan camera right")
+            if is_2f:
+                # 2F: pan right first (drag left→right to reveal right corner)
+                self.log("2F pan camera: drag left→right to reveal right corner")
+                return action_swipe(0.25, 0.45, 0.75, 0.45, 500, "pan camera left (2F first)")
+            else:
+                # 1F: pan left first (drag right→left to reveal left corner)
+                self.log("1F pan camera: drag right→left to reveal left corner")
+                return action_swipe(0.75, 0.45, 0.25, 0.45, 500, "pan camera right (1F first)")
         if self._pan_phase == 3:
             self._pan_phase = 4
             self._empty_scans = 0
-            self.log("pan camera: drag left→right to reveal right corner")
-            return action_swipe(0.25, 0.45, 0.75, 0.45, 500, "pan camera left")
+            if is_2f:
+                # 2F: then pan left (drag right→left to reveal left corner)
+                self.log("2F pan camera: drag right→left to reveal left corner")
+                return action_swipe(0.75, 0.45, 0.25, 0.45, 500, "pan camera right (2F second)")
+            else:
+                # 1F: then pan right (drag left→right to reveal right corner)
+                self.log("1F pan camera: drag left→right to reveal right corner")
+                return action_swipe(0.25, 0.45, 0.75, 0.45, 500, "pan camera left (1F second)")
 
         # After a successful headpat, wait for the heart animation to finish
         # before scanning again (animation takes ~1 second).
@@ -826,20 +939,20 @@ class CafeSkill(BaseSkill):
             self._headpat_cooldown -= 1
             return action_wait(500, f"waiting for headpat animation ({self._headpat_cooldown} left)")
 
-        # Find headpat markers — use YOLO first (most accurate for this icon),
-        # then template matching as fallback.
-        # YOLO detects 角色可摸头黄色感叹号 reliably even at low confidence.
-        mark = screen.find_yolo_one("headpat_bubble", min_conf=_HEADPAT_CONF)
+        # Find headpat markers — template matching primary (happy_face),
+        # YOLO as fallback only.
+        mark = screen.find_template_one("happy_face", min_conf=0.75,
+                                        region=(0.12, 0.25, 0.98, 0.80))
+        if not mark:
+            mark = screen.find_template_one("headpat", min_conf=0.78,
+                                            region=(0.12, 0.25, 0.98, 0.80))
+        if not mark:
+            # YOLO fallback
+            mark = screen.find_yolo_one("headpat_bubble", min_conf=_HEADPAT_CONF)
         if not mark:
             mark = screen.find_yolo_one("角色可摸头黄色感叹号", min_conf=_HEADPAT_CONF)
         if not mark:
             mark = screen.find_yolo_one("感叹号", min_conf=_HEADPAT_CONF)
-        if not mark:
-            # Template matching fallback (restricted to game area)
-            tmpl = screen.find_template_one("headpat", min_conf=0.82,
-                                            region=(0.12, 0.25, 0.98, 0.80))
-            if tmpl:
-                mark = tmpl
 
         if mark:
             self._empty_scans = 0
@@ -943,21 +1056,5 @@ class CafeSkill(BaseSkill):
         if screen.is_lobby():
             self.log("back in lobby, cafe done")
             return action_done("cafe complete")
-
-        back = self._find_florence_hit(
-            screen,
-            ["back button icon", "back arrow button", "return button"],
-            region=(0.0, 0.0, 0.18, 0.18),
-        )
-        if back:
-            return action_click_box(back, "cafe exit: click back button")
-
-        home = self._find_florence_hit(
-            screen,
-            ["home button icon", "main lobby home button"],
-            region=(0.82, 0.0, 1.0, 0.18),
-        )
-        if home:
-            return action_click_box(home, "cafe exit: click home button")
 
         return action_back("cafe exit: press ESC")

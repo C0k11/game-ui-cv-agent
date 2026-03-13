@@ -137,7 +137,7 @@ public partial class MainWindow : Window
 
     private void SetStatus(string msg)
     {
-        try { Title = "AI Game Secretary" + (string.IsNullOrWhiteSpace(msg) ? "" : $" ({msg})"); } catch { }
+        try { Title = "私人碧蓝档案助手" + (string.IsNullOrWhiteSpace(msg) ? "" : $" ({msg})"); } catch { }
         try { if (TxtStatus != null) TxtStatus.Text = "Status: " + (msg ?? ""); } catch { }
     }
 

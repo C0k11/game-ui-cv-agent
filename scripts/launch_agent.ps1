@@ -62,7 +62,7 @@ function Stop-ProcessByPort {
 $processes = @()
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  AI Game Secretary - Launcher" -ForegroundColor Cyan
+Write-Host "  私人碧蓝档案助手 - Launcher" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 if ($ForceRestart) {

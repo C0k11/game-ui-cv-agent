@@ -172,6 +172,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <div class="form-row">
       <div class="form-group"><label>Steps (0=loop)</label><input id="steps" type="number" value="0" style="width:90px"/></div>
       <div class="form-group"><label>Step Sleep</label><input id="step_sleep_s" type="number" value="0.6" style="width:80px"/></div>
+      <div class="form-group"><label>AP Purchase Limit</label><input id="ap_purchase_limit" type="number" value="0" style="width:90px"/></div>
     </div>
     <div class="form-row" style="gap:16px">
       <div class="check-row">
@@ -278,6 +279,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <button class="btn btn-sm" onclick="annZoomOut()" title="Zoom out">-</button>
     <span class="info" id="ann_zoom">100%</span>
     <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <select id="ann_shape" style="padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px" title="Box shape">
+      <option value="rect">Rect</option>
+      <option value="ellipse">Ellipse</option>
+      <option value="polygon">Polygon (freehand)</option>
+    </select>
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
     <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
@@ -306,7 +314,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <kbd>Click</kbd> select box<br>
         <kbd>Drag</kbd> move box<br>
         <kbd>Drag corner</kbd> resize<br>
-        <kbd>Right-drag</kbd> draw new box<br>
+        <kbd>Right-drag</kbd> draw new box/polygon<br>
+        <kbd>R + drag</kbd> rotate selected<br>
         <kbd>Del</kbd> remove box<br>
         <kbd>0-9</kbd> change class<br>
         <kbd>Ctrl+S</kbd> save<br>
@@ -422,6 +431,7 @@ function fillAgentFromProfile(profile){
   if($('goal'))$('goal').value=p.goal||$('goal').value;
   if($('steps'))$('steps').value=typeof p.steps==='number'?p.steps:0;
   if($('step_sleep_s'))$('step_sleep_s').value=typeof p.step_sleep_s==='number'?p.step_sleep_s:0.6;
+  if($('ap_purchase_limit'))$('ap_purchase_limit').value=typeof p.ap_purchase_limit==='number'?p.ap_purchase_limit:0;
   if($('dry_run'))$('dry_run').checked=Boolean(p.dry_run);
   if($('forbid_premium_currency'))$('forbid_premium_currency').checked=p.forbid_premium_currency!==false;
   if($('exploration_click'))$('exploration_click').checked=Boolean(p.exploration_click);
@@ -451,6 +461,7 @@ async function saveProfileConfig(showText='已保存档案'){
       goal:$('goal').value.trim(),
       steps:parseInt($('steps').value,10)||0,
       step_sleep_s:parseFloat($('step_sleep_s').value)||0.6,
+      ap_purchase_limit:parseInt($('ap_purchase_limit').value,10)||0,
       dry_run:$('dry_run').checked,
       forbid_premium_currency:$('forbid_premium_currency').checked,
       exploration_click:$('exploration_click').checked,
@@ -470,7 +481,7 @@ async function saveProfileConfig(showText='已保存档案'){
 
 function agentPayload() {
   return {
-    _ui_rev:4,
+    _ui_rev:5,
     active_profile:currentProfileName(),
     account_label:$('account_label').value.trim(),
     game_exe_path:$('game_exe_path').value.trim(),
@@ -478,6 +489,7 @@ function agentPayload() {
     goal:$('goal').value.trim(),
     steps:parseInt($('steps').value,10)||0,
     step_sleep_s:parseFloat($('step_sleep_s').value)||0.6,
+    ap_purchase_limit:parseInt($('ap_purchase_limit').value,10)||0,
     dry_run:$('dry_run').checked,
     forbid_premium_currency:$('forbid_premium_currency').checked,
     exploration_click:$('exploration_click').checked,
@@ -496,6 +508,7 @@ function loadAgent(){
     if(s.goal)$('goal').value=s.goal;
     if(typeof s.steps==='number')$('steps').value=s.steps;
     if(typeof s.step_sleep_s==='number')$('step_sleep_s').value=s.step_sleep_s;
+    if(typeof s.ap_purchase_limit==='number')$('ap_purchase_limit').value=s.ap_purchase_limit;
     if(s.account_label)$('account_label').value=s.account_label;
     if(typeof s.dry_run==='boolean')$('dry_run').checked=s.dry_run;
     if(typeof s.forbid_premium_currency==='boolean')$('forbid_premium_currency').checked=s.forbid_premium_currency;
@@ -518,7 +531,9 @@ async function agentRefresh(){
     const ps=st.pipeline_status||{};
     const pp=st.pipeline_progress||{};
     const meta=st.pipeline_run_meta||{};
-    $('status_text').textContent=`running=${st.agent_running} profile=${meta.profile_name||ps.profile_name||'-'} account=${meta.account_label||ps.account_label||'-'} error=${le} ticks=${ps.ticks||0}`;
+    const curReason=pp.current_reason||'';
+    const lastRes=(pp.results&&pp.results.length)?(pp.results[pp.results.length-1].reason||''):'';
+    $('status_text').textContent=`running=${st.agent_running} profile=${meta.profile_name||ps.profile_name||'-'} account=${meta.account_label||ps.account_label||'-'} error=${le} ticks=${ps.ticks||0} reason=${curReason||lastRes||'-'}`;
     // Pipeline HUD
     const hud=$('routineHud');
     if(!pp||!pp.running){hud.style.display='none';}
@@ -534,7 +549,9 @@ async function agentRefresh(){
       $('routineBadge').textContent='Pipeline';
       $('routineBadge').className='pill ok';
       const ri=$('routineRetryInfo');
-      ri.style.display='none';
+      const reasonText=curReason||lastRes||'';
+      if(reasonText){ri.style.display='block';ri.textContent='Reason: '+reasonText;}
+      else{ri.style.display='none';ri.textContent='';}
     }
   }catch(e){
     $('status_pill').className='pill bad';$('status_pill').textContent='Offline';
@@ -564,7 +581,7 @@ $('btn_profile_delete').onclick=async()=>{
 $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName()})});await loadServerConfig();await loadFavorites();saveAgent();}catch(e){$('profile_status').textContent='切换失败';}};
  $('btn_skills_reset').onclick=async()=>{const defaults=(APP_CFG.skill_options||[]).map(x=>x.id);renderSkillList(defaults,defaults);saveAgent();try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill_order:defaults})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}};
 
-['game_exe_path','window_title','steps','step_sleep_s','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url'].forEach(id=>{
+['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
 });
 
@@ -653,9 +670,12 @@ let ANN={
   dragMode:null,dragStart:null,dragOrig:null,
   ocrBoxes:null,ocrOn:false,ocrImageW:0,ocrImageH:0,
   // zoom/pan: offX/offY = screen offset of image origin, zoom = screen px per image px
-  zoom:1,offX:0,offY:0,fitZoom:1
+  zoom:1,offX:0,offY:0,fitZoom:1,
+  rotateKey:false,  // true while R is held down
+  polyPoints:null   // freehand polygon points during drawing [{x,y}...]
 };
 const HANDLE=7;
+const ROT_HANDLE_DIST=28; // px from top-center to rotation handle
 const annCanvas=$('ann_canvas');
 const annCtx=annCanvas.getContext('2d');
 const annArea=document.querySelector('.ann-canvas-area');
@@ -767,24 +787,76 @@ function annDraw(){
   // draw image
   ctx.drawImage(ANN.bgImg,ox,oy,ANN.imgW*Z,ANN.imgH*Z);
 
-  // draw YOLO labels
+  // draw YOLO labels (with rotation + shape + polygon support)
   const labels=ANN.data[ANN.idx].labels;
   labels.forEach((lb,i)=>{
-    const x1=(lb.xc-lb.w/2)*ANN.imgW*Z+ox, y1=(lb.yc-lb.h/2)*ANN.imgH*Z+oy;
-    const bw=lb.w*ANN.imgW*Z, bh=lb.h*ANN.imgH*Z;
     const color=COLORS[lb.cls%COLORS.length];const isSel=(i===ANN.selIdx);
-    ctx.fillStyle=color;ctx.globalAlpha=isSel?0.25:0.1;ctx.fillRect(x1,y1,bw,bh);ctx.globalAlpha=1;
-    ctx.strokeStyle=color;ctx.lineWidth=isSel?3:1.5;ctx.setLineDash([]);ctx.strokeRect(x1,y1,bw,bh);
+    const shape=lb.shape||'rect';
+
+    // ── Polygon shape ──
+    if(shape==='polygon'&&lb.points&&lb.points.length>=3){
+      ctx.save();
+      ctx.beginPath();
+      const p0=img2scr(lb.points[0].x*ANN.imgW,lb.points[0].y*ANN.imgH);
+      ctx.moveTo(p0.x,p0.y);
+      for(let j=1;j<lb.points.length;j++){const pj=img2scr(lb.points[j].x*ANN.imgW,lb.points[j].y*ANN.imgH);ctx.lineTo(pj.x,pj.y);}
+      ctx.closePath();
+      ctx.fillStyle=color;ctx.globalAlpha=isSel?0.25:0.1;ctx.fill();ctx.globalAlpha=1;
+      ctx.strokeStyle=color;ctx.lineWidth=isSel?3:1.5;ctx.setLineDash([]);ctx.stroke();
+      // label text at bounding box top-left
+      const xs=lb.points.map(p=>p.x*ANN.imgW),ys=lb.points.map(p=>p.y*ANN.imgH);
+      const lbl_scr=img2scr(Math.min(...xs),Math.min(...ys));
+      const fs=Math.max(10,12);ctx.font=fs+'px sans-serif';
+      const cn=ANN.classes[lb.cls]||`cls_${lb.cls}`;
+      const labelText=cn+` [poly ${lb.points.length}pt]`;
+      const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(lbl_scr.x,lbl_scr.y-fs-4,tm.width+6,fs+4);
+      ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,lbl_scr.x+3,lbl_scr.y-4);
+      if(isSel){
+        lb.points.forEach(p=>{
+          const ps=img2scr(p.x*ANN.imgW,p.y*ANN.imgH);
+          ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
+          ctx.beginPath();ctx.arc(ps.x,ps.y,HANDLE-1,0,Math.PI*2);ctx.fill();ctx.stroke();
+        });
+      }
+      ctx.restore();
+      return; // skip rect/ellipse path
+    }
+
+    // ── Rect / Ellipse shape ──
+    const cx_scr=lb.xc*ANN.imgW*Z+ox, cy_scr=lb.yc*ANN.imgH*Z+oy;
+    const bw=lb.w*ANN.imgW*Z, bh=lb.h*ANN.imgH*Z;
+    const angle=lb.angle||0;
+    ctx.save();
+    ctx.translate(cx_scr,cy_scr);
+    ctx.rotate(angle);
+    if(shape==='ellipse'){
+      ctx.fillStyle=color;ctx.globalAlpha=isSel?0.25:0.1;
+      ctx.beginPath();ctx.ellipse(0,0,bw/2,bh/2,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+      ctx.strokeStyle=color;ctx.lineWidth=isSel?3:1.5;ctx.setLineDash([]);ctx.stroke();
+    } else {
+      ctx.fillStyle=color;ctx.globalAlpha=isSel?0.25:0.1;ctx.fillRect(-bw/2,-bh/2,bw,bh);ctx.globalAlpha=1;
+      ctx.strokeStyle=color;ctx.lineWidth=isSel?3:1.5;ctx.setLineDash([]);ctx.strokeRect(-bw/2,-bh/2,bw,bh);
+    }
+    // label text (always horizontal, drawn at top-left of rotated box)
     const fs=Math.max(10,12);ctx.font=fs+'px sans-serif';
     const cn=ANN.classes[lb.cls]||`cls_${lb.cls}`;
-    const tm=ctx.measureText(cn);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(x1,y1-fs-4,tm.width+6,fs+4);
-    ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(cn,x1+3,y1-4);
+    const shapeTag=(shape!=='rect'||angle)?` [${shape}${angle?(' '+Math.round(angle*180/Math.PI)+'\u00b0'):''}]`:'';// eslint-disable-line no-useless-escape
+    const labelText=cn+shapeTag;
+    const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(-bw/2,-bh/2-fs-4,tm.width+6,fs+4);
+    ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,-bw/2+3,-bh/2-4);
     if(isSel){
-      [[x1,y1],[x1+bw,y1],[x1,y1+bh],[x1+bw,y1+bh]].forEach(([cx,cy])=>{
+      // corner handles
+      [[-bw/2,-bh/2],[bw/2,-bh/2],[-bw/2,bh/2],[bw/2,bh/2]].forEach(([hx,hy])=>{
         ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
-        ctx.beginPath();ctx.arc(cx,cy,HANDLE,0,Math.PI*2);ctx.fill();ctx.stroke();
+        ctx.beginPath();ctx.arc(hx,hy,HANDLE,0,Math.PI*2);ctx.fill();ctx.stroke();
       });
+      // rotation handle (above top center)
+      ctx.strokeStyle='#ffff00';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(0,-bh/2);ctx.lineTo(0,-bh/2-ROT_HANDLE_DIST);ctx.stroke();
+      ctx.fillStyle='#ffff00';ctx.strokeStyle='#333';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(0,-bh/2-ROT_HANDLE_DIST,HANDLE+1,0,Math.PI*2);ctx.fill();ctx.stroke();
     }
+    ctx.restore();
   });
 
   // draw OCR overlay
@@ -805,12 +877,21 @@ function annDraw(){
     });
   }
 
-  // draw in-progress box
+  // draw in-progress box or freehand polygon
   if(ANN.dragMode==='draw'&&ANN.dragStart&&ANN.dragOrig){
     const s1=img2scr(ANN.dragStart.x,ANN.dragStart.y),s2=img2scr(ANN.dragOrig.x,ANN.dragOrig.y);
     const dx1=Math.min(s1.x,s2.x),dy1=Math.min(s1.y,s2.y);
     const dw=Math.abs(s1.x-s2.x),dh=Math.abs(s1.y-s2.y);
     ctx.strokeStyle=COLORS[ANN.drawClass%COLORS.length];ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.strokeRect(dx1,dy1,dw,dh);ctx.setLineDash([]);
+  }
+  if(ANN.dragMode==='draw_poly'&&ANN.polyPoints&&ANN.polyPoints.length>1){
+    ctx.strokeStyle=COLORS[ANN.drawClass%COLORS.length];ctx.lineWidth=2;ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    const p0=img2scr(ANN.polyPoints[0].x,ANN.polyPoints[0].y);
+    ctx.moveTo(p0.x,p0.y);
+    for(let i=1;i<ANN.polyPoints.length;i++){const pi=img2scr(ANN.polyPoints[i].x,ANN.polyPoints[i].y);ctx.lineTo(pi.x,pi.y);}
+    ctx.closePath();ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=COLORS[ANN.drawClass%COLORS.length];ctx.globalAlpha=0.15;ctx.fill();ctx.globalAlpha=1;
   }
 
   // update info
@@ -819,45 +900,113 @@ function annDraw(){
   annBuildBoxList();
 }
 
-// ── hit testing (in image space) ──
+// ── rotation-aware coordinate helpers ──
+function _rotatePoint(px,py,cx,cy,angle){
+  const cos=Math.cos(-angle),sin=Math.sin(-angle);
+  const dx=px-cx,dy=py-cy;
+  return{x:cx+dx*cos-dy*sin, y:cy+dx*sin+dy*cos};
+}
+function _toLocalBox(ix,iy,lb){
+  // transform image-space point into box-local space (unrotated, origin at box center)
+  const cx=lb.xc*ANN.imgW, cy=lb.yc*ANN.imgH;
+  const angle=lb.angle||0;
+  const r=_rotatePoint(ix,iy,cx,cy,angle);
+  return{x:r.x-cx, y:r.y-cy};
+}
+
+// ── hit testing (in image space, rotation-aware) ──
 function annHitHandle(ix,iy){
   if(ANN.selIdx<0)return null;
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
-  const x1=(lb.xc-lb.w/2)*ANN.imgW, y1=(lb.yc-lb.h/2)*ANN.imgH;
-  const x2=x1+lb.w*ANN.imgW, y2=y1+lb.h*ANN.imgH;
+  if((lb.shape||'rect')==='polygon')return null; // polygons: move only, no corner/rotation handles
+  const hw=lb.w*ANN.imgW/2, hh=lb.h*ANN.imgH/2;
+  const local=_toLocalBox(ix,iy,lb);
   const thr=(HANDLE+3)/ANN.zoom;
-  for(const[cx,cy,tag] of [[x1,y1,'resize-tl'],[x2,y1,'resize-tr'],[x1,y2,'resize-bl'],[x2,y2,'resize-br']])
-    if(Math.hypot(ix-cx,iy-cy)<=thr)return tag;
+  // rotation handle (above top center in local space)
+  const rotY=-hh-ROT_HANDLE_DIST/ANN.zoom;
+  if(Math.hypot(local.x-0,local.y-rotY)<=thr+3/ANN.zoom)return 'rotate';
+  // corner handles
+  for(const[hx,hy,tag] of [[-hw,-hh,'resize-tl'],[hw,-hh,'resize-tr'],[-hw,hh,'resize-bl'],[hw,hh,'resize-br']])
+    if(Math.hypot(local.x-hx,local.y-hy)<=thr)return tag;
   return null;
 }
 function annHitBox(ix,iy){
   const labels=ANN.data[ANN.idx].labels;
   for(let i=labels.length-1;i>=0;i--){
     const lb=labels[i];
-    const x1=(lb.xc-lb.w/2)*ANN.imgW, y1=(lb.yc-lb.h/2)*ANN.imgH;
-    const x2=x1+lb.w*ANN.imgW, y2=y1+lb.h*ANN.imgH;
-    if(ix>=x1&&ix<=x2&&iy>=y1&&iy<=y2)return i;
+    if((lb.shape||'rect')==='polygon'&&lb.points&&lb.points.length>=3){
+      if(_pointInPolygon(ix,iy,lb.points.map(p=>({x:p.x*ANN.imgW,y:p.y*ANN.imgH}))))return i;
+      continue;
+    }
+    const hw=lb.w*ANN.imgW/2, hh=lb.h*ANN.imgH/2;
+    const local=_toLocalBox(ix,iy,lb);
+    if(lb.shape==='ellipse'){
+      if((local.x*local.x)/(hw*hw)+(local.y*local.y)/(hh*hh)<=1)return i;
+    } else {
+      if(local.x>=-hw&&local.x<=hw&&local.y>=-hh&&local.y<=hh)return i;
+    }
   }
   return -1;
 }
 
+// Point-in-polygon (ray casting)
+function _pointInPolygon(px,py,pts){
+  let inside=false;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+    const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y;
+    if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi))inside=!inside;
+  }
+  return inside;
+}
+
+// Simplify polygon (Ramer-Douglas-Peucker)
+function _simplifyPoly(pts,epsilon){
+  if(pts.length<=2)return pts;
+  let maxDist=0,maxIdx=0;
+  const start=pts[0],end=pts[pts.length-1];
+  for(let i=1;i<pts.length-1;i++){
+    const d=_pointLineDist(pts[i],start,end);
+    if(d>maxDist){maxDist=d;maxIdx=i;}
+  }
+  if(maxDist>epsilon){
+    const left=_simplifyPoly(pts.slice(0,maxIdx+1),epsilon);
+    const right=_simplifyPoly(pts.slice(maxIdx),epsilon);
+    return left.slice(0,-1).concat(right);
+  }
+  return[start,end];
+}
+function _pointLineDist(p,a,b){
+  const dx=b.x-a.x,dy=b.y-a.y;
+  const len2=dx*dx+dy*dy;
+  if(len2===0)return Math.hypot(p.x-a.x,p.y-a.y);
+  let t=((p.x-a.x)*dx+(p.y-a.y)*dy)/len2;
+  t=Math.max(0,Math.min(1,t));
+  return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
+}
+
 // ── mouse events ──
-annCanvas.addEventListener('mousedown',e=>{
+annCanvas.addEventListener('pointerdown',e=>{
   if(!ANN.data.length)return;
   // middle button = pan
-  if(e.button===1){e.preventDefault();ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};return;}
+  if(e.button===1){e.preventDefault();ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};annCanvas.setPointerCapture(e.pointerId);return;}
   const pos=annGetMouse(e);
-  if(e.button===2){e.preventDefault();ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;}
+  if(e.button===2){
+    e.preventDefault();
+    annCanvas.setPointerCapture(e.pointerId);
+    const shape=($('ann_shape')||{}).value||'rect';
+    if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];return;}
+    ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;
+  }
   const h=annHitHandle(pos.x,pos.y);
-  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h};return;}
+  if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0};return;}
   const hit=annHitBox(pos.x,pos.y);
-  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annBuildOCRList();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h};return;}
+  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annBuildOCRList();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};return;}
   // check OCR box hit
   const ocrHit=annHitOCR(pos.x,pos.y);
   if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annBuildOCRList();annDraw();return;}
   ANN.selIdx=-1;ocrSelIdx=-1;annBuildOCRList();annDraw();
 });
-annCanvas.addEventListener('mousemove',e=>{
+annCanvas.addEventListener('pointermove',e=>{
   if(!ANN.dragMode)return;
   if(ANN.dragMode==='pan'){
     const cur=annGetScreen(e);
@@ -868,27 +1017,69 @@ annCanvas.addEventListener('mousemove',e=>{
   const pos=annGetMouse(e);
   const dx=pos.x-ANN.dragStart.x, dy=pos.y-ANN.dragStart.y;
   if(ANN.dragMode==='draw'){ANN.dragOrig=pos;annDraw();return;}
+  if(ANN.dragMode==='draw_poly'){ANN.polyPoints.push(pos);annDraw();return;}
   if(ANN.selIdx<0||!ANN.dragOrig)return;
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
-  if(ANN.dragMode==='move'){lb.xc=ANN.dragOrig.xc+dx/ANN.imgW;lb.yc=ANN.dragOrig.yc+dy/ANN.imgH;ANN.dirty=true;annDraw();return;}
+  if(ANN.dragMode==='rotate'){
+    // Compute angle from box center to current mouse position
+    const cx=lb.xc*ANN.imgW, cy=lb.yc*ANN.imgH;
+    const angle=Math.atan2(pos.x-cx,-(pos.y-cy)); // 0 = up
+    lb.angle=angle;ANN.dirty=true;annDraw();return;
+  }
+  if(ANN.dragMode==='move'){
+    lb.xc=ANN.dragOrig.xc+dx/ANN.imgW;lb.yc=ANN.dragOrig.yc+dy/ANN.imgH;
+    if(lb.shape==='polygon'&&lb.points&&ANN.dragOrig.points){
+      const ddx=dx/ANN.imgW,ddy=dy/ANN.imgH;
+      for(let i=0;i<lb.points.length;i++){lb.points[i].x=ANN.dragOrig.points[i].x+ddx;lb.points[i].y=ANN.dragOrig.points[i].y+ddy;}
+    }
+    ANN.dirty=true;annDraw();return;
+  }
+  // Resize in local (unrotated) space
+  const angle=lb.angle||0;
+  const cos=Math.cos(-angle),sin=Math.sin(-angle);
+  const ldx=dx*cos-dy*sin, ldy=dx*sin+dy*cos;
   let ox1=(ANN.dragOrig.xc-ANN.dragOrig.w/2)*ANN.imgW, oy1=(ANN.dragOrig.yc-ANN.dragOrig.h/2)*ANN.imgH;
   let ox2=ox1+ANN.dragOrig.w*ANN.imgW, oy2=oy1+ANN.dragOrig.h*ANN.imgH;
-  if(ANN.dragMode==='resize-tl'){ox1+=dx;oy1+=dy;}if(ANN.dragMode==='resize-tr'){ox2+=dx;oy1+=dy;}
-  if(ANN.dragMode==='resize-bl'){ox1+=dx;oy2+=dy;}if(ANN.dragMode==='resize-br'){ox2+=dx;oy2+=dy;}
+  if(ANN.dragMode==='resize-tl'){ox1+=ldx;oy1+=ldy;}if(ANN.dragMode==='resize-tr'){ox2+=ldx;oy1+=ldy;}
+  if(ANN.dragMode==='resize-bl'){ox1+=ldx;oy2+=ldy;}if(ANN.dragMode==='resize-br'){ox2+=ldx;oy2+=ldy;}
   const nx1=Math.min(ox1,ox2),ny1=Math.min(oy1,oy2),nx2=Math.max(ox1,ox2),ny2=Math.max(oy1,oy2);
   lb.w=(nx2-nx1)/ANN.imgW;lb.h=(ny2-ny1)/ANN.imgH;lb.xc=(nx1+nx2)/2/ANN.imgW;lb.yc=(ny1+ny2)/2/ANN.imgH;
   ANN.dirty=true;annDraw();
 });
-annCanvas.addEventListener('mouseup',e=>{
+annCanvas.addEventListener('pointerup',e=>{
+  if(ANN.dragMode==='draw_poly'&&ANN.polyPoints&&ANN.polyPoints.length>=2){
+    // Simplify freehand path: cap epsilon to avoid over-simplification when zoomed out
+    const epsilon=Math.min(2/ANN.zoom, 4);
+    let simplified=_simplifyPoly(ANN.polyPoints,epsilon);
+    // Fallback: if RDP reduced to < 3 points but we had enough raw points,
+    // keep evenly-spaced subset to preserve the polygon shape
+    if(simplified.length<3&&ANN.polyPoints.length>=3){
+      const raw=ANN.polyPoints;
+      const step=Math.max(1,Math.floor(raw.length/Math.min(raw.length,12)));
+      simplified=[];for(let i=0;i<raw.length;i+=step)simplified.push(raw[i]);
+      if(simplified[simplified.length-1]!==raw[raw.length-1])simplified.push(raw[raw.length-1]);
+    }
+    if(simplified.length>=3){
+      // Normalize to 0-1
+      const npts=simplified.map(p=>({x:p.x/ANN.imgW,y:p.y/ANN.imgH}));
+      // Compute bounding box for xc/yc/w/h fallback
+      const xs=npts.map(p=>p.x),ys=npts.map(p=>p.y);
+      const bx1=Math.min(...xs),by1=Math.min(...ys),bx2=Math.max(...xs),by2=Math.max(...ys);
+      ANN.data[ANN.idx].labels.push({cls:ANN.drawClass,xc:(bx1+bx2)/2,yc:(by1+by2)/2,w:bx2-bx1,h:by2-by1,angle:0,shape:'polygon',points:npts});
+      ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;
+    } else { console.warn('[Annotator] freehand polygon discarded: only',simplified.length,'points after simplify from',ANN.polyPoints.length,'raw'); }
+    ANN.polyPoints=null;
+  }
   if(ANN.dragMode==='draw'&&ANN.dragStart&&ANN.dragOrig){
     const bx1=Math.min(ANN.dragStart.x,ANN.dragOrig.x),by1=Math.min(ANN.dragStart.y,ANN.dragOrig.y);
     const bw=Math.abs(ANN.dragStart.x-ANN.dragOrig.x),bh=Math.abs(ANN.dragStart.y-ANN.dragOrig.y);
     if(bw>3&&bh>3){
-      ANN.data[ANN.idx].labels.push({cls:ANN.drawClass,xc:(bx1+bw/2)/ANN.imgW,yc:(by1+bh/2)/ANN.imgH,w:bw/ANN.imgW,h:bh/ANN.imgH});
+      const shape=($('ann_shape')||{}).value||'rect';
+      ANN.data[ANN.idx].labels.push({cls:ANN.drawClass,xc:(bx1+bw/2)/ANN.imgW,yc:(by1+bh/2)/ANN.imgH,w:bw/ANN.imgW,h:bh/ANN.imgH,angle:0,shape:shape});
       ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;
     }
   }
-  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;annDraw();
+  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;ANN.polyPoints=null;annDraw();
 });
 annCanvas.addEventListener('contextmenu',e=>e.preventDefault());
 
@@ -967,7 +1158,18 @@ async function annRunFlorence(){
 async function annSave(){
   if(!ANN.data.length)return;
   const item=ANN.data[ANN.idx];
-  const lines=item.labels.map(lb=>`${lb.cls} ${lb.xc.toFixed(6)} ${lb.yc.toFixed(6)} ${lb.w.toFixed(6)} ${lb.h.toFixed(6)}`);
+  const lines=item.labels.map(lb=>{
+    const shape=lb.shape||'rect';
+    if(shape==='polygon'&&lb.points&&lb.points.length>=3){
+      // polygon format: cls xc yc w h 0.0 polygon x1,y1;x2,y2;...
+      const ptsStr=lb.points.map(p=>`${p.x.toFixed(6)},${p.y.toFixed(6)}`).join(';');
+      return `${lb.cls} ${lb.xc.toFixed(6)} ${lb.yc.toFixed(6)} ${lb.w.toFixed(6)} ${lb.h.toFixed(6)} 0.000000 polygon ${ptsStr}`;
+    }
+    const base=`${lb.cls} ${lb.xc.toFixed(6)} ${lb.yc.toFixed(6)} ${lb.w.toFixed(6)} ${lb.h.toFixed(6)}`;
+    const angle=lb.angle||0;
+    if(angle||shape!=='rect') return `${base} ${angle.toFixed(6)} ${shape}`;
+    return base;
+  });
   try{
     await api('/api/v1/datasets/save_labels',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({dataset:ANN.dataset,img:item.img,labels:lines.join('\n')})});

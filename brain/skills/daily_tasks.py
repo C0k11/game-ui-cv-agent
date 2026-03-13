@@ -121,14 +121,6 @@ class DailyTasksSkill(BaseSkill):
             if tasks_btn:
                 return action_click_box(tasks_btn, "click tasks from lobby")
 
-            task_icon = self._find_florence_hit(
-                screen,
-                ["tasks icon", "mission button", "daily tasks button"],
-                region=(0.0, 0.18, 0.22, 0.50),
-            )
-            if task_icon:
-                return action_click_box(task_icon, "click task icon via Florence")
-
             # Fallback: tasks button is often in bottom-left area or sidebar
             # Try nav bar
             nav = self._nav_to(screen, ["工作", "任務", "任务"])
@@ -207,17 +199,7 @@ class DailyTasksSkill(BaseSkill):
         These are usually small chest icons along an activity progress bar.
         They become claimable (glow/animate) when activity points reach thresholds.
         """
-        chest = self._find_florence_hit(
-            screen,
-            ["claimable chest icon", "reward chest", "activity chest"],
-            region=(0.20, 0.05, 0.90, 0.24),
-        )
-        if chest:
-            self.log(f"clicking activity chest at ({chest.cx:.2f},{chest.cy:.2f})")
-            self._chests_claimed += 1
-            return action_click_box(chest, "claim activity chest")
-
-        # OCR fallback: look for activity progress text and click chest areas
+        # Look for activity progress text and click chest areas
         # Activity bar is usually at top of tasks screen (y: 0.10-0.20)
         activity = screen.find_any_text(
             ["活躍度", "活跃度", "Activity"],

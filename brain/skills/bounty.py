@@ -25,6 +25,12 @@ from brain.skills.base import (
 
 
 class BountySkill(BaseSkill):
+    _BRANCHES = [
+        ("高架公路", ["高架公路", "高架", "Overpass"], (0.90, 0.25)),
+        ("沙漠鐵道", ["沙漠鐵道", "沙漠铁道", "沙漠", "Railway"], (0.90, 0.41)),
+        ("教室", ["教室", "Classroom"], (0.90, 0.57)),
+    ]
+
     def __init__(self):
         super().__init__("Bounty")
         self.max_ticks = 60
@@ -32,6 +38,7 @@ class BountySkill(BaseSkill):
         self._sweep_stage: int = 0  # 0=select, 1=click sweep, 2=click max, 3=confirm, 4=done
         self._sweep_attempts: int = 0
         self._enter_attempts: int = 0
+        self._branch_idx: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -41,6 +48,14 @@ class BountySkill(BaseSkill):
         self._stage_ticks = 0
         self._loc_ticks = 0
         self._enter_attempts = 0
+        self._branch_idx = 0
+
+    def _advance_branch(self) -> None:
+        self._branch_idx = (self._branch_idx + 1) % len(self._BRANCHES)
+        self._loc_ticks = 0
+        self._stage_ticks = 0
+        self._sweep_stage = 0
+        self._sweep_attempts = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -60,13 +75,6 @@ class BountySkill(BaseSkill):
             cancel = screen.find_any_text(["取消"], min_conf=0.7)
             if cancel:
                 return action_click_box(cancel, "cancel AP purchase")
-            close_btn = self._find_florence_hit(
-                screen,
-                ["close button icon", "close dialog x button", "x close icon"],
-                region=(0.0, 0.0, 0.93, 0.30),
-            )
-            if close_btn:
-                return action_click_box(close_btn, "close AP popup")
             return action_back("dismiss AP popup")
 
         # Sweep result popup — dismiss and continue
@@ -231,7 +239,8 @@ class BountySkill(BaseSkill):
                     self.sub_state = "exit"
                     return action_wait(300, "no bounty tickets")
                 self.sub_state = "select_location"
-                return action_wait(300, f"have {remaining} tickets, selecting location")
+                branch_name = self._BRANCHES[self._branch_idx][0]
+                return action_wait(300, f"have {remaining} tickets, selecting '{branch_name}'")
 
         # If we can't parse tickets after a few ticks, proceed anyway
         if self.ticks > 10:
@@ -253,40 +262,43 @@ class BountySkill(BaseSkill):
         If already past LocationSelect (stage list visible with 入場), skip ahead.
         """
         self._loc_ticks = getattr(self, '_loc_ticks', 0) + 1
+        branch_name, aliases, fallback_pos = self._BRANCHES[self._branch_idx]
 
-        # Already in stage list? (入場 buttons visible → skip to select_stage)
+        # Try selecting the target branch by OCR first.
+        for alias in aliases:
+            hit = screen.find_text_one(alias, region=(0.68, 0.12, 1.0, 0.72), min_conf=0.55)
+            if hit:
+                self.log(f"selecting branch '{branch_name}' via '{hit.text}'")
+                self.sub_state = "select_stage"
+                self._stage_ticks = 0
+                return action_click_box(hit, f"select bounty branch '{branch_name}'")
+
+        # Hardcoded fallback for this branch (location cards in right panel).
+        if self._loc_ticks > 2:
+            self.log(f"selecting branch '{branch_name}' at hardcoded position")
+            self.sub_state = "select_stage"
+            self._stage_ticks = 0
+            return action_click(*fallback_pos, f"select bounty branch '{branch_name}' (hardcoded)")
+
+        # Already in stage list? Continue with stage selection.
         enter_btns = [
             b for b in screen.ocr_boxes
             if b.confidence >= 0.6 and b.cx > 0.70
             and ("入場" in b.text or "入场" in b.text)
         ]
         if enter_btns:
-            self.log("already in stage list, skipping to select_stage")
+            self.log(f"stage list visible for branch '{branch_name}'")
             self.sub_state = "select_stage"
             self._stage_ticks = 0
             return action_wait(300, "stage list visible")
 
-        # Look for location names and click them
-        locations = screen.find_any_text(
-            ["高架公路", "沙漠鐵道", "沙漠铁道", "教室"],
-            region=(0.70, 0.15, 1.0, 0.70), min_conf=0.7
-        )
-        if locations:
-            self.log(f"clicking location '{locations.text}'")
-            return action_click_box(locations, f"select bounty location '{locations.text}'")
-
-        # Fallback: click first location card area
-        if self._loc_ticks > 3:
-            self.log("clicking first location (fallback)")
-            return action_click(0.90, 0.25, "click first bounty location (fallback)")
-
-        if self._loc_ticks > 6:
+        if self._loc_ticks > 8:
             self.log("location select timeout, trying select_stage anyway")
             self.sub_state = "select_stage"
             self._stage_ticks = 0
             return action_wait(300, "location select timeout")
 
-        return action_wait(500, "waiting for location select")
+        return action_wait(500, f"waiting for branch '{branch_name}'")
 
     def _select_stage(self, screen: ScreenState) -> Dict[str, Any]:
         """Select the last (highest) stage from the stage list (關卡目錄).
@@ -345,9 +357,10 @@ class BountySkill(BaseSkill):
         self._sweep_attempts += 1
 
         if self._sweep_attempts > 25:
-            self.log("sweep stuck, exiting")
-            self.sub_state = "exit"
-            return action_wait(300, "sweep timeout")
+            self.log("sweep stuck, rotating branch")
+            self._advance_branch()
+            self.sub_state = "check_tickets"
+            return action_wait(300, "sweep timeout, try next branch")
 
         # Stage 0: Wait for 任務資訊 popup → click MAX
         if self._sweep_stage == 0:
@@ -434,7 +447,8 @@ class BountySkill(BaseSkill):
                 )
                 if popup_max:
                     self.log("sweep completed (popup returned)")
-                    self.sub_state = "exit"
+                    self._advance_branch()
+                    self.sub_state = "check_tickets"
                     return action_back("close popup after sweep")
 
             return action_wait(400, "waiting for confirm dialog")
@@ -446,8 +460,10 @@ class BountySkill(BaseSkill):
                 min_conf=0.6
             )
             if ok:
-                self.log("sweep done, dismissing result")
-                self.sub_state = "exit"
+                done_branch = self._BRANCHES[self._branch_idx][0]
+                self.log(f"sweep done on '{done_branch}', moving to next branch")
+                self._advance_branch()
+                self.sub_state = "check_tickets"
                 return action_click_box(ok, "dismiss sweep result")
             # Click anywhere to dismiss
             return action_click(0.5, 0.9, "dismiss sweep result")

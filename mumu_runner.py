@@ -103,6 +103,31 @@ class AdbInput:
     def back(self) -> bool:
         return self._shell("input keyevent 4")  # KEYCODE_BACK
 
+    def capture_frame(self) -> Optional[np.ndarray]:
+        try:
+            r = subprocess.run(
+                [self._adb, "-s", self.addr, "exec-out", "screencap", "-p"],
+                capture_output=True,
+                timeout=8,
+            )
+            data = bytes(r.stdout or b"")
+            if not data:
+                return None
+            if data.startswith(b"\x89PNG"):
+                png_bytes = data
+            else:
+                png_bytes = data.replace(b"\r\n", b"\n")
+            arr = np.frombuffer(png_bytes, dtype=np.uint8)
+            if arr.size == 0:
+                return None
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None or frame.size == 0:
+                return None
+            return frame
+        except Exception as e:
+            print(f"[ADB] capture_frame error: {e}")
+            return None
+
     def screen_size(self) -> Tuple[int, int]:
         """Get the Android screen resolution via ADB (landscape-corrected).
 

@@ -529,13 +529,8 @@ def capture_client(hwnd: int) -> Image.Image:
         img0 = _capture_window_dc()
         try:
             img1 = _capture_desktop_dc()
-            if not _is_nearly_black(img1):
-                if _is_nearly_black(img0):
-                    return img1
-                s0 = _sig(img0)
-                s1 = _sig(img1)
-                if s0 and s1 and s0 != s1:
-                    return img1
+            if _is_nearly_black(img0) and not _is_nearly_black(img1):
+                return img1
         except Exception:
             pass
         return img0
