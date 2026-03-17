@@ -416,7 +416,7 @@ class EventActivitySkill(BaseSkill):
         # After clicking 任務開始, lands on formation screen.
         # reference: click (1156/1280, 659/720) = (0.903, 0.915) for sortie button
         sortie = screen.find_any_text(
-            ["出擊", "出击", "出撃", "開始作戰", "开始作战",
+            ["出擊", "出击", "出撃", "出擎", "開始作戰", "开始作战",
              "戰鬥開始", "战斗开始"],
             region=(0.70, 0.75, 1.0, 0.98),
             min_conf=0.55,
@@ -520,7 +520,7 @@ class EventActivitySkill(BaseSkill):
 
         # ── Formation screen ──
         sortie = screen.find_any_text(
-            ["出擊", "出击", "出撃", "開始作戰", "开始作战",
+            ["出擊", "出击", "出撃", "出擎", "開始作戰", "开始作战",
              "戰鬥開始", "战斗开始"],
             region=(0.70, 0.75, 1.0, 0.98),
             min_conf=0.55,

@@ -65,7 +65,7 @@ def _get_ocr():
 
 # ── YOLO Detector (singleton) ───────────────────────────────────────
 
-_yolo_models = []   # list of loaded YOLO model objects
+_yolo_models = []   # list of (model, conf_threshold) tuples
 _yolo_lock = None
 _YOLO_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "_yolo_full.pt"
 # Battle + headpat models loaded in parallel
@@ -83,6 +83,7 @@ def _get_yolo():
     """Get or create YOLO model(s) (lazy singleton). Only loads on first call.
 
     Loads all available model files (battle_heads + emoticon + full).
+    Each entry is a (model, conf_threshold) tuple.
     Returns the first model for backward compat; _yolo_models holds all.
     """
     global _yolo_models, _yolo_lock, _yolo_load_attempts, _yolo_status
@@ -95,13 +96,18 @@ def _get_yolo():
         if _yolo_load_attempts >= _MAX_YOLO_LOAD_ATTEMPTS:
             return None
         _yolo_load_attempts += 1
-        candidates = []
+        # Per-model confidence thresholds:
+        # battle_heads: 0.45 (well-defined targets; 0.15 causes false positives
+        #   on cafe sprites at conf 0.25-0.47)
+        # emoticon: 0.15 (headpat bubbles on 2F score as low as 0.18)
+        # full: 0.25 (general model, moderate threshold)
+        candidates = []  # (path, conf_threshold)
         if _YOLO_BATTLE_HEADS.is_file():
-            candidates.append(_YOLO_BATTLE_HEADS)
+            candidates.append((_YOLO_BATTLE_HEADS, 0.45))
         if _YOLO_EMOTICON.is_file():
-            candidates.append(_YOLO_EMOTICON)
+            candidates.append((_YOLO_EMOTICON, 0.15))
         if _YOLO_MODEL_PATH.is_file():
-            candidates.append(_YOLO_MODEL_PATH)
+            candidates.append((_YOLO_MODEL_PATH, 0.25))
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
@@ -109,19 +115,19 @@ def _get_yolo():
         from ultralytics import YOLO
         import numpy as np
         loaded_names = []
-        for model_path in candidates:
+        for model_path, model_conf in candidates:
             try:
                 m = YOLO(str(model_path))
                 m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
-                _yolo_models.append(m)
+                _yolo_models.append((m, model_conf))
                 loaded_names.append(f"{model_path.stem}({len(m.names)}cls)")
-                print(f"[Pipeline] YOLO loaded from {model_path}")
+                print(f"[Pipeline] YOLO loaded from {model_path} (conf={model_conf})")
             except Exception as e:
                 print(f"[Pipeline] YOLO load failed for {model_path}: {e}")
                 continue
         if _yolo_models:
             _yolo_status = f"loaded_ok: {', '.join(loaded_names)}"
-            return _yolo_models[0]
+            return _yolo_models[0][0]
         _yolo_status = "all_candidates_failed"
         return None
 
@@ -186,9 +192,9 @@ def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
             print(f"[Pipeline] YOLO unavailable: {_yolo_status}")
             _run_yolo_on_image._warned = True
         return yolo_boxes
-    for yolo in _yolo_models:
+    for yolo, model_conf in _yolo_models:
         try:
-            yolo_results = yolo(img, conf=0.15, verbose=False)
+            yolo_results = yolo(img, conf=model_conf, verbose=False)
             for r in yolo_results:
                 for box in r.boxes:
                     bx1, by1, bx2, by2 = box.xyxy[0].tolist()
