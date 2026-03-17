@@ -390,20 +390,22 @@ class EventFarmingSkill(BaseSkill):
 
         # ── Non-夏莱 event type: Story/Quest/Challenge tabs ──
         # These events show tabs like "Story", "Quest", "Challenge" at top-right
-        # and have 劇情/商店/任務/抽卡 buttons at bottom
+        # and have 劇情/商店/任務/抽卡 buttons at bottom.
+        # IMPORTANT: click the "Quest" TAB (top, combat quests with Normal/Hard),
+        # NOT the bottom nav "任務" (daily event missions like card draws).
+        quest_tab = screen.find_any_text(
+            ["Quest"],
+            region=(0.60, 0.08, 0.85, 0.22), min_conf=0.6
+        )
         story_tab = screen.find_any_text(
-            ["Story", "Quest", "Challenge"],
-            min_conf=0.6
+            ["Story", "Challenge"],
+            region=(0.50, 0.08, 1.0, 0.22), min_conf=0.6
         )
-        quest_btn = screen.find_any_text(
-            ["任務", "任务"],
-            region=(0.15, 0.80, 0.50, 0.98), min_conf=0.7
-        )
-        if story_tab and quest_btn:
-            self.log("non-夏莱 event type (Story/Quest tabs), clicking 任務")
+        if quest_tab and (story_tab or event_header):
+            self.log("non-夏莱 event type, clicking Quest tab (top)")
             self.sub_state = "check_normal"
             self._checked_normal = True
-            return action_click_box(quest_btn, "click 任務 on story event page")
+            return action_click_box(quest_tab, "click Quest tab on event page")
 
         if event_header or item_method:
             self.log("on 活動 page (夏莱 event type)")
@@ -504,28 +506,45 @@ class EventFarmingSkill(BaseSkill):
     def _check_normal(self, screen: ScreenState) -> Dict[str, Any]:
         """Check if 任務 (normal missions) has 活動進行中 badge.
 
-        After clicking 任務's 入場 on the 活動 page, we land on the
-        normal missions page (header: 任務, with Normal/Hard tabs).
+        After clicking Quest tab or 任務's 入場 on the 活動 page, we land
+        on the quest page (Normal/Hard tabs visible).
 
         Flow:
         1. Default lands on Normal tab → check for 活動進行中
         2. If not found → click Hard tab → check again
         3. If still not found → back to 活動 page
         """
-        # First: verify we're actually on the 任務 page.
-        # Must see header "任務" at top-left AND one of Normal/Hard tabs.
-        # This prevents false positives from lobby or transition screens.
+        self._check_normal_ticks = getattr(self, '_check_normal_ticks', 0) + 1
+
+        # Detect wrong page: "活動任務" header = event daily missions (card draws)
+        # This means we clicked the bottom nav "任務" instead of Quest tab.
+        wrong_page = screen.find_any_text(
+            ["活動任務", "活动任务"],
+            region=(0.0, 0.0, 0.25, 0.08), min_conf=0.7
+        )
+        if wrong_page:
+            self.log("on wrong page (活動任務 daily missions), backing out")
+            self._check_normal_ticks = 0
+            self.sub_state = "enter_event"
+            return action_back("back from 活動任務 (wrong page)")
+
+        # Verify we're on the quest page: Normal/Hard tabs visible, or
+        # header "任務" at top-left. Accept tabs alone (Quest tab view).
         mission_header = screen.find_any_text(
             ["任務", "任务"],
             region=(0.0, 0.0, 0.20, 0.08), min_conf=0.7
         )
         normal_tab = screen.find_any_text(["Normal"], min_conf=0.6)
         hard_tab = screen.find_any_text(["Hard"], min_conf=0.6)
-        on_mission_page = mission_header and (normal_tab or hard_tab)
+        on_mission_page = (normal_tab or hard_tab) and (mission_header or normal_tab or hard_tab)
 
         if not on_mission_page:
-            # Not on 任務 page yet — could be loading or transitioning
-            return action_wait(500, "waiting for 任務 page to load")
+            if self._check_normal_ticks > 15:
+                self.log("stuck waiting for quest page, backing out")
+                self._check_normal_ticks = 0
+                self.sub_state = "enter_event"
+                return action_back("timeout waiting for quest page")
+            return action_wait(500, "waiting for quest page to load")
 
         # We're confirmed on the 任務 page. Check for 活動進行中.
         # The badge appears in the left panel area (~x < 0.5, y 0.1-0.5).
@@ -606,10 +625,14 @@ class EventFarmingSkill(BaseSkill):
         self._scan_done = True
 
         # Detect event timer
+        # OCR frequently misreads: 離→雕/離, drops 還, etc.
         event_timer = screen.find_any_text(
-            ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩"],
+            ["距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩",
+             "結束剩", "结束剩"],
             min_conf=0.5
         )
+        if not event_timer:
+            event_timer = screen.find_text_one(r"距.{0,2}[结結]束.{0,2}剩", min_conf=0.5)
         if event_timer:
             self._has_event = True
             self.log(f"global event detected: '{event_timer.text}'")
@@ -622,13 +645,14 @@ class EventFarmingSkill(BaseSkill):
         event_badges += screen.find_text("活勤进行", min_conf=0.5)
 
         # Find the campaign section labels and check which ones have badges near them
+        # OCR often truncates 特殊任務→特殊任 or misreads 務→努
         special_label = screen.find_any_text(
-            ["特殊任務", "特殊任务"],
-            min_conf=0.6
+            ["特殊任務", "特殊任务", "特殊任"],
+            min_conf=0.5
         )
         normal_label = screen.find_any_text(
-            ["任務", "任务"],
-            min_conf=0.6
+            ["任務", "任务", "任努"],
+            min_conf=0.5
         )
         # Filter out the one that's just the header
         if normal_label and special_label:
@@ -644,6 +668,11 @@ class EventFarmingSkill(BaseSkill):
             if normal_label and self._is_badge_near(badge, normal_label):
                 self._event_on_normal = True
                 self.log("event bonus on 任務!")
+
+        # If badges found but couldn't match to any label, assume event on special
+        if event_badges and not self._event_on_special and not self._event_on_normal:
+            self._event_on_special = True
+            self.log(f"event badge found ({len(event_badges)}) but no label matched, assuming special")
 
         # If no badges found but event timer exists, both could have bonus
         if self._has_event and not self._event_on_special and not self._event_on_normal:
@@ -671,7 +700,7 @@ class EventFarmingSkill(BaseSkill):
         # Badge should be within ~0.15 horizontal and ~0.12 vertical of label
         dx = abs(badge.cx - label.cx)
         dy = label.cy - badge.cy  # badge usually above label
-        return dx < 0.20 and -0.05 < dy < 0.15
+        return dx < 0.25 and -0.05 < dy < 0.22
 
     # Campaign hub button positions (normalized, measured from MuMu 3840x2160).
     # OCR is unreliable on this screen — use hardcoded positions as fallback.

@@ -527,6 +527,9 @@ class CafeSkill(BaseSkill):
         if self._enter_attempts > 8:
             if self._looks_like_lobby(screen):
                 return action_click(0.08, 0.95, "force click cafe nav from lobby-like screen")
+            # Don't send back on loading/transition screens (low OCR) — wait instead
+            if len(screen.ocr_boxes) < 5:
+                return action_wait(800, "low OCR, likely loading — waiting")
             return action_back("recover from unknown screen before entering cafe")
 
         return action_wait(500, "entering cafe")
@@ -548,6 +551,12 @@ class CafeSkill(BaseSkill):
             return action_wait(300, "earnings done, moving to invite")
 
         if not self._is_cafe(screen):
+            # If we're clearly on the lobby, go back to enter state
+            if self._looks_like_lobby(screen):
+                self.log("earnings: on lobby, resetting to enter")
+                self.sub_state = "enter"
+                self._enter_attempts = 0
+                return action_wait(300, "earnings: back on lobby, re-entering cafe")
             return action_wait(500, "waiting for cafe UI")
 
         def _read_earnings_pct() -> float:
@@ -699,6 +708,11 @@ class CafeSkill(BaseSkill):
             return action_wait(300, f"invite done/skip, starting {self._invite_next_state}")
 
         if not self._is_cafe(screen):
+            if self._looks_like_lobby(screen):
+                self.log("invite: on lobby, resetting to enter")
+                self.sub_state = "enter"
+                self._enter_attempts = 0
+                return action_wait(300, "invite: back on lobby, re-entering cafe")
             return action_wait(500, "waiting for cafe UI (invite)")
 
         self._invite_ticks += 1

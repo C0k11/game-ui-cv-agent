@@ -81,7 +81,6 @@
       ],
       "skill_order": [
         "lobby",
-        "ap_overflow",
         "event_activity",
         "event_farming",
         "cafe",
@@ -90,15 +89,10 @@
         "momo_talk",
         "shop",
         "craft",
-        "story_cleanup",
         "bounty",
         "mail",
         "daily_tasks",
-        "pass_reward",
-        "ap_planning",
-        "hard_farming",
-        "event_farming_2",
-        "campaign_push"
+        "event_farming_2"
       ]
     }
   },

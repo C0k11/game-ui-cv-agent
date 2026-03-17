@@ -75,13 +75,9 @@ _YOLO_EMOTICON = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
 _yolo_status = "not_attempted"
-_YOLO_ALLOWED_SUBSTRINGS = (
-    "角色头像",
-    "角色可摸头黄色感叹号",
-    "感叹号",
-    "Emoticon_Action",
-    "headpat_bubble",
-)
+# No class-name filter — purpose-built models (battle_heads, emoticon) only
+# contain relevant classes.  The old _YOLO_ALLOWED_SUBSTRINGS gate silently
+# dropped every detection from battle_heads whose classes are c0-c3.
 
 def _get_yolo():
     """Get or create YOLO model(s) (lazy singleton). Only loads on first call.
@@ -199,8 +195,6 @@ def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
                     cls_id = int(box.cls[0])
                     cls_name = yolo.names.get(cls_id, str(cls_id))
                     cls_low = str(cls_name).lower()
-                    if not any(token.lower() in cls_low for token in _YOLO_ALLOWED_SUBSTRINGS):
-                        continue
                     nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h
                     # Filter headpat/emoticon: only accept in cafe play area
                     if "headpat" in cls_low or "emoticon" in cls_low:

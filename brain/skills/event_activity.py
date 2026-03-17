@@ -34,6 +34,8 @@ class EventActivitySkill(BaseSkill):
         self._story_done: bool = False
         self._story_tab_clicked: bool = False
         self._story_idle_ticks: int = 0
+        self._skip_stage: int = 0  # 0=not skipping, 1=clicked MENU, 2=clicked Skip, 3=done
+        self._cutscene_taps: int = 0  # how many times we tapped to advance cutscene
 
         self._challenge_done: bool = False
         self._challenge_tab_clicked: bool = False
@@ -52,6 +54,8 @@ class EventActivitySkill(BaseSkill):
         self._story_done = False
         self._story_tab_clicked = False
         self._story_idle_ticks = 0
+        self._skip_stage = 0
+        self._cutscene_taps = 0
 
         self._challenge_done = False
         self._challenge_tab_clicked = False
@@ -194,9 +198,13 @@ class EventActivitySkill(BaseSkill):
             return action_wait(200, "event phases complete")
 
         if self._is_event_story_screen(screen):
+            if self._story_done:
+                # Story marked done but still on cutscene — skip via MENU→Skip
+                self.log("cutscene after story done, skipping via MENU")
+                self._skip_stage = 0
             self._phase_ticks = 0
+            self._story_idle_ticks = 0  # reset to prevent immediate exit
             self.sub_state = "story"
-            self.log("event story/cutscene screen detected -> story phase")
             return action_wait(250, "start event story phase from cutscene")
 
         current = self.detect_current_screen(screen)
@@ -275,12 +283,109 @@ class EventActivitySkill(BaseSkill):
     def _story(self, screen: ScreenState) -> Dict[str, Any]:
         self._phase_ticks += 1
 
-        # Handle cutscene/dialog first.
-        skip = screen.find_any_text(["SKIP", "Skip", "跳過", "跳过"], min_conf=0.7)
-        if skip:
-            self._story_idle_ticks = 0
-            return action_click_box(skip, "skip event story cutscene")
+        # Detect expired event — skip all phases immediately
+        ended = screen.find_any_text(
+            ["已结束", "已結束", "活動期已", "活动期已"],
+            min_conf=0.6,
+        )
+        if ended:
+            self.log(f"event ended: '{ended.text}', skipping story")
+            self._story_done = True
+            self._challenge_done = True
+            self._mission_done = True
+            self.sub_state = "exit"
+            return action_wait(200, "event ended, skipping all phases")
 
+        # ── Cutscene / dialog screen (AUTO + MENU visible) ──
+        # BA hides Skip behind MENU. Flow: MENU → Skip → Confirm.
+        # reference coordinates (1280×720): MENU(1205,34) Skip(1213,116) Confirm(766,520)
+        on_cutscene = self._is_event_story_screen(screen)
+        if on_cutscene:
+            self._story_idle_ticks = 0  # cutscene is NOT idle
+
+            # Direct SKIP button visible (some screens show it directly)
+            skip = screen.find_any_text(
+                ["SKIP", "Skip", "跳過", "跳过"],
+                min_conf=0.65,
+            )
+            if skip:
+                self._skip_stage = 2
+                return action_click_box(skip, "click visible SKIP")
+
+            # Skip confirmation dialog (center of screen)
+            # OCR often truncates "確認" → "確", so match single char too.
+            if self._skip_stage >= 2:
+                self._cutscene_taps += 1
+                confirm = screen.find_any_text(
+                    ["確認", "确认", "確定", "确定", "OK", "Yes", "確", "确"],
+                    region=(0.45, 0.55, 0.80, 0.85),
+                    min_conf=0.55,
+                )
+                if confirm:
+                    self._skip_stage = 3
+                    self._cutscene_taps = 0
+                    return action_click_box(confirm, "confirm story skip")
+                # Detect "是否略過此劇情" dialog → click confirm area
+                skip_prompt = screen.find_any_text(
+                    ["略過", "略过", "是否略", "跳過此"],
+                    region=(0.30, 0.45, 0.70, 0.70),
+                    min_conf=0.55,
+                )
+                if skip_prompt:
+                    self._skip_stage = 3
+                    self._cutscene_taps = 0
+                    # reference confirm pos: (766/1280, 520/720) = (0.60, 0.72)
+                    return action_click(0.60, 0.72, "confirm skip (hardcoded)")
+                # Fallback: after 10 ticks reset, after 5 blind-click
+                if self._cutscene_taps >= 10:
+                    self._cutscene_taps = 0
+                    self._skip_stage = 0
+                    return action_wait(200, "skip confirm timeout, retrying")
+                if self._cutscene_taps >= 5:
+                    return action_click(0.60, 0.72, "confirm skip (timeout fallback)")
+                return action_wait(300, "waiting for skip confirm dialog")
+
+            # Stage 0: click MENU to reveal skip option
+            if self._skip_stage == 0:
+                menu = screen.find_any_text(
+                    ["MENU"],
+                    region=(0.82, 0.0, 1.0, 0.14),
+                    min_conf=0.65,
+                )
+                if menu:
+                    self._skip_stage = 1
+                    return action_click_box(menu, "click MENU to reveal skip")
+                # MENU not found by OCR — try hardcoded position
+                self._skip_stage = 1
+                return action_click(0.94, 0.05, "click MENU (hardcoded)")
+
+            # Stage 1: MENU was clicked, look for Skip button in dropdown
+            if self._skip_stage == 1:
+                skip_btn = screen.find_any_text(
+                    ["SKIP", "Skip", "跳過", "跳过", "スキップ"],
+                    min_conf=0.55,
+                )
+                if skip_btn:
+                    self._skip_stage = 2
+                    return action_click_box(skip_btn, "click Skip in menu")
+                # Try hardcoded position (reference: 1213/1280, 116/720)
+                self._skip_stage = 2
+                return action_click(0.95, 0.16, "click Skip (hardcoded)")
+
+            # Fallback: tap center to advance dialog text
+            self._cutscene_taps += 1
+            if self._cutscene_taps > 40:
+                # Stuck on cutscene too long — try pressing back
+                self._cutscene_taps = 0
+                self._skip_stage = 0
+                return action_back("cutscene stuck, pressing back")
+            return action_click(0.5, 0.5, "advance event story text")
+
+        # ── Not on cutscene — reset skip state ──
+        self._skip_stage = 0
+        self._cutscene_taps = 0
+
+        # Handle next/confirm buttons (reward popups, transitions)
         next_btn = screen.find_any_text(
             ["下一步", "Next", "確認", "确认", "確定", "确定", "OK"],
             region=(0.25, 0.55, 0.80, 0.95),
@@ -304,7 +409,8 @@ class EventActivitySkill(BaseSkill):
 
         # Start any available story node.
         start = screen.find_any_text(
-            ["NEW", "開始", "开始", "前往", "進入", "进入", "入場", "入场", "閱讀", "阅读", "觀看", "观看"],
+            ["NEW", "開始", "开始", "前往", "進入", "进入", "入場", "入场",
+             "閱讀", "阅读", "觀看", "观看"],
             region=(0.10, 0.16, 0.98, 0.96),
             min_conf=0.55,
         )
@@ -323,16 +429,12 @@ class EventActivitySkill(BaseSkill):
             return action_click_box(sortie, "start event story battle")
 
         self._story_idle_ticks += 1
-        if self._phase_ticks > 60 or self._story_idle_ticks > 8:
+        if self._phase_ticks > 60 or self._story_idle_ticks > 12:
             self.log("story phase complete")
             self._story_done = True
             self._phase_ticks = 0
             self.sub_state = "enter"
             return action_wait(250, "story phase done")
-
-        # Keep tapping center if still inside story dialogue screen.
-        if not self._is_event_page(screen):
-            return action_click(0.5, 0.5, "advance event story text")
 
         return action_wait(350, "event story scanning")
 
@@ -348,10 +450,19 @@ class EventActivitySkill(BaseSkill):
         if end_turn:
             return action_click_box(end_turn, "end turn on event grid")
 
-        skip = screen.find_any_text(["SKIP", "Skip", "跳過", "跳过"], min_conf=0.7)
+        # Handle cutscene/dialog during challenge (story interludes)
+        skip = screen.find_any_text(["SKIP", "Skip", "跳過", "跳过"], min_conf=0.65)
         if skip:
             self._challenge_idle_ticks = 0
-            return action_click_box(skip, "skip event challenge battle")
+            return action_click_box(skip, "skip event challenge cutscene")
+
+        if self._is_event_story_screen(screen):
+            self._challenge_idle_ticks = 0
+            # Click MENU to reveal Skip, then tap center as fallback
+            menu = screen.find_any_text(["MENU"], region=(0.82, 0.0, 1.0, 0.14), min_conf=0.65)
+            if menu:
+                return action_click_box(menu, "click MENU during challenge cutscene")
+            return action_click(0.94, 0.05, "click MENU (hardcoded) during challenge")
 
         result_confirm = screen.find_any_text(
             ["確認", "确认", "確定", "确定", "確", "确", "OK"],
