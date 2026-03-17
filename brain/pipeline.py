@@ -67,8 +67,7 @@ def _get_ocr():
 
 _yolo_models = []   # list of (model, conf_threshold) tuples
 _yolo_lock = None
-_YOLO_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "_yolo_full.pt"
-# Battle + headpat models loaded in parallel
+# Only two purpose-built models: battle character heads + cafe emoticon bubbles
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
 _YOLO_EMOTICON = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
 
@@ -82,7 +81,7 @@ _yolo_status = "not_attempted"
 def _get_yolo():
     """Get or create YOLO model(s) (lazy singleton). Only loads on first call.
 
-    Loads all available model files (battle_heads + emoticon + full).
+    Loads available model files (battle_heads + emoticon).
     Each entry is a (model, conf_threshold) tuple.
     Returns the first model for backward compat; _yolo_models holds all.
     """
@@ -100,14 +99,11 @@ def _get_yolo():
         # battle_heads: 0.45 (well-defined targets; 0.15 causes false positives
         #   on cafe sprites at conf 0.25-0.47)
         # emoticon: 0.15 (headpat bubbles on 2F score as low as 0.18)
-        # full: 0.25 (general model, moderate threshold)
         candidates = []  # (path, conf_threshold)
         if _YOLO_BATTLE_HEADS.is_file():
             candidates.append((_YOLO_BATTLE_HEADS, 0.45))
         if _YOLO_EMOTICON.is_file():
             candidates.append((_YOLO_EMOTICON, 0.15))
-        if _YOLO_MODEL_PATH.is_file():
-            candidates.append((_YOLO_MODEL_PATH, 0.25))
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
