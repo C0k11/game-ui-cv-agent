@@ -385,10 +385,52 @@ class EventActivitySkill(BaseSkill):
         self._skip_stage = 0
         self._cutscene_taps = 0
 
-        # Handle next/confirm buttons (reward popups, transitions)
+        # ── Loading / battle in progress ──
+        # Very low OCR during loading screens or active battles.
+        # Don't count as idle; just wait.
+        if len(screen.ocr_boxes) <= 5:
+            self._story_idle_ticks = 0
+            return action_wait(500, "story loading/battle in progress")
+
+        # ── Mission Info dialog (battle story node) ──
+        # Screen shows "任務資訊" header with "任務開始" yellow button and
+        # a disabled "掃蕩開始" (sweep). Must click "任務開始" specifically.
+        # reference: "activity_task-info" → click (940/1280, 538/720) = (0.734, 0.747)
+        mission_info = screen.find_any_text(
+            ["任務資訊", "任务资讯"],
+            min_conf=0.55,
+        )
+        if mission_info:
+            self._story_idle_ticks = 0
+            start_btn = screen.find_any_text(
+                ["任務開始", "任务开始"],
+                region=(0.55, 0.60, 0.90, 0.85),
+                min_conf=0.55,
+            )
+            if start_btn:
+                return action_click_box(start_btn, "click 任務開始 (story battle)")
+            # reference hardcoded: (940/1280, 538/720)
+            return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
+
+        # ── Formation screen (team edit before battle) ──
+        # After clicking 任務開始, lands on formation screen.
+        # reference: click (1156/1280, 659/720) = (0.903, 0.915) for sortie button
+        sortie = screen.find_any_text(
+            ["出擊", "出击", "出撃", "開始作戰", "开始作战",
+             "戰鬥開始", "战斗开始"],
+            region=(0.70, 0.75, 1.0, 0.98),
+            min_conf=0.55,
+        )
+        if sortie:
+            self._story_idle_ticks = 0
+            return action_click_box(sortie, "click sortie (story battle)")
+
+        # ── Battle result / reward confirm ──
+        # After battle: fight-success-confirm, reward_acquired, etc.
+        # reference: "story-fight-success-confirm" at (1117-1219, 639-687)
         next_btn = screen.find_any_text(
-            ["下一步", "Next", "確認", "确认", "確定", "确定", "OK"],
-            region=(0.25, 0.55, 0.80, 0.95),
+            ["下一步", "Next", "確認", "确认", "確定", "确定", "OK", "確", "确"],
+            region=(0.25, 0.55, 0.95, 0.98),
             min_conf=0.55,
         )
         if next_btn:
@@ -407,9 +449,10 @@ class EventActivitySkill(BaseSkill):
                 self._story_idle_ticks = 0
                 return action_click_box(tab, "switch to event story tab")
 
-        # Start any available story node.
+        # Start any available story node (入場 on story list).
+        # NOTE: bare "開始" removed — it wrongly matches disabled "掃蕩開始".
         start = screen.find_any_text(
-            ["NEW", "開始", "开始", "前往", "進入", "进入", "入場", "入场",
+            ["NEW", "前往", "進入", "进入", "入場", "入场",
              "閱讀", "阅读", "觀看", "观看"],
             region=(0.10, 0.16, 0.98, 0.96),
             min_conf=0.55,
@@ -418,18 +461,8 @@ class EventActivitySkill(BaseSkill):
             self._story_idle_ticks = 0
             return action_click_box(start, "start/continue event story")
 
-        # Some stories include a fight entry.
-        sortie = screen.find_any_text(
-            ["出擊", "出击", "開始作戰", "开始作战", "戰鬥開始", "战斗开始"],
-            region=(0.50, 0.55, 1.0, 0.95),
-            min_conf=0.55,
-        )
-        if sortie:
-            self._story_idle_ticks = 0
-            return action_click_box(sortie, "start event story battle")
-
         self._story_idle_ticks += 1
-        if self._phase_ticks > 60 or self._story_idle_ticks > 12:
+        if self._phase_ticks > 150 or self._story_idle_ticks > 12:
             self.log("story phase complete")
             self._story_done = True
             self._phase_ticks = 0
@@ -464,9 +497,42 @@ class EventActivitySkill(BaseSkill):
                 return action_click_box(menu, "click MENU during challenge cutscene")
             return action_click(0.94, 0.05, "click MENU (hardcoded) during challenge")
 
+        # ── Loading / battle in progress ──
+        if len(screen.ocr_boxes) <= 5:
+            self._challenge_idle_ticks = 0
+            return action_wait(500, "challenge loading/battle in progress")
+
+        # ── Mission Info dialog (battle node) ──
+        mission_info = screen.find_any_text(
+            ["任務資訊", "任务资讯"],
+            min_conf=0.55,
+        )
+        if mission_info:
+            self._challenge_idle_ticks = 0
+            start_btn = screen.find_any_text(
+                ["任務開始", "任务开始"],
+                region=(0.55, 0.60, 0.90, 0.85),
+                min_conf=0.55,
+            )
+            if start_btn:
+                return action_click_box(start_btn, "click 任務開始 (challenge battle)")
+            return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
+
+        # ── Formation screen ──
+        sortie = screen.find_any_text(
+            ["出擊", "出击", "出撃", "開始作戰", "开始作战",
+             "戰鬥開始", "战斗开始"],
+            region=(0.70, 0.75, 1.0, 0.98),
+            min_conf=0.55,
+        )
+        if sortie:
+            self._challenge_idle_ticks = 0
+            return action_click_box(sortie, "click sortie (challenge battle)")
+
+        # ── Battle result confirm ──
         result_confirm = screen.find_any_text(
             ["確認", "确认", "確定", "确定", "確", "确", "OK"],
-            region=(0.25, 0.50, 0.80, 0.95),
+            region=(0.25, 0.50, 0.95, 0.98),
             min_conf=0.6,
         )
         if result_confirm and screen.find_any_text(["戰鬥結果", "战斗结果", "VICTORY", "DEFEAT"], min_conf=0.55):
@@ -493,7 +559,7 @@ class EventActivitySkill(BaseSkill):
                 return action_click_box(max_btn, "challenge sweep max")
 
             start_stage = screen.find_any_text(
-                ["入場", "入场", "挑戰", "挑战", "開始", "开始"],
+                ["入場", "入场", "挑戰", "挑战"],
                 region=(0.45, 0.16, 1.0, 0.95),
                 min_conf=0.55,
             )
@@ -505,15 +571,6 @@ class EventActivitySkill(BaseSkill):
             if sweep:
                 self._challenge_idle_ticks = 0
                 return action_click_box(sweep, "open event challenge sweep")
-
-            fight = screen.find_any_text(
-                ["出擊", "出击", "開始作戰", "开始作战", "戰鬥開始", "战斗开始"],
-                region=(0.50, 0.55, 1.0, 0.95),
-                min_conf=0.55,
-            )
-            if fight:
-                self._challenge_idle_ticks = 0
-                return action_click_box(fight, "start event challenge fight")
 
         elif self._challenge_sweep_stage == 1:
             sweep_start = screen.find_any_text(["掃蕩開始", "扫荡开始"], min_conf=0.55)
