@@ -26,7 +26,7 @@ from brain.skills.base import (
 class EventActivitySkill(BaseSkill):
     def __init__(self):
         super().__init__("EventActivity")
-        self.max_ticks = 140
+        self.max_ticks = 300  # battles can take 60+ ticks; multiple story nodes
 
         self._enter_ticks: int = 0
         self._phase_ticks: int = 0
@@ -79,6 +79,7 @@ class EventActivitySkill(BaseSkill):
                 "獲得獎勵", "获得奖励", "獲得道具", "获得道具",
                 "戰鬥結果", "战斗结果", "掃蕩完成", "扫荡完成",
                 "任務完成", "任务完成", "關卡完成", "关卡完成",
+                "VICTORY", "DEFEAT", "勝利", "敗北", "胜利", "败北",
             ],
             min_conf=0.6,
         )
@@ -113,6 +114,27 @@ class EventActivitySkill(BaseSkill):
             return self._exit(screen)
 
         return action_wait(300, "event activity unknown state")
+
+    def _is_auto_battle(self, screen: ScreenState) -> bool:
+        """Detect active auto-battle screen via HUD elements.
+
+        Battle HUD has AUTO at bottom-right (~0.95, 0.94) and COST at
+        bottom-center (~0.63, 0.92).  OCR count is typically 8-10, which
+        is above the generic <=5 loading threshold.
+        """
+        auto = screen.find_any_text(
+            ["AUTO"],
+            region=(0.85, 0.85, 1.0, 1.0),
+            min_conf=0.8,
+        )
+        if not auto:
+            return False
+        cost = screen.find_any_text(
+            ["COST"],
+            region=(0.55, 0.85, 0.70, 0.97),
+            min_conf=0.8,
+        )
+        return cost is not None
 
     def _find_event_timer(self, screen: ScreenState, *, region) -> Optional[Any]:
         return screen.find_any_text(
@@ -385,7 +407,14 @@ class EventActivitySkill(BaseSkill):
         self._skip_stage = 0
         self._cutscene_taps = 0
 
-        # ── Loading / battle in progress ──
+        # ── Auto-battle in progress (HUD: AUTO + COST at bottom) ──
+        # Battle screen has 8-10 OCR boxes (above <=5 threshold).
+        # reference: uses fighting_feature RGB check; we use OCR HUD markers.
+        if self._is_auto_battle(screen):
+            self._story_idle_ticks = 0
+            return action_wait(1500, "story battle in progress (auto)")
+
+        # ── Loading / battle transition ──
         # Very low OCR during loading screens or active battles.
         # Don't count as idle; just wait.
         if len(screen.ocr_boxes) <= 5:
@@ -462,7 +491,7 @@ class EventActivitySkill(BaseSkill):
             return action_click_box(start, "start/continue event story")
 
         self._story_idle_ticks += 1
-        if self._phase_ticks > 150 or self._story_idle_ticks > 12:
+        if self._phase_ticks > 200 or self._story_idle_ticks > 20:
             self.log("story phase complete")
             self._story_done = True
             self._phase_ticks = 0
@@ -497,7 +526,12 @@ class EventActivitySkill(BaseSkill):
                 return action_click_box(menu, "click MENU during challenge cutscene")
             return action_click(0.94, 0.05, "click MENU (hardcoded) during challenge")
 
-        # ── Loading / battle in progress ──
+        # ── Auto-battle in progress (HUD: AUTO + COST) ──
+        if self._is_auto_battle(screen):
+            self._challenge_idle_ticks = 0
+            return action_wait(1500, "challenge battle in progress (auto)")
+
+        # ── Loading / battle transition ──
         if len(screen.ocr_boxes) <= 5:
             self._challenge_idle_ticks = 0
             return action_wait(500, "challenge loading/battle in progress")
@@ -535,7 +569,10 @@ class EventActivitySkill(BaseSkill):
             region=(0.25, 0.50, 0.95, 0.98),
             min_conf=0.6,
         )
-        if result_confirm and screen.find_any_text(["戰鬥結果", "战斗结果", "VICTORY", "DEFEAT"], min_conf=0.55):
+        if result_confirm and screen.find_any_text(
+                ["戰鬥結果", "战斗结果", "VICTORY", "DEFEAT",
+                 "勝利", "敗北", "胜利", "败北"],
+                min_conf=0.55):
             self._challenge_idle_ticks = 0
             return action_click_box(result_confirm, "confirm challenge battle result")
 
@@ -609,7 +646,7 @@ class EventActivitySkill(BaseSkill):
                 return action_click_box(done, "close challenge sweep result")
 
         self._challenge_idle_ticks += 1
-        if self._phase_ticks > 70 or self._challenge_idle_ticks > 12:
+        if self._phase_ticks > 200 or self._challenge_idle_ticks > 20:
             self.log("challenge phase complete")
             self._challenge_done = True
             self._phase_ticks = 0
