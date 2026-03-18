@@ -912,7 +912,18 @@ class DailyPipeline:
         target = action.get("target")
         reason = str(action.get("reason", "") or "")
 
-        if (target == self._last_click_target and reason == self._last_click_reason):
+        # Compare with positional tolerance — OCR returns slightly different
+        # bounding boxes each frame, so the "same" button gets different coords.
+        same_target = False
+        if target and self._last_click_target:
+            try:
+                dx = abs(target[0] - self._last_click_target[0])
+                dy = abs(target[1] - self._last_click_target[1])
+                same_target = dx < 0.03 and dy < 0.03
+            except (TypeError, IndexError):
+                same_target = target == self._last_click_target
+
+        if same_target and reason == self._last_click_reason:
             self._click_repeat_count += 1
             if self._click_repeat_count <= 1:
                 # Allow max 1 repeat (2 total), then suppress
