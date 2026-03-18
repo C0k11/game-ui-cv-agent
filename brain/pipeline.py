@@ -925,12 +925,17 @@ class DailyPipeline:
 
         if same_target and reason == self._last_click_reason:
             self._click_repeat_count += 1
-            if self._click_repeat_count <= 1:
-                # Allow max 1 repeat (2 total), then suppress
+            if self._click_repeat_count <= 2:
+                # Allow max 2 repeats (3 total), then throttle
                 return action
-            # Suppress — convert to wait
-            print(f"[Pipeline] Stale click suppressed (repeat #{self._click_repeat_count}): {reason}")
-            return action_wait(300, f"stale click suppressed: {reason}")
+            # Throttle — convert to wait AND reset counter so the next
+            # attempt gets a fresh start.  This prevents permanent deadlock
+            # when a click genuinely needs retrying (game lag, slow transition).
+            print(f"[Pipeline] Click throttled (repeat #{self._click_repeat_count}): {reason}")
+            self._last_click_target = None
+            self._last_click_reason = ""
+            self._click_repeat_count = 0
+            return action_wait(400, f"click throttled: {reason}")
         else:
             self._last_click_target = target
             self._last_click_reason = reason
