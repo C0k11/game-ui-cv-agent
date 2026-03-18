@@ -659,6 +659,19 @@ class DailyPipeline:
         # Full-screen popup with NO close button. Just click anywhere to dismiss.
         # IMPORTANT: "彩奈" restricted to TITLE area (top-center) to avoid matching
         # Mail "From彩奈" text. Use "簽到/到薄/到簿" or "第N天" grid as primary.
+        #
+        # CAVEAT: "新上任指南任務" (guide mission panel) also has "第N天" grids
+        # but is NOT a check-in calendar — center-click doesn't dismiss it.
+        # Detect it separately and use BACK to close.
+        guide_mission = screen.find_any_text(
+            ["新上任指南", "新上任指南任務", "新上任指南任务"],
+            min_conf=0.6
+        )
+        if guide_mission:
+            print(f"[Interceptor] P0.5 guide mission panel: '{guide_mission.text}', pressing BACK")
+            self._interceptor_streak += 1
+            return action_back(f"interceptor: close guide mission panel")
+
         checkin = screen.find_any_text(
             ["簽到", "签到", "到薄", "到簿"],
             min_conf=0.5

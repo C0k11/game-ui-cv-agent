@@ -292,7 +292,13 @@ class LobbySkill(BaseSkill):
         # ── Already inside a sub-screen? ──
         # If we detected a specific screen other than Lobby, we are deep in a menu.
         # We should navigate back to lobby to ensure a clean state.
+        # EXCEPTION: If already on the Event page, skip lobby and let
+        # EventActivity handle it directly — backing out wastes time and
+        # can trigger unwanted popups (e.g. 新上任指南任務).
         if current_screen and current_screen != "Lobby":
+            if current_screen == "Event":
+                self.log("already on Event page, skipping lobby recovery")
+                return action_done("in Event (skip lobby)")
             self.log(f"detected sub-screen '{current_screen}', returning to lobby")
             return action_back(f"back from {current_screen} to lobby")
 

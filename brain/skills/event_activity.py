@@ -467,6 +467,25 @@ class EventActivitySkill(BaseSkill):
             self._story_idle_ticks = 0
             return action_wait(500, "story loading/battle in progress")
 
+        # ── Chapter Info dialog (story chapter node, not battle) ──
+        # Clicking 入場 on a story-only node opens a "章節資訊" dialog
+        # with a "進入章節" button to actually enter.
+        chapter_info = screen.find_any_text(
+            ["章節資訊", "章节资讯", "章節資", "章节资"],
+            min_conf=0.55,
+        )
+        if chapter_info:
+            self._story_idle_ticks = 0
+            enter_chapter = screen.find_any_text(
+                ["進入章節", "进入章节"],
+                region=(0.30, 0.55, 0.70, 0.80),
+                min_conf=0.55,
+            )
+            if enter_chapter:
+                return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
+            # Fallback: hardcoded position for 進入章節 button
+            return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
+
         # ── Mission Info dialog (battle story node) ──
         # Screen shows "任務資訊" header with "任務開始" yellow button and
         # a disabled "掃蕩開始" (sweep). Must click "任務開始" specifically.
