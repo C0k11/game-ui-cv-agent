@@ -51,6 +51,7 @@ class EventActivitySkill(BaseSkill):
         self._story_scroll_count: int = 0    # consecutive scrolls without finding target
         self._max_story_index_seen: int = 0  # highest node number observed on screen
         self._story_node_pending: bool = False  # True after clicking 入場, awaiting popup
+        self._story_ap_depleted: bool = False  # True when AP purchase popup seen
 
         self._mission_done: bool = False
         self._mission_tab_clicked: bool = False
@@ -77,6 +78,7 @@ class EventActivitySkill(BaseSkill):
         self._story_scroll_count = 0
         self._max_story_index_seen = 0
         self._story_node_pending = False
+        self._story_ap_depleted = False
 
         self._mission_done = False
         self._mission_tab_clicked = False
@@ -485,6 +487,13 @@ class EventActivitySkill(BaseSkill):
         if chapter_info:
             self._story_idle_ticks = 0
             self._story_node_pending = False
+            # AP depleted — can't enter any chapter, close popup and end story
+            if self._story_ap_depleted:
+                self.log("AP depleted, closing chapter popup, ending story phase")
+                self._story_done = True
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_back("close chapter popup (AP depleted)")
             # Check if chapter already completed (no 進入章節 button, shows replay)
             enter_chapter = screen.find_any_text(
                 ["進入章節", "进入章节"],
@@ -524,6 +533,13 @@ class EventActivitySkill(BaseSkill):
         if mission_info:
             self._story_idle_ticks = 0
             self._story_node_pending = False
+            # AP depleted — can't start battle, close popup and end story
+            if self._story_ap_depleted:
+                self.log("AP depleted, closing mission popup, ending story phase")
+                self._story_done = True
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_back("close mission popup (AP depleted)")
             # Check for already-completed battle indicators:
             # "該關卡無法" = can't sweep (already cleared)
             # "没有任務目標" / "沒有任務目標" = no objectives remaining
@@ -580,6 +596,26 @@ class EventActivitySkill(BaseSkill):
             self._story_idle_ticks = 0
             return action_click_box(next_btn, "event story next/confirm")
 
+        # ── AP purchase popup ──
+        # Playing story nodes costs AP; game prompts to buy when depleted.
+        # Must dismiss with 取消 to avoid spending premium currency.
+        ap_buy = screen.find_any_text(
+            ["是否購買", "是否购买", "購買AP", "购买AP"],
+            min_conf=0.6,
+        )
+        if ap_buy:
+            self._story_idle_ticks = 0
+            self._story_ap_depleted = True
+            cancel = screen.find_any_text(
+                ["取消"],
+                region=(0.25, 0.60, 0.55, 0.80),
+                min_conf=0.55,
+            )
+            if cancel:
+                self.log("AP depleted, cancelling purchase")
+                return action_click_box(cancel, "cancel AP purchase")
+            return action_click(0.40, 0.70, "cancel AP purchase (hardcoded)")
+
         # Open Story tab once.
         if not self._story_tab_clicked:
             tab = screen.find_any_text(
@@ -620,8 +656,11 @@ class EventActivitySkill(BaseSkill):
         """
         nodes: List[Tuple[int, float]] = []
         for box in screen.ocr_boxes:
-            # Node numbers are 2-digit (01-30), located in left-center area
-            if box.conf < 0.45 or box.cx < 0.40 or box.cx > 0.70:
+            # Node numbers are 2-digit (01-30) at cx ≈ 0.572 in story list.
+            # Tight X/Y filter avoids false positives (e.g. AP popup prices).
+            if (box.confidence < 0.45
+                    or box.cx < 0.52 or box.cx > 0.62
+                    or box.cy < 0.20 or box.cy > 0.85):
                 continue
             text = box.text.strip()
             m = re.match(r"^(\d{1,2})$", text)
@@ -645,9 +684,6 @@ class EventActivitySkill(BaseSkill):
         and clicks it. Scrolls the story list when the target is off-screen.
         Returns an action dict, or None if no actionable state found.
         """
-        target = self._current_story_index
-        target_str = f"{target:02d}"
-
         nodes, entry_buttons = self._find_story_nodes_on_screen(screen)
 
         # Update max seen index for termination detection
@@ -656,6 +692,16 @@ class EventActivitySkill(BaseSkill):
                 self._max_story_index_seen,
                 max(idx for idx, _ in nodes)
             )
+            # On first call, start from the minimum visible node instead of 1.
+            # The game auto-scrolls to the frontier; nodes above are completed.
+            if self._current_story_index == 1 and min(idx for idx, _ in nodes) > 1:
+                first_visible = min(idx for idx, _ in nodes)
+                self.log(f"starting from first visible node {first_visible:02d} "
+                         f"(skipping 01-{first_visible - 1:02d})")
+                self._current_story_index = first_visible
+
+        target = self._current_story_index
+        target_str = f"{target:02d}"
 
         # Try to find the target node number on screen
         target_cy = None
