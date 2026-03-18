@@ -51,7 +51,11 @@ _ocr_engine = None
 _ocr_lock = None
 
 def _get_ocr():
-    """Get or create RapidOCR engine (thread-safe singleton)."""
+    """Get or create RapidOCR engine (thread-safe singleton).
+
+    Automatically loads fine-tuned Blue Archive rec model from
+    data/ocr_model/ba_rec.onnx if present, otherwise uses default PP-OCRv3.
+    """
     global _ocr_engine, _ocr_lock
     import threading
     if _ocr_lock is None:
@@ -59,7 +63,12 @@ def _get_ocr():
     with _ocr_lock:
         if _ocr_engine is None:
             from rapidocr_onnxruntime import RapidOCR
-            _ocr_engine = RapidOCR()
+            custom_rec = Path(__file__).resolve().parent.parent / "data" / "ocr_model" / "ba_rec.onnx"
+            if custom_rec.exists():
+                print(f"[OCR] Loading fine-tuned BA rec model: {custom_rec}")
+                _ocr_engine = RapidOCR(rec_model_path=str(custom_rec))
+            else:
+                _ocr_engine = RapidOCR()
         return _ocr_engine
 
 
@@ -466,6 +475,9 @@ class DailyPipeline:
         self._last_action_reason: str = ""
         self._stuck_counter: int = 0  # ticks in same sub_state
         self._consecutive_timeouts: int = 0  # skills that timed out in a row
+        self._last_click_target: Optional[list] = None
+        self._last_click_reason: str = ""
+        self._click_repeat_count: int = 0
 
     @property
     def is_running(self) -> bool:
@@ -740,19 +752,19 @@ class DailyPipeline:
             min_conf=0.6
         )
         if reward:
-            # Try clicking 領取/领取 button first
-            claim_btn = screen.find_any_text(
-                ["領取", "领取"],
-                region=screen.CENTER, min_conf=0.7
+            # Try clicking 領取/确认/確認 button first
+            dismiss_btn = screen.find_any_text(
+                ["確認", "确认", "確定", "确定", "領取", "领取", "確", "确", "OK"],
+                region=(0.25, 0.80, 0.80, 0.98), min_conf=0.6
             )
-            if claim_btn:
-                print(f"[Interceptor] P2 reward popup, clicking 領取")
+            if dismiss_btn:
+                print(f"[Interceptor] P2 reward popup, clicking {dismiss_btn.text}")
                 self._interceptor_streak += 1
-                return action_click_box(claim_btn, f"interceptor: claim reward ({reward.text})")
-            # Fallback: tap bottom area to dismiss (NOT center — cards absorb clicks)
-            print(f"[Interceptor] P2 reward popup '{reward.text}', tapping bottom to dismiss")
+                return action_click_box(dismiss_btn, f"interceptor: claim reward ({reward.text})")
+            # Fallback: tap 確認 button area (right-side button on Battle Complete reward)
+            print(f"[Interceptor] P2 reward popup '{reward.text}', tapping confirm area")
             self._interceptor_streak += 1
-            return action_click(0.5, 0.87, f"interceptor: dismiss reward ({reward.text})")
+            return action_click(0.60, 0.92, f"interceptor: dismiss reward ({reward.text})")
 
         # ── P2: Bond / Rank-up popups (好感度升級, 羈絆升級, Rank Up) ──
         bond_popup = screen.find_any_text(
@@ -882,6 +894,38 @@ class DailyPipeline:
         """Last ScreenState processed by tick (for overlay access)."""
         return getattr(self, '_last_screen', None)
 
+    def _dedup_click(self, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Suppress stale repeated clicks.
+
+        If the same click target+reason fires twice in a row, the second
+        time is almost certainly acting on stale OCR data from before the
+        screen transitioned.  Convert it to a short wait instead.
+        """
+        action_type = action.get("action", "")
+        if action_type != "click":
+            # Reset tracking on non-click actions
+            self._last_click_target = None
+            self._last_click_reason = ""
+            self._click_repeat_count = 0
+            return action
+
+        target = action.get("target")
+        reason = str(action.get("reason", "") or "")
+
+        if (target == self._last_click_target and reason == self._last_click_reason):
+            self._click_repeat_count += 1
+            if self._click_repeat_count <= 2:
+                # Allow max 2 repeats (3 total), then suppress
+                return action
+            # Suppress — convert to wait
+            print(f"[Pipeline] Stale click suppressed (repeat #{self._click_repeat_count}): {reason}")
+            return action_wait(300, f"stale click suppressed: {reason}")
+        else:
+            self._last_click_target = target
+            self._last_click_reason = reason
+            self._click_repeat_count = 0
+            return action
+
     def _tick_with_screen(self, screen: ScreenState, *, screenshot_path: str = "") -> Dict[str, Any]:
         """Internal tick logic shared by tick() and tick_from_frame()."""
         self._last_screen = screen
@@ -897,11 +941,13 @@ class DailyPipeline:
         # ── Global Interceptor (runs before any skill) ──
         intercept = self._global_interceptor(screen, skill)
         if intercept:
+            intercept = self._dedup_click(intercept)
             self._save_trajectory(screenshot_path, screen, skill, intercept)
             return intercept
 
         # Let skill decide
         action = skill.tick(screen)
+        action = self._dedup_click(action)
         action_type = action.get("action", "")
         action_reason = str(action.get("reason", "") or "")
         self._last_action_reason = action_reason
@@ -922,9 +968,15 @@ class DailyPipeline:
         # If the exact same wait reason repeats for 20+ ticks, burst ESC to break out.
         # CRITICAL: Do NOT send ESC when on lobby — ESC on lobby opens
         # the "是否結束？" exit dialog which can cause cascading failures.
+        # Also do NOT ESC during active battles — they legitimately repeat
+        # the same wait reason for many ticks while combat is in progress.
+        _battle_wait_keywords = ("battle in progress", "battle speed", "loading/battle")
+        _is_battle_wait = any(kw in action_reason.lower() for kw in _battle_wait_keywords)
         if action_type == "wait" and self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
             if screen.is_lobby():
                 print(f"[Pipeline] Skill '{skill.name}' repeating wait on lobby for {self._stuck_counter} ticks, skipping ESC (unsafe on lobby)")
+            elif _is_battle_wait:
+                print(f"[Pipeline] Skill '{skill.name}' battle in progress for {self._stuck_counter} ticks, skipping ESC (active battle)")
             else:
                 print(
                     f"[Pipeline] Skill '{skill.name}' repeating wait '{action_reason}' "

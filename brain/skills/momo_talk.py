@@ -31,6 +31,14 @@ class MomoTalkSkill(BaseSkill):
     # We approximate with discrete slot centers.
     _SLOT_YS = [0.32, 0.40, 0.48, 0.56, 0.64, 0.72, 0.80, 0.88]
 
+    # reference coordinates (1280x720 → normalized)
+    # Sidebar icon on lobby: (166, 150) → (0.130, 0.208)
+    # Tab 2 (conversations): (168, 202) → (0.131, 0.281)
+    # Tab 1 (friends):       (168, 280) → (0.131, 0.389)
+    _ICON_POS = (0.130, 0.208)
+    _TAB_CONV = (0.131, 0.281)   # conversations tab (target)
+    _TAB_FRIEND = (0.131, 0.389) # friends tab
+
     def __init__(self):
         super().__init__("MomoTalk")
         self.max_ticks = 100
@@ -42,6 +50,7 @@ class MomoTalkSkill(BaseSkill):
         self._click_slot_idx: int = 0
         self._enter_ticks: int = 0
         self._story_mode: bool = False
+        self._tab_navigated: bool = False
 
     def reset(self) -> None:
         super().reset()
@@ -53,12 +62,25 @@ class MomoTalkSkill(BaseSkill):
         self._click_slot_idx = 0
         self._enter_ticks = 0
         self._story_mode = False
+        self._tab_navigated = False
 
     def _is_momotalk(self, screen: ScreenState) -> bool:
-        return (
-            screen.has_text("MomoTalk", region=(0.0, 0.0, 0.50, 0.15), min_conf=0.5)
-            or screen.has_text("Momo", region=(0.0, 0.0, 0.50, 0.15), min_conf=0.5)
+        """Detect MomoTalk screen (either tab).
+
+        MomoTalk header appears at top-left. Also check for conversation
+        list elements: student names panel on left, chat panel on right.
+        """
+        if (screen.has_text("MomoTalk", region=(0.0, 0.0, 0.50, 0.15), min_conf=0.5)
+                or screen.has_text("Momo", region=(0.0, 0.0, 0.50, 0.15), min_conf=0.5)):
+            return True
+        # Fallback: detect sort/filter controls unique to MomoTalk
+        sort_ctl = screen.find_any_text(
+            ["排序", "Sort", "未讀", "未读", "最新"],
+            region=(0.30, 0.18, 0.55, 0.32), min_conf=0.45
         )
+        if sort_ctl:
+            return True
+        return False
 
     def _is_conversation_view(self, screen: ScreenState) -> bool:
         """Detect if we're inside a conversation (right panel has chat bubbles)."""
@@ -122,6 +144,11 @@ class MomoTalkSkill(BaseSkill):
 
         if self._is_momotalk(screen):
             self.log("inside MomoTalk")
+            # Ensure we're on the conversations tab (tab 2), not friends tab
+            if not self._tab_navigated:
+                self._tab_navigated = True
+                # Click conversations tab position to ensure correct tab
+                return action_click(*self._TAB_CONV, "click conversations tab")
             if not self._sort_set:
                 self.sub_state = "set_sort"
             else:
@@ -131,21 +158,28 @@ class MomoTalkSkill(BaseSkill):
 
         current = self.detect_current_screen(screen)
         if current == "Lobby":
-            # MomoTalk is accessed via the left sidebar icon on lobby.
-            # reference uses pixel-based navigation; we use OCR + hardcoded fallback.
+            # MomoTalk sidebar icon on lobby left side.
+            # reference: (166, 150) / (1280, 720) = (0.130, 0.208)
             momo = screen.find_any_text(
                 ["MomoTalk", "Momo"],
-                region=(0.0, 0.08, 0.22, 0.28), min_conf=0.4
+                region=(0.0, 0.06, 0.25, 0.30), min_conf=0.35
             )
             if momo:
                 return action_click_box(momo, "click MomoTalk sidebar icon")
-            # Hardcoded: MomoTalk icon at ~(0.11, 0.18) on lobby sidebar
-            return action_click(0.11, 0.18, "click MomoTalk icon (hardcoded)")
+            # Use reference-verified hardcoded position
+            return action_click(*self._ICON_POS, "click MomoTalk icon (reference pos)")
 
         if current and current != "MomoTalk":
             return action_back(f"back from {current}")
 
-        if self._enter_ticks > 15:
+        # Not detected as lobby or momotalk — might be transitioning.
+        # After several ticks, try clicking MomoTalk icon position anyway
+        # (lobby detection can fail if sidebar panel partially obscures nav bar).
+        if self._enter_ticks > 5 and self._enter_ticks % 4 == 0:
+            self.log("entry stalled, retrying MomoTalk icon click")
+            return action_click(*self._ICON_POS, "retry MomoTalk icon")
+
+        if self._enter_ticks > 20:
             self.log("can't reach MomoTalk, skipping")
             return action_done("momotalk unavailable")
 
@@ -216,8 +250,8 @@ class MomoTalkSkill(BaseSkill):
         # In our OCR pipeline, unread numbers appear as small digits near x≈0.49.
         # We look for small red number indicators or "NEW" text in the conversation list.
         unread = screen.find_any_text(
-            ["NEW"],
-            region=(0.42, 0.25, 0.55, 0.92), min_conf=0.5
+            ["NEW", "new"],
+            region=(0.42, 0.25, 0.55, 0.92), min_conf=0.4
         )
         if unread:
             self.log(f"unread indicator found at y={unread.cy:.2f}")
@@ -227,14 +261,27 @@ class MomoTalkSkill(BaseSkill):
 
         # Look for notification badge numbers (1, 2, 3, etc.) on the right side
         for box in screen.ocr_boxes:
-            if box.confidence < 0.5:
+            if box.confidence < 0.4:
                 continue
-            if 0.44 < box.cx < 0.54 and 0.25 < box.cy < 0.92:
-                if box.text.strip().isdigit() and 1 <= int(box.text.strip()) <= 99:
-                    self.log(f"unread badge '{box.text}' at y={box.cy:.2f}")
+            if 0.42 < box.cx < 0.56 and 0.25 < box.cy < 0.92:
+                txt = box.text.strip()
+                if txt.isdigit() and 1 <= int(txt) <= 99:
+                    self.log(f"unread badge '{txt}' at y={box.cy:.2f}")
                     self.sub_state = "dialogue"
                     self._dialogue_ticks = 0
                     return action_click(0.35, box.cy, "click conversation with badge")
+
+        # Look for any reply/interaction text already visible in the right panel
+        # (user may have entered a conversation without explicit unread indicator)
+        reply_visible = screen.find_any_text(
+            ["回覆", "回复", "Reply"],
+            region=(0.50, 0.20, 1.0, 0.95), min_conf=0.40
+        )
+        if reply_visible:
+            self.log("reply button visible in chat panel")
+            self.sub_state = "dialogue"
+            self._dialogue_ticks = 0
+            return action_wait(200, "conversation already open")
 
         # Try clicking conversation slots sequentially
         if self._click_slot_idx < len(self._SLOT_YS):

@@ -179,18 +179,38 @@ class AdbInput:
 # ── Window Capture ──────────────────────────────────────────────────────
 
 class MuMuCapture:
-    """Capture frames from MuMu emulator window using BitBlt."""
+    """Capture frames from MuMu emulator.
 
-    def __init__(self, title_substring: str = "MuMu"):
+    Supports three capture modes:
+      - 'bitblt': Win32 BitBlt (fast ~1ms, requires visible window)
+      - 'adb':    ADB screencap (works minimized/off-screen, ~150-300ms)
+      - 'auto':   Try BitBlt first, auto-fallback to ADB if black/empty
+    """
+
+    def __init__(self, title_substring: str = "MuMu",
+                 capture_mode: str = "auto",
+                 adb_input: Optional['AdbInput'] = None):
         self.title = title_substring
         self.hwnd: Optional[int] = None
         self.render_hwnd: Optional[int] = None
         self._client_w = 0
         self._client_h = 0
+        self._capture_mode = capture_mode.lower().strip()  # auto, bitblt, adb
+        self._adb: Optional['AdbInput'] = adb_input
+        self._adb_fallback_count = 0
+        self._switched_to_adb = False  # auto mode switched permanently to adb
 
     def find_window(self) -> bool:
+        if self._capture_mode == "adb":
+            # ADB mode doesn't need a window handle
+            print(f"[Capture] ADB mode — no window handle needed")
+            return True
         self.hwnd = find_window_by_title_substring(self.title)
         if self.hwnd is None:
+            if self._capture_mode == "auto" and self._adb is not None:
+                print(f"[Capture] Window not found, using ADB capture")
+                self._switched_to_adb = True
+                return True
             return False
         child = find_largest_visible_child(int(self.hwnd))
         self.render_hwnd = int(child) if child else int(self.hwnd)
@@ -211,8 +231,17 @@ class MuMuCapture:
     def client_size(self) -> Tuple[int, int]:
         return self._client_w, self._client_h
 
-    def grab(self) -> Optional[np.ndarray]:
-        """Capture one frame as BGR numpy array."""
+    @staticmethod
+    def _is_black(frame: np.ndarray) -> bool:
+        """Check if frame is nearly all black (minimized/off-screen)."""
+        try:
+            small = cv2.resize(frame, (32, 32))
+            return float(np.mean(small)) < 8.0
+        except Exception:
+            return False
+
+    def _grab_bitblt(self) -> Optional[np.ndarray]:
+        """Capture via Win32 BitBlt (fast, needs visible window)."""
         if self.render_hwnd is None:
             return None
         try:
@@ -225,9 +254,45 @@ class MuMuCapture:
                 self._client_w = w
                 self._client_h = h
             return frame
-        except Exception as e:
-            print(f"[Capture] grab error: {e}")
+        except Exception:
             return None
+
+    def _grab_adb(self) -> Optional[np.ndarray]:
+        """Capture via ADB screencap (works minimized/off-screen)."""
+        if self._adb is None:
+            return None
+        frame = self._adb.capture_frame()
+        if frame is not None:
+            h, w = frame.shape[:2]
+            self._client_w = w
+            self._client_h = h
+        return frame
+
+    def grab(self) -> Optional[np.ndarray]:
+        """Capture one frame as BGR numpy array."""
+        if self._capture_mode == "adb" or self._switched_to_adb:
+            return self._grab_adb()
+
+        if self._capture_mode == "bitblt":
+            return self._grab_bitblt()
+
+        # auto mode: try BitBlt, fallback to ADB if black
+        frame = self._grab_bitblt()
+        if frame is not None and not self._is_black(frame):
+            self._adb_fallback_count = 0
+            return frame
+
+        # BitBlt returned black/None → try ADB
+        if self._adb is not None:
+            adb_frame = self._grab_adb()
+            if adb_frame is not None:
+                self._adb_fallback_count += 1
+                if self._adb_fallback_count >= 5 and not self._switched_to_adb:
+                    print(f"[Capture] BitBlt consistently black, switching to ADB capture permanently")
+                    self._switched_to_adb = True
+                return adb_frame
+
+        return frame  # return whatever we have
 
 
 # ── Overlay Drawing ─────────────────────────────────────────────────────
@@ -341,21 +406,27 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Overlay only, no clicks")
     parser.add_argument("--no-overlay", action="store_true", help="Disable overlay window")
     parser.add_argument("--overlay-scale", type=float, default=0.5, help="Overlay window scale (default 0.5)")
+    parser.add_argument("--capture-mode", choices=["auto", "bitblt", "adb"], default="auto",
+                        help="Screen capture mode: auto (BitBlt+ADB fallback), bitblt (fast, needs visible window), adb (works minimized)")
     args = parser.parse_args()
 
-    # 1. Find MuMu window
-    cap = MuMuCapture(title_substring=args.title)
-    if not cap.find_window():
-        print(f"[ERROR] MuMu window not found (title contains '{args.title}')")
-        print("  Make sure MuMu Player is running.")
-        sys.exit(1)
-
-    # 2. Connect ADB
+    # 1. Connect ADB (needed for both input and optional ADB capture)
     adb = AdbInput(host=args.adb_host, port=args.adb_port)
     if not args.dry_run:
         if not adb.connect():
             print("[WARNING] ADB connection failed. Running in dry-run mode.")
             args.dry_run = True
+
+    # 2. Find MuMu window (pass adb for fallback capture)
+    cap = MuMuCapture(
+        title_substring=args.title,
+        capture_mode=args.capture_mode,
+        adb_input=adb,
+    )
+    if not cap.find_window():
+        print(f"[ERROR] MuMu window not found (title contains '{args.title}')")
+        print("  Make sure MuMu Player is running, or use --capture-mode adb")
+        sys.exit(1)
 
     # Get Android screen resolution for coordinate mapping
     android_w, android_h = adb.screen_size()
@@ -367,9 +438,9 @@ def main() -> None:
     pipe.start()
     print(f"[Info] Pipeline started with {len(pipe._skill_order)} skills")
 
-    # 3b. Start YOLO overlay on game window
+    # 3b. Start YOLO overlay on game window (only if we have a window handle)
     yolo_overlay = None
-    if not args.no_overlay:
+    if not args.no_overlay and cap.render_hwnd is not None:
         try:
             from scripts.yolo_overlay import YoloOverlay
             yolo_overlay = YoloOverlay(cap.render_hwnd)
@@ -378,10 +449,15 @@ def main() -> None:
         except Exception as e:
             print(f"[WARN] YOLO overlay failed: {e}")
 
+    using_adb_capture = (args.capture_mode == "adb" or cap._switched_to_adb)
+    if using_adb_capture:
+        print(f"[Info] Using ADB capture (works with minimized window, ~200ms/frame)")
+
     # 4. Main loop
     window_name = "BA Bot - MuMu"
     frame_interval = 1.0 / max(1, args.fps)
-    tick_interval = 0.5  # Pipeline tick every 500ms (OCR+YOLO is ~200ms)
+    # ADB capture is ~200ms; no need to tick faster than capture allows
+    tick_interval = 0.8 if using_adb_capture else 0.5
     last_tick_time = 0.0
     last_action: Dict[str, Any] = {"action": "wait", "reason": "starting"}
     cached_yolo_boxes: list = []  # cached from last pipeline tick

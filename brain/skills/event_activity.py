@@ -42,6 +42,7 @@ class EventActivitySkill(BaseSkill):
         self._challenge_idle_ticks: int = 0
         self._challenge_sweep_stage: int = 0
         self._grid_auto_enabled: bool = False
+        self._battle_speed_set: bool = False  # clicked speed/auto buttons this battle?
 
         self._mission_done: bool = False
         self._mission_tab_clicked: bool = False
@@ -62,6 +63,7 @@ class EventActivitySkill(BaseSkill):
         self._challenge_idle_ticks = 0
         self._challenge_sweep_stage = 0
         self._grid_auto_enabled = False
+        self._battle_speed_set = False
 
         self._mission_done = False
         self._mission_tab_clicked = False
@@ -74,23 +76,30 @@ class EventActivitySkill(BaseSkill):
             return action_done("event activity timeout")
 
         # Frequent reward/result popups across story/challenge/battle.
+        # "Battle Complete" appears as header on post-battle screens.
+        # OCR sometimes misreads "獲得獎勵" as "獲得奖！" — include short prefixes.
         reward_popup = screen.find_any_text(
             [
                 "獲得獎勵", "获得奖励", "獲得道具", "获得道具",
+                "獲得奖", "獲得獎",
                 "戰鬥結果", "战斗结果", "掃蕩完成", "扫荡完成",
                 "任務完成", "任务完成", "關卡完成", "关卡完成",
+                "Battle Complete", "BattleComplete",
                 "VICTORY", "DEFEAT", "勝利", "敗北", "胜利", "败北",
             ],
             min_conf=0.6,
         )
         if reward_popup:
+            self._battle_speed_set = False  # battle ended, reset for next
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],
+                region=(0.25, 0.80, 0.80, 0.98),
                 min_conf=0.6,
             )
             if confirm:
                 return action_click_box(confirm, "dismiss event popup")
-            return action_click(0.5, 0.9, "dismiss event popup fallback")
+            # Fallback: click right-side confirm area (0.60, 0.92)
+            return action_click(0.60, 0.92, "dismiss event popup fallback")
 
         popup = self._handle_common_popups(screen)
         if popup:
@@ -136,13 +145,29 @@ class EventActivitySkill(BaseSkill):
         )
         return cost is not None
 
+    def _handle_battle_speed(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
+        """On first auto-battle detection, click speed button to set 3x.
+
+        reference: speed button at (1215/1280, 625/720) = (0.949, 0.868)
+              auto  button at (1215/1280, 677/720) = (0.949, 0.940)
+        Speed cycles 1x→2x→3x. Click twice to reach 3x from 1x.
+        Returns an action if speed needs setting, None if already done.
+        """
+        if self._battle_speed_set:
+            return None
+        self._battle_speed_set = True
+        # Click speed button area twice (1x→2x→3x), then auto is already on
+        return action_click(0.949, 0.868, "set battle speed to 3x")
+
     def _find_event_timer(self, screen: ScreenState, *, region) -> Optional[Any]:
+        # OCR frequently mixes Traditional/Simplified (e.g. "距離结束還剩").
+        # Use regex with character classes to match all script combinations.
         return screen.find_any_text(
             [
-                "距離結束還剩", "距离结束还剩", "結束還剩", "结束还剩",
-                "距離結束剩", "距离结束剩", "結束剩", "结束剩",
-                "距離結束選剩", "距离结束选剩", "結束選剩", "结束选剩", "结束选剩",
-                "距離结束遗剩", "距離结束道剩", "结束遗剩", "結束遗剩",
+                "[結结]束[還还]剩",       # core pattern — covers all Trad/Simp mixes
+                "距[離离][結结]束",        # prefix variant
+                "[結结]束[選遗道]剩",      # OCR misread variants (選/遗/道 for 還)
+                "[結结]束剩",             # short fallback
             ],
             region=region,
             min_conf=0.3,
@@ -296,6 +321,18 @@ class EventActivitySkill(BaseSkill):
         if current and current not in ("Lobby", "Mission", "Event"):
             return action_back(f"back from {current} to find event")
 
+        # Detect WebView / external pages (Discord invite, announcement, etc.)
+        # These open when the bot accidentally clicks embedded links.
+        webview = screen.find_any_text(
+            ["discord.com", "Discord", "接受邀请", "Webpage",
+             "Official Twitter", "Official Forum", "主要消息",
+             "My Office", "Update"],
+            min_conf=0.7,
+        )
+        if webview:
+            self.log(f"WebView/external page detected: '{webview.text}', pressing back")
+            return action_back("interceptor: close external WebView")
+
         if self._enter_ticks > 24:
             self.log("event not found, skipping event activity")
             return action_done("event unavailable")
@@ -412,6 +449,9 @@ class EventActivitySkill(BaseSkill):
         # reference: uses fighting_feature RGB check; we use OCR HUD markers.
         if self._is_auto_battle(screen):
             self._story_idle_ticks = 0
+            speed_action = self._handle_battle_speed(screen)
+            if speed_action:
+                return speed_action
             return action_wait(1500, "story battle in progress (auto)")
 
         # ── Loading / battle transition ──
@@ -431,6 +471,17 @@ class EventActivitySkill(BaseSkill):
         )
         if mission_info:
             self._story_idle_ticks = 0
+            # Check for already-completed battle indicators:
+            # "該關卡無法" = can't sweep (already cleared)
+            # "没有任務目標" / "沒有任務目標" = no objectives remaining
+            already_done = screen.find_any_text(
+                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
+                 "没有任务目标", "已完成"],
+                min_conf=0.55,
+            )
+            if already_done:
+                self.log(f"story battle already completed: '{already_done.text}', skipping")
+                return action_back("skip already-completed story battle")
             start_btn = screen.find_any_text(
                 ["任務開始", "任务开始"],
                 region=(0.55, 0.60, 0.90, 0.85),
@@ -529,6 +580,9 @@ class EventActivitySkill(BaseSkill):
         # ── Auto-battle in progress (HUD: AUTO + COST) ──
         if self._is_auto_battle(screen):
             self._challenge_idle_ticks = 0
+            speed_action = self._handle_battle_speed(screen)
+            if speed_action:
+                return speed_action
             return action_wait(1500, "challenge battle in progress (auto)")
 
         # ── Loading / battle transition ──
@@ -543,6 +597,14 @@ class EventActivitySkill(BaseSkill):
         )
         if mission_info:
             self._challenge_idle_ticks = 0
+            already_done = screen.find_any_text(
+                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
+                 "没有任务目标", "已完成"],
+                min_conf=0.55,
+            )
+            if already_done:
+                self.log(f"challenge battle already completed: '{already_done.text}', skipping")
+                return action_back("skip already-completed challenge battle")
             start_btn = screen.find_any_text(
                 ["任務開始", "任务开始"],
                 region=(0.55, 0.60, 0.90, 0.85),

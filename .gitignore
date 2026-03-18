@@ -47,25 +47,27 @@ data/_check_frame.png
 *.pt
 !scripts/*.py
 
-# Il2CppDumper / reverse-engineering tools (local only)
-Il2CppDumper*/
-Il2CppDumper*.exe
-Il2CppDumper*.dll
-Il2CppDumper*.json
-Il2CppDumper*.pdb
-Il2CppDumper\ GUI*
-Mono.Cecil*.dll
-ghidra*.py
-ida*.py
-hopper*.py
-il2cpp_header_to_*.py
-config.json
-Changelog.txt
-images/
-tools/
+# Archive (moved: Il2CppDumper, RE scripts, debug images, old modules)
+archive/
 
 # reference study reference (local only)
 study/ref/
 
+# YOLO/ML models (large binaries)
+data/models/
+*.pt
+*.onnx
+!data/ocr_model/
+
+# OCR training workspace (large generated data)
+data/ocr_training/
+
+# Temp pipeline frames
+data/_mumu_frame.jpg
+
+# Config (local-specific)
+config.json
+
 # Debug / one-off scripts
 scripts/_*.py
+debug_*.jpg

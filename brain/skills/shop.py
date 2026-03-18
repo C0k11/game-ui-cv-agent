@@ -42,6 +42,8 @@ class ShopSkill(BaseSkill):
         self._purchase_ticks: int = 0
         self._enter_ticks: int = 0
         self._select_ticks: int = 0
+        self._confirm_clicks: int = 0
+        self._buy_btn_clicks: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -51,6 +53,8 @@ class ShopSkill(BaseSkill):
         self._purchase_ticks = 0
         self._enter_ticks = 0
         self._select_ticks = 0
+        self._confirm_clicks = 0
+        self._buy_btn_clicks = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -241,7 +245,7 @@ class ShopSkill(BaseSkill):
         """
         self._purchase_ticks += 1
 
-        if self._purchase_ticks > 20:
+        if self._purchase_ticks > 15:
             self.log("purchase timeout, exiting")
             self.sub_state = "exit"
             return action_wait(300, "purchase timeout")
@@ -249,16 +253,30 @@ class ShopSkill(BaseSkill):
         # 1. Confirm dialog (取消 + 確認) — after clicking 選擇購買
         cancel_in_dialog = screen.find_any_text(
             ["取消"],
-            region=(0.25, 0.58, 0.55, 0.82), min_conf=0.7
+            region=(0.25, 0.58, 0.55, 0.82), min_conf=0.6
         )
         confirm_in_dialog = screen.find_any_text(
             ["確認", "确认", "確定", "确定"],
-            region=(0.50, 0.58, 0.80, 0.82), min_conf=0.6
+            region=(0.50, 0.58, 0.80, 0.82), min_conf=0.5
         )
         if cancel_in_dialog and confirm_in_dialog:
             self.log("confirming bulk purchase")
             self._purchase_confirmed = True
+            self._confirm_clicks += 1
             return action_click_box(confirm_in_dialog, "confirm purchase")
+
+        # Broader confirm dialog detection (OCR may only catch one button)
+        if not self._purchase_confirmed and self._buy_btn_clicks >= 1:
+            # After clicking buy, if a dialog-like area has confirm text, click it
+            dialog_confirm = screen.find_any_text(
+                ["確認", "确认", "確定", "确定"],
+                region=(0.40, 0.55, 0.82, 0.85), min_conf=0.45
+            )
+            if dialog_confirm:
+                self.log("confirm dialog detected (broad match)")
+                self._purchase_confirmed = True
+                self._confirm_clicks += 1
+                return action_click_box(dialog_confirm, "confirm purchase (broad)")
 
         # 2. Already purchased today (refresh button appeared)
         if self._is_already_purchased(screen):
@@ -269,7 +287,7 @@ class ShopSkill(BaseSkill):
         # 3. If we already confirmed, wait for reward popup then exit
         if self._purchase_confirmed:
             # Reward popup is handled at tick() level; if we reach here, just wait/exit
-            if self._purchase_ticks > 5:
+            if self._purchase_ticks > 3 + self._confirm_clicks:
                 self.sub_state = "exit"
                 return action_wait(250, "purchase confirmed, exiting")
             return action_wait(500, "waiting for purchase result")
@@ -277,30 +295,40 @@ class ShopSkill(BaseSkill):
         # 4. Click 選擇購買 in the bottom bar
         bulk_buy = screen.find_any_text(
             ["選擇購買", "选择购买", "選購買", "选购买", "擇購買", "择购买"],
-            region=(0.70, 0.85, 1.0, 0.99), min_conf=0.35
+            region=(0.70, 0.85, 1.0, 0.99), min_conf=0.30
         )
         if bulk_buy:
             self.log(f"clicking bulk purchase '{bulk_buy.text}'")
+            self._buy_btn_clicks += 1
             return action_click_box(bulk_buy, "bulk purchase (選擇購買)")
 
         # 5. Check if bottom selection bar is visible (items are selected)
         selection_bar = screen.find_any_text(
             ["現在選", "现在选", "取消選", "取消选", "商品"],
-            region=(0.20, 0.85, 0.85, 0.99), min_conf=0.5
+            region=(0.20, 0.85, 0.85, 0.99), min_conf=0.45
         )
         if selection_bar:
             # Bar visible but 選擇購買 OCR missed → hardcoded click
             self.log("selection bar visible, clicking 選擇購買 hardcoded")
+            self._buy_btn_clicks += 1
             return action_click(0.91, 0.92, "bulk purchase (hardcoded)")
 
-        # 6. No bottom bar visible — items may not be selectable or already bought
-        if self._purchase_ticks >= 5 and not self._selected_all:
-            self.log("no purchase bar visible, nothing to buy")
+        # 6. No bottom bar — check if items are even available
+        if self._purchase_ticks >= 4 and self._buy_btn_clicks == 0:
+            # We've waited and never found the purchase bar — nothing to buy
+            self.log("no purchase bar after select-all, nothing to buy")
             self.sub_state = "exit"
             return action_wait(250, "nothing purchasable")
 
-        # Try hardcoded after a few ticks
-        if self._purchase_ticks >= 4:
+        # 7. If we've clicked buy but loop back without confirm dialog
+        if self._buy_btn_clicks >= 3:
+            self.log("buy button clicked 3 times with no confirm, giving up")
+            self.sub_state = "exit"
+            return action_wait(250, "purchase stuck")
+
+        # Try hardcoded after a couple ticks
+        if self._purchase_ticks >= 3 and self._buy_btn_clicks == 0:
+            self._buy_btn_clicks += 1
             return action_click(0.91, 0.92, "bulk purchase fallback click")
 
         return action_wait(400, "looking for 選擇購買 button")

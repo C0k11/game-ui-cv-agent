@@ -52,6 +52,8 @@ class StoryCleanupSkill(BaseSkill):
 
         self._in_dialogue: bool = False
         self._skip_armed: int = 0
+        self._entered_episode_list: bool = False
+        self._hub_consecutive: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -65,6 +67,8 @@ class StoryCleanupSkill(BaseSkill):
         self._dialog_taps = 0
         self._in_dialogue = False
         self._skip_armed = 0
+        self._entered_episode_list = False
+        self._hub_consecutive = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -193,6 +197,8 @@ class StoryCleanupSkill(BaseSkill):
         self._section_actions = 0
         self._in_dialogue = False
         self._skip_armed = 0
+        self._entered_episode_list = False
+        self._hub_consecutive = 0
         if self._section_idx >= len(self._SECTIONS):
             self.sub_state = "exit"
             return action_wait(250, "all story sections complete")
@@ -302,6 +308,7 @@ class StoryCleanupSkill(BaseSkill):
 
         if skip:
             self._idle_ticks = 0
+            self._hub_consecutive = 0
             self._in_dialogue = True
             self._section_actions += 1
             return action_click_box(skip, "skip story dialogue")
@@ -313,12 +320,14 @@ class StoryCleanupSkill(BaseSkill):
 
         if menu_btn:
             self._idle_ticks = 0
+            self._hub_consecutive = 0
             self._in_dialogue = True
             self._skip_armed = 2
             return action_click_box(menu_btn, "open story MENU to skip")
 
         if self._is_story_dialogue(screen):
             self._idle_ticks = 0
+            self._hub_consecutive = 0
             self._in_dialogue = True
             self._dialog_taps += 1
             # Try to find any skip-like button
@@ -337,6 +346,7 @@ class StoryCleanupSkill(BaseSkill):
         # ── Formation/battle screen ──
         if self._is_formation_screen(screen):
             self._idle_ticks = 0
+            self._hub_consecutive = 0
             self._section_actions += 1
             fight_btn = screen.find_any_text(
                 ["出擊", "出击", "開始作戰", "开始作战", "戰鬥開始", "战斗开始"],
@@ -346,29 +356,50 @@ class StoryCleanupSkill(BaseSkill):
                 return action_click_box(fight_btn, "start story battle")
             return action_click(0.90, 0.91, "start battle (hardcoded)")
 
+        # ── Hub loop detection ──
+        on_hub = self._is_story_hub(screen)
+        if on_hub:
+            self._hub_consecutive += 1
+        else:
+            self._hub_consecutive = 0
+
+        # If we keep seeing the hub without entering an episode, finish quickly
+        if self._hub_consecutive >= 4 and self._section_actions == 0:
+            return self._finish_section("hub loop without any actions")
+
+        # ── Episode list detection ──
+        on_episode_list = self._is_episode_list(screen)
+        if on_episode_list:
+            self._entered_episode_list = True
+            self._hub_consecutive = 0
+
         # ── Episode node entry ──
-        start = screen.find_any_text(
-            ["NEW", "開始", "开始", "進入", "进入", "前往", "閱讀", "阅读",
-             "觀看", "观看", "繼續", "继续", "入場", "入场"],
-            region=(0.08, 0.15, 0.98, 0.95),
-            min_conf=0.55,
-        )
-        if start:
-            self._episodes_started += 1
-            self._idle_ticks = 0
-            self._section_actions += 1
-            return action_click_box(start, "start/continue story node")
+        # Only look for actionable text when NOT on hub (to prevent hub text false matches)
+        if not on_hub or self._entered_episode_list:
+            start = screen.find_any_text(
+                ["NEW", "開始", "开始", "進入", "进入", "前往", "閱讀", "阅读",
+                 "觀看", "观看", "繼續", "继续", "入場", "入场"],
+                region=(0.08, 0.30, 0.98, 0.95),
+                min_conf=0.55,
+            )
+            if start:
+                self._episodes_started += 1
+                self._idle_ticks = 0
+                self._hub_consecutive = 0
+                self._section_actions += 1
+                return action_click_box(start, "start/continue story node")
 
         # ── Confirm/next button in non-dialogue context ──
         next_btn = screen.find_any_text(
-            ["下一步", "Next", "NEXT", "確認", "确认", "確定", "确定", "OK"],
+            ["下一步", "Next", "NEXT"],
             region=(0.20, 0.52, 0.86, 0.95),
             min_conf=0.55,
         )
         if next_btn:
             self._idle_ticks = 0
+            self._hub_consecutive = 0
             self._section_actions += 1
-            return action_click_box(next_btn, "story dialogue next/confirm")
+            return action_click_box(next_btn, "story dialogue next")
 
         # ── Clear markers ── section done if all cleared
         clear_marker = screen.find_any_text(
@@ -376,7 +407,7 @@ class StoryCleanupSkill(BaseSkill):
             region=(0.08, 0.10, 0.98, 0.92),
             min_conf=0.55,
         )
-        if clear_marker and self._section_ticks > 3:
+        if clear_marker and self._section_ticks > 2:
             return self._finish_section(f"clear marker '{clear_marker.text}'")
 
         # ── Page navigation ──
@@ -394,16 +425,16 @@ class StoryCleanupSkill(BaseSkill):
         self._idle_ticks += 1
 
         # If on hub with no actionable content, finish section quickly
-        if self._is_story_hub(screen) and self._idle_ticks > 5:
+        if on_hub and self._idle_ticks > 3:
             return self._finish_section("no actionable content on hub")
 
         # If on episode list, try scrolling once
-        if self._is_episode_list(screen) and self._idle_ticks in (3, 6) and self._page_swipes < 3:
+        if on_episode_list and self._idle_ticks in (2, 5) and self._page_swipes < 3:
             self._page_swipes += 1
             return action_swipe(0.88, 0.52, 0.30, 0.52, 350, "story page swipe")
 
         # Absolute timeout for this section
-        if self._section_ticks > 40 or self._idle_ticks > 8:
+        if self._section_ticks > 30 or self._idle_ticks > 6:
             return self._finish_section("idle/timeout threshold")
 
         return action_wait(350, "story cleanup scanning")

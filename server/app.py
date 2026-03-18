@@ -25,8 +25,8 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 _SERVER_STARTED_AT = time.time()
 
-DASHBOARD_PATH = REPO_ROOT / "dashboard.html"
-ANNOTATE_PATH = REPO_ROOT / "annotate.html"
+DASHBOARD_PATH = REPO_ROOT / "server" / "dashboard.html"
+ANNOTATE_PATH = REPO_ROOT / "archive" / "old_modules" / "annotate.html"
 
 CAPTURES_DIR = REPO_ROOT / "data" / "captures"
 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -811,10 +811,16 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             if not dry_run and action_type != "done":
                 _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
 
-            # 4. Sleep
+            # 4. Sleep + OCR cache management
             if action_type == "wait":
                 wait_ms = action.get("duration_ms", 500)
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, wait_ms / 1000.0))
+            elif action_type in ("click", "back"):
+                # After click/back: invalidate OCR cache so next tick runs
+                # fresh OCR instead of reusing stale boxes from the old screen.
+                # Also sleep 500ms to let the game start its transition.
+                _prev_ocr_boxes = None
+                _high_res_sleep(0.5)
             else:
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
 
@@ -1617,7 +1623,11 @@ def _get_ocr():
     with _OCR_LOCK:
         if _OCR_ENGINE is None:
             from rapidocr_onnxruntime import RapidOCR
-            _OCR_ENGINE = RapidOCR()
+            custom_rec = Path(__file__).resolve().parent.parent / "data" / "ocr_model" / "ba_rec.onnx"
+            if custom_rec.exists():
+                _OCR_ENGINE = RapidOCR(rec_model_path=str(custom_rec))
+            else:
+                _OCR_ENGINE = RapidOCR()
         return _OCR_ENGINE
 
 @app.get("/api/v1/datasets/ocr")

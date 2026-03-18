@@ -39,7 +39,7 @@
 
 | 层级 | 组件 | 用途 | 速度 | 角色 |
 |------|------|------|------|------|
-| **L1 主干** | RapidOCR | 全屏文字识别 (中/英/日) | ~50ms | 所有技能的文字判据 |
+| **L1 主干** | RapidOCR + **BA fine-tuned rec** | 全屏文字识别 (中/英/日) | ~50ms | 所有技能的文字判据；自训练识别模型 |
 | **L1 主干** | cv2.matchTemplate | 模板匹配 (happy_face / 头像 / UI 图标) | <1ms | 咖啡厅摸头、课程表头像、红点检测 |
 | **L1 主干** | HSV 像素分析 | 颜色状态判断 (房间/按钮/勾选) | <1ms | 课程表房间状态、头像绿勾/红心 |
 | **L2 战斗** | YOLOv8n battle_heads.pt | 战斗角色头部锁定 | ~2ms | 仅战斗覆盖层使用 |
@@ -47,6 +47,17 @@
 | **L3 跟踪** | ByteTrack | 目标跟踪 + EMA 平滑 | <0.1ms | 战斗覆盖层 |
 
 > **设计原则**：日常管线以 OCR + 模板 + 状态机为唯一主干，不依赖重型模型；YOLO 仅在战斗锁定和咖啡厅备用路径中使用。
+
+### OCR 微调
+
+基于 PP-OCRv4 对碧蓝档案游戏内文字进行微调训练（繁体中文 / 简体 / 英文 / 日文混合），提升游戏 UI 专有词汇识别率：
+
+| 指标 | 默认 PP-OCRv3 | BA fine-tuned | 提升 |
+|------|-------------|---------------|------|
+| 词汇精确匹配 | 35.8% | **55.8%** | **+20%** |
+| 全样本精确匹配 | 19.2% | 20.8% | +1.6% |
+
+训练流程：`scripts/ocr_training/` 下 5 步管线（裁切→合成→训练→导出 ONNX→评估），产出 `data/ocr_model/ba_rec.onnx`，管线启动自动加载。
 
 ---
 
@@ -109,12 +120,11 @@ Track 生命周期：
 
 ## 模型
 
-| 模型 | 文件 | 训练数据 | mAP50 | 用途 |
-|------|------|----------|-------|------|
-| 战斗角色头部 | `battle_heads.pt` | 52 帧 (手动标注 + 增强) | 0.995 | 战斗覆盖层 |
-| 咖啡厅摸头气泡 | `headpat.pt` | 1808 cafe 帧 (HSV 自动标注) | 0.96 | 模板匹配备用 |
-
-模型存放：`D:\Project\ml_cache\models\yolo\`
+| 模型 | 文件 | 训练数据 | 指标 | 用途 |
+|------|------|----------|------|------|
+| 战斗角色头部 | `battle_heads.pt` | 52 帧 (手动标注 + 增强) | mAP50=0.995 | 战斗覆盖层 |
+| 咖啡厅摸头气泡 | `headpat.pt` | 1808 cafe 帧 (HSV 自动标注) | mAP50=0.96 | 模板匹配备用 |
+| OCR 识别 (rec) | `ba_rec.onnx` | 轨迹 OCR 裁切 + 合成数据 | 词汇 acc=55.8% | 全管线文字识别 |
 
 ---
 
@@ -168,12 +178,14 @@ ai-game-secretary/
 │   ├── box_tracker.py           # ByteTrack 跟踪器
 │   ├── yolo_overlay.py          # Win32 透明覆盖层 (250Hz)
 │   ├── battle_overlay_demo.py   # 战斗锁定 Demo
-│   └── collect_data.py          # DXcam 数据采集
+│   ├── collect_data.py          # DXcam 数据采集
+│   └── ocr_training/            # OCR 微调管线 (5 步)
 ├── server/
 │   └── app.py                   # FastAPI 后端 + DXcam 录制 + OCR 服务
 ├── dashboard.html               # Web 控制面板（助手/采集/标注三合一）
 ├── data/
 │   ├── captures/                # 模板图片 + 角色头像库
+│   ├── ocr_model/               # 微调 OCR 模型 (ba_rec.onnx)
 │   ├── app_config.json          # 多档案配置
 │   └── trajectories/            # 运行轨迹记录
 ├── mumu_runner.py               # MuMu 主运行入口
@@ -186,7 +198,12 @@ ai-game-secretary/
 - [ ] 大决战 (Grand Assault) 自动化
 - [ ] VFX 增强训练：叠加爆炸/闪光特效提升战斗遮挡召回率
 - [ ] 多模拟器支持 (蓝叠/雷电)
+- [ ] 大模型 OCR 蒸馏：利用 VLM 生成伪标签提升繁体字识别
+- [x] OCR 微调：PP-OCRv4 碧蓝档案专用模型，词汇 +20% ✓
+- [x] MuMu 最小化支持：ADB screencap 后备捕获 ✓
 - [x] 标注中心：旋转框、椭圆框、自由笔刷多边形 ✓
+- [x] reference 技能适配：MomoTalk / Shop / StoryCleanup 修复 ✓
+- [x] Windows 一键启动器 (.NET) ✓
 
 ## License
 

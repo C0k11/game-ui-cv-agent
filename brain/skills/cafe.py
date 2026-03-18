@@ -385,6 +385,16 @@ class CafeSkill(BaseSkill):
         # Has "通知" title + "確" button, no cancel; always safe to dismiss.
         notif = screen.find_text_one("通知", region=(0.35, 0.15, 0.65, 0.30), min_conf=0.8)
         if notif:
+            # Detect invite cooldown notification ("冷時間過後即可邀請。")
+            # If we're in invite phase and see cooldown text, skip invite entirely.
+            if self.sub_state == "invite" and not self._invite_attempted:
+                cd_hint = screen.find_any_text(
+                    ["冷時間", "冷却", "冷印", "即可邀請", "即可邀请"],
+                    region=(0.25, 0.35, 0.75, 0.60), min_conf=0.5
+                )
+                if cd_hint:
+                    self.log(f"invite cooldown notification detected: '{cd_hint.text}', skipping invite")
+                    self._invite_attempted = True
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定"],
                 region=(0.35, 0.62, 0.65, 0.78), min_conf=0.7
@@ -807,7 +817,7 @@ class CafeSkill(BaseSkill):
         # NOTE: "可購買" at cy≈0.83 is the EXTRA ticket purchase label — ignore it.
         # The regular ticket cooldown timer appears above the regular ticket (cy≈0.88-0.96).
         cooldown = screen.find_text_one(
-            r"\d+:\d+:\d+", region=(0.55, 0.88, 0.78, 0.98), min_conf=0.7
+            r"\d+[\uff1a:]\d+[\uff1a:]\d+", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.7
         )
         if cooldown:
             self.log(f"invite cooldown ({cooldown.text}), skipping")

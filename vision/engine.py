@@ -29,7 +29,12 @@ class VisionEngine:
             self.yolo = YOLO(yolo_model_path, task='detect')
             
         # 3. RapidOCR 3.6: 读书能力 (Text recognition on crops)
-        self.ocr = RapidOCR()
+        from pathlib import Path
+        custom_rec = Path(__file__).resolve().parent.parent / "data" / "ocr_model" / "ba_rec.onnx"
+        if custom_rec.exists():
+            self.ocr = RapidOCR(rec_model_path=str(custom_rec))
+        else:
+            self.ocr = RapidOCR()
 
     def grab(self) -> np.ndarray:
         """

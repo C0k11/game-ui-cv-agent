@@ -1,0 +1,20 @@
+# OCR Fine-tuning Dependencies
+# Install: pip install -r scripts/ocr_training/requirements.txt
+
+# PaddlePaddle GPU (CUDA 11.8) — required for training
+# For other CUDA versions, see: https://www.paddlepaddle.org.cn/install/quick
+paddlepaddle-gpu>=2.6.0
+
+# PaddleOCR training framework
+paddleocr>=2.7.0
+
+# Data generation
+Pillow>=10.0
+trdg>=1.8.0
+
+# Evaluation
+rapidocr_onnxruntime
+opencv-python
+numpy
+tqdm
+pyyaml
