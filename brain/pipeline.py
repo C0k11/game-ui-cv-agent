@@ -681,11 +681,12 @@ class DailyPipeline:
             if has_goto and has_day_grid:
                 guide_mission = has_goto  # use as trigger
         if guide_mission:
-            # Panel has a ← back arrow in top-left corner (~0.02, 0.04).
-            # Android BACK triggers exit dialog, so click the in-game arrow instead.
-            print(f"[Interceptor] P0.5 guide mission panel: '{guide_mission.text}', clicking back arrow")
+            # Panel has ← back arrow (top-left) and 🏠 home icon (top-right).
+            # ← goes to previous screen (may be Account Info, not lobby).
+            # 🏠 goes directly to lobby — safer for all callers.
+            print(f"[Interceptor] P0.5 guide mission panel: '{guide_mission.text}', clicking home icon")
             self._interceptor_streak += 1
-            return action_click(0.02, 0.04, f"interceptor: close guide mission panel")
+            return action_click(0.98, 0.03, f"interceptor: close guide mission panel (home)")
 
         checkin = screen.find_any_text(
             ["簽到", "签到", "到薄", "到簿"],
