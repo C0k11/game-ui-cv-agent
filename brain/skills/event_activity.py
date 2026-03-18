@@ -10,7 +10,7 @@ It is intentionally defensive: if no event is available, it exits quickly.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from brain.skills.base import (
     BaseSkill,
@@ -44,6 +44,9 @@ class EventActivitySkill(BaseSkill):
         self._grid_auto_enabled: bool = False
         self._battle_speed_set: bool = False  # clicked speed/auto buttons this battle?
 
+        self._skipped_story_ys: List[float] = []  # Y positions of completed story nodes
+        self._last_story_click_y: float = -1.0  # Y of last clicked story node button
+
         self._mission_done: bool = False
         self._mission_tab_clicked: bool = False
 
@@ -64,6 +67,9 @@ class EventActivitySkill(BaseSkill):
         self._challenge_sweep_stage = 0
         self._grid_auto_enabled = False
         self._battle_speed_set = False
+
+        self._skipped_story_ys = []
+        self._last_story_click_y = -1.0
 
         self._mission_done = False
         self._mission_tab_clicked = False
@@ -480,7 +486,17 @@ class EventActivitySkill(BaseSkill):
                 min_conf=0.55,
             )
             if already_done:
-                self.log(f"story battle already completed: '{already_done.text}', skipping")
+                # Record the Y of the button that led here so we skip it next time
+                if self._last_story_click_y >= 0:
+                    self._skipped_story_ys.append(self._last_story_click_y)
+                    self.log(
+                        f"story battle already completed: '{already_done.text}', "
+                        f"skipping Y={self._last_story_click_y:.3f} "
+                        f"(total skipped: {len(self._skipped_story_ys)})"
+                    )
+                    self._last_story_click_y = -1.0
+                else:
+                    self.log(f"story battle already completed: '{already_done.text}', skipping")
                 return action_back("skip already-completed story battle")
             start_btn = screen.find_any_text(
                 ["任務開始", "任务开始"],
@@ -529,17 +545,34 @@ class EventActivitySkill(BaseSkill):
                 self._story_idle_ticks = 0
                 return action_click_box(tab, "switch to event story tab")
 
-        # Start any available story node (入場 on story list).
-        # NOTE: bare "開始" removed — it wrongly matches disabled "掃蕩開始".
-        start = screen.find_any_text(
-            ["NEW", "前往", "進入", "进入", "入場", "入场",
-             "閱讀", "阅读", "觀看", "观看"],
-            region=(0.10, 0.16, 0.98, 0.96),
-            min_conf=0.55,
-        )
-        if start:
+        # Start next available story node (入場 on story list).
+        # Find ALL entry buttons, filter out Y positions of already-completed nodes.
+        _entry_patterns = ["NEW", "前往", "進入", "进入", "入場", "入场",
+                           "閱讀", "阅读", "觀看", "观看"]
+        all_entries = []
+        for pat in _entry_patterns:
+            all_entries.extend(
+                screen.find_text(pat, region=(0.10, 0.16, 0.98, 0.96), min_conf=0.55)
+            )
+        # Sort by Y (top to bottom) and skip already-tried Y positions
+        all_entries.sort(key=lambda b: b.cy)
+        for entry in all_entries:
+            is_skipped = any(abs(entry.cy - sy) < 0.06 for sy in self._skipped_story_ys)
+            if is_skipped:
+                continue
             self._story_idle_ticks = 0
-            return action_click_box(start, "start/continue event story")
+            self._last_story_click_y = entry.cy
+            return action_click_box(entry, f"start/continue event story (y={entry.cy:.3f})")
+        # All visible nodes are completed — if we have skipped nodes, story is done
+        if self._skipped_story_ys and not all_entries:
+            pass  # fall through to idle detection below
+        elif self._skipped_story_ys and all_entries:
+            # All visible entry buttons are completed nodes
+            self.log(f"all {len(all_entries)} visible story nodes already completed")
+            self._story_done = True
+            self._phase_ticks = 0
+            self.sub_state = "enter"
+            return action_wait(250, "story phase done (all nodes completed)")
 
         self._story_idle_ticks += 1
         if self._phase_ticks > 200 or self._story_idle_ticks > 20:

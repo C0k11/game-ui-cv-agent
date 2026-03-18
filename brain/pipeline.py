@@ -914,8 +914,8 @@ class DailyPipeline:
 
         if (target == self._last_click_target and reason == self._last_click_reason):
             self._click_repeat_count += 1
-            if self._click_repeat_count <= 2:
-                # Allow max 2 repeats (3 total), then suppress
+            if self._click_repeat_count <= 1:
+                # Allow max 1 repeat (2 total), then suppress
                 return action
             # Suppress — convert to wait
             print(f"[Pipeline] Stale click suppressed (repeat #{self._click_repeat_count}): {reason}")
