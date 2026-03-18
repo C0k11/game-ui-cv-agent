@@ -539,6 +539,22 @@ class EventFarmingSkill(BaseSkill):
         on_mission_page = (normal_tab or hard_tab) and (mission_header or normal_tab or hard_tab)
 
         if not on_mission_page:
+            # Fallback: Quest tab events show numbered stages (01-04) with 入場
+            # directly, without Normal/Hard tabs. Detect by Quest tab + 入場 buttons.
+            quest_tab = screen.find_any_text(
+                ["Quest"], region=(0.60, 0.08, 0.85, 0.22), min_conf=0.6
+            )
+            enter_btn = screen.find_any_text(
+                ["入場", "入场"], region=(0.70, 0.15, 0.98, 0.80), min_conf=0.5
+            )
+            if quest_tab and enter_btn:
+                self.log("quest stage list layout (no Normal/Hard tabs), proceeding to farm")
+                self._check_normal_ticks = 0
+                # Quest stage lists show all stages at once — skip scrolling,
+                # go directly to select_stage to click the bottom 入場.
+                self.sub_state = "select_stage"
+                return action_wait(300, "quest stage list detected, selecting bottom stage")
+
             if self._check_normal_ticks > 15:
                 self.log("stuck waiting for quest page, backing out")
                 self._check_normal_ticks = 0
@@ -1013,6 +1029,20 @@ class EventFarmingSkill(BaseSkill):
         """
         # Stage 0: Wait for 任務資訊 popup, then click MAX
         if self._sweep_stage == 0:
+            # Check if stage cannot be swept (first-time clear required)
+            no_sweep = screen.find_any_text(
+                ["無法掃蕩", "无法扫荡", "無法掃荡"],
+                min_conf=0.5
+            )
+            if no_sweep:
+                self.log(f"stage cannot be swept: '{no_sweep.text}', closing and exiting")
+                self.sub_state = "exit"
+                # Click X button at top-right of popup (~0.92, 0.07)
+                close_btn = screen.find_any_text(["X", "×"], region=(0.85, 0.0, 1.0, 0.15), min_conf=0.5)
+                if close_btn:
+                    return action_click_box(close_btn, "close unsweepable stage popup")
+                return action_back("close unsweepable stage popup")
+
             # Detect popup by looking for MAX button (most reliable indicator).
             # OCR reliably reads "MAX" (English, conf ~0.98).
             max_btn = screen.find_any_text(
@@ -1193,6 +1223,18 @@ class EventFarmingSkill(BaseSkill):
                 self.log(f"sweep done ({self._sweep_count} total)")
                 self.sub_state = "exit"
                 return action_click_box(ok, "dismiss result")
+
+            # Detect if sweep already completed and we're back on event/quest page
+            back_on_event = screen.find_any_text(
+                ["Quest", "Story", "Challenge"],
+                region=(0.50, 0.08, 1.0, 0.22), min_conf=0.6
+            )
+            if back_on_event:
+                self.log(f"sweep complete, back on event page ({self._sweep_count} sweeps)")
+                self._sweep_count += 1
+                self.sub_state = "exit"
+                return action_wait(200, "sweep done, returning to exit")
+
             # Click anywhere to dismiss result screen
             return action_click(0.5, 0.9, "dismiss sweep result")
 
