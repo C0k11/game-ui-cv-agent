@@ -662,15 +662,30 @@ class DailyPipeline:
         #
         # CAVEAT: "新上任指南任務" (guide mission panel) also has "第N天" grids
         # but is NOT a check-in calendar — center-click doesn't dismiss it.
-        # Detect it separately and use BACK to close.
+        # OCR often garbles the header ("加班指南任務", "咖班指南任務") so we
+        # detect structurally: "第N天" grid + "立即前往" or "全部领取" buttons.
         guide_mission = screen.find_any_text(
-            ["新上任指南", "新上任指南任務", "新上任指南任务"],
-            min_conf=0.6
+            ["指南任務", "指南任务", "新上任指南"],
+            min_conf=0.5
         )
+        if not guide_mission:
+            # Structural fallback: "立即前往" + "第1天" together = guide mission
+            has_goto = screen.find_any_text(
+                ["立即前往"],
+                region=(0.30, 0.60, 0.95, 0.80), min_conf=0.7
+            )
+            has_day_grid = screen.find_any_text(
+                ["第1天", "第2天", "第3天"],
+                region=(0.25, 0.10, 0.80, 0.35), min_conf=0.6
+            )
+            if has_goto and has_day_grid:
+                guide_mission = has_goto  # use as trigger
         if guide_mission:
-            print(f"[Interceptor] P0.5 guide mission panel: '{guide_mission.text}', pressing BACK")
+            # Panel has a ← back arrow in top-left corner (~0.02, 0.04).
+            # Android BACK triggers exit dialog, so click the in-game arrow instead.
+            print(f"[Interceptor] P0.5 guide mission panel: '{guide_mission.text}', clicking back arrow")
             self._interceptor_streak += 1
-            return action_back(f"interceptor: close guide mission panel")
+            return action_click(0.02, 0.04, f"interceptor: close guide mission panel")
 
         checkin = screen.find_any_text(
             ["簽到", "签到", "到薄", "到簿"],
