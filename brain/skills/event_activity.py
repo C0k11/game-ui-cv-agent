@@ -10,7 +10,8 @@ It is intentionally defensive: if no event is available, it exits quickly.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from brain.skills.base import (
     BaseSkill,
@@ -19,6 +20,7 @@ from brain.skills.base import (
     action_click,
     action_click_box,
     action_done,
+    action_scroll,
     action_wait,
 )
 
@@ -44,8 +46,11 @@ class EventActivitySkill(BaseSkill):
         self._grid_auto_enabled: bool = False
         self._battle_speed_set: bool = False  # clicked speed/auto buttons this battle?
 
-        self._skipped_story_ys: List[float] = []  # Y positions of completed story nodes
-        self._last_story_click_y: float = -1.0  # Y of last clicked story node button
+        # template-based sequential story processing: track by node index (01, 02, ...)
+        self._current_story_index: int = 1   # next node to process (1-based)
+        self._story_scroll_count: int = 0    # consecutive scrolls without finding target
+        self._max_story_index_seen: int = 0  # highest node number observed on screen
+        self._story_node_pending: bool = False  # True after clicking 入場, awaiting popup
 
         self._mission_done: bool = False
         self._mission_tab_clicked: bool = False
@@ -68,8 +73,10 @@ class EventActivitySkill(BaseSkill):
         self._grid_auto_enabled = False
         self._battle_speed_set = False
 
-        self._skipped_story_ys = []
-        self._last_story_click_y = -1.0
+        self._current_story_index = 1
+        self._story_scroll_count = 0
+        self._max_story_index_seen = 0
+        self._story_node_pending = False
 
         self._mission_done = False
         self._mission_tab_clicked = False
@@ -449,6 +456,7 @@ class EventActivitySkill(BaseSkill):
         # ── Not on cutscene — reset skip state ──
         self._skip_stage = 0
         self._cutscene_taps = 0
+        self._story_node_pending = False
 
         # ── Auto-battle in progress (HUD: AUTO + COST at bottom) ──
         # Battle screen has 8-10 OCR boxes (above <=5 threshold).
@@ -476,15 +484,34 @@ class EventActivitySkill(BaseSkill):
         )
         if chapter_info:
             self._story_idle_ticks = 0
+            self._story_node_pending = False
+            # Check if chapter already completed (no 進入章節 button, shows replay)
             enter_chapter = screen.find_any_text(
                 ["進入章節", "进入章节"],
                 region=(0.30, 0.55, 0.70, 0.80),
                 min_conf=0.55,
             )
             if enter_chapter:
+                self.log(f"story node {self._current_story_index:02d} chapter entering")
+                self._current_story_index += 1
+                self._story_scroll_count = 0
                 return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
-            # Fallback: hardcoded position for 進入章節 button
-            return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
+            # Check if AP cost shown (indicates available chapter)
+            ap_cost = screen.find_any_text(
+                ["→"],
+                region=(0.30, 0.55, 0.70, 0.75),
+                min_conf=0.4,
+            )
+            if ap_cost:
+                self.log(f"story node {self._current_story_index:02d} chapter entering (hardcoded)")
+                self._current_story_index += 1
+                self._story_scroll_count = 0
+                return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
+            # No enter button — chapter already completed, close and advance
+            self.log(f"story node {self._current_story_index:02d} chapter already done, closing")
+            self._current_story_index += 1
+            self._story_scroll_count = 0
+            return action_back("close completed chapter info")
 
         # ── Mission Info dialog (battle story node) ──
         # Screen shows "任務資訊" header with "任務開始" yellow button and
@@ -496,6 +523,7 @@ class EventActivitySkill(BaseSkill):
         )
         if mission_info:
             self._story_idle_ticks = 0
+            self._story_node_pending = False
             # Check for already-completed battle indicators:
             # "該關卡無法" = can't sweep (already cleared)
             # "没有任務目標" / "沒有任務目標" = no objectives remaining
@@ -505,17 +533,12 @@ class EventActivitySkill(BaseSkill):
                 min_conf=0.55,
             )
             if already_done:
-                # Record the Y of the button that led here so we skip it next time
-                if self._last_story_click_y >= 0:
-                    self._skipped_story_ys.append(self._last_story_click_y)
-                    self.log(
-                        f"story battle already completed: '{already_done.text}', "
-                        f"skipping Y={self._last_story_click_y:.3f} "
-                        f"(total skipped: {len(self._skipped_story_ys)})"
-                    )
-                    self._last_story_click_y = -1.0
-                else:
-                    self.log(f"story battle already completed: '{already_done.text}', skipping")
+                self.log(
+                    f"story node {self._current_story_index:02d} battle already completed: "
+                    f"'{already_done.text}', advancing to next"
+                )
+                self._current_story_index += 1
+                self._story_scroll_count = 0
                 return action_back("skip already-completed story battle")
             start_btn = screen.find_any_text(
                 ["任務開始", "任务开始"],
@@ -523,8 +546,13 @@ class EventActivitySkill(BaseSkill):
                 min_conf=0.55,
             )
             if start_btn:
+                self.log(f"story node {self._current_story_index:02d} battle starting")
+                self._current_story_index += 1
+                self._story_scroll_count = 0
                 return action_click_box(start_btn, "click 任務開始 (story battle)")
             # reference hardcoded: (940/1280, 538/720)
+            self._current_story_index += 1
+            self._story_scroll_count = 0
             return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
 
         # ── Formation screen (team edit before battle) ──
@@ -564,44 +592,156 @@ class EventActivitySkill(BaseSkill):
                 self._story_idle_ticks = 0
                 return action_click_box(tab, "switch to event story tab")
 
-        # Start next available story node (入場 on story list).
-        # Find ALL entry buttons, filter out Y positions of already-completed nodes.
-        _entry_patterns = ["NEW", "前往", "進入", "进入", "入場", "入场",
-                           "閱讀", "阅读", "觀看", "观看"]
-        all_entries = []
-        for pat in _entry_patterns:
-            all_entries.extend(
-                screen.find_text(pat, region=(0.10, 0.16, 0.98, 0.96), min_conf=0.55)
-            )
-        # Sort by Y (top to bottom) and skip already-tried Y positions
-        all_entries.sort(key=lambda b: b.cy)
-        for entry in all_entries:
-            is_skipped = any(abs(entry.cy - sy) < 0.06 for sy in self._skipped_story_ys)
-            if is_skipped:
-                continue
-            self._story_idle_ticks = 0
-            self._last_story_click_y = entry.cy
-            return action_click_box(entry, f"start/continue event story (y={entry.cy:.3f})")
-        # All visible nodes are completed — if we have skipped nodes, story is done
-        if self._skipped_story_ys and not all_entries:
-            pass  # fall through to idle detection below
-        elif self._skipped_story_ys and all_entries:
-            # All visible entry buttons are completed nodes
-            self.log(f"all {len(all_entries)} visible story nodes already completed")
-            self._story_done = True
-            self._phase_ticks = 0
-            self.sub_state = "enter"
-            return action_wait(250, "story phase done (all nodes completed)")
+        # ── template-based sequential story node processing ──
+        # Find target node by index, scroll if needed, click paired 入場.
+        result = self._find_and_click_story_node(screen)
+        if result is not None:
+            return result
 
         self._story_idle_ticks += 1
-        if self._phase_ticks > 200 or self._story_idle_ticks > 20:
-            self.log("story phase complete")
+        if self._phase_ticks > 250 or self._story_idle_ticks > 30:
+            self.log(f"story phase complete (index={self._current_story_index}, "
+                     f"max_seen={self._max_story_index_seen})")
             self._story_done = True
             self._phase_ticks = 0
             self.sub_state = "enter"
             return action_wait(250, "story phase done")
 
         return action_wait(350, "event story scanning")
+
+    def _find_story_nodes_on_screen(
+        self, screen: ScreenState
+    ) -> Tuple[List[Tuple[int, float]], List]:
+        """Find numbered story nodes and 入場 buttons on the story tab.
+
+        Returns:
+            nodes: list of (index, cy) for detected node numbers
+            entry_buttons: list of OcrBox for 入場 buttons
+        """
+        nodes: List[Tuple[int, float]] = []
+        for box in screen.ocr_boxes:
+            # Node numbers are 2-digit (01-30), located in left-center area
+            if box.conf < 0.45 or box.cx < 0.40 or box.cx > 0.70:
+                continue
+            text = box.text.strip()
+            m = re.match(r"^(\d{1,2})$", text)
+            if m:
+                idx = int(m.group(1))
+                if 1 <= idx <= 30:
+                    nodes.append((idx, box.cy))
+
+        entry_buttons = []
+        for pat in ["入場", "入场"]:
+            for box in screen.find_text(pat, region=(0.70, 0.12, 1.0, 0.92),
+                                        min_conf=0.45):
+                entry_buttons.append(box)
+
+        return nodes, entry_buttons
+
+    def _find_and_click_story_node(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
+        """Sequential story node processing (template-based).
+
+        Finds the current target node by index, pairs it with its 入場 button,
+        and clicks it. Scrolls the story list when the target is off-screen.
+        Returns an action dict, or None if no actionable state found.
+        """
+        target = self._current_story_index
+        target_str = f"{target:02d}"
+
+        nodes, entry_buttons = self._find_story_nodes_on_screen(screen)
+
+        # Update max seen index for termination detection
+        if nodes:
+            self._max_story_index_seen = max(
+                self._max_story_index_seen,
+                max(idx for idx, _ in nodes)
+            )
+
+        # Try to find the target node number on screen
+        target_cy = None
+        for idx, cy in nodes:
+            if idx == target:
+                target_cy = cy
+                break
+
+        if target_cy is not None:
+            self._story_scroll_count = 0  # found target, reset scroll counter
+
+            # Find paired 入場 button at similar Y position
+            paired_entry = None
+            best_dist = 0.08  # max Y distance for pairing
+            for btn in entry_buttons:
+                dist = abs(btn.cy - target_cy)
+                if dist < best_dist:
+                    best_dist = dist
+                    paired_entry = btn
+
+            if paired_entry:
+                self._story_idle_ticks = 0
+                self._story_node_pending = True
+                self.log(f"clicking 入場 for story node {target_str} "
+                         f"(y={paired_entry.cy:.3f})")
+                return action_click_box(
+                    paired_entry,
+                    f"story node {target_str} 入場"
+                )
+
+            # Node number visible but no 入場 button paired
+            # → locked node (dark 入場 with 🔒, OCR can't read it)
+            # Check if there are other entry buttons below this node
+            # that might belong to later unlocked nodes
+            self.log(f"story node {target_str} visible but no 入場 button "
+                     f"(likely locked), advancing")
+            self._current_story_index += 1
+            self._story_scroll_count = 0
+            return action_wait(300, f"node {target_str} locked, trying next")
+
+        # Target node not found on screen
+        if nodes:
+            max_visible = max(idx for idx, _ in nodes)
+            min_visible = min(idx for idx, _ in nodes)
+
+            if target > max_visible:
+                # Target is below visible area → scroll down
+                if self._story_scroll_count < 8:
+                    self._story_scroll_count += 1
+                    self._story_idle_ticks = 0
+                    self.log(f"scrolling down to find node {target_str} "
+                             f"(visible: {min_visible:02d}-{max_visible:02d}, "
+                             f"scroll #{self._story_scroll_count})")
+                    return action_scroll(
+                        0.75, 0.50, clicks=-5,
+                        reason=f"scroll story list for node {target_str}"
+                    )
+                # Scrolled max times without finding target → no more nodes
+                self.log(f"node {target_str} not found after {self._story_scroll_count} "
+                         f"scrolls (max_seen={self._max_story_index_seen}), story complete")
+                self._story_done = True
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_wait(250, "story phase done (scrolled to end)")
+
+            if target < min_visible:
+                # Target is above visible area → scroll up
+                if self._story_scroll_count < 8:
+                    self._story_scroll_count += 1
+                    self._story_idle_ticks = 0
+                    return action_scroll(
+                        0.75, 0.50, clicks=5,
+                        reason=f"scroll up for node {target_str}"
+                    )
+                # Can't find it above either — skip to first visible
+                self.log(f"node {target_str} not found above, jumping to {min_visible:02d}")
+                self._current_story_index = min_visible
+                self._story_scroll_count = 0
+                return action_wait(300, f"jumping to node {min_visible:02d}")
+
+        # If we just clicked an 入場 and are waiting for popup, be patient
+        if self._story_node_pending:
+            return action_wait(400, f"waiting for node {target_str} popup")
+
+        # No nodes visible at all — might still be loading or transitioning
+        return None
 
     def _challenge(self, screen: ScreenState) -> Dict[str, Any]:
         self._phase_ticks += 1
