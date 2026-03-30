@@ -447,6 +447,14 @@ class BaseSkill(ABC):
                 self.log("notification popup (invite hint): fallback dismiss tap")
                 return action_click(0.5, 0.70, "dismiss notification popup fallback")
 
+            # No buttons detected at all — OCR missed them.
+            # Click X close button at top-right of notification dialog.
+            # X is to the right of "通知" header, at approximately (+0.05, same cy).
+            x_btn_x = min(notification.x2 + 0.05, 0.58)
+            x_btn_y = notification.cy
+            self.log("notification popup: no buttons detected, clicking X close")
+            return action_click(x_btn_x, x_btn_y, "dismiss notification popup (X close fallback)")
+
         # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
             ["確認", "确认", "確定", "确定", "確", "确"],

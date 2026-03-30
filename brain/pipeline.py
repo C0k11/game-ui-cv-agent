@@ -664,6 +664,16 @@ class DailyPipeline:
         # but is NOT a check-in calendar — center-click doesn't dismiss it.
         # OCR often garbles the header ("加班指南任務", "咖班指南任務") so we
         # detect structurally: "第N天" grid + "立即前往" or "全部领取" buttons.
+        #
+        # Guard: skip guide mission / check-in if a notification popup (通知) is
+        # in front — the skill's _handle_common_popups will handle it instead.
+        _has_notification_popup = screen.find_text_one(
+            "通知", region=(0.30, 0.10, 0.70, 0.30), min_conf=0.55
+        )
+        if _has_notification_popup:
+            # Let skill popup handler deal with it; don't touch guide panel behind.
+            return None
+
         guide_mission = screen.find_any_text(
             ["指南任務", "指南任务", "新上任指南"],
             min_conf=0.5
