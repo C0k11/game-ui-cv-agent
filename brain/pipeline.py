@@ -600,6 +600,18 @@ class DailyPipeline:
             print(f"[Interceptor] Title screen detected, tapping to start")
             return action_click(0.5, 0.85, "interceptor: tap to start")
 
+        # ── P-1: Global loading / update / download ──
+        # During game startup the screen shows "正在更新", "Now Loading",
+        # "驗證下載檔案中", "重置遊戲資料中", etc.  No skill should act
+        # during these — just wait.  Also reset the current skill's enter
+        # ticks so a long download doesn't trigger a premature timeout.
+        if screen.is_loading():
+            # Reset skill enter-tick counter so downloads don't count as
+            # "stuck" time.  Many skills have _enter_ticks with hard limits.
+            if hasattr(skill, '_enter_ticks'):
+                skill._enter_ticks = max(0, getattr(skill, '_enter_ticks', 0) - 1)
+            return action_wait(1500, "interceptor: game loading / updating")
+
         # ── P0: Disconnect / reconnect ──
         disconnect = screen.find_any_text(
             ["网络连接失败", "網絡連接失敗", "返回标题画面", "返回標題畫面",

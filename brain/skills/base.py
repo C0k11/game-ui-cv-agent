@@ -227,17 +227,36 @@ class ScreenState:
         return nav_hits >= 3
 
     def is_loading(self) -> bool:
-        """Detect loading screen or download progress."""
+        """Detect loading screen, download progress, or game update.
+
+        Covers the FULL startup sequence:
+        1. "Now Loading..." — post-title-screen loading
+        2. "正在更新。[N/M] X.XX%" — game asset download progress
+        3. "驗證下載檔案中" — file verification after download
+        4. "重置遊戲資料中" — game data reset / cache rebuild
+        5. "下載中" / "Downloading" — generic download state
+        """
         if self.has_text("Loading", min_conf=0.7) or self.has_text("loading", min_conf=0.7):
             return True
-        # Game download progress: bottom-left shows "下載中" or percentage bar
-        # Also detect "ダウンロード" (JP) and "Downloading" (EN)
+        # Bottom-of-screen progress text during startup / update.
+        # OCR garbles these regularly (e.g. "驗證下载檔案中" → mixed Trad/Simp).
         if self.find_any_text(
-            ["下載中", "下载中", "Downloading", "ダウンロード",
-             "資料下載", "资料下载", "檔案驗證", "档案验证",
-             "重置遊戲", "重置游戏", "重置游資", "重置游资",
-             "資料中", "资料中"],
-            region=(0.0, 0.80, 0.60, 1.0), min_conf=0.45
+            [
+                # Download in progress
+                "下載中", "下载中", "Downloading", "ダウンロード",
+                "資料下載", "资料下载",
+                # Game update ("正在更新。 [N/M] X%")
+                "正在更新", "正在更新。", "正在更新°",
+                # File verification
+                "檔案驗證", "档案验证", "驗證下載", "验证下载",
+                "驗證下载", "驗證檔案", "验证档案",
+                # Data reset
+                "重置遊戲", "重置游戏", "重置游資", "重置游资",
+                "資料中", "资料中",
+                # Generic download completion
+                "下載檔案", "下载档案",
+            ],
+            region=(0.0, 0.80, 0.60, 1.0), min_conf=0.40,
         ):
             return True
         return False

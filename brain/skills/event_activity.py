@@ -281,6 +281,11 @@ class EventActivitySkill(BaseSkill):
         return bool((auto and menu) or skip)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
+        # Safety net: very few OCR boxes (≤3) typically means loading /
+        # transition screen.  Don't count toward enter timeout so a long
+        # game update doesn't prematurely skip the skill.
+        if len(screen.ocr_boxes) <= 3:
+            return action_wait(800, "enter: transition screen (few OCR)")
         self._enter_ticks += 1
 
         if self._is_event_page(screen):
