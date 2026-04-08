@@ -1,11 +1,14 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
+using WinForms = System.Windows.Forms;
+using MessageBox = System.Windows.MessageBox;
 
 namespace GameSecretaryApp;
 
@@ -17,12 +20,67 @@ public partial class MainWindow : Window
     private HwndSource? _source;
     private bool _isRestarting;
 
+    // ── System tray ──
+    private WinForms.NotifyIcon? _trayIcon;
+    private bool _reallyClosing; // true only when user picks "Exit" from tray
+
     public MainWindow()
     {
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
         Closing += OnClosing;
+        StateChanged += OnStateChanged;
+        InitTrayIcon();
+    }
+
+    private void InitTrayIcon()
+    {
+        _trayIcon = new WinForms.NotifyIcon
+        {
+            Icon = SystemIcons.Application,
+            Text = "私人碧蓝档案助手",
+            Visible = false,
+        };
+
+        var menu = new WinForms.ContextMenuStrip();
+        menu.Items.Add("显示主窗口", null, (_, _) => RestoreFromTray());
+        menu.Items.Add(new WinForms.ToolStripSeparator());
+        menu.Items.Add("退出", null, (_, _) => ExitApp());
+        _trayIcon.ContextMenuStrip = menu;
+        _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
+    }
+
+    private void MinimizeToTray()
+    {
+        Hide();
+        if (_trayIcon != null)
+        {
+            _trayIcon.Visible = true;
+            _trayIcon.ShowBalloonTip(1500, "私人碧蓝档案助手", "程序已最小化到系统托盘，脚本继续运行中", WinForms.ToolTipIcon.Info);
+        }
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+        if (_trayIcon != null) _trayIcon.Visible = false;
+    }
+
+    private void ExitApp()
+    {
+        _reallyClosing = true;
+        Close();
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            MinimizeToTray();
+        }
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -231,6 +289,27 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        // Close button → minimize to tray (keep pipeline running)
+        // Only truly exit when user clicks "退出" from tray menu
+        if (!_reallyClosing)
+        {
+            e.Cancel = true;
+            MinimizeToTray();
+            return;
+        }
+
+        // Real exit path
+        try
+        {
+            if (_trayIcon != null)
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+                _trayIcon = null;
+            }
+        }
+        catch { }
+
         try
         {
             BackendManager.Instance.Stop();

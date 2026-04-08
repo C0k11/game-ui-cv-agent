@@ -2,10 +2,11 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Windows;
+using MessageBox = System.Windows.MessageBox;
 
 namespace GameSecretaryApp;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private Mutex? _mutex;
 

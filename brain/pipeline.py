@@ -593,6 +593,13 @@ class DailyPipeline:
         P1: Stale sign-in / activity popups that leaked through
         P2: Account / student Level Up full-screen effects
         """
+        # ── P-1: Title screen ("TOUCH TO START") ──
+        # Game may restart / disconnect and land on title. All skills need this.
+        tap_start = screen.find_text_one("(?:TOUCH|TAP).*START", min_conf=0.8)
+        if tap_start:
+            print(f"[Interceptor] Title screen detected, tapping to start")
+            return action_click(0.5, 0.85, "interceptor: tap to start")
+
         # ── P0: Disconnect / reconnect ──
         disconnect = screen.find_any_text(
             ["网络连接失败", "網絡連接失敗", "返回标题画面", "返回標題畫面",
