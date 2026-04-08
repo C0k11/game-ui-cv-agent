@@ -548,8 +548,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             import ctypes.wintypes as _wt
 
             # Find which monitor the window center is on
+            # Use DPI-aware context so GetWindowRect returns physical pixels
+            # (critical at 150% scaling: prevents capture region mismatch)
+            from scripts.win_capture import _dpi_aware_context
             _dxcam_rc = _wt.RECT()
-            ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_dxcam_rc))
+            with _dpi_aware_context():
+                ctypes.windll.user32.GetWindowRect(render_hwnd, ctypes.byref(_dxcam_rc))
             win_cx = (_dxcam_rc.left + _dxcam_rc.right) // 2
             win_cy = (_dxcam_rc.top + _dxcam_rc.bottom) // 2
 
@@ -589,10 +593,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     ]
                 _mi = _MONITORINFO()
                 _mi.cbSize = ctypes.sizeof(_MONITORINFO)
-                if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(_mi)):
-                    _mon_offset_x = _mi.rcMonitor.left
-                    _mon_offset_y = _mi.rcMonitor.top
-                    _log_pipeline(f"Monitor {_monitor_idx} origin: ({_mon_offset_x}, {_mon_offset_y})")
+                with _dpi_aware_context():
+                    if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(_mi)):
+                        _mon_offset_x = _mi.rcMonitor.left
+                        _mon_offset_y = _mi.rcMonitor.top
+                        _log_pipeline(f"Monitor {_monitor_idx} origin: ({_mon_offset_x}, {_mon_offset_y})")
             except Exception:
                 pass
             _dxcam_region = (
@@ -601,9 +606,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _dxcam_rc.right - _mon_offset_x,
                 _dxcam_rc.bottom - _mon_offset_y,
             )
+            _log_pipeline(f"DXcam region: {_dxcam_region} (window rect: L={_dxcam_rc.left} T={_dxcam_rc.top} R={_dxcam_rc.right} B={_dxcam_rc.bottom})")
             _test = _dxcam_camera.grab(region=_dxcam_region)
             if _test is not None:
-                _log_pipeline(f"DXcam capture OK: {_test.shape[1]}x{_test.shape[0]} (monitor {_monitor_idx})")
+                _log_pipeline(f"DXcam capture OK: {_test.shape[1]}x{_test.shape[0]} region_w={_dxcam_region[2]-_dxcam_region[0]} region_h={_dxcam_region[3]-_dxcam_region[1]} (monitor {_monitor_idx})")
             else:
                 _dxcam_camera = None
                 _log_pipeline("DXcam grab returned None, falling back to ADB/BitBlt")
@@ -889,7 +895,7 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
     """
     global _dpi_set
     import random
-    from scripts.win_capture import get_client_rect_on_screen
+    from scripts.win_capture import get_client_rect_on_screen, _dpi_aware_context
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     _enable_high_resolution_timer()
 
@@ -971,12 +977,13 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
         coords = _screen_xy(nx, ny)
         if coords:
             cx, cy, sx, sy = coords
-            print(f"[Click] norm=({nx:.3f},{ny:.3f}) client=({cx},{cy}) cw={cw} ch={ch}")
-            user32.SetCursorPos(sx, sy)
-            _high_res_sleep(1.0 / _INPUT_POLL_HZ)
-            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            _high_res_sleep(max(1.0 / _INPUT_POLL_HZ, 1.0 / (_DISPLAY_SYNC_HZ * 2.0)))
-            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            print(f"[Click] norm=({nx:.3f},{ny:.3f}) client=({cx},{cy}) screen=({sx},{sy}) cw={cw} ch={ch}")
+            with _dpi_aware_context():
+                user32.SetCursorPos(sx, sy)
+                _high_res_sleep(1.0 / _INPUT_POLL_HZ)
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                _high_res_sleep(max(1.0 / _INPUT_POLL_HZ, 1.0 / (_DISPLAY_SYNC_HZ * 2.0)))
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
     elif action_type == "back":
         # Send Escape key via PostMessage
@@ -999,16 +1006,17 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
             steps = max(12, int((dur_ms / 1000.0) * _DISPLAY_SYNC_HZ))
             print(f"[Swipe] from=({frm[0]:.3f},{frm[1]:.3f}) to=({to[0]:.3f},{to[1]:.3f}) steps={steps}")
 
-            user32.SetCursorPos(sx1, sy1)
-            _high_res_sleep(1.0 / _INPUT_POLL_HZ)
-            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            for i in range(1, steps + 1):
-                t = i / steps
-                mx = int(sx1 + (sx2 - sx1) * t)
-                my = int(sy1 + (sy2 - sy1) * t)
-                user32.SetCursorPos(mx, my)
-                _high_res_sleep(dur_ms / 1000.0 / steps)
-            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            with _dpi_aware_context():
+                user32.SetCursorPos(sx1, sy1)
+                _high_res_sleep(1.0 / _INPUT_POLL_HZ)
+                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    mx = int(sx1 + (sx2 - sx1) * t)
+                    my = int(sy1 + (sy2 - sy1) * t)
+                    user32.SetCursorPos(mx, my)
+                    _high_res_sleep(dur_ms / 1000.0 / steps)
+                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
     elif action_type == "scroll":
         nx, ny = action.get("target", [0.5, 0.5])
@@ -1016,9 +1024,10 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
         coords = _screen_xy(nx, ny)
         if coords:
             _, _, sx, sy = coords
-            user32.SetCursorPos(sx, sy)
-            _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
-            user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(clicks * 120), 0)
+            with _dpi_aware_context():
+                user32.SetCursorPos(sx, sy)
+                _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
+                user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(clicks * 120), 0)
 
 
 def _log_pipeline(msg: str) -> None:

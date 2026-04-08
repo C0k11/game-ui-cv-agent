@@ -80,19 +80,8 @@
         "Yuuka_(Sportswear).png"
       ],
       "skill_order": [
-        "lobby",
         "event_activity",
-        "event_farming",
-        "cafe",
-        "schedule",
-        "club",
-        "momo_talk",
-        "shop",
-        "craft",
-        "bounty",
-        "mail",
-        "daily_tasks",
-        "event_farming_2"
+        "event_farming"
       ]
     }
   },

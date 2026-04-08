@@ -417,8 +417,8 @@ class BaseSkill(ABC):
             )
             confirm_btn = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],
-                region=(0.42, 0.60, 0.74, 0.82),
-                min_conf=0.55,
+                region=(0.30, 0.55, 0.74, 0.82),
+                min_conf=0.40,
             )
             if invite_hint and confirm_btn:
                 self.log("notification popup (invite): clicking confirm")
@@ -448,12 +448,9 @@ class BaseSkill(ABC):
                 return action_click(0.5, 0.70, "dismiss notification popup fallback")
 
             # No buttons detected at all — OCR missed them.
-            # Click X close button at top-right of notification dialog.
-            # X is to the right of "通知" header, at approximately (+0.05, same cy).
-            x_btn_x = min(notification.x2 + 0.05, 0.58)
-            x_btn_y = notification.cy
-            self.log("notification popup: no buttons detected, clicking X close")
-            return action_click(x_btn_x, x_btn_y, "dismiss notification popup (X close fallback)")
+            # Click 確認 button area (center-bottom of dialog, large target).
+            self.log("notification popup: no buttons detected, clicking confirm area")
+            return action_click(0.50, 0.64, "dismiss notification popup (confirm area fallback)")
 
         # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
