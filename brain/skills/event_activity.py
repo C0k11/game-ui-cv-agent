@@ -307,6 +307,58 @@ class EventActivitySkill(BaseSkill):
                     return True
         return False
 
+    def _check_chapter_completion(self, screen: ScreenState) -> Optional[bool]:
+        """Check if a story chapter is already completed.
+
+        Uses OCR text in the 章節資訊 dialog:
+          - "獲得期待" (Expected Rewards) → uncompleted (return False)
+          - "已獲得" (Already Obtained)   → completed (return True)
+          - Neither found                → unknown (return None)
+
+        Also logs 進入章節 button color for future pixel-based detection.
+        """
+        # Primary: check for uncompleted indicator
+        expected_reward = screen.find_any_text(
+            ["獲得期待", "获得期待"],
+            region=(0.30, 0.30, 0.65, 0.50),
+            min_conf=0.50,
+        )
+        if expected_reward:
+            self.log(f"chapter reward text: '{expected_reward.text}' → uncompleted")
+            return False  # NOT completed
+
+        # Check for completed indicator
+        already_obtained = screen.find_any_text(
+            ["已獲得", "已获得", "已領取", "已领取"],
+            region=(0.30, 0.30, 0.65, 0.50),
+            min_conf=0.50,
+        )
+        if already_obtained:
+            self.log(f"chapter reward text: '{already_obtained.text}' → completed")
+            return True  # completed
+
+        # Log 進入章節 button pixel color for future analysis
+        try:
+            import cv2 as _cv2
+            import numpy as _np
+            img = _cv2.imdecode(
+                _np.fromfile(screen.screenshot_path, dtype=_np.uint8),
+                _cv2.IMREAD_COLOR,
+            )
+            if img is not None:
+                h, w = img.shape[:2]
+                # 進入章節 button center
+                bx, by = int(0.50 * w), int(0.72 * h)
+                patch = img[max(0, by - 2):min(h, by + 3),
+                            max(0, bx - 2):min(w, bx + 3)]
+                if patch.size > 0:
+                    b, g, r = patch.mean(axis=(0, 1))
+                    self.log(f"chapter btn pixel: R={r:.0f} G={g:.0f} B={b:.0f}")
+        except Exception:
+            pass
+
+        return None  # unknown
+
     def _is_event_story_screen(self, screen: ScreenState) -> bool:
         auto = screen.find_any_text(
             ["AUTO"],
@@ -337,16 +389,19 @@ class EventActivitySkill(BaseSkill):
                 return action_wait(250, "start event story phase")
             else:
                 self.log("story phase already done (persisted)")
+            # reference order: story → quest (mission) → challenge
+            if not self._mission_done:
+                self.sub_state = "mission"
+                self.log("story done -> mission (quest) phase")
+                return action_wait(250, "start event mission phase")
+            else:
+                self.log("mission (quest) phase already done")
             if not self._challenge_done:
                 self.sub_state = "challenge"
-                self.log("story done -> challenge phase")
+                self.log("mission done -> challenge phase")
                 return action_wait(250, "start event challenge phase")
             else:
                 self.log("challenge phase already done (persisted)")
-            if not self._mission_done:
-                self.sub_state = "mission"
-                self.log("challenge done -> mission phase")
-                return action_wait(250, "start event mission phase")
             self.sub_state = "exit"
             return action_wait(200, "event phases complete")
 
@@ -605,54 +660,48 @@ class EventActivitySkill(BaseSkill):
                 self.sub_state = "enter"
                 return action_back("close chapter popup (AP depleted)")
 
-            # Detect uncompleted chapter by first-clear reward text "獲得期待"
-            # (reference equivalent: rgb_in_range at (362,322) for reward badge)
-            first_clear_reward = screen.find_any_text(
-                ["獲得期待", "获得期待", "獲得"],
-                region=(0.30, 0.30, 0.65, 0.50),
-                min_conf=0.55,
-            )
-            if first_clear_reward:
-                # Chapter NOT completed — first-clear rewards available → enter
-                self._story_completed_streak = 0
-                enter_chapter = screen.find_any_text(
-                    ["進入章節", "进入章节"],
-                    region=(0.30, 0.55, 0.70, 0.80),
-                    min_conf=0.55,
-                )
-                if enter_chapter:
-                    self.log(f"story node {self._current_story_index:02d} chapter entering "
-                             f"(reward='{first_clear_reward.text}')")
-                    self._current_story_index += 1
-                    self._save_story_index()
-                    self._story_scroll_count = 0
-                    self._story_tab_clicked = False
-                    return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
-                # Fallback: click hardcoded 進入章節 position
-                self.log(f"story node {self._current_story_index:02d} chapter entering (hardcoded)")
+            # Check if chapter is already completed via OCR text detection.
+            # "獲得期待" = uncompleted (first-clear rewards available).
+            # "已獲得" = completed (rewards already claimed).
+            chapter_status = self._check_chapter_completion(screen)
+            if chapter_status is True:  # explicitly completed
+                self._story_completed_streak += 1
+                self.log(f"story node {self._current_story_index:02d} already completed "
+                         f"(streak={self._story_completed_streak})")
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
                 self._story_tab_clicked = False
-                return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
+                if self._story_completed_streak >= 4:
+                    self.log("4+ consecutive completed chapters → story phase done")
+                    self._story_done = True
+                    self._clear_story_state()
+                    self._phase_ticks = 0
+                    self.sub_state = "enter"
+                    return action_back("story done (all chapters completed)")
+                return action_back("close completed chapter info")
 
-            # No first-clear reward → chapter already completed, skip it
-            self._story_completed_streak = getattr(self, '_story_completed_streak', 0) + 1
-            self.log(f"story node {self._current_story_index:02d} already completed "
-                     f"(no reward text, streak={self._story_completed_streak})")
+            # Chapter NOT completed — enter it
+            self._story_completed_streak = 0
+            enter_chapter = screen.find_any_text(
+                ["進入章節", "进入章节"],
+                region=(0.30, 0.55, 0.70, 0.80),
+                min_conf=0.55,
+            )
+            if enter_chapter:
+                self.log(f"story node {self._current_story_index:02d} chapter entering")
+                self._current_story_index += 1
+                self._save_story_index()
+                self._story_scroll_count = 0
+                self._story_tab_clicked = False
+                return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
+            # Fallback: click hardcoded 進入章節 position
+            self.log(f"story node {self._current_story_index:02d} chapter entering (hardcoded)")
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
             self._story_tab_clicked = False
-            # If 4+ consecutive completed chapters, all story is likely done
-            if self._story_completed_streak >= 4:
-                self.log("4+ consecutive completed chapters → story phase done")
-                self._story_done = True
-                self._clear_story_state()
-                self._phase_ticks = 0
-                self.sub_state = "enter"
-                return action_back("story done (all chapters completed)")
-            return action_back("close completed chapter info")
+            return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
 
         # ── Mission Info dialog (battle story node) ──
         # Screen shows "任務資訊" header with "任務開始" yellow button and
