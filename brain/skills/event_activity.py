@@ -59,6 +59,7 @@ class EventActivitySkill(BaseSkill):
         self._max_story_index_seen: int = 0  # highest node number observed on screen
         self._story_node_pending: bool = False  # True after clicking 入場, awaiting popup
         self._story_ap_depleted: bool = False  # True when AP purchase popup seen
+        self._story_completed_streak: int = 0  # consecutive completed chapters detected
 
         self._mission_done: bool = False
         self._mission_tab_clicked: bool = False
@@ -98,6 +99,7 @@ class EventActivitySkill(BaseSkill):
         self._max_story_index_seen = 0
         self._story_node_pending = False
         self._story_ap_depleted = False
+        self._story_completed_streak = 0
         self._no_game_ticks = 0
 
         self._mission_done = False
@@ -584,6 +586,9 @@ class EventActivitySkill(BaseSkill):
         # ── Chapter Info dialog (story chapter node, not battle) ──
         # Clicking 入場 on a story-only node opens a "章節資訊" dialog
         # with a "進入章節" button to actually enter.
+        # reference: check pixel at (362,322)/1280x720 for completion color.
+        # We use OCR: uncompleted chapters show "獲得期待" (first-clear reward).
+        # Completed chapters don't show this text → close and advance.
         chapter_info = screen.find_any_text(
             ["章節資訊", "章节资讯", "章節資", "章节资"],
             min_conf=0.55,
@@ -599,38 +604,54 @@ class EventActivitySkill(BaseSkill):
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_back("close chapter popup (AP depleted)")
-            # Check if chapter already completed (no 進入章節 button, shows replay)
-            enter_chapter = screen.find_any_text(
-                ["進入章節", "进入章节"],
-                region=(0.30, 0.55, 0.70, 0.80),
+
+            # Detect uncompleted chapter by first-clear reward text "獲得期待"
+            # (reference equivalent: rgb_in_range at (362,322) for reward badge)
+            first_clear_reward = screen.find_any_text(
+                ["獲得期待", "获得期待", "獲得"],
+                region=(0.30, 0.30, 0.65, 0.50),
                 min_conf=0.55,
             )
-            if enter_chapter:
-                self.log(f"story node {self._current_story_index:02d} chapter entering")
-                self._current_story_index += 1
-                self._save_story_index()
-                self._story_scroll_count = 0
-                self._story_tab_clicked = False  # re-verify tab after completion
-                return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
-            # Check if AP cost shown (indicates available chapter)
-            ap_cost = screen.find_any_text(
-                ["→"],
-                region=(0.30, 0.55, 0.70, 0.75),
-                min_conf=0.4,
-            )
-            if ap_cost:
+            if first_clear_reward:
+                # Chapter NOT completed — first-clear rewards available → enter
+                self._story_completed_streak = 0
+                enter_chapter = screen.find_any_text(
+                    ["進入章節", "进入章节"],
+                    region=(0.30, 0.55, 0.70, 0.80),
+                    min_conf=0.55,
+                )
+                if enter_chapter:
+                    self.log(f"story node {self._current_story_index:02d} chapter entering "
+                             f"(reward='{first_clear_reward.text}')")
+                    self._current_story_index += 1
+                    self._save_story_index()
+                    self._story_scroll_count = 0
+                    self._story_tab_clicked = False
+                    return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
+                # Fallback: click hardcoded 進入章節 position
                 self.log(f"story node {self._current_story_index:02d} chapter entering (hardcoded)")
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
-                self._story_tab_clicked = False  # re-verify tab after completion
+                self._story_tab_clicked = False
                 return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
-            # No enter button — chapter already completed, close and advance
-            self.log(f"story node {self._current_story_index:02d} chapter already done, closing")
+
+            # No first-clear reward → chapter already completed, skip it
+            self._story_completed_streak = getattr(self, '_story_completed_streak', 0) + 1
+            self.log(f"story node {self._current_story_index:02d} already completed "
+                     f"(no reward text, streak={self._story_completed_streak})")
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
-            self._story_tab_clicked = False  # re-verify tab after completion
+            self._story_tab_clicked = False
+            # If 4+ consecutive completed chapters, all story is likely done
+            if self._story_completed_streak >= 4:
+                self.log("4+ consecutive completed chapters → story phase done")
+                self._story_done = True
+                self._clear_story_state()
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_back("story done (all chapters completed)")
             return action_back("close completed chapter info")
 
         # ── Mission Info dialog (battle story node) ──

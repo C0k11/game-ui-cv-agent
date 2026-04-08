@@ -623,12 +623,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         # Shares latest YOLO results AND latest frame with pipeline tick.
         _yolo_latest_boxes = []    # shared: latest YOLO results
         _yolo_latest_frame = None  # shared: latest DXcam frame for pipeline tick
+        _yolo_latest_ts = 0.0      # shared: timestamp of latest good frame
         _yolo_latest_lock = threading.Lock()
         _yolo_thread_running = True
 
         def _yolo_highfps_thread():
             """DXcam → YOLO → tracker → overlay, like battle_overlay_demo.py."""
-            nonlocal _yolo_latest_boxes, _yolo_latest_frame, _yolo_thread_running
+            nonlocal _yolo_latest_boxes, _yolo_latest_frame, _yolo_latest_ts, _yolo_thread_running
             # Wait for pipeline to start and YOLO model to lazy-load on first tick
             time.sleep(5)
             try:
@@ -660,9 +661,20 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         except Exception:
                             frame = None
                     if frame is None:
+                        # DXcam returned None — clear shared frame after timeout
+                        # so pipeline falls back to ADB (background mode support)
+                        with _yolo_latest_lock:
+                            if _yolo_latest_ts > 0 and time.perf_counter() - _yolo_latest_ts > 2.0:
+                                _yolo_latest_frame = None
+                                _yolo_latest_ts = 0.0
                         time.sleep(0.01)
                         continue
                     if frame.mean() < 10:
+                        # Black frame (window minimized/off-screen)
+                        with _yolo_latest_lock:
+                            if _yolo_latest_ts > 0 and time.perf_counter() - _yolo_latest_ts > 2.0:
+                                _yolo_latest_frame = None
+                                _yolo_latest_ts = 0.0
                         time.sleep(0.01)
                         continue
                     h, w = frame.shape[:2]
@@ -670,6 +682,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     with _yolo_latest_lock:
                         _yolo_latest_boxes = yolo_boxes
                         _yolo_latest_frame = frame
+                        _yolo_latest_ts = time.perf_counter()
                     if _overlay and _overlay.is_alive:
                         pipe_ref = None
                         with _PIPELINE_LOCK:
@@ -720,7 +733,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             frame = None
             with _yolo_latest_lock:
                 if _yolo_latest_frame is not None:
-                    frame = _yolo_latest_frame.copy()
+                    # Only use DXcam frame if fresh (< 3s old);
+                    # stale frames mean window is minimized → fall through to ADB
+                    if time.perf_counter() - _yolo_latest_ts < 3.0:
+                        frame = _yolo_latest_frame.copy()
             if frame is None and adb is not None:
                 try:
                     frame = adb.capture_frame()
@@ -754,7 +770,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _injected_yolo = None
             if _dxcam_camera is not None:
                 with _yolo_latest_lock:
-                    if _yolo_latest_frame is not None:
+                    # Only inject YOLO from high-FPS thread if frame is fresh;
+                    # stale = window minimized → run inline YOLO on ADB frame
+                    if (_yolo_latest_frame is not None
+                            and time.perf_counter() - _yolo_latest_ts < 3.0):
                         _injected_yolo = list(_yolo_latest_boxes)
             else:
                 if not _inline_yolo_logged:
