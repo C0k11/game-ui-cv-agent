@@ -955,6 +955,16 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
         rect = None
         cw = ch = 0
 
+    # DPI safety: if _dpi_aware_context failed silently, cw/ch may be in
+    # logical pixels while frame (screenshot) is physical. Detect and fix.
+    _dpi_scale = 1.0
+    if cw > 0 and img_w > 0 and abs(img_w - cw) > 20:
+        _dpi_scale = img_w / cw
+        if not getattr(_execute_pipeline_action, '_dpi_warned', False):
+            print(f"[DPI] Scale mismatch detected: frame={img_w}x{img_h} "
+                  f"client={cw}x{ch} scale={_dpi_scale:.2f}")
+            _execute_pipeline_action._dpi_warned = True
+
     WM_LBUTTONDOWN = 0x0201
     WM_LBUTTONUP = 0x0202
     WM_MOUSEMOVE = 0x0200
@@ -966,10 +976,18 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
     def _screen_xy(nx: float, ny: float):
         if not rect or cw <= 0 or ch <= 0:
             return None
-        cx = int(nx * cw) + random.randint(-2, 2)
-        cy = int(ny * ch) + random.randint(-2, 2)
-        sx = rect.left + cx
-        sy = rect.top + cy
+        # Use frame (physical) dimensions for pixel calculation when DPI
+        # mismatch is detected; otherwise use client rect directly.
+        pw = img_w if _dpi_scale > 1.01 else cw
+        ph = img_h if _dpi_scale > 1.01 else ch
+        cx = int(nx * pw) + random.randint(-2, 2)
+        cy = int(ny * ph) + random.randint(-2, 2)
+        # Adjust screen origin: if DPI scale active, rect coords are logical
+        # and SetCursorPos (inside _dpi_aware_context) expects physical.
+        ox = int(rect.left * _dpi_scale) if _dpi_scale > 1.01 else rect.left
+        oy = int(rect.top * _dpi_scale) if _dpi_scale > 1.01 else rect.top
+        sx = ox + cx
+        sy = oy + cy
         return cx, cy, sx, sy
 
     if action_type == "click":

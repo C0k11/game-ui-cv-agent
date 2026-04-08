@@ -10,7 +10,9 @@ It is intentionally defensive: if no event is available, it exits quickly.
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from brain.skills.base import (
@@ -23,6 +25,9 @@ from brain.skills.base import (
     action_scroll,
     action_wait,
 )
+
+
+_STATE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "event_story_state.json"
 
 
 class EventActivitySkill(BaseSkill):
@@ -74,7 +79,7 @@ class EventActivitySkill(BaseSkill):
         self._grid_auto_enabled = False
         self._battle_speed_set = False
 
-        self._current_story_index = 1
+        self._current_story_index = self._load_story_index()
         self._story_scroll_count = 0
         self._max_story_index_seen = 0
         self._story_node_pending = False
@@ -82,6 +87,42 @@ class EventActivitySkill(BaseSkill):
 
         self._mission_done = False
         self._mission_tab_clicked = False
+
+    # ── Story index persistence ──
+
+    @staticmethod
+    def _load_story_index() -> int:
+        """Load persisted story node index (survives skill reset / restart)."""
+        try:
+            if _STATE_FILE.exists():
+                data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+                idx = int(data.get("current_story_index", 1))
+                if idx >= 1:
+                    return idx
+        except Exception:
+            pass
+        return 1
+
+    def _save_story_index(self) -> None:
+        """Persist current story index so re-entry continues from next node."""
+        try:
+            _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _STATE_FILE.write_text(
+                json.dumps({"current_story_index": self._current_story_index},
+                           ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _clear_story_state() -> None:
+        """Clear persisted state when story phase is fully complete."""
+        try:
+            if _STATE_FILE.exists():
+                _STATE_FILE.unlink()
+        except Exception:
+            pass
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -365,6 +406,7 @@ class EventActivitySkill(BaseSkill):
         if ended:
             self.log(f"event ended: '{ended.text}', skipping story")
             self._story_done = True
+            self._clear_story_state()
             self._challenge_done = True
             self._mission_done = True
             self.sub_state = "exit"
@@ -491,6 +533,7 @@ class EventActivitySkill(BaseSkill):
             if self._story_ap_depleted:
                 self.log("AP depleted, closing chapter popup, ending story phase")
                 self._story_done = True
+                self._clear_story_state()
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_back("close chapter popup (AP depleted)")
@@ -503,6 +546,7 @@ class EventActivitySkill(BaseSkill):
             if enter_chapter:
                 self.log(f"story node {self._current_story_index:02d} chapter entering")
                 self._current_story_index += 1
+                self._save_story_index()
                 self._story_scroll_count = 0
                 return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
             # Check if AP cost shown (indicates available chapter)
@@ -514,11 +558,13 @@ class EventActivitySkill(BaseSkill):
             if ap_cost:
                 self.log(f"story node {self._current_story_index:02d} chapter entering (hardcoded)")
                 self._current_story_index += 1
+                self._save_story_index()
                 self._story_scroll_count = 0
                 return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
             # No enter button — chapter already completed, close and advance
             self.log(f"story node {self._current_story_index:02d} chapter already done, closing")
             self._current_story_index += 1
+            self._save_story_index()
             self._story_scroll_count = 0
             return action_back("close completed chapter info")
 
@@ -537,6 +583,7 @@ class EventActivitySkill(BaseSkill):
             if self._story_ap_depleted:
                 self.log("AP depleted, closing mission popup, ending story phase")
                 self._story_done = True
+                self._clear_story_state()
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_back("close mission popup (AP depleted)")
@@ -554,6 +601,7 @@ class EventActivitySkill(BaseSkill):
                     f"'{already_done.text}', advancing to next"
                 )
                 self._current_story_index += 1
+                self._save_story_index()
                 self._story_scroll_count = 0
                 return action_back("skip already-completed story battle")
             start_btn = screen.find_any_text(
@@ -564,10 +612,12 @@ class EventActivitySkill(BaseSkill):
             if start_btn:
                 self.log(f"story node {self._current_story_index:02d} battle starting")
                 self._current_story_index += 1
+                self._save_story_index()
                 self._story_scroll_count = 0
                 return action_click_box(start_btn, "click 任務開始 (story battle)")
             # reference hardcoded: (940/1280, 538/720)
             self._current_story_index += 1
+            self._save_story_index()
             self._story_scroll_count = 0
             return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
 
@@ -639,6 +689,7 @@ class EventActivitySkill(BaseSkill):
             self.log(f"story phase complete (index={self._current_story_index}, "
                      f"max_seen={self._max_story_index_seen})")
             self._story_done = True
+            self._clear_story_state()
             self._phase_ticks = 0
             self.sub_state = "enter"
             return action_wait(250, "story phase done")
@@ -699,6 +750,7 @@ class EventActivitySkill(BaseSkill):
                 self.log(f"starting from first visible node {first_visible:02d} "
                          f"(skipping 01-{first_visible - 1:02d})")
                 self._current_story_index = first_visible
+                self._save_story_index()
 
         target = self._current_story_index
         target_str = f"{target:02d}"
@@ -739,6 +791,7 @@ class EventActivitySkill(BaseSkill):
             self.log(f"story node {target_str} visible but no 入場 button "
                      f"(likely locked), advancing")
             self._current_story_index += 1
+            self._save_story_index()
             self._story_scroll_count = 0
             return action_wait(300, f"node {target_str} locked, trying next")
 
@@ -763,6 +816,7 @@ class EventActivitySkill(BaseSkill):
                 self.log(f"node {target_str} not found after {self._story_scroll_count} "
                          f"scrolls (max_seen={self._max_story_index_seen}), story complete")
                 self._story_done = True
+                self._clear_story_state()
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_wait(250, "story phase done (scrolled to end)")

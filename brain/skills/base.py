@@ -227,8 +227,18 @@ class ScreenState:
         return nav_hits >= 3
 
     def is_loading(self) -> bool:
-        """Detect loading screen."""
-        return self.has_text("Loading", min_conf=0.7) or self.has_text("loading", min_conf=0.7)
+        """Detect loading screen or download progress."""
+        if self.has_text("Loading", min_conf=0.7) or self.has_text("loading", min_conf=0.7):
+            return True
+        # Game download progress: bottom-left shows "下載中" or percentage bar
+        # Also detect "ダウンロード" (JP) and "Downloading" (EN)
+        if self.find_any_text(
+            ["下載中", "下载中", "Downloading", "ダウンロード",
+             "資料下載", "资料下载", "檔案驗證", "档案验证"],
+            region=(0.0, 0.80, 0.50, 1.0), min_conf=0.45
+        ):
+            return True
+        return False
 
     def is_dialog(self) -> bool:
         """Detect a popup/dialog (has 確認/取消 or 確定 buttons)."""
@@ -411,30 +421,41 @@ class BaseSkill(ABC):
             "通知", region=(0.30, 0.12, 0.70, 0.32), min_conf=0.55
         )
         if notification:
-            # Check if this is a cafe invite confirmation — MUST confirm, not cancel
+            # Check if this notification MUST be confirmed (not canceled):
+            # 1. Cafe invite: "邀.*咖啡"
+            # 2. Game update download: "下載必要", "下载必要", "更新資源", "更新资源"
             invite_hint = screen.find_text_one(
                 r"邀.*咖啡", region=screen.CENTER, min_conf=0.5
             )
+            update_hint = screen.find_any_text(
+                ["下載必要", "下载必要", "更新資源", "更新资源",
+                 "下載資源", "下载资源", "下載內容", "下载内容"],
+                region=screen.CENTER, min_conf=0.45,
+            )
+            must_confirm = invite_hint or update_hint
+
             confirm_btn = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],
                 region=(0.30, 0.55, 0.74, 0.82),
                 min_conf=0.40,
             )
-            if invite_hint and confirm_btn:
-                self.log("notification popup (invite): clicking confirm")
-                return action_click_box(confirm_btn, "confirm invite notification")
-
             cancel_btn = screen.find_any_text(
                 ["取消"],
                 region=(0.28, 0.60, 0.56, 0.82),
                 min_conf=0.55,
             )
-            # If it's an invite popup but confirm OCR missed, use fallback position
-            if invite_hint and cancel_btn:
-                self.log("notification popup (invite): confirm fallback click")
-                return action_click(0.598, 0.701, "confirm invite notification fallback")
 
-            # Non-invite notification: cancel is safe
+            # Must-confirm notifications: always click 確認
+            if must_confirm and confirm_btn:
+                tag = "invite" if invite_hint else "update"
+                self.log(f"notification popup ({tag}): clicking confirm")
+                return action_click_box(confirm_btn, f"confirm {tag} notification")
+            if must_confirm and cancel_btn:
+                # OCR missed confirm but found cancel → use hardcoded confirm position
+                self.log("notification popup (must-confirm): confirm fallback click")
+                return action_click(0.598, 0.701, "confirm notification fallback")
+
+            # Regular notification: prefer cancel to dismiss
             if cancel_btn:
                 self.log("notification popup: clicking cancel to close")
                 return action_click_box(cancel_btn, "dismiss notification popup (cancel)")
@@ -443,9 +464,9 @@ class BaseSkill(ABC):
                 self.log("notification popup: clicking confirm")
                 return action_click_box(confirm_btn, "dismiss notification popup (confirm)")
 
-            if invite_hint:
-                self.log("notification popup (invite hint): fallback dismiss tap")
-                return action_click(0.5, 0.70, "dismiss notification popup fallback")
+            if must_confirm:
+                self.log("notification popup (must-confirm): no buttons, fallback click confirm area")
+                return action_click(0.598, 0.701, "confirm notification (no btn fallback)")
 
             # No buttons detected at all — OCR missed them.
             # Click 確認 button area (center-bottom of dialog, large target).
