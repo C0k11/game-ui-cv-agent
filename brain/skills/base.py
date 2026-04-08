@@ -234,8 +234,10 @@ class ScreenState:
         # Also detect "ダウンロード" (JP) and "Downloading" (EN)
         if self.find_any_text(
             ["下載中", "下载中", "Downloading", "ダウンロード",
-             "資料下載", "资料下载", "檔案驗證", "档案验证"],
-            region=(0.0, 0.80, 0.50, 1.0), min_conf=0.45
+             "資料下載", "资料下载", "檔案驗證", "档案验证",
+             "重置遊戲", "重置游戏", "重置游資", "重置游资",
+             "資料中", "资料中"],
+            region=(0.0, 0.80, 0.60, 1.0), min_conf=0.45
         ):
             return True
         return False
@@ -423,16 +425,21 @@ class BaseSkill(ABC):
         if notification:
             # Check if this notification MUST be confirmed (not canceled):
             # 1. Cafe invite: "邀.*咖啡"
-            # 2. Game update download: "下載必要", "下载必要", "更新資源", "更新资源"
+            # 2. Game update download: title "更新通知" or body keywords
+            #    Actual body example: "需要下載遊戲所需的檔案6.27GB"
             invite_hint = screen.find_text_one(
                 r"邀.*咖啡", region=screen.CENTER, min_conf=0.5
             )
+            # Detect "更新" in the title text itself (OCR: "更新通知")
+            update_title = "更新" in (notification.text or "")
             update_hint = screen.find_any_text(
                 ["下載必要", "下载必要", "更新資源", "更新资源",
-                 "下載資源", "下载资源", "下載內容", "下载内容"],
+                 "下載資源", "下载资源", "下載內容", "下载内容",
+                 "需要下載", "需要下载", "遊戲所需", "游戏所需",
+                 "下載遊戲", "下载游戏", "檔案"],
                 region=screen.CENTER, min_conf=0.45,
             )
-            must_confirm = invite_hint or update_hint
+            must_confirm = invite_hint or update_title or update_hint
 
             confirm_btn = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],
