@@ -48,6 +48,8 @@ class EventActivitySkill(BaseSkill):
         self._challenge_tab_clicked: bool = False
         self._challenge_idle_ticks: int = 0
         self._challenge_sweep_stage: int = 0
+        self._challenge_stage_index: int = 0  # next challenge entry button to try (0-based)
+        self._challenge_completed_count: int = 0  # consecutive already-completed stages
         self._grid_auto_enabled: bool = False
         self._battle_speed_set: bool = False  # clicked speed/auto buttons this battle?
 
@@ -76,6 +78,8 @@ class EventActivitySkill(BaseSkill):
         self._challenge_tab_clicked = False
         self._challenge_idle_ticks = 0
         self._challenge_sweep_stage = 0
+        self._challenge_stage_index = 0
+        self._challenge_completed_count = 0
         self._grid_auto_enabled = False
         self._battle_speed_set = False
 
@@ -553,6 +557,7 @@ class EventActivitySkill(BaseSkill):
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
+                self._story_tab_clicked = False  # re-verify tab after completion
                 return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
             # Check if AP cost shown (indicates available chapter)
             ap_cost = screen.find_any_text(
@@ -565,12 +570,14 @@ class EventActivitySkill(BaseSkill):
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
+                self._story_tab_clicked = False  # re-verify tab after completion
                 return action_click(0.50, 0.72, "click 進入章節 (hardcoded)")
             # No enter button — chapter already completed, close and advance
             self.log(f"story node {self._current_story_index:02d} chapter already done, closing")
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
+            self._story_tab_clicked = False  # re-verify tab after completion
             return action_back("close completed chapter info")
 
         # ── Mission Info dialog (battle story node) ──
@@ -608,6 +615,7 @@ class EventActivitySkill(BaseSkill):
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
+                self._story_tab_clicked = False  # re-verify tab after completion
                 return action_back("skip already-completed story battle")
             start_btn = screen.find_any_text(
                 ["任務開始", "任务开始"],
@@ -619,11 +627,13 @@ class EventActivitySkill(BaseSkill):
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
+                self._story_tab_clicked = False  # re-verify tab after completion
                 return action_click_box(start_btn, "click 任務開始 (story battle)")
             # reference hardcoded: (940/1280, 538/720)
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
+            self._story_tab_clicked = False  # re-verify tab after completion
             return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
 
         # ── Formation screen (team edit before battle) ──
@@ -798,6 +808,7 @@ class EventActivitySkill(BaseSkill):
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
+            self._story_tab_clicked = False  # re-verify tab after completion
             return action_wait(300, f"node {target_str} locked, trying next")
 
         # Target node not found on screen
@@ -900,7 +911,17 @@ class EventActivitySkill(BaseSkill):
                 min_conf=0.55,
             )
             if already_done:
-                self.log(f"challenge battle already completed: '{already_done.text}', skipping")
+                self._challenge_completed_count += 1
+                self._challenge_stage_index += 1
+                self.log(f"challenge stage already completed: '{already_done.text}' "
+                         f"(completed={self._challenge_completed_count}, next_idx={self._challenge_stage_index})")
+                if self._challenge_completed_count >= 5:
+                    self.log("all challenge stages already completed")
+                    self._challenge_done = True
+                    self._phase_ticks = 0
+                    self.sub_state = "enter"
+                    self._challenge_sweep_stage = 0
+                    return action_back("all challenges completed, exiting")
                 return action_back("skip already-completed challenge battle")
             start_btn = screen.find_any_text(
                 ["任務開始", "任务开始"],
@@ -954,14 +975,30 @@ class EventActivitySkill(BaseSkill):
                 self._challenge_idle_ticks = 0
                 return action_click_box(max_btn, "challenge sweep max")
 
-            start_stage = screen.find_any_text(
-                ["入場", "入场", "挑戰", "挑战"],
-                region=(0.45, 0.16, 1.0, 0.95),
-                min_conf=0.55,
-            )
-            if start_stage:
+            # Find ALL entry buttons, sorted by Y, and click the one at
+            # _challenge_stage_index to cycle through stages instead of
+            # always re-clicking the same first button.
+            all_entries = []
+            for pat in ["入場", "入场"]:
+                all_entries.extend(
+                    screen.find_text(pat, region=(0.45, 0.16, 1.0, 0.95),
+                                     min_conf=0.55)
+                )
+            # Dedupe by Y proximity and sort
+            all_entries.sort(key=lambda b: b.cy)
+            if all_entries:
+                idx = min(self._challenge_stage_index, len(all_entries) - 1)
+                if self._challenge_stage_index >= len(all_entries):
+                    # Cycled through all visible entry buttons
+                    self.log("cycled through all visible challenge entry buttons")
+                    self._challenge_done = True
+                    self._phase_ticks = 0
+                    self.sub_state = "enter"
+                    self._challenge_sweep_stage = 0
+                    return action_wait(250, "all challenge entries exhausted")
+                target = all_entries[idx]
                 self._challenge_idle_ticks = 0
-                return action_click_box(start_stage, "enter event challenge stage")
+                return action_click_box(target, f"enter event challenge stage {idx + 1}")
 
             sweep = screen.find_any_text(["掃蕩", "扫荡"], region=(0.45, 0.35, 1.0, 0.75), min_conf=0.55)
             if sweep:
