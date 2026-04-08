@@ -62,6 +62,13 @@ class EventActivitySkill(BaseSkill):
 
         self._mission_done: bool = False
         self._mission_tab_clicked: bool = False
+        self._no_game_ticks: int = 0  # consecutive ticks with no game UI
+
+        # Quest (mission) phase sequential processing
+        self._quest_current_index: int = 1
+        self._quest_scroll_count: int = 0
+        self._quest_node_pending: bool = False
+        self._quest_idle_ticks: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -83,50 +90,57 @@ class EventActivitySkill(BaseSkill):
         self._grid_auto_enabled = False
         self._battle_speed_set = False
 
-        self._current_story_index = self._load_story_index()
+        _state = self._load_state()
+        self._current_story_index = max(1, int(_state.get("current_story_index", 1)))
+        self._story_done = bool(_state.get("story_done", False))
+        self._challenge_done = bool(_state.get("challenge_done", False))
         self._story_scroll_count = 0
         self._max_story_index_seen = 0
         self._story_node_pending = False
         self._story_ap_depleted = False
+        self._no_game_ticks = 0
 
         self._mission_done = False
         self._mission_tab_clicked = False
+        self._quest_current_index = 1
+        self._quest_scroll_count = 0
+        self._quest_node_pending = False
+        self._quest_idle_ticks = 0
 
     # ── Story index persistence ──
 
     @staticmethod
-    def _load_story_index() -> int:
-        """Load persisted story node index (survives skill reset / restart)."""
+    def _load_state() -> dict:
+        """Load persisted event state (survives skill reset / restart)."""
         try:
             if _STATE_FILE.exists():
-                data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
-                idx = int(data.get("current_story_index", 1))
-                if idx >= 1:
-                    return idx
+                return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-        return 1
+        return {}
 
-    def _save_story_index(self) -> None:
-        """Persist current story index so re-entry continues from next node."""
+    def _save_state(self) -> None:
+        """Persist current event state so re-entry skips completed phases."""
         try:
             _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             _STATE_FILE.write_text(
-                json.dumps({"current_story_index": self._current_story_index},
-                           ensure_ascii=False),
+                json.dumps({
+                    "current_story_index": self._current_story_index,
+                    "story_done": self._story_done,
+                    "challenge_done": self._challenge_done,
+                }, ensure_ascii=False),
                 encoding="utf-8",
             )
         except Exception:
             pass
 
-    @staticmethod
-    def _clear_story_state() -> None:
-        """Clear persisted state when story phase is fully complete."""
-        try:
-            if _STATE_FILE.exists():
-                _STATE_FILE.unlink()
-        except Exception:
-            pass
+    def _save_story_index(self) -> None:
+        """Persist current story index (alias for _save_state)."""
+        self._save_state()
+
+    def _clear_story_state(self) -> None:
+        """Persist done flags when story phase is fully complete."""
+        self._save_state()
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -270,6 +284,27 @@ class EventActivitySkill(BaseSkill):
         )
         return item_method is not None
 
+    def _has_game_ui(self, screen: ScreenState) -> bool:
+        """Quick check: does the screen contain ANY game-related OCR?
+
+        Detects event page elements, battle HUD, common game buttons.
+        Returns False when DXcam is capturing a non-game window (browser, etc).
+        """
+        game_keywords = [
+            "活動", "活动", "Story", "Quest", "Challenge",
+            "入場", "入场", "出擊", "出击", "AUTO", "MENU",
+            "任務", "任务", "章節", "章节", "確認", "确认",
+            "SKIP", "Skip", "COST", "掃蕩", "扫荡",
+            "劇情", "商店", "配對", "資訊",
+        ]
+        for box in screen.ocr_boxes:
+            if box.confidence < 0.5:
+                continue
+            for kw in game_keywords:
+                if kw in box.text:
+                    return True
+        return False
+
     def _is_event_story_screen(self, screen: ScreenState) -> bool:
         auto = screen.find_any_text(
             ["AUTO"],
@@ -298,10 +333,14 @@ class EventActivitySkill(BaseSkill):
                 self.sub_state = "story"
                 self.log("event page ready -> story phase")
                 return action_wait(250, "start event story phase")
+            else:
+                self.log("story phase already done (persisted)")
             if not self._challenge_done:
                 self.sub_state = "challenge"
                 self.log("story done -> challenge phase")
                 return action_wait(250, "start event challenge phase")
+            else:
+                self.log("challenge phase already done (persisted)")
             if not self._mission_done:
                 self.sub_state = "mission"
                 self.log("challenge done -> mission phase")
@@ -407,6 +446,19 @@ class EventActivitySkill(BaseSkill):
     def _story(self, screen: ScreenState) -> Dict[str, Any]:
         self._phase_ticks += 1
 
+        # Non-game screen guard: if DXcam is capturing a non-game window
+        # (browser, etc.), don't proceed blindly through phases.
+        if not self._has_game_ui(screen) and len(screen.ocr_boxes) > 5:
+            self._no_game_ticks += 1
+            if self._no_game_ticks > 15:
+                self.log("no game UI detected for 15+ ticks, resetting to enter")
+                self._no_game_ticks = 0
+                self.sub_state = "enter"
+                return action_back("no game UI, pressing back to recover")
+            return action_wait(500, "no game UI detected, waiting")
+        else:
+            self._no_game_ticks = 0
+
         # Detect expired event — skip all phases immediately
         ended = screen.find_any_text(
             ["已结束", "已結束", "活動期已", "活动期已"],
@@ -418,6 +470,7 @@ class EventActivitySkill(BaseSkill):
             self._clear_story_state()
             self._challenge_done = True
             self._mission_done = True
+            self._save_state()
             self.sub_state = "exit"
             return action_wait(200, "event ended, skipping all phases")
 
@@ -711,22 +764,40 @@ class EventActivitySkill(BaseSkill):
 
         return action_wait(350, "event story scanning")
 
-    def _find_story_nodes_on_screen(
+    def _find_numbered_nodes_on_screen(
         self, screen: ScreenState
     ) -> Tuple[List[Tuple[int, float]], List]:
-        """Find numbered story nodes and 入場 buttons on the story tab.
+        """Find numbered nodes and 入場 buttons on Story/Quest tabs.
+
+        Resolution-independent: finds 入場 buttons first, then looks for
+        2-digit node numbers to the left of them within the same row.
 
         Returns:
             nodes: list of (index, cy) for detected node numbers
             entry_buttons: list of OcrBox for 入場 buttons
         """
+        # Find entry buttons first (wide region to handle any resolution)
+        entry_buttons = []
+        for pat in ["入場", "入场"]:
+            for box in screen.find_text(pat, region=(0.40, 0.10, 1.0, 0.95),
+                                        min_conf=0.45):
+                entry_buttons.append(box)
+
+        # Determine node number x-range from entry button positions.
+        # Node numbers sit to the LEFT of entry buttons in the same row.
+        if entry_buttons:
+            entry_min_cx = min(b.cx for b in entry_buttons)
+            node_cx_max = entry_min_cx - 0.03
+            node_cx_min = max(0.0, entry_min_cx - 0.55)
+        else:
+            # Fallback: wide range covering both DXcam-full and window captures
+            node_cx_min, node_cx_max = 0.15, 0.65
+
         nodes: List[Tuple[int, float]] = []
         for box in screen.ocr_boxes:
-            # Node numbers are 2-digit (01-30) at cx ≈ 0.572 in story list.
-            # Tight X/Y filter avoids false positives (e.g. AP popup prices).
             if (box.confidence < 0.45
-                    or box.cx < 0.52 or box.cx > 0.62
-                    or box.cy < 0.20 or box.cy > 0.85):
+                    or box.cx < node_cx_min or box.cx > node_cx_max
+                    or box.cy < 0.15 or box.cy > 0.90):
                 continue
             text = box.text.strip()
             m = re.match(r"^(\d{1,2})$", text)
@@ -734,12 +805,6 @@ class EventActivitySkill(BaseSkill):
                 idx = int(m.group(1))
                 if 1 <= idx <= 30:
                     nodes.append((idx, box.cy))
-
-        entry_buttons = []
-        for pat in ["入場", "入场"]:
-            for box in screen.find_text(pat, region=(0.70, 0.12, 1.0, 0.92),
-                                        min_conf=0.45):
-                entry_buttons.append(box)
 
         return nodes, entry_buttons
 
@@ -750,7 +815,7 @@ class EventActivitySkill(BaseSkill):
         and clicks it. Scrolls the story list when the target is off-screen.
         Returns an action dict, or None if no actionable state found.
         """
-        nodes, entry_buttons = self._find_story_nodes_on_screen(screen)
+        nodes, entry_buttons = self._find_numbered_nodes_on_screen(screen)
 
         # Update max seen index for termination detection
         if nodes:
@@ -862,6 +927,18 @@ class EventActivitySkill(BaseSkill):
     def _challenge(self, screen: ScreenState) -> Dict[str, Any]:
         self._phase_ticks += 1
 
+        # Non-game screen guard
+        if not self._has_game_ui(screen) and len(screen.ocr_boxes) > 5:
+            self._no_game_ticks += 1
+            if self._no_game_ticks > 15:
+                self.log("challenge: no game UI for 15+ ticks, resetting to enter")
+                self._no_game_ticks = 0
+                self.sub_state = "enter"
+                return action_back("no game UI, pressing back to recover")
+            return action_wait(500, "no game UI detected, waiting")
+        else:
+            self._no_game_ticks = 0
+
         # Grid-walk fallback controls (limited generic support).
         auto = screen.find_any_text(["AUTO", "自動", "自动"], region=(0.70, 0.0, 1.0, 0.24), min_conf=0.55)
         if auto and not self._grid_auto_enabled:
@@ -918,6 +995,7 @@ class EventActivitySkill(BaseSkill):
                 if self._challenge_completed_count >= 5:
                     self.log("all challenge stages already completed")
                     self._challenge_done = True
+                    self._save_state()
                     self._phase_ticks = 0
                     self.sub_state = "enter"
                     self._challenge_sweep_stage = 0
@@ -992,6 +1070,7 @@ class EventActivitySkill(BaseSkill):
                     # Cycled through all visible entry buttons
                     self.log("cycled through all visible challenge entry buttons")
                     self._challenge_done = True
+                    self._save_state()
                     self._phase_ticks = 0
                     self.sub_state = "enter"
                     self._challenge_sweep_stage = 0
@@ -1036,6 +1115,7 @@ class EventActivitySkill(BaseSkill):
             if done:
                 self.log("challenge sweep complete")
                 self._challenge_done = True
+                self._save_state()
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 self._challenge_sweep_stage = 0
@@ -1045,6 +1125,7 @@ class EventActivitySkill(BaseSkill):
         if self._phase_ticks > 200 or self._challenge_idle_ticks > 20:
             self.log("challenge phase complete")
             self._challenge_done = True
+            self._save_state()
             self._phase_ticks = 0
             self.sub_state = "enter"
             self._challenge_sweep_stage = 0
@@ -1053,8 +1134,104 @@ class EventActivitySkill(BaseSkill):
         return action_wait(400, "event challenge scanning")
 
     def _mission(self, screen: ScreenState) -> Dict[str, Any]:
+        """Process Quest (mission) stages sequentially, similar to story."""
         self._phase_ticks += 1
 
+        # Non-game screen guard
+        if not self._has_game_ui(screen) and len(screen.ocr_boxes) > 5:
+            self._no_game_ticks += 1
+            if self._no_game_ticks > 15:
+                self.log("mission: no game UI for 15+ ticks, resetting to enter")
+                self._no_game_ticks = 0
+                self.sub_state = "enter"
+                return action_back("no game UI, pressing back to recover")
+            return action_wait(500, "no game UI detected, waiting")
+        else:
+            self._no_game_ticks = 0
+
+        # ── Auto-battle in progress ──
+        if self._is_auto_battle(screen):
+            self._quest_idle_ticks = 0
+            speed_action = self._handle_battle_speed(screen)
+            if speed_action:
+                return speed_action
+            return action_wait(1500, "quest battle in progress (auto)")
+
+        # ── Loading / battle transition ──
+        if len(screen.ocr_boxes) <= 5:
+            self._quest_idle_ticks = 0
+            return action_wait(500, "quest loading/battle in progress")
+
+        # ── Mission Info dialog (battle stage) ──
+        mission_info = screen.find_any_text(
+            ["任務資訊", "任务资讯"],
+            min_conf=0.55,
+        )
+        if mission_info:
+            self._quest_idle_ticks = 0
+            self._quest_node_pending = False
+            # AP depleted — end quest phase
+            if self._story_ap_depleted:
+                self.log("AP depleted, ending quest phase")
+                self._mission_done = True
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_back("close quest mission popup (AP depleted)")
+            already_done = screen.find_any_text(
+                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
+                 "没有任务目标", "已完成"],
+                min_conf=0.55,
+            )
+            if already_done:
+                self.log(f"quest node {self._quest_current_index:02d} already done")
+                self._quest_current_index += 1
+                self._quest_scroll_count = 0
+                self._mission_tab_clicked = False
+                return action_back("skip already-completed quest battle")
+            start_btn = screen.find_any_text(
+                ["任務開始", "任务开始"],
+                region=(0.55, 0.60, 0.90, 0.85),
+                min_conf=0.55,
+            )
+            if start_btn:
+                self.log(f"quest node {self._quest_current_index:02d} starting battle")
+                self._quest_current_index += 1
+                self._quest_scroll_count = 0
+                self._mission_tab_clicked = False
+                return action_click_box(start_btn, "click 任務開始 (quest)")
+            self._quest_current_index += 1
+            self._quest_scroll_count = 0
+            self._mission_tab_clicked = False
+            return action_click(0.734, 0.747, "click 任務開始 (quest hardcoded)")
+
+        # ── Formation screen ──
+        sortie = screen.find_any_text(
+            ["出擊", "出击", "出撃", "出擎", "開始作戰", "开始作战",
+             "戰鬥開始", "战斗开始"],
+            region=(0.70, 0.75, 1.0, 0.98),
+            min_conf=0.55,
+        )
+        if sortie:
+            self._quest_idle_ticks = 0
+            return action_click_box(sortie, "click sortie (quest battle)")
+
+        # ── AP purchase popup ──
+        ap_buy = screen.find_any_text(
+            ["是否購買", "是否购买", "購買AP", "购买AP"],
+            min_conf=0.6,
+        )
+        if ap_buy:
+            self._quest_idle_ticks = 0
+            self._story_ap_depleted = True
+            cancel = screen.find_any_text(
+                ["取消"], region=(0.25, 0.60, 0.55, 0.80), min_conf=0.55,
+            )
+            if cancel:
+                self.log("AP depleted in quest, cancelling purchase")
+                return action_click_box(cancel, "cancel AP purchase (quest)")
+            return action_click(0.40, 0.70, "cancel AP purchase (quest hardcoded)")
+
+        # ── Switch to Quest tab ──
         if not self._mission_tab_clicked:
             mission_tab = screen.find_any_text(
                 ["Quest", "Mission", "任務", "任务"],
@@ -1063,30 +1240,108 @@ class EventActivitySkill(BaseSkill):
             )
             if mission_tab:
                 self._mission_tab_clicked = True
-                return action_click_box(mission_tab, "switch to event mission tab")
+                self._quest_idle_ticks = 0
+                return action_click_box(mission_tab, "switch to event quest tab")
 
-            bottom_mission = screen.find_any_text(
-                ["任務", "任务", "Quest"],
-                region=(0.10, 0.78, 0.56, 0.98),
-                min_conf=0.6,
-            )
-            if bottom_mission:
-                self._mission_tab_clicked = True
-                return action_click_box(bottom_mission, "open event mission from footer")
+        # ── Sequential quest node processing (reuse story node detection) ──
+        result = self._find_and_click_quest_node(screen)
+        if result is not None:
+            return result
 
-        if self._phase_ticks > 6:
-            self.log("mission phase complete")
+        self._quest_idle_ticks += 1
+        if self._phase_ticks > 200 or self._quest_idle_ticks > 25:
+            self.log(f"quest/mission phase complete (index={self._quest_current_index})")
             self._mission_done = True
             self.sub_state = "enter"
             self._phase_ticks = 0
             return action_wait(200, "mission phase done")
 
-        return action_wait(300, "event mission phase")
+        return action_wait(350, "event quest scanning")
+
+    def _find_and_click_quest_node(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
+        """Sequential quest node processing, mirroring _find_and_click_story_node."""
+        nodes, entry_buttons = self._find_numbered_nodes_on_screen(screen)
+
+        if nodes:
+            if self._quest_current_index == 1 and min(idx for idx, _ in nodes) > 1:
+                first_visible = min(idx for idx, _ in nodes)
+                self.log(f"quest: starting from first visible node {first_visible:02d}")
+                self._quest_current_index = first_visible
+
+        target = self._quest_current_index
+        target_str = f"{target:02d}"
+
+        target_cy = None
+        for idx, cy in nodes:
+            if idx == target:
+                target_cy = cy
+                break
+
+        if target_cy is not None:
+            self._quest_scroll_count = 0
+            paired_entry = None
+            best_dist = 0.08
+            for btn in entry_buttons:
+                dist = abs(btn.cy - target_cy)
+                if dist < best_dist:
+                    best_dist = dist
+                    paired_entry = btn
+            if paired_entry:
+                self._quest_idle_ticks = 0
+                self._quest_node_pending = True
+                self.log(f"clicking 入場 for quest node {target_str}")
+                return action_click_box(paired_entry, f"quest node {target_str} 入場")
+            # No entry button — locked or completed without button
+            self.log(f"quest node {target_str} has no 入場, advancing")
+            self._quest_current_index += 1
+            self._quest_scroll_count = 0
+            self._mission_tab_clicked = False
+            return action_wait(300, f"quest node {target_str} locked, trying next")
+
+        if nodes:
+            max_visible = max(idx for idx, _ in nodes)
+            min_visible = min(idx for idx, _ in nodes)
+            if target > max_visible:
+                if self._quest_scroll_count < 8:
+                    self._quest_scroll_count += 1
+                    self._quest_idle_ticks = 0
+                    return action_scroll(
+                        0.75, 0.50, clicks=-5,
+                        reason=f"scroll quest list for node {target_str}"
+                    )
+                self.log(f"quest node {target_str} not found after scrolling")
+                self._mission_done = True
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_wait(250, "quest phase done (scrolled to end)")
+            if target < min_visible:
+                if self._quest_scroll_count < 8:
+                    self._quest_scroll_count += 1
+                    self._quest_idle_ticks = 0
+                    return action_scroll(
+                        0.75, 0.50, clicks=5,
+                        reason=f"scroll up quest list for node {target_str}"
+                    )
+                self._quest_current_index = min_visible
+                self._quest_scroll_count = 0
+                return action_wait(300, f"quest: jumping to node {min_visible:02d}")
+
+        if self._quest_node_pending:
+            return action_wait(400, f"waiting for quest node {target_str} popup")
+
+        return None
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
             self.log(
                 f"done (story={self._story_done}, challenge={self._challenge_done}, mission={self._mission_done})"
             )
+            # Clear state file when all phases done (next event starts fresh)
+            if self._story_done and self._challenge_done and self._mission_done:
+                try:
+                    if _STATE_FILE.exists():
+                        _STATE_FILE.unlink()
+                except Exception:
+                    pass
             return action_done("event activity complete")
         return action_back("event activity exit: back to lobby")
