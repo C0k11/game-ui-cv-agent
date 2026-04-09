@@ -61,6 +61,39 @@ def _load_target_favorites() -> List[str]:
 
 _AVATAR_MATCH_THRESHOLD = 0.50
 
+# Chinese→English student name map for OCR-based invite matching.
+# Expanded at load time with SC↔TC character variants so OCR mixing
+# simplified/traditional characters still matches.
+_STUDENT_NAME_MAP: Dict[str, str] = {}
+_SC_TC_PAIRS = "装裝 团團 战戰 导導 营營 队隊 仆僕 诞誕 骑騎 乐樂 礼禮 温溫 运運 应應 烧燒 历歷 声聲 绘繪 爱愛 丽麗 实實 织織 优優 饰飾 宝寶 护護 风風 语語 梦夢 备備 关關 觉覺 银銀 龙龍 结結 满滿 纪紀 闪閃 创創 灵靈 弹彈"
+try:
+    _name_map_path = Path(__file__).resolve().parents[2] / "data" / "student_name_map.json"
+    if _name_map_path.exists():
+        _raw_map = json.loads(_name_map_path.read_text("utf-8"))
+        _STUDENT_NAME_MAP.update(_raw_map)
+        # Generate SC↔TC variants for each entry
+        _sc2tc = {}
+        _tc2sc = {}
+        for pair in _SC_TC_PAIRS.split():
+            if len(pair) == 2:
+                _sc2tc[pair[0]] = pair[1]
+                _tc2sc[pair[1]] = pair[0]
+        for cn_name, en_name in list(_raw_map.items()):
+            # SC→TC variant
+            tc = cn_name
+            for sc, t in _sc2tc.items():
+                tc = tc.replace(sc, t)
+            if tc != cn_name and tc not in _STUDENT_NAME_MAP:
+                _STUDENT_NAME_MAP[tc] = en_name
+            # TC→SC variant
+            sc = cn_name
+            for t, s in _tc2sc.items():
+                sc = sc.replace(t, s)
+            if sc != cn_name and sc not in _STUDENT_NAME_MAP:
+                _STUDENT_NAME_MAP[sc] = en_name
+except Exception:
+    pass
+
 # Min confidence for headpat markers.
 # 1F marks score ~0.40+, but 2F marks only score 0.18-0.26. Use 0.15 to catch both.
 _HEADPAT_CONF = 0.15
@@ -199,9 +232,16 @@ class CafeSkill(BaseSkill):
             return default
 
     def _find_favorite_in_invite(self, screen: ScreenState, invite_btns) -> Optional[Any]:
-        """Scan YOLO-detected avatars in the invite list and match against favorites.
+        """Find a favorite student in the MomoTalk invite list.
 
-        Returns the invite button (OcrBox) nearest to the matched favorite avatar,
+        Strategy (fastest to slowest):
+        1. OCR name matching: read Chinese student names from the list,
+           map them to English filenames via student_name_map.json,
+           and check if any are in the favorites config.
+        2. Avatar template matching (fallback): crop each avatar ROI
+           and compare against reference images.
+
+        Returns the invite button (OcrBox) nearest to the matched row,
         or None if no favorite is found.
         """
         if not self._target_favorites:
@@ -210,55 +250,50 @@ class CafeSkill(BaseSkill):
         if not invite_btns:
             return None
 
+        # Build set of favorite filenames (without .png) for fast lookup
+        fav_set = set()
+        for name in self._target_favorites:
+            base = name[:-4] if name.lower().endswith(".png") else name
+            fav_set.add(base)
+
+        # --- Strategy 1: OCR name matching (fast, reliable) ---
+        if _STUDENT_NAME_MAP:
+            # Filter OCR boxes in the MomoTalk name column (x=0.30-0.52)
+            for box in screen.ocr_boxes:
+                if box.confidence < 0.55:
+                    continue
+                if not (0.30 <= box.x1 <= 0.52 and 0.15 <= box.y1 <= 0.90):
+                    continue
+                text = box.text.replace("（", "(").replace("）", ")").strip()
+                en_name = _STUDENT_NAME_MAP.get(text)
+                if en_name and en_name in fav_set:
+                    btn = self._find_nearest_invite_button(invite_btns, box.cy)
+                    if btn:
+                        self.log(f"OCR FAVORITE MATCH: '{text}'→'{en_name}' at ({btn.cx:.2f},{btn.cy:.2f})")
+                        return btn
+
+        # --- Strategy 2: Avatar template matching (fallback) ---
+        candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
+        target_names = self._target_favorites[:_INVITE_MATCH_FAVORITE_LIMIT]
+
         img, w, h = self._load_screen_image(screen)
         if img is None:
             return None
 
-        candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
-        target_names = self._target_favorites[:_INVITE_MATCH_FAVORITE_LIMIT]
         deadline = time.perf_counter() + _INVITE_MATCH_TIME_BUDGET_S
         for btn in candidate_buttons:
             if time.perf_counter() >= deadline:
-                self.log("invite avatar matching budget exhausted before template scan finished")
-                return None
+                break
             roi = self._invite_avatar_roi(img, w, h, btn)
-            if roi.size == 0:
+            if roi is None or roi.size == 0:
                 continue
             if self._avatar_matcher is not None:
                 matched_name, score = self._avatar_matcher.match_avatar(
                     roi, target_names
                 )
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
-                    self.log(f"FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
+                    self.log(f"AVATAR MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
                     return btn
-
-        try:
-            if self._florence_matcher is None:
-                if not _has_florence_runtime():
-                    self.log("Florence matcher skipped in cafe: missing einops/timm")
-                    return None
-                from vision.florence_vision import get_florence_reference_matcher
-                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
-                self._florence_matcher = get_florence_reference_matcher(str(avatar_dir))
-                self.log("Florence reference matcher loaded for cafe invite list")
-        except Exception as e:
-            self.log(f"Florence matcher unavailable in cafe: {e}")
-            self._florence_matcher = None
-
-        if self._florence_matcher is None:
-            return None
-
-        for btn in candidate_buttons:
-            if time.perf_counter() >= deadline:
-                self.log("invite Florence matching budget exhausted")
-                return None
-            roi = self._invite_avatar_roi(img, w, h, btn)
-            if roi.size == 0:
-                continue
-            matched_name, score = self._florence_matcher.match_candidate(roi, target_names)
-            if matched_name and score > 0.5:
-                self.log(f"FLORENCE FAVORITE MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
-                return btn
 
         return None
 
@@ -786,21 +821,21 @@ class CafeSkill(BaseSkill):
                     self._invite_stage = 2
                     self._invite_ticks = 0
                     return action_click_box(fav_btn, "invite favorite student")
-                # No favorite found — scroll if we haven't much, else click first
-                if self._invite_scroll_count < 3:
+                # No favorite found — scroll more, else click first
+                if self._invite_scroll_count < 6:
                     self._invite_scroll_count += 1
-                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/3)")
+                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/6)")
                     return action_swipe(0.35, 0.70, 0.35, 0.35, 400, "scroll invite list")
                 btn = invite_btns[0]
                 self.log(f"no favorite after scrolling, clicking first 邀請 at ({btn.cx:.2f},{btn.cy:.2f})")
                 self._invite_stage = 2
                 self._invite_ticks = 0
                 return action_click_box(btn, "invite student (no fav match)")
-            if self._invite_ticks in (4, 8):
-                self.log("invite list missing, retry opening ticket panel")
+            if self._invite_ticks in (8, 16):
+                self.log("invite list missing after wait, retry opening ticket")
                 self._invite_stage = 0
                 return action_click(0.69, 0.93, "re-open invite ticket (list missing)")
-            if self._invite_ticks >= 10:
+            if self._invite_ticks >= 20:
                 self.log("invite list not found, skipping")
                 self._invite_attempted = True
             return action_wait(400, "waiting for invite list")
@@ -813,6 +848,20 @@ class CafeSkill(BaseSkill):
                     return action_click_box(close_btn, "close earnings popup before invite")
 
         # Stage 0: Open the invite ticket panel from cafe main screen
+
+        # FIRST: check if invite list is already open (e.g. from previous
+        # attempt or toggle race).  Must run BEFORE ticket check — the
+        # 邀請券 ticket is still visible behind the MomoTalk overlay, so
+        # clicking it would CLOSE the already-open list.
+        invite_btn = screen.find_any_text(
+            ["邀請", "邀请", "邀睛"],
+            region=(0.50, 0.20, 0.70, 0.90), min_conf=0.55
+        )
+        if invite_btn:
+            self._invite_stage = 1
+            self._invite_ticks = 0
+            return action_wait(200, "invite list already open")
+
         # Skip if cooldown timer (HH:MM:SS) visible near the REGULAR ticket area.
         # NOTE: "可購買" at cy≈0.83 is the EXTRA ticket purchase label — ignore it.
         # The regular ticket cooldown timer appears above the regular ticket (cy≈0.88-0.96).
@@ -849,16 +898,6 @@ class CafeSkill(BaseSkill):
             self._invite_stage = 1
             self._invite_ticks = 0
             return action_click_box(ticket, "open invite ticket")
-
-        # Also check if invite list is already open (e.g. from previous attempt)
-        invite_btn = screen.find_any_text(
-            ["邀請", "邀请"],
-            region=(0.50, 0.20, 0.70, 0.90), min_conf=0.65
-        )
-        if invite_btn:
-            self._invite_stage = 1
-            self._invite_ticks = 0
-            return action_wait(200, "invite list already open")
 
         if self._invite_ticks in (3, 6):
             self.log("invite UI unresolved, retry fixed click on regular ticket")
