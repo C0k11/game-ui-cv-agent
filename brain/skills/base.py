@@ -203,6 +203,95 @@ class ScreenState:
         hits = self.find_template(label, **kwargs)
         return hits[0] if hits else None
 
+    # ── Pixel color sampling ──
+    #
+    # reference uses RGB pixel checks for button states. We sample at normalized
+    # positions on the screenshot for resolution-independent state detection.
+
+    def sample_color(self, nx: float, ny: float, patch: int = 3) -> Optional[Tuple[int, int, int]]:
+        """Sample average BGR color at normalized position (0-1).
+
+        Args:
+            nx, ny: normalized (0-1) position in the screenshot.
+            patch: half-size of the sampling square (in pixels at native res).
+                   Averages a (2*patch+1)² area for noise robustness.
+
+        Returns (B, G, R) tuple, or None if screenshot not available.
+        """
+        if not self.screenshot_path:
+            return None
+        try:
+            import cv2
+            import numpy as np
+            img = cv2.imdecode(
+                np.fromfile(self.screenshot_path, dtype=np.uint8),
+                cv2.IMREAD_COLOR
+            )
+            if img is None:
+                return None
+            h, w = img.shape[:2]
+            px = max(patch, min(w - patch - 1, int(nx * w)))
+            py = max(patch, min(h - patch - 1, int(ny * h)))
+            roi = img[py - patch:py + patch + 1, px - patch:px + patch + 1]
+            mean = roi.mean(axis=(0, 1)).astype(int)
+            return (int(mean[0]), int(mean[1]), int(mean[2]))
+        except Exception:
+            return None
+
+    def check_color(
+        self,
+        nx: float,
+        ny: float,
+        *,
+        rgb_min: Optional[Tuple[int, int, int]] = None,
+        rgb_max: Optional[Tuple[int, int, int]] = None,
+        hsv_min: Optional[Tuple[int, int, int]] = None,
+        hsv_max: Optional[Tuple[int, int, int]] = None,
+        patch: int = 3,
+    ) -> bool:
+        """Check if pixel color at (nx, ny) falls within given range.
+
+        Specify rgb_min/rgb_max for RGB range check, or hsv_min/hsv_max for
+        HSV range check (OpenCV scale: H 0-179, S 0-255, V 0-255).
+        Both can be specified (all conditions must pass).
+
+        Returns False if screenshot unavailable.
+        """
+        bgr = self.sample_color(nx, ny, patch=patch)
+        if bgr is None:
+            return False
+        b, g, r = bgr
+        if rgb_min is not None and rgb_max is not None:
+            if not (rgb_min[0] <= r <= rgb_max[0] and
+                    rgb_min[1] <= g <= rgb_max[1] and
+                    rgb_min[2] <= b <= rgb_max[2]):
+                return False
+        if hsv_min is not None and hsv_max is not None:
+            import cv2
+            import numpy as np
+            pixel = np.uint8([[[b, g, r]]])
+            hsv = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)[0][0]
+            h_val, s_val, v_val = int(hsv[0]), int(hsv[1]), int(hsv[2])
+            if not (hsv_min[0] <= h_val <= hsv_max[0] and
+                    hsv_min[1] <= s_val <= hsv_max[1] and
+                    hsv_min[2] <= v_val <= hsv_max[2]):
+                return False
+        return True
+
+    def is_button_yellow(self, nx: float, ny: float, patch: int = 5) -> bool:
+        """Check if a button at (nx, ny) is yellow/gold (active state in BA).
+
+        Blue Archive active buttons are bright yellow (~RGB 255,210,50).
+        Greyed/disabled buttons are grey (~RGB 180,180,180).
+        """
+        return self.check_color(nx, ny, patch=patch,
+                                hsv_min=(18, 80, 160), hsv_max=(38, 255, 255))
+
+    def is_button_grey(self, nx: float, ny: float, patch: int = 5) -> bool:
+        """Check if a button at (nx, ny) is grey (disabled state in BA)."""
+        return self.check_color(nx, ny, patch=patch,
+                                hsv_min=(0, 0, 100), hsv_max=(179, 40, 210))
+
     # ── Region constants for Blue Archive ──
 
     # Bottom navigation bar (咖啡廳, 課程表, 學生, 编辑, 社交, 製造, 商店, 招募)

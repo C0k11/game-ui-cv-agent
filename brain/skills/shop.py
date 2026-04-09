@@ -298,6 +298,12 @@ class ShopSkill(BaseSkill):
             region=(0.70, 0.85, 1.0, 0.99), min_conf=0.30
         )
         if bulk_buy:
+            # Color check: is the button yellow (active) or grey (unavailable)?
+            # Blue Archive yellow button HSV ~ H:20-35, S:100+, V:180+
+            if screen.is_button_grey(bulk_buy.cx, bulk_buy.cy, patch=8):
+                self.log(f"purchase button '{bulk_buy.text}' is GREY (unavailable)")
+                self.sub_state = "exit"
+                return action_wait(250, "purchase unavailable (grey button)")
             self.log(f"clicking bulk purchase '{bulk_buy.text}'")
             self._buy_btn_clicks += 1
             return action_click_box(bulk_buy, "bulk purchase (選擇購買)")
@@ -308,10 +314,20 @@ class ShopSkill(BaseSkill):
             region=(0.20, 0.85, 0.85, 0.99), min_conf=0.45
         )
         if selection_bar:
-            # Bar visible but 選擇購買 OCR missed → hardcoded click
-            self.log("selection bar visible, clicking 選擇購買 hardcoded")
-            self._buy_btn_clicks += 1
-            return action_click(0.91, 0.92, "bulk purchase (hardcoded)")
+            # Bar visible — check if purchase button area is yellow or grey
+            if screen.is_button_yellow(0.91, 0.92, patch=8):
+                self.log("selection bar visible, clicking 選擇購買 hardcoded")
+                self._buy_btn_clicks += 1
+                return action_click(0.91, 0.92, "bulk purchase (hardcoded)")
+            elif screen.is_button_grey(0.91, 0.92, patch=8):
+                self.log("selection bar visible but purchase button grey")
+                self.sub_state = "exit"
+                return action_wait(250, "purchase unavailable (grey, bar visible)")
+            else:
+                # Color inconclusive, try clicking anyway
+                self.log("selection bar visible, color check inconclusive, trying click")
+                self._buy_btn_clicks += 1
+                return action_click(0.91, 0.92, "bulk purchase (hardcoded, color unknown)")
 
         # 6. No bottom bar — check if items are even available
         if self._purchase_ticks >= 4 and self._buy_btn_clicks == 0:

@@ -220,6 +220,12 @@ _TEMPLATE_DEFS = {
     "chaser_a_ticket": ("UI/Currency_Icon_ChaserATicket.png", "chaser_a_ticket", [0.3, 0.5, 0.7, 1.0], 0.80),
     "chaser_b_ticket": ("UI/Currency_Icon_ChaserBTicket.png", "chaser_b_ticket", [0.3, 0.5, 0.7, 1.0], 0.80),
     "chaser_c_ticket": ("UI/Currency_Icon_ChaserCTicket.png", "chaser_c_ticket", [0.3, 0.5, 0.7, 1.0], 0.80),
+    # Shop — non-text UI elements
+    "shop_item_chosen": ("shop/item-chosen.png", "item_chosen", [0.5, 0.7, 1.0, 1.3], 0.75),
+    "shop_refresh": ("shop/refresh-button-appear.png", "shop_refresh", [0.5, 0.7, 1.0], 0.75),
+    # Cafe invite — sort indicators (small icon templates, not readable by OCR)
+    "cafe_sort_down": ("cafe/invitation-ticket-order-down.png", "sort_down", [0.5, 0.7, 1.0], 0.75),
+    "cafe_sort_up": ("cafe/invitation-ticket-order-up.png", "sort_up", [0.5, 0.7, 1.0], 0.75),
 }
 
 _template_cache: dict = {}

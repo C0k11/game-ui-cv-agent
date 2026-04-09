@@ -124,12 +124,13 @@ class CafeSkill(BaseSkill):
         self._earnings_attempts: int = 0
         self._invite_attempted: bool = False
         self._invite_ticks: int = 0
-        self._invite_stage: int = 0  # 0=open ticket, 1=click invite, 2=confirm, 3=done
+        self._invite_stage: int = 0  # 0=open ticket, 1=sort, 2=find+invite, 3=confirm, 4=done
         self._invite_next_state: str = "headpat"  # where to go after invite
         self._pan_phase: int = 0  # 0=not started, 1=panned right, 2=panned left, 3=done
         self._target_favorites: List[str] = []
         self._avatar_matcher = None
         self._invite_scroll_count: int = 0
+        self._invite_sorted: bool = False  # True once sorted by affinity
         self._headpat_cooldown: int = 0
         self._1f_headpat_started: bool = False  # True once 1F headpat phase begins
         self._1f_done: bool = False  # True once 1F headpat is complete (switch to 2F)
@@ -149,6 +150,7 @@ class CafeSkill(BaseSkill):
         self._invite_next_state = "headpat"
         self._pan_phase = 0
         self._invite_scroll_count = 0
+        self._invite_sorted = False
         self._headpat_cooldown = 0
         self._1f_headpat_started = False
         self._1f_done = False
@@ -762,15 +764,15 @@ class CafeSkill(BaseSkill):
 
         self._invite_ticks += 1
 
-        # Stage 2: Confirm the invite in the confirmation popup
-        if self._invite_stage == 2:
+        # Stage 3: Confirm the invite in the confirmation popup
+        if self._invite_stage == 3:
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确"],
                 region=screen.CENTER, min_conf=0.7
             )
             if confirm:
                 self.log("confirming student invite")
-                self._invite_stage = 3
+                self._invite_stage = 4
                 self._invite_attempted = True
                 return action_click_box(confirm, "confirm invite")
 
@@ -780,7 +782,7 @@ class CafeSkill(BaseSkill):
             cancel_btn = screen.find_any_text(["取消"], region=(0.30, 0.62, 0.50, 0.78), min_conf=0.8)
             if invite_popup and cancel_btn:
                 self.log("invite popup detected without confirm OCR, clicking confirm fallback")
-                self._invite_stage = 3
+                self._invite_stage = 4
                 self._invite_attempted = True
                 return action_click(0.598, 0.701, "confirm invite fallback")
 
@@ -799,8 +801,74 @@ class CafeSkill(BaseSkill):
                 self._invite_attempted = True
             return action_wait(400, "waiting for invite confirm popup")
 
-        # Stage 1: Invite list is open, find favorite student or click first
+        # Stage 1: Sort invite list by affinity (so high-affinity = favorites first)
         if self._invite_stage == 1:
+            if not self._invite_sorted and self._target_favorites:
+                # Check current sort: OCR the sort label near top of MomoTalk
+                sort_label = screen.find_any_text(
+                    ["名字", "名宇", "學園", "学园", "精選", "精选"],
+                    region=(0.38, 0.09, 0.52, 0.17), min_conf=0.50
+                )
+                affection_label = screen.find_any_text(
+                    ["羈絆", "羁绊", "羈絆等級", "羁绊等级"],
+                    region=(0.38, 0.09, 0.52, 0.17), min_conf=0.50
+                )
+                if affection_label:
+                    self.log("invite list already sorted by affinity")
+                    self._invite_sorted = True
+                    self._invite_stage = 2
+                    self._invite_ticks = 0
+                    return action_wait(200, "sort confirmed, proceeding")
+
+                # Check if sort dropdown menu is open (排列/名字/學園/羈絆等級/精選 options)
+                sort_menu_affection = screen.find_any_text(
+                    ["羈絆等級", "羁绊等级", "羈絆", "羁绊"],
+                    region=(0.30, 0.17, 0.62, 0.35), min_conf=0.50
+                )
+                if sort_menu_affection:
+                    self.log("clicking 羈絆等級 in sort dropdown")
+                    self._invite_sorted = True
+                    self._invite_stage = 2
+                    self._invite_ticks = 0
+                    return action_click_box(sort_menu_affection, "select sort by affinity")
+
+                # Sort dropdown might be open but affection not visible
+                sort_menu_open = screen.find_any_text(
+                    ["排列"],
+                    region=(0.30, 0.14, 0.55, 0.22), min_conf=0.50
+                )
+                if sort_menu_open:
+                    # Menu is open but we haven't found 羈絆 — try scrolling the menu
+                    # or just click the expected position (reference: Global affection at ~0.42, 0.27)
+                    self.log("sort menu open, clicking affection position")
+                    self._invite_sorted = True
+                    self._invite_stage = 2
+                    self._invite_ticks = 0
+                    return action_click(0.42, 0.27, "click affinity sort (hardcoded)")
+
+                if sort_label and self._invite_ticks <= 4:
+                    # Current sort is not affinity → click the sort dropdown to open menu
+                    self.log(f"current sort '{sort_label.text}', opening sort dropdown")
+                    return action_click_box(sort_label, "open sort dropdown")
+
+                # After a few ticks, give up sorting and proceed
+                if self._invite_ticks >= 5:
+                    self.log("sort switch timeout, proceeding with current sort")
+                    self._invite_sorted = True
+                    self._invite_stage = 2
+                    self._invite_ticks = 0
+                    return action_wait(200, "skip sort, find invite btn")
+
+                return action_wait(300, "waiting for sort switch")
+            else:
+                # Already sorted or no favorites configured
+                self._invite_sorted = True
+                self._invite_stage = 2
+                self._invite_ticks = 0
+                return action_wait(200, "sort not needed, proceed to invite")
+
+        # Stage 2: Invite list is open + sorted, find favorite student or click first
+        if self._invite_stage == 2:
             # OCR frequently misreads 邀請 as 邀睛
             invite_btns = screen.find_text(
                 "邀請", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
@@ -814,21 +882,21 @@ class CafeSkill(BaseSkill):
                     "邀睛", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
                 )
             if invite_btns:
-                # Try to find a favorite student via avatar matching
+                # Try to find a favorite student via OCR name matching + avatar fallback
                 fav_btn = self._find_favorite_in_invite(screen, invite_btns)
                 if fav_btn:
                     self.log(f"inviting favorite at ({fav_btn.cx:.2f},{fav_btn.cy:.2f})")
-                    self._invite_stage = 2
+                    self._invite_stage = 3
                     self._invite_ticks = 0
                     return action_click_box(fav_btn, "invite favorite student")
                 # No favorite found — scroll more, else click first
-                if self._invite_scroll_count < 6:
+                if self._invite_scroll_count < 3:
                     self._invite_scroll_count += 1
-                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/6)")
+                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/3)")
                     return action_swipe(0.35, 0.70, 0.35, 0.35, 400, "scroll invite list")
                 btn = invite_btns[0]
                 self.log(f"no favorite after scrolling, clicking first 邀請 at ({btn.cx:.2f},{btn.cy:.2f})")
-                self._invite_stage = 2
+                self._invite_stage = 3
                 self._invite_ticks = 0
                 return action_click_box(btn, "invite student (no fav match)")
             if self._invite_ticks in (8, 16):
