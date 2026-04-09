@@ -74,11 +74,37 @@ def _get_ocr():
 
 # ── YOLO Detector (singleton) ───────────────────────────────────────
 
-_yolo_models = []   # list of (model, conf_threshold) tuples
+_yolo_models = []   # list of (model, conf_threshold, model_tag) tuples
 _yolo_lock = None
 # Only two purpose-built models: battle character heads + cafe emoticon bubbles
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
 _YOLO_EMOTICON = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
+
+# Context-aware YOLO: controls which models run each tick.
+# Values: 'cafe' (emoticon only), 'battle' (battle_heads only),
+#         'all' (both), 'none' (skip YOLO entirely).
+_yolo_context = "none"  # default: skip YOLO until a skill needs it
+_yolo_context_lock = None
+
+def set_yolo_context(ctx: str) -> None:
+    """Set which YOLO models should run. Called by pipeline on skill change."""
+    global _yolo_context, _yolo_context_lock
+    import threading
+    if _yolo_context_lock is None:
+        _yolo_context_lock = threading.Lock()
+    with _yolo_context_lock:
+        if _yolo_context != ctx:
+            print(f"[Pipeline] YOLO context: {_yolo_context} → {ctx}")
+            _yolo_context = ctx
+
+def get_yolo_context() -> str:
+    """Get current YOLO context (thread-safe)."""
+    global _yolo_context, _yolo_context_lock
+    import threading
+    if _yolo_context_lock is None:
+        _yolo_context_lock = threading.Lock()
+    with _yolo_context_lock:
+        return _yolo_context
 
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
@@ -108,11 +134,11 @@ def _get_yolo():
         # battle_heads: 0.45 (well-defined targets; 0.15 causes false positives
         #   on cafe sprites at conf 0.25-0.47)
         # emoticon: 0.15 (headpat bubbles on 2F score as low as 0.18)
-        candidates = []  # (path, conf_threshold)
+        candidates = []  # (path, conf_threshold, tag)
         if _YOLO_BATTLE_HEADS.is_file():
-            candidates.append((_YOLO_BATTLE_HEADS, 0.45))
+            candidates.append((_YOLO_BATTLE_HEADS, 0.45, "battle"))
         if _YOLO_EMOTICON.is_file():
-            candidates.append((_YOLO_EMOTICON, 0.15))
+            candidates.append((_YOLO_EMOTICON, 0.15, "cafe"))
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
@@ -120,13 +146,13 @@ def _get_yolo():
         from ultralytics import YOLO
         import numpy as np
         loaded_names = []
-        for model_path, model_conf in candidates:
+        for model_path, model_conf, model_tag in candidates:
             try:
                 m = YOLO(str(model_path))
                 m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
-                _yolo_models.append((m, model_conf))
+                _yolo_models.append((m, model_conf, model_tag))
                 loaded_names.append(f"{model_path.stem}({len(m.names)}cls)")
-                print(f"[Pipeline] YOLO loaded from {model_path} (conf={model_conf})")
+                print(f"[Pipeline] YOLO loaded from {model_path} (conf={model_conf}, tag={model_tag})")
             except Exception as e:
                 print(f"[Pipeline] YOLO load failed for {model_path}: {e}")
                 continue
@@ -177,14 +203,23 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     return boxes
 
 
-def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
+def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     """Run YOLO on a BGR numpy array and return normalized YoloBox list.
 
-    Runs ALL loaded models (battle_heads + emoticon + full) and merges results.
+    Only runs models matching the current context:
+      'cafe'   → emoticon model only
+      'battle' → battle_heads model only
+      'all'    → all models
+      'none'/'' → skip entirely (returns empty)
+
     Non-blocking: if YOLO is still loading in the pre-warm thread, returns
     empty immediately instead of blocking the pipeline worker.
     """
+    if not context:
+        context = get_yolo_context()
     yolo_boxes: List[YoloBox] = []
+    if context == "none":
+        return yolo_boxes
     # Non-blocking check: if lock is held (pre-warm loading), skip this tick
     if _yolo_lock is not None and not _yolo_models:
         acquired = _yolo_lock.acquire(blocking=False)
@@ -197,7 +232,10 @@ def _run_yolo_on_image(img, w: int, h: int) -> List[YoloBox]:
             print(f"[Pipeline] YOLO unavailable: {_yolo_status}")
             _run_yolo_on_image._warned = True
         return yolo_boxes
-    for yolo, model_conf in _yolo_models:
+    for yolo, model_conf, model_tag in _yolo_models:
+        # Context filter: skip models not relevant to current skill
+        if context != "all" and model_tag != context:
+            continue
         try:
             yolo_results = yolo(img, conf=model_conf, verbose=False)
             for r in yolo_results:
@@ -532,6 +570,7 @@ class DailyPipeline:
     def stop(self) -> None:
         """Stop the pipeline."""
         self._running = False
+        set_yolo_context("none")
         print("[Pipeline] Stopped")
 
     def _start_current_skill(self) -> None:
@@ -552,6 +591,19 @@ class DailyPipeline:
         self._last_sub_state = ""
         self._last_wait_reason = ""
         self._stuck_counter = 0
+        # Set YOLO context based on skill — only run relevant model(s)
+        _SKILL_YOLO_MAP = {
+            "Cafe": "cafe",         # emoticon model for headpat bubbles
+            "Bounty": "battle",     # battle_heads for auto-battle
+            "Arena": "battle",
+            "EventFarming": "battle",
+            "TotalAssault": "battle",
+            "JointFiringDrill": "battle",
+            "CampaignPush": "battle",
+            "EventActivity": "battle",
+        }
+        yolo_ctx = _SKILL_YOLO_MAP.get(skill.name, "none")
+        set_yolo_context(yolo_ctx)
         print(f"[Pipeline] Starting skill '{skill.name}'")
 
     def _advance_skill(self, status: str, reason: str = "") -> None:
