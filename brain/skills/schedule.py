@@ -895,6 +895,11 @@ class ScheduleSkill(BaseSkill):
 
     def _check_roster(self, screen: ScreenState) -> Dict[str, Any]:
         """Inside a location: open roster, check for targets/locks, decide."""
+        # Cooldown after location switch: negative _wait_ticks counts up to 0
+        if self._wait_ticks < 0:
+            self._wait_ticks += 1
+            return action_wait(500, f"location switch cooldown ({self._wait_ticks})")
+
         roster_overlay = self._is_roster_overlay(screen)
         if not roster_overlay and not self._is_schedule(screen):
             self._wait_ticks += 1
@@ -1070,7 +1075,7 @@ class ScheduleSkill(BaseSkill):
             self.log("clicking right switch")
             self.sub_state = "check_roster"
             self._roster_open = False
-            self._wait_ticks = 0
+            self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
             self._roster_scan_ticks = 0
             return action_click_box(right, "right switch")
 
@@ -1079,7 +1084,7 @@ class ScheduleSkill(BaseSkill):
             self.log("clicking right arrow at hardcoded position")
             self.sub_state = "check_roster"
             self._roster_open = False
-            self._wait_ticks = 0
+            self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
             self._roster_scan_ticks = 0
             return action_click(*_RIGHT_ARROW_POS, "right arrow (hardcoded)")
 
@@ -1103,8 +1108,8 @@ class ScheduleSkill(BaseSkill):
 
         # Hard limit: if no start button after many building clicks, this location
         # likely has all rooms done. Switch to next location instead of looping.
-        if self._execute_ticks > 12:
-            self.log("no start button found after 12 ticks, switching location")
+        if self._execute_ticks > 8:
+            self.log("no start button found after 8 ticks, switching location")
             self.sub_state = "switch_location"
             self._execute_ticks = 0
             self._start_clicked = False
@@ -1166,7 +1171,7 @@ class ScheduleSkill(BaseSkill):
             self.log(f"schedule report confirmed (ticket #{self._tickets_used})")
             self._start_clicked = False
             self._execute_ticks = 0
-            self._roster_open = False
+            self._roster_open = True  # game re-opens roster after report
             self._roster_scan_ticks = 0
             self.sub_state = "check_roster"
             if report_confirm:
@@ -1210,13 +1215,21 @@ class ScheduleSkill(BaseSkill):
             self._execute_ticks = 0
             return action_wait(300, "back at location select")
 
-        # ── PRIORITY 4: Roster still visible → close it first ──
-        # But SKIP this for the first 4 ticks after entering execute from
-        # check_roster (the room click needs time to register and the
-        # roster stays visible for several ticks).
-        if self._is_roster_overlay(screen) and self._execute_ticks > 4:
-            self._roster_open = False
-            return self._close_roster_action(screen, "execute", "close roster in execute")
+        # ── PRIORITY 4: Roster visible → re-scan or wait ──
+        if self._is_roster_overlay(screen):
+            # Grace period: roster lingers briefly after room click.
+            if self._execute_ticks <= 4:
+                return action_wait(400, "roster still closing, waiting")
+            # After grace: roster reappeared (game re-opens it after
+            # schedule completes). Go back to check_roster to find
+            # the next available room instead of closing it.
+            self.log("roster reappeared after schedule, re-scanning")
+            self._roster_open = True
+            self._roster_scan_ticks = 0
+            self._execute_ticks = 0
+            self._start_clicked = False
+            self.sub_state = "check_roster"
+            return action_wait(300, "back to check_roster (roster reappeared)")
 
         # ── PRIORITY 5: Click avatar icons on location map ──
         # Avatar icons on the isometric map are the clickable elements.
