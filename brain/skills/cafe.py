@@ -500,9 +500,16 @@ class CafeSkill(BaseSkill):
             return action_click_box(edit_btn, "exit furniture edit mode")
 
         # Generic popups (confirm/cancel dialogs)
-        popup = self._handle_common_popups(screen)
-        if popup:
-            return popup
+        # SKIP when the MomoTalk sort dropdown is open (invite stage 1) —
+        # the sort menu has a 確認 button that _handle_common_popups would
+        # click prematurely before we select 羈絆等級.
+        _in_sort_dropdown = (self.sub_state == "invite"
+                             and self._invite_stage == 1
+                             and not self._invite_sorted)
+        if not _in_sort_dropdown:
+            popup = self._handle_common_popups(screen)
+            if popup:
+                return popup
 
         # Loading
         if screen.is_loading():
@@ -1072,25 +1079,23 @@ class CafeSkill(BaseSkill):
         if self._pan_phase == 2:
             self._pan_phase = 3
             self._empty_scans = 0
-            if is_2f:
-                # 2F: pan right first — full-width sweep like reference (131→1280)
-                self.log("2F pan camera: full sweep left→right")
-                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera left (2F first)")
-            else:
-                # 1F: pan left first — full-width sweep
-                self.log("1F pan camera: full sweep right→left")
-                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera right (1F first)")
+            # Both 1F and 2F: pan LEFT first (drag right→left reveals left corner).
+            # The cafe view starts showing the right side by default, so the
+            # left corner has unseen students.
+            self.log(f"{'2F' if is_2f else '1F'} pan camera: full sweep to LEFT")
+            return action_swipe(0.90, 0.50, 0.10, 0.50, 600, f"pan camera left ({'2F' if is_2f else '1F'} first)")
         if self._pan_phase == 4:
             self._pan_phase = 5
             self._empty_scans = 0
             if is_2f:
-                # 2F: then pan left (full sweep opposite direction)
-                self.log("2F pan camera: full sweep right→left")
-                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera right (2F second)")
+                # 2F: entered on right side, already panned left → skip second pan
+                # (right side was the initial view, no need to return)
+                self.log("2F: skip second pan (right side was initial view)")
+                return action_wait(200, "2F skip second pan")
             else:
-                # 1F: then pan right (full sweep opposite direction)
-                self.log("1F pan camera: full sweep left→right")
-                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera left (1F second)")
+                # 1F: pan RIGHT to reveal right corner (return to initial side + beyond)
+                self.log("1F pan camera: full sweep to RIGHT")
+                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (1F second)")
 
         # After a successful headpat, wait for the heart animation to finish
         # before scanning again (animation takes ~1 second).

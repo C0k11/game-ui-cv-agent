@@ -1140,7 +1140,10 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "back at location select")
 
         # ── PRIORITY 4: Roster still visible → close it first ──
-        if self._is_roster_overlay(screen):
+        # But SKIP this for the first 2 ticks after entering execute from
+        # check_roster (the room click takes a moment to register and the
+        # roster may still be visible briefly).
+        if self._is_roster_overlay(screen) and self._execute_ticks > 2:
             self._roster_open = False
             return self._close_roster_action(screen, "execute", "close roster in execute")
 
