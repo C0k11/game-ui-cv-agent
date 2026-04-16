@@ -107,15 +107,24 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .skill-row .skill-actions{display:flex;gap:4px}
 .profile-hint{font-size:11px;color:var(--muted);margin-top:6px}
 
-/* ── Char grid ── */
+/* ── Char picker ── */
+.fav-tray{display:flex;flex-wrap:wrap;gap:6px;min-height:72px;padding:8px;background:linear-gradient(180deg,#1e2a44 0%,#15202e 100%);border:1px dashed var(--accent);border-radius:6px;margin-bottom:8px}
+.fav-tray.empty::before{content:"未选择角色 · 从下方列表点击添加，在此拖动调整顺序";color:var(--muted);font-size:11px;width:100%;text-align:center;align-self:center;padding:12px 0}
+.fav-tray-item{position:relative;display:flex;flex-direction:column;align-items:center;padding:3px;border-radius:4px;border:2px solid var(--accent);background:#1e3a5f;cursor:grab;user-select:none;transition:transform .12s,box-shadow .12s}
+.fav-tray-item:hover{box-shadow:0 2px 8px rgba(58,132,255,.5)}
+.fav-tray-item:active{cursor:grabbing}
+.fav-tray-item.dragging{opacity:.4}
+.fav-tray-item.drag-over{box-shadow:0 0 0 3px var(--accent)}
+.fav-tray-item .priority-badge{position:absolute;top:-4px;left:-4px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;padding:0 4px;border-radius:9px;line-height:18px;text-align:center;z-index:2;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.fav-tray-item .remove-btn{position:absolute;top:-6px;right:-6px;background:#d33;color:#fff;font-size:10px;width:16px;height:16px;border-radius:50%;line-height:16px;text-align:center;z-index:2;cursor:pointer;opacity:0;transition:opacity .15s}
+.fav-tray-item:hover .remove-btn{opacity:1}
 .char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;max-height:350px;overflow-y:auto;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px}
 .char-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:3px;border-radius:4px;border:2px solid transparent;transition:all .15s;user-select:none}
 .char-item:hover{background:var(--bg3)}
-.char-item.selected{border-color:var(--accent);background:#1e3a5f;position:relative}
-.char-item .priority-badge{display:none;position:absolute;top:-2px;right:-2px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;width:16px;height:16px;border-radius:50%;line-height:16px;text-align:center;z-index:1;pointer-events:none}
-.char-item.selected .priority-badge{display:block}
+.char-item.hidden{display:none}
 .char-avatar{width:44px;height:44px;object-fit:cover;border-radius:3px;pointer-events:none}
 .char-name{font-size:9px;margin-top:2px;text-align:center;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;pointer-events:none}
+.fav-search{width:100%;padding:6px 8px;margin-bottom:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -222,13 +231,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     </div>
   </details>
 
-  <details style="margin-bottom:12px">
+  <details style="margin-bottom:12px" open>
     <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">课程表 / 咖啡厅收藏角色</summary>
     <div class="card" style="margin-top:8px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:4px">已选角色（拖动调整顺序，悬停点击 × 移除）</div>
+      <div id="fav_tray" class="fav-tray empty"></div>
+      <input type="text" id="fav_search" class="fav-search" placeholder="搜索角色名（中文/英文/拼音）..." />
       <div id="char_grid" class="char-grid"></div>
-      <div style="margin-top:6px;font-size:10px;color:var(--muted)">点击顺序 = 优先级: #1 → 咖啡厅1F邀请, #2 → 咖啡厅2F邀请, 全部 → 课程表匹配</div>
+      <div style="margin-top:6px;font-size:10px;color:var(--muted)">顺序 = 优先级: #1 → 咖啡厅1F邀请, #2 → 咖啡厅2F邀请, 全部 → 课程表匹配</div>
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
         <button class="btn btn-primary btn-sm" id="btn_save_favorites">保存收藏角色</button>
+        <button class="btn btn-sm" id="btn_clear_favorites">清空</button>
         <span id="favorites_status" style="font-size:11px;color:var(--muted)"></span>
       </div>
     </div>
@@ -597,41 +610,78 @@ $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'P
 
 // Favorites — ordered array with priority numbers
 // #1 = 1F cafe invite, #2 = 2F cafe invite, all = schedule matching
-let favoritesOrder=[];  // ordered array of filenames
-let charElements={};    // fn -> DOM element
-function updatePriorityBadges(){
+let favoritesOrder=[];     // ordered array of filenames
+let allAvatars=[];         // full list from API
+let charElements={};       // fn -> main grid DOM element
+let _dragSrcFn=null;
+function _avatarUrl(fn){return '/api/v1/captures/image?path=角色头像/'+encodeURIComponent(fn);}
+function _displayName(fn){return decodeURIComponent(fn.replace('.png',''));}
+function renderFavoritesTray(){
+  const tray=$('fav_tray');if(!tray)return;
+  tray.innerHTML='';
+  if(favoritesOrder.length===0){tray.classList.add('empty');}
+  else{tray.classList.remove('empty');}
+  favoritesOrder.forEach((fn,idx)=>{
+    const item=document.createElement('div');
+    item.className='fav-tray-item';item.draggable=true;item.dataset.fn=fn;
+    const badge=document.createElement('span');badge.className='priority-badge';badge.textContent='#'+(idx+1);
+    const img=document.createElement('img');img.className='char-avatar';img.src=_avatarUrl(fn);img.loading='lazy';
+    const nm=document.createElement('span');nm.className='char-name';nm.textContent=_displayName(fn);
+    const rm=document.createElement('span');rm.className='remove-btn';rm.textContent='×';
+    rm.onclick=(e)=>{e.stopPropagation();favoritesOrder.splice(idx,1);renderFavoritesTray();applyGridFilter();};
+    // Drag-and-drop reorder within tray
+    item.addEventListener('dragstart',e=>{_dragSrcFn=fn;item.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',fn);}catch(_){}});
+    item.addEventListener('dragend',()=>{item.classList.remove('dragging');_dragSrcFn=null;document.querySelectorAll('.fav-tray-item.drag-over').forEach(el=>el.classList.remove('drag-over'));});
+    item.addEventListener('dragover',e=>{if(_dragSrcFn&&_dragSrcFn!==fn){e.preventDefault();e.dataTransfer.dropEffect='move';item.classList.add('drag-over');}});
+    item.addEventListener('dragleave',()=>item.classList.remove('drag-over'));
+    item.addEventListener('drop',e=>{e.preventDefault();item.classList.remove('drag-over');if(!_dragSrcFn||_dragSrcFn===fn)return;
+      const srcIdx=favoritesOrder.indexOf(_dragSrcFn);const dstIdx=favoritesOrder.indexOf(fn);
+      if(srcIdx<0||dstIdx<0)return;
+      favoritesOrder.splice(srcIdx,1);favoritesOrder.splice(dstIdx,0,_dragSrcFn);
+      renderFavoritesTray();});
+    item.appendChild(badge);item.appendChild(img);item.appendChild(nm);item.appendChild(rm);
+    tray.appendChild(item);
+  });
+}
+function applyGridFilter(){
+  const q=($('fav_search')?.value||'').toLowerCase().trim();
   Object.entries(charElements).forEach(([fn,el])=>{
-    const idx=favoritesOrder.indexOf(fn);
-    const badge=el.querySelector('.priority-badge');
-    if(idx>=0){el.classList.add('selected');badge.textContent='#'+(idx+1);badge.style.display='block';}
-    else{el.classList.remove('selected');badge.style.display='none';}
+    const inSelected=favoritesOrder.includes(fn);
+    const matchesQ=!q||_displayName(fn).toLowerCase().includes(q)||fn.toLowerCase().includes(q);
+    el.classList.toggle('hidden',inSelected||!matchesQ);
   });
 }
 async function loadFavorites(){
   try{
     const cr=await api('/api/v1/characters/avatars');
     const fr=await api('/api/v1/config/favorites');
+    allAvatars=cr.avatars||[];
     favoritesOrder=[...(fr.target_favorites||[])];
+    // Filter out favorites not in the avatar list (stale entries)
+    const avatarSet=new Set(allAvatars);
+    favoritesOrder=favoritesOrder.filter(fn=>avatarSet.has(fn));
     charElements={};
     const grid=$('char_grid');grid.innerHTML='';
-    (cr.avatars||[]).forEach(fn=>{
-      const name=decodeURIComponent(fn.replace('.png',''));
+    allAvatars.forEach(fn=>{
       const d=document.createElement('div');d.className='char-item';
       d.onclick=()=>{
-        const idx=favoritesOrder.indexOf(fn);
-        if(idx>=0){favoritesOrder.splice(idx,1);}
-        else{favoritesOrder.push(fn);}
-        updatePriorityBadges();
+        if(favoritesOrder.includes(fn))return;  // already selected, tray handles removal
+        favoritesOrder.push(fn);
+        renderFavoritesTray();applyGridFilter();
       };
-      const badge=document.createElement('span');badge.className='priority-badge';
-      const img=document.createElement('img');img.className='char-avatar';img.src='/api/v1/captures/image?path=角色头像/'+encodeURIComponent(fn);img.loading='lazy';
-      const sp=document.createElement('span');sp.className='char-name';sp.textContent=name;
-      d.appendChild(badge);d.appendChild(img);d.appendChild(sp);grid.appendChild(d);
+      const img=document.createElement('img');img.className='char-avatar';img.src=_avatarUrl(fn);img.loading='lazy';
+      const sp=document.createElement('span');sp.className='char-name';sp.textContent=_displayName(fn);
+      d.appendChild(img);d.appendChild(sp);grid.appendChild(d);
       charElements[fn]=d;
     });
-    updatePriorityBadges();
+    renderFavoritesTray();applyGridFilter();
   }catch(e){}
 }
+$('fav_search')?.addEventListener('input',applyGridFilter);
+$('btn_clear_favorites')?.addEventListener('click',()=>{
+  if(favoritesOrder.length&&!confirm('确认清空所有收藏角色？'))return;
+  favoritesOrder=[];renderFavoritesTray();applyGridFilter();
+});
 $('btn_save_favorites').onclick=async()=>{
   try{$('favorites_status').textContent='Saving...';
     await api('/api/v1/config/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_favorites:favoritesOrder})});
