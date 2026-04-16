@@ -261,16 +261,14 @@ class ScheduleSkill(BaseSkill):
         return candidates
 
     def _get_room_statuses(self, screen: ScreenState) -> List[str]:
-        """Detect status of all 9 rooms in 全體課程表 popup via pixel color.
+        """Detect status of all 9 rooms in 全體課程表 popup.
 
-        Adapted from reference lesson.py get_lesson_each_region_status().
-        Checks pixel color at fixed positions in the roster popup grid:
-          - White (250-255 RGB) = "available" (can schedule here)
-          - Grey (220-249 RGB) = "done" (already scheduled)
-          - Dark (31-160 RGB) = "locked" (need higher RANK)
-          - Medium grey (197-217 RGB) = "no_activity"
+        Uses green checkmark detection on avatar areas: completed rooms
+        have green ✓ overlays on student avatars (HSV green pixels > 0.5%).
+        The template-based border pixel check doesn't work for our resolution
+        (all borders read as white=255 regardless of room status).
 
-        Returns list of 9 status strings.
+        Returns list of 9 status strings: "available", "done", or "unknown".
         """
         import cv2
         import numpy as np
@@ -286,29 +284,35 @@ class ScheduleSkill(BaseSkill):
             return ["unknown"] * 9
 
         statuses = []
-        for i, (nx, ny) in enumerate(_ROOM_STATUS_POS):
-            px, py = int(nx * w), int(ny * h)
-            px = min(max(px, 0), w - 1)
-            py = min(max(py, 0), h - 1)
-            x1 = max(0, px - 2)
-            y1 = max(0, py - 2)
-            x2 = min(w, px + 3)
-            y2 = min(h, py + 3)
-            patch = img[y1:y2, x1:x2]
-            if patch.size == 0:
-                statuses.append("unknown")
-                continue
-            b, g, r = patch.mean(axis=(0, 1))  # BGR averaged over 5x5 patch
-            if r >= 245 and g >= 245 and b >= 245:
-                statuses.append("available")
-            elif 220 <= r <= 249 and 220 <= g <= 249 and 220 <= b <= 249:
-                statuses.append("done")
-            elif r <= 160 and g <= 160 and b <= 160 and r >= 31:
-                statuses.append("locked")
-            elif 197 <= r <= 220 and 197 <= g <= 220 and 195 <= b <= 218:
-                statuses.append("no_activity")
-            else:
-                statuses.append("unknown")
+        room_idx = 0
+        for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
+            for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
+                if room_idx >= 9:
+                    break
+                px1 = int(cx1 * w)
+                py1 = int(ry1 * h)
+                px2 = int(cx2 * w)
+                py2 = int(ry2 * h)
+                roi = img[py1:py2, px1:px2]
+                if roi.size == 0:
+                    statuses.append("unknown")
+                    room_idx += 1
+                    continue
+                # Green checkmark: H=35-85, S>80, V>100 (bright green overlay)
+                hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+                green_mask = cv2.inRange(hsv, np.array([35, 80, 100]),
+                                         np.array([85, 255, 255]))
+                green_ratio = (green_mask.sum() / 255) / max(1, roi.shape[0] * roi.shape[1])
+                if green_ratio > 0.005:
+                    statuses.append("done")
+                else:
+                    statuses.append("available")
+                room_idx += 1
+            if room_idx >= 9:
+                break
+        # Pad to 9 if fewer rooms detected
+        while len(statuses) < 9:
+            statuses.append("unknown")
         return statuses
 
     def _choose_best_room(self, statuses: List[str]) -> int:
@@ -969,6 +973,12 @@ class ScheduleSkill(BaseSkill):
                 self._start_clicked = False
                 return action_click(click_x, click_y, f"click room slot {slot_name}")
 
+            # All rooms done or locked → switch to next location
+            done_count = sum(1 for s in statuses if s == "done")
+            if done_count >= 5:
+                self.log(f"all rooms done ({done_count}/9), switching to next location")
+                return self._close_roster_action(screen, "switch_location", "all rooms done")
+
             # OCR fallback: find room names via OCR and click one (prefer higher tier = later in list)
             _ROOM_NAMES = [
                 "視聽室", "體育館", "圖書館",
@@ -1201,10 +1211,10 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "back at location select")
 
         # ── PRIORITY 4: Roster still visible → close it first ──
-        # But SKIP this for the first 2 ticks after entering execute from
-        # check_roster (the room click takes a moment to register and the
-        # roster may still be visible briefly).
-        if self._is_roster_overlay(screen) and self._execute_ticks > 2:
+        # But SKIP this for the first 4 ticks after entering execute from
+        # check_roster (the room click needs time to register and the
+        # roster stays visible for several ticks).
+        if self._is_roster_overlay(screen) and self._execute_ticks > 4:
             self._roster_open = False
             return self._close_roster_action(screen, "execute", "close roster in execute")
 
