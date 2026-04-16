@@ -124,6 +124,7 @@ def _default_profile_settings() -> Dict[str, Any]:
         "notify_webhook_url": "",
         "target_favorites": [],
         "skill_order": list(_DEFAULT_SKILL_ORDER),
+        "bounty_branches": ["高架公路", "沙漠鐵道", "教室"],
     }
 
 
@@ -161,6 +162,17 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
         seen_favs.add(name)
     data["target_favorites"] = favs
     data["skill_order"] = _normalize_skill_order(raw.get("skill_order"))
+    _VALID_BRANCHES = ("高架公路", "沙漠鐵道", "教室")
+    raw_branches = raw.get("bounty_branches")
+    if isinstance(raw_branches, list):
+        norm: List[str] = []
+        seen_b: Set[str] = set()
+        for b in raw_branches:
+            name = str(b or "").strip()
+            if name in _VALID_BRANCHES and name not in seen_b:
+                norm.append(name)
+                seen_b.add(name)
+        data["bounty_branches"] = norm if norm else list(_VALID_BRANCHES)
     return data
 
 

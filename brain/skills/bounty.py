@@ -15,7 +15,8 @@ Key detection patterns:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, List
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
@@ -25,11 +26,35 @@ from brain.skills.base import (
 
 
 class BountySkill(BaseSkill):
-    _BRANCHES = [
+    _ALL_BRANCHES = [
         ("高架公路", ["高架公路", "高架", "Overpass"], (0.90, 0.25)),
         ("沙漠鐵道", ["沙漠鐵道", "沙漠铁道", "沙漠", "Railway"], (0.90, 0.41)),
         ("教室", ["教室", "Classroom"], (0.90, 0.57)),
     ]
+
+    @staticmethod
+    def _load_enabled_branches() -> List:
+        """Load enabled branches from app_config.json (active profile).
+
+        Returns a filtered subset of _ALL_BRANCHES preserving the ORDER
+        the user specified in the config. If no config / empty list, all
+        branches are enabled (default behavior).
+        """
+        try:
+            import json
+            cfg_path = Path(__file__).resolve().parents[2] / "data" / "app_config.json"
+            if not cfg_path.exists():
+                return list(BountySkill._ALL_BRANCHES)
+            data = json.loads(cfg_path.read_text("utf-8"))
+            active = data.get("active_profile", "default")
+            profile = (data.get("profiles") or {}).get(active, {})
+            enabled = profile.get("bounty_branches")
+            if not isinstance(enabled, list) or not enabled:
+                return list(BountySkill._ALL_BRANCHES)
+            by_name = {b[0]: b for b in BountySkill._ALL_BRANCHES}
+            return [by_name[n] for n in enabled if n in by_name]
+        except Exception:
+            return list(BountySkill._ALL_BRANCHES)
 
     def __init__(self):
         super().__init__("Bounty")
@@ -39,6 +64,7 @@ class BountySkill(BaseSkill):
         self._sweep_attempts: int = 0
         self._enter_attempts: int = 0
         self._branch_idx: int = 0
+        self._branches = list(self._ALL_BRANCHES)
 
     def reset(self) -> None:
         super().reset()
@@ -49,9 +75,16 @@ class BountySkill(BaseSkill):
         self._loc_ticks = 0
         self._enter_attempts = 0
         self._branch_idx = 0
+        self._branches = self._load_enabled_branches()
+        if self._branches:
+            self.log(f"bounty branches enabled: {[b[0] for b in self._branches]}")
+        else:
+            self.log("no bounty branches enabled — will exit")
 
     def _advance_branch(self) -> None:
-        self._branch_idx = (self._branch_idx + 1) % len(self._BRANCHES)
+        if not self._branches:
+            return
+        self._branch_idx = (self._branch_idx + 1) % len(self._branches)
         self._loc_ticks = 0
         self._stage_ticks = 0
         self._sweep_stage = 0
@@ -63,6 +96,9 @@ class BountySkill(BaseSkill):
         if self.ticks >= self.max_ticks:
             self.log("timeout")
             return action_done("bounty timeout")
+
+        if not self._branches:
+            return action_done("no bounty branches enabled in config")
 
         # AP exhausted popup — can appear at any time during sweep
         no_ap = screen.find_any_text(
@@ -239,7 +275,7 @@ class BountySkill(BaseSkill):
                     self.sub_state = "exit"
                     return action_wait(300, "no bounty tickets")
                 self.sub_state = "select_location"
-                branch_name = self._BRANCHES[self._branch_idx][0]
+                branch_name = self._branches[self._branch_idx][0]
                 return action_wait(300, f"have {remaining} tickets, selecting '{branch_name}'")
 
         # If we can't parse tickets after a few ticks, proceed anyway
@@ -262,7 +298,7 @@ class BountySkill(BaseSkill):
         If already past LocationSelect (stage list visible with 入場), skip ahead.
         """
         self._loc_ticks = getattr(self, '_loc_ticks', 0) + 1
-        branch_name, aliases, fallback_pos = self._BRANCHES[self._branch_idx]
+        branch_name, aliases, fallback_pos = self._branches[self._branch_idx]
 
         # Try selecting the target branch by OCR first.
         for alias in aliases:
@@ -460,7 +496,7 @@ class BountySkill(BaseSkill):
                 min_conf=0.6
             )
             if ok:
-                done_branch = self._BRANCHES[self._branch_idx][0]
+                done_branch = self._branches[self._branch_idx][0]
                 self.log(f"sweep done on '{done_branch}', moving to next branch")
                 self._advance_branch()
                 self.sub_state = "check_tickets"

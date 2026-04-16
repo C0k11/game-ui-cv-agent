@@ -553,7 +553,13 @@ class BaseSkill(ABC):
                  "下載遊戲", "下载游戏", "檔案"],
                 region=screen.CENTER, min_conf=0.45,
             )
-            must_confirm = invite_hint or update_title or update_hint
+            # Bounty/commission sweep confirm: "要使用X AP掃蕩Y次嗎？"
+            # Must confirm, otherwise the sweep is cancelled.
+            sweep_hint = screen.find_any_text(
+                ["掃蕩", "扫荡", "使用AP", "使用 AP"],
+                region=screen.CENTER, min_conf=0.45,
+            )
+            must_confirm = invite_hint or update_title or update_hint or sweep_hint
 
             confirm_btn = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],

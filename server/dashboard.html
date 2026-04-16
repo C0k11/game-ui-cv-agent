@@ -194,6 +194,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <label><input id="notify_on_finish" type="checkbox"/> 完成后通知</label>
       </div>
     </div>
+    <div class="form-row" style="gap:16px">
+      <div class="check-row">
+        <span style="font-size:12px;color:var(--muted);margin-right:4px">悬赏通缉区域:</span>
+        <label><input id="bounty_branch_overpass" type="checkbox" checked/> 高架公路</label>
+        <label><input id="bounty_branch_railway" type="checkbox" checked/> 沙漠鐵道</label>
+        <label><input id="bounty_branch_classroom" type="checkbox" checked/> 教室</label>
+      </div>
+    </div>
     <div class="form-row" style="margin-top:6px">
       <button class="btn-primary btn" id="btn_start">Start</button>
       <button class="btn-danger btn" id="btn_stop">Stop</button>
@@ -460,7 +468,20 @@ function fillAgentFromProfile(profile){
   if($('exploration_click'))$('exploration_click').checked=Boolean(p.exploration_click);
   if($('notify_on_finish'))$('notify_on_finish').checked=Boolean(p.notify_on_finish);
   if($('notify_webhook_url'))$('notify_webhook_url').value=p.notify_webhook_url||'';
+  // Bounty branches (high-架公路/沙漠鐵道/教室) — default all on
+  const _branches = Array.isArray(p.bounty_branches) && p.bounty_branches.length
+    ? p.bounty_branches : ['高架公路','沙漠鐵道','教室'];
+  if($('bounty_branch_overpass'))$('bounty_branch_overpass').checked=_branches.includes('高架公路');
+  if($('bounty_branch_railway'))$('bounty_branch_railway').checked=_branches.includes('沙漠鐵道');
+  if($('bounty_branch_classroom'))$('bounty_branch_classroom').checked=_branches.includes('教室');
   renderSkillList(p.skill_order||[], p.skill_order||[]);
+}
+function collectBountyBranches(){
+  const out=[];
+  if($('bounty_branch_overpass')?.checked)out.push('高架公路');
+  if($('bounty_branch_railway')?.checked)out.push('沙漠鐵道');
+  if($('bounty_branch_classroom')?.checked)out.push('教室');
+  return out;
 }
 async function loadServerConfig(){
   const cfg=await api('/api/v1/config');
@@ -492,6 +513,7 @@ async function saveProfileConfig(showText='已保存档案'){
       notify_webhook_url:$('notify_webhook_url').value.trim(),
       target_favorites:[...favoritesOrder],
       skill_order:getSelectedSkillOrder(),
+      bounty_branches:collectBountyBranches(),
     }
   };
   const res=await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -519,6 +541,7 @@ function agentPayload() {
     notify_on_finish:$('notify_on_finish').checked,
     notify_webhook_url:$('notify_webhook_url').value.trim(),
     skill_order:getSelectedSkillOrder(),
+    bounty_branches:collectBountyBranches(),
   };
 }
 function saveAgent(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(agentPayload()))}catch(e){}try{api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName(),profile_name:currentProfileName(),profile:agentPayload()})})}catch(e){}}
@@ -604,7 +627,7 @@ $('btn_profile_delete').onclick=async()=>{
 $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName()})});await loadServerConfig();await loadFavorites();saveAgent();}catch(e){$('profile_status').textContent='切换失败';}};
  $('btn_skills_reset').onclick=async()=>{const defaults=(APP_CFG.skill_options||[]).map(x=>x.id);renderSkillList(defaults,defaults);saveAgent();try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill_order:defaults})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}};
 
-['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url'].forEach(id=>{
+['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url','bounty_branch_overpass','bounty_branch_railway','bounty_branch_classroom'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
 });
 
