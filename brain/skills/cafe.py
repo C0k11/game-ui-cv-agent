@@ -130,7 +130,8 @@ class CafeSkill(BaseSkill):
         self._target_favorites: List[str] = []
         self._avatar_matcher = None
         self._invite_scroll_count: int = 0
-        self._invite_sorted: bool = False  # True once sorted by affinity
+        self._invite_sorted: bool = False  # True once sorted by 精選
+        self._sort_option_clicked: bool = False  # True after clicking 精選 option, waiting for 確認
         self._headpat_cooldown: int = 0
         self._1f_headpat_started: bool = False  # True once 1F headpat phase begins
         self._1f_done: bool = False  # True once 1F headpat is complete (switch to 2F)
@@ -151,6 +152,7 @@ class CafeSkill(BaseSkill):
         self._pan_phase = 0
         self._invite_scroll_count = 0
         self._invite_sorted = False
+        self._sort_option_clicked = False
         self._headpat_cooldown = 0
         self._1f_headpat_started = False
         self._1f_done = False
@@ -836,16 +838,22 @@ class CafeSkill(BaseSkill):
         # When opened, dropdown menu spans ~x=0.29-0.68, y=0.27-0.62
         # containing 排列 header, 名字/學園/羈絆等級/精選 options, 確認 button
         _SORT_MENU_REGION = (0.29, 0.27, 0.68, 0.62)
+        # Hardcoded positions inside the sort dropdown (verified from screenshots):
+        #   排列 header: y ~0.29
+        #   2x2 option grid:
+        #     名字 (0.42, 0.37)   學園 (0.58, 0.37)
+        #     羈絆等級 (0.42, 0.44)   精選 (0.58, 0.44)
+        #   確認 button: (0.50, 0.55)
+        _FEATURED_POS = (0.58, 0.44)   # 精選 — starred students first
+        _CONFIRM_POS = (0.50, 0.55)    # 確認 button inside sort popup
         if self._invite_stage == 1:
             if not self._invite_sorted and self._target_favorites:
                 # First, wait for the MomoTalk list to actually be open.
-                # The list has invite buttons and "MomoTalk" header.
                 list_open = screen.find_any_text(
                     ["MomoTalk", "學生"],
                     region=(0.28, 0.10, 0.50, 0.25), min_conf=0.50
                 )
                 if not list_open:
-                    # List not open yet — wait for animation
                     if self._invite_ticks >= 8:
                         self.log("invite list didn't open for sort, proceeding")
                         self._invite_sorted = True
@@ -854,61 +862,49 @@ class CafeSkill(BaseSkill):
                         return action_wait(200, "skip sort (list not open)")
                     return action_wait(300, "waiting for invite list to open for sort")
 
-                # Check current sort: OCR the sort label in MomoTalk header
-                affection_label = screen.find_any_text(
-                    ["羈絆", "羁绊", "羈絆等級", "羁绊等级"],
-                    region=_SORT_LABEL_REGION, min_conf=0.45
-                )
-                if affection_label:
-                    self.log("invite list already sorted by affinity")
-                    self._invite_sorted = True
-                    self._invite_stage = 2
-                    self._invite_ticks = 0
-                    return action_wait(200, "sort confirmed, proceeding")
-
-                # Check if sort dropdown menu is open (has 羈絆等級 option)
-                sort_menu_affection = screen.find_any_text(
-                    ["羈絆等級", "羁绊等级", "羈絆", "羁绊"],
-                    region=_SORT_MENU_REGION, min_conf=0.45
-                )
-                if sort_menu_affection:
-                    self.log("clicking 羈絆等級 in sort dropdown")
-                    # Don't mark as sorted yet — still need to click 確認
-                    self._invite_ticks = 0
-                    return action_click_box(sort_menu_affection, "select sort by affinity")
-
-                # After selecting 羈絆等級, click 確認 to apply
-                confirm_sort = screen.find_any_text(
-                    ["確認", "确认"],
-                    region=(0.40, 0.50, 0.60, 0.62), min_conf=0.50
-                )
-                if confirm_sort:
-                    self.log("confirming sort selection")
-                    self._invite_sorted = True
-                    self._invite_stage = 2
-                    self._invite_ticks = 0
-                    return action_click_box(confirm_sort, "confirm sort dialog")
-
-                # Sort dropdown might be open showing 排列 header (y~0.29)
+                # Is the sort dropdown popup currently open? (排列 header visible)
                 sort_menu_open = screen.find_any_text(
                     ["排列"],
                     region=(0.30, 0.25, 0.60, 0.35), min_conf=0.50
                 )
-                if sort_menu_open:
-                    # Menu open but OCR missed 羈絆 — use hardcoded position
-                    # Menu is a 2x2 grid: 名字/學園 (top row y~0.37),
-                    # 羈絆等級/精選 (bottom row y~0.44), 確認 button at y~0.55
-                    self.log("sort menu open, clicking 羈絆等級 at hardcoded position")
-                    self._invite_ticks = 0
-                    return action_click(0.42, 0.44, "click 羈絆等級 (hardcoded)")
 
+                # If we've already clicked 精選 and popup still open, click 確認 to apply
+                if sort_menu_open and self._sort_option_clicked:
+                    self.log("clicking 確認 to apply sort (hardcoded)")
+                    self._invite_sorted = True
+                    self._invite_stage = 2
+                    self._invite_ticks = 0
+                    self._sort_option_clicked = False
+                    return action_click(*_CONFIRM_POS, "confirm sort selection")
+
+                # Popup open but option not yet clicked → click 精選 (hardcoded)
+                if sort_menu_open:
+                    self.log("sort popup open, clicking 精選 (hardcoded)")
+                    self._sort_option_clicked = True
+                    self._invite_ticks = 0
+                    return action_click(*_FEATURED_POS, "select sort by 精選")
+
+                # Popup not open — check if already sorted (label says 精選)
+                featured_label = screen.find_any_text(
+                    ["精選", "精选"],
+                    region=_SORT_LABEL_REGION, min_conf=0.50
+                )
+                if featured_label:
+                    self.log("invite list already sorted by 精選")
+                    self._invite_sorted = True
+                    self._invite_stage = 2
+                    self._invite_ticks = 0
+                    self._sort_option_clicked = False
+                    return action_wait(200, "sort confirmed, proceeding")
+
+                # Popup not open and not sorted → click sort label to open dropdown
                 sort_label = screen.find_any_text(
-                    ["名字", "名宇", "學園", "学园", "精選", "精选"],
+                    ["名字", "名宇", "學園", "学园", "羈絆", "羁绊"],
                     region=_SORT_LABEL_REGION, min_conf=0.50
                 )
                 if sort_label and self._invite_ticks <= 6:
-                    # Current sort is not affinity → click the sort label to open dropdown
                     self.log(f"current sort '{sort_label.text}', opening sort dropdown")
+                    self._sort_option_clicked = False
                     return action_click_box(sort_label, "open sort dropdown")
 
                 # After enough ticks, give up sorting and proceed
@@ -1213,6 +1209,8 @@ class CafeSkill(BaseSkill):
             self._invite_attempted = False
             self._invite_ticks = 0
             self._invite_stage = 0
+            self._invite_sorted = False
+            self._sort_option_clicked = False
             self._invite_next_state = "headpat2"
             self.sub_state = "invite"
             self._empty_scans = 0
@@ -1228,6 +1226,8 @@ class CafeSkill(BaseSkill):
             self._invite_attempted = False
             self._invite_ticks = 0
             self._invite_stage = 0
+            self._invite_sorted = False
+            self._sort_option_clicked = False
             self._invite_next_state = "headpat2"
             self.sub_state = "invite"
             self._empty_scans = 0
