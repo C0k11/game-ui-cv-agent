@@ -456,16 +456,22 @@ class CafeSkill(BaseSkill):
                     self._invite_attempted = True
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定"],
-                region=(0.35, 0.62, 0.65, 0.78), min_conf=0.7
+                region=(0.45, 0.68, 0.75, 0.82), min_conf=0.5
             )
             if not confirm:
                 confirm = screen.find_text_one(
                     r"^[確确]$",
-                    region=(0.44, 0.62, 0.56, 0.78), min_conf=0.8
+                    region=(0.45, 0.68, 0.75, 0.82), min_conf=0.6
                 )
             if confirm:
                 self.log(f"notification popup, clicking confirm (sub={self.sub_state})")
                 return action_click_box(confirm, "dismiss notification")
+            # Invite confirm popup ("邀請XXX到咖啡廳") REQUIRES clicking 確認
+            # (right button at ~0.60, 0.75) — clicking X/取消 cancels the invite
+            # and the student never spawns in the cafe.
+            if self.sub_state == "invite":
+                self.log("invite 通知 popup, clicking 確認 (hardcoded)")
+                return action_click(0.60, 0.75, "confirm invite (hardcoded)")
             close_btn = self._find_close_button(screen)
             if close_btn:
                 return action_click_box(close_btn, "close notification X")
@@ -1090,10 +1096,31 @@ class CafeSkill(BaseSkill):
                 self.sub_state = "exit"
                 return action_wait(300, "headpat2 max reached, exiting")
 
+        is_2f = (self.sub_state == "headpat2")
+
+        # PRIORITY: Check for headpat emote BEFORE pan/zoom. YOLO often detects
+        # Emoticon_Action during transitions (zoom, center, pan) and the emote
+        # may fade before the scan phase. User-trained model is very accurate
+        # (mAP50 99.5%), so any detection ≥0.5 is reliable — click it immediately.
+        # Skip during animation cooldown.
+        if not (hasattr(self, '_headpat_cooldown') and self._headpat_cooldown > 0):
+            early_mark = screen.find_yolo_one("Emoticon_Action", min_conf=0.40)
+            if early_mark is None:
+                early_mark = screen.find_yolo_one("headpat_bubble", min_conf=0.40)
+            if early_mark is not None:
+                self._empty_scans = 0
+                self._headpat_count += 1
+                self._headpat_cooldown = 1
+                click_x = early_mark.cx + 0.03
+                click_y = early_mark.cy + 0.02
+                self.log(f"early headpat #{self._headpat_count}: cls={getattr(early_mark,'cls','?')} "
+                         f"conf={early_mark.confidence:.2f} at ({early_mark.cx:.2f},{early_mark.cy:.2f}) "
+                         f"pan_phase={self._pan_phase}")
+                return action_click(click_x, click_y, f"early headpat student #{self._headpat_count}")
+
         # Phase 0: zoom out first (reference pattern — pinch out to see all students)
         # Then pan to reveal corners. Zoom out makes headpat bubbles visible.
         # reference: zoom_out = scroll 15 times + swipe down to center view.
-        is_2f = (self.sub_state == "headpat2")
         if self._pan_phase == 0:
             self._pan_phase = 1
             self._empty_scans = 0
@@ -1108,21 +1135,23 @@ class CafeSkill(BaseSkill):
         if self._pan_phase == 2:
             self._pan_phase = 3
             self._empty_scans = 0
-            # Both 1F and 2F: pan LEFT first (drag right→left reveals left corner).
-            # The cafe view starts showing the right side by default, so the
-            # left corner has unseen students.
-            self.log(f"{'2F' if is_2f else '1F'} pan camera: full sweep to LEFT")
-            return action_swipe(0.90, 0.50, 0.10, 0.50, 600, f"pan camera left ({'2F' if is_2f else '1F'} first)")
+            # 1F order: pan LEFT first, then RIGHT (camera default shows right).
+            # 2F order: pan RIGHT first, then LEFT (camera inherits 1F's final
+            # left-side position after full sweep, so reverse the order).
+            if is_2f:
+                self.log("2F pan camera: full sweep to RIGHT (reverse of 1F)")
+                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (2F first)")
+            else:
+                self.log("1F pan camera: full sweep to LEFT")
+                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera left (1F first)")
         if self._pan_phase == 4:
             self._pan_phase = 5
             self._empty_scans = 0
+            # Second sweep: opposite direction of first sweep.
             if is_2f:
-                # 2F: entered on right side, already panned left → skip second pan
-                # (right side was the initial view, no need to return)
-                self.log("2F: skip second pan (right side was initial view)")
-                return action_wait(200, "2F skip second pan")
+                self.log("2F pan camera: full sweep to LEFT (second)")
+                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera left (2F second)")
             else:
-                # 1F: pan RIGHT to reveal right corner (return to initial side + beyond)
                 self.log("1F pan camera: full sweep to RIGHT")
                 return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (1F second)")
 
@@ -1135,10 +1164,10 @@ class CafeSkill(BaseSkill):
         # Find headpat markers — template matching primary (happy_face),
         # YOLO as fallback only.
         mark = screen.find_template_one("happy_face", min_conf=0.75,
-                                        region=(0.12, 0.25, 0.98, 0.80))
+                                        region=(0.05, 0.15, 0.98, 0.85))
         if not mark:
             mark = screen.find_template_one("headpat", min_conf=0.78,
-                                            region=(0.12, 0.25, 0.98, 0.80))
+                                            region=(0.05, 0.15, 0.98, 0.85))
         if not mark:
             # YOLO fallback — try dedicated emoticon model first, then full model classes
             mark = screen.find_yolo_one("Emoticon_Action", min_conf=_HEADPAT_CONF)
