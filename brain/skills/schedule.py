@@ -52,15 +52,16 @@ _ROSTER_TAB_POS = (0.84, 0.91)
 # Room names: row1 y≈0.29, row2 y≈0.50, row3 y≈0.70
 # Columns: x≈0.19, x≈0.46, x≈0.73
 # Click center of each room card (slightly below the name).
+_NUM_ROOMS = 7  # Only 7 rooms exist in the popup (row3 has 1)
 _ROOM_CLICK_POS = [
     (0.19, 0.34), (0.46, 0.34), (0.73, 0.34),  # row 1: 視聽室, 體育館, 圖書館
     (0.19, 0.55), (0.46, 0.55), (0.73, 0.55),  # row 2: 教室, 實驗室, 射擊場
-    (0.19, 0.74), (0.46, 0.74), (0.73, 0.74),  # row 3: 載具庫, (empty), (empty)
+    (0.19, 0.74),                                # row 3: 載具庫 (only 1)
 ]
 _ROOM_SLOT_NAMES = [
     "視聽室", "體育館", "圖書館",
     "教室", "實驗室", "射擊場",
-    "載具庫", "room8", "room9",
+    "載具庫",
 ]
 # Status check positions: top-left area of each room card border.
 # White=available, grey=done, dark=locked.
@@ -278,16 +279,16 @@ class ScheduleSkill(BaseSkill):
                 cv2.IMREAD_COLOR
             )
             if img is None:
-                return ["unknown"] * 9
+                return ["unknown"] * _NUM_ROOMS
             h, w = img.shape[:2]
         except Exception:
-            return ["unknown"] * 9
+            return ["unknown"] * _NUM_ROOMS
 
         statuses = []
         room_idx = 0
         for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
             for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
-                if room_idx >= 9:
+                if room_idx >= _NUM_ROOMS:
                     break
                 px1 = int(cx1 * w)
                 py1 = int(ry1 * h)
@@ -308,10 +309,9 @@ class ScheduleSkill(BaseSkill):
                 else:
                     statuses.append("available")
                 room_idx += 1
-            if room_idx >= 9:
+            if room_idx >= _NUM_ROOMS:
                 break
-        # Pad to 9 if fewer rooms detected
-        while len(statuses) < 9:
+        while len(statuses) < _NUM_ROOMS:
             statuses.append("unknown")
         return statuses
 
@@ -325,7 +325,7 @@ class ScheduleSkill(BaseSkill):
         Returns room index (0-8) or -1 if none available.
         """
         best = -1
-        for i in range(8, -1, -1):
+        for i in range(min(len(statuses), _NUM_ROOMS) - 1, -1, -1):
             if statuses[i] == "available":
                 best = i
                 break
@@ -473,7 +473,7 @@ class ScheduleSkill(BaseSkill):
             room_idx = 0
             for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
                 for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
-                    if room_idx >= 9:
+                    if room_idx >= _NUM_ROOMS:
                         break
                     if statuses[room_idx] not in ("available", "unknown"):
                         room_idx += 1
@@ -501,7 +501,7 @@ class ScheduleSkill(BaseSkill):
                             best_score = score
                             best_room = room_idx
                     room_idx += 1
-                if room_idx >= 9:
+                if room_idx >= _NUM_ROOMS:
                     break
 
         if best_name and best_room >= 0:
