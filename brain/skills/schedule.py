@@ -121,7 +121,7 @@ def _load_target_favorites() -> List[str]:
 # reference uses 0.75; we use the same threshold for per-room student detection.
 _AFFECTION_MATCH_THRESHOLD = 0.75
 # Legacy avatar matcher threshold (kept as fallback).
-_AVATAR_MATCH_THRESHOLD = 0.55
+_AVATAR_MATCH_THRESHOLD = 0.45
 # Max locations to cycle through before executing at current (full circle).
 # Blue Archive has ~10 schedule locations; 12 gives safety margin.
 _MAX_LOCATIONS_FULL_CIRCLE = 12
@@ -417,13 +417,21 @@ class ScheduleSkill(BaseSkill):
                         lookup.add(fmt.lower())
         return lookup
 
-    def _check_roster_avatars(self, screen: ScreenState) -> bool:
-        """Check roster overlay for target characters via per-room template matching.
+    # Avatar region positions in 全體課程表 popup (normalized 0-1).
+    # Each room card's avatar strip: where the small face icons appear.
+    # Row/column grid: 3×3 layout, last row only has 1 room.
+    _AVATAR_ROWS_Y = [(0.35, 0.47), (0.54, 0.66), (0.73, 0.84)]
+    _AVATAR_COLS_X = [(0.09, 0.30), (0.34, 0.55), (0.58, 0.79)]
 
-        Scans ALL lesson_affection templates against each available room,
-        then checks if any match corresponds to a favorite character.
-        reference template names (e.g. 'Aris (Maid)') differ from our config
-        names (e.g. 'Arisu_(Maid)'), so we normalize and fuzzy-match.
+    def _check_roster_avatars(self, screen: ScreenState) -> bool:
+        """Check roster overlay for favorite characters using 角色头像_crop.
+
+        For each available room in the 全體課程表 popup:
+        1. Crop the avatar strip (where student faces are displayed)
+        2. Match only favorite students via AvatarMatcher (template+histogram)
+        3. If a favorite scores above threshold, mark that room
+
+        Uses our own 角色头像_crop assets (not reference templates).
         """
         if not self._target_favorites:
             return False
@@ -441,15 +449,6 @@ class ScheduleSkill(BaseSkill):
         except Exception:
             return False
 
-        try:
-            from vision.template_matcher import match_lesson_affection_in_region
-        except ImportError:
-            self.log("match_lesson_affection_in_region not available")
-            return False
-
-        # Build favorites lookup with multiple name variants
-        fav_lookup = self._build_fav_lookup()
-
         # Get room statuses to only scan available rooms
         statuses = self._get_room_statuses(screen)
 
@@ -457,37 +456,49 @@ class ScheduleSkill(BaseSkill):
         best_score = -1.0
         best_room = -1
 
-        for room_idx in range(9):
-            if statuses[room_idx] not in ("available", "unknown"):
-                continue
-            # Convert normalized region to pixel coords
-            nr = _ROOM_DETECT_REGIONS_NORM[room_idx]
-            px1 = int(nr[0] * w)
-            py1 = int(nr[1] * h)
-            px2 = int(nr[2] * w)
-            py2 = int(nr[3] * h)
+        # PRIMARY: use AvatarMatcher with 角色头像_crop (only favorites)
+        if self._avatar_matcher is not None:
+            fav_names = []
+            for raw in self._target_favorites:
+                name = raw
+                if name.lower().endswith(".png"):
+                    name = name[:-4]
+                name = unquote(name)
+                fav_names.append(name)
 
-            # Match ALL templates (target_names=None)
-            matches = match_lesson_affection_in_region(
-                img, (px1, py1, px2, py2),
-                target_names=None,
-                threshold=_AFFECTION_MATCH_THRESHOLD,
-            )
-            for name, score, (cx, cy) in matches:
-                # Check if this template name is a favorite
-                is_fav = (name in fav_lookup
-                          or name.lower() in fav_lookup
-                          or name.replace(" ", "_") in fav_lookup
-                          or name.replace(" ", "_").lower() in fav_lookup)
-                tag = "★FAV" if is_fav else "   "
-                self.log(
-                    f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                    f"{tag} '{name}' score={score:.2f}"
-                )
-                if is_fav and score > best_score:
-                    best_name = name
-                    best_score = score
-                    best_room = room_idx
+            room_idx = 0
+            for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
+                for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
+                    if room_idx >= 9:
+                        break
+                    if statuses[room_idx] not in ("available", "unknown"):
+                        room_idx += 1
+                        continue
+                    # Crop the avatar strip region
+                    px1 = int(cx1 * w)
+                    py1 = int(ry1 * h)
+                    px2 = int(cx2 * w)
+                    py2 = int(ry2 * h)
+                    roi = img[py1:py2, px1:px2]
+                    if roi.size == 0:
+                        room_idx += 1
+                        continue
+                    # Match favorites against this region
+                    matched, score = self._avatar_matcher.match_avatar(
+                        roi, fav_names
+                    )
+                    if matched and score > _AVATAR_MATCH_THRESHOLD:
+                        self.log(
+                            f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
+                            f"★FAV '{matched}' score={score:.2f}"
+                        )
+                        if score > best_score:
+                            best_name = matched
+                            best_score = score
+                            best_room = room_idx
+                    room_idx += 1
+                if room_idx >= 9:
+                    break
 
         if best_name and best_room >= 0:
             self._target_found = True
