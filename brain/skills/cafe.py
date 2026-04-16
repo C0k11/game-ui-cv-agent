@@ -833,7 +833,9 @@ class CafeSkill(BaseSkill):
         #   sort label ("名字"/"羈絆"): cx ~0.55, cy ~0.21
         #   sort arrows ("≡↑"): cx ~0.64, cy ~0.21
         _SORT_LABEL_REGION = (0.49, 0.17, 0.60, 0.25)
-        _SORT_MENU_REGION = (0.30, 0.20, 0.65, 0.40)
+        # When opened, dropdown menu spans ~x=0.29-0.68, y=0.27-0.62
+        # containing 排列 header, 名字/學園/羈絆等級/精選 options, 確認 button
+        _SORT_MENU_REGION = (0.29, 0.27, 0.68, 0.62)
         if self._invite_stage == 1:
             if not self._invite_sorted and self._target_favorites:
                 # First, wait for the MomoTalk list to actually be open.
@@ -871,24 +873,34 @@ class CafeSkill(BaseSkill):
                 )
                 if sort_menu_affection:
                     self.log("clicking 羈絆等級 in sort dropdown")
-                    self._invite_sorted = True
-                    self._invite_stage = 2
+                    # Don't mark as sorted yet — still need to click 確認
                     self._invite_ticks = 0
                     return action_click_box(sort_menu_affection, "select sort by affinity")
 
-                # Sort dropdown might be open showing 排列 header
-                sort_menu_open = screen.find_any_text(
-                    ["排列"],
-                    region=(0.30, 0.17, 0.60, 0.28), min_conf=0.50
+                # After selecting 羈絆等級, click 確認 to apply
+                confirm_sort = screen.find_any_text(
+                    ["確認", "确认"],
+                    region=(0.40, 0.50, 0.60, 0.62), min_conf=0.50
                 )
-                if sort_menu_open:
-                    # Menu open but OCR missed 羈絆 — use reference hardcoded position
-                    # CN: affection at (745, 267) → normalized (0.58, 0.37)
-                    self.log("sort menu open, clicking affection position")
+                if confirm_sort:
+                    self.log("confirming sort selection")
                     self._invite_sorted = True
                     self._invite_stage = 2
                     self._invite_ticks = 0
-                    return action_click(0.58, 0.37, "click affinity sort (hardcoded)")
+                    return action_click_box(confirm_sort, "confirm sort dialog")
+
+                # Sort dropdown might be open showing 排列 header (y~0.29)
+                sort_menu_open = screen.find_any_text(
+                    ["排列"],
+                    region=(0.30, 0.25, 0.60, 0.35), min_conf=0.50
+                )
+                if sort_menu_open:
+                    # Menu open but OCR missed 羈絆 — use hardcoded position
+                    # Menu is a 2x2 grid: 名字/學園 (top row y~0.37),
+                    # 羈絆等級/精選 (bottom row y~0.44), 確認 button at y~0.55
+                    self.log("sort menu open, clicking 羈絆等級 at hardcoded position")
+                    self._invite_ticks = 0
+                    return action_click(0.42, 0.44, "click 羈絆等級 (hardcoded)")
 
                 sort_label = screen.find_any_text(
                     ["名字", "名宇", "學園", "学园", "精選", "精选"],

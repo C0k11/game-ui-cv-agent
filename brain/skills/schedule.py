@@ -164,6 +164,7 @@ class ScheduleSkill(BaseSkill):
         self._best_match_score: float = -1.0
         self._stale_ticks: int = 0
         self._matched_room_idx: int = -1  # room index where favorite was found
+        self._clicked_rooms_this_location: Set[int] = set()  # rooms clicked since last location switch
 
     def reset(self) -> None:
         super().reset()
@@ -184,6 +185,7 @@ class ScheduleSkill(BaseSkill):
         self._stale_ticks = 0
         self._roster_scan_ticks = 0
         self._matched_room_idx = -1
+        self._clicked_rooms_this_location = set()
         if self._target_favorites:
             self.log(f"target favorites loaded: {len(self._target_favorites)} characters")
         # Lazy-init avatar matcher
@@ -957,6 +959,7 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"clicking FAVORITE room '{slot_name}' idx={fav_slot}")
                 self._roster_open = False
                 self._matched_room_idx = -1
+                self._clicked_rooms_this_location.add(fav_slot)
                 self.sub_state = "execute"
                 self._execute_ticks = 0
                 self._start_clicked = False
@@ -965,24 +968,34 @@ class ScheduleSkill(BaseSkill):
             # template-based primary path: use fixed-position pixel color checks to find
             # the best available room slot, then click its normalized slot position.
             statuses = self._get_room_statuses(screen)
-            best_slot = self._choose_best_room(statuses)
+            # Mask out rooms we've already clicked (handles max-affinity case
+            # where schedule runs but no green check ever appears)
+            masked_statuses = list(statuses)
+            for idx in self._clicked_rooms_this_location:
+                if 0 <= idx < len(masked_statuses):
+                    masked_statuses[idx] = "done"
+            best_slot = self._choose_best_room(masked_statuses)
             if any(s != "unknown" for s in statuses):
-                self.log(f"room statuses: {statuses}")
+                skip = sorted(self._clicked_rooms_this_location)
+                self.log(f"room statuses: {statuses} (skipping clicked: {skip})")
             if best_slot >= 0:
                 slot_name = _ROOM_SLOT_NAMES[best_slot]
                 click_x, click_y = _ROOM_CLICK_POS[best_slot]
                 self.log(f"pixel-selected room '{slot_name}' idx={best_slot} at ({click_x:.3f},{click_y:.3f})")
                 self._roster_open = False
+                self._clicked_rooms_this_location.add(best_slot)
                 self.sub_state = "execute"
                 self._execute_ticks = 0
                 self._start_clicked = False
                 return action_click(click_x, click_y, f"click room slot {slot_name}")
 
-            # All rooms done or locked → switch to next location
-            done_count = sum(1 for s in statuses if s == "done")
-            if done_count >= 5:
-                self.log(f"all rooms done ({done_count}/9), switching to next location")
-                return self._close_roster_action(screen, "switch_location", "all rooms done")
+            # All rooms done/locked/already-clicked → switch to next location
+            any_known = any(s != "unknown" for s in statuses)
+            if any_known:
+                done_count = sum(1 for s in statuses if s == "done")
+                clicked_count = len(self._clicked_rooms_this_location)
+                self.log(f"no available room (done={done_count}/{_NUM_ROOMS}, clicked={clicked_count}), switching location")
+                return self._close_roster_action(screen, "switch_location", "no available rooms")
 
             # OCR fallback: find room names via OCR and click one (prefer higher tier = later in list)
             _ROOM_NAMES = [
@@ -1068,6 +1081,7 @@ class ScheduleSkill(BaseSkill):
         # If we somehow landed at Location Select, pick a different location
         if self._is_location_select(screen):
             self.sub_state = "select_location"
+            self._clicked_rooms_this_location = set()
             return action_wait(300, "back at location select")
 
         right = self._find_schedule_switch_arrow(screen)
@@ -1077,6 +1091,7 @@ class ScheduleSkill(BaseSkill):
             self._roster_open = False
             self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
             self._roster_scan_ticks = 0
+            self._clicked_rooms_this_location = set()
             return action_click_box(right, "right switch")
 
         # Hardcoded fallback: click right arrow position (visible as ">" on right edge)
@@ -1086,6 +1101,7 @@ class ScheduleSkill(BaseSkill):
             self._roster_open = False
             self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
             self._roster_scan_ticks = 0
+            self._clicked_rooms_this_location = set()
             return action_click(*_RIGHT_ARROW_POS, "right arrow (hardcoded)")
 
         # If still stuck after many attempts, go back to Location Select
