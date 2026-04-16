@@ -233,8 +233,11 @@ class CafeSkill(BaseSkill):
             self.log(f"Florence button-state unavailable: {e}")
             return default
 
-    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns) -> Optional[Any]:
+    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Any]:
         """Find a favorite student in the MomoTalk invite list.
+
+        Priority-based: 1F invites the #1 priority favorite, 2F invites #2.
+        If the priority target is not visible, falls back to any favorite.
 
         Strategy (fastest to slowest):
         1. OCR name matching: read Chinese student names from the list,
@@ -258,21 +261,38 @@ class CafeSkill(BaseSkill):
             base = name[:-4] if name.lower().endswith(".png") else name
             fav_set.add(base)
 
+        # Priority target: 1F uses favorites[0], 2F uses favorites[1]
+        priority_idx = 0 if floor == 1 else 1
+        priority_target = None
+        if priority_idx < len(self._target_favorites):
+            raw = self._target_favorites[priority_idx]
+            priority_target = raw[:-4] if raw.lower().endswith(".png") else raw
+
         # --- Strategy 1: OCR name matching (fast, reliable) ---
         if _STUDENT_NAME_MAP:
-            # Filter OCR boxes in the MomoTalk name column (x=0.30-0.52)
+            priority_btn = None
+            any_fav_btn = None
+            any_fav_info = None
             for box in screen.ocr_boxes:
                 if box.confidence < 0.55:
                     continue
                 if not (0.30 <= box.x1 <= 0.52 and 0.15 <= box.y1 <= 0.90):
                     continue
-                text = box.text.replace("（", "(").replace("）", ")").strip()
+                text = box.text.replace("\uff08", "(").replace("\uff09", ")").strip()
                 en_name = _STUDENT_NAME_MAP.get(text)
                 if en_name and en_name in fav_set:
                     btn = self._find_nearest_invite_button(invite_btns, box.cy)
-                    if btn:
-                        self.log(f"OCR FAVORITE MATCH: '{text}'→'{en_name}' at ({btn.cx:.2f},{btn.cy:.2f})")
+                    if not btn:
+                        continue
+                    if priority_target and en_name == priority_target:
+                        self.log(f"OCR PRIORITY #{priority_idx+1} MATCH: '{text}'\u2192'{en_name}' floor={floor}")
                         return btn
+                    if any_fav_btn is None:
+                        any_fav_btn = btn
+                        any_fav_info = f"'{text}'\u2192'{en_name}'"
+            if any_fav_btn:
+                self.log(f"OCR FALLBACK MATCH: {any_fav_info} (priority #{priority_idx+1} not found) floor={floor}")
+                return any_fav_btn
 
         # --- Strategy 2: Avatar template matching (fallback) ---
         candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
@@ -294,7 +314,7 @@ class CafeSkill(BaseSkill):
                     roi, target_names
                 )
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
-                    self.log(f"AVATAR MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f})")
+                    self.log(f"AVATAR MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f}) floor={floor}")
                     return btn
 
         return None
@@ -911,7 +931,8 @@ class CafeSkill(BaseSkill):
                 )
             if invite_btns:
                 # Try to find a favorite student via OCR name matching + avatar fallback
-                fav_btn = self._find_favorite_in_invite(screen, invite_btns)
+                _floor = 2 if self._invite_next_state == "headpat2" else 1
+                fav_btn = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
                 if fav_btn:
                     self.log(f"inviting favorite at ({fav_btn.cx:.2f},{fav_btn.cy:.2f})")
                     self._invite_stage = 3
