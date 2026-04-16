@@ -57,7 +57,7 @@ public partial class MainWindow : Window
         if (_trayIcon != null)
         {
             _trayIcon.Visible = true;
-            _trayIcon.ShowBalloonTip(1500, "私人碧蓝档案助手", "程序已最小化到系统托盘，脚本继续运行中", WinForms.ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(2500, "私人碧蓝档案助手", "程序已最小化到系统托盘 (右下角↘)，双击托盘图标恢复窗口。右键可退出。", WinForms.ToolTipIcon.Info);
         }
     }
 
@@ -77,10 +77,8 @@ public partial class MainWindow : Window
 
     private void OnStateChanged(object? sender, EventArgs e)
     {
-        if (WindowState == WindowState.Minimized)
-        {
-            MinimizeToTray();
-        }
+        // Minimize stays on taskbar (normal behavior).
+        // Only the X close button hides to tray — see OnClosing().
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
