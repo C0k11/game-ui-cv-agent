@@ -354,12 +354,76 @@ class ScheduleSkill(BaseSkill):
             "has_heart": heart_ratio > 0.01,       # 1% red pixels = heart
         }
 
+    # reference template names differ from our config: Arisu→Aris, Bunny_Girl→Bunny, etc.
+    # This map bridges reference template base names to our config base names.
+    _reference_NAME_ALIASES = {
+        "Aris": "Arisu", "Arisu": "Aris",
+        "Hina": "Hina", "Ako": "Ako",
+    }
+    # reference suffix aliases: template suffix → our config suffix
+    _reference_SUFFIX_ALIASES = {
+        "Bunny": "Bunny_Girl", "Bunny_Girl": "Bunny",
+        "Track": "Sportswear", "Sportswear": "Track",
+        "Cheer Squad": "Cheerleader", "Cheerleader": "Cheer Squad",
+        "Camp": "Camping", "Camping": "Camp",
+        "Cycling": "Riding", "Riding": "Cycling",
+    }
+
+    def _build_fav_lookup(self) -> Set[str]:
+        """Build a set of all name variants that count as 'favorite'.
+
+        reference lesson_affection templates use names like 'Aris (Maid)',
+        while our config uses 'Arisu_(Maid).png'. Build a bridge so
+        template match results can be checked against favorites.
+        """
+        lookup: Set[str] = set()
+        for raw in self._target_favorites:
+            name = raw
+            if name.lower().endswith(".png"):
+                name = name[:-4]
+            name = unquote(name)
+            # Add as-is and common variants
+            for variant in [name, name.replace("_", " ")]:
+                lookup.add(variant)
+                lookup.add(variant.lower())
+            # Base name without suffix
+            base = name.split("(")[0].split("_")[0].strip()
+            if base:
+                lookup.add(base)
+                lookup.add(base.lower())
+                # Add reference alias for base name
+                alias = self._reference_NAME_ALIASES.get(base)
+                if alias:
+                    lookup.add(alias)
+                    lookup.add(alias.lower())
+            # Generate variants with base-name aliases and suffix aliases
+            import re as _re
+            m = _re.search(r"\((.+)\)", name)
+            suffix = m.group(1) if m else None
+            bases = [base]
+            alias = self._reference_NAME_ALIASES.get(base)
+            if alias:
+                bases.append(alias)
+            suffixes = [suffix] if suffix else []
+            if suffix:
+                alt_suffix = self._reference_SUFFIX_ALIASES.get(suffix)
+                if alt_suffix:
+                    suffixes.append(alt_suffix)
+            # Cross-product: all base names × all suffixes
+            for b in bases:
+                for s in suffixes:
+                    for fmt in [f"{b} ({s})", f"{b}_({s})"]:
+                        lookup.add(fmt)
+                        lookup.add(fmt.lower())
+        return lookup
+
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
         """Check roster overlay for target characters via per-room template matching.
 
-        Uses template-based approach: for each of the 9 room slots in the roster
-        popup, crop the student detect region and run match_lesson_affection_in_region
-        against configured favorite student templates. No YOLO or Florence dependency.
+        Scans ALL lesson_affection templates against each available room,
+        then checks if any match corresponds to a favorite character.
+        reference template names (e.g. 'Aris (Maid)') differ from our config
+        names (e.g. 'Arisu_(Maid)'), so we normalize and fuzzy-match.
         """
         if not self._target_favorites:
             return False
@@ -383,6 +447,9 @@ class ScheduleSkill(BaseSkill):
             self.log("match_lesson_affection_in_region not available")
             return False
 
+        # Build favorites lookup with multiple name variants
+        fav_lookup = self._build_fav_lookup()
+
         # Get room statuses to only scan available rooms
         statuses = self._get_room_statuses(screen)
 
@@ -400,18 +467,24 @@ class ScheduleSkill(BaseSkill):
             px2 = int(nr[2] * w)
             py2 = int(nr[3] * h)
 
+            # Match ALL templates (target_names=None)
             matches = match_lesson_affection_in_region(
                 img, (px1, py1, px2, py2),
-                target_names=self._target_favorites,
+                target_names=None,
                 threshold=_AFFECTION_MATCH_THRESHOLD,
             )
-            if matches:
-                name, score, (cx, cy) = matches[0]
+            for name, score, (cx, cy) in matches:
+                # Check if this template name is a favorite
+                is_fav = (name in fav_lookup
+                          or name.lower() in fav_lookup
+                          or name.replace(" ", "_") in fav_lookup
+                          or name.replace(" ", "_").lower() in fav_lookup)
+                tag = "★FAV" if is_fav else "   "
                 self.log(
                     f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                    f"found '{name}' score={score:.2f}"
+                    f"{tag} '{name}' score={score:.2f}"
                 )
-                if score > best_score:
+                if is_fav and score > best_score:
                     best_name = name
                     best_score = score
                     best_room = room_idx
@@ -424,29 +497,6 @@ class ScheduleSkill(BaseSkill):
                 f"in room {best_room} ({_ROOM_SLOT_NAMES[best_room]})"
             )
             return True
-
-        # Fallback: try legacy AvatarMatcher if lesson affection templates missed
-        if self._avatar_matcher is not None:
-            avatars = self._fallback_roster_avatar_boxes(screen)
-            for av in avatars:
-                bx1 = max(0, int(av.x1 * w))
-                by1 = max(0, int(av.y1 * h))
-                bx2 = min(w, int(av.x2 * w))
-                by2 = min(h, int(av.y2 * h))
-                roi = img[by1:by2, bx1:bx2]
-                if roi.size == 0:
-                    continue
-                matched_name, score = self._avatar_matcher.match_avatar(
-                    roi, self._target_favorites
-                )
-                if matched_name and score > _AVATAR_MATCH_THRESHOLD:
-                    self._target_found = True
-                    self._matched_avatar_pos = (av.cx, av.cy)
-                    self.log(
-                        f"AVATAR FALLBACK: '{matched_name}' score={score:.2f} "
-                        f"at ({av.cx:.2f},{av.cy:.2f})"
-                    )
-                    return True
 
         self.log(f"no favorite found in roster (scanned {sum(1 for s in statuses if s in ('available','unknown'))} rooms)")
         return False
