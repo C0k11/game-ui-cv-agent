@@ -802,16 +802,33 @@ class CafeSkill(BaseSkill):
             return action_wait(400, "waiting for invite confirm popup")
 
         # Stage 1: Sort invite list by affinity (so high-affinity = favorites first)
+        # MomoTalk header sort controls are at approximately:
+        #   sort label ("名字"/"羈絆"): cx ~0.55, cy ~0.21
+        #   sort arrows ("≡↑"): cx ~0.64, cy ~0.21
+        _SORT_LABEL_REGION = (0.49, 0.17, 0.60, 0.25)
+        _SORT_MENU_REGION = (0.30, 0.20, 0.65, 0.40)
         if self._invite_stage == 1:
             if not self._invite_sorted and self._target_favorites:
-                # Check current sort: OCR the sort label near top of MomoTalk
-                sort_label = screen.find_any_text(
-                    ["名字", "名宇", "學園", "学园", "精選", "精选"],
-                    region=(0.38, 0.09, 0.52, 0.17), min_conf=0.50
+                # First, wait for the MomoTalk list to actually be open.
+                # The list has invite buttons and "MomoTalk" header.
+                list_open = screen.find_any_text(
+                    ["MomoTalk", "學生"],
+                    region=(0.28, 0.10, 0.50, 0.25), min_conf=0.50
                 )
+                if not list_open:
+                    # List not open yet — wait for animation
+                    if self._invite_ticks >= 8:
+                        self.log("invite list didn't open for sort, proceeding")
+                        self._invite_sorted = True
+                        self._invite_stage = 2
+                        self._invite_ticks = 0
+                        return action_wait(200, "skip sort (list not open)")
+                    return action_wait(300, "waiting for invite list to open for sort")
+
+                # Check current sort: OCR the sort label in MomoTalk header
                 affection_label = screen.find_any_text(
                     ["羈絆", "羁绊", "羈絆等級", "羁绊等级"],
-                    region=(0.38, 0.09, 0.52, 0.17), min_conf=0.50
+                    region=_SORT_LABEL_REGION, min_conf=0.45
                 )
                 if affection_label:
                     self.log("invite list already sorted by affinity")
@@ -820,10 +837,10 @@ class CafeSkill(BaseSkill):
                     self._invite_ticks = 0
                     return action_wait(200, "sort confirmed, proceeding")
 
-                # Check if sort dropdown menu is open (排列/名字/學園/羈絆等級/精選 options)
+                # Check if sort dropdown menu is open (has 羈絆等級 option)
                 sort_menu_affection = screen.find_any_text(
                     ["羈絆等級", "羁绊等级", "羈絆", "羁绊"],
-                    region=(0.30, 0.17, 0.62, 0.35), min_conf=0.50
+                    region=_SORT_MENU_REGION, min_conf=0.45
                 )
                 if sort_menu_affection:
                     self.log("clicking 羈絆等級 in sort dropdown")
@@ -832,27 +849,31 @@ class CafeSkill(BaseSkill):
                     self._invite_ticks = 0
                     return action_click_box(sort_menu_affection, "select sort by affinity")
 
-                # Sort dropdown might be open but affection not visible
+                # Sort dropdown might be open showing 排列 header
                 sort_menu_open = screen.find_any_text(
                     ["排列"],
-                    region=(0.30, 0.14, 0.55, 0.22), min_conf=0.50
+                    region=(0.30, 0.17, 0.60, 0.28), min_conf=0.50
                 )
                 if sort_menu_open:
-                    # Menu is open but we haven't found 羈絆 — try scrolling the menu
-                    # or just click the expected position (reference: Global affection at ~0.42, 0.27)
+                    # Menu open but OCR missed 羈絆 — use reference hardcoded position
+                    # CN: affection at (745, 267) → normalized (0.58, 0.37)
                     self.log("sort menu open, clicking affection position")
                     self._invite_sorted = True
                     self._invite_stage = 2
                     self._invite_ticks = 0
-                    return action_click(0.42, 0.27, "click affinity sort (hardcoded)")
+                    return action_click(0.58, 0.37, "click affinity sort (hardcoded)")
 
-                if sort_label and self._invite_ticks <= 4:
-                    # Current sort is not affinity → click the sort dropdown to open menu
+                sort_label = screen.find_any_text(
+                    ["名字", "名宇", "學園", "学园", "精選", "精选"],
+                    region=_SORT_LABEL_REGION, min_conf=0.50
+                )
+                if sort_label and self._invite_ticks <= 6:
+                    # Current sort is not affinity → click the sort label to open dropdown
                     self.log(f"current sort '{sort_label.text}', opening sort dropdown")
                     return action_click_box(sort_label, "open sort dropdown")
 
-                # After a few ticks, give up sorting and proceed
-                if self._invite_ticks >= 5:
+                # After enough ticks, give up sorting and proceed
+                if self._invite_ticks >= 8:
                     self.log("sort switch timeout, proceeding with current sort")
                     self._invite_sorted = True
                     self._invite_stage = 2
@@ -1035,34 +1056,41 @@ class CafeSkill(BaseSkill):
 
         # Phase 0: zoom out first (reference pattern — pinch out to see all students)
         # Then pan to reveal corners. Zoom out makes headpat bubbles visible.
+        # reference: zoom_out = scroll 15 times + swipe down to center view.
         is_2f = (self.sub_state == "headpat2")
         if self._pan_phase == 0:
             self._pan_phase = 1
             self._empty_scans = 0
             self.log("zoom out cafe view (scroll to zoom out)")
-            return action_scroll(0.50, 0.40, -5, "zoom out cafe")
+            return action_scroll(0.50, 0.40, -8, "zoom out cafe")
         if self._pan_phase == 1:
             self._pan_phase = 2
             self._empty_scans = 0
-            if is_2f:
-                # 2F: pan right first (drag left→right to reveal right corner)
-                self.log("2F pan camera: drag left→right to reveal right corner")
-                return action_swipe(0.25, 0.45, 0.75, 0.45, 500, "pan camera left (2F first)")
-            else:
-                # 1F: pan left first (drag right→left to reveal left corner)
-                self.log("1F pan camera: drag right→left to reveal left corner")
-                return action_swipe(0.75, 0.45, 0.25, 0.45, 500, "pan camera right (1F first)")
-        if self._pan_phase == 3:
-            self._pan_phase = 4
+            # After zoom, drag down to center the cafe view (reference: swipe 709,558→709,309)
+            self.log("centering cafe view (drag down)")
+            return action_swipe(0.50, 0.60, 0.50, 0.35, 400, "center cafe view down")
+        if self._pan_phase == 2:
+            self._pan_phase = 3
             self._empty_scans = 0
             if is_2f:
-                # 2F: then pan left (drag right→left to reveal left corner)
-                self.log("2F pan camera: drag right→left to reveal left corner")
-                return action_swipe(0.75, 0.45, 0.25, 0.45, 500, "pan camera right (2F second)")
+                # 2F: pan right first — full-width sweep like reference (131→1280)
+                self.log("2F pan camera: full sweep left→right")
+                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera left (2F first)")
             else:
-                # 1F: then pan right (drag left→right to reveal right corner)
-                self.log("1F pan camera: drag left→right to reveal right corner")
-                return action_swipe(0.25, 0.45, 0.75, 0.45, 500, "pan camera left (1F second)")
+                # 1F: pan left first — full-width sweep
+                self.log("1F pan camera: full sweep right→left")
+                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera right (1F first)")
+        if self._pan_phase == 4:
+            self._pan_phase = 5
+            self._empty_scans = 0
+            if is_2f:
+                # 2F: then pan left (full sweep opposite direction)
+                self.log("2F pan camera: full sweep right→left")
+                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera right (2F second)")
+            else:
+                # 1F: then pan right (full sweep opposite direction)
+                self.log("1F pan camera: full sweep left→right")
+                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera left (1F second)")
 
         # After a successful headpat, wait for the heart animation to finish
         # before scanning again (animation takes ~1 second).
@@ -1112,8 +1140,8 @@ class CafeSkill(BaseSkill):
 
         # After a few empty scans, advance to next pan phase
         if self._empty_scans >= _MAX_EMPTY_SCANS:
-            if self._pan_phase < 5:
-                # Advance pan phase: 2→3 (will pan left next), 4→5 (done panning)
+            if self._pan_phase < 6:
+                # Advance pan phase: 3→4 (triggers second pan), 5→6 (done panning)
                 self._pan_phase += 1
                 self._empty_scans = 0
                 self.log(f"empty scans exhausted, advancing pan phase to {self._pan_phase}")
