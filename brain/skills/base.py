@@ -391,9 +391,15 @@ def action_swipe(fx: float, fy: float, tx: float, ty: float,
             "duration_ms": duration_ms, "reason": reason}
 
 
-def action_scroll(nx: float, ny: float, clicks: int = -3, reason: str = "") -> Dict[str, Any]:
-    """Mouse wheel scroll at normalized position."""
-    return {"action": "scroll", "target": [nx, ny], "clicks": clicks, "reason": reason}
+def action_scroll(nx: float, ny: float, clicks: int = -3, reason: str = "",
+                  with_ctrl: bool = False) -> Dict[str, Any]:
+    """Mouse wheel scroll at normalized position.
+
+    with_ctrl=True holds the Ctrl key during the wheel event — required by
+    some Android emulators (e.g. MuMu, LDPlayer) to trigger pinch-zoom.
+    """
+    return {"action": "scroll", "target": [nx, ny], "clicks": clicks,
+            "reason": reason, "with_ctrl": with_ctrl}
 
 
 def action_done(reason: str = "") -> Dict[str, Any]:

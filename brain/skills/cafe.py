@@ -20,7 +20,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote
 
 from brain.skills.base import (
@@ -132,6 +132,9 @@ class CafeSkill(BaseSkill):
         self._invite_scroll_count: int = 0
         self._invite_sorted: bool = False  # True once sorted by 精選
         self._sort_option_clicked: bool = False  # True after clicking 精選 option, waiting for 確認
+        # Names invited this cafe run (1F pick so 2F can skip duplicate).
+        # Stored as English filenames (e.g. "aru", "saori_(Dress)").
+        self._invited_names: Set[str] = set()
         self._headpat_cooldown: int = 0
         self._1f_headpat_started: bool = False  # True once 1F headpat phase begins
         self._1f_done: bool = False  # True once 1F headpat is complete (switch to 2F)
@@ -153,6 +156,7 @@ class CafeSkill(BaseSkill):
         self._invite_scroll_count = 0
         self._invite_sorted = False
         self._sort_option_clicked = False
+        self._invited_names = set()
         self._headpat_cooldown = 0
         self._1f_headpat_started = False
         self._1f_done = False
@@ -235,10 +239,14 @@ class CafeSkill(BaseSkill):
             self.log(f"Florence button-state unavailable: {e}")
             return default
 
-    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Any]:
+    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Tuple[Any, str]]:
         """Find a favorite student in the MomoTalk invite list.
 
         Priority-based: 1F invites the #1 priority favorite, 2F invites #2.
+        Skips students whose English name is already in self._invited_names
+        (so 2F doesn't pick the same person 1F already invited).
+
+        Returns (invite_button, english_name) tuple, or None.
         If the priority target is not visible, falls back to any favorite.
 
         Strategy (fastest to slowest):
@@ -270,10 +278,15 @@ class CafeSkill(BaseSkill):
             raw = self._target_favorites[priority_idx]
             priority_target = raw[:-4] if raw.lower().endswith(".png") else raw
 
+        excluded = self._invited_names
+        if excluded:
+            self.log(f"excluding already-invited: {sorted(excluded)}")
+
         # --- Strategy 1: OCR name matching (fast, reliable) ---
         if _STUDENT_NAME_MAP:
             priority_btn = None
             any_fav_btn = None
+            any_fav_name = None
             any_fav_info = None
             for box in screen.ocr_boxes:
                 if box.confidence < 0.55:
@@ -282,23 +295,25 @@ class CafeSkill(BaseSkill):
                     continue
                 text = box.text.replace("\uff08", "(").replace("\uff09", ")").strip()
                 en_name = _STUDENT_NAME_MAP.get(text)
-                if en_name and en_name in fav_set:
+                if en_name and en_name in fav_set and en_name not in excluded:
                     btn = self._find_nearest_invite_button(invite_btns, box.cy)
                     if not btn:
                         continue
                     if priority_target and en_name == priority_target:
                         self.log(f"OCR PRIORITY #{priority_idx+1} MATCH: '{text}'\u2192'{en_name}' floor={floor}")
-                        return btn
+                        return btn, en_name
                     if any_fav_btn is None:
                         any_fav_btn = btn
+                        any_fav_name = en_name
                         any_fav_info = f"'{text}'\u2192'{en_name}'"
             if any_fav_btn:
                 self.log(f"OCR FALLBACK MATCH: {any_fav_info} (priority #{priority_idx+1} not found) floor={floor}")
-                return any_fav_btn
+                return any_fav_btn, any_fav_name
 
         # --- Strategy 2: Avatar template matching (fallback) ---
         candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
-        target_names = self._target_favorites[:_INVITE_MATCH_FAVORITE_LIMIT]
+        target_names = [n for n in self._target_favorites[:_INVITE_MATCH_FAVORITE_LIMIT]
+                        if (n[:-4] if n.lower().endswith(".png") else n) not in excluded]
 
         img, w, h = self._load_screen_image(screen)
         if img is None:
@@ -316,8 +331,9 @@ class CafeSkill(BaseSkill):
                     roi, target_names
                 )
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
+                    base = matched_name[:-4] if matched_name.lower().endswith(".png") else matched_name
                     self.log(f"AVATAR MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f}) floor={floor}")
-                    return btn
+                    return btn, base
 
         return None
 
@@ -946,12 +962,14 @@ class CafeSkill(BaseSkill):
             if invite_btns:
                 # Try to find a favorite student via OCR name matching + avatar fallback
                 _floor = 2 if self._invite_next_state == "headpat2" else 1
-                fav_btn = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
-                if fav_btn:
-                    self.log(f"inviting favorite at ({fav_btn.cx:.2f},{fav_btn.cy:.2f})")
+                fav_result = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
+                if fav_result:
+                    fav_btn, fav_name = fav_result
+                    self._invited_names.add(fav_name)
+                    self.log(f"inviting favorite '{fav_name}' at ({fav_btn.cx:.2f},{fav_btn.cy:.2f}) floor={_floor}")
                     self._invite_stage = 3
                     self._invite_ticks = 0
-                    return action_click_box(fav_btn, "invite favorite student")
+                    return action_click_box(fav_btn, f"invite favorite {fav_name}")
                 # No favorite found — scroll more, else click first
                 if self._invite_scroll_count < 3:
                     self._invite_scroll_count += 1
@@ -1124,8 +1142,9 @@ class CafeSkill(BaseSkill):
         if self._pan_phase == 0:
             self._pan_phase = 1
             self._empty_scans = 0
-            self.log("zoom out cafe view (scroll to zoom out)")
-            return action_scroll(0.50, 0.40, -8, "zoom out cafe")
+            # Emulator pinch-zoom requires Ctrl+wheel (MuMu/LDPlayer).
+            self.log("zoom out cafe view (Ctrl+scroll)")
+            return action_scroll(0.50, 0.40, -8, "zoom out cafe", with_ctrl=True)
         if self._pan_phase == 1:
             self._pan_phase = 2
             self._empty_scans = 0
@@ -1135,25 +1154,21 @@ class CafeSkill(BaseSkill):
         if self._pan_phase == 2:
             self._pan_phase = 3
             self._empty_scans = 0
-            # 1F order: pan LEFT first, then RIGHT (camera default shows right).
-            # 2F order: pan RIGHT first, then LEFT (camera inherits 1F's final
-            # left-side position after full sweep, so reverse the order).
-            if is_2f:
-                self.log("2F pan camera: full sweep to RIGHT (reverse of 1F)")
-                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (2F first)")
-            else:
-                self.log("1F pan camera: full sweep to LEFT")
-                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera left (1F first)")
+            # Both floors pan LEFT. 1F starts showing right side, so pan left
+            # reveals the left corner. 2F inherits 1F's final position (right
+            # side after second pan) so also starts with pan-left.
+            self.log(f"{'2F' if is_2f else '1F'} pan camera: sweep LEFT")
+            return action_swipe(0.90, 0.50, 0.10, 0.50, 600, f"pan camera left ({'2F' if is_2f else '1F'})")
         if self._pan_phase == 4:
             self._pan_phase = 5
             self._empty_scans = 0
-            # Second sweep: opposite direction of first sweep.
             if is_2f:
-                self.log("2F pan camera: full sweep to LEFT (second)")
-                return action_swipe(0.90, 0.50, 0.10, 0.50, 600, "pan camera left (2F second)")
-            else:
-                self.log("1F pan camera: full sweep to RIGHT")
-                return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (1F second)")
+                # 2F: single LEFT sweep is enough (small floor, fewer students).
+                self.log("2F: skip second pan (one sweep covers 2F)")
+                return action_wait(200, "2F single pan sufficient")
+            # 1F: pan RIGHT to return and cover the right side
+            self.log("1F pan camera: sweep RIGHT")
+            return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (1F second)")
 
         # After a successful headpat, wait for the heart animation to finish
         # before scanning again (animation takes ~1 second).

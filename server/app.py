@@ -1058,13 +1058,23 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
     elif action_type == "scroll":
         nx, ny = action.get("target", [0.5, 0.5])
         clicks = action.get("clicks", -3)
+        with_ctrl = bool(action.get("with_ctrl", False))
         coords = _screen_xy(nx, ny)
         if coords:
             _, _, sx, sy = coords
+            # Ctrl key constants for emulator pinch-zoom (MuMu/LDPlayer)
+            VK_CONTROL = 0x11
+            KEYEVENTF_KEYUP = 0x0002
             with _dpi_aware_context():
                 user32.SetCursorPos(sx, sy)
                 _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
+                if with_ctrl:
+                    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+                    _high_res_sleep(0.02)
                 user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(clicks * 120), 0)
+                if with_ctrl:
+                    _high_res_sleep(0.02)
+                    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
 
 def _log_pipeline(msg: str) -> None:
