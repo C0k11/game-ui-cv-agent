@@ -122,7 +122,9 @@ def _load_target_favorites() -> List[str]:
 # reference uses 0.75; we use the same threshold for per-room student detection.
 _AFFECTION_MATCH_THRESHOLD = 0.75
 # Legacy avatar matcher threshold (kept as fallback).
-_AVATAR_MATCH_THRESHOLD = 0.45
+# Roster thumbnails are ~40-60px; small size hurts template correlation so
+# a lower threshold is required here than the 0.45 used elsewhere.
+_AVATAR_MATCH_THRESHOLD = 0.35
 # Max locations to cycle through before executing at current (full circle).
 # Blue Archive has ~10 schedule locations; 12 gives safety margin.
 _MAX_LOCATIONS_FULL_CIRCLE = 12
@@ -463,6 +465,11 @@ class ScheduleSkill(BaseSkill):
         best_room = -1
 
         # PRIMARY: use AvatarMatcher with 角色头像_crop (only favorites)
+        # Each room card holds UP TO 4 tiny student avatars side-by-side in a strip
+        # of ~21% × 12% (normalized). Feeding the full strip to the matcher forces
+        # the reference template to resize to the strip aspect ratio (wide+short),
+        # which destroys pixel-level correlation. Instead, slide an avatar-sized
+        # square cell across each strip and match each cell independently.
         if self._avatar_matcher is not None:
             fav_names = []
             for raw in self._target_favorites:
@@ -472,6 +479,7 @@ class ScheduleSkill(BaseSkill):
                 name = unquote(name)
                 fav_names.append(name)
 
+            _CELLS_PER_ROOM = 4   # room strip can contain up to 4 student avatars
             room_idx = 0
             for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
                 for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
@@ -480,28 +488,52 @@ class ScheduleSkill(BaseSkill):
                     if statuses[room_idx] not in ("available", "unknown"):
                         room_idx += 1
                         continue
-                    # Crop the avatar strip region
                     px1 = int(cx1 * w)
                     py1 = int(ry1 * h)
                     px2 = int(cx2 * w)
                     py2 = int(ry2 * h)
-                    roi = img[py1:py2, px1:px2]
-                    if roi.size == 0:
+                    strip = img[py1:py2, px1:px2]
+                    if strip.size == 0:
                         room_idx += 1
                         continue
-                    # Match favorites against this region
-                    matched, score = self._avatar_matcher.match_avatar(
-                        roi, fav_names
-                    )
-                    if matched and score > _AVATAR_MATCH_THRESHOLD:
+                    strip_h, strip_w = strip.shape[:2]
+                    cell_w = max(1, strip_w // _CELLS_PER_ROOM)
+                    # Avatars are approximately square; crop a square cell
+                    # centered vertically in the strip.
+                    cell_size = min(cell_w, strip_h)
+                    if cell_size < 16:  # too tiny to be a real avatar
+                        room_idx += 1
+                        continue
+                    sy = max(0, (strip_h - cell_size) // 2)
+                    room_best_name = None
+                    room_best_score = -1.0
+                    for slot in range(_CELLS_PER_ROOM):
+                        sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
+                        if sx + cell_size > strip_w:
+                            break
+                        cell = strip[sy:sy + cell_size, sx:sx + cell_size]
+                        if cell.size == 0:
+                            continue
+                        matched, score = self._avatar_matcher.match_avatar(cell, fav_names)
+                        if matched and score > room_best_score:
+                            room_best_name = matched
+                            room_best_score = score
+                    if room_best_name and room_best_score > _AVATAR_MATCH_THRESHOLD:
                         self.log(
                             f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                            f"★FAV '{matched}' score={score:.2f}"
+                            f"★FAV '{room_best_name}' score={room_best_score:.2f}"
                         )
-                        if score > best_score:
-                            best_name = matched
-                            best_score = score
+                        if room_best_score > best_score:
+                            best_name = room_best_name
+                            best_score = room_best_score
                             best_room = room_idx
+                    elif room_best_name:
+                        # Below threshold but still log for calibration.
+                        self.log(
+                            f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
+                            f"top='{room_best_name}' score={room_best_score:.2f} "
+                            f"(below thr={_AVATAR_MATCH_THRESHOLD})"
+                        )
                     room_idx += 1
                 if room_idx >= _NUM_ROOMS:
                     break
@@ -978,10 +1010,39 @@ class ScheduleSkill(BaseSkill):
             if any(s != "unknown" for s in statuses):
                 skip = sorted(self._clicked_rooms_this_location)
                 self.log(f"room statuses: {statuses} (skipping clicked: {skip})")
+
+            # PRIORITY HUNT: when favorites are configured and no favorite was
+            # found in this location's roster, try the next location before
+            # falling back to pixel mode. Only accept a pixel-picked room after
+            # we've cycled through every location once (or after enough ticks).
+            _locations_to_try = max(1, _MAX_LOCATIONS_FULL_CIRCLE // 2)
+            if (
+                self._target_favorites
+                and not self._target_found
+                and self._locations_checked < _locations_to_try
+                and best_slot >= 0
+            ):
+                self.log(
+                    f"no favorite in '{cur_loc or '?'}' (checked "
+                    f"{self._locations_checked}/{_locations_to_try} locations), "
+                    f"switching to next location to hunt favorites"
+                )
+                return self._close_roster_action(
+                    screen, "switch_location",
+                    "hunt favorites at next location",
+                )
+
             if best_slot >= 0:
                 slot_name = _ROOM_SLOT_NAMES[best_slot]
                 click_x, click_y = _ROOM_CLICK_POS[best_slot]
-                self.log(f"pixel-selected room '{slot_name}' idx={best_slot} at ({click_x:.3f},{click_y:.3f})")
+                hunt_done = (
+                    not self._target_favorites
+                    or self._locations_checked >= _locations_to_try
+                )
+                self.log(
+                    f"pixel-selected room '{slot_name}' idx={best_slot} at "
+                    f"({click_x:.3f},{click_y:.3f}) (fav-hunt exhausted={hunt_done})"
+                )
                 self._roster_open = False
                 self._clicked_rooms_this_location.add(best_slot)
                 self.sub_state = "execute"
