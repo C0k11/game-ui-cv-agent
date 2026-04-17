@@ -239,14 +239,16 @@ class CafeSkill(BaseSkill):
             self.log(f"Florence button-state unavailable: {e}")
             return default
 
-    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Tuple[Any, str]]:
+    def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Tuple[Any, str, bool]]:
         """Find a favorite student in the MomoTalk invite list.
 
         Priority-based: 1F invites the #1 priority favorite, 2F invites #2.
         Skips students whose English name is already in self._invited_names
         (so 2F doesn't pick the same person 1F already invited).
 
-        Returns (invite_button, english_name) tuple, or None.
+        Returns (invite_button, english_name, is_priority) tuple, or None.
+        `is_priority=True` only when the floor's priority target was hit
+        (the caller can choose to scroll further when it's just a fallback).
         If the priority target is not visible, falls back to any favorite.
 
         Strategy (fastest to slowest):
@@ -301,14 +303,14 @@ class CafeSkill(BaseSkill):
                         continue
                     if priority_target and en_name == priority_target:
                         self.log(f"OCR PRIORITY #{priority_idx+1} MATCH: '{text}'\u2192'{en_name}' floor={floor}")
-                        return btn, en_name
+                        return btn, en_name, True
                     if any_fav_btn is None:
                         any_fav_btn = btn
                         any_fav_name = en_name
                         any_fav_info = f"'{text}'\u2192'{en_name}'"
             if any_fav_btn:
                 self.log(f"OCR FALLBACK MATCH: {any_fav_info} (priority #{priority_idx+1} not found) floor={floor}")
-                return any_fav_btn, any_fav_name
+                return any_fav_btn, any_fav_name, False
 
         # --- Strategy 2: Avatar template matching (fallback) ---
         candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
@@ -332,8 +334,9 @@ class CafeSkill(BaseSkill):
                 )
                 if matched_name and score > _AVATAR_MATCH_THRESHOLD:
                     base = matched_name[:-4] if matched_name.lower().endswith(".png") else matched_name
-                    self.log(f"AVATAR MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f}) floor={floor}")
-                    return btn, base
+                    is_pri = priority_target is not None and base == priority_target
+                    self.log(f"AVATAR MATCH: '{matched_name}' score={score:.2f} at ({btn.cx:.2f},{btn.cy:.2f}) floor={floor} priority={is_pri}")
+                    return btn, base, is_pri
 
         return None
 
@@ -962,18 +965,29 @@ class CafeSkill(BaseSkill):
             if invite_btns:
                 # Try to find a favorite student via OCR name matching + avatar fallback
                 _floor = 2 if self._invite_next_state == "headpat2" else 1
+                _MAX_SCROLLS = 5
                 fav_result = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
                 if fav_result:
-                    fav_btn, fav_name = fav_result
+                    fav_btn, fav_name, is_priority = fav_result
+                    # If we only found a non-priority fallback AND we still have
+                    # scrolls left, keep scrolling to hunt the floor's priority
+                    # target (e.g. 1F=Rio). Only accept fallback once exhausted.
+                    if not is_priority and self._invite_scroll_count < _MAX_SCROLLS:
+                        self._invite_scroll_count += 1
+                        self.log(f"fallback '{fav_name}' found but hunting priority — "
+                                 f"scroll ({self._invite_scroll_count}/{_MAX_SCROLLS}) floor={_floor}")
+                        return action_swipe(0.35, 0.70, 0.35, 0.35, 400,
+                                            "scroll to hunt priority favorite")
                     self._invited_names.add(fav_name)
-                    self.log(f"inviting favorite '{fav_name}' at ({fav_btn.cx:.2f},{fav_btn.cy:.2f}) floor={_floor}")
+                    tag = "priority" if is_priority else "fallback"
+                    self.log(f"inviting {tag} '{fav_name}' at ({fav_btn.cx:.2f},{fav_btn.cy:.2f}) floor={_floor}")
                     self._invite_stage = 3
                     self._invite_ticks = 0
-                    return action_click_box(fav_btn, f"invite favorite {fav_name}")
-                # No favorite found — scroll more, else click first
-                if self._invite_scroll_count < 3:
+                    return action_click_box(fav_btn, f"invite {tag} {fav_name}")
+                # No favorite found at all — scroll more, else click first
+                if self._invite_scroll_count < _MAX_SCROLLS:
                     self._invite_scroll_count += 1
-                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/3)")
+                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/{_MAX_SCROLLS})")
                     return action_swipe(0.35, 0.70, 0.35, 0.35, 400, "scroll invite list")
                 btn = invite_btns[0]
                 self.log(f"no favorite after scrolling, clicking first 邀請 at ({btn.cx:.2f},{btn.cy:.2f})")
@@ -1255,6 +1269,7 @@ class CafeSkill(BaseSkill):
             self._invite_stage = 0
             self._invite_sorted = False
             self._sort_option_clicked = False
+            self._invite_scroll_count = 0
             self._invite_next_state = "headpat2"
             self.sub_state = "invite"
             self._empty_scans = 0
@@ -1272,6 +1287,7 @@ class CafeSkill(BaseSkill):
             self._invite_stage = 0
             self._invite_sorted = False
             self._sort_option_clicked = False
+            self._invite_scroll_count = 0
             self._invite_next_state = "headpat2"
             self.sub_state = "invite"
             self._empty_scans = 0

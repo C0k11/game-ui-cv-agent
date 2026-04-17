@@ -98,10 +98,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .assistant-sub{font-size:12px;color:var(--muted);margin:-10px 0 14px 0}
 .profile-actions{display:flex;gap:6px;align-items:center}
 .skill-list{display:flex;flex-direction:column;gap:8px}
-.skill-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+.skill-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:grab;user-select:none;transition:box-shadow .12s,transform .12s}
+.skill-row:active{cursor:grabbing}
+.skill-row.dragging{opacity:.4}
+.skill-row.drag-over{box-shadow:0 0 0 2px var(--accent);transform:translateY(-1px)}
 .skill-row.off{opacity:.55}
 .skill-row .skill-main{display:flex;align-items:center;gap:8px;flex:1}
 .skill-row .skill-handle{font-family:var(--mono);color:var(--muted);font-size:12px;min-width:18px;text-align:center}
+.skill-row .skill-grip{color:var(--muted);font-size:14px;cursor:grab;padding:0 2px;letter-spacing:-1px}
 .skill-row .skill-label{font-size:13px}
 .skill-row .skill-id{font-size:10px;color:var(--muted);font-family:var(--mono)}
 .skill-row .skill-actions{display:flex;gap:4px}
@@ -231,7 +235,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">日常流程编排</summary>
     <div class="card" style="margin-top:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="font-size:12px;color:var(--muted)">按顺序执行你启用的收菜模块；支持拖曳替代方案前的上下微调。</div>
+        <div style="font-size:12px;color:var(--muted)">按顺序执行你启用的收菜模块 · 直接拖动整行即可排序，也可用 ↑/↓ 微调。</div>
         <button class="btn btn-sm" id="btn_skills_reset">恢复默认顺序</button>
       </div>
       <div id="skill_list" class="skill-list"></div>
@@ -417,7 +421,9 @@ function renderSkillList(order, selectedIds){
     const row=document.createElement('div');
     row.className='skill-row'+(selected.has(id)?'':' off');
     row.dataset.skill=id;
+    row.draggable=true;
     row.innerHTML=`<div class="skill-main">
+      <span class="skill-grip" title="拖动排序">⋮⋮</span>
       <input type="checkbox" ${selected.has(id)?'checked':''}/>
       <span class="skill-handle">${String(idx+1).padStart(2,'0')}</span>
       <div>
@@ -430,18 +436,32 @@ function renderSkillList(order, selectedIds){
       <button class="btn btn-sm">↓</button>
     </div>`;
     const cb=row.querySelector('input[type="checkbox"]');
-    cb.onchange=()=>{row.classList.toggle('off',!cb.checked);saveAgent();updateSkillPlanStatus();};
+    cb.onchange=(e)=>{e.stopPropagation();row.classList.toggle('off',!cb.checked);saveAgent();updateSkillPlanStatus();};
+    // Stop checkbox click from initiating drag side-effects
+    cb.addEventListener('mousedown',e=>e.stopPropagation());
     const [upBtn,downBtn]=row.querySelectorAll('.skill-actions button');
-    upBtn.onclick=()=>moveSkillRow(id,-1);
-    downBtn.onclick=()=>moveSkillRow(id,1);
+    upBtn.onclick=(e)=>{e.stopPropagation();moveSkillRow(id,-1);};
+    downBtn.onclick=(e)=>{e.stopPropagation();moveSkillRow(id,1);};
     const handle=row.querySelector('.skill-handle');
     if(handle)handle.textContent=String(idx+1).padStart(2,'0');
     upBtn.disabled=idx===0;
     downBtn.disabled=idx===desired.length-1;
+    // HTML5 drag-and-drop reorder
+    row.addEventListener('dragstart',e=>{_skillDragSrc=id;row.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',id);}catch(_){}});
+    row.addEventListener('dragend',()=>{row.classList.remove('dragging');_skillDragSrc=null;document.querySelectorAll('#skill_list .skill-row.drag-over').forEach(x=>x.classList.remove('drag-over'));});
+    row.addEventListener('dragover',e=>{if(_skillDragSrc&&_skillDragSrc!==id){e.preventDefault();e.dataTransfer.dropEffect='move';row.classList.add('drag-over');}});
+    row.addEventListener('dragleave',()=>row.classList.remove('drag-over'));
+    row.addEventListener('drop',e=>{e.preventDefault();row.classList.remove('drag-over');if(!_skillDragSrc||_skillDragSrc===id)return;
+      const order=getSkillListOrder();const selectedSet=getSelectedSkillOrder();
+      const srcIdx=order.indexOf(_skillDragSrc);const dstIdx=order.indexOf(id);
+      if(srcIdx<0||dstIdx<0)return;
+      const [item]=order.splice(srcIdx,1);order.splice(dstIdx,0,item);
+      renderSkillList(order,selectedSet);saveAgent();});
     el.appendChild(row);
   });
   updateSkillPlanStatus();
 }
+let _skillDragSrc=null;
 function moveSkillRow(skillId,dir){
   const order=getSkillListOrder();
   const idx=order.indexOf(skillId);
