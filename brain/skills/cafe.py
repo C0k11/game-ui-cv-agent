@@ -146,6 +146,7 @@ class CafeSkill(BaseSkill):
         self._enter_attempts = 0
         self._headpat_count = 0
         self._empty_scans = 0
+        self._friend_dodge_count = 0
         self._earnings_claimed = False
         self._earnings_attempts = 0
         self._invite_attempted = False
@@ -1074,6 +1075,41 @@ class CafeSkill(BaseSkill):
 
         return action_wait(400, "waiting for invite UI")
 
+    # Top-left cafe overlay contains 指定訪問/隨機訪問 buttons which stack on
+    # students standing in the bottom-left corner. Clicking a headpat marker
+    # here accidentally opens the friend-cafe flow. Instead, pan the camera so
+    # the student slides out from under the buttons.
+    _FRIEND_BTN_ZONE = (0.00, 0.00, 0.14, 0.32)  # x1, y1, x2, y2 (normalized)
+    _MAX_FRIEND_DODGES = 2  # give up and click anyway after N pans (rare edge)
+
+    def _maybe_dodge_friend_buttons(self, mx: float, my: float,
+                                    cx: float, cy: float):
+        """Return a pan action if the marker/click overlaps the friend-visit
+        buttons at top-left, else None. Uses `_friend_dodge_count` to avoid
+        infinite loops when the student truly can't be moved out of the zone.
+        """
+        zx1, zy1, zx2, zy2 = self._FRIEND_BTN_ZONE
+        in_zone = (
+            (zx1 <= mx <= zx2 and zy1 <= my <= zy2)
+            or (zx1 <= cx <= zx2 and zy1 <= cy <= zy2)
+        )
+        if not in_zone:
+            return None
+        dodges = getattr(self, "_friend_dodge_count", 0)
+        if dodges >= self._MAX_FRIEND_DODGES:
+            self.log(f"friend-btn dodge budget exhausted ({dodges}), clicking anyway")
+            return None
+        self._friend_dodge_count = dodges + 1
+        self._headpat_cooldown = 1
+        self.log(
+            f"headpat marker at ({mx:.2f},{my:.2f}) overlaps 指定/隨機訪問 buttons — "
+            f"panning cafe right to dodge ({self._friend_dodge_count}/{self._MAX_FRIEND_DODGES})"
+        )
+        # Drag the cafe content right+down so the student slides away from the
+        # top-left buttons. Start from center, end toward bottom-right.
+        return action_swipe(0.30, 0.40, 0.70, 0.60, 400,
+                            "pan cafe to dodge friend-visit buttons")
+
     def _headpat(self, screen: ScreenState) -> Dict[str, Any]:
         """Tap students with happy_face template markers (primary) or YOLO (fallback).
 
@@ -1122,6 +1158,7 @@ class CafeSkill(BaseSkill):
                 self._headpat_count = 0
                 self._empty_scans = 0
                 self._pan_phase = 0
+                self._friend_dodge_count = 0
                 return action_wait(300, "headpat max reached, switching")
             else:
                 self.log(f"reached max {_MAX_HEADPATS_PER_FLOOR} headpats on 2F, exiting")
@@ -1140,11 +1177,14 @@ class CafeSkill(BaseSkill):
             if early_mark is None:
                 early_mark = screen.find_yolo_one("headpat_bubble", min_conf=0.40)
             if early_mark is not None:
+                click_x = early_mark.cx + 0.03
+                click_y = early_mark.cy + 0.02
+                dodge = self._maybe_dodge_friend_buttons(early_mark.cx, early_mark.cy, click_x, click_y)
+                if dodge is not None:
+                    return dodge
                 self._empty_scans = 0
                 self._headpat_count += 1
                 self._headpat_cooldown = 1
-                click_x = early_mark.cx + 0.03
-                click_y = early_mark.cy + 0.02
                 self.log(f"early headpat #{self._headpat_count}: cls={getattr(early_mark,'cls','?')} "
                          f"conf={early_mark.confidence:.2f} at ({early_mark.cx:.2f},{early_mark.cy:.2f}) "
                          f"pan_phase={self._pan_phase}")
@@ -1208,12 +1248,15 @@ class CafeSkill(BaseSkill):
             mark = screen.find_yolo_one("感叹号", min_conf=_HEADPAT_CONF)
 
         if mark:
+            click_x = mark.cx + 0.03
+            click_y = mark.cy + 0.02
+            dodge = self._maybe_dodge_friend_buttons(mark.cx, mark.cy, click_x, click_y)
+            if dodge is not None:
+                return dodge
             self._empty_scans = 0
             self._headpat_count += 1
             self._headpat_cooldown = 1  # Wait 1 tick (~0.5s) for animation
             # Click slightly right of the bubble (student body is just right of bubble)
-            click_x = mark.cx + 0.03
-            click_y = mark.cy + 0.02
             self.log(f"headpat #{self._headpat_count}: conf={mark.confidence:.2f} marker=({mark.cx:.2f},{mark.cy:.2f}) click=({click_x:.2f},{click_y:.2f})")
             return action_click(click_x, click_y, f"headpat student #{self._headpat_count}")
 
@@ -1247,6 +1290,7 @@ class CafeSkill(BaseSkill):
                 self._headpat_count = 0
                 self._empty_scans = 0
                 self._pan_phase = 0
+                self._friend_dodge_count = 0
                 return action_wait(300, "headpat done, switching")
             else:  # headpat2
                 self.log(f"no more headpat marks on 2F after {self._headpat_count} pats, exiting")
