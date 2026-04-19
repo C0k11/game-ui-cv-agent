@@ -559,7 +559,16 @@ class BaseSkill(ABC):
                 ["掃蕩", "扫荡", "使用AP", "使用 AP"],
                 region=screen.CENTER, min_conf=0.45,
             )
-            must_confirm = invite_hint or update_title or update_hint or sweep_hint
+            # Friend-cafe visit confirm ("要訪問好友的咖啡廳嗎？") must NEVER be
+            # confirmed — we want to stay in our own cafe. Force cancel.
+            friend_hint = screen.find_any_text(
+                ["訪問好友", "访问好友", "朋友的咖啡廳", "朋友的咖啡厅",
+                 "前往好友", "前往訪問", "前往访问", "要訪問", "要访问",
+                 "指定訪問", "指定访问", "隨機訪問", "随机访问"],
+                region=screen.CENTER, min_conf=0.5,
+            )
+            must_confirm = (invite_hint or update_title or update_hint or sweep_hint) and not friend_hint
+            must_cancel = bool(friend_hint)
 
             confirm_btn = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],
@@ -571,6 +580,15 @@ class BaseSkill(ABC):
                 region=(0.28, 0.60, 0.56, 0.82),
                 min_conf=0.55,
             )
+
+            # Must-cancel notifications: NEVER confirm (e.g. friend-cafe visit)
+            if must_cancel:
+                if cancel_btn:
+                    self.log("notification popup (friend-cafe): clicking cancel")
+                    return action_click_box(cancel_btn, "cancel friend-cafe visit")
+                # OCR missed the button — hardcoded cancel position (left of confirm)
+                self.log("notification popup (friend-cafe): cancel fallback click")
+                return action_click(0.402, 0.701, "cancel friend-cafe visit fallback")
 
             # Must-confirm notifications: always click 確認
             if must_confirm and confirm_btn:

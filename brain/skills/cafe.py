@@ -966,7 +966,7 @@ class CafeSkill(BaseSkill):
             if invite_btns:
                 # Try to find a favorite student via OCR name matching + avatar fallback
                 _floor = 2 if self._invite_next_state == "headpat2" else 1
-                _MAX_SCROLLS = 5
+                _MAX_SCROLLS = 15
                 fav_result = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
                 if fav_result:
                     fav_btn, fav_name, is_priority = fav_result
@@ -1079,7 +1079,9 @@ class CafeSkill(BaseSkill):
     # students standing in the bottom-left corner. Clicking a headpat marker
     # here accidentally opens the friend-cafe flow. Instead, pan the camera so
     # the student slides out from under the buttons.
-    _FRIEND_BTN_ZONE = (0.00, 0.00, 0.14, 0.32)  # x1, y1, x2, y2 (normalized)
+    # Top-left column holds 指定訪問 (y~0.05-0.22) and 隨機訪問 (y~0.22-0.42)
+    # buttons. Any click inside this column risks opening the friend-cafe flow.
+    _FRIEND_BTN_ZONE = (0.00, 0.00, 0.14, 0.42)  # x1, y1, x2, y2 (normalized)
     _MAX_FRIEND_DODGES = 2  # give up and click anyway after N pans (rare edge)
 
     def _maybe_dodge_friend_buttons(self, mx: float, my: float,
@@ -1148,6 +1150,30 @@ class CafeSkill(BaseSkill):
         recover = self._recover_invite_overlay(screen, self.sub_state)
         if recover:
             return recover
+
+        # GUARD: if we accidentally opened the friend-cafe flow (clicked
+        # 指定訪問 / 隨機訪問 while trying to headpat a student in the top-left
+        # corner), back out immediately. Detect via confirm popup text or
+        # friend-cafe title bar.
+        friend_hint = screen.find_any_text(
+            ["指定訪問", "指定访问", "隨機訪問", "随机访问",
+             "前往訪問", "前往访问", "朋友的咖啡廳", "朋友的咖啡厅",
+             "訪問好友", "访问好友", "前往好友", "要訪問", "要访问"],
+            min_conf=0.55,
+        )
+        if friend_hint:
+            cancel = screen.find_any_text(
+                ["取消", "返回", "關閉", "关闭"], min_conf=0.6
+            )
+            if cancel:
+                self.log(
+                    f"friend-cafe popup detected ('{friend_hint.text}') — cancel"
+                )
+                return action_click_box(cancel, "cancel friend-cafe popup")
+            self.log(
+                f"friend-cafe screen detected ('{friend_hint.text}') — back out"
+            )
+            return action_back("back out of friend-cafe")
 
         # Check if we've hit the per-floor headpat limit
         if self._headpat_count >= _MAX_HEADPATS_PER_FLOOR:
