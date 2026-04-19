@@ -1151,29 +1151,11 @@ class CafeSkill(BaseSkill):
         if recover:
             return recover
 
-        # GUARD: if we accidentally opened the friend-cafe flow (clicked
-        # 指定訪問 / 隨機訪問 while trying to headpat a student in the top-left
-        # corner), back out immediately. Detect via confirm popup text or
-        # friend-cafe title bar.
-        friend_hint = screen.find_any_text(
-            ["指定訪問", "指定访问", "隨機訪問", "随机访问",
-             "前往訪問", "前往访问", "朋友的咖啡廳", "朋友的咖啡厅",
-             "訪問好友", "访问好友", "前往好友", "要訪問", "要访问"],
-            min_conf=0.55,
-        )
-        if friend_hint:
-            cancel = screen.find_any_text(
-                ["取消", "返回", "關閉", "关闭"], min_conf=0.6
-            )
-            if cancel:
-                self.log(
-                    f"friend-cafe popup detected ('{friend_hint.text}') — cancel"
-                )
-                return action_click_box(cancel, "cancel friend-cafe popup")
-            self.log(
-                f"friend-cafe screen detected ('{friend_hint.text}') — back out"
-            )
-            return action_back("back out of friend-cafe")
+        # NOTE: friend-cafe confirm popup ("要訪問好友的咖啡廳嗎？") is handled
+        # by base._handle_common_popups which is gated by the "通知" dialog
+        # title. Do NOT re-check for 指定訪問/隨機訪問 text here — those strings
+        # are always-visible BUTTON LABELS on the normal cafe screen, and
+        # matching them would trigger false action_back() → kick to lobby.
 
         # Check if we've hit the per-floor headpat limit
         if self._headpat_count >= _MAX_HEADPATS_PER_FLOOR:
