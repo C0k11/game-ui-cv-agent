@@ -170,14 +170,30 @@ class ScheduleSkill(BaseSkill):
         self._avatar_regions_cfg = self._load_avatar_regions_config()
 
     @staticmethod
+    def _default_strips() -> List[Dict[str, float]]:
+        """Derive default flat strip list from class-level rows × cols grid."""
+        return [
+            {"x1": cx1, "y1": ry1, "x2": cx2, "y2": ry2}
+            for (ry1, ry2) in ScheduleSkill._DEFAULT_AVATAR_ROWS_Y
+            for (cx1, cx2) in ScheduleSkill._DEFAULT_AVATAR_COLS_X
+        ]
+
+    @staticmethod
     def _load_avatar_regions_config() -> Dict[str, Any]:
         """Load roster avatar region overrides from data/schedule_avatar_regions.json.
 
-        File format::
+        Preferred format (canvas UI)::
 
             {
-              "rows_y": [[0.35, 0.47], [0.54, 0.66], [0.73, 0.84]],
-              "cols_x": [[0.09, 0.30], [0.34, 0.55], [0.58, 0.79]],
+              "strips": [{"x1":0.09,"y1":0.35,"x2":0.30,"y2":0.47}, ...],
+              "cells_per_room": 4
+            }
+
+        Legacy grid format (still supported for back-compat)::
+
+            {
+              "rows_y": [[0.35,0.47], ...],
+              "cols_x": [[0.09,0.30], ...],
               "cells_per_room": 4
             }
 
@@ -189,19 +205,36 @@ class ScheduleSkill(BaseSkill):
             p = Path(__file__).resolve().parents[2] / "data" / "schedule_avatar_regions.json"
             if p.exists():
                 raw = _json.loads(p.read_text(encoding="utf-8"))
-                rows = raw.get("rows_y") or ScheduleSkill._DEFAULT_AVATAR_ROWS_Y
-                cols = raw.get("cols_x") or ScheduleSkill._DEFAULT_AVATAR_COLS_X
                 cpr = int(raw.get("cells_per_room") or ScheduleSkill._DEFAULT_CELLS_PER_ROOM)
-                # Validate shapes; fall back silently on malformed data
-                rows = [tuple(r) for r in rows if len(r) == 2]
-                cols = [tuple(c) for c in cols if len(c) == 2]
+                # Preferred: flat strip list
+                strips_raw = raw.get("strips")
+                if isinstance(strips_raw, list) and strips_raw:
+                    strips: List[Dict[str, float]] = []
+                    for s in strips_raw:
+                        try:
+                            x1, y1, x2, y2 = float(s["x1"]), float(s["y1"]), float(s["x2"]), float(s["y2"])
+                            if x2 > x1 and y2 > y1:
+                                strips.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                    if strips:
+                        return {"strips": strips, "cells_per_room": max(1, cpr)}
+                # Legacy: rows × cols cross-product
+                rows = raw.get("rows_y")
+                cols = raw.get("cols_x")
                 if rows and cols:
-                    return {"rows_y": rows, "cols_x": cols, "cells_per_room": max(1, cpr)}
+                    rows_t = [tuple(r) for r in rows if len(r) == 2]
+                    cols_t = [tuple(c) for c in cols if len(c) == 2]
+                    if rows_t and cols_t:
+                        strips = [
+                            {"x1": float(cx1), "y1": float(ry1), "x2": float(cx2), "y2": float(ry2)}
+                            for (ry1, ry2) in rows_t for (cx1, cx2) in cols_t
+                        ]
+                        return {"strips": strips, "cells_per_room": max(1, cpr)}
         except Exception:
             pass
         return {
-            "rows_y": ScheduleSkill._DEFAULT_AVATAR_ROWS_Y,
-            "cols_x": ScheduleSkill._DEFAULT_AVATAR_COLS_X,
+            "strips": ScheduleSkill._default_strips(),
             "cells_per_room": ScheduleSkill._DEFAULT_CELLS_PER_ROOM,
         }
 
@@ -472,14 +505,6 @@ class ScheduleSkill(BaseSkill):
     _DEFAULT_AVATAR_COLS_X = [(0.09, 0.30), (0.34, 0.55), (0.58, 0.79)]
     _DEFAULT_CELLS_PER_ROOM = 4
 
-    @property
-    def _AVATAR_ROWS_Y(self):
-        return self._avatar_regions_cfg["rows_y"]
-
-    @property
-    def _AVATAR_COLS_X(self):
-        return self._avatar_regions_cfg["cols_x"]
-
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
         """Check roster overlay for favorite characters using 角色头像_crop.
 
@@ -529,63 +554,56 @@ class ScheduleSkill(BaseSkill):
                 fav_names.append(name)
 
             _CELLS_PER_ROOM = int(self._avatar_regions_cfg.get("cells_per_room", 4))
-            room_idx = 0
-            for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
-                for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
-                    if room_idx >= _NUM_ROOMS:
-                        break
-                    if statuses[room_idx] not in ("available", "unknown"):
-                        room_idx += 1
-                        continue
-                    px1 = int(cx1 * w)
-                    py1 = int(ry1 * h)
-                    px2 = int(cx2 * w)
-                    py2 = int(ry2 * h)
-                    strip = img[py1:py2, px1:px2]
-                    if strip.size == 0:
-                        room_idx += 1
-                        continue
-                    strip_h, strip_w = strip.shape[:2]
-                    cell_w = max(1, strip_w // _CELLS_PER_ROOM)
-                    # Avatars are approximately square; crop a square cell
-                    # centered vertically in the strip.
-                    cell_size = min(cell_w, strip_h)
-                    if cell_size < 16:  # too tiny to be a real avatar
-                        room_idx += 1
-                        continue
-                    sy = max(0, (strip_h - cell_size) // 2)
-                    room_best_name = None
-                    room_best_score = -1.0
-                    for slot in range(_CELLS_PER_ROOM):
-                        sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
-                        if sx + cell_size > strip_w:
-                            break
-                        cell = strip[sy:sy + cell_size, sx:sx + cell_size]
-                        if cell.size == 0:
-                            continue
-                        matched, score = self._avatar_matcher.match_avatar(cell, fav_names)
-                        if matched and score > room_best_score:
-                            room_best_name = matched
-                            room_best_score = score
-                    if room_best_name and room_best_score > _AVATAR_MATCH_THRESHOLD:
-                        self.log(
-                            f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                            f"★FAV '{room_best_name}' score={room_best_score:.2f}"
-                        )
-                        if room_best_score > best_score:
-                            best_name = room_best_name
-                            best_score = room_best_score
-                            best_room = room_idx
-                    elif room_best_name:
-                        # Below threshold but still log for calibration.
-                        self.log(
-                            f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                            f"top='{room_best_name}' score={room_best_score:.2f} "
-                            f"(below thr={_AVATAR_MATCH_THRESHOLD})"
-                        )
-                    room_idx += 1
+            strips = self._avatar_regions_cfg.get("strips") or []
+            for room_idx, s in enumerate(strips):
                 if room_idx >= _NUM_ROOMS:
                     break
+                if statuses[room_idx] not in ("available", "unknown"):
+                    continue
+                px1 = int(s["x1"] * w)
+                py1 = int(s["y1"] * h)
+                px2 = int(s["x2"] * w)
+                py2 = int(s["y2"] * h)
+                strip = img[py1:py2, px1:px2]
+                if strip.size == 0:
+                    continue
+                strip_h, strip_w = strip.shape[:2]
+                cell_w = max(1, strip_w // _CELLS_PER_ROOM)
+                # Avatars are approximately square; crop a square cell
+                # centered vertically in the strip.
+                cell_size = min(cell_w, strip_h)
+                if cell_size < 16:  # too tiny to be a real avatar
+                    continue
+                sy = max(0, (strip_h - cell_size) // 2)
+                room_best_name = None
+                room_best_score = -1.0
+                for slot in range(_CELLS_PER_ROOM):
+                    sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
+                    if sx + cell_size > strip_w:
+                        break
+                    cell = strip[sy:sy + cell_size, sx:sx + cell_size]
+                    if cell.size == 0:
+                        continue
+                    matched, score = self._avatar_matcher.match_avatar(cell, fav_names)
+                    if matched and score > room_best_score:
+                        room_best_name = matched
+                        room_best_score = score
+                if room_best_name and room_best_score > _AVATAR_MATCH_THRESHOLD:
+                    self.log(
+                        f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
+                        f"★FAV '{room_best_name}' score={room_best_score:.2f}"
+                    )
+                    if room_best_score > best_score:
+                        best_name = room_best_name
+                        best_score = room_best_score
+                        best_room = room_idx
+                elif room_best_name:
+                    # Below threshold but still log for calibration.
+                    self.log(
+                        f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
+                        f"top='{room_best_name}' score={room_best_score:.2f} "
+                        f"(below thr={_AVATAR_MATCH_THRESHOLD})"
+                    )
 
         if best_name and best_room >= 0:
             self._target_found = True

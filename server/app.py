@@ -26,7 +26,6 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 _SERVER_STARTED_AT = time.time()
 
 DASHBOARD_PATH = REPO_ROOT / "server" / "dashboard.html"
-ANNOTATE_PATH = REPO_ROOT / "archive" / "old_modules" / "annotate.html"
 
 CAPTURES_DIR = REPO_ROOT / "data" / "captures"
 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -1159,20 +1158,6 @@ def dashboard() -> FileResponse:
     )
 
 
-@app.get("/annotate.html")
-def annotate() -> FileResponse:
-    if not ANNOTATE_PATH.exists():
-        raise HTTPException(status_code=404, detail="annotate.html not found")
-    return FileResponse(
-        str(ANNOTATE_PATH),
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
-
-
 @app.get("/api/v1/status")
 def status() -> Dict[str, Any]:
     pipeline_running = _PIPELINE_RUNNING
@@ -1464,33 +1449,65 @@ def next_unlabeled(
 SCHEDULE_REGIONS_PATH = REPO_ROOT / "data" / "schedule_avatar_regions.json"
 TRAJECTORIES_DIR = REPO_ROOT / "data" / "trajectories"
 
+_DEFAULT_STRIPS = [
+    {"x1": cx1, "y1": ry1, "x2": cx2, "y2": ry2}
+    for (ry1, ry2) in [(0.35, 0.47), (0.54, 0.66), (0.73, 0.84)]
+    for (cx1, cx2) in [(0.09, 0.30), (0.34, 0.55), (0.58, 0.79)]
+]
 _DEFAULT_SCHEDULE_REGIONS = {
-    "rows_y": [[0.35, 0.47], [0.54, 0.66], [0.73, 0.84]],
-    "cols_x": [[0.09, 0.30], [0.34, 0.55], [0.58, 0.79]],
+    "strips": _DEFAULT_STRIPS,
     "cells_per_room": 4,
 }
+
+
+def _normalize_strips(raw: Any) -> List[Dict[str, float]]:
+    """Coerce a raw strips payload into a sanitized list of {x1,y1,x2,y2}."""
+    out: List[Dict[str, float]] = []
+    if not isinstance(raw, list):
+        return out
+    for s in raw:
+        try:
+            x1 = float(s["x1"]); y1 = float(s["y1"])
+            x2 = float(s["x2"]); y2 = float(s["y2"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (0.0 <= x1 < x2 <= 1.0 and 0.0 <= y1 < y2 <= 1.0):
+            continue
+        out.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+    return out
 
 
 def _load_schedule_regions() -> Dict[str, Any]:
     try:
         if SCHEDULE_REGIONS_PATH.exists():
             raw = json.loads(SCHEDULE_REGIONS_PATH.read_text(encoding="utf-8"))
-            rows = raw.get("rows_y") or _DEFAULT_SCHEDULE_REGIONS["rows_y"]
-            cols = raw.get("cols_x") or _DEFAULT_SCHEDULE_REGIONS["cols_x"]
             cpr = int(raw.get("cells_per_room") or _DEFAULT_SCHEDULE_REGIONS["cells_per_room"])
-            return {"rows_y": rows, "cols_x": cols, "cells_per_room": max(1, cpr)}
+            # New format: flat strip list
+            strips = _normalize_strips(raw.get("strips"))
+            if strips:
+                return {"strips": strips, "cells_per_room": max(1, cpr)}
+            # Legacy: rows × cols cross-product
+            rows = raw.get("rows_y") or []
+            cols = raw.get("cols_x") or []
+            if rows and cols:
+                legacy = [
+                    {"x1": float(cx1), "y1": float(ry1), "x2": float(cx2), "y2": float(ry2)}
+                    for (ry1, ry2) in [r for r in rows if len(r) == 2]
+                    for (cx1, cx2) in [c for c in cols if len(c) == 2]
+                ]
+                legacy = _normalize_strips(legacy)
+                if legacy:
+                    return {"strips": legacy, "cells_per_room": max(1, cpr)}
     except Exception:
         pass
-    # Return a deep copy of defaults
     return json.loads(json.dumps(_DEFAULT_SCHEDULE_REGIONS))
 
 
 @app.get("/api/v1/schedule/avatar_regions")
 def get_schedule_avatar_regions() -> Dict[str, Any]:
     """Return current schedule avatar region config (defaults if no file)."""
-    cfg = _load_schedule_regions()
     return {
-        "config": cfg,
+        "config": _load_schedule_regions(),
         "defaults": _DEFAULT_SCHEDULE_REGIONS,
         "path": str(SCHEDULE_REGIONS_PATH),
         "exists": SCHEDULE_REGIONS_PATH.exists(),
@@ -1500,25 +1517,17 @@ def get_schedule_avatar_regions() -> Dict[str, Any]:
 @app.post("/api/v1/schedule/avatar_regions")
 def save_schedule_avatar_regions(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Save schedule avatar region config to data/schedule_avatar_regions.json."""
-    rows = payload.get("rows_y")
-    cols = payload.get("cols_x")
-    cpr = payload.get("cells_per_room")
-    if not (isinstance(rows, list) and all(isinstance(r, list) and len(r) == 2 for r in rows)):
-        raise HTTPException(status_code=400, detail="rows_y must be list of [y1,y2] pairs")
-    if not (isinstance(cols, list) and all(isinstance(c, list) and len(c) == 2 for c in cols)):
-        raise HTTPException(status_code=400, detail="cols_x must be list of [x1,x2] pairs")
+    strips = _normalize_strips(payload.get("strips"))
+    if not strips:
+        raise HTTPException(status_code=400, detail="strips must be non-empty list of {x1,y1,x2,y2}")
     try:
-        cpr_int = int(cpr)
+        cpr_int = int(payload.get("cells_per_room"))
         if cpr_int < 1 or cpr_int > 10:
             raise ValueError()
     except Exception:
         raise HTTPException(status_code=400, detail="cells_per_room must be int in 1..10")
 
-    cfg = {
-        "rows_y": [[float(a), float(b)] for a, b in rows],
-        "cols_x": [[float(a), float(b)] for a, b in cols],
-        "cells_per_room": cpr_int,
-    }
+    cfg = {"strips": strips, "cells_per_room": cpr_int}
     SCHEDULE_REGIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SCHEDULE_REGIONS_PATH.write_text(
         json.dumps(cfg, indent=2, ensure_ascii=False),
@@ -1583,68 +1592,15 @@ def _safe_trajectory_jpg(rel: str) -> Path:
     return p
 
 
-@app.get("/api/v1/schedule/roster_preview")
-def roster_preview(
-    jpg: str = Query(...),
-    rows_y: str = Query(""),
-    cols_x: str = Query(""),
-    cells_per_room: int = Query(0),
-):
-    """Render a roster screenshot with the cell grid overlaid.
+@app.get("/api/v1/schedule/roster_image")
+def roster_image(jpg: str = Query(...)) -> FileResponse:
+    """Serve a raw trajectory jpg by `run/tick_NNNN.jpg`.
 
-    Pass `rows_y` / `cols_x` as JSON-encoded lists of [a,b] pairs, or leave
-    empty to use the currently saved config. `cells_per_room` defaults to 4.
+    Client canvas renders the cell overlay; server just streams the image.
     """
     src = _safe_trajectory_jpg(jpg)
-    cfg = _load_schedule_regions()
-    try:
-        if rows_y:
-            cfg["rows_y"] = json.loads(rows_y)
-        if cols_x:
-            cfg["cols_x"] = json.loads(cols_x)
-        if cells_per_room and cells_per_room > 0:
-            cfg["cells_per_room"] = int(cells_per_room)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid rows_y/cols_x JSON")
-
-    try:
-        import cv2
-        import numpy as np
-        img = cv2.imdecode(np.fromfile(str(src), dtype=np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            raise RuntimeError("decode failed")
-        h, w = img.shape[:2]
-        overlay = img.copy()
-        cpr = max(1, int(cfg.get("cells_per_room") or 4))
-        # Draw strip rectangles (red) and per-cell squares (green)
-        for ry1, ry2 in cfg["rows_y"]:
-            for cx1, cx2 in cfg["cols_x"]:
-                px1, py1 = int(cx1 * w), int(ry1 * h)
-                px2, py2 = int(cx2 * w), int(ry2 * h)
-                cv2.rectangle(overlay, (px1, py1), (px2, py2), (0, 0, 255), 2)
-                strip_w = max(1, px2 - px1)
-                strip_h = max(1, py2 - py1)
-                cell_w = max(1, strip_w // cpr)
-                cell_size = min(cell_w, strip_h)
-                sy = py1 + max(0, (strip_h - cell_size) // 2)
-                for slot in range(cpr):
-                    sx = px1 + slot * cell_w + max(0, (cell_w - cell_size) // 2)
-                    if sx + cell_size > px2:
-                        break
-                    cv2.rectangle(overlay, (sx, sy), (sx + cell_size, sy + cell_size),
-                                  (0, 255, 0), 2)
-        # Blend a 30% fill for strips to make them visible
-        blended = cv2.addWeighted(overlay, 0.6, img, 0.4, 0)
-        _ok, buf = cv2.imencode(".png", blended)
-        if not _ok:
-            raise RuntimeError("encode failed")
-        from fastapi.responses import Response
-        return Response(content=buf.tobytes(), media_type="image/png",
-                        headers={"Cache-Control": "no-store"})
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"render failed: {e}")
+    return FileResponse(str(src), media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=3600"})
 
 
 # ── Dataset & Label Editor APIs ──────────────────────────────────────────

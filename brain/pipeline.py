@@ -12,7 +12,9 @@ Usage:
 from __future__ import annotations
 
 import json
+import queue
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -507,6 +509,8 @@ class DailyPipeline:
         self._max_retries: int = 1
         self._retry_count: int = 0
         self._traj_dir: Optional[Path] = None
+        self._traj_writer_queue: "queue.Queue" = queue.Queue(maxsize=64)
+        self._traj_writer_thread: Optional[threading.Thread] = None
         self._interceptor_streak: int = 0  # consecutive interceptor fires
         self._last_sub_state: str = ""
         self._last_wait_reason: str = ""
@@ -564,6 +568,12 @@ class DailyPipeline:
         self._traj_dir = self.TRAJECTORIES_DIR / f"run_{ts}"
         self._traj_dir.mkdir(parents=True, exist_ok=True)
         print(f"[Pipeline] Trajectory dir: {self._traj_dir}")
+        # Start async trajectory writer (drops oldest when queue full)
+        self._traj_writer_queue = queue.Queue(maxsize=64)
+        self._traj_writer_thread = threading.Thread(
+            target=self._traj_writer_loop, name="TrajWriter", daemon=True,
+        )
+        self._traj_writer_thread.start()
         self._start_current_skill()
         print(f"[Pipeline] Started with {len(self._skill_order)} skills: {self._skill_order}")
 
@@ -571,6 +581,11 @@ class DailyPipeline:
         """Stop the pipeline."""
         self._running = False
         set_yolo_context("none")
+        # Signal writer to drain and exit (don't block agent UI)
+        try:
+            self._traj_writer_queue.put_nowait(None)
+        except (queue.Full, AttributeError):
+            pass
         print("[Pipeline] Stopped")
 
     def _start_current_skill(self) -> None:
@@ -1152,56 +1167,87 @@ class DailyPipeline:
 
     def _save_trajectory(self, screenshot_path: str, screen: ScreenState,
                          skill: BaseSkill, action: Dict[str, Any]) -> None:
-        """Save frame + OCR + action for debugging."""
+        """Enqueue frame + OCR + action for async write to trajectory dir.
+
+        Returns immediately — actual disk I/O happens on a background thread.
+        Prevents ~10-50ms/tick blocking when writing to slow disks.
+        """
         if self._traj_dir is None:
             return
-        try:
-            tick_id = f"tick_{self._total_ticks:04d}"
-            # Copy frame image
-            src = Path(screenshot_path)
-            if src.exists():
-                shutil.copy2(str(src), str(self._traj_dir / f"{tick_id}.jpg"))
-            # Save OCR + action JSON
-            ocr_data = [
-                {
-                    "text": b.text,
-                    "conf": round(b.confidence, 3),
-                    "x1": round(b.x1, 4), "y1": round(b.y1, 4),
-                    "x2": round(b.x2, 4), "y2": round(b.y2, 4),
-                }
-                for b in screen.ocr_boxes
-            ]
-            yolo_data = [
-                {
-                    "cls": b.cls_name,
-                    "conf": round(b.confidence, 3),
-                    "x1": round(b.x1, 4), "y1": round(b.y1, 4),
-                    "x2": round(b.x2, 4), "y2": round(b.y2, 4),
-                }
-                for b in screen.yolo_boxes
-            ]
-            record = {
-                "tick": self._total_ticks,
-                "skill": skill.name,
-                "sub_state": skill.sub_state,
-                "skill_ticks": skill.ticks,
-                "action": action,
-                "ocr_boxes": ocr_data,
-                "ocr_count": len(ocr_data),
-                "yolo_boxes": yolo_data,
-                "yolo_count": len(yolo_data),
-                "yolo_status": _yolo_status,
-                "image_w": screen.image_w,
-                "image_h": screen.image_h,
-                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        tick_id = f"tick_{self._total_ticks:04d}"
+        ocr_data = [
+            {
+                "text": b.text,
+                "conf": round(b.confidence, 3),
+                "x1": round(b.x1, 4), "y1": round(b.y1, 4),
+                "x2": round(b.x2, 4), "y2": round(b.y2, 4),
             }
-            json_path = self._traj_dir / f"{tick_id}.json"
-            json_path.write_text(
-                json.dumps(record, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception as e:
-            print(f"[Pipeline] trajectory save error: {e}")
+            for b in screen.ocr_boxes
+        ]
+        yolo_data = [
+            {
+                "cls": b.cls_name,
+                "conf": round(b.confidence, 3),
+                "x1": round(b.x1, 4), "y1": round(b.y1, 4),
+                "x2": round(b.x2, 4), "y2": round(b.y2, 4),
+            }
+            for b in screen.yolo_boxes
+        ]
+        record = {
+            "tick": self._total_ticks,
+            "skill": skill.name,
+            "sub_state": skill.sub_state,
+            "skill_ticks": skill.ticks,
+            "action": action,
+            "ocr_boxes": ocr_data,
+            "ocr_count": len(ocr_data),
+            "yolo_boxes": yolo_data,
+            "yolo_count": len(yolo_data),
+            "yolo_status": _yolo_status,
+            "image_w": screen.image_w,
+            "image_h": screen.image_h,
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        job = (screenshot_path, str(self._traj_dir), tick_id, record)
+        try:
+            self._traj_writer_queue.put_nowait(job)
+        except queue.Full:
+            # Writer is overwhelmed — drop the oldest job to keep agent fluid.
+            try:
+                self._traj_writer_queue.get_nowait()
+                self._traj_writer_queue.put_nowait(job)
+            except (queue.Empty, queue.Full):
+                pass
+
+    def _traj_writer_loop(self) -> None:
+        """Background worker that consumes trajectory save jobs."""
+        while True:
+            try:
+                job = self._traj_writer_queue.get()
+            except Exception:
+                continue
+            if job is None:
+                break
+            try:
+                src_path, traj_dir_str, tick_id, record = job
+                traj_dir = Path(traj_dir_str)
+                src = Path(src_path)
+                if src.exists():
+                    dst = traj_dir / f"{tick_id}.jpg"
+                    # Plain byte copy is faster than copy2 and good enough.
+                    try:
+                        shutil.copyfile(str(src), str(dst))
+                    except Exception:
+                        pass
+                json_path = traj_dir / f"{tick_id}.json"
+                # Compact JSON: separators without spaces reduces size ~35%
+                # and speeds up serialize.
+                json_path.write_text(
+                    json.dumps(record, ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+            except Exception as e:
+                print(f"[Pipeline] trajectory save error: {e}")
 
     def get_summary(self) -> str:
         """Get human-readable summary of pipeline execution."""

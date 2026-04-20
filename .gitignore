@@ -68,6 +68,14 @@ data/_mumu_frame.jpg
 # Config (local-specific)
 config.json
 
-# Debug / one-off scripts
+# Debug / one-off scripts + local regression tests
 scripts/_*.py
+scripts/_*.txt
 debug_*.jpg
+
+# Built app artifacts (use GitHub Releases)
+release_out/
+
+# Runtime state written by skills
+data/event_story_state.json
+data/schedule_avatar_regions.json

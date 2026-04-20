@@ -12,8 +12,12 @@ class AvatarMatcher:
         self.avatars_dir = Path(avatars_dir)
         # Pre-cropped face directory (preferred, faster, no alpha needed)
         self.crop_dir = self.avatars_dir.parent / "角色头像_crop"
-        # Cache stores (bgr_image, alpha_mask, hsv_hist) tuples
+        # Cache stores (bgr_image, alpha_mask, hsv_hist) tuples at _REF_SIZE
         self.cache: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        # Per-size cache of resized candidate tuples: (name, size) -> (bgr, alpha)
+        self._resize_cache: Dict[Tuple[str, int, int], Tuple[np.ndarray, np.ndarray]] = {}
+        # Per-size circular mask cache for ROI
+        self._mask_cache: Dict[Tuple[int, int], np.ndarray] = {}
 
     # Standard size for pre-cached reference avatars.
     # Roster thumbnails are ~50-80px; 96 gives good detail without being too large.
@@ -125,7 +129,11 @@ class AvatarMatcher:
         th, tw = target_roi.shape[:2]
 
         # Apply circular mask to ROI (roster thumbnails are circular)
-        roi_circ_mask = self._circular_mask(th, tw)
+        mask_key = (th, tw)
+        roi_circ_mask = self._mask_cache.get(mask_key)
+        if roi_circ_mask is None:
+            roi_circ_mask = self._circular_mask(th, tw)
+            self._mask_cache[mask_key] = roi_circ_mask
 
         # Compute ROI HSV histogram
         roi_hsv = cv2.cvtColor(target_roi, cv2.COLOR_BGR2HSV)
@@ -139,9 +147,16 @@ class AvatarMatcher:
 
             cand_bgr, cand_alpha, cand_hist = cand_data
 
-            # Resize candidate to match the YOLO ROI size
-            cand_bgr_resized = cv2.resize(cand_bgr, (tw, th))
-            cand_alpha_resized = cv2.resize(cand_alpha, (tw, th))
+            # Resize candidate to match ROI size (cached across calls for same size)
+            rk = (name, th, tw)
+            resized = self._resize_cache.get(rk)
+            if resized is None:
+                resized = (
+                    cv2.resize(cand_bgr, (tw, th)),
+                    cv2.resize(cand_alpha, (tw, th)),
+                )
+                self._resize_cache[rk] = resized
+            cand_bgr_resized, cand_alpha_resized = resized
 
             # Template matching score
             res = cv2.matchTemplate(target_roi, cand_bgr_resized, cv2.TM_CCOEFF_NORMED, mask=cand_alpha_resized)

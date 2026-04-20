@@ -440,14 +440,6 @@ class BaseSkill(ABC):
         self._log_lines.append(line)
         print(line)
 
-    def _find_florence_hits(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> List[OcrBox]:
-        """Deprecated — Florence removed. Always returns empty list."""
-        return []
-
-    def _find_florence_hit(self, screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> Optional[OcrBox]:
-        """Deprecated — Florence removed. Always returns None."""
-        return None
-
     @abstractmethod
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         """Process one frame and return an action.

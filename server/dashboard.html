@@ -367,48 +367,38 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 <!-- ════════════ ROSTER TUNER PAGE ════════════ -->
 <div class="page" id="page-roster">
   <div class="page-title">课程表头像识别区域调整</div>
-  <div class="assistant-sub">调整 <b>全體課程表</b> 弹窗的头像抓取区域。红色框 = 每个房间的头像带；绿色框 = 实际送去匹配的单格。调高/调低 <code>cells_per_room</code> 会改变每条带的格子数。</div>
+  <div class="assistant-sub">鼠标直接<b>拖动矩形/拉角 resize</b> 调整每个房间的头像带。红框 = 头像带，绿框 = 实际送去匹配的 cell。<kbd>Right-click</kbd> 空白处新增一条；<kbd>Del</kbd> 删除选中；<kbd>Ctrl+S</kbd> 保存。</div>
 
-  <div class="card" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-    <!-- Left: sample picker + preview -->
-    <div style="flex:2;min-width:520px">
-      <div class="form-group" style="margin-bottom:8px">
-        <label style="font-size:12px;color:var(--muted)">采样截图（来自最近的 trajectory）</label>
-        <select id="roster_sample" style="width:100%;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"></select>
+  <div class="card" style="display:flex;gap:12px;align-items:stretch;height:calc(100vh - 180px);min-height:500px">
+    <!-- Canvas area -->
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0">
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="roster_sample" style="flex:1;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"></select>
+        <label style="font-size:11px;color:var(--muted)">cells:</label>
+        <input type="number" id="roster_cpr" min="1" max="8" step="1" value="4" style="width:56px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+        <button onclick="rosterSave()" style="padding:5px 12px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px">保存</button>
+        <button onclick="rosterReset()" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">重置</button>
       </div>
-      <div style="position:relative;background:#0d0d10;border:1px solid var(--border);border-radius:6px;padding:4px;min-height:300px">
-        <img id="roster_preview_img" style="display:block;width:100%;height:auto" alt="preview"/>
-        <div id="roster_status" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px"></div>
+      <div style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
+        <canvas id="roster_canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
+        <div id="roster_status" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none"></div>
       </div>
     </div>
 
-    <!-- Right: controls -->
-    <div style="flex:1;min-width:320px;display:flex;flex-direction:column;gap:10px">
-      <div class="form-group">
-        <label>cells_per_room</label>
-        <input type="number" id="roster_cpr" min="1" max="8" step="1" style="width:80px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"/>
-      </div>
-
-      <div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase">行（rows_y） — y1,y2 in 0-1</div>
-        <div id="roster_rows" style="display:flex;flex-direction:column;gap:4px"></div>
-        <button onclick="rosterAddRow()" style="margin-top:6px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">+ 行</button>
-      </div>
-
-      <div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase">列（cols_x） — x1,x2 in 0-1</div>
-        <div id="roster_cols" style="display:flex;flex-direction:column;gap:4px"></div>
-        <button onclick="rosterAddCol()" style="margin-top:6px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">+ 列</button>
-      </div>
-
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button onclick="rosterRefresh()" style="flex:1;padding:8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">刷新预览</button>
-        <button onclick="rosterSave()" style="flex:1;padding:8px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">保存</button>
-        <button onclick="rosterReset()" style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer">重置</button>
-      </div>
-
-      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px">
-        保存到 <code>data/schedule_avatar_regions.json</code>。下次 Schedule skill 启动或点击 Reload 后生效。
+    <!-- Side panel: strip list + help -->
+    <div style="width:260px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase">Strips (<span id="roster_count">0</span>)</div>
+      <div id="roster_list" style="flex:1;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px"></div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.6">
+        <b>操作</b><br>
+        · 拖动框体 = 移动<br>
+        · 拖边 = 单向 resize<br>
+        · 拖角 = 双向 resize<br>
+        · 右键空白 = 新增一条<br>
+        · <kbd>Del</kbd> = 删除选中<br>
+        · <kbd>Ctrl+D</kbd> = 复制选中<br>
+        · <kbd>Ctrl+S</kbd> = 保存<br>
+        · 保存至 <code>data/schedule_avatar_regions.json</code>，点主页 Reload 生效
       </div>
     </div>
   </div>
@@ -1658,128 +1648,330 @@ async function annOpenOCRFolder(){
 window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)annDraw();});
 
 /* ════════════════════════════════════════════════════
-   ROSTER TUNER PAGE — pick roster screenshot, overlay cell grid,
-   edit rows_y/cols_x/cells_per_room, save to config.
+   ROSTER TUNER — canvas editor for schedule avatar region strips.
+   Data model: flat list of {x1,y1,x2,y2} strips in normalized 0-1 coords.
+   Rendering: raw image drawn to canvas, strips overlaid with handles, cell
+   grid computed per frame. Mouse events translate screen↔image↔norm space.
    ════════════════════════════════════════════════════ */
-const ROSTER = { cfg: null, defaults: null, samples: [], loaded: false };
+const ROSTER = {
+  loaded: false,
+  cfg: { strips: [], cells_per_room: 4 },
+  defaults: null,
+  samples: [],
+  bgImg: null,          // HTMLImageElement of current screenshot
+  imgW: 0, imgH: 0,     // natural dims
+  fit: { sx: 0, sy: 0, scale: 1 }, // canvas-space fit
+  selected: -1,         // index of selected strip
+  drag: null,           // {mode:'move'|'resize', handle, startX, startY, orig:{...}}
+  hoverHandle: null,    // 'n','s','e','w','nw','ne','sw','se','move',null
+};
+const ROSTER_HANDLE_PX = 8;
 
 async function rosterInit(){
-  if(ROSTER.loaded) return;
-  ROSTER.loaded = true;
-  try {
-    const cfg = await api('/api/v1/schedule/avatar_regions');
-    ROSTER.cfg = cfg.config;
-    ROSTER.defaults = cfg.defaults;
-    rosterRenderInputs();
-  } catch(e){ console.error(e); }
-  try {
-    const s = await api('/api/v1/schedule/roster_samples?limit=40');
-    ROSTER.samples = s.samples || [];
-    const sel = $('roster_sample');
-    sel.innerHTML = '';
-    if(ROSTER.samples.length === 0){
-      sel.innerHTML = '<option value="">（暂无采样 — 先跑一次含 schedule 的任务）</option>';
-    } else {
-      ROSTER.samples.forEach(smp => {
-        const o = document.createElement('option');
-        o.value = smp.jpg;
-        o.textContent = `${smp.run} · tick ${smp.tick}`;
-        sel.appendChild(o);
-      });
-      sel.onchange = rosterRefresh;
-    }
-  } catch(e){ console.error(e); }
-  rosterRefresh();
-}
-
-function rosterRenderInputs(){
-  $('roster_cpr').value = ROSTER.cfg.cells_per_room || 4;
-  rosterRenderRows();
-  rosterRenderCols();
-}
-
-function rosterRenderRows(){
-  const box = $('roster_rows');
-  box.innerHTML = '';
-  (ROSTER.cfg.rows_y || []).forEach((r, i) => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:4px;align-items:center';
-    row.innerHTML = `
-      <span style="width:16px;color:var(--muted);font-size:11px">${i}</span>
-      <input type="number" step="0.005" min="0" max="1" value="${r[0]}" data-k="y1" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
-      <input type="number" step="0.005" min="0" max="1" value="${r[1]}" data-k="y2" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
-      <button data-del="${i}" style="padding:1px 6px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer;font-size:11px">×</button>
-    `;
-    box.appendChild(row);
-  });
-  box.querySelectorAll('input').forEach(inp => {
-    inp.oninput = () => {
-      const i = +inp.dataset.i, k = inp.dataset.k;
-      ROSTER.cfg.rows_y[i][k === 'y1' ? 0 : 1] = parseFloat(inp.value) || 0;
+  if(!ROSTER.loaded){
+    ROSTER.loaded = true;
+    try {
+      const resp = await api('/api/v1/schedule/avatar_regions');
+      ROSTER.cfg = { strips: resp.config.strips || [], cells_per_room: resp.config.cells_per_room || 4 };
+      ROSTER.defaults = resp.defaults;
+      $('roster_cpr').value = ROSTER.cfg.cells_per_room;
+    } catch(e){ console.error(e); }
+    try {
+      const s = await api('/api/v1/schedule/roster_samples?limit=60');
+      ROSTER.samples = s.samples || [];
+      const sel = $('roster_sample');
+      sel.innerHTML = '';
+      if(ROSTER.samples.length === 0){
+        sel.innerHTML = '<option value="">（暂无采样 — 先跑一次含 schedule 的任务）</option>';
+      } else {
+        ROSTER.samples.forEach(smp => {
+          const o = document.createElement('option');
+          o.value = smp.jpg;
+          o.textContent = `${smp.run} · tick ${smp.tick}`;
+          sel.appendChild(o);
+        });
+        sel.onchange = rosterLoadImage;
+      }
+    } catch(e){ console.error(e); }
+    rosterBindCanvas();
+    $('roster_cpr').oninput = () => {
+      ROSTER.cfg.cells_per_room = Math.max(1, parseInt($('roster_cpr').value) || 4);
+      rosterDraw();
     };
-  });
-  box.querySelectorAll('button[data-del]').forEach(b => {
-    b.onclick = () => { ROSTER.cfg.rows_y.splice(+b.dataset.del, 1); rosterRenderRows(); };
-  });
+    window.addEventListener('resize', () => { if(currentPage === 'roster') rosterDraw(); });
+    window.addEventListener('keydown', rosterKeyDown);
+  }
+  rosterLoadImage();
 }
 
-function rosterRenderCols(){
-  const box = $('roster_cols');
-  box.innerHTML = '';
-  (ROSTER.cfg.cols_x || []).forEach((c, i) => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:4px;align-items:center';
-    row.innerHTML = `
-      <span style="width:16px;color:var(--muted);font-size:11px">${i}</span>
-      <input type="number" step="0.005" min="0" max="1" value="${c[0]}" data-k="x1" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
-      <input type="number" step="0.005" min="0" max="1" value="${c[1]}" data-k="x2" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
-      <button data-del="${i}" style="padding:1px 6px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer;font-size:11px">×</button>
-    `;
-    box.appendChild(row);
-  });
-  box.querySelectorAll('input').forEach(inp => {
-    inp.oninput = () => {
-      const i = +inp.dataset.i, k = inp.dataset.k;
-      ROSTER.cfg.cols_x[i][k === 'x1' ? 0 : 1] = parseFloat(inp.value) || 0;
-    };
-  });
-  box.querySelectorAll('button[data-del]').forEach(b => {
-    b.onclick = () => { ROSTER.cfg.cols_x.splice(+b.dataset.del, 1); rosterRenderCols(); };
-  });
-}
-
-function rosterAddRow(){ ROSTER.cfg.rows_y.push([0.3, 0.4]); rosterRenderRows(); }
-function rosterAddCol(){ ROSTER.cfg.cols_x.push([0.1, 0.3]); rosterRenderCols(); }
-
-function rosterRefresh(){
+function rosterLoadImage(){
   const jpg = $('roster_sample').value;
-  const img = $('roster_preview_img');
-  const status = $('roster_status');
-  if(!jpg){ img.src = ''; status.textContent = '选择一个采样'; return; }
-  ROSTER.cfg.cells_per_room = parseInt($('roster_cpr').value) || 4;
-  const q = new URLSearchParams({
-    jpg,
-    rows_y: JSON.stringify(ROSTER.cfg.rows_y),
-    cols_x: JSON.stringify(ROSTER.cfg.cols_x),
-    cells_per_room: String(ROSTER.cfg.cells_per_room),
+  if(!jpg){ ROSTER.bgImg = null; rosterDraw(); $('roster_status').textContent = '选择一个采样'; return; }
+  $('roster_status').textContent = '加载中...';
+  const img = new Image();
+  img.onload = () => {
+    ROSTER.bgImg = img;
+    ROSTER.imgW = img.naturalWidth;
+    ROSTER.imgH = img.naturalHeight;
+    $('roster_status').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+    rosterDraw();
+  };
+  img.onerror = () => { $('roster_status').textContent = '加载失败'; };
+  img.src = `/api/v1/schedule/roster_image?jpg=${encodeURIComponent(jpg)}&_=${Date.now()}`;
+}
+
+function rosterFit(){
+  const cvs = $('roster_canvas');
+  const rect = cvs.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cvs.width = Math.max(1, Math.floor(rect.width * dpr));
+  cvs.height = Math.max(1, Math.floor(rect.height * dpr));
+  if(!ROSTER.bgImg){ ROSTER.fit = { sx:0, sy:0, scale: dpr }; return { cvs, dpr }; }
+  const scale = Math.min(cvs.width / ROSTER.imgW, cvs.height / ROSTER.imgH);
+  const drawW = ROSTER.imgW * scale, drawH = ROSTER.imgH * scale;
+  ROSTER.fit = { sx: (cvs.width - drawW) / 2, sy: (cvs.height - drawH) / 2, scale };
+  return { cvs, dpr };
+}
+
+function rosterNormToCanvas(x, y){
+  return [ROSTER.fit.sx + x * ROSTER.imgW * ROSTER.fit.scale,
+          ROSTER.fit.sy + y * ROSTER.imgH * ROSTER.fit.scale];
+}
+function rosterCanvasToNorm(cx, cy){
+  return [(cx - ROSTER.fit.sx) / (ROSTER.imgW * ROSTER.fit.scale),
+          (cy - ROSTER.fit.sy) / (ROSTER.imgH * ROSTER.fit.scale)];
+}
+
+function rosterDraw(){
+  const { cvs } = rosterFit();
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = '#0d0d10';
+  ctx.fillRect(0, 0, cvs.width, cvs.height);
+  if(ROSTER.bgImg){
+    const [x0, y0] = [ROSTER.fit.sx, ROSTER.fit.sy];
+    const dw = ROSTER.imgW * ROSTER.fit.scale, dh = ROSTER.imgH * ROSTER.fit.scale;
+    ctx.drawImage(ROSTER.bgImg, x0, y0, dw, dh);
+  }
+  const cpr = Math.max(1, ROSTER.cfg.cells_per_room || 4);
+  ROSTER.cfg.strips.forEach((s, i) => {
+    const [x1, y1] = rosterNormToCanvas(s.x1, s.y1);
+    const [x2, y2] = rosterNormToCanvas(s.x2, s.y2);
+    const w = x2 - x1, h = y2 - y1;
+    const isSel = i === ROSTER.selected;
+    // Strip rect: red fill + stroke
+    ctx.fillStyle = isSel ? 'rgba(239,68,68,0.22)' : 'rgba(239,68,68,0.10)';
+    ctx.fillRect(x1, y1, w, h);
+    ctx.strokeStyle = isSel ? '#ef4444' : '#dc2626';
+    ctx.lineWidth = isSel ? 2 : 1.5;
+    ctx.strokeRect(x1, y1, w, h);
+    // Cell overlays: green squares
+    const cellW = w / cpr;
+    const cellSize = Math.min(cellW, h);
+    const cy = y1 + (h - cellSize) / 2;
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 1.5;
+    for(let k = 0; k < cpr; k++){
+      const cx = x1 + k * cellW + (cellW - cellSize) / 2;
+      if(cx + cellSize > x2 + 0.5) break;
+      ctx.strokeRect(cx, cy, cellSize, cellSize);
+    }
+    // Index label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px system-ui';
+    ctx.fillText(`#${i}`, x1 + 4, y1 + 14);
+    // Resize handles (only if selected)
+    if(isSel){
+      const hs = ROSTER_HANDLE_PX;
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1;
+      const handles = [
+        [x1, y1], [x2, y1], [x1, y2], [x2, y2],
+        [(x1+x2)/2, y1], [(x1+x2)/2, y2], [x1, (y1+y2)/2], [x2, (y1+y2)/2],
+      ];
+      handles.forEach(([hx, hy]) => {
+        ctx.fillRect(hx - hs/2, hy - hs/2, hs, hs);
+        ctx.strokeRect(hx - hs/2, hy - hs/2, hs, hs);
+      });
+    }
   });
-  const url = `/api/v1/schedule/roster_preview?${q}&_=${Date.now()}`;
-  status.textContent = '加载中...';
-  img.onload = () => { status.textContent = `${img.naturalWidth}×${img.naturalHeight}`; };
-  img.onerror = () => { status.textContent = '加载失败'; };
-  img.src = url;
+  rosterRenderList();
+}
+
+function rosterRenderList(){
+  const el = $('roster_list');
+  $('roster_count').textContent = ROSTER.cfg.strips.length;
+  el.innerHTML = '';
+  ROSTER.cfg.strips.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;gap:4px;align-items:center;padding:4px 6px;margin-bottom:2px;border-radius:3px;cursor:pointer;font-size:11px;${i === ROSTER.selected ? 'background:rgba(239,68,68,0.2);border:1px solid #ef4444' : 'background:transparent'}`;
+    row.innerHTML = `<span style="flex:1">#${i} <span style="color:var(--muted)">(${s.x1.toFixed(2)},${s.y1.toFixed(2)})→(${s.x2.toFixed(2)},${s.y2.toFixed(2)})</span></span><button data-del="${i}" style="padding:0 5px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer">×</button>`;
+    row.onclick = (e) => { if(e.target.tagName !== 'BUTTON'){ ROSTER.selected = i; rosterDraw(); } };
+    el.appendChild(row);
+  });
+  el.querySelectorAll('button[data-del]').forEach(b => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const i = +b.dataset.del;
+      ROSTER.cfg.strips.splice(i, 1);
+      if(ROSTER.selected === i) ROSTER.selected = -1;
+      else if(ROSTER.selected > i) ROSTER.selected--;
+      rosterDraw();
+    };
+  });
+}
+
+function rosterHitTest(cx, cy){
+  // returns {idx, handle} where handle is 'move'|'nw'|'ne'|'sw'|'se'|'n'|'s'|'e'|'w'|null
+  const hs = ROSTER_HANDLE_PX;
+  // Prefer checking selected strip's handles first
+  const order = [];
+  if(ROSTER.selected >= 0) order.push(ROSTER.selected);
+  for(let i = ROSTER.cfg.strips.length - 1; i >= 0; i--) if(i !== ROSTER.selected) order.push(i);
+  for(const i of order){
+    const s = ROSTER.cfg.strips[i];
+    const [x1, y1] = rosterNormToCanvas(s.x1, s.y1);
+    const [x2, y2] = rosterNormToCanvas(s.x2, s.y2);
+    if(i === ROSTER.selected){
+      // corner handles
+      const corners = { nw:[x1,y1], ne:[x2,y1], sw:[x1,y2], se:[x2,y2],
+                        n:[(x1+x2)/2,y1], s:[(x1+x2)/2,y2], w:[x1,(y1+y2)/2], e:[x2,(y1+y2)/2] };
+      for(const [h, [hx, hy]] of Object.entries(corners)){
+        if(Math.abs(cx-hx) <= hs && Math.abs(cy-hy) <= hs) return { idx: i, handle: h };
+      }
+    }
+    if(cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2){
+      return { idx: i, handle: 'move' };
+    }
+  }
+  return { idx: -1, handle: null };
+}
+
+function rosterBindCanvas(){
+  const cvs = $('roster_canvas');
+  const getPos = (e) => {
+    const r = cvs.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr];
+  };
+  cvs.addEventListener('mousedown', (e) => {
+    if(e.button === 2) return; // right-click handled in contextmenu
+    const [cx, cy] = getPos(e);
+    const hit = rosterHitTest(cx, cy);
+    if(hit.idx >= 0){
+      ROSTER.selected = hit.idx;
+      const s = ROSTER.cfg.strips[hit.idx];
+      ROSTER.drag = {
+        handle: hit.handle,
+        startX: cx, startY: cy,
+        orig: {...s},
+      };
+    } else {
+      ROSTER.selected = -1;
+    }
+    rosterDraw();
+  });
+  cvs.addEventListener('mousemove', (e) => {
+    const [cx, cy] = getPos(e);
+    if(ROSTER.drag){
+      const d = ROSTER.drag;
+      const s = ROSTER.cfg.strips[ROSTER.selected];
+      if(!s) return;
+      const scaleW = ROSTER.imgW * ROSTER.fit.scale;
+      const scaleH = ROSTER.imgH * ROSTER.fit.scale;
+      const dxN = (cx - d.startX) / scaleW;
+      const dyN = (cy - d.startY) / scaleH;
+      if(d.handle === 'move'){
+        const w = d.orig.x2 - d.orig.x1;
+        const h = d.orig.y2 - d.orig.y1;
+        let nx1 = Math.max(0, Math.min(1-w, d.orig.x1 + dxN));
+        let ny1 = Math.max(0, Math.min(1-h, d.orig.y1 + dyN));
+        s.x1 = nx1; s.y1 = ny1; s.x2 = nx1 + w; s.y2 = ny1 + h;
+      } else {
+        let { x1, y1, x2, y2 } = d.orig;
+        if(d.handle.includes('w')) x1 = Math.min(x2 - 0.005, Math.max(0, d.orig.x1 + dxN));
+        if(d.handle.includes('e')) x2 = Math.max(x1 + 0.005, Math.min(1, d.orig.x2 + dxN));
+        if(d.handle.includes('n')) y1 = Math.min(y2 - 0.005, Math.max(0, d.orig.y1 + dyN));
+        if(d.handle.includes('s')) y2 = Math.max(y1 + 0.005, Math.min(1, d.orig.y2 + dyN));
+        s.x1 = x1; s.y1 = y1; s.x2 = x2; s.y2 = y2;
+      }
+      rosterDraw();
+    } else {
+      const hit = rosterHitTest(cx, cy);
+      const cursors = { move:'move', nw:'nwse-resize', se:'nwse-resize', ne:'nesw-resize',
+                        sw:'nesw-resize', n:'ns-resize', s:'ns-resize', e:'ew-resize', w:'ew-resize' };
+      cvs.style.cursor = cursors[hit.handle] || 'crosshair';
+    }
+  });
+  cvs.addEventListener('mouseup', () => { ROSTER.drag = null; });
+  cvs.addEventListener('mouseleave', () => { ROSTER.drag = null; });
+  cvs.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const [cx, cy] = getPos(e);
+    const hit = rosterHitTest(cx, cy);
+    if(hit.idx < 0){
+      // Empty: add new strip at click location
+      const [nx, ny] = rosterCanvasToNorm(cx, cy);
+      if(nx < 0 || ny < 0 || nx > 1 || ny > 1) return;
+      const w = 0.22, h = 0.12;
+      const x1 = Math.max(0, Math.min(1-w, nx - w/2));
+      const y1 = Math.max(0, Math.min(1-h, ny - h/2));
+      ROSTER.cfg.strips.push({ x1, y1, x2: x1+w, y2: y1+h });
+      ROSTER.selected = ROSTER.cfg.strips.length - 1;
+      rosterDraw();
+    }
+  });
+}
+
+function rosterKeyDown(e){
+  if(currentPage !== 'roster') return;
+  if(e.ctrlKey && e.key.toLowerCase() === 's'){ e.preventDefault(); rosterSave(); return; }
+  if(e.ctrlKey && e.key.toLowerCase() === 'd' && ROSTER.selected >= 0){
+    e.preventDefault();
+    const s = ROSTER.cfg.strips[ROSTER.selected];
+    const dup = { x1: Math.min(0.98, s.x1 + 0.02), y1: Math.min(0.98, s.y1 + 0.02),
+                  x2: Math.min(1, s.x2 + 0.02), y2: Math.min(1, s.y2 + 0.02) };
+    ROSTER.cfg.strips.push(dup);
+    ROSTER.selected = ROSTER.cfg.strips.length - 1;
+    rosterDraw();
+    return;
+  }
+  if((e.key === 'Delete' || e.key === 'Backspace') && ROSTER.selected >= 0){
+    // don't hijack backspace inside an input
+    if(document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    e.preventDefault();
+    ROSTER.cfg.strips.splice(ROSTER.selected, 1);
+    ROSTER.selected = -1;
+    rosterDraw();
+  }
+  // Arrow key nudge (1px = ~0.0005)
+  const nudge = e.shiftKey ? 0.01 : 0.002;
+  if(ROSTER.selected >= 0 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
+    if(document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    e.preventDefault();
+    const s = ROSTER.cfg.strips[ROSTER.selected];
+    if(e.key === 'ArrowLeft'){ s.x1 -= nudge; s.x2 -= nudge; }
+    else if(e.key === 'ArrowRight'){ s.x1 += nudge; s.x2 += nudge; }
+    else if(e.key === 'ArrowUp'){ s.y1 -= nudge; s.y2 -= nudge; }
+    else if(e.key === 'ArrowDown'){ s.y1 += nudge; s.y2 += nudge; }
+    s.x1 = Math.max(0, s.x1); s.y1 = Math.max(0, s.y1);
+    s.x2 = Math.min(1, s.x2); s.y2 = Math.min(1, s.y2);
+    rosterDraw();
+  }
 }
 
 async function rosterSave(){
-  ROSTER.cfg.cells_per_room = parseInt($('roster_cpr').value) || 4;
   try {
-    const r = await api('/api/v1/schedule/avatar_regions', {
+    await api('/api/v1/schedule/avatar_regions', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(ROSTER.cfg),
+      body: JSON.stringify({
+        strips: ROSTER.cfg.strips,
+        cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 4),
+      }),
     });
     $('roster_status').textContent = '已保存 ✓';
-    setTimeout(() => { $('roster_status').textContent = ''; }, 2000);
+    setTimeout(() => { if($('roster_status')) $('roster_status').textContent = `${ROSTER.imgW}×${ROSTER.imgH}`; }, 1500);
   } catch(e){
     alert('保存失败: ' + e.message);
   }
@@ -1788,8 +1980,9 @@ async function rosterSave(){
 function rosterReset(){
   if(!ROSTER.defaults) return;
   ROSTER.cfg = JSON.parse(JSON.stringify(ROSTER.defaults));
-  rosterRenderInputs();
-  rosterRefresh();
+  $('roster_cpr').value = ROSTER.cfg.cells_per_room;
+  ROSTER.selected = -1;
+  rosterDraw();
 }
 </script>
 </body>
