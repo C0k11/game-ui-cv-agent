@@ -553,10 +553,13 @@ class BaseSkill(ABC):
                  "下載遊戲", "下载游戏", "檔案"],
                 region=screen.CENTER, min_conf=0.45,
             )
-            # Bounty/commission sweep confirm: "要使用X AP掃蕩Y次嗎？"
+            # Bounty/commission sweep confirm:
+            #   "要使用X AP掃蕩Y次嗎？"          (commission AP sweep)
+            #   "要使用6通票券6次？"              (bounty ticket sweep)
             # Must confirm, otherwise the sweep is cancelled.
             sweep_hint = screen.find_any_text(
-                ["掃蕩", "扫荡", "使用AP", "使用 AP"],
+                ["掃蕩", "扫荡", "使用AP", "使用 AP",
+                 "通票券", "通缉票券", "通緝票券", "票券"],
                 region=screen.CENTER, min_conf=0.45,
             )
             # Friend-cafe visit confirm ("要訪問好友的咖啡廳嗎？") must NEVER be

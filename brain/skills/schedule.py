@@ -167,6 +167,43 @@ class ScheduleSkill(BaseSkill):
         self._stale_ticks: int = 0
         self._matched_room_idx: int = -1  # room index where favorite was found
         self._clicked_rooms_this_location: Set[int] = set()  # rooms clicked since last location switch
+        self._avatar_regions_cfg = self._load_avatar_regions_config()
+
+    @staticmethod
+    def _load_avatar_regions_config() -> Dict[str, Any]:
+        """Load roster avatar region overrides from data/schedule_avatar_regions.json.
+
+        File format::
+
+            {
+              "rows_y": [[0.35, 0.47], [0.54, 0.66], [0.73, 0.84]],
+              "cols_x": [[0.09, 0.30], [0.34, 0.55], [0.58, 0.79]],
+              "cells_per_room": 4
+            }
+
+        Missing keys fall back to class defaults. Invalid files are ignored.
+        """
+        try:
+            from pathlib import Path
+            import json as _json
+            p = Path(__file__).resolve().parents[2] / "data" / "schedule_avatar_regions.json"
+            if p.exists():
+                raw = _json.loads(p.read_text(encoding="utf-8"))
+                rows = raw.get("rows_y") or ScheduleSkill._DEFAULT_AVATAR_ROWS_Y
+                cols = raw.get("cols_x") or ScheduleSkill._DEFAULT_AVATAR_COLS_X
+                cpr = int(raw.get("cells_per_room") or ScheduleSkill._DEFAULT_CELLS_PER_ROOM)
+                # Validate shapes; fall back silently on malformed data
+                rows = [tuple(r) for r in rows if len(r) == 2]
+                cols = [tuple(c) for c in cols if len(c) == 2]
+                if rows and cols:
+                    return {"rows_y": rows, "cols_x": cols, "cells_per_room": max(1, cpr)}
+        except Exception:
+            pass
+        return {
+            "rows_y": ScheduleSkill._DEFAULT_AVATAR_ROWS_Y,
+            "cols_x": ScheduleSkill._DEFAULT_AVATAR_COLS_X,
+            "cells_per_room": ScheduleSkill._DEFAULT_CELLS_PER_ROOM,
+        }
 
     def reset(self) -> None:
         super().reset()
@@ -188,6 +225,7 @@ class ScheduleSkill(BaseSkill):
         self._roster_scan_ticks = 0
         self._matched_room_idx = -1
         self._clicked_rooms_this_location = set()
+        self._avatar_regions_cfg = self._load_avatar_regions_config()
         if self._target_favorites:
             self.log(f"target favorites loaded: {len(self._target_favorites)} characters")
         # Lazy-init avatar matcher
@@ -428,8 +466,19 @@ class ScheduleSkill(BaseSkill):
     # Avatar region positions in 全體課程表 popup (normalized 0-1).
     # Each room card's avatar strip: where the small face icons appear.
     # Row/column grid: 3×3 layout, last row only has 1 room.
-    _AVATAR_ROWS_Y = [(0.35, 0.47), (0.54, 0.66), (0.73, 0.84)]
-    _AVATAR_COLS_X = [(0.09, 0.30), (0.34, 0.55), (0.58, 0.79)]
+    # Default values can be overridden by data/schedule_avatar_regions.json;
+    # see _load_avatar_regions_config() below.
+    _DEFAULT_AVATAR_ROWS_Y = [(0.35, 0.47), (0.54, 0.66), (0.73, 0.84)]
+    _DEFAULT_AVATAR_COLS_X = [(0.09, 0.30), (0.34, 0.55), (0.58, 0.79)]
+    _DEFAULT_CELLS_PER_ROOM = 4
+
+    @property
+    def _AVATAR_ROWS_Y(self):
+        return self._avatar_regions_cfg["rows_y"]
+
+    @property
+    def _AVATAR_COLS_X(self):
+        return self._avatar_regions_cfg["cols_x"]
 
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
         """Check roster overlay for favorite characters using 角色头像_crop.
@@ -479,7 +528,7 @@ class ScheduleSkill(BaseSkill):
                 name = unquote(name)
                 fav_names.append(name)
 
-            _CELLS_PER_ROOM = 4   # room strip can contain up to 4 student avatars
+            _CELLS_PER_ROOM = int(self._avatar_regions_cfg.get("cells_per_room", 4))
             room_idx = 0
             for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
                 for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):

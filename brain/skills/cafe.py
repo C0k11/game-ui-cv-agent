@@ -1223,13 +1223,14 @@ class CafeSkill(BaseSkill):
         if self._pan_phase == 4:
             self._pan_phase = 5
             self._empty_scans = 0
-            if is_2f:
-                # 2F: single LEFT sweep is enough (small floor, fewer students).
-                self.log("2F: skip second pan (one sweep covers 2F)")
-                return action_wait(200, "2F single pan sufficient")
-            # 1F: pan RIGHT to return and cover the right side
-            self.log("1F pan camera: sweep RIGHT")
-            return action_swipe(0.10, 0.50, 0.90, 0.50, 600, "pan camera right (1F second)")
+            # Both 1F and 2F need a pan-RIGHT after the pan-LEFT, otherwise
+            # students that were visible in the initial view (and panned
+            # off the left edge) are lost. Previously 2F skipped this which
+            # caused missed headpats (run_20260420_191257 2F had 2 markers
+            # in initial view but only 1 got patted).
+            floor_tag = "2F" if is_2f else "1F"
+            self.log(f"{floor_tag} pan camera: sweep RIGHT")
+            return action_swipe(0.10, 0.50, 0.90, 0.50, 600, f"pan camera right ({floor_tag} second)")
 
         # After a successful headpat, wait for the heart animation to finish
         # before scanning again (animation takes ~1 second).

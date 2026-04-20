@@ -1456,6 +1456,197 @@ def next_unlabeled(
     return {"session": session, "filename": None, "image": None}
 
 
+# ── Schedule Roster Region Tuner ────────────────────────────────────────
+# Lets the user visually tune the avatar-cell grid used by ScheduleSkill when
+# scanning the 全體課程表 roster popup for favorite characters. Source config
+# file: data/schedule_avatar_regions.json (loaded by ScheduleSkill).
+
+SCHEDULE_REGIONS_PATH = REPO_ROOT / "data" / "schedule_avatar_regions.json"
+TRAJECTORIES_DIR = REPO_ROOT / "data" / "trajectories"
+
+_DEFAULT_SCHEDULE_REGIONS = {
+    "rows_y": [[0.35, 0.47], [0.54, 0.66], [0.73, 0.84]],
+    "cols_x": [[0.09, 0.30], [0.34, 0.55], [0.58, 0.79]],
+    "cells_per_room": 4,
+}
+
+
+def _load_schedule_regions() -> Dict[str, Any]:
+    try:
+        if SCHEDULE_REGIONS_PATH.exists():
+            raw = json.loads(SCHEDULE_REGIONS_PATH.read_text(encoding="utf-8"))
+            rows = raw.get("rows_y") or _DEFAULT_SCHEDULE_REGIONS["rows_y"]
+            cols = raw.get("cols_x") or _DEFAULT_SCHEDULE_REGIONS["cols_x"]
+            cpr = int(raw.get("cells_per_room") or _DEFAULT_SCHEDULE_REGIONS["cells_per_room"])
+            return {"rows_y": rows, "cols_x": cols, "cells_per_room": max(1, cpr)}
+    except Exception:
+        pass
+    # Return a deep copy of defaults
+    return json.loads(json.dumps(_DEFAULT_SCHEDULE_REGIONS))
+
+
+@app.get("/api/v1/schedule/avatar_regions")
+def get_schedule_avatar_regions() -> Dict[str, Any]:
+    """Return current schedule avatar region config (defaults if no file)."""
+    cfg = _load_schedule_regions()
+    return {
+        "config": cfg,
+        "defaults": _DEFAULT_SCHEDULE_REGIONS,
+        "path": str(SCHEDULE_REGIONS_PATH),
+        "exists": SCHEDULE_REGIONS_PATH.exists(),
+    }
+
+
+@app.post("/api/v1/schedule/avatar_regions")
+def save_schedule_avatar_regions(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Save schedule avatar region config to data/schedule_avatar_regions.json."""
+    rows = payload.get("rows_y")
+    cols = payload.get("cols_x")
+    cpr = payload.get("cells_per_room")
+    if not (isinstance(rows, list) and all(isinstance(r, list) and len(r) == 2 for r in rows)):
+        raise HTTPException(status_code=400, detail="rows_y must be list of [y1,y2] pairs")
+    if not (isinstance(cols, list) and all(isinstance(c, list) and len(c) == 2 for c in cols)):
+        raise HTTPException(status_code=400, detail="cols_x must be list of [x1,x2] pairs")
+    try:
+        cpr_int = int(cpr)
+        if cpr_int < 1 or cpr_int > 10:
+            raise ValueError()
+    except Exception:
+        raise HTTPException(status_code=400, detail="cells_per_room must be int in 1..10")
+
+    cfg = {
+        "rows_y": [[float(a), float(b)] for a, b in rows],
+        "cols_x": [[float(a), float(b)] for a, b in cols],
+        "cells_per_room": cpr_int,
+    }
+    SCHEDULE_REGIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SCHEDULE_REGIONS_PATH.write_text(
+        json.dumps(cfg, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return {"ok": True, "config": cfg, "path": str(SCHEDULE_REGIONS_PATH)}
+
+
+@app.get("/api/v1/schedule/roster_samples")
+def list_roster_samples(limit: int = Query(30)) -> Dict[str, Any]:
+    """List recent trajectory ticks where the roster popup was open.
+
+    Returns ticks captured while ScheduleSkill was in the `check_roster`
+    sub-state — these are the frames suitable for tuning the cell grid.
+    """
+    if not TRAJECTORIES_DIR.exists():
+        return {"samples": []}
+    samples: List[Dict[str, Any]] = []
+    try:
+        runs = sorted(
+            [d for d in TRAJECTORIES_DIR.iterdir() if d.is_dir() and d.name.startswith("run_")],
+            key=lambda p: p.name, reverse=True,
+        )[:10]
+        for run in runs:
+            for js in sorted(run.glob("tick_*.json")):
+                try:
+                    d = json.loads(js.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if d.get("skill") != "Schedule":
+                    continue
+                if d.get("sub_state") != "check_roster":
+                    continue
+                action = (d.get("action") or {}).get("reason", "")
+                if "scanning roster avatars" not in action:
+                    continue
+                jpg = js.with_suffix(".jpg")
+                if not jpg.exists():
+                    continue
+                samples.append({
+                    "run": run.name,
+                    "tick": d.get("tick"),
+                    "jpg": f"{run.name}/{jpg.name}",
+                })
+                if len(samples) >= limit:
+                    break
+            if len(samples) >= limit:
+                break
+    except Exception as e:
+        print(f"[server] roster_samples error: {e}")
+    return {"samples": samples}
+
+
+def _safe_trajectory_jpg(rel: str) -> Path:
+    rel = (rel or "").replace("\\", "/").strip()
+    if not rel or ".." in rel.split("/"):
+        raise HTTPException(status_code=400, detail="invalid path")
+    p = (TRAJECTORIES_DIR / rel).resolve()
+    base = TRAJECTORIES_DIR.resolve()
+    if not str(p).startswith(str(base)) or not p.exists() or p.suffix.lower() != ".jpg":
+        raise HTTPException(status_code=404, detail="jpg not found")
+    return p
+
+
+@app.get("/api/v1/schedule/roster_preview")
+def roster_preview(
+    jpg: str = Query(...),
+    rows_y: str = Query(""),
+    cols_x: str = Query(""),
+    cells_per_room: int = Query(0),
+):
+    """Render a roster screenshot with the cell grid overlaid.
+
+    Pass `rows_y` / `cols_x` as JSON-encoded lists of [a,b] pairs, or leave
+    empty to use the currently saved config. `cells_per_room` defaults to 4.
+    """
+    src = _safe_trajectory_jpg(jpg)
+    cfg = _load_schedule_regions()
+    try:
+        if rows_y:
+            cfg["rows_y"] = json.loads(rows_y)
+        if cols_x:
+            cfg["cols_x"] = json.loads(cols_x)
+        if cells_per_room and cells_per_room > 0:
+            cfg["cells_per_room"] = int(cells_per_room)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid rows_y/cols_x JSON")
+
+    try:
+        import cv2
+        import numpy as np
+        img = cv2.imdecode(np.fromfile(str(src), dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise RuntimeError("decode failed")
+        h, w = img.shape[:2]
+        overlay = img.copy()
+        cpr = max(1, int(cfg.get("cells_per_room") or 4))
+        # Draw strip rectangles (red) and per-cell squares (green)
+        for ry1, ry2 in cfg["rows_y"]:
+            for cx1, cx2 in cfg["cols_x"]:
+                px1, py1 = int(cx1 * w), int(ry1 * h)
+                px2, py2 = int(cx2 * w), int(ry2 * h)
+                cv2.rectangle(overlay, (px1, py1), (px2, py2), (0, 0, 255), 2)
+                strip_w = max(1, px2 - px1)
+                strip_h = max(1, py2 - py1)
+                cell_w = max(1, strip_w // cpr)
+                cell_size = min(cell_w, strip_h)
+                sy = py1 + max(0, (strip_h - cell_size) // 2)
+                for slot in range(cpr):
+                    sx = px1 + slot * cell_w + max(0, (cell_w - cell_size) // 2)
+                    if sx + cell_size > px2:
+                        break
+                    cv2.rectangle(overlay, (sx, sy), (sx + cell_size, sy + cell_size),
+                                  (0, 255, 0), 2)
+        # Blend a 30% fill for strips to make them visible
+        blended = cv2.addWeighted(overlay, 0.6, img, 0.4, 0)
+        _ok, buf = cv2.imencode(".png", blended)
+        if not _ok:
+            raise RuntimeError("encode failed")
+        from fastapi.responses import Response
+        return Response(content=buf.tobytes(), media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"render failed: {e}")
+
+
 # ── Dataset & Label Editor APIs ──────────────────────────────────────────
 
 def _safe_dataset_path(name: str) -> Path:

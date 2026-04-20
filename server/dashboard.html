@@ -139,6 +139,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   <button class="nav-btn active" onclick="showPage('agent')" title="助手控制台">A</button>
   <button class="nav-btn" onclick="showPage('capture')" title="采集中心">C</button>
   <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
+  <button class="nav-btn" onclick="showPage('roster')" title="课程表头像调整">R</button>
   <div class="sidebar-bottom">
     <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API 文档">?</button>
   </div>
@@ -363,6 +364,56 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   </div>
 </div>
 
+<!-- ════════════ ROSTER TUNER PAGE ════════════ -->
+<div class="page" id="page-roster">
+  <div class="page-title">课程表头像识别区域调整</div>
+  <div class="assistant-sub">调整 <b>全體課程表</b> 弹窗的头像抓取区域。红色框 = 每个房间的头像带；绿色框 = 实际送去匹配的单格。调高/调低 <code>cells_per_room</code> 会改变每条带的格子数。</div>
+
+  <div class="card" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+    <!-- Left: sample picker + preview -->
+    <div style="flex:2;min-width:520px">
+      <div class="form-group" style="margin-bottom:8px">
+        <label style="font-size:12px;color:var(--muted)">采样截图（来自最近的 trajectory）</label>
+        <select id="roster_sample" style="width:100%;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"></select>
+      </div>
+      <div style="position:relative;background:#0d0d10;border:1px solid var(--border);border-radius:6px;padding:4px;min-height:300px">
+        <img id="roster_preview_img" style="display:block;width:100%;height:auto" alt="preview"/>
+        <div id="roster_status" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px"></div>
+      </div>
+    </div>
+
+    <!-- Right: controls -->
+    <div style="flex:1;min-width:320px;display:flex;flex-direction:column;gap:10px">
+      <div class="form-group">
+        <label>cells_per_room</label>
+        <input type="number" id="roster_cpr" min="1" max="8" step="1" style="width:80px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"/>
+      </div>
+
+      <div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase">行（rows_y） — y1,y2 in 0-1</div>
+        <div id="roster_rows" style="display:flex;flex-direction:column;gap:4px"></div>
+        <button onclick="rosterAddRow()" style="margin-top:6px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">+ 行</button>
+      </div>
+
+      <div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase">列（cols_x） — x1,x2 in 0-1</div>
+        <div id="roster_cols" style="display:flex;flex-direction:column;gap:4px"></div>
+        <button onclick="rosterAddCol()" style="margin-top:6px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">+ 列</button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button onclick="rosterRefresh()" style="flex:1;padding:8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">刷新预览</button>
+        <button onclick="rosterSave()" style="flex:1;padding:8px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">保存</button>
+        <button onclick="rosterReset()" style="padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer">重置</button>
+      </div>
+
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px">
+        保存到 <code>data/schedule_avatar_regions.json</code>。下次 Schedule skill 启动或点击 Reload 后生效。
+      </div>
+    </div>
+  </div>
+</div>
+
 </div><!-- /main -->
 
 <script>
@@ -380,10 +431,11 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   $('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2}[name]].classList.add('active');
+  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,roster:3}[name]].classList.add('active');
   currentPage = name;
   if (name === 'capture') refreshCapture();
   if (name === 'annotate') annLoadDatasets();
+  if (name === 'roster') rosterInit();
 }
 
 /* ════════════════════════════════════════════════════
@@ -1604,6 +1656,141 @@ async function annOpenOCRFolder(){
 
 // resize handler
 window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)annDraw();});
+
+/* ════════════════════════════════════════════════════
+   ROSTER TUNER PAGE — pick roster screenshot, overlay cell grid,
+   edit rows_y/cols_x/cells_per_room, save to config.
+   ════════════════════════════════════════════════════ */
+const ROSTER = { cfg: null, defaults: null, samples: [], loaded: false };
+
+async function rosterInit(){
+  if(ROSTER.loaded) return;
+  ROSTER.loaded = true;
+  try {
+    const cfg = await api('/api/v1/schedule/avatar_regions');
+    ROSTER.cfg = cfg.config;
+    ROSTER.defaults = cfg.defaults;
+    rosterRenderInputs();
+  } catch(e){ console.error(e); }
+  try {
+    const s = await api('/api/v1/schedule/roster_samples?limit=40');
+    ROSTER.samples = s.samples || [];
+    const sel = $('roster_sample');
+    sel.innerHTML = '';
+    if(ROSTER.samples.length === 0){
+      sel.innerHTML = '<option value="">（暂无采样 — 先跑一次含 schedule 的任务）</option>';
+    } else {
+      ROSTER.samples.forEach(smp => {
+        const o = document.createElement('option');
+        o.value = smp.jpg;
+        o.textContent = `${smp.run} · tick ${smp.tick}`;
+        sel.appendChild(o);
+      });
+      sel.onchange = rosterRefresh;
+    }
+  } catch(e){ console.error(e); }
+  rosterRefresh();
+}
+
+function rosterRenderInputs(){
+  $('roster_cpr').value = ROSTER.cfg.cells_per_room || 4;
+  rosterRenderRows();
+  rosterRenderCols();
+}
+
+function rosterRenderRows(){
+  const box = $('roster_rows');
+  box.innerHTML = '';
+  (ROSTER.cfg.rows_y || []).forEach((r, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;align-items:center';
+    row.innerHTML = `
+      <span style="width:16px;color:var(--muted);font-size:11px">${i}</span>
+      <input type="number" step="0.005" min="0" max="1" value="${r[0]}" data-k="y1" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
+      <input type="number" step="0.005" min="0" max="1" value="${r[1]}" data-k="y2" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
+      <button data-del="${i}" style="padding:1px 6px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer;font-size:11px">×</button>
+    `;
+    box.appendChild(row);
+  });
+  box.querySelectorAll('input').forEach(inp => {
+    inp.oninput = () => {
+      const i = +inp.dataset.i, k = inp.dataset.k;
+      ROSTER.cfg.rows_y[i][k === 'y1' ? 0 : 1] = parseFloat(inp.value) || 0;
+    };
+  });
+  box.querySelectorAll('button[data-del]').forEach(b => {
+    b.onclick = () => { ROSTER.cfg.rows_y.splice(+b.dataset.del, 1); rosterRenderRows(); };
+  });
+}
+
+function rosterRenderCols(){
+  const box = $('roster_cols');
+  box.innerHTML = '';
+  (ROSTER.cfg.cols_x || []).forEach((c, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;align-items:center';
+    row.innerHTML = `
+      <span style="width:16px;color:var(--muted);font-size:11px">${i}</span>
+      <input type="number" step="0.005" min="0" max="1" value="${c[0]}" data-k="x1" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
+      <input type="number" step="0.005" min="0" max="1" value="${c[1]}" data-k="x2" data-i="${i}" style="width:70px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"/>
+      <button data-del="${i}" style="padding:1px 6px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer;font-size:11px">×</button>
+    `;
+    box.appendChild(row);
+  });
+  box.querySelectorAll('input').forEach(inp => {
+    inp.oninput = () => {
+      const i = +inp.dataset.i, k = inp.dataset.k;
+      ROSTER.cfg.cols_x[i][k === 'x1' ? 0 : 1] = parseFloat(inp.value) || 0;
+    };
+  });
+  box.querySelectorAll('button[data-del]').forEach(b => {
+    b.onclick = () => { ROSTER.cfg.cols_x.splice(+b.dataset.del, 1); rosterRenderCols(); };
+  });
+}
+
+function rosterAddRow(){ ROSTER.cfg.rows_y.push([0.3, 0.4]); rosterRenderRows(); }
+function rosterAddCol(){ ROSTER.cfg.cols_x.push([0.1, 0.3]); rosterRenderCols(); }
+
+function rosterRefresh(){
+  const jpg = $('roster_sample').value;
+  const img = $('roster_preview_img');
+  const status = $('roster_status');
+  if(!jpg){ img.src = ''; status.textContent = '选择一个采样'; return; }
+  ROSTER.cfg.cells_per_room = parseInt($('roster_cpr').value) || 4;
+  const q = new URLSearchParams({
+    jpg,
+    rows_y: JSON.stringify(ROSTER.cfg.rows_y),
+    cols_x: JSON.stringify(ROSTER.cfg.cols_x),
+    cells_per_room: String(ROSTER.cfg.cells_per_room),
+  });
+  const url = `/api/v1/schedule/roster_preview?${q}&_=${Date.now()}`;
+  status.textContent = '加载中...';
+  img.onload = () => { status.textContent = `${img.naturalWidth}×${img.naturalHeight}`; };
+  img.onerror = () => { status.textContent = '加载失败'; };
+  img.src = url;
+}
+
+async function rosterSave(){
+  ROSTER.cfg.cells_per_room = parseInt($('roster_cpr').value) || 4;
+  try {
+    const r = await api('/api/v1/schedule/avatar_regions', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(ROSTER.cfg),
+    });
+    $('roster_status').textContent = '已保存 ✓';
+    setTimeout(() => { $('roster_status').textContent = ''; }, 2000);
+  } catch(e){
+    alert('保存失败: ' + e.message);
+  }
+}
+
+function rosterReset(){
+  if(!ROSTER.defaults) return;
+  ROSTER.cfg = JSON.parse(JSON.stringify(ROSTER.defaults));
+  rosterRenderInputs();
+  rosterRefresh();
+}
 </script>
 </body>
 </html>
