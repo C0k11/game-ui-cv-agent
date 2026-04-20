@@ -977,7 +977,9 @@ class CafeSkill(BaseSkill):
                         self._invite_scroll_count += 1
                         self.log(f"fallback '{fav_name}' found but hunting priority — "
                                  f"scroll ({self._invite_scroll_count}/{_MAX_SCROLLS}) floor={_floor}")
-                        return action_swipe(0.35, 0.70, 0.35, 0.35, 400,
+                        # Slower, shorter swipe → less inertia, less row-skipping.
+                        # y delta reduced 0.35→0.22 (≈2 rows), duration 400→800ms.
+                        return action_swipe(0.35, 0.68, 0.35, 0.46, 800,
                                             "scroll to hunt priority favorite")
                     self._invited_names.add(fav_name)
                     tag = "priority" if is_priority else "fallback"
@@ -989,7 +991,7 @@ class CafeSkill(BaseSkill):
                 if self._invite_scroll_count < _MAX_SCROLLS:
                     self._invite_scroll_count += 1
                     self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/{_MAX_SCROLLS})")
-                    return action_swipe(0.35, 0.70, 0.35, 0.35, 400, "scroll invite list")
+                    return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll invite list")
                 btn = invite_btns[0]
                 self.log(f"no favorite after scrolling, clicking first 邀請 at ({btn.cx:.2f},{btn.cy:.2f})")
                 self._invite_stage = 3
@@ -1198,21 +1200,18 @@ class CafeSkill(BaseSkill):
                          f"pan_phase={self._pan_phase}")
                 return action_click(click_x, click_y, f"early headpat student #{self._headpat_count}")
 
-        # Phase 0: zoom out first (reference pattern — pinch out to see all students)
-        # Then pan to reveal corners. Zoom out makes headpat bubbles visible.
-        # reference: zoom_out = scroll 15 times + swipe down to center view.
+        # Zoom-out disabled per user request (2026-04-19) — it wasn't helping
+        # visibility and introduced camera noise. Phase 0 and 1 now skip
+        # directly to centering + pan.
         if self._pan_phase == 0:
-            self._pan_phase = 1
-            self._empty_scans = 0
-            # Emulator pinch-zoom requires Ctrl+wheel (MuMu/LDPlayer).
-            self.log("zoom out cafe view (Ctrl+scroll)")
-            return action_scroll(0.50, 0.40, -8, "zoom out cafe", with_ctrl=True)
-        if self._pan_phase == 1:
             self._pan_phase = 2
             self._empty_scans = 0
-            # After zoom, drag down to center the cafe view (reference: swipe 709,558→709,309)
-            self.log("centering cafe view (drag down)")
-            return action_swipe(0.50, 0.60, 0.50, 0.35, 400, "center cafe view down")
+            # Drag down slightly to center the cafe view (reference: 709,558→709,309)
+            self.log("centering cafe view (drag down, no zoom)")
+            return action_swipe(0.50, 0.60, 0.50, 0.40, 400, "center cafe view down")
+        if self._pan_phase == 1:
+            # Legacy state — fall through to phase 2 without action
+            self._pan_phase = 2
         if self._pan_phase == 2:
             self._pan_phase = 3
             self._empty_scans = 0

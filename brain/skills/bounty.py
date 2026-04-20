@@ -151,7 +151,8 @@ class BountySkill(BaseSkill):
         """Detect bounty screen via unique markers (header OCR is unreliable).
 
         Bounty screen has: "票券" (ticket count), "關卡目錄" (stage catalog),
-        "入場" buttons on the right side.
+        "入場" buttons on the right side, or the LocationSelect panel with
+        3 branch cards (高架公路/沙漠鐵道/教室).
         """
         # Check header region for any bounty-like text (including partial OCR)
         header = screen.find_any_text(
@@ -160,10 +161,11 @@ class BountySkill(BaseSkill):
         )
         if header:
             return True
-        # Fallback: look for bounty-specific UI elements
+        # Ticket count label — broadened region to include y=0.10-0.20
+        # (observed "持有票券6/6" at y=0.14 on LocationSelect screen).
         tickets = screen.find_any_text(
-            ["通緝票券", "通缉票券", "通票券"],
-            region=(0.0, 0.15, 0.35, 0.35), min_conf=0.7
+            ["持有票券", "通緝票券", "通缉票券", "通票券"],
+            region=(0.0, 0.10, 0.35, 0.35), min_conf=0.7
         )
         if tickets:
             return True
@@ -172,6 +174,25 @@ class BountySkill(BaseSkill):
             region=(0.55, 0.10, 0.85, 0.20), min_conf=0.7
         )
         if catalog:
+            return True
+        # LocationSelect tag — English artifact from OCR on the 選擇委託 panel
+        loc_tag = screen.find_any_text(
+            ["LocationSelect", "Location", "選擇委托", "选择委托",
+             "選擇委託", "选择委托"],
+            region=(0.45, 0.10, 0.85, 0.22), min_conf=0.7
+        )
+        if loc_tag:
+            return True
+        # Fallback: detect ≥2 of the 3 branch location cards
+        # (高架公路, 沙漠鐵道, 教室) visible in the right half, far-right x.
+        branch_hits = 0
+        for name, aliases, _ in self._ALL_BRANCHES:
+            hit = screen.find_any_text(
+                aliases, region=(0.78, 0.15, 1.0, 0.75), min_conf=0.7
+            )
+            if hit:
+                branch_hits += 1
+        if branch_hits >= 2:
             return True
         return False
 
