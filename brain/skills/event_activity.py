@@ -52,6 +52,7 @@ class EventActivitySkill(BaseSkill):
         self._challenge_completed_count: int = 0  # consecutive already-completed stages
         self._grid_auto_enabled: bool = False
         self._battle_speed_set: bool = False  # clicked speed/auto buttons this battle?
+        self._reward_fallback_streak: int = 0  # consecutive fallback clicks on post-battle screens
 
         # template-based sequential story processing: track by node index (01, 02, ...)
         self._current_story_index: int = 1   # next node to process (1-based)
@@ -90,6 +91,7 @@ class EventActivitySkill(BaseSkill):
         self._challenge_completed_count = 0
         self._grid_auto_enabled = False
         self._battle_speed_set = False
+        self._reward_fallback_streak = 0
 
         _state = self._load_state()
         self._current_story_index = max(1, int(_state.get("current_story_index", 1)))
@@ -167,15 +169,32 @@ class EventActivitySkill(BaseSkill):
         )
         if reward_popup:
             self._battle_speed_set = False  # battle ended, reset for next
+            # Expanded region: BA's 確認 button sits at the far bottom-right
+            # (~x=0.95 on Battle Complete screens); the old cutoff at x=0.80
+            # missed it entirely. Keep y lower bound loose for reward dialogs
+            # whose button is centered higher.
             confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确", "OK"],
-                region=(0.25, 0.80, 0.80, 0.98),
-                min_conf=0.6,
+                ["確認", "确认", "確定", "确定", "確", "确", "OK", "NEXT", "Next"],
+                region=(0.25, 0.78, 0.995, 0.99),
+                min_conf=0.55,
             )
             if confirm:
+                self._reward_fallback_streak = 0
                 return action_click_box(confirm, "dismiss event popup")
-            # Fallback: click right-side confirm area (0.60, 0.92)
-            return action_click(0.60, 0.92, "dismiss event popup fallback")
+            # Fallback: reference uses (1168, 659) ≈ (0.913, 0.915) on
+            # normal_task_fight-confirm. That's consistently where BA's
+            # bottom-right confirm button lives across post-battle summaries,
+            # quest-complete, and reward-acquired screens.
+            self._reward_fallback_streak = getattr(self, "_reward_fallback_streak", 0) + 1
+            # If we've clicked the fallback 6+ times and OCR still shows the
+            # same reward-complete screen, the click is landing on dead space
+            # or a partially-covered modal — press BACK once to unstick, then
+            # reset the streak counter.
+            if self._reward_fallback_streak >= 6:
+                self._reward_fallback_streak = 0
+                self.log("reward popup fallback stuck 6x, pressing BACK to unstick")
+                return action_back("reward popup fallback stuck, recover via back")
+            return action_click(0.913, 0.915, "dismiss event popup fallback")
 
         popup = self._handle_common_popups(screen)
         if popup:
