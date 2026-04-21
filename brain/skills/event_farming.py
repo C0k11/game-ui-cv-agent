@@ -38,12 +38,27 @@ from brain.skills.base import (
 
 
 class EventFarmingSkill(BaseSkill):
-    """Event-aware farming skill with optional AP threshold gate."""
+    """Event-aware farming skill with optional AP threshold gate.
 
-    def __init__(self, ap_threshold: int = 0):
+    Params:
+      ap_threshold: only farm when current AP >= this (0 = always).
+      max_rounds: how many sweep rounds to run per skill invocation.
+                  1 (default) preserves the original single-sweep behavior.
+                  Higher values adapt reference's multi-sweep budgeting: after
+                  each sweep result we re-enter the stage popup (MAX) and
+                  sweep again until `max_rounds` reached or AP below reserve.
+      ap_reserve: stop looping when remaining AP would drop below this
+                  (acts as a safety floor so we don't burn every last point).
+
+    Tick budget scales with rounds: 120 + 40 * (max_rounds - 1).
+    """
+
+    def __init__(self, ap_threshold: int = 0, max_rounds: int = 1, ap_reserve: int = 0):
         super().__init__("EventFarming")
-        self.max_ticks = 120
         self._ap_threshold = ap_threshold  # 0 = always farm, >0 = only if AP >= threshold
+        self._max_rounds = max(1, int(max_rounds))
+        self._ap_reserve = max(0, int(ap_reserve))
+        self.max_ticks = 120 + 40 * (self._max_rounds - 1)
         self._current_ap: int = -1
         self._ap_before: int = -1
         self._ap_after: int = -1
@@ -130,16 +145,15 @@ class EventFarmingSkill(BaseSkill):
         )
         if result and self.sub_state == "sweep":
             self._sweep_stage = 3  # ensure stage advances
-            self._sweep_count += 1
-            self.log(f"sweep #{self._sweep_count} result, dismissing")
+            self.log(f"sweep result detected (early), dispatching")
             ok = screen.find_any_text(
                 ["確認", "确认", "確", "确", "OK"],
                 min_conf=0.6
             )
+            next_state, reason = self._post_sweep_next_state(screen)
             if ok:
-                self.sub_state = "exit"
-                return action_click_box(ok, "dismiss sweep result (confirm btn)")
-            return action_click(0.5, 0.9, "dismiss sweep result")
+                return action_click_box(ok, f"dismiss result early ({reason})")
+            return action_click(0.5, 0.9, f"dismiss result early ({reason})")
 
         # Skip common popup handler during sweep — sweep has its own dialog FSM
         if self.sub_state != "sweep":
@@ -1213,16 +1227,15 @@ class EventFarmingSkill(BaseSkill):
             self._sweep_stage = 3
             return action_wait(500, "waiting for sweep result")
 
-        # Stage 3+: Dismiss sweep result and exit
+        # Stage 3+: Dismiss sweep result. Optionally loop for more rounds.
         if self._sweep_stage >= 3:
             ok = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "確", "确", "OK"],
                 min_conf=0.6
             )
             if ok:
-                self.log(f"sweep done ({self._sweep_count} total)")
-                self.sub_state = "exit"
-                return action_click_box(ok, "dismiss result")
+                next_state, reason = self._post_sweep_next_state(screen)
+                return action_click_box(ok, f"dismiss result ({reason})")
 
             # Detect if sweep already completed and we're back on event/quest page
             back_on_event = screen.find_any_text(
@@ -1230,15 +1243,51 @@ class EventFarmingSkill(BaseSkill):
                 region=(0.50, 0.08, 1.0, 0.22), min_conf=0.6
             )
             if back_on_event:
-                self.log(f"sweep complete, back on event page ({self._sweep_count} sweeps)")
-                self._sweep_count += 1
-                self.sub_state = "exit"
-                return action_wait(200, "sweep done, returning to exit")
+                next_state, reason = self._post_sweep_next_state(screen)
+                self.log(f"sweep complete on event page ({reason})")
+                return action_wait(200, f"sweep done ({reason})")
 
             # Click anywhere to dismiss result screen
             return action_click(0.5, 0.9, "dismiss sweep result")
 
         return action_wait(400, "sweep processing")
+
+    def _post_sweep_next_state(self, screen: ScreenState) -> tuple[str, str]:
+        """Decide whether to loop for another sweep round or exit.
+
+        Adapted from reference activity_sweep's click_times-in-one-go model:
+        we don't increment a counter on-popup (no reliable +/- UI), instead
+        we loop the whole `select_stage → sweep → result` cycle up to
+        `max_rounds` times, bailing early if AP would drop below reserve.
+        Sets self.sub_state and returns (new_state, human reason).
+        """
+        # Update sweep counter (caller may have already bumped it; stay idempotent)
+        if self._sweep_stage < 4:
+            self._sweep_count += 1
+            self._sweep_stage = 4  # guard against double increment
+        done_rounds = self._sweep_count
+        remaining = self._max_rounds - done_rounds
+
+        if remaining <= 0:
+            self.sub_state = "exit"
+            return "exit", f"round {done_rounds}/{self._max_rounds} done"
+
+        # If we have an AP reserve floor, check current AP.
+        # Note: AP on sweep-result screen is not visible; we rely on lobby read
+        # at entry (self._ap_before) to guess. A more accurate check happens
+        # next tick when the stage list comes back and we may see the top bar.
+        if self._ap_reserve > 0:
+            ap_now = self._parse_ap(screen)
+            if ap_now >= 0 and ap_now <= self._ap_reserve:
+                self.sub_state = "exit"
+                return "exit", f"AP {ap_now} ≤ reserve {self._ap_reserve}"
+
+        # Loop: reset sweep-popup state and go back to pick the same stage.
+        # The stage list should still be visible after result dismissal.
+        self._sweep_stage = 0
+        self.sub_state = "select_stage"
+        self.log(f"looping for round {done_rounds + 1}/{self._max_rounds}")
+        return "select_stage", f"loop round {done_rounds + 1}/{self._max_rounds}"
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         touch_to_start = screen.find_text_one("TOUCH\\s*TO\\s*START", min_conf=0.6)

@@ -118,6 +118,8 @@ def _default_profile_settings() -> Dict[str, Any]:
         "dry_run": True,
         "forbid_premium_currency": True,
         "ap_purchase_limit": 0,
+        "event_max_rounds": 1,
+        "event_ap_reserve": 0,
         "exploration_click": False,
         "notify_on_finish": False,
         "notify_webhook_url": "",
@@ -148,6 +150,14 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
         data["ap_purchase_limit"] = max(0, int(raw.get("ap_purchase_limit") or 0))
     except Exception:
         data["ap_purchase_limit"] = 0
+    try:
+        data["event_max_rounds"] = max(1, min(20, int(raw.get("event_max_rounds") or 1)))
+    except Exception:
+        data["event_max_rounds"] = 1
+    try:
+        data["event_ap_reserve"] = max(0, int(raw.get("event_ap_reserve") or 0))
+    except Exception:
+        data["event_ap_reserve"] = 0
     data["exploration_click"] = bool(raw.get("exploration_click") if raw.get("exploration_click") is not None else False)
     data["notify_on_finish"] = bool(raw.get("notify_on_finish") if raw.get("notify_on_finish") is not None else False)
     data["notify_webhook_url"] = str(raw.get("notify_webhook_url") or "").strip()
@@ -404,6 +414,8 @@ def _start_pipeline(*, payload: Dict[str, Any]) -> None:
             "goal",
             "forbid_premium_currency",
             "ap_purchase_limit",
+            "event_max_rounds",
+            "event_ap_reserve",
             "exploration_click",
         ]:
             if payload.get(key) is not None:

@@ -190,6 +190,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div class="form-group"><label>Steps (0=loop)</label><input id="steps" type="number" value="0" style="width:90px"/></div>
       <div class="form-group"><label>Step Sleep</label><input id="step_sleep_s" type="number" value="0.6" style="width:80px"/></div>
       <div class="form-group"><label>AP Purchase Limit</label><input id="ap_purchase_limit" type="number" value="0" style="width:90px"/></div>
+      <div class="form-group" title="Event 刷取每次技能运行的扫荡轮数 (1=单轮，>1=循环，借鉴 reference activity_sweep_times)"><label>Event Rounds</label><input id="event_max_rounds" type="number" min="1" max="20" value="1" style="width:80px"/></div>
+      <div class="form-group" title="AP 保留下限：当前 AP ≤ 此值时停止循环（配合 Event Rounds 使用）"><label>AP Reserve</label><input id="event_ap_reserve" type="number" min="0" value="0" style="width:80px"/></div>
     </div>
     <div class="form-row" style="gap:16px">
       <div class="check-row">
@@ -388,17 +390,22 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <!-- Side panel: strip list + help -->
     <div style="width:260px;display:flex;flex-direction:column;gap:8px">
       <div style="font-size:11px;color:var(--muted);text-transform:uppercase">Strips (<span id="roster_count">0</span>)</div>
-      <div id="roster_list" style="flex:1;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px"></div>
+      <div id="roster_list" style="flex:1;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px;min-height:120px"></div>
+      <div style="display:flex;gap:4px">
+        <button onclick="rosterCopyJson()" style="flex:1;padding:5px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">📋 Copy JSON</button>
+        <button onclick="rosterPasteJson()" style="flex:1;padding:5px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">📥 Paste JSON</button>
+      </div>
+      <textarea id="roster_json" placeholder="粘贴另一台机器调好的 strips JSON 到这里，然后点 Paste JSON 应用" style="width:100%;height:110px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:monospace;font-size:10px;padding:4px;resize:vertical;box-sizing:border-box"></textarea>
       <div style="font-size:11px;color:var(--muted);line-height:1.6">
         <b>操作</b><br>
         · 拖动框体 = 移动<br>
-        · 拖边 = 单向 resize<br>
-        · 拖角 = 双向 resize<br>
-        · 右键空白 = 新增一条<br>
+        · 拖边/角 = resize<br>
+        · 右键空白 = 新增<br>
         · <kbd>Del</kbd> = 删除选中<br>
         · <kbd>Ctrl+D</kbd> = 复制选中<br>
         · <kbd>Ctrl+S</kbd> = 保存<br>
-        · 保存至 <code>data/schedule_avatar_regions.json</code>，点主页 Reload 生效
+        <b>分享配置</b>：Copy JSON 把配置写入下方框 + 剪贴板；
+        别人粘贴进来点 Paste JSON 即可一键套用。
       </div>
     </div>
   </div>
@@ -525,6 +532,8 @@ function fillAgentFromProfile(profile){
   if($('steps'))$('steps').value=typeof p.steps==='number'?p.steps:0;
   if($('step_sleep_s'))$('step_sleep_s').value=typeof p.step_sleep_s==='number'?p.step_sleep_s:0.6;
   if($('ap_purchase_limit'))$('ap_purchase_limit').value=typeof p.ap_purchase_limit==='number'?p.ap_purchase_limit:0;
+  if($('event_max_rounds'))$('event_max_rounds').value=typeof p.event_max_rounds==='number'?p.event_max_rounds:1;
+  if($('event_ap_reserve'))$('event_ap_reserve').value=typeof p.event_ap_reserve==='number'?p.event_ap_reserve:0;
   if($('dry_run'))$('dry_run').checked=Boolean(p.dry_run);
   if($('forbid_premium_currency'))$('forbid_premium_currency').checked=p.forbid_premium_currency!==false;
   if($('exploration_click'))$('exploration_click').checked=Boolean(p.exploration_click);
@@ -568,6 +577,8 @@ async function saveProfileConfig(showText='已保存档案'){
       steps:parseInt($('steps').value,10)||0,
       step_sleep_s:parseFloat($('step_sleep_s').value)||0.6,
       ap_purchase_limit:parseInt($('ap_purchase_limit').value,10)||0,
+      event_max_rounds:Math.max(1,parseInt($('event_max_rounds').value,10)||1),
+      event_ap_reserve:Math.max(0,parseInt($('event_ap_reserve').value,10)||0),
       dry_run:$('dry_run').checked,
       forbid_premium_currency:$('forbid_premium_currency').checked,
       exploration_click:$('exploration_click').checked,
@@ -597,6 +608,8 @@ function agentPayload() {
     steps:parseInt($('steps').value,10)||0,
     step_sleep_s:parseFloat($('step_sleep_s').value)||0.6,
     ap_purchase_limit:parseInt($('ap_purchase_limit').value,10)||0,
+    event_max_rounds:Math.max(1,parseInt($('event_max_rounds').value,10)||1),
+    event_ap_reserve:Math.max(0,parseInt($('event_ap_reserve').value,10)||0),
     dry_run:$('dry_run').checked,
     forbid_premium_currency:$('forbid_premium_currency').checked,
     exploration_click:$('exploration_click').checked,
@@ -617,6 +630,8 @@ function loadAgent(){
     if(typeof s.steps==='number')$('steps').value=s.steps;
     if(typeof s.step_sleep_s==='number')$('step_sleep_s').value=s.step_sleep_s;
     if(typeof s.ap_purchase_limit==='number')$('ap_purchase_limit').value=s.ap_purchase_limit;
+    if(typeof s.event_max_rounds==='number')$('event_max_rounds').value=s.event_max_rounds;
+    if(typeof s.event_ap_reserve==='number')$('event_ap_reserve').value=s.event_ap_reserve;
     if(s.account_label)$('account_label').value=s.account_label;
     if(typeof s.dry_run==='boolean')$('dry_run').checked=s.dry_run;
     if(typeof s.forbid_premium_currency==='boolean')$('forbid_premium_currency').checked=s.forbid_premium_currency;
@@ -689,7 +704,7 @@ $('btn_profile_delete').onclick=async()=>{
 $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName()})});await loadServerConfig();await loadFavorites();saveAgent();}catch(e){$('profile_status').textContent='切换失败';}};
  $('btn_skills_reset').onclick=async()=>{const defaults=(APP_CFG.skill_options||[]).map(x=>x.id);renderSkillList(defaults,defaults);saveAgent();try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill_order:defaults})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}};
 
-['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url','bounty_branch_overpass','bounty_branch_railway','bounty_branch_classroom'].forEach(id=>{
+['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','event_max_rounds','event_ap_reserve','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url','bounty_branch_overpass','bounty_branch_railway','bounty_branch_classroom'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
 });
 
@@ -1983,6 +1998,59 @@ function rosterReset(){
   $('roster_cpr').value = ROSTER.cfg.cells_per_room;
   ROSTER.selected = -1;
   rosterDraw();
+}
+
+function rosterCopyJson(){
+  const payload = {
+    strips: ROSTER.cfg.strips.map(s => ({
+      x1: +s.x1.toFixed(4), y1: +s.y1.toFixed(4),
+      x2: +s.x2.toFixed(4), y2: +s.y2.toFixed(4),
+    })),
+    cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 4),
+  };
+  const text = JSON.stringify(payload, null, 2);
+  $('roster_json').value = text;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(
+      () => { $('roster_status').textContent = '已复制到剪贴板 ✓'; setTimeout(() => { $('roster_status').textContent = `${ROSTER.imgW}×${ROSTER.imgH}`; }, 1500); },
+      () => { $('roster_status').textContent = '已写入文本框 (剪贴板失败)'; },
+    );
+  } else {
+    $('roster_json').select();
+    $('roster_status').textContent = '请手动 Ctrl+C 复制';
+  }
+}
+
+function rosterPasteJson(){
+  const text = $('roster_json').value.trim();
+  if(!text){
+    alert('先在文本框粘贴要套用的 JSON');
+    return;
+  }
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch(e){ alert('JSON 解析失败: ' + e.message); return; }
+  const strips = Array.isArray(parsed) ? parsed : parsed.strips;
+  if(!Array.isArray(strips) || strips.length === 0){
+    alert('JSON 应为 {strips:[...]} 或 strip 数组');
+    return;
+  }
+  const cleaned = [];
+  for(const s of strips){
+    const x1 = +s.x1, y1 = +s.y1, x2 = +s.x2, y2 = +s.y2;
+    if(![x1,y1,x2,y2].every(n => Number.isFinite(n) && n >= 0 && n <= 1)){ continue; }
+    if(x2 <= x1 || y2 <= y1){ continue; }
+    cleaned.push({ x1, y1, x2, y2 });
+  }
+  if(cleaned.length === 0){ alert('没有合法的 strip（需要 0-1 范围且 x2>x1, y2>y1）'); return; }
+  ROSTER.cfg.strips = cleaned;
+  if(Number.isFinite(+parsed.cells_per_room) && +parsed.cells_per_room >= 1){
+    ROSTER.cfg.cells_per_room = Math.min(8, Math.max(1, Math.round(+parsed.cells_per_room)));
+    $('roster_cpr').value = ROSTER.cfg.cells_per_room;
+  }
+  ROSTER.selected = -1;
+  rosterDraw();
+  $('roster_status').textContent = `已套用 ${cleaned.length} strips（未保存，点保存写盘）`;
 }
 </script>
 </body>

@@ -470,6 +470,17 @@ class DailyPipeline:
             campaign_push_steps = 3
         campaign_push_steps = min(campaign_push_steps, 30)
         forbid_premium_currency = bool(opts.get("forbid_premium_currency", True))
+        # Event-farming budget (adapted from reference activity_sweep_times).
+        # max_rounds: how many sweep cycles per run (1 = legacy, >1 = loop).
+        # ap_reserve: don't loop when current AP ≤ this floor.
+        try:
+            event_max_rounds = max(1, int(opts.get("event_max_rounds") or 1))
+        except Exception:
+            event_max_rounds = 1
+        try:
+            event_ap_reserve = max(0, int(opts.get("event_ap_reserve") or 0))
+        except Exception:
+            event_ap_reserve = 0
 
         self._skill_registry: Dict[str, BaseSkill] = {
             "lobby": LobbySkill(),
@@ -486,7 +497,10 @@ class DailyPipeline:
             "arena": ArenaSkill(),
             "joint_firing_drill": JointFiringDrillSkill(),
             "total_assault": TotalAssaultSkill(),
-            "event_farming": EventFarmingSkill(),       # event-aware (always farms)
+            "event_farming": EventFarmingSkill(
+                max_rounds=event_max_rounds,
+                ap_reserve=event_ap_reserve,
+            ),       # event-aware (always farms)
             "ap_planning": ApPlanningSkill(
                 forbid_premium_currency=forbid_premium_currency,
                 paid_purchase_limit=ap_purchase_limit,
@@ -496,7 +510,10 @@ class DailyPipeline:
             "mail": MailSkill(),
             "daily_tasks": DailyTasksSkill(),
             "pass_reward": PassRewardSkill(),
-            "event_farming_2": EventFarmingSkill(),      # 回马枪 second pass
+            "event_farming_2": EventFarmingSkill(
+                max_rounds=event_max_rounds,
+                ap_reserve=event_ap_reserve,
+            ),      # 回马枪 second pass
         }
 
         names = skill_names or self.DEFAULT_SKILLS
