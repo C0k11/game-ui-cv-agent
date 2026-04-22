@@ -684,6 +684,38 @@ class DailyPipeline:
             print(f"[Interceptor] Title screen detected, tapping to start")
             return action_click(0.5, 0.85, "interceptor: tap to start")
 
+        # ── P-1: Download / update confirmation modal ──
+        # BA first-run and patch-day show a "通知" modal:
+        #   "下載必要內容 XXX MB"  [取消] [確認]
+        # Residual "下載檔案驗證完" text from the background loading screen
+        # still renders at the bottom and would trick is_loading() into
+        # returning True, stalling the pipeline forever. Handle the modal
+        # explicitly first so the confirm click always goes through.
+        update_notice = screen.find_text_one(
+            "通知", region=(0.30, 0.12, 0.70, 0.32), min_conf=0.55
+        )
+        if update_notice:
+            update_body = screen.find_any_text(
+                ["下載必要", "下载必要", "下載遊戲", "下载游戏",
+                 "需要下載", "需要下载", "遊戲所需", "游戏所需",
+                 "更新資源", "更新资源", "下載資源", "下载资源",
+                 "下載內容", "下载内容"],
+                region=(0.25, 0.35, 0.75, 0.65), min_conf=0.45,
+            )
+            if update_body:
+                confirm_btn = screen.find_any_text(
+                    ["確認", "确认", "確定", "确定", "確", "确", "OK"],
+                    region=(0.45, 0.60, 0.75, 0.80),
+                    min_conf=0.40,
+                )
+                if confirm_btn:
+                    print(f"[Interceptor] update/download notice '{update_body.text}', clicking confirm")
+                    return action_click_box(confirm_btn, "interceptor: confirm download notice")
+                # OCR missed the button — use the notification handler's
+                # hardcoded confirm position (right half of the modal).
+                print(f"[Interceptor] update/download notice '{update_body.text}', fallback click")
+                return action_click(0.598, 0.701, "interceptor: confirm download notice (fallback)")
+
         # ── P-1: Global loading / update / download ──
         # During game startup the screen shows "正在更新", "Now Loading",
         # "驗證下載檔案中", "重置遊戲資料中", etc.  No skill should act
