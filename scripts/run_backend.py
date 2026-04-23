@@ -19,6 +19,16 @@ def main() -> None:
     except Exception:
         pass
 
+    # Pre-import YOLO in the MAIN thread to avoid a Python 3.13
+    # threaded circular import in torchvision when the pipeline
+    # worker thread lazy-imports ultralytics later.  Swallow any
+    # error here — if ultralytics cannot be imported the pipeline
+    # will fall back to OCR-only detection.
+    try:
+        from ultralytics import YOLO  # noqa: F401
+    except Exception as exc:
+        print(f"[run_backend] ultralytics pre-import failed: {exc}")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
