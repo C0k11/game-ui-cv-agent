@@ -19,9 +19,46 @@ import importlib.util
 import json
 import re
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote
+
+_CAFE_STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "cafe_state.json"
+
+
+def _game_day() -> str:
+    """Return the BA game-day (ISO date) for 'today'.
+
+    BA resets daily at 04:00 local.  Anything before 04:00 still counts as
+    the previous game day, so we shift the clock back 4 hours before
+    taking the date component.  This keeps invite-state persistent across
+    pipeline retries within the same game day and auto-clears after the
+    next 04:00 reset.
+    """
+    return (datetime.now() - timedelta(hours=4)).date().isoformat()
+
+
+def _load_cafe_state() -> dict:
+    """Load persisted cafe state (invited names etc.).  Empty on error."""
+    try:
+        if _CAFE_STATE_FILE.exists():
+            return json.loads(_CAFE_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_cafe_state(state: dict) -> None:
+    """Persist cafe state to disk (best-effort, swallow errors)."""
+    try:
+        _CAFE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CAFE_STATE_FILE.write_text(
+            json.dumps(state, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
@@ -157,7 +194,20 @@ class CafeSkill(BaseSkill):
         self._invite_scroll_count = 0
         self._invite_sorted = False
         self._sort_option_clicked = False
+        # Restore cross-instance invited tracking for today's game day so
+        # a cafe retry (after a previous timeout) doesn't re-invite the
+        # same student and waste a ticket.  State auto-expires at the
+        # next 04:00 reset — see _game_day().
         self._invited_names = set()
+        try:
+            saved = _load_cafe_state()
+            if saved.get("game_day") == _game_day():
+                restored = [str(n) for n in saved.get("invited_names", []) if n]
+                if restored:
+                    self._invited_names = set(restored)
+                    self.log(f"restored invited_names from disk: {sorted(self._invited_names)}")
+        except Exception:
+            pass
         self._headpat_cooldown = 0
         self._1f_headpat_started = False
         self._1f_done = False
@@ -982,6 +1032,10 @@ class CafeSkill(BaseSkill):
                         return action_swipe(0.35, 0.68, 0.35, 0.46, 800,
                                             "scroll to hunt priority favorite")
                     self._invited_names.add(fav_name)
+                    _save_cafe_state({
+                        "game_day": _game_day(),
+                        "invited_names": sorted(self._invited_names),
+                    })
                     tag = "priority" if is_priority else "fallback"
                     self.log(f"inviting {tag} '{fav_name}' at ({fav_btn.cx:.2f},{fav_btn.cy:.2f}) floor={_floor}")
                     self._invite_stage = 3
