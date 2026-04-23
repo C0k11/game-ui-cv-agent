@@ -1039,31 +1039,45 @@ class CafeSkill(BaseSkill):
             self._invite_attempted = True
             return action_wait(200, f"invite unavailable: {cooldown.text}")
 
-        # Find the REGULAR invite ticket (not the paid 額外邀請券)
+        # Find the REGULAR invite ticket (not the paid 額外邀請券).
         # OCR reads 額外 as "额外", "客外", or "額外" — exclude all variants.
+        # Ticket char-glyph varies by OCR: 券 ↔ 劵, 請 ↔ 请 ↔ 睛 (mis-OCR).
+        # We need all four combinations or we miss the 2F OCR output
+        # (observed: '外邀请券', '邀请劵' — neither contains traditional 邀請券).
         _EXTRA_PREFIXES = ("客外", "额外", "額外", "客", "外")
-        ticket_hits = screen.find_text(
-            "邀請券", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.50
+        _TICKET_REGION = (0.55, 0.78, 0.78, 0.98)
+        _TICKET_PATTERNS = (
+            "邀請券", "邀请券",   # trad / simp
+            "邀請劵", "邀请劵",   # mis-OCR 券→劵
+            "邀睛券", "邀睛劵",   # mis-OCR 請→睛
         )
-        # OCR frequently misreads 邀請券 as 邀睛券
-        if not ticket_hits:
-            ticket_hits = screen.find_text(
-                "邀睛券", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.50
-            )
+        ticket_hits: List[OcrBox] = []
+        for pat in _TICKET_PATTERNS:
+            ticket_hits = screen.find_text(pat, region=_TICKET_REGION, min_conf=0.50)
+            if ticket_hits:
+                break
         ticket = None
         for hit in ticket_hits:
             if not any(p in hit.text for p in _EXTRA_PREFIXES):
                 ticket = hit
                 break
-        if not ticket:
-            ticket = screen.find_text_one(
-                "可使用", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.50
-            )
         if ticket:
             self.log(f"clicking invite ticket '{ticket.text}' at ({ticket.cx:.2f},{ticket.cy:.2f})")
             self._invite_stage = 1
             self._invite_ticks = 0
             return action_click_box(ticket, "open invite ticket")
+        # OCR missed the ticket label entirely (or only saw the 可使用/可購買
+        # tooltips at cy≈0.83). Tooltips are above the button, so clicking
+        # them closes the hover instead of opening the list. Use the
+        # hardcoded button center directly — same position used by the
+        # retry path below.
+        if screen.find_any_text(
+            ["可使用", "可购买", "可購買"], region=_TICKET_REGION, min_conf=0.50
+        ):
+            self.log("invite ticket OCR missed, clicking hardcoded button pos")
+            self._invite_stage = 1
+            self._invite_ticks = 0
+            return action_click(0.69, 0.94, "open invite ticket (hardcoded)")
 
         if self._invite_ticks in (3, 6):
             self.log("invite UI unresolved, retry fixed click on regular ticket")
@@ -1310,11 +1324,26 @@ class CafeSkill(BaseSkill):
     def _switch_floor(self, screen: ScreenState) -> Dict[str, Any]:
         """Switch from cafe 1F to 2F."""
         # Already on 2F? (button says "移動至1號店" = we're on 2F)
+        # OCR mixes trad/simp glyphs (動↔动, 號↔号), so we match each
+        # glyph independently rather than full strings.  Region extended
+        # to y=0.18 because the button OCR box centers at cy≈0.145, not
+        # ≤0.12 as the original bounds assumed.
         already_2f = screen.find_any_text(
-            ["移動至1號店", "移动至1号店", "1號店"],
-            region=(0.0, 0.03, 0.25, 0.12), min_conf=0.5
+            ["移動至1號店", "移动至1号店", "移動至1号店", "移动至1號店",
+             "1號店", "1号店"],
+            region=(0.0, 0.03, 0.25, 0.18), min_conf=0.5
         )
         if already_2f:
+            # If this skill instance already ran a headpat cycle AND we're
+            # on 2F, it means the cafe started with the player already on
+            # 2F (e.g. after a previous-run timeout) and we just finished
+            # an inv+pat cycle on 2F.  Don't loop into another invite —
+            # just exit.  Without this guard, fixing the OCR pattern match
+            # causes a wasted 3rd inv+pat cycle burning invite tickets.
+            if self._1f_headpat_started:
+                self.log("already on 2F and headpat cycle done, exiting")
+                self.sub_state = "exit"
+                return action_wait(300, "2F cycle complete, exiting")
             self.log("already on 2F, skipping switch")
             self._invite_attempted = False
             self._invite_ticks = 0
