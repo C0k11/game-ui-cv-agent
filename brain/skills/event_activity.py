@@ -384,9 +384,13 @@ class EventActivitySkill(BaseSkill):
 
     def _is_event_page(self, screen: ScreenState) -> bool:
         event_header = screen.find_any_text(
-            ["活動", "活动"],
+            ["活動", "活动",
+             # Named event headers — the campaign tile opens a page
+             # whose header shows the event title directly, not "活動".
+             "學園交流會", "学园交流会", "學園交流", "学园交流",
+             "交流會", "交流会"],
             region=(0.0, 0.0, 0.22, 0.10),
-            min_conf=0.65,
+            min_conf=0.55,
         )
         if event_header:
             return True
@@ -535,6 +539,17 @@ class EventActivitySkill(BaseSkill):
             return action_wait(250, "start event story phase from cutscene")
 
         current = self.detect_current_screen(screen)
+
+        # Dismiss tutorial / help popups (幫助 modal) — BA shows these
+        # on first entry to many event pages.  BACK closes them in BA.
+        help_popup = screen.find_any_text(
+            ["幫助", "帮助"],
+            region=(0.40, 0.10, 0.65, 0.20),
+            min_conf=0.55,
+        )
+        if help_popup:
+            self.log(f"help popup detected: '{help_popup.text}', closing with BACK")
+            return action_back("close help popup")
 
         # Back out of 劇情 / 主線劇情 (story menus) — these share the
         # '劇情' hub-marker so detect_current_screen classifies them
