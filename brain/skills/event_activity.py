@@ -512,6 +512,20 @@ class EventActivitySkill(BaseSkill):
 
         current = self.detect_current_screen(screen)
 
+        # Back out of 主線劇情 (main story menu) — it shares the '劇情'
+        # hub-marker with the Campaign hub so detect_current_screen
+        # classifies it as "Mission", but it has no event entries and
+        # keeps the skill looping here until timeout.  A plain BACK
+        # press returns to the Campaign hub / Lobby where the event
+        # tiles live.
+        if screen.find_any_text(
+            ["主線劇情", "主线剧情", "主線劇", "主线剧"],
+            region=(0.0, 0.0, 0.28, 0.10),
+            min_conf=0.55,
+        ):
+            self.log("on 主線劇情 menu (dead end for event_activity), backing out")
+            return action_back("back out of main-story menu")
+
         if current == "Lobby":
             # Check for OLD event reward-claim banner first — skip it
             old_reward = self._find_reward_claim_timer(screen, region=(0.55, 0.0, 1.0, 0.30))
