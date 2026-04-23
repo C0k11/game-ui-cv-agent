@@ -268,6 +268,9 @@ class EventActivitySkill(BaseSkill):
             min_conf=0.3,
         )
 
+    # Region where the lobby's big main-event banner lives.
+    _BOTTOM_LEFT_BANNER_REGION = (0.0, 0.60, 0.32, 0.92)
+
     def _find_main_event_banner(self, screen: ScreenState) -> Optional[Any]:
         """Detect the big bottom-left event banner (the actual entry to the
         current main event — e.g. Serenade Promenade), as opposed to the
@@ -279,14 +282,21 @@ class EventActivitySkill(BaseSkill):
           * "復刻" / "复刻" / "Re!" ribbon for rerun events
           * an "活動進行中" / "活动进行中" label at the bottom-right
             of the card
-        We prefer this banner over the top-right cycling widget because
-        the cycler can be occupied by the 夏莱 grind event, which the
-        daily-tasks skill already handles.
+        The banner ALSO cycles between multiple active events, so even
+        though we detect the EVENT!! / 活動進行中 markers we must also
+        verify the card doesn't currently show 夏莱 (聯邦學生會) — in
+        that case return None and let the caller wait for the rotation.
         """
+        # Reject the whole region if it currently shows 夏莱.
+        if self._is_schale_signature(
+            screen, region=self._BOTTOM_LEFT_BANNER_REGION
+        ):
+            return None
+
         # Try the loud banner labels first — very distinctive English text.
         label = screen.find_any_text(
             ["EVENT!!", "EVENT!", "EVENT", "復刻", "复刻", "Re!", "Re!!", "NEW!"],
-            region=(0.0, 0.60, 0.32, 0.92),
+            region=self._BOTTOM_LEFT_BANNER_REGION,
             min_conf=0.55,
         )
         if label:
@@ -327,20 +337,34 @@ class EventActivitySkill(BaseSkill):
             min_conf=0.55,
         )
 
-    def _is_schale_signature(self, screen: ScreenState) -> bool:
-        """Return True if the top-right cycling widget currently shows the
-        夏莱 總結算 (Schale Final Settlement) event.
+    def _is_schale_signature(
+        self,
+        screen: ScreenState,
+        *,
+        region: tuple = (0.55, 0.0, 1.0, 0.35),
+    ) -> bool:
+        """Return True if the given region shows the 夏莱 總結算
+        (Schale Final Settlement) event.
 
-        That event is essentially a daily-task / special-mission grind —
-        the user asked us to skip the event-activity skill when 夏莱 is
-        the only option, so `daily_tasks` / `campaign_push` can handle
-        its sub-objectives instead of this skill wasting ticks inside
-        its UI.
+        夏莱 is essentially a daily-task / special-mission grind —
+        the user asked us to skip the event-activity skill when 夏莱
+        is the only option, so `daily_tasks` / `campaign_push` can
+        handle its sub-objectives instead of this skill wasting ticks
+        inside its UI.
+
+        BA cycles both the top-right widget AND the bottom-left banner
+        between multiple active events, so the caller passes the
+        region that matches the banner it is about to click (bottom
+        left: 0.0..0.30 × 0.60..0.92; top right: 0.55..1.0 × 0.0..0.35).
+        The 夏莱 text can be OCR'd as partially mangled characters, so
+        we also accept the common tail substring "聯邦" / "联邦".
         """
         return bool(screen.find_any_text(
             ["夏萊", "夏莱", "聯邦學生會", "联邦学生会",
-             "總結算", "总结算", "總結", "总结"],
-            region=(0.55, 0.0, 1.0, 0.35),
+             "聯邦學生", "联邦学生",
+             "總結算", "总结算", "總結", "总结",
+             "聯邦", "联邦"],
+            region=region,
             min_conf=0.45,
         ))
 
@@ -553,9 +577,10 @@ class EventActivitySkill(BaseSkill):
 
             # ── PRIORITY 1: BIG bottom-left main-event banner ──
             # This is the real entry to the current main event (e.g.
-            # Serenade Promenade).  Prefer it over the top-right
-            # cycling widget because the cycler can land on the 夏莱
-            # grind event, which the daily-tasks skill already handles.
+            # Serenade Promenade).  The banner also cycles, so
+            # _find_main_event_banner already returns None if the
+            # current cycle is 夏莱 (daily-task grind handled by
+            # daily_tasks / campaign_push).
             main_banner = self._find_main_event_banner(screen)
             if main_banner:
                 # Click the banner image.  Label is at the top-left of
@@ -569,12 +594,27 @@ class EventActivitySkill(BaseSkill):
                 )
                 return action_click(bx, by, "click main event banner (bottom-left)")
 
-            # ── PRIORITY 2: top-right cycling widget, BUT skip 夏莱 ──
-            # When the top-right currently shows 夏莱 (總結算 / 聯邦學生會)
-            # and no main banner exists, treat 夏莱 as a non-event — its
-            # tasks are covered by daily_tasks / campaign_push.  Give the
-            # banner up to ~6 ticks to cycle to a real event before
-            # declaring the event unavailable.
+            # ── PRIORITY 2: if bottom-left CURRENTLY shows 夏莱, wait ──
+            # The bottom-left banner is the most reliable detector for
+            # a 夏莱 cycle.  When it shows 夏莱 the top-right widget is
+            # typically synced to the same event, so clicking either
+            # would land on 夏莱 — wait for the cycle to advance
+            # instead.
+            if self._is_schale_signature(
+                screen, region=self._BOTTOM_LEFT_BANNER_REGION
+            ):
+                if self._enter_ticks <= 12:
+                    self.log(
+                        "bottom-left banner is 夏莱 grind event, "
+                        "waiting for banner cycle to advance"
+                    )
+                    return action_wait(1500, "schale on bottom-left, waiting for cycle")
+                self.log("bottom-left only shows schale after rotation wait, skipping")
+                return action_done("schale-only bottom banner, deferred to daily tasks")
+
+            # ── PRIORITY 3: top-right cycling widget, skip if 夏莱 ──
+            # Only consulted if the bottom-left card is completely
+            # absent (no main event currently available at all).
             timer = self._find_event_timer(screen, region=(0.55, 0.0, 1.0, 0.30))
             if timer and self._is_schale_signature(screen):
                 if self._enter_ticks <= 6:
@@ -582,8 +622,8 @@ class EventActivitySkill(BaseSkill):
                         f"top-right banner is 夏莱 grind event "
                         f"('{timer.text}'), waiting for rotation"
                     )
-                    return action_wait(1500, "schale banner in cycle, waiting")
-                self.log("only schale banner visible after rotation wait, skipping")
+                    return action_wait(1500, "schale on top-right, waiting")
+                self.log("only schale visible after rotation wait, skipping")
                 return action_done("schale-only event, deferred to daily tasks")
 
             if timer:
