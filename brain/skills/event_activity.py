@@ -566,6 +566,23 @@ class EventActivitySkill(BaseSkill):
             )
             return action_back("back out of story menu")
 
+        # Generic dead-end: headers that indicate lobby-adjacent screens
+        # (Recruitment, Student, Social, Craft, Shop, Cafe, etc.) which
+        # detect_current_screen either misses (招募 / Recruitment has no
+        # entry in base.py's headers dict) or classifies as something
+        # unrelated.  None of these host event entries, so BACK out.
+        dead_end = screen.find_any_text(
+            ["招募", "Recruit",           # gacha screen
+             "機率情報", "机率情报"],    # gacha rate-info tab title
+            region=(0.0, 0.0, 0.22, 0.10),
+            min_conf=0.55,
+        )
+        if dead_end:
+            self.log(
+                f"on dead-end screen ('{dead_end.text}'), backing out"
+            )
+            return action_back("back out of dead-end screen")
+
         if current == "Lobby":
             # Check for OLD event reward-claim banner first — skip it
             old_reward = self._find_reward_claim_timer(screen, region=(0.55, 0.0, 1.0, 0.30))
