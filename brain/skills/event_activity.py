@@ -26,8 +26,24 @@ from brain.skills.base import (
     action_wait,
 )
 
+try:
+    from vision.event_banner_matcher import (
+        BannerMatch,
+        EventBannerMatcher,
+        get_matcher as _get_banner_matcher,
+    )
+except Exception:  # pragma: no cover — fall back to OCR-only path
+    BannerMatch = None  # type: ignore[assignment]
+    EventBannerMatcher = None  # type: ignore[assignment]
+    _get_banner_matcher = None  # type: ignore[assignment]
+
 
 _STATE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "event_story_state.json"
+
+# Template-match score threshold for trusting a banner classification.
+# Calibrated from scripts/_test_event_banner_classifier.py: training
+# frames score 1.000, genuine-but-unseen lobbies score 0.69-0.99.
+_BANNER_MATCH_THRESHOLD = 0.55
 
 
 class EventActivitySkill(BaseSkill):
@@ -71,6 +87,15 @@ class EventActivitySkill(BaseSkill):
         self._quest_scroll_count: int = 0
         self._quest_node_pending: bool = False
         self._quest_idle_ticks: int = 0
+
+        # Template-match event classifier (template-based compare_image).
+        # Falls back to pure-OCR when templates are missing.
+        self._banner_matcher: Optional["EventBannerMatcher"] = None
+        if _get_banner_matcher is not None:
+            try:
+                self._banner_matcher = _get_banner_matcher()
+            except Exception:
+                self._banner_matcher = None
 
     def reset(self) -> None:
         super().reset()
@@ -337,6 +362,38 @@ class EventActivitySkill(BaseSkill):
             min_conf=0.55,
         )
 
+    # Map legacy OCR-region tuples used by existing call sites to the
+    # matcher's position key.  Call sites pass either the bottom-left
+    # banner region (x1<0.05) or the top-right widget region (x1>0.5).
+    @staticmethod
+    def _region_to_banner_position(
+        region: tuple,
+    ) -> Optional[str]:
+        try:
+            x1 = float(region[0])
+        except Exception:
+            return None
+        if x1 < 0.30:
+            return "bottom_left"
+        if x1 > 0.50:
+            return "top_right"
+        return None
+
+    def _classify_banner(
+        self, screen: ScreenState, position: str
+    ) -> Optional["BannerMatch"]:
+        """Return the matcher's best event classification for a given
+        banner position, or None if the matcher / frame is unavailable."""
+        if self._banner_matcher is None:
+            return None
+        frame = screen.load_image()
+        if frame is None:
+            return None
+        try:
+            return self._banner_matcher.classify(frame, position)
+        except Exception:
+            return None
+
     def _is_schale_signature(
         self,
         screen: ScreenState,
@@ -352,13 +409,20 @@ class EventActivitySkill(BaseSkill):
         handle its sub-objectives instead of this skill wasting ticks
         inside its UI.
 
-        BA cycles both the top-right widget AND the bottom-left banner
-        between multiple active events, so the caller passes the
-        region that matches the banner it is about to click (bottom
-        left: 0.0..0.30 × 0.60..0.92; top right: 0.55..1.0 × 0.0..0.35).
-        The 夏莱 text can be OCR'd as partially mangled characters, so
-        we also accept the common tail substring "聯邦" / "联邦".
+        Primary signal: template-based template matching
+        (``EventBannerMatcher``) against pre-cropped banner PNGs in
+        ``data/event_banners/``.  This beats OCR on stylised titles
+        where "夏萊" or "總結算" can get mangled.
+
+        Fallback: the legacy OCR text-search, used when templates are
+        missing or the classifier is inconclusive.
         """
+        position = self._region_to_banner_position(region)
+        if position is not None:
+            match = self._classify_banner(screen, position)
+            if match is not None and match.score >= _BANNER_MATCH_THRESHOLD:
+                return match.is_schale
+
         return bool(screen.find_any_text(
             ["夏萊", "夏莱", "聯邦學生會", "联邦学生会",
              "聯邦學生", "联邦学生",
@@ -367,6 +431,24 @@ class EventActivitySkill(BaseSkill):
             region=region,
             min_conf=0.45,
         ))
+
+    def _has_non_schale_event_banner(
+        self, screen: ScreenState, position: str
+    ) -> Optional["BannerMatch"]:
+        """Return the BannerMatch when the position shows a KNOWN
+        non-schale event with high confidence; None otherwise.
+
+        Used by the Lobby branch to decide whether to click a banner
+        immediately instead of waiting for the cycle.
+        """
+        match = self._classify_banner(screen, position)
+        if match is None:
+            return None
+        if match.score < _BANNER_MATCH_THRESHOLD:
+            return None
+        if not match.is_known_event or match.is_schale:
+            return None
+        return match
 
     def _find_reward_claim_timer(self, screen: ScreenState, *, region) -> Optional[Any]:
         """Detect expired event reward-claim banners (not current event)."""
@@ -607,12 +689,29 @@ class EventActivitySkill(BaseSkill):
                 self.log("only old event reward banner visible, no current event")
                 return action_done("reward-claim event only")
 
-            # ── PRIORITY 1: BIG bottom-left main-event banner ──
-            # This is the real entry to the current main event (e.g.
-            # Serenade Promenade).  The banner also cycles, so
-            # _find_main_event_banner already returns None if the
-            # current cycle is 夏莱 (daily-task grind handled by
-            # daily_tasks / campaign_push).
+            # ── PRIORITY 1a: template-match bottom-left non-schale event ──
+            # template-based compare_image: if the pre-cropped template for
+            # a non-夏莱 event (e.g. Serenade Promenade) lights up, click
+            # straight to the card center regardless of whether OCR
+            # found the EVENT!! / 活動進行中 label.
+            bl_match = self._has_non_schale_event_banner(screen, "bottom_left")
+            if bl_match is not None:
+                # bottom_left region is (0.01, 0.63, 0.33, 0.84) → center
+                self.log(
+                    f"bottom-left banner template-matched event "
+                    f"'{bl_match.event}' score={bl_match.score:+.3f} "
+                    f"-> clicking center"
+                )
+                return action_click(
+                    0.17, 0.735,
+                    f"click main event banner ({bl_match.event} template)",
+                )
+
+            # ── PRIORITY 1b: OCR fallback for unseen events ──
+            # When we don't have a template for the current event yet,
+            # fall back to finding the EVENT!! / 活動進行中 label via OCR.
+            # _find_main_event_banner already returns None if the card
+            # currently shows 夏莱 (daily-task grind handled elsewhere).
             main_banner = self._find_main_event_banner(screen)
             if main_banner:
                 # Click the banner image.  Label is at the top-left of
@@ -624,7 +723,7 @@ class EventActivitySkill(BaseSkill):
                     f"({main_banner.cx:.2f},{main_banner.cy:.2f}) "
                     f"-> clicking ({bx:.2f},{by:.2f})"
                 )
-                return action_click(bx, by, "click main event banner (bottom-left)")
+                return action_click(bx, by, "click main event banner (bottom-left OCR)")
 
             # ── PRIORITY 2: if bottom-left CURRENTLY shows 夏莱, wait ──
             # The bottom-left banner is the most reliable detector for

@@ -208,6 +208,37 @@ class ScreenState:
     # reference uses RGB pixel checks for button states. We sample at normalized
     # positions on the screenshot for resolution-independent state detection.
 
+    def load_image(self):
+        """Return the decoded BGR frame of this tick's screenshot.
+
+        The decoded ``np.ndarray`` is cached on the ``ScreenState`` so
+        multiple callers (sample_color, template matchers, HSV checks,
+        avatar matchers, …) share one JPEG decode per tick.
+
+        Returns ``None`` when no screenshot is available or decoding
+        fails.
+        """
+        cached = getattr(self, "_cached_bgr_image", None)
+        if cached is not None:
+            return cached
+        if not self.screenshot_path:
+            return None
+        try:
+            import cv2
+            import numpy as np
+            img = cv2.imdecode(
+                np.fromfile(self.screenshot_path, dtype=np.uint8),
+                cv2.IMREAD_COLOR,
+            )
+        except Exception:
+            img = None
+        # Cache even None so repeated failures don't re-attempt decode.
+        try:
+            object.__setattr__(self, "_cached_bgr_image", img)
+        except Exception:
+            pass
+        return img
+
     def sample_color(self, nx: float, ny: float, patch: int = 3) -> Optional[Tuple[int, int, int]]:
         """Sample average BGR color at normalized position (0-1).
 
@@ -218,17 +249,10 @@ class ScreenState:
 
         Returns (B, G, R) tuple, or None if screenshot not available.
         """
-        if not self.screenshot_path:
+        img = self.load_image()
+        if img is None:
             return None
         try:
-            import cv2
-            import numpy as np
-            img = cv2.imdecode(
-                np.fromfile(self.screenshot_path, dtype=np.uint8),
-                cv2.IMREAD_COLOR
-            )
-            if img is None:
-                return None
             h, w = img.shape[:2]
             px = max(patch, min(w - patch - 1, int(nx * w)))
             py = max(patch, min(h - patch - 1, int(ny * h)))
