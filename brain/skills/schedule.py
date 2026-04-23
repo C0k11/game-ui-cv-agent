@@ -595,8 +595,13 @@ class ScheduleSkill(BaseSkill):
                 if cell_size < 16:  # too tiny to be a real avatar
                     continue
                 sy = max(0, (strip_h - cell_size) // 2)
-                room_best_name = None
-                room_best_score = -1.0
+                room_best_name: Optional[str] = None          # accepted favorite
+                room_best_score: float = -1.0                 # accepted favorite score
+                room_top_overall: Optional[str] = None        # best overall student in any cell
+                room_top_overall_score: float = -1.0          # (for calibration log)
+                # Open-set pool (all ~250 templates) cached inside the matcher.
+                all_names = self._avatar_matcher.all_template_names()
+                fav_set = set(fav_names)
                 for slot in range(_CELLS_PER_ROOM):
                     sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
                     if sx + cell_size > strip_w:
@@ -604,10 +609,22 @@ class ScheduleSkill(BaseSkill):
                     cell = strip[sy:sy + cell_size, sx:sx + cell_size]
                     if cell.size == 0:
                         continue
-                    matched, score = self._avatar_matcher.match_avatar(cell, fav_names)
-                    if matched and score > room_best_score:
-                        room_best_name = matched
-                        room_best_score = score
+                    # Open-set verification: score against EVERY template,
+                    # then accept the cell's favorite only when the best
+                    # overall match is itself a favorite.  Otherwise the
+                    # cell genuinely shows a non-favorite student that
+                    # merely resembles a favorite (e.g. base Kayoko vs.
+                    # Kayoko_(Dress)) — a common false-positive pattern.
+                    fav_m, fav_s, all_m, all_s = \
+                        self._avatar_matcher.match_avatar_open_set(
+                            cell, fav_set, all_names,
+                        )
+                    if all_s > room_top_overall_score:
+                        room_top_overall = all_m
+                        room_top_overall_score = all_s
+                    if all_m in fav_set and fav_m == all_m and fav_s > room_best_score:
+                        room_best_name = fav_m
+                        room_best_score = fav_s
                 if room_best_name and room_best_score > _AVATAR_MATCH_THRESHOLD:
                     self.log(
                         f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
@@ -617,12 +634,14 @@ class ScheduleSkill(BaseSkill):
                         best_name = room_best_name
                         best_score = room_best_score
                         best_room = room_idx
-                elif room_best_name:
-                    # Below threshold but still log for calibration.
+                elif room_top_overall:
+                    # No cell passed open-set verification.  Log the
+                    # winning non-favorite so we can see who was actually
+                    # present in the roster (useful for tuning).
                     self.log(
                         f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                        f"top='{room_best_name}' score={room_best_score:.2f} "
-                        f"(below thr={_AVATAR_MATCH_THRESHOLD})"
+                        f"no favorite (top overall='{room_top_overall}' "
+                        f"score={room_top_overall_score:.2f})"
                     )
 
         if best_name and best_room >= 0:
