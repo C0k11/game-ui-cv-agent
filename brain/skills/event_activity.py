@@ -512,19 +512,35 @@ class EventActivitySkill(BaseSkill):
 
         current = self.detect_current_screen(screen)
 
-        # Back out of 主線劇情 (main story menu) — it shares the '劇情'
-        # hub-marker with the Campaign hub so detect_current_screen
-        # classifies it as "Mission", but it has no event entries and
-        # keeps the skill looping here until timeout.  A plain BACK
-        # press returns to the Campaign hub / Lobby where the event
-        # tiles live.
-        if screen.find_any_text(
+        # Back out of 劇情 / 主線劇情 (story menus) — these share the
+        # '劇情' hub-marker so detect_current_screen classifies them
+        # as "Mission", but they have no event entries.  Without this
+        # guard the Mission branch's event_entry fallback matches the
+        # 主線劇情 / 短篇劇情 / 支線劇情 panel titles and pings back
+        # and forth between the two screens.  Detect the page HEADER
+        # (region y<0.10) — body panels sit below y≈0.18 so that band
+        # is unique to the top-bar.
+        story_header = screen.find_any_text(
             ["主線劇情", "主线剧情", "主線劇", "主线剧"],
             region=(0.0, 0.0, 0.28, 0.10),
             min_conf=0.55,
-        ):
-            self.log("on 主線劇情 menu (dead end for event_activity), backing out")
-            return action_back("back out of main-story menu")
+        )
+        if story_header is None:
+            # Plain "劇情" header means the Story hub (list of
+            # main/short/side story panels).  Disambiguate from the
+            # Campaign "任務" hub by checking the header doesn't ALSO
+            # contain 任務 — the Campaign hub has 任務 header.
+            story_header = screen.find_any_text(
+                ["^劇情$", "^剧情$"],
+                region=(0.0, 0.0, 0.15, 0.10),
+                min_conf=0.6,
+            )
+        if story_header:
+            self.log(
+                f"on story-type menu ('{story_header.text}') — dead end "
+                f"for event_activity, backing out"
+            )
+            return action_back("back out of story menu")
 
         if current == "Lobby":
             # Check for OLD event reward-claim banner first — skip it
