@@ -380,7 +380,16 @@ class ScheduleSkill(BaseSkill):
             except (KeyError, TypeError, ValueError):
                 statuses.append("unknown")
                 continue
-            roi = img[py1:py2, px1:px2]
+            # The canvas-tuned strips cover only the avatar FACE area, but
+            # BA's 'done' green ✓ overlay sits on the TOP-RIGHT of each
+            # avatar — that is, ABOVE the face strip.  Extend the strip
+            # upward by 2x its own height for the status check so the
+            # checkmark pixels actually fall inside the ROI.  We only do
+            # this for green detection; avatar matching still uses the
+            # tight strip (wide aspect ratio preserved).
+            strip_h = max(1, py2 - py1)
+            sy1 = max(0, py1 - 2 * strip_h)
+            roi = img[sy1:py2, px1:px2]
             if roi.size == 0:
                 statuses.append("unknown")
                 continue
@@ -563,6 +572,13 @@ class ScheduleSkill(BaseSkill):
                 if room_idx >= _NUM_ROOMS:
                     break
                 if statuses[room_idx] not in ("available", "unknown"):
+                    continue
+                # Don't re-target a room we've already dispatched a
+                # schedule to at this location.  Without this guard the
+                # scan cycle that runs after the roster reappears will
+                # re-match the same favorite and click the same room
+                # forever (observed in run_20260422_214941 ticks 19–59).
+                if room_idx in self._clicked_rooms_this_location:
                     continue
                 px1 = int(s["x1"] * w)
                 py1 = int(s["y1"] * h)
