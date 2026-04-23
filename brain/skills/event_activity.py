@@ -298,6 +298,35 @@ class EventActivitySkill(BaseSkill):
             min_conf=0.55,
         )
 
+    def _find_campaign_event_tile(self, screen: ScreenState) -> Optional[Any]:
+        """Detect the main-event tile on the Campaign/Mission hub.
+
+        On that screen the layout is:
+          * TOP-LEFT small banner (x<0.30, y<0.25)     = 夏莱 grind banner
+          * 任務 / 劇情 big tiles                     = main campaign entry
+          * Small tile grid at y≈0.50–0.90 with a red "活動進行中" ribbon
+            marking the current main event (e.g. 學園交流會 for
+            Serenade Promenade).
+
+        We look for the 活動進行中 ribbon in the tile-grid region —
+        outside the 夏莱 banner area — so the click lands on the real
+        event entry.
+        """
+        # Primary signal: the red ribbon
+        ribbon = screen.find_any_text(
+            ["活動進行中", "活动进行中", "活動進行", "活动进行"],
+            region=(0.30, 0.65, 0.98, 0.92),
+            min_conf=0.55,
+        )
+        if ribbon:
+            return ribbon
+        # Secondary: known event-tile titles
+        return screen.find_any_text(
+            ["學園交流會", "学园交流会", "學園交流", "学园交流"],
+            region=(0.30, 0.65, 0.98, 0.92),
+            min_conf=0.55,
+        )
+
     def _is_schale_signature(self, screen: ScreenState) -> bool:
         """Return True if the top-right cycling widget currently shows the
         夏莱 總結算 (Schale Final Settlement) event.
@@ -554,7 +583,37 @@ class EventActivitySkill(BaseSkill):
                 self.log("campaign: only old event reward banner")
                 return action_done("campaign reward-claim event only")
 
+            # ── PRIORITY 1: main event tile (活動進行中 ribbon / 學園交流會) ──
+            # On the Campaign hub the real current event lives in the
+            # tile grid with a red 活動進行中 ribbon.  Prefer it over the
+            # top-left 夏莱 banner, which is a daily-task grind that
+            # daily_tasks / campaign_push already handle.
+            event_tile = self._find_campaign_event_tile(screen)
+            if event_tile:
+                tx = event_tile.cx
+                ty = min(max(event_tile.cy + 0.04, 0.74), 0.88)
+                self.log(
+                    f"campaign main-event tile: '{event_tile.text}' at "
+                    f"({event_tile.cx:.2f},{event_tile.cy:.2f}) "
+                    f"-> clicking ({tx:.2f},{ty:.2f})"
+                )
+                return action_click(tx, ty, "click main event tile (campaign)")
+
+            # ── PRIORITY 2: top-left 夏莱 timer — only if no main tile ──
+            # If the ONLY event marker on the hub is the 夏莱 banner,
+            # give it a few ticks (main tile may appear after a panel
+            # load animation) and then skip so daily_tasks handles 夏莱.
             timer = self._find_event_timer(screen, region=(0.0, 0.04, 0.32, 0.26))
+            if timer and self._is_schale_signature(screen):
+                if self._enter_ticks <= 4:
+                    self.log(
+                        f"campaign top-left banner is 夏莱 grind "
+                        f"('{timer.text}'), waiting for main tile to render"
+                    )
+                    return action_wait(1000, "schale-only campaign, waiting for main tile")
+                self.log("campaign: only 夏莱 banner, skipping")
+                return action_done("schale-only campaign, deferred to daily tasks")
+
             if timer:
                 self.log(f"campaign event timer visible: '{timer.text}', opening event")
                 return action_click(timer.cx, min(timer.cy + 0.08, 0.35), "click campaign event banner")
