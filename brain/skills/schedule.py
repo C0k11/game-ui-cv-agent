@@ -359,33 +359,37 @@ class ScheduleSkill(BaseSkill):
         except Exception:
             return ["unknown"] * _NUM_ROOMS
 
-        statuses = []
-        room_idx = 0
-        for ri, (ry1, ry2) in enumerate(self._AVATAR_ROWS_Y):
-            for ci, (cx1, cx2) in enumerate(self._AVATAR_COLS_X):
-                if room_idx >= _NUM_ROOMS:
-                    break
-                px1 = int(cx1 * w)
-                py1 = int(ry1 * h)
-                px2 = int(cx2 * w)
-                py2 = int(ry2 * h)
-                roi = img[py1:py2, px1:px2]
-                if roi.size == 0:
-                    statuses.append("unknown")
-                    room_idx += 1
-                    continue
-                # Green checkmark: H=35-85, S>80, V>100 (bright green overlay)
-                hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-                green_mask = cv2.inRange(hsv, np.array([35, 80, 100]),
-                                         np.array([85, 255, 255]))
-                green_ratio = (green_mask.sum() / 255) / max(1, roi.shape[0] * roi.shape[1])
-                if green_ratio > 0.005:
-                    statuses.append("done")
-                else:
-                    statuses.append("available")
-                room_idx += 1
+        # Use the same strip list that _check_roster_avatars uses — this
+        # comes from data/schedule_avatar_regions.json when present, or
+        # falls back to the class-level defaults (_default_strips()).
+        # NOTE: _AVATAR_ROWS_Y / _AVATAR_COLS_X were removed when the
+        # region config was flattened to strips; referencing them here
+        # crashed with AttributeError and aborted the pipeline worker
+        # (see run_20260422_213826 tick 8).
+        statuses: List[str] = []
+        strips = (self._avatar_regions_cfg or {}).get("strips") \
+            or self._default_strips()
+        for room_idx, s in enumerate(strips):
             if room_idx >= _NUM_ROOMS:
                 break
+            try:
+                px1 = int(float(s["x1"]) * w)
+                py1 = int(float(s["y1"]) * h)
+                px2 = int(float(s["x2"]) * w)
+                py2 = int(float(s["y2"]) * h)
+            except (KeyError, TypeError, ValueError):
+                statuses.append("unknown")
+                continue
+            roi = img[py1:py2, px1:px2]
+            if roi.size == 0:
+                statuses.append("unknown")
+                continue
+            # Green checkmark: H=35-85, S>80, V>100 (bright green overlay)
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            green_mask = cv2.inRange(hsv, np.array([35, 80, 100]),
+                                     np.array([85, 255, 255]))
+            green_ratio = (green_mask.sum() / 255) / max(1, roi.shape[0] * roi.shape[1])
+            statuses.append("done" if green_ratio > 0.005 else "available")
         while len(statuses) < _NUM_ROOMS:
             statuses.append("unknown")
         return statuses
