@@ -37,6 +37,15 @@ except Exception:  # pragma: no cover — fall back to OCR-only path
     EventBannerMatcher = None  # type: ignore[assignment]
     _get_banner_matcher = None  # type: ignore[assignment]
 
+# Per-event persistent progress (see brain/skills/event_progress.py).
+# Records which story / mission / challenge nodes have been beaten, so a
+# bot restart mid-event can resume without re-running completed nodes —
+# inspired by reference's per-activity JSON but with a single generic store
+# plus per-event metadata keyed by the event id our banner matcher emits.
+from brain.skills.event_progress import (  # noqa: E402
+    EventProgressStore,
+    get_store as _get_progress_store,
+)
 
 _STATE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "event_story_state.json"
 
@@ -53,6 +62,13 @@ class EventActivitySkill(BaseSkill):
 
         self._enter_ticks: int = 0
         self._phase_ticks: int = 0
+        # Per-event persistent progress store.  Populated lazily — the
+        # event id is not known until the banner matcher identifies the
+        # current event inside _enter().  Until then we fall back to the
+        # conservative "unknown event" default where every phase reports
+        # done immediately and the skill exits gracefully.
+        self._progress_store: EventProgressStore = _get_progress_store()
+        self._current_event_id: str = ""
         # Set each tick _is_schale_signature fires on the bottom-left region;
         # persists for ~N ticks after so a mid-cycle transition (schale just
         # faded out, next banner not yet rendered) still forbids OCR-fallback
@@ -127,10 +143,21 @@ class EventActivitySkill(BaseSkill):
         self._battle_speed_set = False
         self._reward_fallback_streak = 0
 
-        _state = self._load_state()
-        self._current_story_index = max(1, int(_state.get("current_story_index", 1)))
-        self._story_done = bool(_state.get("story_done", False))
-        self._challenge_done = bool(_state.get("challenge_done", False))
+        # Event id is set inside _enter() once the banner matcher
+        # identifies the current event.  Until that happens the store
+        # returns zeroed metadata and all helper calls are no-ops — we
+        # keep running on the old in-memory counters as a safety net.
+        self._current_event_id = ""
+
+        # Seed the local counters from whatever progress the store has
+        # persisted for the last-seen event.  If no event was played
+        # before, or this is a fresh event rotation, these default to 1.
+        self._current_story_index = 1
+        self._quest_current_index = 1
+        self._story_done = False
+        self._challenge_done = False
+        self._mission_done = False
+
         self._story_scroll_count = 0
         self._max_story_index_seen = 0
         self._story_node_pending = False
@@ -138,20 +165,92 @@ class EventActivitySkill(BaseSkill):
         self._story_completed_streak = 0
         self._no_game_ticks = 0
 
-        self._mission_done = False
         self._mission_tab_clicked = False
-        self._quest_current_index = 1
         self._quest_scroll_count = 0
         self._quest_node_pending = False
         self._quest_idle_ticks = 0
         self._quest_consecutive_locks = 0
         self._story_consecutive_locks = 0
 
-    # ── Story index persistence ──
+    # ── Per-event persistence (backed by brain/skills/event_progress) ──
+    #
+    # The store is keyed by ``event_id`` (e.g. ``"serenade_promenade"``)
+    # and tracks, per phase, the SET of node indices that have been
+    # beaten.  Derived views:
+    #
+    #   _phase_done(phase)  →  True iff every node 1..total is beaten
+    #   _next_node(phase)   →  smallest unfinished node (>=1), or
+    #                          total+1 when the phase is fully done
+    #   _mark_node_done()   →  append a node to the completed set and
+    #                          fsync the store so a crash between
+    #                          nodes still preserves progress
+    #
+    # If no event id has been detected yet (template matcher hasn't
+    # fired), every accessor is a defensive no-op / conservative
+    # default so the skill keeps working on the old counters.
+
+    def _event_total(self, phase: str) -> int:
+        if not self._current_event_id:
+            return 0
+        return self._progress_store.metadata(self._current_event_id).total_for(phase)
+
+    def _phase_done(self, phase: str) -> bool:
+        if not self._current_event_id:
+            return False
+        return self._progress_store.phase_done(self._current_event_id, phase)
+
+    def _next_node(self, phase: str) -> int:
+        """First unfinished node index for this phase, or ``total + 1``.
+
+        Returns 1 when no event id has been detected yet so the skill's
+        existing "start from node 1" behaviour is preserved.
+        """
+        if not self._current_event_id:
+            return 1
+        nxt = self._progress_store.next_node(self._current_event_id, phase)
+        if nxt is not None:
+            return nxt
+        return max(1, self._event_total(phase) + 1)
+
+    def _mark_node_done(self, phase: str, node: int) -> None:
+        if not self._current_event_id or node < 1:
+            return
+        self._progress_store.mark_done(self._current_event_id, phase, node)
+
+    def _set_current_event(self, event_id: str) -> None:
+        """Called from _enter when banner match identifies the event.
+
+        Resyncs local counters from the store so we resume at the right
+        node after a restart.  Idempotent — only does real work the
+        first time we see a new event id or when switching events.
+        """
+        if not event_id or event_id == self._current_event_id:
+            return
+        self._current_event_id = event_id
+        self._current_story_index = self._next_node("story")
+        self._quest_current_index = self._next_node("mission")
+        # `_story_done` / `_mission_done` / `_challenge_done` remain as
+        # in-memory caches but we now derive them from the store so a
+        # timeout can't prematurely declare a phase complete.
+        self._story_done = self._phase_done("story")
+        self._mission_done = self._phase_done("mission")
+        self._challenge_done = self._phase_done("challenge")
+        meta = self._progress_store.metadata(event_id)
+        summary = self._progress_store.summary(event_id)
+        self.log(
+            f"event identified: {event_id} ({meta.display_name or 'no-metadata'}) "
+            f"progress story={summary['story']} mission={summary['mission']} "
+            f"challenge={summary['challenge']} — "
+            f"story@{self._current_story_index} quest@{self._quest_current_index}"
+        )
+
+    # Legacy methods kept as thin shims so the rest of the (large)
+    # skill body doesn't need to learn the new API in a single diff.
+    # These now write through to the store AND to the legacy JSON file
+    # so external tooling (dashboards, unit tests) keeps working.
 
     @staticmethod
     def _load_state() -> dict:
-        """Load persisted event state (survives skill reset / restart)."""
         try:
             if _STATE_FILE.exists():
                 return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
@@ -160,14 +259,16 @@ class EventActivitySkill(BaseSkill):
         return {}
 
     def _save_state(self) -> None:
-        """Persist current event state so re-entry skips completed phases."""
         try:
             _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             _STATE_FILE.write_text(
                 json.dumps({
+                    "event_id": self._current_event_id,
                     "current_story_index": self._current_story_index,
-                    "story_done": self._story_done,
-                    "challenge_done": self._challenge_done,
+                    "current_quest_index": self._quest_current_index,
+                    "story_done": self._phase_done("story"),
+                    "mission_done": self._phase_done("mission"),
+                    "challenge_done": self._phase_done("challenge"),
                 }, ensure_ascii=False),
                 encoding="utf-8",
             )
@@ -175,11 +276,9 @@ class EventActivitySkill(BaseSkill):
             pass
 
     def _save_story_index(self) -> None:
-        """Persist current story index (alias for _save_state)."""
         self._save_state()
 
     def _clear_story_state(self) -> None:
-        """Persist done flags when story phase is fully complete."""
         self._save_state()
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
@@ -599,25 +698,63 @@ class EventActivitySkill(BaseSkill):
 
         if self._is_event_page(screen):
             self._phase_ticks = 0
-            if not self._story_done:
+            # Phase dispatch follows reference order (story → quest → challenge)
+            # but uses the persistent store as the source of truth so a
+            # timeout inside a phase can't prematurely skip ahead.  Each
+            # _phase_done(x) returns True iff every node 1..total for
+            # phase x is in the store's completed set for the current
+            # event id (unknown-to-metadata events zero-total to True).
+            #
+            # The legacy in-memory *_done booleans are SESSION-ABORT
+            # signals — set when AP depletes, a 4-completion streak
+            # fires, or a phase hits its hard timeout.  Rule: if the
+            # store says the phase is still incomplete but the session
+            # flag says "we gave up", we exit the skill WITHOUT moving
+            # on to the next phase.  User invariant: story 1..N must
+            # actually finish before any quest node is attempted.
+            story_ok = self._phase_done("story")
+            if not story_ok:
+                if self._story_done:
+                    self.log(
+                        f"story incomplete ({self._next_node('story') - 1}/"
+                        f"{self._event_total('story')}) but session aborted "
+                        f"— exiting without touching quest"
+                    )
+                    self.sub_state = "exit"
+                    return action_wait(200, "story incomplete, session aborted")
                 self.sub_state = "story"
-                self.log("event page ready -> story phase")
+                self.log(
+                    f"event page ready -> story phase "
+                    f"(next node {self._next_node('story'):02d}/"
+                    f"{self._event_total('story')})"
+                )
                 return action_wait(250, "start event story phase")
-            else:
-                self.log("story phase already done (persisted)")
-            # reference order: story → quest (mission) → challenge
-            if not self._mission_done:
+            self.log("story phase fully done, checking mission")
+
+            mission_ok = self._phase_done("mission")
+            if not mission_ok:
+                if self._mission_done:
+                    self.log(
+                        f"mission incomplete ({self._next_node('mission') - 1}/"
+                        f"{self._event_total('mission')}) but session aborted "
+                        f"— exiting without touching challenge"
+                    )
+                    self.sub_state = "exit"
+                    return action_wait(200, "mission incomplete, session aborted")
                 self.sub_state = "mission"
-                self.log("story done -> mission (quest) phase")
+                self.log(
+                    f"story done -> mission phase "
+                    f"(next node {self._next_node('mission'):02d}/"
+                    f"{self._event_total('mission')})"
+                )
                 return action_wait(250, "start event mission phase")
-            else:
-                self.log("mission (quest) phase already done")
-            if not self._challenge_done:
+            self.log("mission phase fully done, checking challenge")
+
+            if not self._phase_done("challenge") and not self._challenge_done:
                 self.sub_state = "challenge"
                 self.log("mission done -> challenge phase")
                 return action_wait(250, "start event challenge phase")
-            else:
-                self.log("challenge phase already done (persisted)")
+            self.log("challenge phase already done")
             self.sub_state = "exit"
             return action_wait(200, "event phases complete")
 
@@ -724,6 +861,13 @@ class EventActivitySkill(BaseSkill):
                     f"'{bl_match.event}' score={bl_match.score:+.3f} "
                     f"-> clicking center"
                 )
+                # Bind the skill to this event id so per-phase progress
+                # is loaded/persisted under the right key before we
+                # even enter the event page.  Doing it here (lobby)
+                # rather than inside the event page lets _enter use
+                # the persisted state to decide whether to dispatch to
+                # story / mission / challenge when we land on the hub.
+                self._set_current_event(bl_match.event)
                 return action_click(
                     0.17, 0.735,
                     f"click main event banner ({bl_match.event} template)",
@@ -1074,7 +1218,12 @@ class EventActivitySkill(BaseSkill):
                 self._story_completed_streak += 1
                 self.log(f"story node {self._current_story_index:02d} already completed "
                          f"(streak={self._story_completed_streak})")
-                self._current_story_index += 1
+                # In-game UI confirms this node is clear — persist it
+                # so a restart skips straight to the next unfinished one.
+                self._mark_node_done("story", self._current_story_index)
+                self._current_story_index = max(
+                    self._current_story_index + 1, self._next_node("story")
+                )
                 self._save_story_index()
                 self._story_scroll_count = 0
                 self._story_tab_clicked = False
@@ -1096,14 +1245,24 @@ class EventActivitySkill(BaseSkill):
             )
             if enter_chapter:
                 self.log(f"story node {self._current_story_index:02d} chapter entering")
-                self._current_story_index += 1
+                # Clicking 進入章節 commits us to this node; mark it
+                # done proactively so an interruption between click
+                # and reward doesn't strand the index (reference also
+                # advances their counter right after the start click).
+                self._mark_node_done("story", self._current_story_index)
+                self._current_story_index = max(
+                    self._current_story_index + 1, self._next_node("story")
+                )
                 self._save_story_index()
                 self._story_scroll_count = 0
                 self._story_tab_clicked = False
                 return action_click_box(enter_chapter, "click 進入章節 (story chapter)")
             # Fallback: click hardcoded 進入章節 position
             self.log(f"story node {self._current_story_index:02d} chapter entering (hardcoded)")
-            self._current_story_index += 1
+            self._mark_node_done("story", self._current_story_index)
+            self._current_story_index = max(
+                self._current_story_index + 1, self._next_node("story")
+            )
             self._save_story_index()
             self._story_scroll_count = 0
             self._story_tab_clicked = False
@@ -1139,7 +1298,10 @@ class EventActivitySkill(BaseSkill):
             )
             if start_btn:
                 self.log(f"story node {self._current_story_index:02d} battle starting")
-                self._current_story_index += 1
+                self._mark_node_done("story", self._current_story_index)
+                self._current_story_index = max(
+                    self._current_story_index + 1, self._next_node("story")
+                )
                 self._save_story_index()
                 self._story_scroll_count = 0
                 # Reset tab flag — after battle reward we'll be on hub,
@@ -1161,7 +1323,11 @@ class EventActivitySkill(BaseSkill):
                     f"story node {self._current_story_index:02d} has no objectives: "
                     f"'{no_goals.text}', advancing"
                 )
-                self._current_story_index += 1
+                # No-objectives = already cleared (reward taken); mark it.
+                self._mark_node_done("story", self._current_story_index)
+                self._current_story_index = max(
+                    self._current_story_index + 1, self._next_node("story")
+                )
                 self._save_story_index()
                 self._story_scroll_count = 0
                 return action_back("skip node with no objectives")
@@ -1684,7 +1850,10 @@ class EventActivitySkill(BaseSkill):
             )
             if start_btn:
                 self.log(f"quest node {self._quest_current_index:02d} starting battle")
-                self._quest_current_index += 1
+                self._mark_node_done("mission", self._quest_current_index)
+                self._quest_current_index = max(
+                    self._quest_current_index + 1, self._next_node("mission")
+                )
                 self._quest_scroll_count = 0
                 self._mission_tab_clicked = False
                 return action_click_box(start_btn, "click 任務開始 (quest)")
@@ -1698,7 +1867,10 @@ class EventActivitySkill(BaseSkill):
             )
             if no_goals:
                 self.log(f"quest node {self._quest_current_index:02d} no objectives, advancing")
-                self._quest_current_index += 1
+                self._mark_node_done("mission", self._quest_current_index)
+                self._quest_current_index = max(
+                    self._quest_current_index + 1, self._next_node("mission")
+                )
                 self._quest_scroll_count = 0
                 return action_back("skip quest node with no objectives")
 

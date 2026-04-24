@@ -1,0 +1,19 @@
+{
+  "_comment": "Per-event static config. total_story / total_mission / total_challenge are the number of nodes we expect the event to expose. Cross-checked against reference's src/explore_task_data/activities/*.json and verified against real lobby screenshots. Unknown events fall back to zeroed totals (phase_done immediately returns True, skill exits gracefully).",
+  "events": {
+    "serenade_promenade": {
+      "display_name": "Serenade Promenade",
+      "total_story": 8,
+      "total_mission": 12,
+      "total_challenge": 4,
+      "phase_order": ["story", "mission", "challenge"]
+    },
+    "schale_summary": {
+      "display_name": "Schale Summary (夏萊總結算)",
+      "total_story": 0,
+      "total_mission": 0,
+      "total_challenge": 0,
+      "phase_order": []
+    }
+  }
+}
