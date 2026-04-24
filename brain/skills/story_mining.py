@@ -222,10 +222,45 @@ class StoryMiningSkill(BaseSkill):
             self.sub_state = "grid"
             return self._on_grid(screen)
 
-        if self._enter_ticks > 6:
-            self.log("story hub not detected, skipping")
+        # Not on hub / category page → navigate there from wherever we are.
+        # Mirrors StoryCleanup._enter's traversal: Lobby -> 任務 button ->
+        # Mission page -> 劇情 entry -> story hub.
+        current = self.detect_current_screen(screen)
+
+        if current == "Lobby":
+            campaign_btn = screen.find_any_text(
+                ["任務", "任务"],
+                region=(0.80, 0.70, 1.0, 0.90),
+                min_conf=0.6,
+            )
+            if campaign_btn:
+                return action_click_box(
+                    campaign_btn, "open 任務 for story mining",
+                )
+            return action_click(0.95, 0.83, "open 任務 (hardcoded)")
+
+        if current == "Mission":
+            story_entry = screen.find_any_text(
+                ["劇情", "剧情", "Story"],
+                min_conf=0.5,
+            )
+            if story_entry:
+                return action_click_box(
+                    story_entry, "enter 劇情 hub",
+                )
+            if self._enter_ticks > 6:
+                return action_click(0.26, 0.71, "enter 劇情 hub (hardcoded)")
+            return action_wait(350, "looking for 劇情 entry")
+
+        if current and current not in ("Lobby", "Mission"):
+            return action_back(f"back from {current} toward story hub")
+
+        # Unknown screen — wait briefly and retry, cap at 28 ticks so
+        # we don't block the pipeline forever.
+        if self._enter_ticks > 28:
+            self.log("story hub unreachable, skipping")
             return action_done("story hub not reached")
-        return action_wait(400, "searching for story hub")
+        return action_wait(450, "searching for story hub")
 
     # ── hub ────────────────────────────────────────────────────────
 
