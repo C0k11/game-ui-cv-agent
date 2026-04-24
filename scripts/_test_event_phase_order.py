@@ -146,6 +146,31 @@ def run_tests() -> int:
         assert skill4._next_node("story") == 4
         print("PASS fresh instance after session abort resumes story@4")
 
+        # CRITICAL: memo fallback.  The previous fresh-instance test
+        # called _set_current_event manually to mimic the lobby banner
+        # matcher firing — but in real runs the skill can start already
+        # on the event page with no banner visible (chained after daily
+        # tasks, or user opened the event page before triggering the
+        # bot).  The store's persisted current_event_id memo must let
+        # reset() seed the counters from the right event's progress.
+        assert ep.get_store().get_current_event_id() == "serenade_promenade", \
+            "memo should have been persisted by earlier _set_current_event calls"
+        skill5 = EventActivitySkill()
+        skill5.reset()
+        # Did NOT call _set_current_event — mimicking "skill starts
+        # directly on event page".  The memo fallback should still
+        # bind us to serenade_promenade progress.
+        assert skill5._current_event_id == "serenade_promenade", (
+            f"memo fallback failed: _current_event_id={skill5._current_event_id!r}"
+        )
+        assert skill5._current_story_index == 4, (
+            f"memo-recovered skill should resume story@4, got {skill5._current_story_index}"
+        )
+        assert skill5._next_node("story") == 4
+        assert not skill5._phase_done("story")
+        print("PASS memo fallback: skill starting mid-event page "
+              "recovers event_id and resumes at story@4")
+
     print("\nRESULT: phase-order invariants hold")
     return 0
 

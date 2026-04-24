@@ -144,6 +144,11 @@ class EventProgressStore:
     single thread, and backend restarts serialise file I/O anyway.  A
     re-entrant lock makes it safe to call ``mark_done`` and ``save``
     from nested helpers without deadlocking.
+
+    Also persists a top-level ``current_event_id`` memo (the event id
+    last set via :meth:`set_current_event`), which the skill uses as a
+    fallback when it starts already on the event page and so never got
+    a chance to classify the lobby banner.
     """
 
     def __init__(
@@ -156,6 +161,7 @@ class EventProgressStore:
         self._lock = threading.RLock()
         self._metadata: Dict[str, EventMetadata] = {}
         self._progress: Dict[str, EventProgress] = {}
+        self._current_event_id: str = ""
         self._load()
 
     # -- io ---------------------------------------------------------------
@@ -164,6 +170,16 @@ class EventProgressStore:
         with self._lock:
             self._metadata = self._load_metadata()
             self._progress = self._load_progress()
+            self._current_event_id = self._load_current_event_id()
+
+    def _load_current_event_id(self) -> str:
+        if not self._progress_path.exists():
+            return ""
+        try:
+            raw = json.loads(self._progress_path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        return str(raw.get("current_event_id", "") or "")
 
     def _load_metadata(self) -> Dict[str, EventMetadata]:
         if not self._metadata_path.exists():
@@ -222,20 +238,47 @@ class EventProgressStore:
         with self._lock:
             self._progress_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._progress_path.with_suffix(".json.tmp")
-            data = {"events": {
-                eid: {
-                    "story": {"completed": list(p.story.completed)},
-                    "mission": {"completed": list(p.mission.completed)},
-                    "challenge": {"completed": list(p.challenge.completed)},
-                    "last_phase": p.last_phase,
-                    "last_updated": p.last_updated,
-                } for eid, p in self._progress.items()
-            }}
+            data = {
+                "current_event_id": self._current_event_id,
+                "events": {
+                    eid: {
+                        "story": {"completed": list(p.story.completed)},
+                        "mission": {"completed": list(p.mission.completed)},
+                        "challenge": {"completed": list(p.challenge.completed)},
+                        "last_phase": p.last_phase,
+                        "last_updated": p.last_updated,
+                    } for eid, p in self._progress.items()
+                },
+            }
             tmp.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             tmp.replace(self._progress_path)
+
+    # -- current-event memo ---------------------------------------------
+    #
+    # The skill sets this the moment the lobby banner matcher identifies
+    # the running event.  On a subsequent run where the skill starts
+    # directly on the event page (e.g. chained from another skill that
+    # opened the event, or user-triggered from the dashboard with the
+    # event page already open), the memo provides a reliable fallback
+    # so the progress lookup still scopes to the right event id.  The
+    # memo survives the banner-template-matcher failing because we
+    # deliberately persist only ids that came from a successful match.
+
+    def get_current_event_id(self) -> str:
+        with self._lock:
+            return self._current_event_id
+
+    def set_current_event_id(self, event_id: str) -> None:
+        if not event_id:
+            return
+        with self._lock:
+            if event_id == self._current_event_id:
+                return
+            self._current_event_id = event_id
+            self.save()
 
     # -- getters ---------------------------------------------------------
 
@@ -282,6 +325,8 @@ class EventProgressStore:
         """Wipe all progress for an event (e.g. event rotated out)."""
         with self._lock:
             self._progress.pop(event_id, None)
+            if self._current_event_id == event_id:
+                self._current_event_id = ""
             self.save()
 
     # -- convenience (keeps the skill terse) -----------------------------

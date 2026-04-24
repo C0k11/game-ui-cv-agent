@@ -144,19 +144,31 @@ class EventActivitySkill(BaseSkill):
         self._reward_fallback_streak = 0
 
         # Event id is set inside _enter() once the banner matcher
-        # identifies the current event.  Until that happens the store
-        # returns zeroed metadata and all helper calls are no-ops — we
-        # keep running on the old in-memory counters as a safety net.
-        self._current_event_id = ""
+        # identifies the current event — BUT we also seed it from the
+        # store's persisted "last-seen event" memo so a skill run that
+        # starts already on the event page (e.g. chained after daily
+        # tasks, or the user manually opened the event page before
+        # triggering the bot) still scopes progress to the right event
+        # without having to pass through the lobby banner first.
+        memo = self._progress_store.get_current_event_id()
+        self._current_event_id = memo
 
         # Seed the local counters from whatever progress the store has
-        # persisted for the last-seen event.  If no event was played
+        # persisted for the memoised event.  If no event was played
         # before, or this is a fresh event rotation, these default to 1.
-        self._current_story_index = 1
-        self._quest_current_index = 1
-        self._story_done = False
-        self._challenge_done = False
-        self._mission_done = False
+        self._current_story_index = self._next_node("story") if memo else 1
+        self._quest_current_index = self._next_node("mission") if memo else 1
+        self._story_done = self._phase_done("story") if memo else False
+        self._mission_done = self._phase_done("mission") if memo else False
+        self._challenge_done = self._phase_done("challenge") if memo else False
+        if memo:
+            summary = self._progress_store.summary(memo)
+            self.log(
+                f"restored last-seen event '{memo}' from store memo: "
+                f"story={summary['story']} mission={summary['mission']} "
+                f"challenge={summary['challenge']} — "
+                f"story@{self._current_story_index} quest@{self._quest_current_index}"
+            )
 
         self._story_scroll_count = 0
         self._max_story_index_seen = 0
@@ -227,6 +239,10 @@ class EventActivitySkill(BaseSkill):
         if not event_id or event_id == self._current_event_id:
             return
         self._current_event_id = event_id
+        # Persist the memo so the next skill run can recover the event
+        # id even if it starts already on the event page (no lobby
+        # banner classification will fire there).
+        self._progress_store.set_current_event_id(event_id)
         self._current_story_index = self._next_node("story")
         self._quest_current_index = self._next_node("mission")
         # `_story_done` / `_mission_done` / `_challenge_done` remain as
