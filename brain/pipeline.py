@@ -43,6 +43,7 @@ from brain.skills.total_assault import TotalAssaultSkill
 from brain.skills.pass_reward import PassRewardSkill
 from brain.skills.joint_firing_drill import JointFiringDrillSkill
 from brain.skills.story_cleanup import StoryCleanupSkill
+from brain.skills.story_mining import StoryMiningSkill
 from brain.skills.campaign_push import CampaignPushSkill
 from brain.skills.ap_planning import ApPlanningSkill
 
@@ -558,6 +559,7 @@ class DailyPipeline:
             "craft": CraftSkill(),
             "momo_talk": MomoTalkSkill(),
             "story_cleanup": StoryCleanupSkill(),
+            "story_mining": StoryMiningSkill(),
             "event_activity": EventActivitySkill(),
             "bounty": BountySkill(),
             "arena": ArenaSkill(),
