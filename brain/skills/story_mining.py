@@ -1,57 +1,47 @@
 """StoryMiningSkill — auto-play unplayed chapters in 短篇 / 支線 stories.
 
-Corrected UI model (v2, based on user playtest 2026-04-24)
------------------------------------------------------------
+v3 design — grid-based grid model
+---------------------------------------
 
-    1.  **Hub** — the 劇情 page hosts four sub-cards.
-            · 主線劇情 (main)  — deferred to a later commit (grid-based push)
-            · 短篇劇情 (short) — this skill
-            · 支線劇情 (side)  — this skill
-            · 重播 (replay)    — ignored (no rewards)
+After playtests (run_20260424_010918/011049) and a deep read of reference
+(``study/ref/module/mini_story.py`` + ``group_story.py``), the correct
+UI model is:
 
-    2.  **Category page** — a *horizontal carousel* of volume cards
-        (篇).  Only ONE volume is centred at a time; siblings peek in
-        at the edges.  Navigation is via a left/right arrow button at
-        the screen edges (~x=0.03 and x=0.97); if the arrow template
-        doesn't land we fall back to a centred horizontal swipe.
+    * **Category page = 2×3 grid of volume cards** (NOT a single-card
+      carousel as v2 assumed).  reference's pixel coords at 1280×720 map
+      to these normalised card centres::
 
-        A volume card displays a "New" badge (top-left) when it
-        contains unplayed chapters.
+          col_x = [0.275, 0.727]        # 352/1280,  931/1280
+          row_y = [0.333, 0.550, 0.746] # 240/720,   396/720,   537/720
 
-    3.  **Volume detail** — clicking the centred volume card opens a
-        detail view with:
-            · big volume art + description on the left
-            · chapter list on the right, each row labelled
-              「第N章 標題」
-        Each chapter row shows a tiny yellow dot when it's playable,
-        a lock icon 🔒 when it's gated behind progression, and nothing
-        when already cleared.  We don't rely on colour detection for
-        this MVP — we use the combination of OCR-ordered rows plus
-        our progress ledger to pick the first unplayed chapter in
-        sequence.  Locked chapters surface as a modal popup we detect
-        and dismiss.
+      Each card has a small 'New' / '新' badge at its top-left corner::
 
-    4.  **Cutscene** — standard MENU → Skip → 確認 dance, same machine
-        as event_activity's story branch.
+          badge_col_x = [0.067, 0.516]     # 86/1280,   660/1280
+          badge_row_y = [0.215, 0.424, 0.633] # 155/720, 305/720, 456/720
+          badge_size   = (0.042, 0.035)      # 54×25 px
 
-State machine
--------------
+      A card shows 'New' when it contains unplayed chapters.
 
-    enter        — figure out where we are
-    hub          — on 劇情 hub; click the next category card
-    category     — on a carousel page; inspect current volume, click
-                   it if it has a 'New' badge, else advance carousel
-    volume       — on a volume detail page; click the first unplayed
-                   chapter row, or back out when none remain
-    playing      — inside a chapter cutscene; run the skip dance
-    finished     — done; advance pipeline
+    * **Page navigation**: a right-arrow at (0.98, 0.50) advances to the
+      next grid page; reference only probes the right arrow because short /
+      side stories scroll one-way.  We add a left-swipe fallback for
+      robustness (user-requested v2 policy).
 
-Main-story push is still deferred; when we encounter 主線劇情 we log
-and skip so the skill doesn't hang on an unsupported page.
+    * **Volume detail page**: up to 2 visible chapter entry rows.  reference
+      probes the 入場 button colour at (1073, 251) and (1073, 351) —
+      normalised (0.838, 0.349) and (0.838, 0.488).  We mirror this via
+      OCR of the 入場 / Enter text + fall back to the fixed click
+      anchors when OCR misses the button.
+
+    * **Cutscene**: same MENU → Skip → 確認 dance as v2.
+
+The category pages are entered from the 劇情 hub (the 主線/短篇/支線/
+重播 triad page).  主線劇情 has a *different* UI that reference handles
+separately in ``main_story.py`` — we still back out of it here and
+leave the port to a dedicated follow-up commit.
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from brain.skills.base import (
@@ -68,84 +58,87 @@ from brain.skills.base import (
 from brain.skills.story_progress import StoryProgressStore, get_store
 
 
-# ── UI regions (normalised 0..1) ────────────────────────────────────────
-
-# Sub-card click centres on the 劇情 hub (from OCR evidence at
-# data/trajectories/run_20260423_024430/tick_0004.json).
+# ── Hub sub-card click targets (劇情 hub) ────────────────────────────
 _HUB_SHORT_CLICK = (0.61, 0.45)
 _HUB_SIDE_CLICK = (0.83, 0.45)
-_HUB_MAIN_CLICK = (0.27, 0.60)    # deferred
-_HUB_REPLAY_CLICK = (0.83, 0.85)  # ignored
 
-# Category-page carousel arrows (sprite-only, no OCR text; derived
-# from the user's uploaded arrow screenshots).
-_ARROW_RIGHT_CLICK = (0.97, 0.50)
-_ARROW_LEFT_CLICK = (0.03, 0.50)
 
-# Centre region of the carousel where the current volume card sits —
-# "New" badge detection is restricted here to ignore cards peeking in
-# from the sides.
-_CAROUSEL_CENTRE_REGION = (0.28, 0.15, 0.70, 0.75)
+# ── Grid-page constants (reference mini_story.py mapped to 0..1) ──────────
+# Card click centres (2 cols × 3 rows).
+_GRID_CARD_COL_X = (0.275, 0.727)
+_GRID_CARD_ROW_Y = (0.333, 0.550, 0.746)
 
-# Volume-card click target when a New badge is detected inside the
-# centre region (slightly below the badge lands on the art centre).
-_CAROUSEL_CENTRE_CLICK = (0.47, 0.45)
+# 'New' badge regions, top-left of each card.
+_GRID_BADGE_COL_X = (0.067, 0.516)
+_GRID_BADGE_ROW_Y = (0.215, 0.424, 0.633)
+_GRID_BADGE_W = 0.12   # bit wider than reference's strict 0.042 to catch
+_GRID_BADGE_H = 0.06   # OCR boxes whose padding varies by font size
 
-# Breadcrumb / category title region.
+# Page-next arrow at right edge; click advances to next grid page.
+_GRID_PAGE_NEXT_CLICK = (0.98, 0.497)
+# Swipe fallback when the arrow click doesn't advance.
+_GRID_SWIPE_FROM = (0.80, 0.50)
+_GRID_SWIPE_TO = (0.20, 0.50)
+
+# Max grid pages we scan before declaring a category exhausted.
+_GRID_PAGE_LIMIT = 4  # short/side categories ship 2-3 pages; 4 is safe.
+
+
+# ── Volume-detail constants ──────────────────────────────────────────
+# reference probes (1073, 251) / (1073, 351) for 入場 button colour.
+# We click slightly earlier on the row (x=0.78) so we hit the chapter
+# body rather than the button sprite alone — same visual effect.
+_VOLUME_CHAPTER_CLICKS = (
+    (0.78, 0.349),  # top chapter row
+    (0.78, 0.488),  # bottom chapter row
+)
+# 入場 / Enter OCR search region (both rows combined).
+_VOLUME_ENTER_REGION = (0.70, 0.30, 0.99, 0.55)
+
+
+# ── Hub / breadcrumb detection ───────────────────────────────────────
 _BREADCRUMB_REGION = (0.0, 0.0, 0.25, 0.09)
 
-# Volume-detail chapter list lives on the right side of the screen.
-_CHAPTER_LIST_REGION = (0.55, 0.18, 1.0, 0.85)
 
-# Chapter rows match "第N章 ..." (both Traditional and Simplified).
-_CHAPTER_RE = re.compile(r"^第\s*([0-9０-９一二三四五六七八九十]+)\s*章")
-
-
-# ── Skill ──────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────
 
 class StoryMiningSkill(BaseSkill):
-    """Auto-play unplayed chapters in every 短篇 / 支線 volume."""
+    """Auto-play unplayed chapters in 短篇劇情 and 支線劇情."""
 
     def __init__(self) -> None:
         super().__init__("StoryMining")
-        self.max_ticks = 600  # many volumes × many chapters × skip ticks
+        self.max_ticks = 600
 
         self._store: StoryProgressStore = get_store()
 
+        # Sub-states:
+        #   enter   — figure out where we are
+        #   hub     — on 劇情 hub; click next category card
+        #   grid    — on a 2×3 grid category page; find a 'New' cell
+        #   volume  — inside a volume; click an active chapter row
+        #   playing — cutscene skip dance
+        #   finished — done; advance pipeline
         self.sub_state = "enter"
         self._enter_ticks: int = 0
 
-        # Which category we're processing (short / side / main).
         self._category: Optional[str] = None
         self._exhausted: List[str] = []
 
-        # Carousel navigation state.  We track the title OCR'd on the
-        # centred card; if it doesn't change after an arrow click we
-        # assume the arrow didn't register and fall back to a swipe.
-        self._current_volume: str = ""
-        self._prev_volume: str = ""
-        self._carousel_steps: int = 0          # arrow/swipe clicks so far
-        self._carousel_stall: bool = False     # last step didn't advance
-        # Max volumes to scan before giving up on a category (typical
-        # game build ships ~15-20 volumes per category; 30 is a safe
-        # upper bound).
-        self._CAROUSEL_LIMIT: int = 30
+        # Grid state.
+        self._grid_page: int = 0              # 0-indexed page number
+        self._prev_grid_fingerprint: str = ""  # stall detection
+        self._arrow_stalled: bool = False
 
-        # Currently-open volume (entered from category carousel).
-        self._open_volume: str = ""
-        # Chapters inside the open volume we've tried in this visit —
-        # guards against an infinite retry loop on a misread row.
-        self._tried_chapters: List[str] = []
+        # Volume state.
+        self._open_volume_hint: str = ""      # card index (0-5) + page for the ledger
+        self._volume_chapter_attempts: int = 0
 
-        # Cutscene we're playing; keyed by (volume, chapter).
+        # Cutscene state.
         self._pending_volume: str = ""
         self._pending_chapter: str = ""
-
-        # Skip-machine state (same shape as event_activity).
         self._skip_stage: int = 0
         self._cutscene_taps: int = 0
 
-        # Generic stall counter for failure recovery.
         self._stall_ticks: int = 0
 
     def reset(self) -> None:
@@ -154,12 +147,11 @@ class StoryMiningSkill(BaseSkill):
         self._enter_ticks = 0
         self._category = None
         self._exhausted = []
-        self._current_volume = ""
-        self._prev_volume = ""
-        self._carousel_steps = 0
-        self._carousel_stall = False
-        self._open_volume = ""
-        self._tried_chapters = []
+        self._grid_page = 0
+        self._prev_grid_fingerprint = ""
+        self._arrow_stalled = False
+        self._open_volume_hint = ""
+        self._volume_chapter_attempts = 0
         self._pending_volume = ""
         self._pending_chapter = ""
         self._skip_stage = 0
@@ -172,9 +164,6 @@ class StoryMiningSkill(BaseSkill):
         self.ticks += 1
         self._enter_ticks += 1
 
-        # Dismiss generic popups (locked-chapter notice, confirmation,
-        # etc.) before any sub-state branches so we don't get stuck
-        # behind a modal.
         popup_action = self._dismiss_popup(screen)
         if popup_action is not None:
             return popup_action
@@ -182,7 +171,7 @@ class StoryMiningSkill(BaseSkill):
         handler = {
             "enter": self._on_enter,
             "hub": self._on_hub,
-            "category": self._on_category,
+            "grid": self._on_grid,
             "volume": self._on_volume,
             "playing": self._on_playing,
             "finished": self._on_finished,
@@ -192,69 +181,53 @@ class StoryMiningSkill(BaseSkill):
     # ── Popup handling ─────────────────────────────────────────────
 
     def _dismiss_popup(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
-        """Close a locked-chapter / cannot-enter modal if visible.
-
-        Only fires on screens that *don't* look like our workflow —
-        confirmation dialogs on the cutscene skip path are handled in
-        _on_playing.
-        """
         if self.sub_state == "playing":
             return None
-        # Common locked / unavailable messages.
         blocked = screen.find_any_text(
             [
                 "尚未開放", "尚未开放", "尚未達成", "尚未达成",
                 "無法進入", "无法进入", "請先完成", "请先完成",
                 "未解鎖", "未解锁",
             ],
-            region=screen.CENTER,
-            min_conf=0.55,
+            region=screen.CENTER, min_conf=0.55,
         )
         if not blocked:
             return None
-        # Prefer an explicit confirm, else tap centre-bottom.
         confirm = screen.find_any_text(
             ["確認", "确认", "確定", "确定", "OK", "Yes", "確", "确"],
-            region=(0.30, 0.55, 0.75, 0.82),
-            min_conf=0.55,
+            region=(0.30, 0.55, 0.75, 0.82), min_conf=0.55,
         )
-        self.log(f"locked/blocked popup: '{blocked.text}', dismissing")
+        self.log(f"locked popup: '{blocked.text}', dismissing")
         if confirm:
             return action_click_box(confirm, "dismiss locked popup")
         return action_click(0.50, 0.72, "dismiss locked popup (fallback)")
 
-    # ── Sub-state: enter ───────────────────────────────────────────
+    # ── enter ──────────────────────────────────────────────────────
 
     def _on_enter(self, screen: ScreenState) -> Dict[str, Any]:
         if self._is_story_hub(screen):
-            self.log("on story hub — routing to category picker")
             self.sub_state = "hub"
             return self._on_hub(screen)
 
         cat = self._detect_category_page(screen)
-        if cat is not None:
-            if cat == StoryProgressStore.MAIN:
-                # Main-story push not implemented yet — back out and
-                # mark as exhausted so we don't loop on it.
-                if StoryProgressStore.MAIN not in self._exhausted:
-                    self._exhausted.append(StoryProgressStore.MAIN)
-                self.log("主線劇情 detected but pusher not implemented; backing out")
-                return action_back("main story not supported yet")
-            if cat in (StoryProgressStore.SHORT, StoryProgressStore.SIDE):
-                self.log(f"already on {cat!r} category page")
-                self._category = cat
-                self._reset_category_state()
-                self.sub_state = "category"
-                return self._on_category(screen)
+        if cat == StoryProgressStore.MAIN:
+            if StoryProgressStore.MAIN not in self._exhausted:
+                self._exhausted.append(StoryProgressStore.MAIN)
+            self.log("主線劇情 detected; pusher not implemented — backing out")
+            return action_back("main story not supported yet")
+        if cat in (StoryProgressStore.SHORT, StoryProgressStore.SIDE):
+            self.log(f"already on {cat} category grid")
+            self._category = cat
+            self._reset_category_state()
+            self.sub_state = "grid"
+            return self._on_grid(screen)
 
-        # Not on any recognised story page within 6 ticks — let the
-        # pipeline move on.
         if self._enter_ticks > 6:
-            self.log("story hub not detected within 6 ticks, skipping")
+            self.log("story hub not detected, skipping")
             return action_done("story hub not reached")
         return action_wait(400, "searching for story hub")
 
-    # ── Sub-state: hub ─────────────────────────────────────────────
+    # ── hub ────────────────────────────────────────────────────────
 
     def _on_hub(self, screen: ScreenState) -> Dict[str, Any]:
         for cat, target in (
@@ -265,7 +238,7 @@ class StoryMiningSkill(BaseSkill):
                 continue
             self._category = cat
             self._reset_category_state()
-            self.sub_state = "category"
+            self.sub_state = "grid"
             self.log(f"entering {cat} category")
             return action_click(target[0], target[1], f"open {cat} category")
 
@@ -273,60 +246,60 @@ class StoryMiningSkill(BaseSkill):
             self._exhausted.append(StoryProgressStore.MAIN)
             self.log("主線劇情 push not implemented — skipped")
 
-        self.log("all categories exhausted")
         self.sub_state = "finished"
         return action_done("story mining finished")
 
     def _reset_category_state(self) -> None:
-        self._current_volume = ""
-        self._prev_volume = ""
-        self._carousel_steps = 0
-        self._carousel_stall = False
-        self._open_volume = ""
-        self._tried_chapters = []
+        self._grid_page = 0
+        self._prev_grid_fingerprint = ""
+        self._arrow_stalled = False
+        self._open_volume_hint = ""
+        self._volume_chapter_attempts = 0
         self._stall_ticks = 0
 
-    # ── Sub-state: category (carousel) ─────────────────────────────
+    # ── grid (2×3 volume carousel) ─────────────────────────────────
 
-    def _on_category(self, screen: ScreenState) -> Dict[str, Any]:
-        # Bounced back to hub? Mark category done & return.
+    def _on_grid(self, screen: ScreenState) -> Dict[str, Any]:
+        # Bounced back to hub? Finish this category.
         if self._is_story_hub(screen):
-            self.log(f"category '{self._category}' closed unexpectedly — back to hub")
+            self.log(f"category '{self._category}' auto-closed, back to hub")
             if self._category:
                 self._exhausted.append(self._category)
                 self._category = None
             self.sub_state = "hub"
             return self._on_hub(screen)
 
-        # Step 1: who's on centre stage?
-        centre_title = self._detect_centre_volume(screen)
-
-        # Detect carousel stall — arrow click didn't change title.
-        if centre_title and centre_title == self._prev_volume:
-            self._carousel_stall = True
+        # Stall detection: grid fingerprint (titles visible) unchanged
+        # across two ticks means the arrow click didn't register.
+        fingerprint = self._grid_fingerprint(screen)
+        if fingerprint and fingerprint == self._prev_grid_fingerprint:
+            self._arrow_stalled = True
         else:
-            self._carousel_stall = False
+            self._arrow_stalled = False
+        if fingerprint:
+            self._prev_grid_fingerprint = fingerprint
 
-        if centre_title:
-            self._current_volume = centre_title
-
-        # Step 2: if the centre volume has a 'New' badge, enter it.
-        new_visible = self._has_new_badge_centre(screen)
-        if new_visible and centre_title:
-            self.log(f"volume '{centre_title}' has New badge — entering")
-            self._open_volume = centre_title
-            self._tried_chapters = []
+        # Probe 6 cells for a 'New' badge.  Return first hit
+        # (top-to-bottom, left-to-right) so selection is deterministic.
+        cell_idx = self._find_new_cell(screen)
+        if cell_idx is not None:
+            col = cell_idx % 2
+            row = cell_idx // 2
+            cx = _GRID_CARD_COL_X[col]
+            cy = _GRID_CARD_ROW_Y[row]
+            self._open_volume_hint = f"{self._category}:p{self._grid_page}:c{cell_idx}"
+            self._volume_chapter_attempts = 0
             self.sub_state = "volume"
-            return action_click(
-                _CAROUSEL_CENTRE_CLICK[0], _CAROUSEL_CENTRE_CLICK[1],
-                f"open volume '{centre_title}'",
-            )
-
-        # Step 3: no New → advance carousel.
-        if self._carousel_steps >= self._CAROUSEL_LIMIT:
             self.log(
-                f"scanned {self._carousel_steps} volumes in '{self._category}' "
-                f"without finding unplayed content — exhausted"
+                f"cell {cell_idx} (row={row}, col={col}) has 'New' — entering"
+            )
+            return action_click(cx, cy, f"open volume cell {cell_idx}")
+
+        # No 'New' on this page → try next page.
+        if self._grid_page >= _GRID_PAGE_LIMIT - 1:
+            self.log(
+                f"scanned {self._grid_page + 1} grid pages in '{self._category}' "
+                f"with no 'New' — category exhausted"
             )
             if self._category:
                 self._exhausted.append(self._category)
@@ -336,140 +309,219 @@ class StoryMiningSkill(BaseSkill):
             self._enter_ticks = 0
             return action_back("category exhausted, back to hub")
 
-        self._prev_volume = centre_title or self._prev_volume
-        self._carousel_steps += 1
-
-        # Prefer arrow click; swipe fallback when previous arrow
-        # didn't advance the centre volume.
-        if self._carousel_stall:
-            self._carousel_stall = False
+        self._grid_page += 1
+        if self._arrow_stalled:
+            self._arrow_stalled = False
             self.log(
-                f"arrow click stalled on '{centre_title or '?'}' — "
+                f"grid arrow stalled on page {self._grid_page - 1} — "
                 f"swiping as fallback"
             )
+            fx, fy = _GRID_SWIPE_FROM
+            tx, ty = _GRID_SWIPE_TO
             return action_swipe(
-                0.75, 0.50, 0.25, 0.50, duration_ms=400,
-                reason="carousel swipe fallback (arrow stalled)",
+                fx, fy, tx, ty, duration_ms=400,
+                reason=f"swipe to grid page {self._grid_page}",
             )
         return action_click(
-            _ARROW_RIGHT_CLICK[0], _ARROW_RIGHT_CLICK[1],
-            f"carousel arrow next (step {self._carousel_steps})",
+            _GRID_PAGE_NEXT_CLICK[0], _GRID_PAGE_NEXT_CLICK[1],
+            f"arrow → grid page {self._grid_page}",
         )
 
-    # ── Sub-state: volume ──────────────────────────────────────────
+    def _grid_fingerprint(self, screen: ScreenState) -> str:
+        """Return a cheap hashable summary of the grid page contents.
+
+        We use the concatenated OCR text of every '篇' box on the page
+        — this changes the moment the grid page advances.
+        """
+        parts: List[str] = []
+        for b in screen.ocr_boxes:
+            if b.confidence < 0.6:
+                continue
+            t = (b.text or "").strip()
+            if "篇" in t and t not in ("短篇劇情", "支線劇情", "主線劇情"):
+                parts.append(t)
+        return "|".join(sorted(parts))
+
+    def _find_new_cell(self, screen: ScreenState) -> Optional[int]:
+        """Return the grid cell index (0..5) with a 'New' / '新' badge.
+
+        Cell index layout::
+
+            0  1
+            2  3
+            4  5
+        """
+        for b in screen.ocr_boxes:
+            if b.confidence < 0.5:
+                continue
+            t = (b.text or "").strip()
+            if t.lower() != "new" and t != "新":
+                continue
+            # Which cell does this badge belong to?  Pick the cell
+            # whose badge region contains the box centre.
+            for row_idx, ry in enumerate(_GRID_BADGE_ROW_Y):
+                for col_idx, rx in enumerate(_GRID_BADGE_COL_X):
+                    if rx <= b.cx <= rx + _GRID_BADGE_W \
+                            and ry <= b.cy <= ry + _GRID_BADGE_H:
+                        return row_idx * 2 + col_idx
+        return None
+
+    # ── volume detail ──────────────────────────────────────────────
 
     def _on_volume(self, screen: ScreenState) -> Dict[str, Any]:
-        # Bounced back to carousel (user closed panel, or ESC)
-        if self._detect_category_page(screen) == self._category \
-                and not self._find_chapter_rows(screen):
-            self.log(f"left volume '{self._open_volume}' without finishing — back to carousel")
-            self._open_volume = ""
-            self._tried_chapters = []
-            self.sub_state = "category"
-            return self._on_category(screen)
+        # Bounced back to grid (user closed via ESC or game auto-back).
+        cat_here = self._detect_category_page(screen)
+        if cat_here == self._category and not self._volume_has_chapters(screen):
+            self.log(f"left volume {self._open_volume_hint} without entering")
+            self.sub_state = "grid"
+            return self._on_grid(screen)
 
-        rows = self._find_chapter_rows(screen)
-        if not rows:
-            # Volume detail not rendered yet; wait.
-            self._stall_ticks += 1
-            if self._stall_ticks > 10:
-                self.log("volume detail not detected, backing out")
-                self._stall_ticks = 0
-                return action_back("volume detail not rendered")
-            return action_wait(300, "waiting for chapter list")
-
-        self._stall_ticks = 0
-
-        # Pick the first chapter row we haven't already tried this
-        # visit AND that isn't already in the progress ledger.  Rows
-        # are sorted top-to-bottom by the helper.
-        for row in rows:
-            chapter = row.text.strip()
-            if chapter in self._tried_chapters:
-                continue
-            composite_key = f"{self._open_volume}|{chapter}"
-            if self._category and self._store.is_done(
-                self._category, composite_key,
-            ):
-                continue
-            # This is our candidate.
-            self._tried_chapters.append(chapter)
-            self._pending_volume = self._open_volume
-            self._pending_chapter = chapter
-            self._skip_stage = 0
-            self._cutscene_taps = 0
-            self.sub_state = "playing"
-            self.log(
-                f"starting {self._category}|{self._open_volume}|{chapter}"
-            )
-            return action_click_box(row, f"open chapter '{chapter}'")
-
-        # All chapters either tried or already done — leave volume.
-        self.log(
-            f"volume '{self._open_volume}' has no more unplayed chapters "
-            f"(tried={len(self._tried_chapters)})"
+        # Find an 入場 / Enter button or click a fixed chapter row anchor.
+        enter_box = screen.find_any_text(
+            ["入場", "入场", "Enter", "開始", "开始", "進入", "进入"],
+            region=_VOLUME_ENTER_REGION, min_conf=0.55,
         )
-        self._open_volume = ""
-        self._tried_chapters = []
-        self.sub_state = "category"
-        return action_back("volume complete, back to carousel")
 
-    # ── Sub-state: playing ─────────────────────────────────────────
+        if enter_box is not None:
+            chapter_id = self._chapter_key_from_y(enter_box.cy)
+            composite = f"{self._open_volume_hint}|{chapter_id}"
+            if self._category and self._store.is_done(self._category, composite):
+                # Already done per ledger; skip to the next row anchor.
+                return self._try_next_chapter_anchor(composite_skip=composite)
+            return self._start_chapter(composite, click_target=enter_box)
+
+        # No Enter button visible — try the fixed anchors reference uses.
+        return self._try_next_chapter_anchor()
+
+    def _chapter_key_from_y(self, y: float) -> str:
+        """Bin a vertical coord to 'r0' / 'r1' — two chapter rows."""
+        mid = (_VOLUME_CHAPTER_CLICKS[0][1] + _VOLUME_CHAPTER_CLICKS[1][1]) / 2
+        return "r0" if y < mid else "r1"
+
+    def _try_next_chapter_anchor(
+        self, *, composite_skip: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Click the next un-attempted chapter anchor (top row first).
+
+        When we exhaust both anchors we back out to the grid.  Each
+        attempt is tracked so a second tick on the same screen without
+        state change doesn't loop forever on the same row.
+        """
+        if self._volume_chapter_attempts >= len(_VOLUME_CHAPTER_CLICKS):
+            self.log(
+                f"no more chapter anchors in volume {self._open_volume_hint}"
+            )
+            self._volume_chapter_attempts = 0
+            self.sub_state = "grid"
+            return action_back("volume exhausted, back to grid")
+
+        idx = self._volume_chapter_attempts
+        self._volume_chapter_attempts += 1
+        cx, cy = _VOLUME_CHAPTER_CLICKS[idx]
+        chapter_id = f"r{idx}"
+        composite = f"{self._open_volume_hint}|{chapter_id}"
+
+        # Skip if ledger already has this chapter.
+        if self._category and self._store.is_done(self._category, composite):
+            self.log(f"{composite} already done per ledger, skipping")
+            return self._try_next_chapter_anchor()
+
+        return self._start_chapter(
+            composite,
+            click_target=None,
+            click_xy=(cx, cy),
+            chapter_id=chapter_id,
+        )
+
+    def _start_chapter(
+        self,
+        composite: str,
+        *,
+        click_target: Optional[OcrBox] = None,
+        click_xy: Optional[Tuple[float, float]] = None,
+        chapter_id: str = "",
+    ) -> Dict[str, Any]:
+        self._pending_volume = self._open_volume_hint
+        self._pending_chapter = chapter_id or composite.rsplit("|", 1)[-1]
+        self._skip_stage = 0
+        self._cutscene_taps = 0
+        self.sub_state = "playing"
+        self.log(f"starting {self._category}|{composite}")
+        if click_target is not None:
+            return action_click_box(click_target, f"open chapter {composite}")
+        assert click_xy is not None
+        return action_click(
+            click_xy[0], click_xy[1], f"open chapter anchor {composite}",
+        )
+
+    def _volume_has_chapters(self, screen: ScreenState) -> bool:
+        """Heuristic: the volume detail page always shows '入場' or
+        a '第N章' row.  If neither is visible we're on the grid.
+        """
+        if screen.find_any_text(
+            ["入場", "入场", "Enter"],
+            region=_VOLUME_ENTER_REGION, min_conf=0.55,
+        ):
+            return True
+        for b in screen.ocr_boxes:
+            if b.confidence < 0.55:
+                continue
+            t = (b.text or "").strip()
+            if t.startswith("第") and "章" in t and b.cx > 0.55:
+                return True
+        return False
+
+    # ── playing (cutscene skip) ────────────────────────────────────
 
     def _on_playing(self, screen: ScreenState) -> Dict[str, Any]:
-        # Detect cutscene dismissal: either the volume detail re-appears
-        # (chapter list visible) or we bounce all the way to the hub.
-        back_in_volume = bool(self._find_chapter_rows(screen))
-        back_in_hub = self._is_story_hub(screen)
-        on_category = (
+        # Detect dismissal.
+        back_in_volume = self._volume_has_chapters(screen)
+        back_on_grid = (
             self._detect_category_page(screen) == self._category
             and not back_in_volume
         )
-        if back_in_volume or back_in_hub or on_category:
+        back_in_hub = self._is_story_hub(screen)
+        if back_in_volume or back_on_grid or back_in_hub:
             if self._category and self._pending_volume and self._pending_chapter:
-                composite_key = f"{self._pending_volume}|{self._pending_chapter}"
-                newly = self._store.mark_done(self._category, composite_key)
+                key = f"{self._pending_volume}|{self._pending_chapter}"
+                newly = self._store.mark_done(self._category, key)
                 self.log(
-                    f"cutscene dismissed, marked '{composite_key}' "
-                    f"done in {self._category} (newly={newly})"
+                    f"cutscene dismissed, marked '{key}' done "
+                    f"(newly={newly})"
                 )
             self._pending_volume = ""
             self._pending_chapter = ""
             self._skip_stage = 0
             self._cutscene_taps = 0
-            # Return to the most-specific context visible.
             if back_in_volume:
                 self.sub_state = "volume"
                 return action_wait(250, "back in volume detail")
-            if on_category:
-                self._open_volume = ""
-                self._tried_chapters = []
-                self.sub_state = "category"
-                return action_wait(250, "back in category carousel")
-            # Hub — mark this category exhausted to avoid re-entering
-            # (defensive; normally the chapter exit lands on volume).
+            if back_on_grid:
+                self._open_volume_hint = ""
+                self._volume_chapter_attempts = 0
+                self.sub_state = "grid"
+                return action_wait(250, "back on grid")
+            # hub (rare defensive path)
             if self._category:
                 self._exhausted.append(self._category)
                 self._category = None
             self.sub_state = "hub"
             return action_wait(250, "bounced to hub after cutscene")
 
-        # Skip-machine: same stages as event_activity's story branch.
         if self._skip_stage >= 3:
             self._cutscene_taps += 1
             if self._cutscene_taps > 25:
-                self.log("stall after skip confirm, pressing back")
+                self.log("post-skip stall, pressing back")
                 self._skip_stage = 0
                 self._cutscene_taps = 0
-                return action_back("post-skip stall, back out")
+                return action_back("post-skip stall")
             return action_wait(300, "waiting for cutscene to dismiss")
 
         if self._skip_stage == 2:
             self._cutscene_taps += 1
             confirm = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "OK", "Yes", "確", "确"],
-                region=(0.30, 0.55, 0.75, 0.82),
-                min_conf=0.55,
+                region=(0.30, 0.55, 0.75, 0.82), min_conf=0.55,
             )
             if confirm:
                 self._skip_stage = 3
@@ -477,8 +529,7 @@ class StoryMiningSkill(BaseSkill):
                 return action_click_box(confirm, "confirm story skip")
             prompt = screen.find_any_text(
                 ["略過", "略过", "是否略", "跳過此"],
-                region=(0.20, 0.30, 0.80, 0.70),
-                min_conf=0.55,
+                region=(0.20, 0.30, 0.80, 0.70), min_conf=0.55,
             )
             if prompt:
                 self._skip_stage = 3
@@ -489,7 +540,9 @@ class StoryMiningSkill(BaseSkill):
                 self._skip_stage = 0
                 return action_wait(200, "skip confirm timeout, retrying")
             if self._cutscene_taps >= 5:
-                return action_click(0.60, 0.72, "confirm skip (timeout fallback)")
+                return action_click(
+                    0.60, 0.72, "confirm skip (timeout fallback)",
+                )
             return action_wait(300, "waiting for skip confirm dialog")
 
         if self._skip_stage == 0:
@@ -502,7 +555,7 @@ class StoryMiningSkill(BaseSkill):
             self._skip_stage = 1
             return action_click(0.94, 0.05, "click MENU (hardcoded)")
 
-        # _skip_stage == 1: Skip button
+        # _skip_stage == 1
         skip = screen.find_any_text(
             ["SKIP", "Skip", "跳過", "跳过", "スキップ"], min_conf=0.55,
         )
@@ -512,24 +565,21 @@ class StoryMiningSkill(BaseSkill):
         self._skip_stage = 2
         return action_click(0.95, 0.16, "click Skip (hardcoded)")
 
-    # ── Sub-state: finished ────────────────────────────────────────
+    # ── finished ──────────────────────────────────────────────────
 
     def _on_finished(self, screen: ScreenState) -> Dict[str, Any]:
         return action_done("story mining finished")
 
-    # ── Screen classifiers ─────────────────────────────────────────
+    # ── classifiers ──────────────────────────────────────────────
 
     def _is_story_hub(self, screen: ScreenState) -> bool:
-        """Hub: triad of 主線/短篇/支線 sub-card titles visible."""
-        have_main = screen.has_text("主線劇情", min_conf=0.6)
-        have_short = screen.has_text("短篇劇情", min_conf=0.6)
-        have_side = screen.has_text("支線劇情", min_conf=0.6)
-        return have_main and have_short and have_side
+        return (
+            screen.has_text("主線劇情", min_conf=0.6)
+            and screen.has_text("短篇劇情", min_conf=0.6)
+            and screen.has_text("支線劇情", min_conf=0.6)
+        )
 
     def _detect_category_page(self, screen: ScreenState) -> Optional[str]:
-        """Return 'short' / 'side' / 'main' if we're on that category
-        page (hub has no breadcrumb so this is disambiguated).
-        """
         if self._is_story_hub(screen):
             return None
         if screen.find_text("短篇劇情", region=_BREADCRUMB_REGION, min_conf=0.55):
@@ -539,65 +589,3 @@ class StoryMiningSkill(BaseSkill):
         if screen.find_text("主線劇情", region=_BREADCRUMB_REGION, min_conf=0.55):
             return StoryProgressStore.MAIN
         return None
-
-    # ── Carousel helpers ───────────────────────────────────────────
-
-    def _detect_centre_volume(self, screen: ScreenState) -> str:
-        """Read the title of the volume currently centred on the carousel.
-
-        Volume titles look like "X.名稱篇" or "Ex.名稱篇".  We pick the
-        longest '*篇' OCR box inside the centre region — the centred
-        card renders at full size so its OCR confidence and bounding
-        box are largest.
-        """
-        best: Optional[OcrBox] = None
-        best_area = 0.0
-        cx_lo, cy_lo, cx_hi, cy_hi = _CAROUSEL_CENTRE_REGION
-        for b in screen.ocr_boxes:
-            if b.confidence < 0.6:
-                continue
-            t = (b.text or "").strip()
-            if "篇" not in t:
-                continue
-            if not (cx_lo <= b.cx <= cx_hi and cy_lo <= b.cy <= cy_hi):
-                continue
-            # Exclude the category breadcrumb itself.
-            if t in ("短篇劇情", "支線劇情", "主線劇情"):
-                continue
-            area = b.w * b.h
-            if area > best_area:
-                best_area = area
-                best = b
-        return best.text.strip() if best else ""
-
-    def _has_new_badge_centre(self, screen: ScreenState) -> bool:
-        """True if a 'New' OCR box is visible on the centred card."""
-        cx_lo, cy_lo, cx_hi, cy_hi = _CAROUSEL_CENTRE_REGION
-        for b in screen.ocr_boxes:
-            if b.confidence < 0.45:
-                continue
-            if (b.text or "").strip().lower() != "new":
-                continue
-            if cx_lo <= b.cx <= cx_hi and cy_lo <= b.cy <= cy_hi:
-                return True
-        return False
-
-    # ── Chapter-row helpers ────────────────────────────────────────
-
-    def _find_chapter_rows(self, screen: ScreenState) -> List[OcrBox]:
-        """Return "第N章 ..." OCR boxes in the chapter-list region,
-        sorted top-to-bottom.
-        """
-        rows: List[OcrBox] = []
-        cx_lo, cy_lo, cx_hi, cy_hi = _CHAPTER_LIST_REGION
-        for b in screen.ocr_boxes:
-            if b.confidence < 0.55:
-                continue
-            t = (b.text or "").strip()
-            if not _CHAPTER_RE.match(t):
-                continue
-            if not (cx_lo <= b.cx <= cx_hi and cy_lo <= b.cy <= cy_hi):
-                continue
-            rows.append(b)
-        rows.sort(key=lambda r: (round(r.cy, 3), round(r.cx, 3)))
-        return rows

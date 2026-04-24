@@ -201,7 +201,11 @@ _singleton: Optional[StoryProgressStore] = None
 def get_store() -> StoryProgressStore:
     global _singleton
     if _singleton is None:
-        _singleton = StoryProgressStore()
+        # Read _STORY_FILE at call-time so tests can redirect the
+        # path via `sp._STORY_FILE = tmp` + reset_singleton().  Using
+        # the default arg would capture the original module path at
+        # `def` time and ignore the override.
+        _singleton = StoryProgressStore(progress_path=_STORY_FILE)
     return _singleton
 
 

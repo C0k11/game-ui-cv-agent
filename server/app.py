@@ -11,7 +11,7 @@ import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
@@ -38,29 +38,44 @@ CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
 
 APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 
+# Skills organized by 4 daily states.
+# Removed: `ap_overflow` (merged into event_farming via ap_reserve).
+# Optional (not in default order): momo_talk, story_cleanup, event_activity,
+# joint_firing_drill, total_assault — still selectable on dashboard.
 _SKILL_OPTIONS: List[Dict[str, str]] = [
-    {"id": "lobby", "label": "大厅恢复 / 弹窗清理"},
-    {"id": "ap_overflow", "label": "高 AP 溢出保护"},
-    {"id": "event_activity", "label": "活动剧情 / 挑战 / 走格子"},
-    {"id": "event_farming", "label": "活动清体力"},
-    {"id": "cafe", "label": "咖啡厅收益 / 邀请 / 摸头"},
-    {"id": "schedule", "label": "课程表"},
-    {"id": "club", "label": "社团 AP"},
-    {"id": "momo_talk", "label": "MomoTalk 消息"},
-    {"id": "shop", "label": "商店日常"},
-    {"id": "craft", "label": "制造"},
-    {"id": "story_cleanup", "label": "主线 / 小组 / 迷你剧情清理"},
-    {"id": "bounty", "label": "悬赏通缉"},
-    {"id": "arena", "label": "战术对抗赛"},
-    {"id": "joint_firing_drill", "label": "战术考试 / 联合火力演习"},
-    {"id": "total_assault", "label": "总力战 / 大决战"},
-    {"id": "mail", "label": "邮件领取"},
-    {"id": "daily_tasks", "label": "每日任务"},
-    {"id": "pass_reward", "label": "通行证奖励"},
-    {"id": "ap_planning", "label": "AP 规划 / 每日免费体力"},
-    {"id": "hard_farming", "label": "Hard 刷取"},
-    {"id": "event_farming_2", "label": "二次回马枪清体力"},
-    {"id": "campaign_push", "label": "主线推进 / 兜底清体力"},
+    # pre-flight
+    {"id": "lobby", "label": "[前置] 大厅 / 关弹窗 / 签到"},
+
+    # State 1: 基建与免费资源
+    {"id": "cafe", "label": "[S1] 咖啡厅收益 / 邀请 / 摸头"},
+    {"id": "club", "label": "[S1] 社团签到 AP"},
+
+    # State 2: 票券类日常
+    {"id": "schedule", "label": "[S2] 课程表"},
+    {"id": "bounty", "label": "[S2] 悬赏通缉"},
+    {"id": "arena", "label": "[S2] 战术对抗赛"},
+
+    # State 3: 体力获取 & 消耗
+    {"id": "mail", "label": "[S3] 邮件一键领取"},
+    {"id": "ap_planning", "label": "[S3] 补给 / 每日免费 AP"},
+    {"id": "event_farming", "label": "[S3] 活动刷取（双倍优先）"},
+    {"id": "hard_farming", "label": "[S3] Hard 图碎片扫荡"},
+    {"id": "event_farming_2", "label": "[S3] 回马枪（二次活动刷取）"},
+    {"id": "campaign_push", "label": "[S3] Normal 图兜底清体力"},
+
+    # State 4: 后勤 & 结算
+    {"id": "shop", "label": "[S4] 普通商店日购"},
+    {"id": "craft", "label": "[S4] 制造（领成品 + 投石）"},
+    {"id": "daily_tasks", "label": "[S4] 每日任务一键领取"},
+    {"id": "pass_reward", "label": "[S4] 战令一键领取"},
+
+    # Optional extras (not default, kept for profile customization)
+    {"id": "momo_talk", "label": "[可选] MomoTalk 未读"},
+    {"id": "story_cleanup", "label": "[可选] 主线 / 小组 / 迷你剧情清理"},
+    {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿（reference风格）"},
+    {"id": "event_activity", "label": "[可选] 活动剧情 / 挑战 / 走格子"},
+    {"id": "joint_firing_drill", "label": "[可选] 战术考试 / 联合火力演习"},
+    {"id": "total_assault", "label": "[可选] 总力战 / 大决战"},
 ]
 _DEFAULT_SKILL_ORDER = [item["id"] for item in _SKILL_OPTIONS]
 _VALID_SKILL_IDS = set(_DEFAULT_SKILL_ORDER)
@@ -84,6 +99,20 @@ _DISPLAY_SYNC_HZ = 240.0
 _INPUT_POLL_HZ = 8000.0
 _TIMER_RES_ENABLED = False
 _PIPELINE_RUN_META: Dict[str, Any] = {}
+
+# ── Daily scheduler ────────────────────────────────────────────────────
+# Background thread that, when enabled in the active profile, auto-starts
+# the pipeline at `reset_time` (HH:MM, local) and again every
+# `interval_hours`. Manual POST /api/v1/start always wins — scheduler
+# skips firing if a run is already active.
+_SCHEDULER_THREAD: Optional[threading.Thread] = None
+_SCHEDULER_STOP: threading.Event = threading.Event()
+_SCHEDULER_STATUS: Dict[str, Any] = {
+    "enabled": False,
+    "next_fire_ts": 0.0,
+    "last_fire_ts": 0.0,
+    "last_result": "",
+}
 
 
 def _normalize_profile_name(value: Any) -> str:
@@ -126,6 +155,51 @@ def _default_profile_settings() -> Dict[str, Any]:
         "target_favorites": [],
         "skill_order": list(_DEFAULT_SKILL_ORDER),
         "bounty_branches": ["高架公路", "沙漠鐵道", "教室"],
+        # ── Extended profile config (schema-only; skills consume incrementally) ──
+        # Daily scheduler (opt-in). When enabled, server auto-fires pipeline
+        # at `reset_time` (HH:MM, local) and re-fires every `interval_hours`.
+        "scheduler": {
+            "enabled": False,
+            "reset_time": "04:00",   # JP server reset; CN uses 04:00 too
+            "interval_hours": 24,
+        },
+        # Paid / ticketed purchase caps (0 = never buy).
+        "purchase_caps": {
+            "arena_tickets": 0,
+            "bounty_tickets": 0,      # 悬赏/rewarded_task
+            "scrimmage_tickets": 0,
+            "lesson_tickets": 0,
+        },
+        # Arena tuning.
+        "arena": {
+            "level_diff": 0,           # opponent level offset (-N .. +N)
+            "stop_at_rank1": True,     # stop challenging once we hit rank 1
+            "max_refresh": 0,          # refresh opponent pool up to N times
+        },
+        # Shop purchase strategy.
+        "shop": {
+            "common_priority_list": [],     # item name keywords in buy order (e.g. "信用點", "強化珠")
+            "tactical_priority_list": [],   # tactical-challenge shop items
+            "common_refresh_times": 0,      # extra refreshes on common shop
+            "tactical_refresh_times": 0,
+        },
+        # Stage sweep explicit whitelists.
+        "hard_task_list": [],             # e.g. ["H14-3", "H20-3"]
+        "normal_task_list": [],           # e.g. ["14-1"] for mats/equipment
+        # Lesson (course schedule) tuning.
+        "lesson": {
+            "relationship_first": True,   # prioritize affection > drop mats
+        },
+        # Craft / creation node priorities.
+        "craft": {
+            "use_acceleration_ticket": False,
+            "phase_priority": ["光辉", "花朵"],  # node types ranked
+        },
+        # Drill / firing drill formations.
+        "drill": {
+            "difficulty_list": [],          # ["普通", "困難", "極限", "洞察"]
+            "choose_team_method": "preset",
+        },
     }
 
 
@@ -182,6 +256,20 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
                 norm.append(name)
                 seen_b.add(name)
         data["bounty_branches"] = norm if norm else list(_VALID_BRANCHES)
+
+    # Extended config blocks: shallow-merge dict-valued keys and
+    # pass through list/scalar keys as-is. Skills ignore unknown fields,
+    # so type coercion can be added lazily when a skill starts consuming.
+    for key in ("scheduler", "purchase_caps", "arena", "shop", "lesson", "craft", "drill"):
+        incoming = raw.get(key)
+        if isinstance(incoming, dict):
+            merged = dict(data[key])
+            merged.update(incoming)
+            data[key] = merged
+    for key in ("hard_task_list", "normal_task_list"):
+        incoming = raw.get(key)
+        if isinstance(incoming, list):
+            data[key] = [str(x).strip() for x in incoming if str(x or "").strip()]
     return data
 
 
@@ -385,6 +473,92 @@ def _parent_watchdog() -> None:
 
 
 app = FastAPI()
+
+
+# ── Daily scheduler worker ────────────────────────────────────────────
+def _compute_next_fire(now: float, reset_hhmm: str, interval_hours: int) -> float:
+    """Next fire time: aligned to today's `reset_hhmm`, rolled by `interval_hours`."""
+    import datetime as _dt
+    try:
+        hh, mm = reset_hhmm.split(":")
+        hh, mm = int(hh), int(mm)
+    except Exception:
+        hh, mm = 4, 0
+    interval_s = max(3600, int(interval_hours) * 3600)  # clamp min 1h
+    now_dt = _dt.datetime.fromtimestamp(now)
+    base = now_dt.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if base.timestamp() <= now:
+        # advance by interval until it's in the future
+        advance = _dt.timedelta(seconds=interval_s)
+        while base.timestamp() <= now:
+            base = base + advance
+    return base.timestamp()
+
+
+def _scheduler_loop() -> None:
+    print("[Scheduler] thread started", flush=True)
+    while not _SCHEDULER_STOP.is_set():
+        try:
+            _, prof, _ = _get_active_profile_settings()
+            sched = (prof.get("scheduler") or {})
+            enabled = bool(sched.get("enabled"))
+            _SCHEDULER_STATUS["enabled"] = enabled
+            if not enabled:
+                _SCHEDULER_STATUS["next_fire_ts"] = 0.0
+                _SCHEDULER_STOP.wait(30.0)
+                continue
+            reset_hhmm = str(sched.get("reset_time") or "04:00")
+            interval = int(sched.get("interval_hours") or 24)
+            now = time.time()
+            next_fire = _SCHEDULER_STATUS.get("next_fire_ts") or 0.0
+            if next_fire <= 0 or next_fire <= now:
+                next_fire = _compute_next_fire(now, reset_hhmm, interval)
+                _SCHEDULER_STATUS["next_fire_ts"] = next_fire
+            sleep_s = max(5.0, min(60.0, next_fire - now))
+            if _SCHEDULER_STOP.wait(sleep_s):
+                break
+            now = time.time()
+            if now >= _SCHEDULER_STATUS["next_fire_ts"]:
+                if _PIPELINE_RUNNING:
+                    _SCHEDULER_STATUS["last_result"] = "skipped: already running"
+                else:
+                    try:
+                        _start_pipeline(payload=dict(prof))
+                        _SCHEDULER_STATUS["last_result"] = "fired"
+                    except Exception as e:
+                        _SCHEDULER_STATUS["last_result"] = f"error: {e!r}"
+                _SCHEDULER_STATUS["last_fire_ts"] = now
+                # schedule next
+                _SCHEDULER_STATUS["next_fire_ts"] = _compute_next_fire(
+                    now, reset_hhmm, interval,
+                )
+        except Exception:
+            traceback.print_exc()
+            _SCHEDULER_STOP.wait(30.0)
+    print("[Scheduler] thread stopped", flush=True)
+
+
+@app.on_event("startup")
+def _scheduler_startup() -> None:
+    global _SCHEDULER_THREAD
+    if _SCHEDULER_THREAD and _SCHEDULER_THREAD.is_alive():
+        return
+    _SCHEDULER_STOP.clear()
+    _SCHEDULER_THREAD = threading.Thread(
+        target=_scheduler_loop, name="DailyScheduler", daemon=True,
+    )
+    _SCHEDULER_THREAD.start()
+
+
+@app.on_event("shutdown")
+def _scheduler_shutdown() -> None:
+    _SCHEDULER_STOP.set()
+
+
+@app.get("/api/v1/scheduler/status")
+def api_scheduler_status() -> Dict[str, Any]:
+    return dict(_SCHEDULER_STATUS)
+
 
 # Print env vars for debugging
 try:
@@ -1615,6 +1789,612 @@ def roster_image(jpg: str = Query(...)) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=3600"})
 
 
+# ── Avatar harvest: extract (avatar, name) pairs from UI ──────────────
+# User-configurable region layout from dashboard's Harvest page. The grid
+# lets one sample frame produce N rows × M cols of (avatar, name) pairs
+# — OCR'd names become the template filenames, avatar crops become the
+# new template images. Dramatically better than matching game frames
+# against wiki portraits.
+
+HARVEST_CONFIG_PATH = REPO_ROOT / "data" / "harvest_regions.json"
+HARVEST_OUT_DIR = REPO_ROOT / "data" / "captures" / "角色头像_crop_harvested_named"
+
+_DEFAULT_HARVEST_CONFIG = {
+    # Each preset = one UI source (MomoTalk invite, cafe invite, etc).
+    # `avatar_box` and `name_box` are normalized (x1,y1,x2,y2) of the FIRST
+    # grid cell. `grid.dx/dy` are the per-step offsets, `cols/rows` the
+    # repeat counts. Multiple presets can coexist; frontend picks one.
+    "presets": {
+        "momotalk_invite": {
+            "label": "MomoTalk 邀请卷",
+            "avatar_box": {"x1": 0.05, "y1": 0.20, "x2": 0.15, "y2": 0.30},
+            "name_box":   {"x1": 0.16, "y1": 0.22, "x2": 0.28, "y2": 0.28},
+            "grid": {"dx": 0.0, "dy": 0.10, "cols": 1, "rows": 5},
+            "ocr_keywords": ["邀請", "邀请", "MomoTalk"],
+        },
+        "cafe_invite": {
+            "label": "咖啡厅邀请学生",
+            "avatar_box": {"x1": 0.05, "y1": 0.20, "x2": 0.15, "y2": 0.30},
+            "name_box":   {"x1": 0.16, "y1": 0.22, "x2": 0.28, "y2": 0.28},
+            "grid": {"dx": 0.0, "dy": 0.10, "cols": 1, "rows": 5},
+            "ocr_keywords": ["邀請", "邀请", "咖啡"],
+        },
+    },
+    "active_preset": "momotalk_invite",
+}
+
+
+def _load_harvest_config() -> Dict[str, Any]:
+    if not HARVEST_CONFIG_PATH.exists():
+        return json.loads(json.dumps(_DEFAULT_HARVEST_CONFIG))  # deep copy
+    try:
+        data = json.loads(HARVEST_CONFIG_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return json.loads(json.dumps(_DEFAULT_HARVEST_CONFIG))
+        return data
+    except Exception:
+        return json.loads(json.dumps(_DEFAULT_HARVEST_CONFIG))
+
+
+def _save_harvest_config(cfg: Dict[str, Any]) -> None:
+    HARVEST_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    HARVEST_CONFIG_PATH.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+@app.get("/api/v1/harvest/config")
+def get_harvest_config() -> Dict[str, Any]:
+    return {
+        "config": _load_harvest_config(),
+        "defaults": _DEFAULT_HARVEST_CONFIG,
+    }
+
+
+@app.post("/api/v1/harvest/config")
+def set_harvest_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    cfg = _load_harvest_config()
+    incoming = payload.get("config") if isinstance(payload, dict) else None
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=400, detail="config must be a dict")
+    # Shallow-merge top-level keys; preset dict is replaced wholesale when sent
+    presets = dict(cfg.get("presets") or {})
+    in_presets = incoming.get("presets") or {}
+    if isinstance(in_presets, dict):
+        for k, v in in_presets.items():
+            if isinstance(v, dict):
+                presets[str(k)] = v
+    cfg["presets"] = presets
+    if "active_preset" in incoming:
+        cfg["active_preset"] = str(incoming["active_preset"] or "momotalk_invite")
+    _save_harvest_config(cfg)
+    return {"ok": True, "config": cfg}
+
+
+@app.get("/api/v1/harvest/samples")
+def list_harvest_samples(
+    preset: str = Query("momotalk_invite"),
+    limit: int = Query(40),
+) -> Dict[str, Any]:
+    """List trajectory ticks matching the preset's OCR keywords.
+
+    Scans recent runs, returns jpg paths whose tick JSON contains any of
+    the preset's `ocr_keywords` in its saved OCR boxes.
+    """
+    if not TRAJECTORIES_DIR.exists():
+        return {"samples": []}
+    cfg = _load_harvest_config()
+    preset_cfg = (cfg.get("presets") or {}).get(preset) or {}
+    keywords = [str(k).strip() for k in (preset_cfg.get("ocr_keywords") or []) if str(k).strip()]
+    if not keywords:
+        return {"samples": [], "reason": "preset has no ocr_keywords"}
+    samples: List[Dict[str, Any]] = []
+    try:
+        runs = sorted(
+            [d for d in TRAJECTORIES_DIR.iterdir() if d.is_dir() and d.name.startswith("run_")],
+            key=lambda p: p.name, reverse=True,
+        )[:30]
+        for run in runs:
+            for js in sorted(run.glob("tick_*.json")):
+                try:
+                    d = json.loads(js.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                boxes = d.get("ocr_boxes") or []
+                hit = False
+                for b in boxes:
+                    t = str(b.get("text") or "")
+                    if not t:
+                        continue
+                    if any(k in t for k in keywords):
+                        hit = True
+                        break
+                if not hit:
+                    continue
+                jpg = js.with_suffix(".jpg")
+                if not jpg.exists():
+                    continue
+                samples.append({
+                    "run": run.name,
+                    "tick": d.get("tick"),
+                    "jpg": f"{run.name}/{jpg.name}",
+                })
+                if len(samples) >= limit:
+                    break
+            if len(samples) >= limit:
+                break
+    except Exception as e:
+        print(f"[server] harvest samples error: {e}")
+    return {"samples": samples, "keywords": keywords}
+
+
+@app.post("/api/v1/harvest/run")
+def run_harvest(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract (avatar, name) pairs from all matching trajectory frames.
+
+    For each frame:
+      - Iterate the grid (cols × rows) stepping by (dx, dy)
+      - Crop avatar + name regions
+      - OCR the name region
+      - If OCR gives a plausible name (CJK+latin, conf >= min_conf),
+        save the avatar crop as `<name>.png` in HARVEST_OUT_DIR
+      - Dedup by name; keep the highest-OCR-conf sample per name
+
+    Body: {"preset": "momotalk_invite", "min_conf": 0.6, "max_frames": 200}
+    """
+    preset_name = str((payload or {}).get("preset") or "momotalk_invite")
+    min_conf = float((payload or {}).get("min_conf") or 0.6)
+    max_frames = int((payload or {}).get("max_frames") or 200)
+
+    cfg = _load_harvest_config()
+    preset = (cfg.get("presets") or {}).get(preset_name)
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"preset {preset_name!r} not found")
+    keywords = [str(k).strip() for k in (preset.get("ocr_keywords") or []) if str(k).strip()]
+    avatar_box = preset.get("avatar_box") or {}
+    name_box = preset.get("name_box") or {}
+    grid = preset.get("grid") or {}
+    if not avatar_box or not name_box:
+        raise HTTPException(status_code=400, detail="preset missing avatar_box/name_box")
+
+    try:
+        dx = float(grid.get("dx") or 0.0)
+        dy = float(grid.get("dy") or 0.0)
+        cols = max(1, int(grid.get("cols") or 1))
+        rows = max(1, int(grid.get("rows") or 1))
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid grid config")
+
+    # Build frame list
+    if not TRAJECTORIES_DIR.exists():
+        return {"ok": False, "reason": "no trajectories"}
+    frames_to_scan: List[Path] = []
+    try:
+        for run in sorted(TRAJECTORIES_DIR.iterdir(), reverse=True):
+            if not run.is_dir() or not run.name.startswith("run_"):
+                continue
+            for js in sorted(run.glob("tick_*.json")):
+                try:
+                    d = json.loads(js.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                boxes = d.get("ocr_boxes") or []
+                if keywords and not any(
+                    any(k in str(b.get("text") or "") for k in keywords)
+                    for b in boxes
+                ):
+                    continue
+                jpg = js.with_suffix(".jpg")
+                if jpg.exists():
+                    frames_to_scan.append(jpg)
+                    if len(frames_to_scan) >= max_frames:
+                        break
+            if len(frames_to_scan) >= max_frames:
+                break
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"scan error: {e}")
+
+    if not frames_to_scan:
+        return {"ok": False, "reason": "no matching frames", "keywords": keywords}
+
+    # Lazy-load vision + OCR
+    try:
+        from vision.io_utils import imread_any, imwrite_any  # noqa: PLC0415
+        from brain.pipeline import _get_ocr  # noqa: PLC0415
+        import cv2  # noqa: PLC0415
+        import re  # noqa: PLC0415
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"import error: {e}")
+    ocr = _get_ocr()
+
+    HARVEST_OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _sanitize_name(text: str) -> str:
+        """Keep CJK + ASCII alphanumerics + space/parentheses; collapse ws."""
+        t = (text or "").strip()
+        # Remove characters unsafe/unlikely for filenames
+        t = re.sub(r"[\\/:*?\"<>|]", "", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    # Per-name best (conf, saved_path)
+    best: Dict[str, Dict[str, Any]] = {}
+    frames_used = 0
+    pairs_attempted = 0
+    ocr_misses = 0
+
+    for fp in frames_to_scan:
+        img = imread_any(str(fp))
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        frames_used += 1
+        for i in range(cols):
+            for j in range(rows):
+                pairs_attempted += 1
+                # Compute cell rect for avatar and name
+                def _shift(box):
+                    x1 = float(box.get("x1", 0.0)) + i * dx
+                    y1 = float(box.get("y1", 0.0)) + j * dy
+                    x2 = float(box.get("x2", 0.0)) + i * dx
+                    y2 = float(box.get("y2", 0.0)) + j * dy
+                    return (
+                        max(0, int(x1 * w)), max(0, int(y1 * h)),
+                        min(w, int(x2 * w)), min(h, int(y2 * h)),
+                    )
+                ax1, ay1, ax2, ay2 = _shift(avatar_box)
+                nx1, ny1, nx2, ny2 = _shift(name_box)
+                if ax2 - ax1 < 8 or ay2 - ay1 < 8:
+                    continue
+                if nx2 - nx1 < 8 or ny2 - ny1 < 8:
+                    continue
+                avatar_crop = img[ay1:ay2, ax1:ax2]
+                name_crop = img[ny1:ny2, nx1:nx2]
+                if avatar_crop.size == 0 or name_crop.size == 0:
+                    continue
+                # OCR the name crop
+                try:
+                    res, _ = ocr(name_crop)
+                except Exception:
+                    res = None
+                if not res:
+                    ocr_misses += 1
+                    continue
+                # Pick highest-conf text from OCR result
+                best_text = ""
+                best_c = 0.0
+                for item in res:
+                    try:
+                        _, txt, c = item
+                        c = float(c)
+                    except Exception:
+                        continue
+                    if c > best_c and txt:
+                        best_c = c
+                        best_text = str(txt)
+                if best_c < min_conf or not best_text:
+                    ocr_misses += 1
+                    continue
+                name_key = _sanitize_name(best_text)
+                if not name_key:
+                    continue
+                prev = best.get(name_key)
+                if prev is None or best_c > prev["conf"]:
+                    out_path = HARVEST_OUT_DIR / f"{name_key}.png"
+                    try:
+                        imwrite_any(str(out_path), avatar_crop)
+                        best[name_key] = {
+                            "conf": best_c,
+                            "file": out_path.name,
+                            "source_frame": fp.name,
+                            "grid_pos": [i, j],
+                        }
+                    except Exception:
+                        pass
+
+    return {
+        "ok": True,
+        "output_dir": str(HARVEST_OUT_DIR),
+        "frames_used": frames_used,
+        "pairs_attempted": pairs_attempted,
+        "ocr_misses": ocr_misses,
+        "unique_names_saved": len(best),
+        "sample": dict(list(best.items())[:20]),
+    }
+
+
+# ── Per-image box/grid persistence (survives page refresh / backend restart) ──
+# Stored as JSON per (preset, dataset) at
+#   data/harvest_per_image/<preset>/<dataset>.json
+HARVEST_PER_IMAGE_DIR = REPO_ROOT / "data" / "harvest_per_image"
+
+
+def _per_image_path(preset: str, dataset: str) -> Path:
+    import re as _re
+    safe_preset = _re.sub(r"[^a-zA-Z0-9_\-]", "_", (preset or "").strip()) or "preset"
+    safe_ds = _re.sub(r"[^a-zA-Z0-9_\-]", "_", (dataset or "").strip()) or "ds"
+    return HARVEST_PER_IMAGE_DIR / safe_preset / f"{safe_ds}.json"
+
+
+@app.get("/api/v1/harvest/per_image")
+def get_harvest_per_image(
+    preset: str = Query(...),
+    dataset: str = Query(...),
+) -> Dict[str, Any]:
+    p = _per_image_path(preset, dataset)
+    if not p.exists():
+        return {"per_image": {}}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {"per_image": data}
+    except Exception:
+        pass
+    return {"per_image": {}}
+
+
+@app.post("/api/v1/harvest/per_image")
+def set_harvest_per_image(payload: Dict[str, Any]) -> Dict[str, Any]:
+    preset = str((payload or {}).get("preset") or "").strip()
+    dataset = str((payload or {}).get("dataset") or "").strip()
+    per_image = (payload or {}).get("per_image") or {}
+    if not preset or not dataset:
+        raise HTTPException(status_code=400, detail="preset and dataset required")
+    if not isinstance(per_image, dict):
+        raise HTTPException(status_code=400, detail="per_image must be a dict")
+    p = _per_image_path(preset, dataset)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps(per_image, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return {"ok": True, "saved_frames": len(per_image), "path": str(p)}
+
+
+@app.post("/api/v1/harvest/run_dataset")
+def run_harvest_dataset(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Iterate images in a dataset folder. For each frame:
+
+    - If `per_image[filename]` present in payload, use its boxes/grid
+    - Else fall back to the closest-preceding per_image entry (in sort
+      order) — matches the "previous frame acts as template" UX
+    - Else (no per_image at all) use the preset default
+
+    Body: {
+      "preset": "...",
+      "dataset": "...",
+      "min_conf": 0.6,
+      "max_frames": 0,  # 0 = all
+      "per_image": { "frame_0010.jpg": {"avatar_box":{...}, "name_box":{...}, "grid":{...}} }
+    }
+    """
+    preset_name = str((payload or {}).get("preset") or "momotalk_invite")
+    dataset_name = str((payload or {}).get("dataset") or "").strip()
+    min_conf = float((payload or {}).get("min_conf") or 0.6)
+    max_frames = int((payload or {}).get("max_frames") or 0)  # 0 = all
+    per_image_in = (payload or {}).get("per_image") or {}
+    if not isinstance(per_image_in, dict):
+        per_image_in = {}
+    if not dataset_name:
+        raise HTTPException(status_code=400, detail="dataset required")
+
+    ds_path = _safe_dataset_path(dataset_name)
+    if not ds_path.exists():
+        raise HTTPException(status_code=404, detail=f"dataset {dataset_name!r} not found")
+    img_dir = ds_path / "frames" if (ds_path / "frames").is_dir() else ds_path
+    frames = sorted(img_dir.glob("*.jpg"))
+    if max_frames > 0:
+        frames = frames[:max_frames]
+    if not frames:
+        return {"ok": False, "reason": "dataset has no jpg frames"}
+
+    cfg = _load_harvest_config()
+    preset = (cfg.get("presets") or {}).get(preset_name)
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"preset {preset_name!r} not found")
+    preset_default = {
+        "avatar_box": preset.get("avatar_box") or {},
+        "name_box":   preset.get("name_box") or {},
+        "grid":       preset.get("grid") or {},
+    }
+    if not preset_default["avatar_box"] or not preset_default["name_box"]:
+        raise HTTPException(status_code=400, detail="preset missing avatar_box/name_box")
+
+    try:
+        from vision.io_utils import imread_any, imwrite_any  # noqa: PLC0415
+        from brain.pipeline import _get_ocr  # noqa: PLC0415
+        import re  # noqa: PLC0415
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"import error: {e}")
+    ocr = _get_ocr()
+
+    HARVEST_OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _sanitize_name(text: str) -> str:
+        t = (text or "").strip()
+        t = re.sub(r"[\\/:*?\"<>|]", "", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    def _is_plausible_name(name: str) -> bool:
+        """Reject pure-digit OCR results (intimacy numbers) + orphan
+        brackets / fragments that usually come from mis-cropping."""
+        if not name or len(name) < 2:
+            return False
+        # All digits + punctuation (no CJK/alpha): this is an intimacy number
+        if re.fullmatch(r"[\d\s\.,+\-!?]+", name):
+            return False
+        # Contains ANY CJK or latin letter?
+        has_letter = bool(re.search(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ffA-Za-z]", name))
+        if not has_letter:
+            return False
+        # Starts with a bracket character → it's the variant suffix WITHOUT
+        # the student name prefix. Reject: OCR's name-box was too narrow
+        # and only captured the right-hand "(变体)" portion.
+        if name[0] in "(（【[{)）】]}":
+            return False
+        return True
+
+    def _polish_name(name: str) -> str:
+        """Strip UNMATCHED brackets at edges. Balanced bracket pairs like
+        "星野(泳装)" are preserved because the parens match; only orphans
+        like "英美(" (open with no close) or ")泳装" (close without open)
+        get stripped.
+        """
+        OPEN = "(（【[{"
+        CLOSE = ")）】]}"
+        out = name
+        # Count brackets; if they balance, return as-is
+        opens = sum(1 for c in out if c in OPEN)
+        closes = sum(1 for c in out if c in CLOSE)
+        if opens == closes:
+            return out
+        # Unbalanced: strip excess brackets from the edges where they're orphan
+        # If too many opens: strip trailing open(s)
+        while out and opens > closes and out[-1] in OPEN:
+            out = out[:-1].rstrip()
+            opens -= 1
+        # If too many closes: strip leading close(s) then trailing close(s)
+        while out and closes > opens and out[0] in CLOSE:
+            out = out[1:].lstrip()
+            closes -= 1
+        while out and closes > opens and out[-1] in CLOSE:
+            out = out[:-1].rstrip()
+            closes -= 1
+        return out
+
+    best: Dict[str, Dict[str, Any]] = {}
+    frames_used = 0
+    pairs_attempted = 0
+    ocr_misses = 0
+    name_filtered = 0
+    # "Closest-preceding-edited frame" inheritance: walk frames in sort
+    # order, maintain `current_state` = last known config (starts as
+    # preset_default). If per_image has an entry for this frame, swap
+    # current_state to it. This matches the UX where tuning frame N sets
+    # boxes for N and everything after until the next tuned frame.
+    current_state = {
+        "avatar_box": dict(preset_default["avatar_box"]),
+        "name_box":   dict(preset_default["name_box"]),
+        "grid":       dict(preset_default["grid"]),
+    }
+    frames_tuned_used = 0
+    frames_inherited = 0
+
+    def _merge_state(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        out = {
+            "avatar_box": dict(base["avatar_box"]),
+            "name_box":   dict(base["name_box"]),
+            "grid":       dict(base["grid"]),
+        }
+        if isinstance(override, dict):
+            if isinstance(override.get("avatar_box"), dict):
+                out["avatar_box"].update(override["avatar_box"])
+            if isinstance(override.get("name_box"), dict):
+                out["name_box"].update(override["name_box"])
+            if isinstance(override.get("grid"), dict):
+                out["grid"].update(override["grid"])
+        return out
+
+    for fp in frames:
+        img = imread_any(str(fp))
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        frames_used += 1
+        # Update inheritance state if this frame has its own tuning
+        if fp.name in per_image_in:
+            current_state = _merge_state(preset_default, per_image_in[fp.name])
+            frames_tuned_used += 1
+        else:
+            frames_inherited += 1
+        ab = current_state["avatar_box"]
+        nb = current_state["name_box"]
+        g = current_state["grid"]
+        try:
+            dx = float(g.get("dx") or 0.0)
+            dy = float(g.get("dy") or 0.0)
+            cols = max(1, int(g.get("cols") or 1))
+            rows = max(1, int(g.get("rows") or 1))
+        except Exception:
+            continue
+        for i in range(cols):
+            for j in range(rows):
+                pairs_attempted += 1
+                def _shift(box):
+                    x1 = float(box.get("x1", 0.0)) + i * dx
+                    y1 = float(box.get("y1", 0.0)) + j * dy
+                    x2 = float(box.get("x2", 0.0)) + i * dx
+                    y2 = float(box.get("y2", 0.0)) + j * dy
+                    return (
+                        max(0, int(x1 * w)), max(0, int(y1 * h)),
+                        min(w, int(x2 * w)), min(h, int(y2 * h)),
+                    )
+                ax1, ay1, ax2, ay2 = _shift(ab)
+                nx1, ny1, nx2, ny2 = _shift(nb)
+                if ax2 - ax1 < 8 or ay2 - ay1 < 8:
+                    continue
+                if nx2 - nx1 < 8 or ny2 - ny1 < 8:
+                    continue
+                avatar_crop = img[ay1:ay2, ax1:ax2]
+                name_crop = img[ny1:ny2, nx1:nx2]
+                if avatar_crop.size == 0 or name_crop.size == 0:
+                    continue
+                try:
+                    res, _ = ocr(name_crop)
+                except Exception:
+                    res = None
+                if not res:
+                    ocr_misses += 1
+                    continue
+                best_text = ""
+                best_c = 0.0
+                for item in res:
+                    try:
+                        _, txt, c = item
+                        c = float(c)
+                    except Exception:
+                        continue
+                    if c > best_c and txt:
+                        best_c = c
+                        best_text = str(txt)
+                if best_c < min_conf or not best_text:
+                    ocr_misses += 1
+                    continue
+                name_key = _polish_name(_sanitize_name(best_text))
+                if not _is_plausible_name(name_key):
+                    name_filtered += 1
+                    continue
+                prev = best.get(name_key)
+                if prev is None or best_c > prev["conf"]:
+                    out_path = HARVEST_OUT_DIR / f"{name_key}.png"
+                    try:
+                        imwrite_any(str(out_path), avatar_crop)
+                        best[name_key] = {
+                            "conf": best_c,
+                            "file": out_path.name,
+                            "source_frame": fp.name,
+                            "grid_pos": [i, j],
+                        }
+                    except Exception:
+                        pass
+
+    return {
+        "ok": True,
+        "output_dir": str(HARVEST_OUT_DIR),
+        "dataset": dataset_name,
+        "frames_used": frames_used,
+        "frames_tuned_used": frames_tuned_used,
+        "frames_inherited": frames_inherited,
+        "pairs_attempted": pairs_attempted,
+        "ocr_misses": ocr_misses,
+        "name_filtered": name_filtered,
+        "unique_names_saved": len(best),
+        "sample": dict(list(best.items())[:20]),
+    }
+
+
 # ── Dataset & Label Editor APIs ──────────────────────────────────────────
 
 def _safe_dataset_path(name: str) -> Path:
@@ -1792,7 +2572,8 @@ def dataset_florence_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         import cv2
 
-        img = cv2.imread(str(img_path))
+        from vision.io_utils import imread_any  # noqa: PLC0415
+        img = imread_any(str(img_path))
         if img is None:
             raise HTTPException(status_code=400, detail="cannot read image")
         h, w = img.shape[:2]
@@ -1865,7 +2646,8 @@ def dataset_ocr(dataset: str = Query(...), filename: str = Query(...)):
         raise HTTPException(404, "Image not found")
     try:
         import cv2
-        img = cv2.imread(str(img_path))
+        from vision.io_utils import imread_any  # noqa: PLC0415
+        img = imread_any(str(img_path))
         if img is None:
             raise HTTPException(400, "Cannot read image")
         ocr = _get_ocr()
@@ -1957,7 +2739,8 @@ def dataset_ocr_batch(payload: Dict[str, Any]):
         fname = img_path.name
         if fname in data:
             continue  # skip already scanned
-        img = cv2.imread(str(img_path))
+        from vision.io_utils import imread_any  # noqa: PLC0415
+        img = imread_any(str(img_path))
         if img is None:
             continue
         h, w = img.shape[:2]
