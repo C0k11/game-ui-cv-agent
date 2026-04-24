@@ -52,11 +52,51 @@ from brain.skills.ap_planning import ApPlanningSkill
 _ocr_engine = None
 _ocr_lock = None
 
+def _try_enable_cuda_dlls() -> bool:
+    """Load CUDA/cuDNN + TensorRT DLLs so onnxruntime-gpu can register both
+    the CUDA and TensorRT execution providers without a separate CUDA/TRT
+    Toolkit install. Pip packages supply all needed DLLs:
+
+      - torch (cu124) bundles cublasLt / cudart / cudnn under torch/lib/
+      - tensorrt-cu12-libs (pip) bundles nvinfer_10.dll under tensorrt_libs/
+
+    Returns True if at least one DLL dir was added.
+    """
+    added = False
+    try:
+        import os
+        if not hasattr(os, "add_dll_directory"):
+            return False
+        try:
+            import torch  # type: ignore
+            lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+            if os.path.isdir(lib_dir):
+                os.add_dll_directory(lib_dir)
+                added = True
+        except Exception:
+            pass
+        try:
+            import tensorrt_libs  # type: ignore
+            trt_dir = os.path.dirname(tensorrt_libs.__file__)
+            if os.path.isdir(trt_dir):
+                os.add_dll_directory(trt_dir)
+                added = True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return added
+
+
 def _get_ocr():
     """Get or create RapidOCR engine (thread-safe singleton).
 
-    Automatically loads fine-tuned Blue Archive rec model from
-    data/ocr_model/ba_rec.onnx if present, otherwise uses default PP-OCRv3.
+    Automatically:
+    - Loads fine-tuned Blue Archive rec model from data/ocr_model/ba_rec.onnx
+      if present, otherwise uses default PP-OCRv3.
+    - Tries to enable CUDA provider (det + rec). Falls back to CPU if CUDA
+      runtime DLLs are unavailable. Measured on RTX 4090: full-frame 1262x2243
+      CPU 2.2 FPS → CUDA 3.3 FPS; ROI-sized (~45% screen) CUDA 9 FPS.
     """
     global _ocr_engine, _ocr_lock
     import threading
@@ -64,13 +104,39 @@ def _get_ocr():
         _ocr_lock = threading.Lock()
     with _ocr_lock:
         if _ocr_engine is None:
+            _try_enable_cuda_dlls()
             from rapidocr_onnxruntime import RapidOCR
             custom_rec = Path(__file__).resolve().parent.parent / "data" / "ocr_model" / "ba_rec.onnx"
-            if custom_rec.exists():
-                print(f"[OCR] Loading fine-tuned BA rec model: {custom_rec}")
-                _ocr_engine = RapidOCR(rec_model_path=str(custom_rec))
-            else:
-                _ocr_engine = RapidOCR()
+            kw = dict(
+                det_use_cuda=True, det_model_path=None,
+                rec_use_cuda=True,
+                cls_use_cuda=True, cls_model_path=None,
+            )
+            kw["rec_model_path"] = str(custom_rec) if custom_rec.exists() else None
+            try:
+                _ocr_engine = RapidOCR(**kw)
+                # Inspect what provider det actually got — if CPU, we know
+                # CUDA load failed silently.
+                try:
+                    det_providers = _ocr_engine.text_detector.infer.session.get_providers()
+                    if "CUDAExecutionProvider" in det_providers:
+                        print(f"[OCR] CUDA provider active (det={det_providers})")
+                    else:
+                        print(f"[OCR] CUDA requested but fell back to CPU "
+                              f"(det={det_providers}). Install nvidia-cuda-runtime-cu12 "
+                              f"or add CUDA Toolkit to PATH.")
+                except Exception:
+                    pass
+                if custom_rec.exists():
+                    print(f"[OCR] Using fine-tuned BA rec model: {custom_rec.name}")
+            except Exception as e:
+                # Fall back to pure CPU with default kwargs
+                print(f"[OCR] CUDA init failed ({e!r}); using CPU")
+                _ocr_engine = (
+                    RapidOCR(rec_model_path=str(custom_rec))
+                    if custom_rec.exists()
+                    else RapidOCR()
+                )
         return _ocr_engine
 
 
@@ -809,8 +875,17 @@ class DailyPipeline:
             # Let skill popup handler deal with it; don't touch guide panel behind.
             return None
 
+        # IMPORTANT: Lobby event widgets (e.g. Serenade Promenade's top-right
+        # cycler) stamp "指南任務" on the character portrait at x≈0.90, y≈0.31.
+        # A region-less match fired the interceptor on a pristine lobby,
+        # causing it to click (0.98, 0.03) — which is the event widget's
+        # fullscreen-expand button, NOT the tutorial panel's home icon. That
+        # opened a fullscreen event splash and trapped the event-entry flow.
+        # Constrain the header text search to the top-center band where the
+        # actual tutorial panel's title lives.
         guide_mission = screen.find_any_text(
             ["指南任務", "指南任务", "新上任指南"],
+            region=(0.20, 0.00, 0.80, 0.22),
             min_conf=0.5
         )
         if not guide_mission:

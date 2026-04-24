@@ -53,6 +53,13 @@ class EventActivitySkill(BaseSkill):
 
         self._enter_ticks: int = 0
         self._phase_ticks: int = 0
+        # Set each tick _is_schale_signature fires on the bottom-left region;
+        # persists for ~N ticks after so a mid-cycle transition (schale just
+        # faded out, next banner not yet rendered) still forbids OCR-fallback
+        # clicks. Prevents the "click main event banner (bottom-left OCR)"
+        # false-positive that lands on 夏莱 during banner rotation.
+        self._schale_recent_tick: int = -100  # last tick index schale was seen
+        self._SCHALE_GUARD_TICKS: int = 3    # how long the guard persists
 
         self._story_done: bool = False
         self._story_tab_clicked: bool = False
@@ -87,6 +94,8 @@ class EventActivitySkill(BaseSkill):
         self._quest_scroll_count: int = 0
         self._quest_node_pending: bool = False
         self._quest_idle_ticks: int = 0
+        self._quest_consecutive_locks: int = 0   # stop after 2 in a row
+        self._story_consecutive_locks: int = 0   # same, story phase
 
         # Template-match event classifier (template-based compare_image).
         # Falls back to pure-OCR when templates are missing.
@@ -135,6 +144,8 @@ class EventActivitySkill(BaseSkill):
         self._quest_scroll_count = 0
         self._quest_node_pending = False
         self._quest_idle_ticks = 0
+        self._quest_consecutive_locks = 0
+        self._story_consecutive_locks = 0
 
     # ── Story index persistence ──
 
@@ -689,6 +700,17 @@ class EventActivitySkill(BaseSkill):
                 self.log("only old event reward banner visible, no current event")
                 return action_done("reward-claim event only")
 
+            # ── Proactive schale detection ──
+            # Record every tick we see schale on the bottom-left banner so
+            # the OCR-fallback below knows we're in a cycling state. Must
+            # run BEFORE priority 1b so mid-cycle transition frames are
+            # protected even if _is_schale_signature reads False on the
+            # very frame where 1b would otherwise fire.
+            if self._is_schale_signature(
+                screen, region=self._BOTTOM_LEFT_BANNER_REGION
+            ):
+                self._schale_recent_tick = self._enter_ticks
+
             # ── PRIORITY 1a: template-match bottom-left non-schale event ──
             # template-based compare_image: if the pre-cropped template for
             # a non-夏莱 event (e.g. Serenade Promenade) lights up, click
@@ -712,7 +734,27 @@ class EventActivitySkill(BaseSkill):
             # fall back to finding the EVENT!! / 活動進行中 label via OCR.
             # _find_main_event_banner already returns None if the card
             # currently shows 夏莱 (daily-task grind handled elsewhere).
-            main_banner = self._find_main_event_banner(screen)
+            #
+            # NARROW GUARD: Only block OCR-fallback on the SAME tick we
+            # observed schale. The banner cycle animation is fast enough
+            # that a schale frame is followed by a clear non-schale frame
+            # within one tick; blocking multiple ticks used to strand us
+            # when a 3-event rotation cycled [schale → unknown event →
+            # serenade] and the unknown event had no template to match.
+            # The mid-cycle transition is also rare: _find_main_event_banner
+            # itself rejects the frame via _is_schale_signature first, and
+            # the schale priority-2 branch below catches true schale frames.
+            schale_guard_active = (
+                self._schale_recent_tick == self._enter_ticks
+            )
+            if schale_guard_active:
+                self.log(
+                    "schale on bottom-left this tick — skipping OCR fallback, "
+                    "letting priority-2 branch handle the wait"
+                )
+                # Fall through to PRIORITY 2 below instead of returning a
+                # generic wait, so the user-visible reason is accurate.
+            main_banner = None if schale_guard_active else self._find_main_event_banner(screen)
             if main_banner:
                 # Click the banner image.  Label is at the top-left of
                 # the card; shift toward the card center before clicking.
@@ -734,6 +776,10 @@ class EventActivitySkill(BaseSkill):
             if self._is_schale_signature(
                 screen, region=self._BOTTOM_LEFT_BANNER_REGION
             ):
+                # Record schale sighting so the next N ticks of OCR-fallback
+                # (1b) are gated — prevents landing on schale when the banner
+                # is mid-cycle.
+                self._schale_recent_tick = self._enter_ticks
                 if self._enter_ticks <= 12:
                     self.log(
                         "bottom-left banner is 夏莱 grind event, "
@@ -1068,7 +1114,7 @@ class EventActivitySkill(BaseSkill):
         # a disabled "掃蕩開始" (sweep). Must click "任務開始" specifically.
         # reference: "activity_task-info" → click (940/1280, 538/720) = (0.734, 0.747)
         mission_info = screen.find_any_text(
-            ["任務資訊", "任务资讯"],
+            ["任務資訊", "任务资讯", "任務資讯", "任务資訊", "任務资讯"],
             min_conf=0.55,
         )
         if mission_info:
@@ -1082,26 +1128,12 @@ class EventActivitySkill(BaseSkill):
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_back("close mission popup (AP depleted)")
-            # Check for already-completed battle indicators:
-            # "該關卡無法" = can't sweep (already cleared)
-            # "没有任務目標" / "沒有任務目標" = no objectives remaining
-            already_done = screen.find_any_text(
-                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
-                 "没有任务目标", "已完成"],
-                min_conf=0.55,
-            )
-            if already_done:
-                self.log(
-                    f"story node {self._current_story_index:02d} battle already completed: "
-                    f"'{already_done.text}', advancing to next"
-                )
-                self._current_story_index += 1
-                self._save_story_index()
-                self._story_scroll_count = 0
-                self._story_tab_clicked = False  # re-verify tab after completion
-                return action_back("skip already-completed story battle")
+
+            # PRIORITY 1: Start button visible → play the node. Do NOT check
+            # "已完成" globally first — the mission popup's sub-objective list
+            # shows "已完成" badges per reward which trips the skip branch.
             start_btn = screen.find_any_text(
-                ["任務開始", "任务开始"],
+                ["任務開始", "任务开始", "任務开始", "任务開始"],
                 region=(0.55, 0.60, 0.90, 0.85),
                 min_conf=0.55,
             )
@@ -1110,14 +1142,33 @@ class EventActivitySkill(BaseSkill):
                 self._current_story_index += 1
                 self._save_story_index()
                 self._story_scroll_count = 0
-                self._story_tab_clicked = False  # re-verify tab after completion
+                # Reset tab flag — after battle reward we'll be on hub,
+                # need to re-switch to Story tab.
+                self._story_tab_clicked = False
                 return action_click_box(start_btn, "click 任務開始 (story battle)")
-            # reference hardcoded: (940/1280, 538/720)
-            self._current_story_index += 1
-            self._save_story_index()
-            self._story_scroll_count = 0
-            self._story_tab_clicked = False  # re-verify tab after completion
-            return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
+
+            # PRIORITY 2: Start button absent → either "can't sweep" banner
+            # (already cleared) or a system-level "無目標" message. Use tight
+            # region (center-right, where start button normally lives).
+            no_goals = screen.find_any_text(
+                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
+                 "没有任务目标"],
+                region=(0.50, 0.55, 0.95, 0.90),
+                min_conf=0.60,
+            )
+            if no_goals:
+                self.log(
+                    f"story node {self._current_story_index:02d} has no objectives: "
+                    f"'{no_goals.text}', advancing"
+                )
+                self._current_story_index += 1
+                self._save_story_index()
+                self._story_scroll_count = 0
+                return action_back("skip node with no objectives")
+
+            # PRIORITY 3: Neither button nor no-goals text — popup partial
+            # render. Wait a beat, don't advance.
+            return action_wait(400, "mission popup loading (story)")
 
         # ── Formation screen (team edit before battle) ──
         # After clicking 任務開始, lands on formation screen.
@@ -1287,6 +1338,7 @@ class EventActivitySkill(BaseSkill):
             if paired_entry:
                 self._story_idle_ticks = 0
                 self._story_node_pending = True
+                self._story_consecutive_locks = 0
                 self.log(f"clicking 入場 for story node {target_str} "
                          f"(y={paired_entry.cy:.3f})")
                 return action_click_box(
@@ -1294,16 +1346,22 @@ class EventActivitySkill(BaseSkill):
                     f"story node {target_str} 入場"
                 )
 
-            # Node number visible but no 入場 button paired
-            # → locked node (dark 入場 with 🔒, OCR can't read it)
-            # Check if there are other entry buttons below this node
-            # that might belong to later unlocked nodes
-            self.log(f"story node {target_str} visible but no 入場 button "
-                     f"(likely locked), advancing")
+            # Node visible, no 入場 button → locked. Stop after 2 in a row.
+            self._story_consecutive_locks += 1
+            if self._story_consecutive_locks >= 2:
+                self.log(
+                    f"story node {target_str} locked "
+                    f"(consecutive={self._story_consecutive_locks}), ending story phase"
+                )
+                self._story_done = True
+                self._clear_story_state()
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_wait(250, f"story phase stopped at locked node {target_str}")
+            self.log(f"story node {target_str} no 入場 button (retry once)")
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
-            self._story_tab_clicked = False  # re-verify tab after completion
             return action_wait(300, f"node {target_str} locked, trying next")
 
         # Target node not found on screen
@@ -1406,21 +1464,36 @@ class EventActivitySkill(BaseSkill):
             return action_wait(500, "challenge loading/battle in progress")
 
         # ── Mission Info dialog (battle node) ──
+        # Accept Trad/Simp/mixed-OCR variants: RapidOCR sometimes reads
+        # "任務資讯" (Trad 資 + Simp 讯) or "任务資訊" etc.
         mission_info = screen.find_any_text(
-            ["任務資訊", "任务资讯"],
+            ["任務資訊", "任务资讯", "任務資讯", "任务資訊", "任務资讯"],
             min_conf=0.55,
         )
         if mission_info:
             self._challenge_idle_ticks = 0
-            already_done = screen.find_any_text(
-                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
-                 "没有任务目标", "已完成"],
+            # PRIORITY 1: Start button — same anti-false-positive logic as
+            # story/quest phases. Sub-objective list uses "★完成" which
+            # contains "完成" and trips a global "已完成" scan.
+            start_btn = screen.find_any_text(
+                ["任務開始", "任务开始", "任務开始", "任务開始"],
+                region=(0.55, 0.60, 0.90, 0.85),
                 min_conf=0.55,
             )
-            if already_done:
+            if start_btn:
+                return action_click_box(start_btn, "click 任務開始 (challenge battle)")
+            # PRIORITY 2: No-goals text in tight region where start button
+            # normally sits. Drop global "已完成" — too noisy.
+            no_goals = screen.find_any_text(
+                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
+                 "没有任务目标"],
+                region=(0.50, 0.55, 0.95, 0.90),
+                min_conf=0.60,
+            )
+            if no_goals:
                 self._challenge_completed_count += 1
                 self._challenge_stage_index += 1
-                self.log(f"challenge stage already completed: '{already_done.text}' "
+                self.log(f"challenge stage already completed: '{no_goals.text}' "
                          f"(completed={self._challenge_completed_count}, next_idx={self._challenge_stage_index})")
                 if self._challenge_completed_count >= 5:
                     self.log("all challenge stages already completed")
@@ -1431,14 +1504,7 @@ class EventActivitySkill(BaseSkill):
                     self._challenge_sweep_stage = 0
                     return action_back("all challenges completed, exiting")
                 return action_back("skip already-completed challenge battle")
-            start_btn = screen.find_any_text(
-                ["任務開始", "任务开始"],
-                region=(0.55, 0.60, 0.90, 0.85),
-                min_conf=0.55,
-            )
-            if start_btn:
-                return action_click_box(start_btn, "click 任務開始 (challenge battle)")
-            return action_click(0.734, 0.747, "click 任務開始 (hardcoded)")
+            return action_wait(400, "mission popup loading (challenge)")
 
         # ── Formation screen ──
         sortie = screen.find_any_text(
@@ -1594,7 +1660,7 @@ class EventActivitySkill(BaseSkill):
 
         # ── Mission Info dialog (battle stage) ──
         mission_info = screen.find_any_text(
-            ["任務資訊", "任务资讯"],
+            ["任務資訊", "任务资讯", "任務資讯", "任务資訊", "任務资讯"],
             min_conf=0.55,
         )
         if mission_info:
@@ -1607,19 +1673,12 @@ class EventActivitySkill(BaseSkill):
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_back("close quest mission popup (AP depleted)")
-            already_done = screen.find_any_text(
-                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
-                 "没有任务目标", "已完成"],
-                min_conf=0.55,
-            )
-            if already_done:
-                self.log(f"quest node {self._quest_current_index:02d} already done")
-                self._quest_current_index += 1
-                self._quest_scroll_count = 0
-                self._mission_tab_clicked = False
-                return action_back("skip already-completed quest battle")
+
+            # PRIORITY 1: Start button visible → play. (Same reasoning as
+            # story phase: mission popup's reward checklist contains "已完成"
+            # badges that fire a false skip.)
             start_btn = screen.find_any_text(
-                ["任務開始", "任务开始"],
+                ["任務開始", "任务开始", "任務开始", "任务開始"],
                 region=(0.55, 0.60, 0.90, 0.85),
                 min_conf=0.55,
             )
@@ -1629,10 +1688,21 @@ class EventActivitySkill(BaseSkill):
                 self._quest_scroll_count = 0
                 self._mission_tab_clicked = False
                 return action_click_box(start_btn, "click 任務開始 (quest)")
-            self._quest_current_index += 1
-            self._quest_scroll_count = 0
-            self._mission_tab_clicked = False
-            return action_click(0.734, 0.747, "click 任務開始 (quest hardcoded)")
+
+            # PRIORITY 2: tight-region no-goals detection.
+            no_goals = screen.find_any_text(
+                ["該關卡無法", "该关卡无法", "没有任務目標", "沒有任務目標",
+                 "没有任务目标"],
+                region=(0.50, 0.55, 0.95, 0.90),
+                min_conf=0.60,
+            )
+            if no_goals:
+                self.log(f"quest node {self._quest_current_index:02d} no objectives, advancing")
+                self._quest_current_index += 1
+                self._quest_scroll_count = 0
+                return action_back("skip quest node with no objectives")
+
+            return action_wait(400, "mission popup loading (quest)")
 
         # ── Formation screen ──
         sortie = screen.find_any_text(
@@ -1719,14 +1789,26 @@ class EventActivitySkill(BaseSkill):
             if paired_entry:
                 self._quest_idle_ticks = 0
                 self._quest_node_pending = True
+                self._quest_consecutive_locks = 0  # reset on successful entry
                 self.log(f"clicking 入場 for quest node {target_str}")
                 return action_click_box(paired_entry, f"quest node {target_str} 入場")
-            # No entry button — locked or completed without button
-            self.log(f"quest node {target_str} has no 入場, advancing")
+            # No entry button — locked. Quest nodes unlock sequentially, so a
+            # lock means all later nodes are also locked. Stop after 1 lock;
+            # allow 1 retry in case of OCR miss on a real 入場 button.
+            self._quest_consecutive_locks += 1
+            if self._quest_consecutive_locks >= 2:
+                self.log(
+                    f"quest node {target_str} locked (consecutive locks="
+                    f"{self._quest_consecutive_locks}), ending quest phase"
+                )
+                self._mission_done = True
+                self._phase_ticks = 0
+                self.sub_state = "enter"
+                return action_wait(250, f"quest phase stopped at first lock (node {target_str})")
+            self.log(f"quest node {target_str} no 入場 (retry once)")
             self._quest_current_index += 1
             self._quest_scroll_count = 0
-            self._mission_tab_clicked = False
-            return action_wait(300, f"quest node {target_str} locked, trying next")
+            return action_wait(300, f"quest node {target_str} locked, retry next")
 
         if nodes:
             max_visible = max(idx for idx, _ in nodes)
