@@ -507,6 +507,7 @@ class DailyPipeline:
         "shop",             # 9.  Buy daily items (一般 tab, select all, purchase)
         "craft",            # 10. Quick-craft items + claim finished crafts
         "story_cleanup",    # 11. Main/group/mini story cleanup pass
+        "story_mining",     # 11b. Auto-play 短篇/支線 unplayed chapters
         "bounty",           # 12. Sweep bounty tickets (3 branches)
         "arena",            # 13. PvP fights + claim rewards
         "joint_firing_drill",  # 14. Tactical exam / joint firing drill tickets
