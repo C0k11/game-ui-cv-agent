@@ -24,10 +24,10 @@ The automation pipeline is built around OCR, template matching, and explicit sta
 |------|----------|-----------------|-------|
 | Lobby | Popup/announcement/notification cleanup, sign-in | OCR + templates | Handles update banners and `TOUCH TO START` |
 | AP overflow guard | Dumps AP via event farming when AP >= 900 | OCR numeric parsing | Prevents cafe-settlement deadlock |
-| EventActivity | Event story, challenge, and task navigation | OCR + state machine | Auto-detects active-event badge |
+| EventActivity | Event story → mission → challenge → farming + shop | OCR + banner template + state machine | Auto-identifies event by period text (`auto_YYYYMMDD`) so each rotation gets its own progress bucket; story-tab smart-skip avoids redundant clicks; story-done falls through to mission instead of exiting; mission phase always direct-sortie (no quick-edit) so initial clears use the saved team — quick-edit + auto-bonus is reserved for the farming phase to update the sweep team for the rate-up stage; first-visible-node detection persists so resumed runs don't re-scan completed chapters |
 | EventFarming | Normal / Hard / quest-type sweeps | OCR + state machine | `max_rounds` + `ap_reserve` budget |
 | Cafe | Income collection, invitation tickets, head-pat | Template (primary) + YOLO (fallback) | `happy_face` template first; 1F left-to-right, 2F right-to-left scan |
-| Schedule | Room assignment with favourite priority | OCR + `AvatarMatcher` | Template + HSV histogram matching; region tuner on canvas |
+| Schedule | Room assignment with favourite priority | OCR + `AvatarMatcher` | Template + HSV histogram matching; region tuner on canvas; lobby-detect early exit; tuned `STAGE2_TOP_K=15` (≈32% faster, ≈18% more favourite hits than the original wide-shortlist sweep) |
 | Club | AP collection | OCR | |
 | MomoTalk | Auto-reply to unread threads | OCR + state machine | Processes by unread count; auto-dialog / story skip |
 | Shop | Free daily items and affordable purchases | OCR + state machine | Detects completion / refresh states |
@@ -172,7 +172,7 @@ Intra-class NMS: merge same-class tracks with center_dist < 1.0
 ## Performance Notes
 
 - Trajectory writes are asynchronous: `brain/pipeline.py` drains a bounded `Queue(maxsize=64)` on a background thread, removing 10–50 ms of per-tick disk I/O from the main loop. JSON uses compact separators (about 35% smaller).
-- Avatar matching caches resize results per `(name, h, w)` and circular masks per `(h, w)` in `vision/avatar_matcher.py`, avoiding redundant work across 9 rooms × 4 cells × N candidates per frame.
+- Avatar matching caches resize results per `(name, h, w)` and circular masks per `(h, w)` in `vision/avatar_matcher.py`, avoiding redundant work across 9 rooms × 4 cells × N candidates per frame. The two-stage pipeline (cheap HSV histogram prefilter → masked `matchTemplate` on the top-K shortlist) defaults to `STAGE2_TOP_K=15`, which is both faster and more accurate than the original 40 because trimming look-alike non-favourite distractors lets genuine favourites win the open-set contest more often. `AVATAR_CROP_DIR` env var (or the `crop_dir=` constructor arg) swaps in alternative template sets without touching skill code.
 - OCR results are cached within a single tick so multiple `find_text` calls in one pass share one OCR invocation.
 - YOLO is lazily imported so the daily pipeline does not pay the load cost.
 

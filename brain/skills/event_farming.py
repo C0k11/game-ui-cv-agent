@@ -53,11 +53,23 @@ class EventFarmingSkill(BaseSkill):
     Tick budget scales with rounds: 120 + 40 * (max_rounds - 1).
     """
 
-    def __init__(self, ap_threshold: int = 0, max_rounds: int = 1, ap_reserve: int = 0):
+    def __init__(self, ap_threshold: int = 0, max_rounds: int = 1, ap_reserve: int = 0,
+                 preferred_stage: int = 0, ap_budget: int = 0):
         super().__init__("EventFarming")
         self._ap_threshold = ap_threshold  # 0 = always farm, >0 = only if AP >= threshold
         self._max_rounds = max(1, int(max_rounds))
         self._ap_reserve = max(0, int(ap_reserve))
+        # Preferred stage index (e.g. 12 = last stage in 4-stage event).
+        # template-based rationale: last stage usually drops highest-tier shop
+        # currency (premium shards, 活動點數 P-shop items). 0 = use old
+        # "bottom-most visible" heuristic.
+        self._preferred_stage = max(0, int(preferred_stage or 0))
+        # P1b: hard AP budget across the whole skill run. Stops sweeping
+        # when cumulative AP spent reaches this. 0 = disabled, run until
+        # ap_reserve / max_rounds triggers. Will also be auto-derived
+        # from event_shop budget file when set to negative value.
+        self._ap_budget = max(0, int(ap_budget or 0))
+        self._ap_spent: int = 0
         self.max_ticks = 120 + 40 * (self._max_rounds - 1)
         self._current_ap: int = -1
         self._ap_before: int = -1
@@ -1018,11 +1030,41 @@ class EventFarmingSkill(BaseSkill):
                 self.sub_state = "exit"
                 return action_wait(200, "no hard stages with attempts left")
 
-            bottom_btn = max(available_buttons, key=lambda b: b.cy)
-            self.log(f"clicking bottom available 入場 at y={bottom_btn.cy:.2f}")
+            # Preferred-stage picker: pair each 入場 with the closest
+            # numbered OCR box on its left (same Y row, cx < btn.cx). If
+            # the user's preferred stage index is visible AND available,
+            # click it. Otherwise fall back to bottom-most.
+            chosen = None
+            if self._preferred_stage > 0:
+                target_str = f"{self._preferred_stage:02d}"
+                for btn in available_buttons:
+                    # Find numbered OCR on same row, to the left of the button
+                    for box in screen.ocr_boxes:
+                        if box.confidence < 0.55:
+                            continue
+                        if abs(box.cy - btn.cy) > 0.05:
+                            continue
+                        if box.cx >= btn.cx:
+                            continue
+                        text = box.text.strip()
+                        # Match either padded or unpadded integer
+                        if text == target_str or text == str(self._preferred_stage):
+                            chosen = btn
+                            break
+                    if chosen:
+                        break
+                if chosen:
+                    self.log(f"clicking preferred stage {target_str} 入場 at y={chosen.cy:.2f}")
+                else:
+                    self.log(f"preferred stage {target_str} not visible, falling back to bottom-most")
+
+            if chosen is None:
+                chosen = max(available_buttons, key=lambda b: b.cy)
+                self.log(f"clicking bottom available 入場 at y={chosen.cy:.2f}")
+
             self.sub_state = "sweep"
             self._sweep_stage = 0
-            return action_click_box(bottom_btn, f"click bottom available 入場 button")
+            return action_click_box(chosen, f"click event stage 入場 button")
 
         # No 入場 found — maybe 關卡目錄 not visible, try waiting
         self.log("no 入場 buttons found")
@@ -1271,6 +1313,21 @@ class EventFarmingSkill(BaseSkill):
         if remaining <= 0:
             self.sub_state = "exit"
             return "exit", f"round {done_rounds}/{self._max_rounds} done"
+
+        # P1b: hard AP budget. Track cumulative AP spent by diffing the
+        # top-bar AP readings between rounds. Exit when we've burned
+        # our configured budget.
+        if self._ap_budget > 0:
+            ap_now = self._parse_ap(screen)
+            if ap_now >= 0 and self._ap_before >= 0:
+                delta = max(0, self._ap_before - ap_now)
+                self._ap_spent += delta
+                # Update the baseline for the next diff.
+                self._ap_before = ap_now
+                if self._ap_spent >= self._ap_budget:
+                    self.sub_state = "exit"
+                    return "exit", (f"AP budget reached: spent {self._ap_spent}/"
+                                    f"{self._ap_budget}")
 
         # If we have an AP reserve floor, check current AP.
         # Note: AP on sweep-result screen is not visible; we rely on lobby read

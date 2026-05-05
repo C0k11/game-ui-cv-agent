@@ -39,13 +39,10 @@ CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
 APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 
 # Skills organized by 4 daily states.
-# Removed: `ap_overflow` (merged into event_farming via ap_reserve).
-# Optional (not in default order): momo_talk, story_cleanup, event_activity,
-# joint_firing_drill, total_assault — still selectable on dashboard.
+# Lobby popup/sign-in/title-tap handled by pipeline global interceptor.
+# Removed: lobby, ap_overflow, story_cleanup, joint_firing_drill,
+# total_assault, hard_farming, campaign_push.
 _SKILL_OPTIONS: List[Dict[str, str]] = [
-    # pre-flight
-    {"id": "lobby", "label": "[前置] 大厅 / 关弹窗 / 签到"},
-
     # State 1: 基建与免费资源
     {"id": "cafe", "label": "[S1] 咖啡厅收益 / 邀请 / 摸头"},
     {"id": "club", "label": "[S1] 社团签到 AP"},
@@ -58,10 +55,7 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # State 3: 体力获取 & 消耗
     {"id": "mail", "label": "[S3] 邮件一键领取"},
     {"id": "ap_planning", "label": "[S3] 补给 / 每日免费 AP"},
-    {"id": "event_farming", "label": "[S3] 活动刷取（双倍优先）"},
-    {"id": "hard_farming", "label": "[S3] Hard 图碎片扫荡"},
-    {"id": "event_farming_2", "label": "[S3] 回马枪（二次活动刷取）"},
-    {"id": "campaign_push", "label": "[S3] Normal 图兜底清体力"},
+    {"id": "event_activity", "label": "[S3] 刷活动（剧情 / 任务 / 扫荡 / 商店）"},
 
     # State 4: 后勤 & 结算
     {"id": "shop", "label": "[S4] 普通商店日购"},
@@ -71,11 +65,7 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 
     # Optional extras (not default, kept for profile customization)
     {"id": "momo_talk", "label": "[可选] MomoTalk 未读"},
-    {"id": "story_cleanup", "label": "[可选] 主线 / 小组 / 迷你剧情清理"},
-    {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿（reference风格）"},
-    {"id": "event_activity", "label": "[可选] 活动剧情 / 挑战 / 走格子"},
-    {"id": "joint_firing_drill", "label": "[可选] 战术考试 / 联合火力演习"},
-    {"id": "total_assault", "label": "[可选] 总力战 / 大决战"},
+    {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿"},
 ]
 _DEFAULT_SKILL_ORDER = [item["id"] for item in _SKILL_OPTIONS]
 _VALID_SKILL_IDS = set(_DEFAULT_SKILL_ORDER)
@@ -149,6 +139,33 @@ def _default_profile_settings() -> Dict[str, Any]:
         "ap_purchase_limit": 0,
         "event_max_rounds": 1,
         "event_ap_reserve": 0,
+        # Auto-pick event-bonus characters before quest sortie:
+        # 快速編輯 → 自動 → 確認 → 出擊. FSM falls back to direct sortie
+        # if any button isn't found within 30 ticks.
+        "enable_bonus_team": True,
+        # Specific stage to sweep in event_farming. template-based rationale:
+        # the LAST stage in an event drops the highest-value shop currency
+        # (P-shop items = premium shards / pyroxenes). 0 = old behavior
+        # (bottom-most visible stage). 12 = typical 4-stage event finale.
+        "event_farming_stage": 12,
+        # P1b: hard AP ceiling for event_farming in one run. 0 = disabled
+        # (run until max_rounds or ap_reserve). Typical 1-week event
+        # budget: 200 sweeps × 40 AP = 8000.
+        "event_farming_ap_budget": 0,
+        # Minimum AP required before farming enters sweep. When AP < this,
+        # just claim reward badges and skip to shop. Stage 12 ≈ 20 AP.
+        "event_min_ap_for_sweep": 20,
+        # P1c: event_shop behavior.
+        #   auto_buy=True       → actually click 購買 on eligible items
+        #                         (5:1 exchange traps auto-skipped)
+        #   currencies=[]       → allow ALL currency tabs (recommended)
+        #   currencies=["tab3"] → only spend from the listed tabs
+        "event_shop_auto_buy": True,
+        "event_shop_currencies": [],
+        # Furniture items (interactive cafe decor — 可愛器皿組合 / 刺繡手帕
+        # etc.) priority toggle. False (default) = buy after materials.
+        # True = buy furniture first.
+        "event_shop_furniture_first": False,
         "exploration_click": False,
         "notify_on_finish": False,
         "notify_webhook_url": "",

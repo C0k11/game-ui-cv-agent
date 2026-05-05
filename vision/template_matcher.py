@@ -93,8 +93,10 @@ class TemplateMatcher:
         self.threshold = threshold
         self.scales = scales or [0.7, 0.85, 1.0, 1.2, 1.5]
 
-        # Load template as BGR (ignore alpha)
-        raw = cv2.imread(str(template_path), cv2.IMREAD_UNCHANGED)
+        # Load template as BGR (ignore alpha). Use unicode-safe loader so
+        # paths containing CJK (e.g. 角色头像) work on Windows.
+        from vision.io_utils import imread_any  # noqa: PLC0415
+        raw = imread_any(str(template_path), cv2.IMREAD_UNCHANGED)
         if raw is None:
             raise FileNotFoundError(f"Template not found: {template_path}")
         if len(raw.shape) > 2 and raw.shape[2] == 4:
@@ -226,6 +228,29 @@ _TEMPLATE_DEFS = {
     # Cafe invite — sort indicators (small icon templates, not readable by OCR)
     "cafe_sort_down": ("cafe/invitation-ticket-order-down.png", "sort_down", [0.5, 0.7, 1.0], 0.75),
     "cafe_sort_up": ("cafe/invitation-ticket-order-up.png", "sort_up", [0.5, 0.7, 1.0], 0.75),
+    # ── reference-derived screen + button templates (added 2026-05-04) ──
+    # Use as OCR fallback or to disambiguate ambiguous OCR.  Skills
+    # call screen.find_template_one(name) to use these.
+    "mail_menu":           ("mail/menu.png",                       "信箱",          [0.7, 1.0, 1.3], 0.75),
+    "shop_menu":           ("shop/menu.png",                       "商店",          [0.7, 1.0, 1.3], 0.75),
+    "arena_menu":          ("arena/menu.png",                      "arena_menu",    [0.7, 1.0, 1.3], 0.75),
+    "lesson_menu":         ("lesson/lesson-information.png",       "課程",          [0.7, 1.0, 1.3], 0.75),
+    "back_arrow":          ("main_page/back-arrow.png",            "back_arrow",    [0.7, 1.0, 1.3], 0.75),
+    "quick_home":          ("main_page/quick-home.png",            "home_icon",     [0.7, 1.0, 1.3], 0.75),
+    "cafe_confirm_invite": ("cafe/confirm-invite.png",             "confirm_invite",[0.7, 1.0, 1.3], 0.72),
+    "cafe_dup_invite":     ("cafe/duplicate-invite-notice.png",    "dup_invite",    [0.7, 1.0, 1.3], 0.72),
+    "task_enter_button":   ("normal_task/enter-task-button.png",   "入場",          [0.7, 1.0, 1.3], 0.75),
+    "task_auto_over":      ("normal_task/auto-over.png",           "auto_over",     [0.7, 1.0, 1.3], 0.75),
+    "task_end_turn":       ("normal_task/end-turn.png",            "end_turn",      [0.7, 1.0, 1.3], 0.75),
+    "shop_credits_active": ("shop/coin-type-creditpoints-bright.png", "credit_act", [0.7, 1.0, 1.3], 0.75),
+    "shop_credits_idle":   ("shop/coin-type-creditpoints-grey.png",   "credit_idle",[0.7, 1.0, 1.3], 0.75),
+    "shop_purchase_avail": ("shop/purchase-available.png",         "buy_btn",       [0.7, 1.0, 1.3], 0.75),
+    "arena_battle_win":    ("arena/battle-win.png",                "victory",       [0.7, 1.0, 1.3], 0.75),
+    "arena_battle_lost":   ("arena/battle-lost.png",               "defeat",        [0.7, 1.0, 1.3], 0.75),
+    "main_page_notice":    ("main_page/notice.png",                "notice",        [0.7, 1.0, 1.3], 0.72),
+    "main_page_full_notice":("main_page/full-notice.png",          "full_notice",   [0.7, 1.0, 1.3], 0.72),
+    "main_page_bus":       ("main_page/bus.png",                   "bus",           [0.7, 1.0, 1.3], 0.75),
+    "purchase_ap":         ("purchase_ap/notice.png",              "buy_ap",        [0.7, 1.0, 1.3], 0.75),
 }
 
 _template_cache: dict = {}
@@ -317,7 +342,8 @@ def _load_lesson_affection_template(name: str) -> Optional[np.ndarray]:
     if not path.exists():
         _lesson_affection_cache[name] = None
         return None
-    raw = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    from vision.io_utils import imread_any  # noqa: PLC0415
+    raw = imread_any(str(path), cv2.IMREAD_UNCHANGED)
     if raw is None:
         _lesson_affection_cache[name] = None
         return None

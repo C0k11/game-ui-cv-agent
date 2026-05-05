@@ -166,22 +166,14 @@ class DailyTasksSkill(BaseSkill):
             self._chest_phase = True
             return action_wait(300, "claim attempts exhausted, checking chests")
 
-        # Look for claim-all button
-        claim = screen.find_any_text(
-            ["一鍵領取", "一键领取", "全部領取", "全部领取", "Claim All"],
-            min_conf=0.6
-        )
+        # Shared base-class claim helpers (normalize Trad/Simp/English).
+        claim = self.find_claim_all_button(screen)
         if claim:
             self.log(f"claiming all tasks (attempt {self._claim_attempts})")
             self._claimed_count += 1
             return action_click_box(claim, "claim all tasks")
 
-        # Individual claim buttons
-        single = screen.find_any_text(
-            ["領取", "领取", "Claim"],
-            min_conf=0.7,
-            region=(0.6, 0.1, 1.0, 0.9)
-        )
+        single = self.find_single_claim_button(screen)
         if single:
             self.log("claiming individual task reward")
             self._claimed_count += 1

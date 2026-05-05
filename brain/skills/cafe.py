@@ -167,6 +167,17 @@ class CafeSkill(BaseSkill):
         self._target_favorites: List[str] = []
         self._avatar_matcher = None
         self._invite_scroll_count: int = 0
+        # After firing a swipe, wait this many ticks before re-OCR to let
+        # the animation settle.  Without this gate, every tick was firing
+        # a fresh swipe before the previous one's animation completed →
+        # OCR captured mid-blur frames → "no fav found" → swipe again →
+        # 15 swipes burned in 15 ticks (run_20260504_221729 t033-047).
+        self._invite_swipe_cooldown: int = 0
+        # Last visible student signature (joined names string).  When two
+        # consecutive scans return the same signature, the list is stuck
+        # at the bottom — stop scrolling.
+        self._invite_last_signature: str = ""
+        self._invite_signature_repeat: int = 0
         self._invite_sorted: bool = False  # True once sorted by 精選
         self._sort_option_clicked: bool = False  # True after clicking 精選 option, waiting for 確認
         # Names invited this cafe run (1F pick so 2F can skip duplicate).
@@ -192,6 +203,9 @@ class CafeSkill(BaseSkill):
         self._invite_next_state = "headpat"
         self._pan_phase = 0
         self._invite_scroll_count = 0
+        self._invite_swipe_cooldown = 0
+        self._invite_last_signature = ""
+        self._invite_signature_repeat = 0
         self._invite_sorted = False
         self._sort_option_clicked = False
         # Restore cross-instance invited tracking for today's game day so
@@ -289,6 +303,33 @@ class CafeSkill(BaseSkill):
         except Exception as e:
             self.log(f"Florence button-state unavailable: {e}")
             return default
+
+    def _invite_visible_signature(self, screen: ScreenState) -> str:
+        """Return a stable string signature of the student names currently
+        visible in the invite list — used to detect when scrolling has
+        stopped advancing (list bottom reached).
+
+        Reads the same OCR region the favorite-finder uses, sorted by cy
+        for deterministic ordering.
+        """
+        names = []
+        for box in screen.ocr_boxes:
+            if box.confidence < 0.55:
+                continue
+            if not (0.30 <= box.x1 <= 0.52 and 0.15 <= box.y1 <= 0.90):
+                continue
+            t = box.text.strip()
+            # Skip non-name boxes: tips banner, numbers, header, sentence
+            # punctuation (TIPS row uses 。 / ! / ?).
+            if not t or t.startswith("TIPS") or t.startswith("學生"):
+                continue
+            if t.isdigit() or len(t) < 2 or len(t) > 12:
+                continue
+            if any(c in t for c in "。！？!?"):
+                continue
+            names.append((round(box.cy, 2), t))
+        names.sort()
+        return "|".join(n for _, n in names)
 
     def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Tuple[Any, str, bool]]:
         """Find a favorite student in the MomoTalk invite list.
@@ -999,8 +1040,22 @@ class CafeSkill(BaseSkill):
                 self._invite_ticks = 0
                 return action_wait(200, "sort not needed, proceed to invite")
 
-        # Stage 2: Invite list is open + sorted, find favorite student or click first
+        # Stage 2: Invite list is open + sorted, find favorite student or click first.
+        #
+        # CRITICAL FLOW (rewritten 2026-05-04 per user's spec): OCR scan
+        # finishes BEFORE any swipe.  After every swipe we cooldown 2-3
+        # ticks for the animation to settle, then OCR fresh, then decide.
+        # Old code fired one swipe per tick → 15 burned swipes in 15
+        # ticks (run_20260504_221729) → list overshooting target rows.
         if self._invite_stage == 2:
+            # Post-swipe settle gate — block OCR/decisions while animation runs.
+            if self._invite_swipe_cooldown > 0:
+                self._invite_swipe_cooldown -= 1
+                return action_wait(
+                    250,
+                    f"post-swipe settle ({self._invite_swipe_cooldown} ticks left)"
+                )
+
             # OCR frequently misreads 邀請 as 邀睛
             invite_btns = screen.find_text(
                 "邀請", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
@@ -1016,41 +1071,92 @@ class CafeSkill(BaseSkill):
             if invite_btns:
                 # Try to find a favorite student via OCR name matching + avatar fallback
                 _floor = 2 if self._invite_next_state == "headpat2" else 1
-                _MAX_SCROLLS = 15
+                _MAX_SCROLLS = 12
+                _SWIPE_COOLDOWN = 3  # ticks of wait after each swipe (~750ms)
                 fav_result = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
+
+                # Build a signature of currently visible student names — if
+                # two consecutive post-swipe scans return the same set,
+                # we've hit the list bottom (or list isn't scrolling).
+                visible_sig = self._invite_visible_signature(screen)
+
                 if fav_result:
                     fav_btn, fav_name, is_priority = fav_result
-                    # If we only found a non-priority fallback AND we still have
-                    # scrolls left, keep scrolling to hunt the floor's priority
-                    # target (e.g. 1F=Rio). Only accept fallback once exhausted.
-                    if not is_priority and self._invite_scroll_count < _MAX_SCROLLS:
-                        self._invite_scroll_count += 1
-                        self.log(f"fallback '{fav_name}' found but hunting priority — "
-                                 f"scroll ({self._invite_scroll_count}/{_MAX_SCROLLS}) floor={_floor}")
-                        # Slower, shorter swipe → less inertia, less row-skipping.
-                        # y delta reduced 0.35→0.22 (≈2 rows), duration 400→800ms.
-                        return action_swipe(0.35, 0.68, 0.35, 0.46, 800,
-                                            "scroll to hunt priority favorite")
-                    self._invited_names.add(fav_name)
-                    _save_cafe_state({
-                        "game_day": _game_day(),
-                        "invited_names": sorted(self._invited_names),
-                    })
-                    tag = "priority" if is_priority else "fallback"
-                    self.log(f"inviting {tag} '{fav_name}' at ({fav_btn.cx:.2f},{fav_btn.cy:.2f}) floor={_floor}")
+                    # Priority hit → invite immediately, no more scrolling.
+                    if is_priority:
+                        self._invited_names.add(fav_name)
+                        _save_cafe_state({
+                            "game_day": _game_day(),
+                            "invited_names": sorted(self._invited_names),
+                        })
+                        self.log(f"inviting PRIORITY '{fav_name}' at "
+                                 f"({fav_btn.cx:.2f},{fav_btn.cy:.2f}) floor={_floor}")
+                        self._invite_stage = 3
+                        self._invite_ticks = 0
+                        return action_click_box(fav_btn, f"invite priority {fav_name}")
+
+                    # Fallback fav found.  Decide: keep hunting priority, or
+                    # accept fallback?  Stop hunting if (a) scroll budget
+                    # exhausted, OR (b) list bottom detected.
+                    list_stuck = (
+                        visible_sig
+                        and visible_sig == self._invite_last_signature
+                    )
+                    if list_stuck:
+                        self._invite_signature_repeat += 1
+                    else:
+                        self._invite_signature_repeat = 0
+                    self._invite_last_signature = visible_sig
+
+                    if (self._invite_scroll_count >= _MAX_SCROLLS
+                            or self._invite_signature_repeat >= 2):
+                        reason = ("scroll budget" if self._invite_scroll_count >= _MAX_SCROLLS
+                                  else "list bottom (signature repeat)")
+                        self._invited_names.add(fav_name)
+                        _save_cafe_state({
+                            "game_day": _game_day(),
+                            "invited_names": sorted(self._invited_names),
+                        })
+                        self.log(f"accepting fallback '{fav_name}' ({reason}) floor={_floor}")
+                        self._invite_stage = 3
+                        self._invite_ticks = 0
+                        return action_click_box(fav_btn, f"invite fallback {fav_name}")
+
+                    # Keep hunting priority.  Swipe + cooldown.
+                    self._invite_scroll_count += 1
+                    self._invite_swipe_cooldown = _SWIPE_COOLDOWN
+                    self.log(f"fallback '{fav_name}' found but hunting priority — "
+                             f"scroll ({self._invite_scroll_count}/{_MAX_SCROLLS}) floor={_floor}")
+                    return action_swipe(0.35, 0.68, 0.35, 0.46, 800,
+                                        "scroll to hunt priority favorite")
+
+                # No favorite at all on screen — scroll more if budget left.
+                list_stuck = (
+                    visible_sig
+                    and visible_sig == self._invite_last_signature
+                )
+                if list_stuck:
+                    self._invite_signature_repeat += 1
+                else:
+                    self._invite_signature_repeat = 0
+                self._invite_last_signature = visible_sig
+
+                if (self._invite_scroll_count >= _MAX_SCROLLS
+                        or self._invite_signature_repeat >= 2):
+                    btn = invite_btns[0]
+                    reason = ("scroll budget" if self._invite_scroll_count >= _MAX_SCROLLS
+                              else "list bottom")
+                    self.log(f"no favorite after scrolling ({reason}), clicking first 邀請 "
+                             f"at ({btn.cx:.2f},{btn.cy:.2f})")
                     self._invite_stage = 3
                     self._invite_ticks = 0
-                    return action_click_box(fav_btn, f"invite {tag} {fav_name}")
-                # No favorite found at all — scroll more, else click first
-                if self._invite_scroll_count < _MAX_SCROLLS:
-                    self._invite_scroll_count += 1
-                    self.log(f"no favorite found, scrolling invite list ({self._invite_scroll_count}/{_MAX_SCROLLS})")
-                    return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll invite list")
-                btn = invite_btns[0]
-                self.log(f"no favorite after scrolling, clicking first 邀請 at ({btn.cx:.2f},{btn.cy:.2f})")
-                self._invite_stage = 3
-                self._invite_ticks = 0
-                return action_click_box(btn, "invite student (no fav match)")
+                    return action_click_box(btn, "invite student (no fav match)")
+
+                self._invite_scroll_count += 1
+                self._invite_swipe_cooldown = _SWIPE_COOLDOWN
+                self.log(f"no favorite found, scrolling invite list "
+                         f"({self._invite_scroll_count}/{_MAX_SCROLLS})")
+                return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll invite list")
             if self._invite_ticks in (8, 16):
                 self.log("invite list missing after wait, retry opening ticket")
                 self._invite_stage = 0
@@ -1276,6 +1382,12 @@ class CafeSkill(BaseSkill):
             self._empty_scans = 0
             # Drag down slightly to center the cafe view (reference: 709,558→709,309)
             self.log("centering cafe view (drag down, no zoom)")
+            # Post-pan cooldown: pan animation is ~600ms; we need at
+            # least 2 ticks (~500ms) of settle before scanning for
+            # headpat marks, otherwise OCR/template detection runs on
+            # blurry mid-pan frames and misses students (cafe1
+            # run_20260504_221729 missed at least one student).
+            self._headpat_cooldown = 2
             return action_swipe(0.50, 0.60, 0.50, 0.40, 400, "center cafe view down")
         if self._pan_phase == 1:
             # Legacy state — fall through to phase 2 without action
@@ -1287,6 +1399,7 @@ class CafeSkill(BaseSkill):
             # reveals the left corner. 2F inherits 1F's final position (right
             # side after second pan) so also starts with pan-left.
             self.log(f"{'2F' if is_2f else '1F'} pan camera: sweep LEFT")
+            self._headpat_cooldown = 2  # post-pan settle
             return action_swipe(0.90, 0.50, 0.10, 0.50, 600, f"pan camera left ({'2F' if is_2f else '1F'})")
         if self._pan_phase == 4:
             self._pan_phase = 5
@@ -1298,6 +1411,7 @@ class CafeSkill(BaseSkill):
             # in initial view but only 1 got patted).
             floor_tag = "2F" if is_2f else "1F"
             self.log(f"{floor_tag} pan camera: sweep RIGHT")
+            self._headpat_cooldown = 2  # post-pan settle
             return action_swipe(0.10, 0.50, 0.90, 0.50, 600, f"pan camera right ({floor_tag} second)")
 
         # After a successful headpat, wait for the heart animation to finish

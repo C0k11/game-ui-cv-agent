@@ -79,3 +79,13 @@ release_out/
 # Runtime state written by skills
 data/event_story_state.json
 data/schedule_avatar_regions.json
+
+# 2026-05-04: runtime / harvested caches (per-machine)
+data/_roster_replay/
+data/harvest_per_image/
+data/cafe_state.json
+data/event_shop_state.json
+data/event_progress.json
+data/story_progress.json
+data/ocr_model/trt_cache/
+.claude/

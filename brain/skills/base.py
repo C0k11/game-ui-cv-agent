@@ -110,12 +110,30 @@ class ScreenState:
                   region: Optional[Tuple[float, float, float, float]] = None) -> List[OcrBox]:
         """Find OCR boxes matching a text pattern (substring or regex).
 
+        Matching runs on *normalized* text: OCR output and the pattern are
+        both passed through `vision.ocr_normalize.normalize` (known misreads
+        fixed, Traditional chars folded to Simplified). Skills no longer
+        need to enumerate Trad/Simp/mixed permutations of a keyword.
+
         Args:
             pattern: text to search for (case-insensitive substring match,
                      or regex if it contains special chars)
             min_conf: minimum confidence threshold
             region: optional (x1, y1, x2, y2) normalized region filter
         """
+        # Lazy import so vision module tests don't require brain.
+        try:
+            from vision.ocr_normalize import normalize as _norm
+        except Exception:
+            _norm = lambda s: s  # fall through to raw match
+        norm_pattern = _norm(pattern).lower()
+        # Only fall through to regex if the pattern contains *clearly intentional*
+        # regex syntax. A bare `?` / `+` after a literal char (e.g. "次?") is
+        # syntactically valid regex but almost always a keyword author's literal-
+        # punctuation typo, and `次?` matches the empty string at every position
+        # → false-positive on every OCR box. Keep regex opt-in via clear markers.
+        _regex_markers = (".*", ".+", "[", "\\", "|", "^", "$", "(?")
+        treat_as_regex = any(m in norm_pattern for m in _regex_markers)
         results = []
         for box in self.ocr_boxes:
             if box.confidence < min_conf:
@@ -124,12 +142,13 @@ class ScreenState:
                 rx1, ry1, rx2, ry2 = region
                 if box.cx < rx1 or box.cx > rx2 or box.cy < ry1 or box.cy > ry2:
                     continue
-            # Try substring match first, then regex
-            if pattern.lower() in box.text.lower():
+            norm_text = _norm(box.text).lower()
+            # Try substring match first, then regex (only if pattern looks regex-y).
+            if norm_pattern in norm_text:
                 results.append(box)
-            else:
+            elif treat_as_regex:
                 try:
-                    if re.search(pattern, box.text, re.IGNORECASE):
+                    if re.search(norm_pattern, norm_text, re.IGNORECASE):
                         results.append(box)
                 except re.error:
                     pass
@@ -151,6 +170,132 @@ class ScreenState:
             if hit:
                 return hit
         return None
+
+    def find_clickable_text(
+        self,
+        patterns: List[str],
+        *,
+        min_conf: float = 0.5,
+        region: Optional[Tuple[float, float, float, float]] = None,
+        disabled_saturation: float = 0.20,
+    ) -> Optional[OcrBox]:
+        """Find a text match AND verify the pixel region isn't grayed-out.
+
+        A common failure mode: a button's text is OCR'd (e.g. "掃蕩開始")
+        but the button is disabled/locked (greyed). Clicking does nothing
+        and the skill stalls. We avoid that by sampling the box's pixels
+        from the saved screenshot and rejecting matches whose saturation
+        is below `disabled_saturation` — disabled UI is desaturated in BA.
+
+        If the screenshot isn't available, falls back to plain text match
+        (no verification). Returns the first match passing both checks.
+        """
+        # Plain text hit first
+        for p in patterns:
+            box = self.find_text_one(p, min_conf=min_conf, region=region)
+            if box is None:
+                continue
+            if not self.screenshot_path:
+                return box  # no screenshot to verify; accept
+            try:
+                import cv2  # noqa: PLC0415
+                import numpy as np  # noqa: PLC0415
+                from vision.io_utils import imread_any  # noqa: PLC0415
+                img = imread_any(self.screenshot_path)
+                if img is None:
+                    return box
+                H, W = img.shape[:2]
+                ix1 = max(0, int(box.x1 * W)); iy1 = max(0, int(box.y1 * H))
+                ix2 = min(W, int(box.x2 * W)); iy2 = min(H, int(box.y2 * H))
+                if ix2 - ix1 < 4 or iy2 - iy1 < 4:
+                    return box
+                crop = img[iy1:iy2, ix1:ix2]
+                hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+                mean_sat = float(np.mean(hsv[:, :, 1])) / 255.0
+                if mean_sat < disabled_saturation:
+                    # Grayed-out — skip this match, try next pattern
+                    continue
+                return box
+            except Exception:
+                return box
+        return None
+
+    def reocr_region(
+        self,
+        region: Tuple[float, float, float, float],
+        *,
+        min_conf: float = 0.5,
+        pad_frac: float = 0.02,
+    ) -> List[OcrBox]:
+        """Re-run OCR on a cropped region of the current frame.
+
+        Use when you need a higher-confidence reading on a specific area
+        (e.g. a mission popup's start-button row) than the full-frame
+        pass provided. Crops the saved screenshot, runs OCR, and returns
+        boxes with coordinates re-mapped to the FULL-frame normalized
+        space (so downstream region filters work unchanged).
+
+        Cost on RTX 4090 with CUDA: ~100–200ms per call for a popup-
+        sized region. Not for per-tick use — reserve for cases where the
+        full-frame pass produced ambiguous or sub-threshold results.
+        """
+        x1, y1, x2, y2 = region
+        if not (0.0 <= x1 < x2 <= 1.0 and 0.0 <= y1 < y2 <= 1.0):
+            return []
+        if not self.screenshot_path:
+            return []
+        try:
+            import cv2  # noqa: PLC0415
+            from vision.io_utils import imread_any  # noqa: PLC0415
+            img = imread_any(self.screenshot_path)
+            if img is None:
+                return []
+        except Exception:
+            return []
+        H, W = img.shape[:2]
+        # Add small padding so text near edges isn't clipped
+        px = pad_frac * (x2 - x1)
+        py = pad_frac * (y2 - y1)
+        ix1 = max(0, int((x1 - px) * W))
+        iy1 = max(0, int((y1 - py) * H))
+        ix2 = min(W, int((x2 + px) * W))
+        iy2 = min(H, int((y2 + py) * H))
+        if ix2 - ix1 < 8 or iy2 - iy1 < 8:
+            return []
+        crop = img[iy1:iy2, ix1:ix2]
+        try:
+            from brain.pipeline import _get_ocr  # noqa: PLC0415
+            ocr = _get_ocr()
+            result, _ = ocr(crop)
+        except Exception:
+            return []
+        if not result:
+            return []
+        # Map crop-local coords back to full-frame normalized coords
+        crop_w = ix2 - ix1
+        crop_h = iy2 - iy1
+        boxes: List[OcrBox] = []
+        for item in result:
+            try:
+                poly, text, conf = item
+                conf = float(conf)
+            except (ValueError, TypeError):
+                continue
+            if conf < min_conf or not text:
+                continue
+            xs = [p[0] for p in poly]
+            ys = [p[1] for p in poly]
+            cx1 = (ix1 + min(xs)) / W
+            cy1 = (iy1 + min(ys)) / H
+            cx2 = (ix1 + max(xs)) / W
+            cy2 = (iy1 + max(ys)) / H
+            boxes.append(OcrBox(
+                text=str(text),
+                confidence=float(conf),
+                x1=float(cx1), y1=float(cy1),
+                x2=float(cx2), y2=float(cy2),
+            ))
+        return boxes
 
     # ── YOLO detection helpers ──
 
@@ -316,6 +461,200 @@ class ScreenState:
         return self.check_color(nx, ny, patch=patch,
                                 hsv_min=(0, 0, 100), hsv_max=(179, 40, 210))
 
+    # ── Universal notification badge detection ──
+    #
+    # Blue Archive uses two kinds of tiny circular badges over icons /
+    # buttons to signal the user:
+    #
+    #   🔴 red dot   = "you have something unclaimed here"
+    #                  (reward waiting, new mail, unread momotalk, pass
+    #                  rewards, craft finished, event reward threshold)
+    #
+    #   🟡 yellow dot = "you can DO something here now"
+    #                  (stage unlocked, new task available, craft craftable,
+    #                  ticket refilled, daily reset)
+    #
+    # Skills should use the helpers below rather than hard-coding HSV per
+    # skill. Typical call site::
+    #
+    #     btn = screen.find_text_one("奖励资讯")
+    #     if btn and screen.has_red_badge(btn):
+    #         click(btn)   # go claim
+    #
+    # Badges are ~12-20px diameter and sit at the top-right corner of
+    # the parent button/icon, slightly overlapping the edge. We sample a
+    # small patch at the anchor's top-right with a configurable offset
+    # (default +1.2% x / -0.5% y from the top-right corner, tuned so the
+    # patch lands on the badge's filled center, not the border).
+
+    # HSV envelopes for the badge colors (OpenCV H: 0-179).
+    # Tight thresholds: alert badges are SATURATED pure colors, not the
+    # soft orange/pink gradients of nearby buttons/icons. Loosening too
+    # much false-positives on the 獎勵資訊 button's own orange outline
+    # and the pink `P` currency icon.
+    #
+    # Real red badge pixels have S≥200 & V≥180. Previous loose H≤15
+    # caught orange button edges; restrict to true red H≤8 / ≥172.
+    _RED_BADGE_HSV = [
+        ((0,   200, 180), (8,   255, 255)),    # red hue near 0 (strict)
+        ((172, 200, 180), (179, 255, 255)),    # red hue near 180 (wraparound)
+    ]
+    # Yellow badges are distinct from the yellow active-button state —
+    # a badge is a small saturated dot, not the whole button face.
+    _YELLOW_BADGE_HSV = ((18, 200, 200), (32, 255, 255))
+
+    def _sample_badge_color(
+        self,
+        anchor: Optional["OcrBox"] = None,
+        *,
+        nx: Optional[float] = None,
+        ny: Optional[float] = None,
+        offset: Tuple[float, float] = (0.012, -0.005),
+        patch: int = 3,
+    ) -> Optional[Tuple[int, int, int]]:
+        """Sample the small patch where a notification badge would sit.
+
+        Give EITHER an ``anchor`` (OcrBox — sample at its top-right + offset)
+        OR explicit ``(nx, ny)``.
+        """
+        if anchor is not None:
+            x = min(0.995, anchor.x2 + offset[0])
+            y = max(0.005, anchor.y1 + offset[1])
+        elif nx is not None and ny is not None:
+            x, y = nx, ny
+        else:
+            return None
+        return self.sample_color(x, y, patch=patch)
+
+    def _hsv_matches(self, bgr: Tuple[int, int, int], envelopes) -> bool:
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return False
+        b, g, r = bgr
+        pixel = np.uint8([[[b, g, r]]])
+        hsv = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)[0][0]
+        h, s, v = int(hsv[0]), int(hsv[1]), int(hsv[2])
+        # Accept single envelope or list of envelopes
+        if isinstance(envelopes, tuple) and len(envelopes) == 2 and all(
+                isinstance(e, tuple) for e in envelopes):
+            mn, mx = envelopes
+            return (mn[0] <= h <= mx[0] and mn[1] <= s <= mx[1] and mn[2] <= v <= mx[2])
+        for mn, mx in envelopes:
+            if (mn[0] <= h <= mx[0] and mn[1] <= s <= mx[1] and mn[2] <= v <= mx[2]):
+                return True
+        return False
+
+    # Region search: badge position varies per button style, but it's
+    # always within a rectangle near the anchor's top-right corner. Mask
+    # the region for badge-color HSV and return True when the matching
+    # pixel cluster is large enough to be a real badge (not stray noise).
+    #
+    # Region spans slightly outside the button frame (for badges that
+    # overlap the edge) and into the upper half (where alert dots sit).
+    # Narrow to just the top-right corner where badge actually sits.
+    # Before this was too wide and caught the button body/gradient.
+    _BADGE_REGION_OFFSET = (-0.03, -0.08, +0.03, -0.02)   # (dx1,dy1,dx2,dy2)
+    _BADGE_MIN_PIXELS = 20   # minimum saturated pixel cluster to count
+
+    def _badge_matches_any_offset(
+        self,
+        envelopes,
+        anchor: Optional["OcrBox"] = None,
+        *,
+        nx: Optional[float] = None,
+        ny: Optional[float] = None,
+        offset: Optional[Tuple[float, float]] = None,
+    ) -> bool:
+        # Explicit single-point mode when nx/ny or offset explicitly given
+        if nx is not None and ny is not None:
+            bgr = self._sample_badge_color(None, nx=nx, ny=ny)
+            return bgr is not None and self._hsv_matches(bgr, envelopes)
+        if offset is not None:
+            bgr = self._sample_badge_color(anchor, offset=offset)
+            return bgr is not None and self._hsv_matches(bgr, envelopes)
+        # Default: region mask scan around anchor's top-right corner
+        if anchor is None:
+            return False
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return False
+        img = self.load_image()
+        if img is None:
+            return False
+        h, w = img.shape[:2]
+        dx1, dy1, dx2, dy2 = self._BADGE_REGION_OFFSET
+        x0 = max(0.0, min(0.995, anchor.x2 + dx1))
+        y0 = max(0.0, min(0.995, anchor.y1 + dy1))
+        x1 = max(0.005, min(1.0, anchor.x2 + dx2))
+        y1 = max(0.005, min(1.0, anchor.y1 + dy2))
+        if x1 <= x0 or y1 <= y0:
+            return False
+        px0, py0 = int(x0 * w), int(y0 * h)
+        px1, py1 = int(x1 * w), int(y1 * h)
+        roi = img[py0:py1, px0:px1]
+        if roi.size == 0:
+            return False
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        # Accept envelope as list or single tuple
+        envs = envelopes if isinstance(envelopes, list) else [envelopes]
+        total = 0
+        for mn, mx in envs:
+            m = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
+                                  np.array(mx, dtype=np.uint8))
+            total += int(m.sum() // 255)
+            if total >= self._BADGE_MIN_PIXELS:
+                return True
+        return total >= self._BADGE_MIN_PIXELS
+
+    def has_red_badge(
+        self,
+        anchor: Optional["OcrBox"] = None,
+        *,
+        nx: Optional[float] = None,
+        ny: Optional[float] = None,
+        offset: Optional[Tuple[float, float]] = None,
+    ) -> bool:
+        """True if a red unclaimed-reward badge overlays the anchor.
+
+        Default: probes 5 offsets around anchor's top-right corner.
+        Pass explicit ``offset`` or ``(nx, ny)`` for single-point mode.
+        """
+        return self._badge_matches_any_offset(
+            self._RED_BADGE_HSV, anchor, nx=nx, ny=ny, offset=offset)
+
+    def has_yellow_badge(
+        self,
+        anchor: Optional["OcrBox"] = None,
+        *,
+        nx: Optional[float] = None,
+        ny: Optional[float] = None,
+        offset: Optional[Tuple[float, float]] = None,
+    ) -> bool:
+        """True if a yellow actionable badge overlays the anchor."""
+        return self._badge_matches_any_offset(
+            self._YELLOW_BADGE_HSV, anchor, nx=nx, ny=ny, offset=offset)
+
+    def badge_state(
+        self,
+        anchor: Optional["OcrBox"] = None,
+        *,
+        nx: Optional[float] = None,
+        ny: Optional[float] = None,
+        offset: Optional[Tuple[float, float]] = None,
+    ) -> str:
+        """Return 'red' | 'yellow' | 'none' for a badge at anchor."""
+        if self._badge_matches_any_offset(
+                self._RED_BADGE_HSV, anchor, nx=nx, ny=ny, offset=offset):
+            return "red"
+        if self._badge_matches_any_offset(
+                self._YELLOW_BADGE_HSV, anchor, nx=nx, ny=ny, offset=offset):
+            return "yellow"
+        return "none"
+
     # ── Region constants for Blue Archive ──
 
     # Bottom navigation bar (咖啡廳, 課程表, 學生, 编辑, 社交, 製造, 商店, 招募)
@@ -464,6 +803,50 @@ class BaseSkill(ABC):
         self._log_lines.append(line)
         print(line)
 
+    # ── Shared helpers: reusable mini-flows used by multiple skills ──
+
+    _CLAIM_ALL_TEXTS = [
+        "一鍵領取", "一键领取", "全部領取", "全部领取",
+        "一次領取", "一次领取", "一键领", "一鍵领", "Claim All",
+    ]
+    _SINGLE_CLAIM_TEXTS = ["領取", "领取", "Claim"]
+    _EMPTY_LIST_TEXTS = [
+        "沒有郵件", "没有郵件", "沒有邮件", "没有邮件",
+        "没有任務", "没有任务", "沒有任務", "沒有任务",
+        "暫無", "暂无", "No Mail", "No Tasks",
+    ]
+
+    def find_claim_all_button(
+        self,
+        screen: ScreenState,
+        *,
+        min_conf: float = 0.6,
+        region: Optional[Tuple[float, float, float, float]] = None,
+    ) -> Optional[OcrBox]:
+        """Locate a 一鍵領取 / 全部領取 / Claim All button in any of its
+        Trad/Simp/English forms. Returns OcrBox or None.
+        """
+        return screen.find_any_text(
+            self._CLAIM_ALL_TEXTS, min_conf=min_conf, region=region,
+        )
+
+    def find_single_claim_button(
+        self,
+        screen: ScreenState,
+        *,
+        min_conf: float = 0.7,
+        region: Optional[Tuple[float, float, float, float]] = (0.6, 0.1, 1.0, 0.9),
+    ) -> Optional[OcrBox]:
+        """Locate an individual 領取 / Claim button (default region: right
+        side where per-item rewards usually sit)."""
+        return screen.find_any_text(
+            self._SINGLE_CLAIM_TEXTS, min_conf=min_conf, region=region,
+        )
+
+    def is_empty_reward_list(self, screen: ScreenState) -> bool:
+        """True if the current list view shows 'nothing to claim'."""
+        return bool(screen.find_any_text(self._EMPTY_LIST_TEXTS, min_conf=0.6))
+
     @abstractmethod
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         """Process one frame and return an action.
@@ -569,13 +952,25 @@ class BaseSkill(ABC):
                  "下載遊戲", "下载游戏", "檔案"],
                 region=screen.CENTER, min_conf=0.45,
             )
-            # Bounty/commission sweep confirm:
+            # Bounty/commission/event sweep confirm:
             #   "要使用X AP掃蕩Y次嗎？"          (commission AP sweep)
             #   "要使用6通票券6次？"              (bounty ticket sweep)
-            # Must confirm, otherwise the sweep is cancelled.
+            #   "要使用600AP30次？"               (event activity sweep)
+            # OCR drops spaces between "使用" and digits, so "使用AP"
+            # doesn't match the event variant. Use broader anchors:
+            # `要使用` is distinctive to BA sweep confirms; `次？` +
+            # digit-before-AP catch the same pattern.
             sweep_hint = screen.find_any_text(
-                ["掃蕩", "扫荡", "使用AP", "使用 AP",
-                 "通票券", "通缉票券", "通緝票券", "票券"],
+                ["掃蕩", "扫荡", "捅荡", "捅蕩",
+                 "使用AP", "使用 AP", "要使用",
+                 "次？", "次?", "次嗎", "次吗",
+                 "通票券", "通缉票券", "通緝票券", "票券",
+                 # Sweep-reset prompts: "掃蕩次數設定為2次以上 / 是否重置 / 次數設定 / 重置次數"
+                 # OCR sometimes drops the leading 掃蕩, so use the
+                 # post-prefix anchors as alternates (run_20260504_224706
+                 # t322 saw "次數設定為2次以上" without the 掃蕩 prefix).
+                 "重置", "次數設定", "次數", "次数设定", "次数",
+                 "次以上", "次以下", "若想開始", "若想开始"],
                 region=screen.CENTER, min_conf=0.45,
             )
             # Friend-cafe visit confirm ("要訪問好友的咖啡廳嗎？") must NEVER be
@@ -609,8 +1004,20 @@ class BaseSkill(ABC):
                 self.log("notification popup (friend-cafe): cancel fallback click")
                 return action_click(0.402, 0.701, "cancel friend-cafe visit fallback")
 
-            # Must-confirm notifications: always click 確認
+            # Must-confirm notifications: always click 確認 — UNLESS the
+            # confirm button is grayed out (insufficient resources, e.g.
+            # shop purchase without enough currency). In that case clicking
+            # does nothing → infinite loop. Sample the button color; if
+            # grayed, click cancel and give up.
             if must_confirm and confirm_btn:
+                if screen.is_button_grey(confirm_btn.cx, confirm_btn.cy):
+                    self.log(
+                        "notification popup: confirm button is grayed "
+                        "(insufficient / disabled) — clicking cancel instead"
+                    )
+                    if cancel_btn:
+                        return action_click_box(cancel_btn, "grayed confirm → cancel")
+                    return action_click(0.402, 0.701, "grayed confirm → cancel (fallback)")
                 tag = "invite" if invite_hint else "update"
                 self.log(f"notification popup ({tag}): clicking confirm")
                 return action_click_box(confirm_btn, f"confirm {tag} notification")

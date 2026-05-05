@@ -82,8 +82,19 @@ class MailSkill(BaseSkill):
             if mail_btn:
                 return action_click_box(mail_btn, "open mail from lobby")
 
-            # Hardcoded fallback: mail icon near top right
-            return action_click(0.89, 0.05, "click mail icon area")
+            # Top-right corner has 3 icons.  Verified pixel-position via
+            # brightness-profile analysis on run_20260504_233357 t1
+            # (3840×2160 BA window):
+            #   contacts (envelope-less): center ~(0.86, 0.04)
+            #   MAIL (envelope):           center ~(0.91, 0.04)
+            #   grid (apps):               center ~(0.98, 0.04)
+            # Old (0.89) hit contacts; my second guess (0.93) hit the
+            # divider between mail and grid (empty pixels).  Correct
+            # mail icon is at 0.91.
+            for cx in (0.91, 0.905, 0.915):
+                if screen.has_red_badge(nx=cx, ny=0.04):
+                    return action_click(cx, 0.04, f"click mail icon (red-dot @ x={cx})")
+            return action_click(0.91, 0.04, "click mail icon area")
 
         if current and current != "Mail":
             self.log(f"wrong screen '{current}', backing out")
@@ -100,33 +111,21 @@ class MailSkill(BaseSkill):
             self.sub_state = "exit"
             return action_wait(300, "claim attempts exhausted")
 
-        # Check if mailbox is empty — "没有郵件" / "沒有郵件" visible
-        # The "一次领取" button stays visible (greyed out) even when empty.
-        if screen.find_any_text(
-            ["没有郵件", "沒有郵件", "没有邮件", "沒有邮件", "No Mail"],
-            min_conf=0.6
-        ):
+        # Empty mailbox check (claim button stays visible but greyed when empty)
+        if self.is_empty_reward_list(screen):
             self.log(f"mailbox empty ({self._claimed_count} claimed)")
             self.sub_state = "exit"
             return action_wait(300, "no mail remaining")
 
-        # Look for "一鍵領取" / "全部領取" / "Claim All" / "領取" buttons
-        claim = screen.find_any_text(
-            ["一鍵領取", "一键领取", "全部領取", "全部领取",
-             "一次領取", "一次领取", "Claim All"],
-            min_conf=0.6
-        )
+        # 一鍵領取 / Claim All — base-class helper normalizes variants.
+        claim = self.find_claim_all_button(screen)
         if claim:
             self.log(f"claiming all mail (attempt {self._claim_attempts})")
             self._claimed_count += 1
             return action_click_box(claim, "claim all mail")
 
-        # Individual "領取" buttons (when claim-all is gone but individual items remain)
-        single_claim = screen.find_any_text(
-            ["領取", "领取"],
-            min_conf=0.7,
-            region=(0.6, 0.1, 1.0, 0.9)
-        )
+        # Fallback: single 領取 button on the right side.
+        single_claim = self.find_single_claim_button(screen)
         if single_claim:
             self.log("claiming individual mail item")
             self._claimed_count += 1

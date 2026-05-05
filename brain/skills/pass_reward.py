@@ -94,10 +94,8 @@ class PassRewardSkill(BaseSkill):
         if season:
             return True
 
-        claim_area = screen.find_any_text(
-            ["一鍵領取", "一键领取", "全部領取", "全部领取", "受取", "Claim"],
-            region=(0.55, 0.55, 1.0, 0.95),
-            min_conf=0.55,
+        claim_area = self.find_claim_all_button(
+            screen, region=(0.55, 0.55, 1.0, 0.95), min_conf=0.55,
         )
         return claim_area is not None
 
@@ -142,10 +140,8 @@ class PassRewardSkill(BaseSkill):
         return action_wait(400, "entering pass")
 
     def _claim_current_tab(self, screen: ScreenState, phase_name: str) -> Optional[Dict[str, Any]]:
-        claim = screen.find_any_text(
-            ["一鍵領取", "一键领取", "全部領取", "全部领取", "Claim All", "受取"],
-            region=(0.55, 0.55, 1.0, 0.95),
-            min_conf=0.55,
+        claim = self.find_claim_all_button(
+            screen, region=(0.55, 0.55, 1.0, 0.95), min_conf=0.55,
         )
         if claim:
             self._claim_clicks += 1

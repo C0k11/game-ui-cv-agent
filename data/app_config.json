@@ -6,10 +6,19 @@
       "window_title": "MuMu",
       "goal": "保持碧蓝档案日常流程稳定、安全、可回退，优先完成收菜与领奖，不触碰抽卡/氪金相关按钮。",
       "steps": 0,
-      "step_sleep_s": 0.6,
+      "step_sleep_s": 0.3,
       "dry_run": false,
       "forbid_premium_currency": true,
       "ap_purchase_limit": 0,
+      "event_max_rounds": 1,
+      "event_ap_reserve": 0,
+      "enable_bonus_team": true,
+      "event_farming_stage": 12,
+      "event_farming_ap_budget": 0,
+      "event_min_ap_for_sweep": 20,
+      "event_shop_auto_buy": true,
+      "event_shop_currencies": [],
+      "event_shop_furniture_first": false,
       "exploration_click": false,
       "notify_on_finish": false,
       "notify_webhook_url": "",
@@ -44,13 +53,50 @@
         "Toki_(Bunny_Girl).png"
       ],
       "skill_order": [
-        "cafe",
-        "schedule",
-        "bounty"
+        "mail",
+        "event_activity"
       ],
       "bounty_branches": [
         "教室"
-      ]
+      ],
+      "scheduler": {
+        "enabled": false,
+        "reset_time": "04:00",
+        "interval_hours": 24
+      },
+      "purchase_caps": {
+        "arena_tickets": 0,
+        "bounty_tickets": 0,
+        "scrimmage_tickets": 0,
+        "lesson_tickets": 0
+      },
+      "arena": {
+        "level_diff": 0,
+        "stop_at_rank1": true,
+        "max_refresh": 0
+      },
+      "shop": {
+        "common_priority_list": [],
+        "tactical_priority_list": [],
+        "common_refresh_times": 0,
+        "tactical_refresh_times": 0
+      },
+      "hard_task_list": [],
+      "normal_task_list": [],
+      "lesson": {
+        "relationship_first": true
+      },
+      "craft": {
+        "use_acceleration_ticket": false,
+        "phase_priority": [
+          "光辉",
+          "花朵"
+        ]
+      },
+      "drill": {
+        "difficulty_list": [],
+        "choose_team_method": "preset"
+      }
     }
   },
   "active_profile": "default",

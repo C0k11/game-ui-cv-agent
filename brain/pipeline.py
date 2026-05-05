@@ -25,26 +25,21 @@ from brain.skills.base import (
     BaseSkill, OcrBox, YoloBox, ScreenState,
     action_click, action_click_box, action_back, action_wait, action_done,
 )
-from brain.skills.lobby import LobbySkill
 from brain.skills.cafe import CafeSkill
 from brain.skills.schedule import ScheduleSkill
 from brain.skills.club import ClubSkill
 from brain.skills.bounty import BountySkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
-from brain.skills.farming import FarmingSkill
-from brain.skills.event_farming import EventFarmingSkill
+# event_farming + event_shop merged into event_activity (刷活动).
+# The standalone skill classes still exist but aren't registered.
 from brain.skills.daily_tasks import DailyTasksSkill
 from brain.skills.shop import ShopSkill
 from brain.skills.craft import CraftSkill
 from brain.skills.momo_talk import MomoTalkSkill
 from brain.skills.event_activity import EventActivitySkill
-from brain.skills.total_assault import TotalAssaultSkill
 from brain.skills.pass_reward import PassRewardSkill
-from brain.skills.joint_firing_drill import JointFiringDrillSkill
-from brain.skills.story_cleanup import StoryCleanupSkill
 from brain.skills.story_mining import StoryMiningSkill
-from brain.skills.campaign_push import CampaignPushSkill
 from brain.skills.ap_planning import ApPlanningSkill
 
 
@@ -495,31 +490,51 @@ class DailyPipeline:
     #          prioritize credit stages, scroll to bottom for highest stage.
     # Phase 3: Mail + tasks → collect AP rewards.
     # Phase 4: 回马枪 (boomerang) — second farming pass with collected AP.
+    @staticmethod
+    def _make_event_activity(opts):
+        skill = EventActivitySkill()
+        # Profile-driven toggles for EventActivity.
+        skill._enable_bonus_team = bool(opts.get("enable_bonus_team", False))
+        # Farming + shop settings (formerly separate skills, now merged in)
+        try:
+            skill._preferred_stage = max(0, int(opts.get("event_farming_stage") or 0))
+        except Exception:
+            skill._preferred_stage = 0
+        try:
+            skill._farming_ap_budget = max(0, int(opts.get("event_farming_ap_budget") or 0))
+        except Exception:
+            skill._farming_ap_budget = 0
+        try:
+            skill._min_ap_for_sweep = max(1, int(opts.get("event_min_ap_for_sweep") or 20))
+        except Exception:
+            skill._min_ap_for_sweep = 20
+        try:
+            skill._farm_max_rounds = max(0, int(opts.get("event_max_rounds") or 0))
+        except Exception:
+            skill._farm_max_rounds = 0
+        skill._shop_auto_buy = bool(opts.get("event_shop_auto_buy", False))
+        skill._shop_spend_currencies = tuple(opts.get("event_shop_currencies") or ())
+        skill._shop_furniture_first = bool(opts.get("event_shop_furniture_first", False))
+        return skill
+
     DEFAULT_SKILLS = [
-        "lobby",            # 1.  Login, close popups, confirm lobby
-        "ap_overflow",      # 2.  Emergency farm if AP≥900 (prevents cafe block)
-        "event_activity",   # 3.  Event story/challenge/grid cleanup
-        "event_farming",    # 4.  Burn AP in event missions
-        "cafe",             # 5.  Collect earnings, headpat students
-        "schedule",         # 6.  Run schedules with tickets
-        "club",             # 7.  Claim club AP (社交→社團)
-        "momo_talk",        # 8.  Auto-complete unread MomoTalk conversations
-        "shop",             # 9.  Buy daily items (一般 tab, select all, purchase)
-        "craft",            # 10. Quick-craft items + claim finished crafts
-        "story_cleanup",    # 11. Main/group/mini story cleanup pass
-        "story_mining",     # 11b. Auto-play 短篇/支線 unplayed chapters
-        "bounty",           # 12. Sweep bounty tickets (3 branches)
-        "arena",            # 13. PvP fights + claim rewards
-        "joint_firing_drill",  # 14. Tactical exam / joint firing drill tickets
-        "total_assault",    # 15. Total assault tickets + season/point rewards
-        "mail",             # 16. Collect mail rewards (AP, items)
-        "daily_tasks",      # 17. Claim daily task rewards + activity chests
-        "pass_reward",      # 18. Claim battle pass mission/reward tabs
-        "ap_planning",      # 19. Free AP claim + optional AP purchase planning
-        "hard_farming",     # 20. Hard mode shard farming (remaining AP)
-        "event_farming_2",  # 21. 回马枪: second event sweep with collected AP
-        "campaign_push",    # 22. Campaign progression fallback AP sink
+        "event_activity",   # 1.  Full event loop: story/mission/farming/shop
+        "cafe",             # 2.  Collect earnings, headpat students
+        "schedule",         # 4.  Run schedules with tickets
+        "club",             # 5.  Claim club AP (社交→社團)
+        "momo_talk",        # 6.  Auto-complete unread MomoTalk conversations
+        "shop",             # 7.  Buy daily items (一般 tab, select all, purchase)
+        "craft",            # 8.  Quick-craft items + claim finished crafts
+        "story_mining",     # 9.  Auto-play 短篇/支線 unplayed chapters
+        "bounty",           # 10. Sweep bounty tickets (3 branches)
+        "arena",            # 11. PvP fights + claim rewards
+        "mail",             # 12. Collect mail rewards (AP, items)
+        "daily_tasks",      # 13. Claim daily task rewards + activity chests
+        "pass_reward",      # 14. Claim battle pass mission/reward tabs
+        "ap_planning",      # 15. Free AP claim + optional AP purchase planning
     ]
+    # 回马枪 (post-loop second event sweep): handled inline at pipeline level
+    # after all skills finish — see _maybe_huimaqiang().
 
     TRAJECTORIES_DIR = Path(__file__).resolve().parents[1] / "data" / "trajectories"
 
@@ -530,13 +545,6 @@ class DailyPipeline:
             ap_purchase_limit = max(0, int(opts.get("ap_purchase_limit") or 0))
         except Exception:
             ap_purchase_limit = 0
-        try:
-            campaign_push_steps = int(opts.get("steps") or 0)
-        except Exception:
-            campaign_push_steps = 0
-        if campaign_push_steps <= 0:
-            campaign_push_steps = 3
-        campaign_push_steps = min(campaign_push_steps, 30)
         forbid_premium_currency = bool(opts.get("forbid_premium_currency", True))
         # Event-farming budget (adapted from reference activity_sweep_times).
         # max_rounds: how many sweep cycles per run (1 = legacy, >1 = loop).
@@ -551,38 +559,23 @@ class DailyPipeline:
             event_ap_reserve = 0
 
         self._skill_registry: Dict[str, BaseSkill] = {
-            "lobby": LobbySkill(),
-            "ap_overflow": EventFarmingSkill(ap_threshold=900),  # only farms if AP≥900
             "cafe": CafeSkill(),
             "schedule": ScheduleSkill(),
             "club": ClubSkill(),
             "shop": ShopSkill(),
             "craft": CraftSkill(),
             "momo_talk": MomoTalkSkill(),
-            "story_cleanup": StoryCleanupSkill(),
             "story_mining": StoryMiningSkill(),
-            "event_activity": EventActivitySkill(),
+            "event_activity": self._make_event_activity(opts),
             "bounty": BountySkill(),
             "arena": ArenaSkill(),
-            "joint_firing_drill": JointFiringDrillSkill(),
-            "total_assault": TotalAssaultSkill(),
-            "event_farming": EventFarmingSkill(
-                max_rounds=event_max_rounds,
-                ap_reserve=event_ap_reserve,
-            ),       # event-aware (always farms)
             "ap_planning": ApPlanningSkill(
                 forbid_premium_currency=forbid_premium_currency,
                 paid_purchase_limit=ap_purchase_limit,
             ),
-            "hard_farming": FarmingSkill(),              # Hard mode shard farming
-            "campaign_push": CampaignPushSkill(max_pushes=campaign_push_steps),
             "mail": MailSkill(),
             "daily_tasks": DailyTasksSkill(),
             "pass_reward": PassRewardSkill(),
-            "event_farming_2": EventFarmingSkill(
-                max_rounds=event_max_rounds,
-                ap_reserve=event_ap_reserve,
-            ),      # 回马枪 second pass
         }
 
         names = skill_names or self.DEFAULT_SKILLS
@@ -1068,14 +1061,57 @@ class DailyPipeline:
                     if cancel_btn or confirm_btn:
                         return None
 
-                # Strong user preference: click 今日不再 checkbox first
+                # 今日不再顯示 checkbox: the OCR text label is the only
+                # OCR-detectable anchor, but clicking the label itself
+                # doesn't toggle the checkbox (it sits to the LEFT of the
+                # label, not on it).  Old code clicked the label and
+                # looped forever (run_20260504_215753 burned 160 ticks).
+                # Click the checkbox spot once (text.x1 - small offset),
+                # then PROCEED to the X close button.  One-shot via
+                # _dnsa_toggled flag — don't re-toggle every tick.
                 do_not_show = screen.find_any_text(
                     ["今日不再", "今日不再提示", "今日不再顯示", "今日不再显示"],
                     min_conf=0.7
                 )
-                if do_not_show:
-                    print(f"[Interceptor] P1 popup: clicking 今日不再提示")
-                    return action_click_box(do_not_show, "interceptor: do not show again today")
+                if do_not_show and not getattr(self, "_dnsa_toggled", False):
+                    self._dnsa_toggled = True
+                    # Checkbox sits to the LEFT of the text label.  Click
+                    # at ~text.x1 - 0.025 to hit the box itself (BA's
+                    # checkbox is ~0.02-0.03 wide).
+                    cx_left = max(0.005, do_not_show.x1 - 0.025)
+                    print(f"[Interceptor] P1 popup: clicking 今日不再 checkbox (left of label)")
+                    return action_click(
+                        cx_left, do_not_show.cy,
+                        "interceptor: toggle do-not-show-again checkbox"
+                    )
+                # If do_not_show isn't on screen anymore, the promo
+                # popup has closed — reset toggle so a future popup
+                # gets a fresh attempt.
+                if not do_not_show:
+                    self._dnsa_toggled = False
+
+                # After toggling the do-not-show checkbox, close the popup
+                # via top-right X.  ONLY fire when we previously detected
+                # a real promo (do_not_show was found on a prior tick →
+                # _dnsa_toggled set).  Without this gate, ANY weak popup
+                # hit (e.g. "公告" on lobby) would fall here and click
+                # empty space at (0.955, 0.065) forever
+                # (run_20260504_221135 burned 86 ticks doing exactly that).
+                if getattr(self, "_dnsa_toggled", False) and is_strong:
+                    self._interceptor_streak += 1
+                    if self._interceptor_streak > 8:
+                        self._interceptor_streak = 0
+                        self._dnsa_toggled = False
+                        return action_back("interceptor: ESC burst (promo popup stuck)")
+                    _PROMO_X_POSITIONS = [(0.955, 0.065), (0.95, 0.07), (0.97, 0.05)]
+                    px, py = _PROMO_X_POSITIONS[
+                        (self._interceptor_streak - 1) % len(_PROMO_X_POSITIONS)
+                    ]
+                    print(f"[Interceptor] P1 promo popup: hardcoded X at ({px},{py})")
+                    return action_click(
+                        px, py,
+                        f"interceptor: close promo popup X (streak={self._interceptor_streak})"
+                    )
 
                 close_btn = _find_florence_hit(
                     screen,
@@ -1110,8 +1146,9 @@ class DailyPipeline:
                         return action_back("interceptor: ESC burst (popup stuck, no X)")
                     return action_click(px, py, f"interceptor: close popup X hardcoded ({popup_text.text})")
 
-        # No interceptor fired — reset streak
+        # No interceptor fired — reset streak + do-not-show-again flag
         self._interceptor_streak = 0
+        self._dnsa_toggled = False
         return None
 
     def tick(self, screenshot_path: str) -> Dict[str, Any]:
@@ -1238,7 +1275,17 @@ class DailyPipeline:
         # the "是否結束？" exit dialog which can cause cascading failures.
         # Also do NOT ESC during active battles — they legitimately repeat
         # the same wait reason for many ticks while combat is in progress.
-        _battle_wait_keywords = ("battle in progress", "battle speed", "loading/battle")
+        _battle_wait_keywords = (
+            "battle in progress", "battle speed", "loading/battle",
+            # event phase scanning: legitimate waits between popup/reward
+            # cycles, ESC here drops us out of the event page to lobby
+            "event quest scanning", "event story scanning", "event challenge scanning",
+            "no 入場 anywhere, waiting", "no 入場 visible",
+            "ocr flicker",
+            # bonus-setup battle: formation/quick-edit FSM + battle wait
+            # — ESC mid-battle backs us out of the active fight
+            "bonus-setup", "bonus-team", "quick-edit",
+        )
         _is_battle_wait = any(kw in action_reason.lower() for kw in _battle_wait_keywords)
         if action_type == "wait" and self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
             if screen.is_lobby():

@@ -115,7 +115,7 @@ RAIDS = [
 
 # ── Generic / System ──
 SYSTEM = [
-    "TOUCH TO START", "Touch to Start", "TOUCHTO CONTINUE", "TAP TO CONTINUE",
+    "TOUCH TO START", "Touch to Start", "TOUCH TO CONTINUE", "TAP TO CONTINUE",
     "是否結束", "是否结束", "是否退出", "是否离开",
     "UID", "Lv.", "AP",
     "下載", "下载", "登入", "登录",
@@ -174,6 +174,10 @@ def get_all_characters() -> list[str]:
 # Maps (misread text) → (correct text) for common Blue Archive OCR errors.
 # Used for auto-correcting trajectory labels during training data extraction.
 CORRECTIONS = {
+    # ── Latin OCR confusions observed in trajectories (hand-curated) ──
+    "Ouest": "Quest",    # O / Q at game font size
+    "Duest": "Quest",    # D / Q  (trace: run_20260423_033417 tick 33)
+    "Ouest02": "Quest",
     # Traditional/Simplified mixing
     "距離结束還剩": "距離結束還剩",
     "距離结束还剩": "距離結束還剩",

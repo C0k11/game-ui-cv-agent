@@ -91,7 +91,8 @@ class EventBannerMatcher:
                 pos, name = "bottom_left", stem[3:]
             else:
                 continue
-            img = cv2.imread(str(p), cv2.IMREAD_COLOR)
+            from vision.io_utils import imread_any  # noqa: PLC0415
+            img = imread_any(str(p), cv2.IMREAD_COLOR)
             if img is None or img.size == 0:
                 continue
             canonical = _CANONICAL[pos]

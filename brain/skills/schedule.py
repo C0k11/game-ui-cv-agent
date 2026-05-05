@@ -602,6 +602,9 @@ class ScheduleSkill(BaseSkill):
                 # Open-set pool (all ~250 templates) cached inside the matcher.
                 all_names = self._avatar_matcher.all_template_names()
                 fav_set = set(fav_names)
+                # Accumulate per-slot debug (logged only when room has no
+                # favorite match, so logs don't flood on success).
+                _slot_debug: List[str] = []
                 for slot in range(_CELLS_PER_ROOM):
                     sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
                     if sx + cell_size > strip_w:
@@ -619,6 +622,9 @@ class ScheduleSkill(BaseSkill):
                         self._avatar_matcher.match_avatar_open_set(
                             cell, fav_set, all_names,
                         )
+                    _slot_debug.append(
+                        f"s{slot}[all={all_m}/{all_s:.2f} fav={fav_m}/{fav_s:.2f}]"
+                    )
                     if all_s > room_top_overall_score:
                         room_top_overall = all_m
                         room_top_overall_score = all_s
@@ -635,13 +641,14 @@ class ScheduleSkill(BaseSkill):
                         best_score = room_best_score
                         best_room = room_idx
                 elif room_top_overall:
-                    # No cell passed open-set verification.  Log the
-                    # winning non-favorite so we can see who was actually
-                    # present in the roster (useful for tuning).
+                    # No cell passed open-set verification. Log per-slot
+                    # scores so user can audit: (a) favorite wasn't there,
+                    # (b) open-set picked non-favorite that looks more
+                    # similar, or (c) matcher signal is weak overall
+                    # (wiki-portrait vs in-game thumbnail mismatch).
                     self.log(
                         f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                        f"no favorite (top overall='{room_top_overall}' "
-                        f"score={room_top_overall_score:.2f})"
+                        f"no favorite | " + " ".join(_slot_debug)
                     )
 
         if best_name and best_room >= 0:
@@ -918,6 +925,13 @@ class ScheduleSkill(BaseSkill):
     def _select_location(self, screen: ScreenState) -> Dict[str, Any]:
         """On Location Select screen, click an unvisited location."""
         if not self._is_schedule(screen):
+            # If we're back on lobby, the skill ended — don't keep pressing
+            # back (which would open the exit-game dialog and loop forever).
+            if screen.is_lobby():
+                self.log("on lobby, schedule already exited — finishing skill")
+                self._stale_ticks = 0
+                self.sub_state = "exit"
+                return action_done("schedule done (returned to lobby)")
             self._stale_ticks += 1
             if self._stale_ticks > 10:
                 self.log("schedule UI lost for too long, trying back")

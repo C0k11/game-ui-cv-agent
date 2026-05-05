@@ -8,10 +8,19 @@ class AvatarMatcher:
     """Matches YOLO-detected student avatar ROIs against known target avatars,
     using template matching + histogram comparison for robustness."""
 
-    def __init__(self, avatars_dir: str):
+    def __init__(self, avatars_dir: str, crop_dir: Optional[str] = None):
         self.avatars_dir = Path(avatars_dir)
-        # Pre-cropped face directory (preferred, faster, no alpha needed)
-        self.crop_dir = self.avatars_dir.parent / "角色头像_crop"
+        # Pre-cropped face directory (preferred, faster, no alpha needed).
+        # Override priority: explicit ctor arg > env var > sibling default.
+        # Env var lets users swap template sets without touching skill code.
+        if crop_dir:
+            self.crop_dir = Path(crop_dir)
+        else:
+            env_dir = os.environ.get("AVATAR_CROP_DIR")
+            if env_dir:
+                self.crop_dir = Path(env_dir)
+            else:
+                self.crop_dir = self.avatars_dir.parent / "角色头像_crop"
         # Cache stores (bgr_image, alpha_mask, hsv_hist) tuples at _REF_SIZE
         self.cache: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
         # Per-size cache of resized candidate tuples: (name, size) -> (bgr, alpha)
@@ -20,8 +29,21 @@ class AvatarMatcher:
         self._mask_cache: Dict[Tuple[int, int], np.ndarray] = {}
 
     # Standard size for pre-cached reference avatars.
-    # Roster thumbnails are ~50-80px; 96 gives good detail without being too large.
-    _REF_SIZE = 96
+    # Roster thumbnails are ~50-80px; 64 gives plenty of detail and ~2.25× the
+    # matchTemplate throughput vs 96 (cost scales with size²).  Schedule's
+    # roster scan is 28 cells × ~250 templates worth of work per pass; the
+    # speed difference matters at tick-budget scale.
+    _REF_SIZE = 64
+    # Stage-2 matchTemplate shortlist size.  Tunable per-instance.
+    # Empirically (run_20260428_175656 schedule, 168 cells, threshold 0.35):
+    #   top_k=40: 22 hits, 25 ms/cell  (original)
+    #   top_k=25: 22 hits, 19 ms/cell
+    #   top_k=15: 26 hits, 16 ms/cell  ← default (more accurate AND faster)
+    #   top_k=10: 26 hits, 14 ms/cell
+    #   top_k≤6:  +false-positive risk (non-fav distractors removed too far)
+    # The accuracy gain is because lower top_k strips look-alike non-fav
+    # variants from Stage-2 → genuine favs win the open-set contest more often.
+    STAGE2_TOP_K = 15
 
     def _get_avatar_data(self, name: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         if name in self.cache:
@@ -268,7 +290,11 @@ class AvatarMatcher:
         # rank.  The favorite over-include is cheap (usually tens of
         # entries) and guarantees the closed-set fav match stays
         # correct even when a favorite has a weak histogram.
-        top_k = 40
+        # K=25 is the verified sweet spot (full bench: K=40/25/15/10 all
+        # produce the same 22 ★FAV count on the 175656 schedule run, but
+        # K<15 starts losing edge cases).  Stage-2 matchTemplate cost
+        # scales linearly with K.
+        top_k = self.STAGE2_TOP_K
         shortlist: List[Tuple[float, str]] = list(hist_prefilter[:top_k])
         seen = {name for _, name in shortlist}
         for hs, name in hist_prefilter[top_k:]:
@@ -304,6 +330,33 @@ class AvatarMatcher:
             if name in fav_set and score > best_fav_score:
                 best_fav_score = score
                 best_fav_name = name
+
+        # ── Tie-break / near-tie bias toward favorites ──
+        # Two cases we want to accept as favorite instead of rejecting:
+        #
+        #   (a) EXACT tie: fav_score == all_score (e.g. base-cloned variant
+        #       templates have identical pixels → identical scores; alphabetical
+        #       order arbitrarily put the base first, which isn't in favs).
+        #   (b) NEAR tie with strong favorite: fav_score ≥ 0.50 and the gap
+        #       to all_score is ≤ 0.05 — the top-1 is probably a look-alike
+        #       non-favorite and we'd rather the user's preferred identity.
+        #
+        # Callers still see both names; skill's open-set rule can decide whether
+        # to accept, but surfacing the favorite as best_all here flips the
+        # "top must equal favorite" gate.
+        if best_fav_name is not None and best_fav_score > 0:
+            exact_tie = (
+                best_all_name is not None
+                and best_all_name != best_fav_name
+                and abs(best_fav_score - best_all_score) < 1e-6
+            )
+            near_tie_strong = (
+                best_fav_score >= 0.50
+                and (best_all_score - best_fav_score) <= 0.05
+            )
+            if exact_tie or near_tie_strong:
+                best_all_name = best_fav_name
+                best_all_score = best_fav_score
 
         return (best_fav_name, max(-1.0, best_fav_score),
                 best_all_name, max(-1.0, best_all_score))

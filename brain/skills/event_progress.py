@@ -283,17 +283,27 @@ class EventProgressStore:
     # -- getters ---------------------------------------------------------
 
     def metadata(self, event_id: str) -> EventMetadata:
-        """Return metadata for ``event_id`` or a conservative default.
+        """Return metadata for ``event_id`` or a sensible default.
 
-        Unknown events get zeroed totals so ``phase_done`` returns True
-        immediately and the skill falls through to exit — that matches
-        the "no config, skip gracefully" philosophy reference uses.
+        For events auto-detected via period text (event_id starts with
+        ``auto_``), use BA-typical totals (story=12, mission=12,
+        challenge=4) so star-resync can declare a phase done once all
+        nodes are marked, instead of looping forever waiting for an
+        unreachable threshold.  Other unknown events still get zeros
+        (vacuous done → graceful exit).
         """
         with self._lock:
-            return self._metadata.get(
-                event_id,
-                EventMetadata(event_id=event_id),
-            )
+            if event_id in self._metadata:
+                return self._metadata[event_id]
+            if event_id.startswith("auto_"):
+                return EventMetadata(
+                    event_id=event_id,
+                    display_name=f"Auto-detected ({event_id})",
+                    total_story=12,
+                    total_mission=12,
+                    total_challenge=4,
+                )
+            return EventMetadata(event_id=event_id)
 
     def progress(self, event_id: str) -> EventProgress:
         """Return (and lazily-create) the progress entry for ``event_id``."""
