@@ -167,12 +167,6 @@ class EventActivitySkill(BaseSkill):
         # Farming: sweep a preferred stage with MAX count, honoring AP
         # budget. Shop: scan each currency tab, skip 5:1 traps.
         self._preferred_stage: int = 0     # 0 = last-visible (reference default)
-        # Remember the ORIGINAL preferred stage from config — when farming
-        # step-downs reduce _preferred_stage to find a sweepable stage,
-        # we still want to know what the user's TOP target was, so we
-        # only spend MAX-AP on that top stage and conservative on
-        # step-down fallbacks.
-        self._top_event_stage: int = 12
         self._farming_ap_budget: int = 0   # 0 = disabled
         # Minimum AP required to enter sweep. Below this we don't even
         # try — reward-badges get claimed in phase 0 head, then skill
@@ -3369,30 +3363,6 @@ class EventActivitySkill(BaseSkill):
                     f"{len(bonus_hits)} Bonus item(s), proceeding to sweep"
                 )
 
-            # AP discipline: clicking MAX drains AP in one round (e.g.
-            # 24 sweeps × 30 AP = 720 AP).  User complained "quest 都没
-            # 打完就把我 ap 全拿去扫荡了" — bot was using MAX too greedily
-            # on lower-tier stages while higher-tier ones were game-locked.
-            #
-            # Rule: only click MAX on the user's preferred top stage
-            # (typically 12).  For step-down fallback stages (lower than
-            # preferred), use the + button N times instead (or skip MAX)
-            # to limit AP per round.
-            #
-            # config `event_farming_ap_budget` (>0) also limits total
-            # spend across rounds at phase-0; this is the per-round cap.
-            target_stage = self._preferred_stage or 0
-            config_top_stage = getattr(self, "_top_event_stage", 12)
-            if target_stage < config_top_stage:
-                # Step-down fallback — don't drain.  Click the + button
-                # a few times (default 5) or just leave at 1.
-                self.log(
-                    f"farming: stage {target_stage} is step-down fallback "
-                    f"(< top {config_top_stage}), skipping MAX click (sweep 1)"
-                )
-                self._farm_sweep_phase = 2  # proceed to sweep with N=1
-                self._farm_stage_ticks = 0
-                return action_wait(200, "farming: conservative sweep (1x)")
             max_btn = screen.find_any_text(["MAX"], min_conf=0.7)
             if max_btn:
                 self._farm_sweep_phase = 2
