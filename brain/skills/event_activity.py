@@ -1986,10 +1986,15 @@ class EventActivitySkill(BaseSkill):
         if result is not None:
             return result
 
-        self._story_idle_ticks += 1
-        if self._phase_ticks > 250 or self._story_idle_ticks > 30:
+        # Same battle-aware idle counter as _mission (don't increment
+        # idle_ticks during active battle/formation/reward popups).
+        on_story_hub = bool(self._find_numbered_nodes_on_screen(screen)[0])
+        if on_story_hub:
+            self._story_idle_ticks += 1
+        if self._phase_ticks > 500 or self._story_idle_ticks > 30:
             self.log(f"story phase complete (index={self._current_story_index}, "
-                     f"max_seen={self._max_story_index_seen})")
+                     f"max_seen={self._max_story_index_seen}, "
+                     f"phase_ticks={self._phase_ticks}, idle={self._story_idle_ticks})")
             self._story_done = True
             self._clear_story_state()
             self._phase_ticks = 0
@@ -2319,7 +2324,16 @@ class EventActivitySkill(BaseSkill):
                 self._phase_ticks = 0
                 self.sub_state = "enter"
                 return action_wait(250, f"story phase stopped at locked node {target_str}")
-            self.log(f"story node {target_str} no 入場 button (retry once)")
+            # Node visible but no 入場 button → genuinely locked.  Common
+            # reasons: story-progress gate (need to complete prior nodes
+            # in another tab), time-gate (event day N+1 unlock), or
+            # daily-reset gate.  Game shows a lock icon at the row's
+            # right edge instead of 入場.  We can't unlock it; advance
+            # past and let the next-locked-detection bail out the phase.
+            self.log(
+                f"story node {target_str} LOCKED (no 入場 button — lock icon "
+                f"present); advancing past; will stop phase if next is also locked"
+            )
             self._current_story_index += 1
             self._save_story_index()
             self._story_scroll_count = 0
@@ -2671,9 +2685,19 @@ class EventActivitySkill(BaseSkill):
         if result is not None:
             return result
 
-        self._quest_idle_ticks += 1
-        if self._phase_ticks > 200 or self._quest_idle_ticks > 25:
-            self.log(f"quest/mission phase complete (index={self._quest_current_index})")
+        # Idle counter — but ONLY when we're actually on the quest hub list.
+        # During battle / formation / reward popups, _find_*_quest_node
+        # returns None too, but that's not "idle" — we're working.
+        # Without this gate, a 30-60s battle (~50 ticks) easily blows past
+        # the 25-tick limit → bot prematurely declares mission done while
+        # the battle is still running, then loses event-page state
+        # (run_20260513_133808 t539 abandoned mission mid-quest-04 battle).
+        on_quest_hub = bool(self._find_numbered_nodes_on_screen(screen)[0])
+        if on_quest_hub:
+            self._quest_idle_ticks += 1
+        if self._phase_ticks > 400 or self._quest_idle_ticks > 25:
+            self.log(f"quest/mission phase complete (index={self._quest_current_index}, "
+                     f"phase_ticks={self._phase_ticks}, idle={self._quest_idle_ticks})")
             self._mission_done = True
             self.sub_state = "enter"
             self._phase_ticks = 0
