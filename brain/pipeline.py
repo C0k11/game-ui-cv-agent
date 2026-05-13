@@ -495,6 +495,11 @@ class DailyPipeline:
         skill = EventActivitySkill()
         # Profile-driven toggles for EventActivity.
         skill._enable_bonus_team = bool(opts.get("enable_bonus_team", False))
+        # Farming auto-setup battle (one quick-edit battle to populate the
+        # saved sweep team with rate-up students).  Defaults False per
+        # user — they don't want a surprise second battle after quest
+        # finishes.  Enable via profile option `enable_bonus_setup_battle`.
+        skill._enable_bonus_setup_battle = bool(opts.get("enable_bonus_setup_battle", False))
         # Farming + shop settings (formerly separate skills, now merged in)
         try:
             skill._preferred_stage = max(0, int(opts.get("event_farming_stage") or 0))

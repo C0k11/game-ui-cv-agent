@@ -23,6 +23,7 @@ from brain.skills.base import (
     action_click_box,
     action_done,
     action_scroll,
+    action_swipe,
     action_wait,
 )
 
@@ -137,6 +138,13 @@ class EventActivitySkill(BaseSkill):
         # OFF — enable via profile option `enable_bonus_team=True` once
         # the click targets are verified against your screen resolution.
         self._enable_bonus_team: bool = False
+        # Whether the farming phase is allowed to run a one-off setup battle
+        # to populate the saved sweep team with rate-up students when the
+        # "Bonus" indicator is missing.  Default OFF per user (2026-05-13):
+        # after quest is done they do NOT want another battle to fire
+        # automatically.  Keep the FSM code around so it can be re-enabled
+        # via profile option `enable_bonus_setup_battle=True`.
+        self._enable_bonus_setup_battle: bool = False
         self._form_stage: str = "start"      # see _formation_bonus_team
         self._form_battle_node: int = -1      # which quest node this FSM is for
         self._form_ticks: int = 0             # stage-local tick counter
@@ -2366,16 +2374,19 @@ class EventActivitySkill(BaseSkill):
             min_visible = min(idx for idx, _ in nodes)
 
             if target > max_visible:
-                # Target is below visible area → scroll down
+                # Target is below visible area → swipe up to bring lower
+                # nodes into view.  Switched from wheel-scroll to swipe per
+                # user 2026-05-13 — they don't want wheel/CTRL-wheel
+                # gestures, only finger-style drag.
                 if self._story_scroll_count < 8:
                     self._story_scroll_count += 1
                     self._story_idle_ticks = 0
                     self.log(f"scrolling down to find node {target_str} "
                              f"(visible: {min_visible:02d}-{max_visible:02d}, "
                              f"scroll #{self._story_scroll_count})")
-                    return action_scroll(
-                        0.75, 0.50, clicks=-5,
-                        reason=f"scroll story list for node {target_str}"
+                    return action_swipe(
+                        0.75, 0.70, 0.75, 0.30, 500,
+                        reason=f"swipe story list down for node {target_str}"
                     )
                 # Scrolled max times without finding target → no more nodes
                 self.log(f"node {target_str} not found after {self._story_scroll_count} "
@@ -2387,13 +2398,14 @@ class EventActivitySkill(BaseSkill):
                 return action_wait(250, "story phase done (scrolled to end)")
 
             if target < min_visible:
-                # Target is above visible area → scroll up
+                # Target is above visible area → swipe down (drag-down
+                # gesture brings upper nodes into view).
                 if self._story_scroll_count < 8:
                     self._story_scroll_count += 1
                     self._story_idle_ticks = 0
-                    return action_scroll(
-                        0.75, 0.50, clicks=5,
-                        reason=f"scroll up for node {target_str}"
+                    return action_swipe(
+                        0.75, 0.30, 0.75, 0.70, 500,
+                        reason=f"swipe story list up for node {target_str}"
                     )
                 # Can't find it above either — skip to first visible
                 self.log(f"node {target_str} not found above, jumping to {min_visible:02d}")
@@ -2821,9 +2833,9 @@ class EventActivitySkill(BaseSkill):
                     return action_wait(500, f"quest node {target_str} visible but no 入場 anywhere, waiting")
                 if self._quest_blank_ticks <= 5 and self._quest_scroll_count < 4:
                     self._quest_scroll_count += 1
-                    return action_scroll(
-                        0.75, 0.50, clicks=-3,
-                        reason=f"no 入場 visible, scroll to check remaining quest nodes"
+                    return action_swipe(
+                        0.75, 0.70, 0.75, 0.35, 500,
+                        reason="no 入場 visible, swipe down to reveal remaining quest nodes"
                     )
                 self.log(
                     f"quest: no 入場 buttons visible after {self._quest_blank_ticks} "
@@ -2930,9 +2942,9 @@ class EventActivitySkill(BaseSkill):
                 if self._quest_scroll_count < 3:
                     self._quest_scroll_count += 1
                     self._quest_idle_ticks = 0
-                    return action_scroll(
-                        0.75, 0.50, clicks=-5,
-                        reason=f"scroll quest list for node {target_str}"
+                    return action_swipe(
+                        0.75, 0.70, 0.75, 0.30, 500,
+                        reason=f"swipe quest list down for node {target_str}"
                     )
                 self.log(f"quest node {target_str} not found after scrolling")
                 self._mission_done = True
@@ -2943,9 +2955,9 @@ class EventActivitySkill(BaseSkill):
                 if self._quest_scroll_count < 8:
                     self._quest_scroll_count += 1
                     self._quest_idle_ticks = 0
-                    return action_scroll(
-                        0.75, 0.50, clicks=5,
-                        reason=f"scroll up quest list for node {target_str}"
+                    return action_swipe(
+                        0.75, 0.30, 0.75, 0.70, 500,
+                        reason=f"swipe quest list up for node {target_str}"
                     )
                 self._quest_current_index = min_visible
                 self._quest_scroll_count = 0
@@ -3317,9 +3329,9 @@ class EventActivitySkill(BaseSkill):
                         f"farming: visible nodes {sorted({n for n,_ in nodes})} all locked, "
                         f"scrolling UP to find playable stage"
                     )
-                    return action_scroll(
-                        0.75, 0.50, clicks=5,
-                        reason="farming: scroll up to find unlocked stage"
+                    return action_swipe(
+                        0.75, 0.30, 0.75, 0.70, 500,
+                        reason="farming: swipe up to find unlocked stage"
                     )
                 if quest_tab:
                     return action_click_box(quest_tab, "farming: ensure quest tab")
@@ -3389,13 +3401,22 @@ class EventActivitySkill(BaseSkill):
                 self._farm_sweep_phase = 0
                 return action_back("farming: stage not sweepable")
 
-            # USER RULE (2026-05-04): before sweeping, verify the saved
-            # sweep team has full event bonus.  Game shows `Bonus` items
-            # in the 獲得期待獎勵 row only when the saved team contains
-            # rate-up students.  If absent, run one bonus-setup battle:
-            # 任務開始 → quick-edit auto-fill → 出擊 → wait for battle
-            # complete.  After return, the saved team has bonus; future
-            # sweeps benefit.
+            # USER RULE (2026-05-04, refined 2026-05-13): before sweeping,
+            # check whether the saved sweep team already has full event
+            # bonus.  The game shows `Bonus` items in the 獲得期待獎勵 row
+            # only when the saved team contains rate-up students.  If the
+            # indicator is absent, the historical behaviour was to run one
+            # quick-edit setup battle to populate the saved team.
+            #
+            # User (run_20260513_185751 feedback): "quest打完不要去打 challenge,
+            # 以后单独拿出来做".  After the quest phase completes they do
+            # NOT want farming to fire a second battle on the same stage —
+            # it doubles AP usage and feels like the bot is running an
+            # extra battle no one asked for.  So gate this auto-setup
+            # behind `enable_bonus_setup_battle` (default OFF).  When off,
+            # we just log the missing Bonus indicator and continue to
+            # sweep with whatever team is saved (drops will be smaller
+            # but no surprise battle).
             stage_idx = self._preferred_stage or 0
             if stage_idx not in self._farm_bonus_setup_done_stages:
                 bonus_hits = [
@@ -3403,21 +3424,28 @@ class EventActivitySkill(BaseSkill):
                     if "Bonus" in b.text and b.confidence >= 0.55
                 ]
                 if not bonus_hits:
+                    if self._enable_bonus_setup_battle:
+                        self.log(
+                            f"farming: stage {stage_idx} has no Bonus indicator → "
+                            f"running one quick-edit battle to set bonus team"
+                        )
+                        self._farm_sweep_phase = 100  # bonus-setup battle
+                        self._farm_bonus_battle_stage = "task_start"
+                        self._farm_bonus_battle_ticks = 0
+                        self._farm_stage_ticks = 0
+                        return action_wait(200, "farming: starting bonus-setup battle")
                     self.log(
-                        f"farming: stage {stage_idx} has no Bonus indicator → "
-                        f"running one quick-edit battle to set bonus team"
+                        f"farming: stage {stage_idx} no Bonus indicator but "
+                        f"enable_bonus_setup_battle=False — sweeping without bonus"
                     )
-                    self._farm_sweep_phase = 100  # bonus-setup battle
-                    self._farm_bonus_battle_stage = "task_start"
-                    self._farm_bonus_battle_ticks = 0
-                    self._farm_stage_ticks = 0
-                    return action_wait(200, "farming: starting bonus-setup battle")
-                # Bonus already there — mark as done (e.g. user pre-set it)
-                self._farm_bonus_setup_done_stages.add(stage_idx)
-                self.log(
-                    f"farming: stage {stage_idx} already has "
-                    f"{len(bonus_hits)} Bonus item(s), proceeding to sweep"
-                )
+                    self._farm_bonus_setup_done_stages.add(stage_idx)
+                else:
+                    # Bonus already there — mark as done (e.g. user pre-set it)
+                    self._farm_bonus_setup_done_stages.add(stage_idx)
+                    self.log(
+                        f"farming: stage {stage_idx} already has "
+                        f"{len(bonus_hits)} Bonus item(s), proceeding to sweep"
+                    )
 
             max_btn = screen.find_any_text(["MAX"], min_conf=0.7)
             if max_btn:

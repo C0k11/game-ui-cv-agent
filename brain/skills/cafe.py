@@ -136,8 +136,13 @@ except Exception:
 _HEADPAT_CONF = 0.15
 # Max consecutive empty scans before giving up on headpats
 _MAX_EMPTY_SCANS = 4
-# Max headpats per floor (cafe typically has 3-5 students per floor)
-_MAX_HEADPATS_PER_FLOOR = 7
+# Max headpats per floor.  Each floor can seat up to 8 students at a
+# time (Schale Cafe 1F default chair count) — plus the lounging spots
+# add a couple more.  Bumped 7 → 10 because user reported a missed
+# headpat on 1F (run_20260513_185751 patted 7, missed at least one).
+# Higher cap costs nothing — extra empty scans short-circuit via
+# _MAX_EMPTY_SCANS regardless.
+_MAX_HEADPATS_PER_FLOOR = 10
 _INVITE_MATCH_BUTTON_LIMIT = 4
 _INVITE_MATCH_FAVORITE_LIMIT = 12
 _INVITE_MATCH_TIME_BUDGET_S = 0.75
@@ -1082,8 +1087,33 @@ class CafeSkill(BaseSkill):
                     "邀睛", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
                 )
             if invite_btns:
-                # Try to find a favorite student via OCR name matching + avatar fallback
-                _floor = 2 if self._invite_next_state == "headpat2" else 1
+                # Try to find a favorite student via OCR name matching + avatar fallback.
+                # Floor detection (robust to retry resets):
+                #   1. _invite_next_state == "headpat2" — set when we explicitly
+                #      enter 2F invite via _switch_floor.
+                #   2. Screen shows "1號店"/"1号店" button — means we're CURRENTLY
+                #      on 2F (the switch button takes us TO 1F).
+                #   3. invited_names already has a student — implies 1F invite
+                #      already happened.
+                # Bug fixed (2026-05-13 / run_20260513_185751 t100+): cafe got
+                # reset during cafe2 setup, which clobbered _invite_next_state
+                # back to default "headpat".  _floor incorrectly computed as 1,
+                # priority_target became Rio (already invited / excluded), so
+                # Wakamo (the floor-2 priority) only matched as fallback — bot
+                # scrolled through the entire list never inviting her.
+                _on_2f = (
+                    self._invite_next_state == "headpat2"
+                    or screen.find_any_text(
+                        ["移動至1號店", "移动至1号店", "移動至1号店", "移动至1號店",
+                         "1號店", "1号店"],
+                        region=(0.0, 0.03, 0.25, 0.18), min_conf=0.5
+                    ) is not None
+                    or len(self._invited_names) >= 1
+                )
+                if _on_2f and self._invite_next_state != "headpat2":
+                    self.log("invite: detected 2F state, repairing _invite_next_state")
+                    self._invite_next_state = "headpat2"
+                _floor = 2 if _on_2f else 1
                 _MAX_SCROLLS = 12
                 _SWIPE_COOLDOWN = 3  # ticks of wait after each swipe (~750ms)
                 fav_result = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
