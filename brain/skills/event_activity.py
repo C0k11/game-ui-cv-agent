@@ -1862,6 +1862,13 @@ class EventActivitySkill(BaseSkill):
                 region=(0.55, 0.60, 0.90, 0.85),
                 min_conf=0.55,
             )
+            if not start_btn:
+                # Template fallback: 任務開始 yellow button is visually
+                # very distinctive — auto-cropped from real game frames.
+                # Catches the case when OCR misses or mis-reads the text.
+                start_btn = screen.find_template_one(
+                    "task_start_button", region=(0.55, 0.60, 0.95, 0.90),
+                )
             if start_btn:
                 self.log(f"story node {self._current_story_index:02d} battle starting")
                 self._mark_node_done("story", self._current_story_index)
@@ -1908,6 +1915,10 @@ class EventActivitySkill(BaseSkill):
             region=(0.70, 0.75, 1.0, 0.98),
             min_conf=0.55,
         )
+        if not sortie:
+            sortie = screen.find_template_one(
+                "sortie_button", region=(0.70, 0.75, 1.0, 0.99),
+            )
         if sortie:
             self._story_idle_ticks = 0
             # Story phase = BA Story tab (cutscenes + occasional battles).
@@ -2524,6 +2535,13 @@ class EventActivitySkill(BaseSkill):
                 region=(0.55, 0.60, 0.90, 0.85),
                 min_conf=0.55,
             )
+            if not start_btn:
+                # Template fallback: 任務開始 yellow button is visually
+                # very distinctive — auto-cropped from real game frames.
+                # Catches the case when OCR misses or mis-reads the text.
+                start_btn = screen.find_template_one(
+                    "task_start_button", region=(0.55, 0.60, 0.95, 0.90),
+                )
             if start_btn:
                 # User's rule: if 獲得期待獎勵 row already shows `Bonus`
                 # items on this 任務資訊 popup, the stage has already
@@ -2585,6 +2603,10 @@ class EventActivitySkill(BaseSkill):
             region=(0.70, 0.75, 1.0, 0.98),
             min_conf=0.55,
         )
+        if not sortie:
+            sortie = screen.find_template_one(
+                "sortie_button", region=(0.70, 0.75, 1.0, 0.99),
+            )
         if sortie:
             self._quest_idle_ticks = 0
             # User rule (corrected 2026-04-28): code's `_mission` = BA
@@ -2906,6 +2928,13 @@ class EventActivitySkill(BaseSkill):
                 region=(0.55, 0.60, 0.90, 0.85),
                 min_conf=0.55,
             )
+            if not start_btn:
+                # Template fallback: 任務開始 yellow button is visually
+                # very distinctive — auto-cropped from real game frames.
+                # Catches the case when OCR misses or mis-reads the text.
+                start_btn = screen.find_template_one(
+                    "task_start_button", region=(0.55, 0.60, 0.95, 0.90),
+                )
             if start_btn:
                 self._farm_bonus_battle_stage = "switch_team2"
                 return action_click_box(start_btn, "bonus-setup: click 任務開始")
@@ -3275,6 +3304,13 @@ class EventActivitySkill(BaseSkill):
                  "荡開始", "荡开始", "蕩開始", "蕩开始"],
                 min_conf=0.50,
             )
+            if not sweep_start:
+                # Template fallback: cyan 掃蕩開始 button auto-cropped
+                # from real frame.  Catches OCR misses (when 掃 character
+                # drops entirely or confidence falls below 0.50).
+                sweep_start = screen.find_template_one(
+                    "sweep_start_button", region=(0.55, 0.40, 0.95, 0.85),
+                )
             if sweep_start:
                 self._farm_sweep_phase = 3
                 self._farm_stage_ticks = 0

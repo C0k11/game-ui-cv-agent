@@ -528,20 +528,25 @@ class CafeSkill(BaseSkill):
                 return action_click_box(close_btn, "close earnings popup (disabled)")
             return action_wait(300, "earnings popup disabled")
 
-        # Tutorial/説明 popup (cafe 2F first visit).  CRITICAL: do NOT
-        # match single char '明' — OCR mis-reads `邀請` button label as
-        # `返明` (and similar) on the invite list, triggering this
-        # branch → click X → close invite popup → invite phase dies
-        # (run_20260513_112359 t114/t165/t219/t114 all wasted that way).
-        # Require 2+ chars or the specific tutorial signature.
-        # Also: don't fire during invite phase (the invite list never
-        # shows a real tutorial popup mid-scroll).
+        # Tutorial/説明 popup (cafe 2F first visit).
+        # NEW (2026-05-13): use reference `cafe_students_arrived` template as
+        # PRIMARY signal — `訪問學生目錄` header is the unique tutorial
+        # signature.  Falls back to text OCR keywords only when template
+        # registry isn't loaded.  Avoids the single-char `明` trap that
+        # mis-fired on `返明` (OCR misreading 邀請 button) and closed the
+        # invite list (run_20260513_112359 t114/t165/t219 all wasted).
         tutorial = None
         if self.sub_state != "invite":
-            tutorial = screen.find_any_text(
-                ["說明", "说明", "説明"],
-                region=(0.3, 0.1, 0.7, 0.3), min_conf=0.55
+            tmpl_hit = screen.find_template_one(
+                "cafe_students_arrived", region=(0.20, 0.05, 0.80, 0.40),
             )
+            if tmpl_hit:
+                tutorial = tmpl_hit
+            else:
+                tutorial = screen.find_any_text(
+                    ["說明", "说明", "説明"],
+                    region=(0.3, 0.1, 0.7, 0.3), min_conf=0.55
+                )
             if not tutorial:
                 tutorial = screen.find_any_text(
                     ["訪問學生目錄", "訪問學生", "訪问学生目录", "訪间學生", "訪周學生目緣", "訪周學生", "學生目緣"],

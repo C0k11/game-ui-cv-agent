@@ -251,6 +251,48 @@ _TEMPLATE_DEFS = {
     "main_page_full_notice":("main_page/full-notice.png",          "full_notice",   [0.7, 1.0, 1.3], 0.72),
     "main_page_bus":       ("main_page/bus.png",                   "bus",           [0.7, 1.0, 1.3], 0.75),
     "purchase_ap":         ("purchase_ap/notice.png",              "buy_ap",        [0.7, 1.0, 1.3], 0.75),
+    # ── More reference captures (added 2026-05-13 after full inventory) ──
+    # CAFE — replace flaky OCR for invite list & tutorial detection
+    "cafe_invite_button":     ("cafe/invite-student-button.png",     "邀請",          [1.0, 1.5, 1.8, 2.2, 2.6], 0.65),
+    "cafe_reward_status":     ("cafe/cafe-reward-status.png",        "咖啡廳收益",     [0.7, 1.0, 1.3], 0.75),
+    "cafe_students_arrived":  ("cafe/students-arrived.png",          "訪問學生目錄",   [0.7, 1.0, 1.3], 0.72),
+    "cafe_specified_visit":   ("cafe/specified-visit.png",           "指定訪問",       [0.7, 1.0, 1.3], 0.72),
+    "cafe_random_visit":      ("cafe/random-visit-notice.png",       "random_visit",  [0.7, 1.0, 1.3], 0.72),
+    "cafe_dup_invite_body":   ("cafe/duplicate-invite.png",          "dup_invite_body",[0.7, 1.0, 1.3], 0.70),
+    "cafe_quick_home":        ("cafe/quick-home.png",                "cafe_home",     [0.7, 1.0, 1.3], 0.75),
+    # ACTIVITY — popup detection + button templates
+    "activity_task_info":     ("activity/common/task-info.png",      "任務資訊",       [0.7, 1.0, 1.3], 0.72),
+    "activity_no_goals":      ("activity/common/task-no-goals.png",  "no_goals",      [0.7, 1.0, 1.3], 0.72),
+    "activity_fight_confirm": ("activity/common/fight-success-confirm.png","確認_yellow",[1.0, 1.5, 2.0, 2.5], 0.65),
+    "activity_mission_enter": ("activity/common/mission-enter-task-button.png","入場_quest",[0.7, 1.0, 1.3], 0.72),
+    "activity_story_enter":   ("activity/common/story-enter-task-button.png","入場_story",[0.7, 1.0, 1.3], 0.72),
+    "activity_formation":     ("activity/common/formation.png",      "formation_panel",[0.7, 1.0, 1.3], 0.72),
+    "activity_self_formation":("activity/common/self-formation.png", "self_formation",[0.7, 1.0, 1.3], 0.72),
+    # NORMAL TASK — confirm/sweep/post-battle
+    "task_info":              ("normal_task/task-info.png",          "任務資訊",       [0.7, 1.0, 1.3], 0.72),
+    "task_fight_confirm":     ("normal_task/fight-confirm.png",      "確認_blue",     [0.7, 1.0, 1.3], 0.72),
+    "task_prize_confirm":     ("normal_task/prize-confirm.png",      "確認_red",      [0.7, 1.0, 1.3], 0.72),
+    "task_sweep_complete":    ("normal_task/sweep-complete.png",     "確認_white",    [0.7, 1.0, 1.3], 0.72),
+    "task_fail_confirm":      ("normal_task/fail-confirm.png",       "確認_defeat",   [0.7, 1.0, 1.3], 0.72),
+    "task_finish":            ("normal_task/task-finish.png",        "確認_finish",   [0.7, 1.0, 1.3], 0.72),
+    "task_back_to_main":      ("normal_task/fight-end-back-to-main-page.png","前往大廳",[0.7, 1.0, 1.3], 0.72),
+    "task_skip_sweep":        ("normal_task/skip-sweep-complete.png", "SKIP",         [0.7, 1.0, 1.3], 0.72),
+    "task_start_sweep_dialog":("normal_task/start-sweep-notice.png", "取消_確認_dlg", [0.7, 1.0, 1.3], 0.72),
+    "task_begin_warning":     ("normal_task/task-begin-without-further-editing-notice.png","begin_warn",[0.7,1.0,1.3],0.70),
+    "task_formation_menu":    ("normal_task/formation-menu.png",     "編輯",          [0.7, 1.0, 1.3], 0.72),
+    "task_formation_preset":  ("normal_task/formation-preset.png",   "預設",          [0.7, 1.0, 1.3], 0.72),
+    "task_pause":             ("normal_task/mission-pause.png",      "中斷任務",      [0.7, 1.0, 1.3], 0.72),
+    # OTHER COMMON
+    "drill_sweep_tab":        ("joint_firing_drill/sweep-menu.png",  "掃蕩_tab",      [0.7, 1.0, 1.3], 0.72),
+    "bounty_task_info":       ("rewarded_task/task-info.png",        "任務資訊_bounty",[0.7, 1.0, 1.3], 0.72),
+    "scrimmage_task_info":    ("scrimmage/task-info.png",            "任務資訊_scrim", [0.7, 1.0, 1.3], 0.72),
+    "main_page_back_arrow":   ("main_page/back-arrow.png",           "←",             [0.7, 1.0, 1.3], 0.72),
+    "shop_purchase_notice":   ("shop/purchase-notice1.png",          "shop_buy_dlg",  [0.7, 1.0, 1.3], 0.72),
+    "main_page_quick_home":   ("main_page/quick-home.png",           "home_icon",     [0.7, 1.0, 1.3], 0.72),
+    # ── Auto-cropped from trajectory (2026-05-13, reference doesn't ship these) ──
+    "task_start_button":      ("activity/common/task-start-button.png",  "任務開始",   [0.7, 1.0, 1.3], 0.70),
+    "sweep_start_button":     ("activity/common/sweep-start-button.png", "掃蕩開始",   [0.7, 1.0, 1.3], 0.70),
+    "sortie_button":          ("normal_task/sortie-button.png",          "出擊",      [0.7, 1.0, 1.3], 0.70),
 }
 
 _template_cache: dict = {}
