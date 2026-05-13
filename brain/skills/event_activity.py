@@ -1605,6 +1605,19 @@ class EventActivitySkill(BaseSkill):
             self.log(f"WebView/external page detected: '{webview.text}', pressing back")
             return action_back("interceptor: close external WebView")
 
+        # Battle-active guard: if a quest battle is in progress (we
+        # detect AUTO + cost/timer UI markers), don't count tick budget
+        # against `_enter_ticks` and don't ESC (pipeline burst would
+        # interrupt the fight).  Just wait for the battle to finish.
+        # Without this, mission-done → enter → battle still on screen →
+        # "event unavailable" exit (run_20260513_133808 t540-564).
+        battle_marker = screen.find_any_text(
+            ["AUTO", "Auto", "戰鬥時間", "战斗时间", "戰鬥開始", "战斗开始"],
+            min_conf=0.6,
+        )
+        if battle_marker:
+            return action_wait(800, "enter: battle in progress, waiting")
+
         if self._enter_ticks > 24:
             self.log("event not found, skipping event activity")
             return action_done("event unavailable")
