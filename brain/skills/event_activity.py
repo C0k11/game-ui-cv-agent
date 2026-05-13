@@ -125,6 +125,11 @@ class EventActivitySkill(BaseSkill):
         self._quest_consecutive_locks: int = 0   # stop after 2 in a row
         self._story_consecutive_locks: int = 0   # same, story phase
         self._quest_blank_ticks: int = 0  # no 入場 anywhere (popup still covering?)
+        # Cooldown after click 任務開始 — suppress node lock-detection while
+        # battle is in progress (transient quest-list frames during the
+        # popup→formation→battle transition can show next node still
+        # locked because just-started node isn't ★3'd yet).
+        self._quest_post_task_start_cooldown: int = 0
         self._story_blank_ticks: int = 0
 
         # ── Event-bonus team auto-select FSM (quick-edit flow) ──
@@ -293,6 +298,7 @@ class EventActivitySkill(BaseSkill):
         self._quest_node_pending = False
         self._quest_idle_ticks = 0
         self._quest_consecutive_locks = 0
+        self._quest_post_task_start_cooldown = 0
         self._story_consecutive_locks = 0
         self._quest_blank_ticks = 0
         self._story_blank_ticks = 0
@@ -545,6 +551,9 @@ class EventActivitySkill(BaseSkill):
                     f"defeat: hardcoded 確認 (OCR miss)")
             if is_victory:
                 self._reward_fallback_streak = 0
+                # Battle ended → clear quest cooldown so next quest scan
+                # picks up newly-unlocked nodes (★3 of N unlocks N+1).
+                self._quest_post_task_start_cooldown = 0
                 return action_wait(500, f"battle splash '{reward_popup.text}', waiting for dismiss")
             # Expanded region: BA's 確認 button sits at the far bottom-right
             # (~x=0.95 on Battle Complete screens); the old cutoff at x=0.80
@@ -2602,6 +2611,15 @@ class EventActivitySkill(BaseSkill):
                     self._quest_current_index + 1, self._next_node("mission")
                 )
                 self._quest_scroll_count = 0
+                # Post-task-start cooldown: while > 0, skip lock-detection
+                # paths in _find_and_click_quest_node so a brief quest-list
+                # transition frame doesn't permanently mark the next node
+                # locked when it would actually unlock after this battle's
+                # ★3 (run_20260513_181944 t95: 09 task-start, transition
+                # frame showed 10 still locked because 09 not ★3 yet, bot
+                # marked 10 "retry next" → lost forever).  Ticks down each
+                # tick this skill runs; reset to 0 on VICTORY/popup-dismiss.
+                self._quest_post_task_start_cooldown = 60
                 return action_click_box(start_btn, "click 任務開始 (quest)")
 
             # PRIORITY 2: tight-region no-goals detection.
@@ -2719,6 +2737,22 @@ class EventActivitySkill(BaseSkill):
 
     def _find_and_click_quest_node(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         """Sequential quest node processing, mirroring _find_and_click_story_node."""
+        # Post-task-start cooldown: a brief quest-list transition frame
+        # can show right after click 任務開始 (popup closes → list visible
+        # briefly → formation loads).  During this window, scanning for
+        # "next node locked" gives a false positive because the just-
+        # task-started node hasn't been ★3'd yet and therefore N+1 is
+        # still legitimately locked.  Wait for battle + reward to finish
+        # before re-scanning (cooldown reset to 0 by VICTORY/popup handlers).
+        if getattr(self, "_quest_post_task_start_cooldown", 0) > 0:
+            self._quest_post_task_start_cooldown -= 1
+            return action_wait(
+                400,
+                f"post-task-start cooldown "
+                f"({self._quest_post_task_start_cooldown} ticks left) — "
+                f"waiting for battle+rewards to complete"
+            )
+
         # Popup-residue guard: after bonus-team FSM finishes, the quick-edit
         # popup can stay visible another 1-3 ticks showing a confirmation
         # ("已自動編輯部隊") before collapsing to formation. During this
