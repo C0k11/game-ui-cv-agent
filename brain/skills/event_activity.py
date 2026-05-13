@@ -3297,12 +3297,38 @@ class EventActivitySkill(BaseSkill):
                 self._farm_sweep_phase = 0
                 self._farm_stage_ticks = 0
                 return action_back("farming: MAX not found, back out and retry")
-            # Detect "stage cannot sweep" (first-clear required)
+            # Detect "stage cannot sweep" — multiple game-side messages:
+            #   - "無法掃蕩" (generic)
+            #   - "★3 達成時開放" / "★3 達成时开放" (sweep unlocks after 3-star clear)
+            # Both indicate this stage isn't sweepable yet.  Skip stage,
+            # try a LOWER-numbered stage (which is more likely 3-star cleared).
+            # Without lower-stage fallback, run_20260513_181143 t232+ bot
+            # cycled forever entering stage 8 (locked sweep) every 12 ticks.
             no_sweep = screen.find_any_text(
-                ["無法掃蕩", "无法扫荡"], min_conf=0.55,
+                ["無法掃蕩", "无法扫荡",
+                 "達成時開放", "达成时开放", "達成時開", "达成时开"],
+                min_conf=0.55,
             )
             if no_sweep:
-                self.log("farming: stage not sweepable, skip to shop")
+                # Try lower stage on next attempt — track failed stages
+                self._farm_unsweepable_stages = getattr(
+                    self, "_farm_unsweepable_stages", set()
+                )
+                # The stage we just entered = max visible idx in entry button row
+                # Use preferred_stage as a proxy if not yet known
+                guess_idx = self._preferred_stage or 0
+                self._farm_unsweepable_stages.add(guess_idx)
+                # Step preferred_stage down by 1 (try next lower)
+                if self._preferred_stage and self._preferred_stage > 1:
+                    self._preferred_stage -= 1
+                    self.log(
+                        f"farming: stage not sweepable ('{no_sweep.text}') — "
+                        f"stepping preferred_stage down to {self._preferred_stage}"
+                    )
+                    self._farm_sweep_phase = 0
+                    self._farm_stage_ticks = 0
+                    return action_back("farming: not sweepable, try lower stage")
+                self.log("farming: stage not sweepable + no lower stage, skip to shop")
                 self.sub_state = "shop"
                 self._farm_sweep_phase = 0
                 return action_back("farming: stage not sweepable")
@@ -3371,6 +3397,20 @@ class EventActivitySkill(BaseSkill):
                     "sweep_start_button", region=(0.55, 0.40, 0.95, 0.85),
                 )
             if sweep_start:
+                # If 掃蕩開始 button is greyed out, the stage isn't
+                # sweepable (★3 not yet achieved on this stage).  Don't
+                # click — fall back to "step preferred_stage down" path
+                # to find a sweepable lower stage.
+                if screen.is_button_grey(sweep_start.cx, sweep_start.cy):
+                    self.log(
+                        f"farming: 掃蕩開始 button is GREY (stage not yet "
+                        f"sweepable); stepping preferred_stage down"
+                    )
+                    if self._preferred_stage and self._preferred_stage > 1:
+                        self._preferred_stage -= 1
+                    self._farm_sweep_phase = 0
+                    self._farm_stage_ticks = 0
+                    return action_back("farming: sweep button grey, try lower stage")
                 self._farm_sweep_phase = 3
                 self._farm_stage_ticks = 0
                 return action_click_box(sweep_start, "farming: click 掃蕩開始")
