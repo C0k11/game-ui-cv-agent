@@ -981,16 +981,29 @@ class BaseSkill(ABC):
                  "指定訪問", "指定访问", "隨機訪問", "随机访问"],
                 region=screen.CENTER, min_conf=0.5,
             )
-            must_confirm = (invite_hint or update_title or update_hint or sweep_hint) and not friend_hint
+            # Resume-battle prompt: "有進行中的戰鬥。是否繼續活動關卡？"
+            # appears at login after a prior run abandoned mid-battle.
+            # Buttons are 中斷 (abort) and 繼續 (resume).  MUST click 繼續
+            # to resume the orphaned battle; clicking 中斷 forfeits it.
+            # OCR routinely garbles 戰鬥→門 and drops 繼 from 繼續, so
+            # match on the most stable substrings only.
+            resume_battle_hint = screen.find_any_text(
+                ["進行中", "进行中", "活動關卡", "活动关卡",
+                 "繼續活動", "继续活动", "續活動"],
+                region=screen.CENTER, min_conf=0.5,
+            )
+            must_confirm = (invite_hint or update_title or update_hint
+                            or sweep_hint or resume_battle_hint) and not friend_hint
             must_cancel = bool(friend_hint)
 
             confirm_btn = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确", "OK"],
+                ["確認", "确认", "確定", "确定", "繼續", "继续",
+                 "確", "确", "續", "OK"],   # `續` covers OCR-dropped 繼
                 region=(0.30, 0.55, 0.74, 0.82),
                 min_conf=0.40,
             )
             cancel_btn = screen.find_any_text(
-                ["取消"],
+                ["取消", "中斷", "中断"],
                 region=(0.28, 0.60, 0.56, 0.82),
                 min_conf=0.55,
             )
@@ -1018,7 +1031,9 @@ class BaseSkill(ABC):
                     if cancel_btn:
                         return action_click_box(cancel_btn, "grayed confirm → cancel")
                     return action_click(0.402, 0.701, "grayed confirm → cancel (fallback)")
-                tag = "invite" if invite_hint else "update"
+                tag = ("invite" if invite_hint
+                       else "resume-battle" if resume_battle_hint
+                       else "update")
                 self.log(f"notification popup ({tag}): clicking confirm")
                 return action_click_box(confirm_btn, f"confirm {tag} notification")
             if must_confirm and cancel_btn:
