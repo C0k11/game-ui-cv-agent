@@ -678,6 +678,111 @@ class ScreenState:
                 nav_hits += 1
         return nav_hits >= 3
 
+    # Names → (TC, SC) text variants for the 8 bottom-nav icons.  Used by
+    # scan_lobby_nav_badges() so callers get a stable english key
+    # regardless of which OCR character variant fired on a given frame.
+    # 編輯 sometimes mis-OCRs (small icon, no Chinese-character anchor)
+    # so we also accept partial / known mis-reads.
+    _LOBBY_NAV_VARIANTS = (
+        ("cafe",     ["咖啡廳", "咖啡厅", "咖啡"]),
+        ("schedule", ["課程表", "课程表", "課程", "课程"]),
+        ("student",  ["學生", "学生"]),
+        ("edit",     ["編輯", "编辑"]),
+        ("social",   ["社交"]),
+        ("craft",    ["製造", "制造"]),
+        ("shop",     ["商店"]),
+        ("recruit",  ["招募"]),
+    )
+
+    # HSV envelopes used by scan_lobby_nav_badges.  Saturation/value
+    # floors are intentionally high to reject muted anime-art reds and
+    # the icon body's own decorative fills (e.g. cafe heart cup).  Real
+    # nav badges are punchy, saturated, and high-contrast.
+    _NAV_DOT_RED_HSV = [
+        ((0, 120, 160),   (12, 255, 255)),
+        ((168, 120, 160), (180, 255, 255)),
+    ]
+    _NAV_DOT_YELLOW_HSV = [
+        ((10, 120, 180), (45, 255, 255)),
+    ]
+    # Min pixel count for a real dot — under this is anti-alias / noise.
+    # On a 2255×1268 frame a real dot is ~100-200px (verified: student
+    # yellow=122, social red=118, craft yellow=120).  Floor at 80 to
+    # catch faint dots while rejecting stray icon-art pixel clusters.
+    _NAV_DOT_MIN_PIXELS = 80
+
+    def scan_lobby_nav_badges(self) -> Dict[str, str]:
+        """Scan the 8 bottom-nav icons for red/yellow badges.
+
+        Returns a dict {nav_name: state} where state ∈ {"red", "yellow",
+        "none"} and nav_name is the stable english key (cafe / schedule /
+        student / edit / social / craft / shop / recruit).  Names not
+        currently visible on screen are omitted from the dict — callers
+        should treat absence as "unknown" (we're probably not on lobby).
+
+        Where the dot lives: BA renders the badge as a small saturated
+        dot just BELOW the icon body and to the RIGHT of the label.  In
+        the standard 4K-window the dot centroid is at roughly
+        (label_cx + 0.012, ~0.93).  We scan a tight ROI just above the
+        label top and right of label centre (`label_cx + [0.005, 0.045]`,
+        y `[0.905, 0.945]`).  This ROI deliberately excludes the icon
+        body (above) — that part is full of decorative colors like the
+        cafe heart, recruit gold stars, etc. — to avoid false positives.
+
+        Caller should ensure they're on lobby (is_lobby() == True) before
+        calling — running on non-lobby screens may catch false positives
+        from whatever happens to live in the bottom strip.
+        """
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return {}
+        img = self.load_image()
+        if img is None:
+            return {}
+        h, w = img.shape[:2]
+        results: Dict[str, str] = {}
+        for key, variants in self._LOBBY_NAV_VARIANTS:
+            anchor = None
+            for v in variants:
+                anchor = self.find_text_one(v, region=self.NAV_BAR, min_conf=0.5)
+                if anchor:
+                    break
+            if not anchor:
+                continue
+            cx = (anchor.x1 + anchor.x2) / 2.0
+            # Tight ROI: right of label, between icon bottom and label top.
+            x0 = max(0, int((cx + 0.005) * w))
+            x1 = min(w, int((cx + 0.045) * w))
+            y0 = max(0, int(0.905 * h))
+            y1 = min(h, int(0.945 * h))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            roi = img[y0:y1, x0:x1]
+            if roi.size == 0:
+                continue
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            red_total = 0
+            for mn, mx in self._NAV_DOT_RED_HSV:
+                mask = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
+                                          np.array(mx, dtype=np.uint8))
+                red_total += int(mask.sum() // 255)
+            yellow_total = 0
+            for mn, mx in self._NAV_DOT_YELLOW_HSV:
+                mask = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
+                                          np.array(mx, dtype=np.uint8))
+                yellow_total += int(mask.sum() // 255)
+            # Red dominates yellow if both fire (red is the stronger
+            # "claim me" signal; yellow is "go look at this").
+            if red_total >= self._NAV_DOT_MIN_PIXELS:
+                results[key] = "red"
+            elif yellow_total >= self._NAV_DOT_MIN_PIXELS:
+                results[key] = "yellow"
+            else:
+                results[key] = "none"
+        return results
+
     def is_loading(self) -> bool:
         """Detect loading screen, download progress, or game update.
 

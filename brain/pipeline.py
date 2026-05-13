@@ -730,11 +730,73 @@ class DailyPipeline:
         self._last_sub_state = ""
         self._last_wait_reason = ""
         self._stuck_counter = 0
+        # Opportunistic lobby badge scan between skills — we're usually
+        # transiting through lobby anyway, so it's free.  See
+        # _maybe_scan_lobby_badges for the deduplication logic.
+        self._maybe_scan_lobby_badges(reason="advancing skill")
         if self._current_idx >= len(self._skill_order):
             self._running = False
+            self._log_lobby_badge_summary()
             print("[Pipeline] All skills complete")
             return
         self._start_current_skill()
+
+    # ── Lobby badge tracking ─────────────────────────────────────────
+    #
+    # The 8 bottom-nav icons each render a small dot when something is
+    # actionable:
+    #   • RED dot   → unclaimed reward at that location
+    #   • YELLOW dot → unfinished task / new content at that location
+    # We scan the lobby a few times during a run (at start, between
+    # skills, at end) and diff to see what got cleared vs. what was
+    # missed.  Future: use the initial scan to skip skills whose icon
+    # has no dot (no work to do there).
+    def _maybe_scan_lobby_badges(self, *, reason: str = "") -> None:
+        screen = getattr(self, "_last_screen", None)
+        if screen is None or not screen.is_lobby():
+            return
+        try:
+            badges = screen.scan_lobby_nav_badges()
+        except Exception as exc:  # noqa: BLE001 — never break the pipeline
+            print(f"[LobbyBadge] scan failed: {exc}")
+            return
+        if not badges:
+            return
+        # First-seen snapshot (locked once we get our first lobby-on read)
+        if not getattr(self, "_lobby_badges_first_seen", None):
+            self._lobby_badges_first_seen = dict(badges)
+            non_none = {k: v for k, v in badges.items() if v != "none"}
+            if non_none:
+                print(f"[LobbyBadge] initial dots ({reason}): {non_none}")
+            else:
+                print(f"[LobbyBadge] initial scan ({reason}): all clear")
+        # Most-recent snapshot always updated
+        self._lobby_badges_last_seen = dict(badges)
+
+    def _log_lobby_badge_summary(self) -> None:
+        first = getattr(self, "_lobby_badges_first_seen", None) or {}
+        last = getattr(self, "_lobby_badges_last_seen", None) or {}
+        if not first and not last:
+            return
+        cleared = []   # had dot at start, gone at end
+        remaining = [] # still has dot at end (missed work / partial run)
+        new = []       # didn't have at start, appeared by end
+        keys = set(first) | set(last)
+        for k in sorted(keys):
+            f = first.get(k, "none")
+            l = last.get(k, "none")
+            if f != "none" and l == "none":
+                cleared.append(f"{k}:{f}→clear")
+            elif f != "none" and l != "none":
+                remaining.append(f"{k}:{l}")
+            elif f == "none" and l != "none":
+                new.append(f"{k}:{l}")
+        if cleared:
+            print(f"[LobbyBadge] cleared this run: {cleared}")
+        if remaining:
+            print(f"[LobbyBadge] STILL pending: {remaining}")
+        if new:
+            print(f"[LobbyBadge] newly appeared: {new}")
 
     def _global_interceptor(self, screen: ScreenState, skill: BaseSkill) -> Optional[Dict[str, Any]]:
         """Global interceptor — runs BEFORE every skill tick.
@@ -1243,6 +1305,11 @@ class DailyPipeline:
             return action_done("pipeline not running")
 
         self._total_ticks += 1
+        # First lobby-visit of the run → snapshot all 8 nav-icon badges.
+        # Inexpensive (~5ms on a 4K screenshot) and only runs until the
+        # first snapshot lands, so it can't impact steady-state perf.
+        if not getattr(self, "_lobby_badges_first_seen", None):
+            self._maybe_scan_lobby_badges(reason="pipeline start")
         skill = self.current_skill
         if skill is None:
             self._running = False
