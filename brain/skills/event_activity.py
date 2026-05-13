@@ -3242,6 +3242,29 @@ class EventActivitySkill(BaseSkill):
             )
             nodes, entry_buttons = self._find_numbered_nodes_on_screen(screen)
             if not entry_buttons:
+                # All visible nodes are locked (no 入場 buttons) AND we
+                # can see numbered nodes — we scrolled past the playable
+                # ones into the locked tail.  Scroll UP to find playable
+                # stages (highest unlocked is the best farming target).
+                # Without this guard, bot kept clicking Quest tab forever
+                # since it's already active (run_20260513_180124 t187+
+                # 200+ ticks of "ensure quest tab" throttled).
+                if nodes:
+                    self._farm_stage_ticks = getattr(self, "_farm_stage_ticks", 0) + 1
+                    if self._farm_stage_ticks > 6:
+                        self.log("farming: scrolled past unlocked stages too long, → shop")
+                        self.sub_state = "shop"
+                        self._farm_sweep_phase = 0
+                        self._farm_stage_ticks = 0
+                        return action_wait(200, "farming: no playable stage, skip to shop")
+                    self.log(
+                        f"farming: visible nodes {sorted({n for n,_ in nodes})} all locked, "
+                        f"scrolling UP to find playable stage"
+                    )
+                    return action_scroll(
+                        0.75, 0.50, clicks=5,
+                        reason="farming: scroll up to find unlocked stage"
+                    )
                 if quest_tab:
                     return action_click_box(quest_tab, "farming: ensure quest tab")
                 return action_wait(400, "farming: waiting for stage list")
