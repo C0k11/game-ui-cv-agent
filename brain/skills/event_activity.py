@@ -2803,6 +2803,7 @@ class EventActivitySkill(BaseSkill):
                 self._quest_idle_ticks = 0
                 self._quest_node_pending = True
                 self._quest_consecutive_locks = 0  # reset on successful entry
+                self._quest_stage_lock_ticks = 0    # reset stage-lock debounce
                 self.log(f"clicking 入場 for quest node {target_str}")
                 return action_click_box(paired_entry, f"quest node {target_str} 入場")
             # No paired entry — but before calling it "locked", distinguish:
@@ -2849,6 +2850,27 @@ class EventActivitySkill(BaseSkill):
                     return action_wait(500, f"quest node {target_str} pending (ocr flicker, earlier 入場 only)")
                 # After 3 flicker ticks, accept it as real lock.
             self._quest_flicker_ticks = 0
+            # Stage-N-locked debounce: stay on N for K consecutive ticks
+            # before giving up on it.  Game often takes 5-10s after a
+            # battle's VICTORY for the next-stage unlock animation to
+            # complete and refresh the entry button visibility.  Old
+            # code advanced past N on first "no 入場 on N" detection
+            # which permanently lost the stage if it was a transient
+            # rendering issue (run_20260513_184415 t164: bot saw 12
+            # locked once → advanced to 13 → past-tail exit → meanwhile
+            # 12 actually unlocked at t169 farming phase).
+            self._quest_stage_lock_ticks = getattr(
+                self, "_quest_stage_lock_ticks", 0
+            ) + 1
+            STAGE_LOCK_K = 8   # ~4s @ 500ms tick; covers unlock animation
+            if self._quest_stage_lock_ticks < STAGE_LOCK_K:
+                return action_wait(
+                    500,
+                    f"quest node {target_str} no 入場 — debounce "
+                    f"{self._quest_stage_lock_ticks}/{STAGE_LOCK_K} "
+                    f"(waiting for unlock animation)"
+                )
+            self._quest_stage_lock_ticks = 0
             self._quest_consecutive_locks += 1
             if self._quest_consecutive_locks >= 2:
                 self.log(
@@ -2860,7 +2882,7 @@ class EventActivitySkill(BaseSkill):
                 self.sub_state = "enter"
                 self._save_state()
                 return action_wait(250, f"quest phase stopped at first lock (node {target_str})")
-            self.log(f"quest node {target_str} no 入場 (retry once)")
+            self.log(f"quest node {target_str} truly locked after {STAGE_LOCK_K}-tick debounce — advancing")
             self._quest_current_index += 1
             self._save_state()
             self._quest_scroll_count = 0
