@@ -516,14 +516,34 @@ class EventActivitySkill(BaseSkill):
         )
         if reward_popup:
             self._battle_speed_set = False  # battle ended, reset for next
-            # VICTORY / DEFEAT splash screens auto-dismiss after a couple
-            # of seconds and have no clickable button. Earlier versions
-            # burned 6 fallback clicks before pressing BACK to recover —
-            # that BACK could push us out of the post-battle reward
-            # screen entirely. Cleaner: just wait for the splash to
-            # dissolve into the actual reward dialog.
+            # VICTORY / DEFEAT splash screens.  Two distinct behaviors:
+            #  - VICTORY: auto-dissolves into the post-battle reward
+            #    screen after ~2s. Just wait.
+            #  - DEFEAT: has a 確認 button at center-bottom that MUST
+            #    be clicked to proceed (no auto-dismiss).  Scripted
+            #    "剧情杀" defeats in event story chapter battles use
+            #    this — bot was waiting forever otherwise (observed
+            #    run_20260513_112359 t667-699 stuck 30+ ticks).
             kw = (reward_popup.text or "").lower()
-            if any(w in kw for w in ("victory", "defeat", "勝利", "敗北", "胜利", "败北")):
+            is_victory = any(w in kw for w in ("victory", "勝利", "胜利"))
+            is_defeat = any(w in kw for w in ("defeat", "敗北", "败北"))
+            if is_defeat:
+                # DEFEAT screen: click the prominent yellow 確認 button.
+                # Position: bottom-center (cx≈0.47, cy≈0.89).
+                defeat_confirm = screen.find_any_text(
+                    ["確認", "确认", "確", "确"],
+                    region=(0.30, 0.80, 0.70, 0.99), min_conf=0.55,
+                )
+                self._reward_fallback_streak = 0
+                if defeat_confirm:
+                    return action_click_box(
+                        defeat_confirm,
+                        f"defeat: click 確認 to acknowledge (scripted loss OK)"
+                    )
+                # OCR missed the button — hardcoded center-bottom click.
+                return action_click(0.47, 0.89,
+                    f"defeat: hardcoded 確認 (OCR miss)")
+            if is_victory:
                 self._reward_fallback_streak = 0
                 return action_wait(500, f"battle splash '{reward_popup.text}', waiting for dismiss")
             # Expanded region: BA's 確認 button sits at the far bottom-right
