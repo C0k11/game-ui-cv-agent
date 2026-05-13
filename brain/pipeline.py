@@ -500,6 +500,10 @@ class DailyPipeline:
             skill._preferred_stage = max(0, int(opts.get("event_farming_stage") or 0))
         except Exception:
             skill._preferred_stage = 0
+        # Remember the user's top stage — farming step-down may lower
+        # _preferred_stage at runtime; we use _top_event_stage to decide
+        # whether to MAX-sweep or be conservative on step-down stages.
+        skill._top_event_stage = skill._preferred_stage or 12
         try:
             skill._farming_ap_budget = max(0, int(opts.get("event_farming_ap_budget") or 0))
         except Exception:
