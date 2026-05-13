@@ -1140,6 +1140,18 @@ class EventActivitySkill(BaseSkill):
         # game update doesn't prematurely skip the skill.
         if len(screen.ocr_boxes) <= 3:
             return action_wait(800, "enter: transition screen (few OCR)")
+        # Battle-active guard: if a quest battle is in progress, do NOT
+        # count toward enter timeout — wait until battle finishes.
+        # Without this, an orphan battle resume (from prior run abandoned
+        # mid-fight) consumes the 24-tick budget while the bot just
+        # watches the battle (run_20260513_175504 t085-t104 burned 20 of
+        # the 24 ticks here before declaring "event unavailable").
+        battle_marker = screen.find_any_text(
+            ["AUTO", "Auto", "戰鬥時間", "战斗时间", "戰鬥開始", "战斗开始"],
+            min_conf=0.6,
+        )
+        if battle_marker:
+            return action_wait(800, "enter: battle in progress, waiting")
         self._enter_ticks += 1
 
         # Stranded on 活動任務 sub-page (typically because claim_tasks ran
@@ -1604,19 +1616,6 @@ class EventActivitySkill(BaseSkill):
         if webview:
             self.log(f"WebView/external page detected: '{webview.text}', pressing back")
             return action_back("interceptor: close external WebView")
-
-        # Battle-active guard: if a quest battle is in progress (we
-        # detect AUTO + cost/timer UI markers), don't count tick budget
-        # against `_enter_ticks` and don't ESC (pipeline burst would
-        # interrupt the fight).  Just wait for the battle to finish.
-        # Without this, mission-done → enter → battle still on screen →
-        # "event unavailable" exit (run_20260513_133808 t540-564).
-        battle_marker = screen.find_any_text(
-            ["AUTO", "Auto", "戰鬥時間", "战斗时间", "戰鬥開始", "战斗开始"],
-            min_conf=0.6,
-        )
-        if battle_marker:
-            return action_wait(800, "enter: battle in progress, waiting")
 
         if self._enter_ticks > 24:
             self.log("event not found, skipping event activity")

@@ -33,6 +33,15 @@ class MailSkill(BaseSkill):
         self._claimed_count = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
+        # Don't count ticks while an orphan battle is on screen — we're
+        # not "trying mail and failing", we're waiting for the battle
+        # to finish so we can actually try mail.
+        battle_marker = screen.find_any_text(
+            ["AUTO", "Auto", "戰鬥時間", "战斗时间"],
+            min_conf=0.6,
+        )
+        if battle_marker:
+            return action_wait(800, "mail: battle in progress, waiting")
         self.ticks += 1
 
         if self.ticks >= self.max_ticks:
@@ -67,6 +76,19 @@ class MailSkill(BaseSkill):
         return action_wait(300, "mail unknown state")
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
+        # Battle-active guard: if an orphan quest battle is resuming
+        # from a prior abandoned run, screen will show AUTO/timer
+        # markers.  Mail can't enter while a battle is running — wait.
+        # Without this guard, Mail spends 80 ticks looking for the mail
+        # icon on a battle screen, ESC bursts during active fight, and
+        # eventually times out (run_20260513_175504 t006-t084 wasted).
+        battle_marker = screen.find_any_text(
+            ["AUTO", "Auto", "戰鬥時間", "战斗时间"],
+            min_conf=0.6,
+        )
+        if battle_marker:
+            return action_wait(800, "mail: battle in progress, waiting")
+
         current = self.detect_current_screen(screen)
 
         if current == "Mail":
