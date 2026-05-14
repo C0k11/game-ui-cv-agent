@@ -199,8 +199,13 @@ class DailyTasksSkill(BaseSkill):
                 return action_click_box(claim, "claim all tasks")
 
         # Phase B: per-row 領取 (catches tier-bonus rows + anything
-        # 一鍵領取 skipped).
-        single = self.find_single_claim_button(screen, region=single_region)
+        # 一鍵領取 skipped).  min_conf lowered to 0.55 — the tier-bonus
+        # 領取 button on Yellow-painted state has OCR conf ~0.66, below
+        # the default 0.7 threshold (validated on tick_0040 of
+        # run_20260513_212504 where 領取 at (0.76,0.93) conf=0.66).
+        single = self.find_single_claim_button(
+            screen, region=single_region, min_conf=0.55
+        )
         if single:
             self.log(
                 f"claiming individual task reward at "
