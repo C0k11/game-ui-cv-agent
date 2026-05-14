@@ -323,6 +323,9 @@ class EventActivitySkill(BaseSkill):
         self._farm_sweep_phase = 0
         self._farm_rounds_done = 0
         self._farm_quest_tab_clicked = False
+        # Story bottom-of-list detection (resets on every skill start)
+        self._story_last_max_visible = -1
+        self._story_bottom_repeat = 0
         self._farm_ap_spent = 0
         self._farm_ap_baseline = -1
         self._farm_reward_dialog_open = False
@@ -2375,6 +2378,31 @@ class EventActivitySkill(BaseSkill):
             min_visible = min(idx for idx, _ in nodes)
 
             if target > max_visible:
+                # Bottom-of-list detection: if visible range hasn't grown
+                # since the last scroll, the list is already at its end
+                # and the target node doesn't exist (metadata over-counts
+                # for this event).  After 2 same-max scrolls, declare
+                # story complete instead of burning 8 full scrolls.
+                #
+                # Without this we burn ~8 scrolls every run on events
+                # whose true total is below the auto-detected default
+                # (run_20260513_193301: scrolled 8x to find node 12 on
+                # an 11-node event before declaring done).
+                if max_visible <= getattr(self, "_story_last_max_visible", -1):
+                    self._story_bottom_repeat = getattr(self, "_story_bottom_repeat", 0) + 1
+                else:
+                    self._story_bottom_repeat = 0
+                self._story_last_max_visible = max_visible
+                if self._story_bottom_repeat >= 2:
+                    self.log(
+                        f"node {target_str} not visible; list bottom reached at "
+                        f"max={max_visible} (2 same-max scrolls), story complete"
+                    )
+                    self._story_done = True
+                    self._clear_story_state()
+                    self._phase_ticks = 0
+                    self.sub_state = "enter"
+                    return action_wait(250, "story phase done (list bottom)")
                 # Target is below visible area → swipe up to bring lower
                 # nodes into view.  Switched from wheel-scroll to swipe per
                 # user 2026-05-13 — they don't want wheel/CTRL-wheel
