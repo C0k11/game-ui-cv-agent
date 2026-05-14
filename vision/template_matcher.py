@@ -293,6 +293,21 @@ _TEMPLATE_DEFS = {
     "task_start_button":      ("activity/common/task-start-button.png",  "任務開始",   [0.7, 1.0, 1.3], 0.70),
     "sweep_start_button":     ("activity/common/sweep-start-button.png", "掃蕩開始",   [0.7, 1.0, 1.3], 0.70),
     "sortie_button":          ("normal_task/sortie-button.png",          "出擊",      [0.7, 1.0, 1.3], 0.70),
+    # CLUB — popup detection (run_20260513_211309 t74-78: bot exited
+    # without dismissing 社團簽到獎勵 because OCR header didn't match
+    # 通知; this template gives a deterministic anchor).
+    "club_signin_reward":     ("group/sign-up-reward.png",               "社團簽到獎勵", [0.7, 1.0, 1.3], 0.72),
+    "club_menu":              ("group/menu.png",                         "社團",       [0.7, 1.0, 1.3], 0.72),
+    # ACTIVITY TAB STATE — active vs inactive Story/Quest/Challenge.
+    # Active (chosen) has yellow text; inactive has dark blue.  Used to
+    # detect if farming should click the Quest tab BEFORE scanning the
+    # stage list (otherwise we might be on Story and click chapters).
+    "activity_story_chosen":     ("activity/common/story-chosen-0.png",     "Story_active",   [0.7, 1.0, 1.3], 0.75),
+    "activity_story_inactive":   ("activity/common/story-not-chosen-0.png", "Story_inactive", [0.7, 1.0, 1.3], 0.75),
+    "activity_quest_chosen":     ("activity/common/mission-chosen-0.png",   "Quest_active",   [0.7, 1.0, 1.3], 0.75),
+    "activity_quest_inactive":   ("activity/common/mission-not-chosen-0.png","Quest_inactive",[0.7, 1.0, 1.3], 0.75),
+    "activity_challenge_chosen": ("activity/common/challenge-chosen-0.png", "Challenge_active",[0.7, 1.0, 1.3], 0.75),
+    "activity_challenge_inactive":("activity/common/challenge-not-chosen-0.png","Challenge_inactive",[0.7, 1.0, 1.3], 0.75),
 }
 
 _template_cache: dict = {}
