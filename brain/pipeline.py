@@ -672,14 +672,81 @@ class DailyPipeline:
             pass
         print("[Pipeline] Stopped")
 
+    # Skill name → lobby-nav badge key.  Only skills whose entry point
+    # is a bottom-nav icon can use this routing.  Bounty/Arena enter via
+    # the right-side 任務 sidebar; Mail via top-right; DailyTasks via
+    # left sidebar; EventActivity via lobby carousel — so they don't
+    # appear here and always run.
+    _SKILL_BADGE_MAP: Dict[str, str] = {
+        "Cafe": "cafe",
+        "Schedule": "schedule",
+        "Club": "social",
+        "Craft": "craft",
+        "Shop": "shop",
+        "PassReward": "recruit",
+    }
+
+    def _should_skip_skill_by_badge(self, skill: BaseSkill) -> Optional[str]:
+        """Return a skip reason if this skill's nav-icon has no badge.
+
+        User rule: "黄点就说明没打完还有的东西打，红点就说明有东西可以
+        领取".  No dot means there's nothing to claim and nothing pending
+        at that location — safely skip the skill instead of burning
+        ticks navigating in and back out.
+
+        Returns:
+            str reason if we should skip (caller logs + advances).
+            None if the skill should run normally.
+        """
+        badge_key = self._SKILL_BADGE_MAP.get(skill.name)
+        if not badge_key:
+            return None  # No badge mapping → always run
+        first_seen = getattr(self, "_lobby_badges_first_seen", None)
+        if not first_seen:
+            return None  # We haven't seen the lobby yet → can't decide, run
+        state = first_seen.get(badge_key, "unknown")
+        if state in ("red", "yellow"):
+            return None  # Has a dot → something to do, run
+        if state == "none":
+            return f"no {badge_key} badge on lobby nav (nothing to claim/play)"
+        return None  # unknown / not detected → run
+
     def _start_current_skill(self) -> None:
-        """Reset and start the currently selected skill."""
+        """Reset and start the currently selected skill.
+
+        If lobby-badge skip routing decides the skill has no work to do,
+        record a skip result and recurse into the next skill instead.
+        """
         if not self._running:
             return
         skill = self.current_skill
         if skill is None:
             self._running = False
             return
+
+        # Badge-based skip BEFORE skill.reset() (avoid resetting state we
+        # won't use).  Recurse into the next skill if we skip.
+        skip_reason = self._should_skip_skill_by_badge(skill)
+        if skip_reason:
+            print(f"[Pipeline] Skipping skill '{skill.name}': {skip_reason}")
+            self._results.append(
+                SkillResult(
+                    skill_name=skill.name,
+                    status="skipped",
+                    ticks=0,
+                    duration_s=0.0,
+                    reason=skip_reason,
+                )
+            )
+            self._current_idx += 1
+            if self._current_idx >= len(self._skill_order):
+                self._running = False
+                self._log_lobby_badge_summary()
+                print("[Pipeline] All skills complete")
+                return
+            self._start_current_skill()
+            return
+
         try:
             skill.reset()
         except Exception as e:
