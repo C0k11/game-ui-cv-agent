@@ -322,6 +322,7 @@ class EventActivitySkill(BaseSkill):
         self._farm_stage_ticks = 0
         self._farm_sweep_phase = 0
         self._farm_rounds_done = 0
+        self._farm_quest_tab_clicked = False
         self._farm_ap_spent = 0
         self._farm_ap_baseline = -1
         self._farm_reward_dialog_open = False
@@ -3152,6 +3153,45 @@ class EventActivitySkill(BaseSkill):
             self._phase_ticks = 0
             return action_wait(200, "farming phase tick cap")
 
+        # ── 章節資訊 popup guard ──
+        # Farming is supposed to click 入場 on Quest-tab stages.  But if
+        # the Story tab happens to be the active tab when farming starts,
+        # the 入場 column we see belongs to STORY chapters.  Clicking one
+        # opens the 章節資訊 popup with 進入章節 button — and the popup
+        # masks the 入場 grid behind it.  Without a guard, farming clicks
+        # the same y=0.88 入場 for ~700 ticks because OCR still picks up
+        # background 入場 text bleeding past the popup edges
+        # (run_20260513_195859 t640-1340: stuck at chapter 11 五塵降臨).
+        #
+        # Fix: detect 章節資訊 + close it via ESC (we explicitly don't
+        # want to enter that story chapter from farming).  The next
+        # farming tick lands on the bare event page and can re-route
+        # through the Quest tab.
+        chapter_info = screen.find_any_text(
+            ["章節資訊", "章节资讯", "章節資", "章节资"],
+            min_conf=0.55,
+        )
+        if chapter_info:
+            self.log(
+                "farming: 章節資訊 popup detected (clicked story 入場 by mistake) — "
+                "closing and re-routing through Quest tab"
+            )
+            # Reset farm sub-phase so we re-detect tab + stage from scratch.
+            # Also clear quest-tab-clicked flag so we force Quest tab
+            # selection again after popup closes.
+            self._farm_sweep_phase = 0
+            self._farm_stage_ticks = 0
+            self._farm_quest_tab_clicked = False
+            # Try OCR'd X close button first (top-right of modal); ESC fallback.
+            close_btn = screen.find_any_text(
+                ["X", "x", "×", "✕"],
+                region=(0.62, 0.06, 0.94, 0.30),
+                min_conf=0.55,
+            )
+            if close_btn:
+                return action_click_box(close_btn, "close 章節資訊 popup")
+            return action_back("ESC out of 章節資訊 popup")
+
         # Popup-residue guard inherited from _mission — tick top handles
         # reward / confirm popups via the global reward handler before we
         # get here. We handle sweep-specific dialogs below.
@@ -3303,11 +3343,19 @@ class EventActivitySkill(BaseSkill):
                 self._phase_ticks = 0
                 return action_wait(200, f"AP {ap_now} too low, skip to shop")
 
-            # Make sure Quest tab is selected first
+            # Make sure Quest tab is selected first.  One-time click on
+            # entry to farming — even if Quest text was visible we don't
+            # know if the tab is ACTIVE without pixel-color check.  If we
+            # were on Story tab, the nodes we'd scan below are story
+            # chapters and clicking 入場 would open 章節資訊 popup → loop.
             quest_tab = screen.find_any_text(
                 ["Quest", "任務", "任务"],
                 region=(0.45, 0.0, 1.0, 0.24), min_conf=0.55,
             )
+            if quest_tab and not getattr(self, "_farm_quest_tab_clicked", False):
+                self._farm_quest_tab_clicked = True
+                self.log("farming: clicking Quest tab on entry to ensure correct list")
+                return action_click_box(quest_tab, "farming: force Quest tab active")
             nodes, entry_buttons = self._find_numbered_nodes_on_screen(screen)
             if not entry_buttons:
                 # All visible nodes are locked (no 入場 buttons) AND we
