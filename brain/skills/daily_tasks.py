@@ -190,13 +190,18 @@ class DailyTasksSkill(BaseSkill):
         # Phase A: try 一鍵領取 for the first 5 attempts.  If that button
         # is still visible after 5 attempts we assume it's "stuck" (most
         # rewards already gone, button persists for UI reasons) and
-        # switch to per-row mode.
+        # switch to per-row mode.  Skip grey (already-claimed) buttons.
         if self._claim_attempts <= 5:
             claim = self.find_claim_all_button(screen)
-            if claim:
+            if claim and not screen.is_button_grey(claim.cx, claim.cy):
                 self.log(f"claiming all tasks (attempt {self._claim_attempts})")
                 self._claimed_count += 1
                 return action_click_box(claim, "claim all tasks")
+            if claim:
+                # 一鍵領取 button is grey — already swept.  Don't spin on
+                # Phase A; jump to Phase B to look for any per-row 領取
+                # that 一鍵領取 didn't catch (tier-bonus, milestone).
+                self._claim_attempts = max(self._claim_attempts, 6)
 
         # Phase B: per-row 領取 (catches tier-bonus rows + anything
         # 一鍵領取 skipped).  min_conf lowered to 0.55 — the tier-bonus
@@ -206,6 +211,15 @@ class DailyTasksSkill(BaseSkill):
         single = self.find_single_claim_button(
             screen, region=single_region, min_conf=0.55
         )
+        # Skip grey-painted 領取 (already claimed).  User feedback
+        # 2026-05-13: bot kept hitting the bottom-right 全部領取 grey
+        # button for 20 throttled ticks instead of exiting.
+        if single and screen.is_button_grey(single.cx, single.cy):
+            self.log(
+                f"per-row 領取 at ({single.cx:.2f},{single.cy:.2f}) is grey "
+                f"(already claimed), skipping"
+            )
+            single = None
         if single:
             self.log(
                 f"claiming individual task reward at "

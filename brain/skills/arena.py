@@ -259,16 +259,30 @@ class ArenaSkill(BaseSkill):
             "領取|领取",
             region=(0.15, 0.40, 0.40, 0.75), min_conf=0.5
         )
-        if claims:
+        # Filter out greyed-out buttons.  Once a reward is claimed BA
+        # paints the 領取 button grey and ignores clicks — every tick
+        # the OCR still reads the text, so without this check the bot
+        # bangs on the same dead button until _claim_clicks hits 3
+        # (user feedback 2026-05-13: "灰色就成了，没必要浪费时间").
+        live_claims = [
+            c for c in claims
+            if not screen.is_button_grey(c.cx, c.cy)
+        ]
+        if live_claims:
             # Click BOTTOM first (sort by y descending).
             # Reason: the top button (累積量 time reward) regenerates instantly
             # after claiming, so clicking topmost first causes an infinite loop.
             # The bottom button (持有票券 daily reward) only appears once per day.
-            claims.sort(key=lambda b: b.cy, reverse=True)
-            claim = claims[0]
+            live_claims.sort(key=lambda b: b.cy, reverse=True)
+            claim = live_claims[0]
             self._claim_clicks += 1
-            self.log(f"claiming reward #{self._claim_clicks}: '{claim.text}' at y={claim.cy:.2f} ({len(claims)} buttons)")
+            self.log(f"claiming reward #{self._claim_clicks}: '{claim.text}' at y={claim.cy:.2f} ({len(live_claims)}/{len(claims)} live)")
             return action_click_box(claim, "claim arena reward")
+        # All visible 領取 buttons are grey → already claimed.
+        if claims:
+            self.log(f"all {len(claims)} claim buttons grey (already claimed), skipping")
+            self.sub_state = "check_tickets"
+            return action_wait(200, "claim rewards already grey")
 
         # No claim buttons visible — either all claimed or popup blocking
         if self._claim_clicks > 0:

@@ -138,13 +138,18 @@ class EventActivitySkill(BaseSkill):
         # OFF — enable via profile option `enable_bonus_team=True` once
         # the click targets are verified against your screen resolution.
         self._enable_bonus_team: bool = False
-        # Whether the farming phase is allowed to run a one-off setup battle
-        # to populate the saved sweep team with rate-up students when the
-        # "Bonus" indicator is missing.  Default OFF per user (2026-05-13):
-        # after quest is done they do NOT want another battle to fire
-        # automatically.  Keep the FSM code around so it can be re-enabled
-        # via profile option `enable_bonus_setup_battle=True`.
-        self._enable_bonus_setup_battle: bool = False
+        # Whether the farming phase is allowed to run a one-off setup
+        # battle to populate the saved sweep team with rate-up students
+        # when the Bonus indicator is partial / missing.  Default ON
+        # (corrected 2026-05-13): user wants "加成打满" before sweeping,
+        # which requires one quick-edit battle per stage to update the
+        # saved team.  The earlier gate-OFF default was a mistake — I
+        # conflated this setup battle with the "Challenge" tab the user
+        # wanted skipped; they're separate.  Challenge tab dispatch is
+        # already disabled at the top of _enter; the bonus-setup battle
+        # is a single ~1-minute investment that doubles every sweep
+        # afterwards.
+        self._enable_bonus_setup_battle: bool = True
         self._form_stage: str = "start"      # see _formation_bonus_team
         self._form_battle_node: int = -1      # which quest node this FSM is for
         self._form_ticks: int = 0             # stage-local tick counter
@@ -3518,11 +3523,20 @@ class EventActivitySkill(BaseSkill):
                     b for b in screen.ocr_boxes
                     if "Bonus" in b.text and b.confidence >= 0.55
                 ]
-                if not bonus_hits:
+                # User feedback (2026-05-13): "活动还是没有把加成打满,
+                # 依旧是直接就去扫荡了" — one Bonus tag means saved team
+                # has SOME rate-up students but probably not the full
+                # team.  Maxed-out bonus typically shows 2-3 Bonus tags
+                # on the expected-rewards row.  Treat ≥2 as "already
+                # maxed" and run setup when count is 0 or 1.
+                _BONUS_FULL_MIN = 2
+                if len(bonus_hits) < _BONUS_FULL_MIN:
                     if self._enable_bonus_setup_battle:
                         self.log(
-                            f"farming: stage {stage_idx} has no Bonus indicator → "
-                            f"running one quick-edit battle to set bonus team"
+                            f"farming: stage {stage_idx} has only "
+                            f"{len(bonus_hits)} Bonus tag(s) (need ≥{_BONUS_FULL_MIN} "
+                            f"for full bonus) → running quick-edit battle to "
+                            f"max bonus team"
                         )
                         self._farm_sweep_phase = 100  # bonus-setup battle
                         self._farm_bonus_battle_stage = "task_start"
@@ -3530,16 +3544,16 @@ class EventActivitySkill(BaseSkill):
                         self._farm_stage_ticks = 0
                         return action_wait(200, "farming: starting bonus-setup battle")
                     self.log(
-                        f"farming: stage {stage_idx} no Bonus indicator but "
-                        f"enable_bonus_setup_battle=False — sweeping without bonus"
+                        f"farming: stage {stage_idx} has {len(bonus_hits)} Bonus tag(s) "
+                        f"but enable_bonus_setup_battle=False — sweeping as-is"
                     )
                     self._farm_bonus_setup_done_stages.add(stage_idx)
                 else:
-                    # Bonus already there — mark as done (e.g. user pre-set it)
+                    # Bonus already maxed (≥2 tags) — proceed to sweep
                     self._farm_bonus_setup_done_stages.add(stage_idx)
                     self.log(
-                        f"farming: stage {stage_idx} already has "
-                        f"{len(bonus_hits)} Bonus item(s), proceeding to sweep"
+                        f"farming: stage {stage_idx} bonus maxed "
+                        f"({len(bonus_hits)} tags ≥ {_BONUS_FULL_MIN}), proceeding to sweep"
                     )
 
             max_btn = screen.find_any_text(["MAX"], min_conf=0.7)
@@ -4131,7 +4145,38 @@ class EventActivitySkill(BaseSkill):
             )
             if playable:
                 top = playable[0]
-                if balance < 0 or top["unit_cost"] <= balance:
+                # User rule: "都知道是0货币还在那一个个商品试" — when
+                # balance == 0 the bot was still iterating items because
+                # balance<0 (unknown) and balance==0 fell into the same
+                # permissive path.  Split them: explicit 0 = abandon tab;
+                # unknown (-1) wait one extra tick to let OCR re-fire,
+                # then abandon if still unknown.
+                if balance == 0:
+                    self.log(
+                        f"shop[{self._shop_current_tab}]: balance=0 — "
+                        f"abandoning tab (nothing to spend)"
+                    )
+                    self._shop_current_tab = ""
+                    return action_wait(150, "shop: zero balance, next tab")
+                if balance < 0:
+                    self._shop_balance_unknown_ticks = getattr(
+                        self, "_shop_balance_unknown_ticks", 0
+                    ) + 1
+                    if self._shop_balance_unknown_ticks < 3:
+                        return action_wait(
+                            400, "shop: balance OCR unclear, retrying"
+                        )
+                    self.log(
+                        f"shop[{self._shop_current_tab}]: balance still "
+                        f"unknown after 3 ticks — abandoning tab to be safe"
+                    )
+                    self._shop_current_tab = ""
+                    self._shop_balance_unknown_ticks = 0
+                    return action_wait(150, "shop: balance unknown, next tab")
+                # balance is a real positive number — apply the user's
+                # buy-top-or-skip rule.
+                self._shop_balance_unknown_ticks = 0
+                if top["unit_cost"] <= balance:
                     candidates = [top]
                     self.log(
                         f"shop: BUY top '{top['name']}' @ {top['unit_cost']} "
