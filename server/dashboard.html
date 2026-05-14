@@ -201,6 +201,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   <div class="page-title">老师专属碧蓝档案助手 <span class="pill gold" style="font-size:10px;margin-left:6px">Sensei Mode</span></div>
   <div class="assistant-sub">纯本地日常收菜工作台 · 多档案 / 多账号 / Skill 顺序编排 / 红黄点智能跳过 / OCR + 模板 + YOLO 状态机驱动</div>
   <div class="card">
+    <!-- ── PRIMARY: Profile + Run controls (everything you actually press) ── -->
     <div class="form-row">
       <div class="form-group" style="min-width:260px">
         <label>配置档案</label>
@@ -210,88 +211,98 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
           <button class="btn btn-sm btn-danger" id="btn_profile_delete">删除</button>
         </div>
       </div>
-      <div class="form-group" style="min-width:220px">
+      <div class="form-group" style="min-width:180px">
         <label>账号标记</label>
-        <input id="account_label" type="text" placeholder="例：主号 / 国际服小号"/>
+        <input id="account_label" type="text" placeholder="主号 / 小号"/>
       </div>
-      <div class="form-group wide">
-        <label>完成通知 Webhook</label>
-        <input id="notify_webhook_url" type="text" placeholder="Discord / Telegram / 自定义 webhook URL"/>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group" style="min-width:400px;flex:1">
-        <label>Game EXE Path</label>
-        <input id="game_exe_path" type="text" value=""/>
-      </div>
-      <div class="form-group">
+      <div class="form-group" style="min-width:140px">
         <label>Window Title</label>
         <input id="window_title" type="text" value="MuMu"/>
       </div>
+      <div style="flex:1"></div>
+      <span id="profile_status" style="font-size:11px;color:var(--muted);align-self:flex-end;margin-bottom:11px"></span>
+      <span class="pill idle" id="status_pill" style="align-self:flex-end;margin-bottom:11px">Unknown</span>
     </div>
-    <div class="form-row">
-      <div class="form-group wide">
-        <label>日常目标指令</label>
-        <textarea id="goal">保持碧蓝档案日常流程稳定、安全、可回退，优先完成收菜与领奖，不触碰抽卡/氪金相关按钮。</textarea>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Steps (0=loop)</label><input id="steps" type="number" value="0" style="width:90px"/></div>
-      <div class="form-group" title="每 tick 之间 sleep 秒数（非 wait 动作）。0.3 = 默认，降低提升吞吐但加重 ADB 压力"><label>Step Sleep</label><input id="step_sleep_s" type="number" step="0.1" min="0.1" value="0.3" style="width:80px"/></div>
-      <div class="form-group"><label>AP Purchase Limit</label><input id="ap_purchase_limit" type="number" value="0" style="width:90px"/></div>
-      <div class="form-group" title="Event 刷取每次技能运行的扫荡轮数 (1=单轮，>1=循环，借鉴 reference activity_sweep_times)"><label>Event Rounds</label><input id="event_max_rounds" type="number" min="1" max="20" value="1" style="width:80px"/></div>
-      <div class="form-group" title="AP 保留下限：当前 AP ≤ 此值时停止循环（配合 Event Rounds 使用）"><label>AP Reserve</label><input id="event_ap_reserve" type="number" min="0" value="0" style="width:80px"/></div>
-    </div>
-    <div class="form-row" style="gap:16px">
-      <div class="check-row">
-        <label><input id="dry_run" type="checkbox" checked/> Dry Run</label>
-        <label><input id="forbid_premium_currency" type="checkbox" checked/> 禁止高级货币 / 抽卡点击</label>
-        <label><input id="exploration_click" type="checkbox"/> 探索性点击</label>
-        <label><input id="notify_on_finish" type="checkbox"/> 完成后通知</label>
-      </div>
-    </div>
-    <div class="form-row" style="gap:16px;flex-wrap:wrap">
-      <div class="check-row">
-        <span style="font-size:12px;color:var(--muted);margin-right:4px">活动:</span>
-        <label><input id="enable_bonus_team" type="checkbox" checked/> 自动加成队</label>
-        <label><input id="event_shop_auto_buy" type="checkbox" checked/> 自动购买商店</label>
-        <label title="默认 false = 材料买完再买家具。家具单价通常上千 P，慎用"><input id="event_shop_furniture_first" type="checkbox"/> 优先买家具</label>
-      </div>
-      <div class="form-group"><label>farming 关卡</label><input id="event_farming_stage" type="number" value="12" min="1" max="20" style="width:70px"/></div>
-      <div class="form-group" title="0 = 无 AP 上限"><label>farming AP 预算</label><input id="event_farming_ap_budget" type="number" value="0" min="0" style="width:90px"/></div>
-      <div class="form-group" title="低于此 AP 不再扫荡，直接去商店"><label>最低扫荡 AP</label><input id="event_min_ap_for_sweep" type="number" value="20" min="1" style="width:70px"/></div>
-    </div>
-    <div class="form-row" style="gap:16px">
-      <div class="check-row">
-        <span style="font-size:12px;color:var(--muted);margin-right:4px">悬赏通缉区域:</span>
-        <label><input id="bounty_branch_overpass" type="checkbox" checked/> 高架公路</label>
-        <label><input id="bounty_branch_railway" type="checkbox" checked/> 沙漠鐵道</label>
-        <label><input id="bounty_branch_classroom" type="checkbox" checked/> 教室</label>
-      </div>
-    </div>
-    <div class="form-row" style="gap:16px;flex-wrap:wrap">
-      <div class="check-row" style="gap:8px" title="每日定时自动触发 pipeline">
-        <label><input id="sched_enabled" type="checkbox"/> 每日自动跑</label>
-        <label style="font-size:12px;color:var(--muted)">时刻
-          <input id="sched_reset_time" type="text" value="04:00" style="width:60px" placeholder="HH:MM"/>
-        </label>
-        <label style="font-size:12px;color:var(--muted)">间隔/小时
-          <input id="sched_interval_hours" type="number" min="1" max="168" value="24" style="width:60px"/>
-        </label>
-        <span id="sched_next_fire" style="font-size:11px;color:var(--muted);font-family:var(--mono)">—</span>
-      </div>
-    </div>
-    <div class="form-row" style="margin-top:10px;gap:8px">
+    <div class="form-row" style="margin-top:4px;gap:8px;align-items:center">
       <button class="btn-primary btn" id="btn_start">▶ Start 日常</button>
       <button class="btn-danger btn" id="btn_stop">■ Stop</button>
-      <button class="btn" id="btn_goal_daily">填入日常模板</button>
       <button class="btn" id="btn_profile_save">保存档案</button>
       <div style="flex:1"></div>
-      <span id="profile_status" style="font-size:11px;color:var(--muted);margin-right:8px"></span>
-      <span class="pill idle" id="status_pill">Unknown</span>
+      <button class="btn btn-sm" onclick="document.getElementById('advancedSettings').open=!document.getElementById('advancedSettings').open;return false">⚙ 高级设置</button>
     </div>
-    <div class="profile-hint">档案会保存窗口标题、账号标记、通知地址、技能顺序和收藏角色，适合主号/小号/不同模拟器配置一键切换。</div>
-    <div id="status_text" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono);word-break:break-all;max-height:40px;overflow:hidden">Status: ...</div>
+    <div id="status_text" style="font-size:11px;color:var(--muted);margin-top:8px;font-family:var(--mono);word-break:break-all;max-height:40px;overflow:hidden">Status: ...</div>
+
+    <!-- ── SECONDARY: collapsed advanced settings ── -->
+    <details id="advancedSettings" style="margin-top:14px;border-top:1px solid var(--border-soft);padding-top:12px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none;letter-spacing:.5px">▾ 高级设置（运行参数 / 活动 / 悬赏 / 定时 / 通知 / 目标指令）</summary>
+      <div style="margin-top:12px">
+        <div class="form-row">
+          <div class="form-group" style="min-width:260px;flex:1">
+            <label>完成通知 Webhook</label>
+            <input id="notify_webhook_url" type="text" placeholder="Discord / Telegram / 自定义 webhook URL"/>
+          </div>
+          <div class="form-group" style="min-width:300px;flex:1">
+            <label>Game EXE Path</label>
+            <input id="game_exe_path" type="text" value=""/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group wide">
+            <label>日常目标指令</label>
+            <textarea id="goal" style="min-height:60px">保持碧蓝档案日常流程稳定、安全、可回退，优先完成收菜与领奖，不触碰抽卡/氪金相关按钮。</textarea>
+            <button class="btn btn-sm" id="btn_goal_daily" style="align-self:flex-start;margin-top:4px">填入日常模板</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Steps (0=loop)</label><input id="steps" type="number" value="0" style="width:90px"/></div>
+          <div class="form-group" title="每 tick 之间 sleep 秒数（非 wait 动作）。0.3 = 默认"><label>Step Sleep</label><input id="step_sleep_s" type="number" step="0.1" min="0.1" value="0.3" style="width:80px"/></div>
+          <div class="form-group"><label>AP Purchase Limit</label><input id="ap_purchase_limit" type="number" value="0" style="width:90px"/></div>
+          <div class="form-group" title="Event 刷取每次技能运行的扫荡轮数"><label>Event Rounds</label><input id="event_max_rounds" type="number" min="1" max="20" value="1" style="width:80px"/></div>
+          <div class="form-group" title="AP 保留下限：当前 AP ≤ 此值时停止循环"><label>AP Reserve</label><input id="event_ap_reserve" type="number" min="0" value="0" style="width:80px"/></div>
+        </div>
+        <div class="form-row" style="gap:18px">
+          <div class="check-row">
+            <label><input id="dry_run" type="checkbox" checked/> Dry Run</label>
+            <label><input id="forbid_premium_currency" type="checkbox" checked/> 禁止高级货币 / 抽卡点击</label>
+            <label><input id="exploration_click" type="checkbox"/> 探索性点击</label>
+            <label><input id="notify_on_finish" type="checkbox"/> 完成后通知</label>
+          </div>
+        </div>
+        <div class="form-row" style="gap:18px;flex-wrap:wrap">
+          <div class="check-row">
+            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">活动</span>
+            <label><input id="enable_bonus_team" type="checkbox" checked/> 自动加成队</label>
+            <label><input id="event_shop_auto_buy" type="checkbox" checked/> 自动购买商店</label>
+            <label title="默认 false = 材料买完再买家具"><input id="event_shop_furniture_first" type="checkbox"/> 优先买家具</label>
+          </div>
+          <div class="form-group"><label>farming 关卡</label><input id="event_farming_stage" type="number" value="12" min="1" max="20" style="width:70px"/></div>
+          <div class="form-group" title="0 = 无 AP 上限"><label>farming AP 预算</label><input id="event_farming_ap_budget" type="number" value="0" min="0" style="width:90px"/></div>
+          <div class="form-group" title="低于此 AP 不再扫荡"><label>最低扫荡 AP</label><input id="event_min_ap_for_sweep" type="number" value="20" min="1" style="width:70px"/></div>
+        </div>
+        <div class="form-row" style="gap:18px">
+          <div class="check-row">
+            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">悬赏区域</span>
+            <label><input id="bounty_branch_overpass" type="checkbox" checked/> 高架公路</label>
+            <label><input id="bounty_branch_railway" type="checkbox" checked/> 沙漠鐵道</label>
+            <label><input id="bounty_branch_classroom" type="checkbox" checked/> 教室</label>
+          </div>
+        </div>
+        <div class="form-row" style="gap:18px;flex-wrap:wrap">
+          <div class="check-row" style="gap:8px" title="每日定时自动触发 pipeline">
+            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">定时</span>
+            <label><input id="sched_enabled" type="checkbox"/> 每日自动跑</label>
+            <label style="font-size:12px;color:var(--muted)">时刻
+              <input id="sched_reset_time" type="text" value="04:00" style="width:60px" placeholder="HH:MM"/>
+            </label>
+            <label style="font-size:12px;color:var(--muted)">间隔/小时
+              <input id="sched_interval_hours" type="number" min="1" max="168" value="24" style="width:60px"/>
+            </label>
+            <span id="sched_next_fire" style="font-size:11px;color:var(--muted);font-family:var(--mono)">—</span>
+          </div>
+        </div>
+        <div class="profile-hint">档案会保存所有以上设置，主号/小号/不同模拟器一键切换。</div>
+      </div>
+    </details>
     <div id="routineHud" class="routine-hud" style="display:none">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <span id="routinePhase" style="font-weight:700">Idle</span>
