@@ -2580,8 +2580,21 @@ class EventActivitySkill(BaseSkill):
         # a non-terminal state so the popup doesn't leak OCR numbers into
         # _find_and_click_quest_node (which would mistake Lv.90 / role
         # counts for quest node indices and scroll away the list).
-        if (self._enable_bonus_team
-                and self._form_stage not in ("start", "done")):
+        # Bonus-team FSM gate: fire when we're on a formation screen
+        # (entry into FSM) OR we're already mid-FSM (clicked 快速編輯,
+        # now in the auto/confirm popup so 快速編輯 anchor is gone).
+        # Without this gate the FSM either never starts (previous
+        # trigger rejected 'start' state) or fires on non-formation
+        # screens like the quest list.
+        fsm_in_progress = self._form_stage in ("click_auto", "click_confirm")
+        on_formation = (self._form_stage == "start"
+                        and screen.find_any_text(
+                            ["快速編輯", "快速编辑", "快速辑", "快速編", "快速编",
+                             "速編輯", "速编辑"],
+                            region=(0.78, 0.15, 1.0, 0.55), min_conf=0.50,
+                        ) is not None)
+        if (self._enable_bonus_team and self._form_stage != "done"
+                and (on_formation or fsm_in_progress)):
             fsm_action = self._formation_bonus_team(screen)
             if fsm_action is not None:
                 self._quest_idle_ticks = 0
@@ -2845,6 +2858,12 @@ class EventActivitySkill(BaseSkill):
                 self._quest_node_pending = True
                 self._quest_consecutive_locks = 0  # reset on successful entry
                 self._quest_stage_lock_ticks = 0    # reset stage-lock debounce
+                # Reset bonus-team FSM so it re-runs on this quest's
+                # formation screen (each quest may have different bonus
+                # students; the FSM ends in 'done' state which would
+                # otherwise stay sticky across quests).
+                self._form_stage = "start"
+                self._form_ticks = 0
                 self.log(f"clicking 入場 for quest node {target_str}")
                 return action_click_box(paired_entry, f"quest node {target_str} 入場")
             # No paired entry — but before calling it "locked", distinguish:

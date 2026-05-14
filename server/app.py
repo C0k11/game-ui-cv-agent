@@ -43,32 +43,42 @@ APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 # Removed: lobby, ap_overflow, story_cleanup, joint_firing_drill,
 # total_assault, hard_farming, campaign_push.
 _SKILL_OPTIONS: List[Dict[str, str]] = [
+    # Production daily order (validated 2026-05-13).  All 10 skills
+    # below run end-to-end with badge-based skip routing — Cafe /
+    # Schedule / Club / Craft / Shop / PassReward auto-skip when their
+    # lobby nav icon shows no red/yellow dot.  Bounty / Arena / Mail /
+    # DailyTasks / EventActivity always run (their badges live outside
+    # the bottom-nav scan).
     # State 1: 基建与免费资源
     {"id": "cafe", "label": "[S1] 咖啡厅收益 / 邀请 / 摸头"},
-    {"id": "club", "label": "[S1] 社团签到 AP"},
-
     # State 2: 票券类日常
     {"id": "schedule", "label": "[S2] 课程表"},
     {"id": "bounty", "label": "[S2] 悬赏通缉"},
     {"id": "arena", "label": "[S2] 战术对抗赛"},
-
-    # State 3: 体力获取 & 消耗
+    # State 3: 邮件 + 任务结算
     {"id": "mail", "label": "[S3] 邮件一键领取"},
-    {"id": "ap_planning", "label": "[S3] 补给 / 每日免费 AP"},
-    {"id": "event_activity", "label": "[S3] 刷活动（剧情 / 任务 / 扫荡 / 商店）"},
-
-    # State 4: 后勤 & 结算
-    {"id": "shop", "label": "[S4] 普通商店日购"},
-    {"id": "craft", "label": "[S4] 制造（领成品 + 投石）"},
-    {"id": "daily_tasks", "label": "[S4] 每日任务一键领取"},
-    {"id": "pass_reward", "label": "[S4] 战令一键领取"},
+    {"id": "daily_tasks", "label": "[S3] 每日任务一键领取"},
+    # State 4: 余下需要进入的菜单（badge-gated）
+    {"id": "club", "label": "[S4] 社团签到 AP（red dot 才进）"},
+    {"id": "craft", "label": "[S4] 制造（yellow dot 才进）"},
+    {"id": "pass_reward", "label": "[S4] 战令一键领取（recruit red dot 才进）"},
+    # State 5: 活动
+    {"id": "event_activity", "label": "[S5] 刷活动（剧情 / 任务 / 扫荡 / 商店）"},
 
     # Optional extras (not default, kept for profile customization)
+    {"id": "shop", "label": "[可选-S4] 普通商店日购"},
+    {"id": "ap_planning", "label": "[可选-S3] 补给 / 每日免费 AP"},
     {"id": "momo_talk", "label": "[可选] MomoTalk 未读"},
     {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿"},
 ]
-_DEFAULT_SKILL_ORDER = [item["id"] for item in _SKILL_OPTIONS]
-_VALID_SKILL_IDS = set(_DEFAULT_SKILL_ORDER)
+# Default order = first 10 (the production daily order).  Optional
+# extras live in _SKILL_OPTIONS but aren't auto-included so a user
+# pressing "restore default" gets the validated set, not every plugin.
+_DEFAULT_SKILL_ORDER = [
+    "cafe", "schedule", "bounty", "arena", "mail", "daily_tasks",
+    "club", "craft", "pass_reward", "event_activity",
+]
+_VALID_SKILL_IDS = {item["id"] for item in _SKILL_OPTIONS}
 
 # DXcam capture state
 _CAPTURE_LOCK = threading.Lock()

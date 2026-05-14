@@ -694,6 +694,14 @@ class DailyPipeline:
         at that location — safely skip the skill instead of burning
         ticks navigating in and back out.
 
+        Important: consult the MOST RECENT lobby snapshot, not the first
+        one — mid-run actions (e.g. DailyTasks claiming) can refresh
+        notifications that light up social/craft/etc. badges that
+        weren't there at pipeline start.  Using first_seen would skip
+        Club even though social just lit up red, losing a claim
+        (run_20260513_205321: initial all-clear, social=red appeared
+        mid-run, Club still skipped → user noticed missing AP claim).
+
         Returns:
             str reason if we should skip (caller logs + advances).
             None if the skill should run normally.
@@ -701,10 +709,15 @@ class DailyPipeline:
         badge_key = self._SKILL_BADGE_MAP.get(skill.name)
         if not badge_key:
             return None  # No badge mapping → always run
-        first_seen = getattr(self, "_lobby_badges_first_seen", None)
-        if not first_seen:
+        # Prefer last_seen (refreshed every advance_skill); fall back to
+        # first_seen if last_seen hasn't populated yet.
+        snapshot = (
+            getattr(self, "_lobby_badges_last_seen", None)
+            or getattr(self, "_lobby_badges_first_seen", None)
+        )
+        if not snapshot:
             return None  # We haven't seen the lobby yet → can't decide, run
-        state = first_seen.get(badge_key, "unknown")
+        state = snapshot.get(badge_key, "unknown")
         if state in ("red", "yellow"):
             return None  # Has a dot → something to do, run
         if state == "none":
@@ -1375,12 +1388,46 @@ class DailyPipeline:
         # First lobby-visit of the run → snapshot all 8 nav-icon badges.
         # Inexpensive (~5ms on a 4K screenshot) and only runs until the
         # first snapshot lands, so it can't impact steady-state perf.
-        if not getattr(self, "_lobby_badges_first_seen", None):
+        was_empty = not getattr(self, "_lobby_badges_first_seen", None)
+        if was_empty:
             self._maybe_scan_lobby_badges(reason="pipeline start")
         skill = self.current_skill
         if skill is None:
             self._running = False
             return action_done("no more skills")
+
+        # If the badge snapshot JUST populated AND the current skill (we
+        # already started, since _start_current_skill ran before any
+        # tick) has no dot, bail out NOW — including the very first
+        # skill of the run, which couldn't be skipped pre-tick because
+        # the lobby hadn't been scanned yet.  User-reported case: cafe
+        # icon shows no dot but bot went in anyway (run_20260513_205321).
+        if was_empty and getattr(self, "_lobby_badges_first_seen", None):
+            skip_reason = self._should_skip_skill_by_badge(skill)
+            if skip_reason:
+                print(f"[Pipeline] Skipping skill '{skill.name}': {skip_reason} (post-scan)")
+                # Mimic the skip path in _start_current_skill but on the
+                # already-started skill: drop its bookkeeping and advance.
+                self._results.append(
+                    SkillResult(
+                        skill_name=skill.name,
+                        status="skipped",
+                        ticks=0,
+                        duration_s=max(0.0, time.time() - self._skill_start_time),
+                        reason=skip_reason,
+                    )
+                )
+                self._current_idx += 1
+                self._retry_count = 0
+                if self._current_idx >= len(self._skill_order):
+                    self._running = False
+                    self._log_lobby_badge_summary()
+                    print("[Pipeline] All skills complete")
+                    return action_done("all skills complete after skip")
+                self._start_current_skill()
+                # The next skill is ready; emit a 0.2s wait so the next
+                # tick can run its first action cleanly.
+                return action_wait(200, f"advanced past {skill.name} (no dot)")
 
         # ── Global Interceptor (runs before any skill) ──
         intercept = self._global_interceptor(screen, skill)

@@ -160,7 +160,7 @@ class DailyTasksSkill(BaseSkill):
         """Click claim-all button repeatedly until no more rewards."""
         self._claim_attempts += 1
 
-        if self._claim_attempts > 15:
+        if self._claim_attempts > 25:
             self.log(f"claim loop done ({self._claimed_count} claimed)")
             self.sub_state = "claim_chests"
             self._chest_phase = True
@@ -173,9 +173,19 @@ class DailyTasksSkill(BaseSkill):
             self._claimed_count += 1
             return action_click_box(claim, "claim all tasks")
 
-        single = self.find_single_claim_button(screen)
+        # Wider region than the default (0.6,0.1,1.0,0.9) — daily-tasks
+        # page also has a TIER BONUS bar at the top (e.g. "完成每日任務
+        # 8次以上 8/8 [領取]") whose 領取 button sits at y≈0.05-0.10,
+        # below the default 0.1 floor.  Pull the top edge to 0.02 so we
+        # don't miss those tier-bonus claims.
+        # User report (run 2026-05-13 ~21:00): bot claimed 15 individual
+        # rewards then exited without catching the 8/8 tier-bonus 領取
+        # because find_single_claim_button's default region cut it off.
+        single = self.find_single_claim_button(
+            screen, region=(0.55, 0.02, 1.0, 0.95)
+        )
         if single:
-            self.log("claiming individual task reward")
+            self.log(f"claiming individual task reward at ({single.cx:.2f},{single.cy:.2f})")
             self._claimed_count += 1
             return action_click_box(single, "claim single task")
 
