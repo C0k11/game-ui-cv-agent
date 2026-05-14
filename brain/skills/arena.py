@@ -184,8 +184,8 @@ class ArenaSkill(BaseSkill):
             return action_click(0.95, 0.83, "click campaign area (hardcoded)")
 
         if current == "Mission":
-            # Inside campaign menu — find 戰術大賽 (PvP Arena)
-            # OCR frequently misreads: "戰術大賽" → "术大赛" / "戰術" / "大賽" / partial
+            # Inside campaign menu — find 戰術大賽 (PvP Arena).
+            # OCR frequently misreads: "戰術大賽" → "术大赛" / "戰術" / "大賽" / partial.
             pvp = screen.find_any_text(
                 ["戰術大賽", "战术大赛", "對抗", "对抗", "大賽", "大赛",
                  "术大赛", "戰術", "PVP", "Arena"],
@@ -194,6 +194,27 @@ class ArenaSkill(BaseSkill):
             if pvp:
                 self.log(f"clicking arena '{pvp.text}'")
                 return action_click_box(pvp, "click arena in campaign")
+
+            # Are we on a DETAIL sub-page (Decisive Battle boss detail,
+            # bounty detail, etc.) instead of the campaign hub?  These
+            # have "Mission"-like cues but no 戰術 anchor.  Telltale:
+            # detail-specific markers like 最高紀錄, 游玩提示, 帮手設定
+            # — none of which appear on the campaign hub grid.  Back out
+            # so we land on the actual hub.
+            #
+            # Without this we burn 60 enter_ticks clicking a hardcoded
+            # coord that does nothing because we're past the hub already
+            # (run_20260513_195859 t300-376: bot stuck on 制約解除決戰
+            # 賽特的憤怒 detail, clicked (0.73,0.81) ~70x).
+            detail_marker = screen.find_any_text(
+                ["最高紀錄", "最高纪录", "游玩提示", "遊玩提示",
+                 "帮手設定", "幫手設定", "助手设定",
+                 "活動期間", "活动期间"],
+                min_conf=0.5,
+            )
+            if detail_marker and self._enter_ticks > 3:
+                self.log(f"on detail page '{detail_marker.text}', ESC out to hub")
+                return action_back("back out of campaign detail page")
 
             # Hardcoded fallback: 戰術大賽 position in campaign grid (~0.73, 0.81)
             if self._enter_ticks > 5:
