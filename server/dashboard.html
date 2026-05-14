@@ -6,56 +6,94 @@
 <title>私人碧蓝档案助手</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0f172a;--bg2:#1e293b;--bg3:#334155;--border:#475569;--text:#e2e8f0;--muted:#94a3b8;--accent:#3b82f6;--accent2:#2563eb;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--font:system-ui,-apple-system,'Segoe UI',sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+/* ── BA-themed palette (refactored 2026-05-13) ──
+ * Mirrors Blue Archive's mission-screen dark navy + cyan accents +
+ * signature gold "active" highlight on tabs/badges.  Keeps dark mode
+ * (BA's primary menus use dark navy), swaps slate→navy and blue→
+ * BA-cyan, adds gold accent variable for important callouts.
+ * Reference: BA mission/strategy screens (dark navy bg, cyan tab
+ * highlights, gold-yellow "selected" / "active" indicators). */
+:root{
+  --bg:#0e1a2d;            /* deep navy — BA mission screen bg */
+  --bg2:#182843;           /* card surface — slightly lighter navy */
+  --bg3:#243757;           /* hover / inputs */
+  --bg-soft:#1d2e4d;       /* sub-panel tint */
+  --border:#2f456a;        /* subtle navy border */
+  --border-soft:#26385a;
+  --text:#e7f0fb;          /* cream-white text */
+  --muted:#8ea5c3;         /* secondary text */
+  --accent:#4fc3f7;        /* BA primary cyan */
+  --accent2:#29a8e0;       /* hover cyan */
+  --accent-soft:rgba(79,195,247,.12);
+  --gold:#f4c430;          /* BA gold (active tab / claim) */
+  --gold-soft:rgba(244,196,48,.16);
+  --green:#4ade80;
+  --red:#f87171;
+  --yellow:#facc15;
+  --shadow:0 2px 8px rgba(0,8,24,.4);
+  --shadow-soft:0 1px 3px rgba(0,8,24,.25);
+  --font:'Noto Sans SC','Source Han Sans SC',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-display:'Noto Sans SC','Source Han Sans SC',system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --radius:10px;
+  --radius-lg:14px;
+}
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex}
+body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a 0%,var(--bg) 60%);color:var(--text);display:flex}
 
 /* ── Sidebar ── */
-.sidebar{width:56px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px;flex-shrink:0;transition:width .2s}
-.sidebar .logo{font-size:20px;margin-bottom:8px;padding:8px 0}
-.nav-btn{width:44px;height:44px;border:none;background:transparent;color:var(--muted);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;transition:all .15s}
+.sidebar{width:60px;background:linear-gradient(180deg,var(--bg2) 0%,#142441 100%);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;flex-shrink:0;transition:width .2s;box-shadow:1px 0 4px rgba(0,4,12,.3)}
+.sidebar .logo{font-size:20px;margin-bottom:8px;padding:8px 0;color:var(--accent);font-weight:700;letter-spacing:-1px;text-shadow:0 0 12px rgba(79,195,247,.4)}
+.nav-btn{width:44px;height:44px;border:none;background:transparent;color:var(--muted);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;transition:all .15s;position:relative}
 .nav-btn:hover{background:var(--bg3);color:var(--text)}
-.nav-btn.active{background:var(--accent);color:#fff}
+.nav-btn.active{background:var(--accent);color:#0b1a30;box-shadow:0 0 12px rgba(79,195,247,.5)}
+.nav-btn.active::after{content:"";position:absolute;left:-10px;top:50%;transform:translateY(-50%);width:3px;height:24px;background:var(--gold);border-radius:0 3px 3px 0}
 .nav-btn .label{display:none}
 .sidebar-bottom{margin-top:auto}
 
 /* ── Main ── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.page{display:none;flex:1;overflow:auto;padding:20px}
+.page{display:none;flex:1;overflow:auto;padding:22px 26px}
 .page.active{display:flex;flex-direction:column}
-.page-title{font-size:20px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.page-title{font-size:22px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:10px;color:var(--text);letter-spacing:.5px}
+.page-title::before{content:"";display:inline-block;width:4px;height:22px;background:linear-gradient(180deg,var(--accent) 0%,var(--gold) 100%);border-radius:2px}
 
 /* ── Cards ── */
-.card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px}
-.card h3{font-size:14px;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px;box-shadow:var(--shadow-soft)}
+.card h3{font-size:13px;color:var(--accent);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;display:flex;align-items:center;gap:6px}
+.card h3::before{content:"◆";color:var(--gold);font-size:10px}
 
 /* ── Form elements ── */
-.form-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end}
-.form-group{display:flex;flex-direction:column;gap:4px}
-.form-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
-.form-group input,.form-group textarea,.form-group select{padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:13px;outline:none}
-.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--accent)}
+.form-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:500}
+.form-group input,.form-group textarea,.form-group select{padding:9px 11px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .form-group textarea{min-height:100px;font-family:var(--mono);font-size:12px;resize:vertical}
 .form-group.wide{flex:1;min-width:300px}
-.check-row{display:flex;gap:16px;align-items:center;font-size:13px}
+.check-row{display:flex;gap:18px;align-items:center;font-size:13px;flex-wrap:wrap}
 .check-row label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)}
+.check-row input[type=checkbox]{accent-color:var(--accent)}
 
 /* ── Buttons ── */
-.btn{padding:8px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-family:var(--font);transition:all .15s;white-space:nowrap}
-.btn:hover{background:var(--border)}
-.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent2)}
-.btn-danger{background:#991b1b;border-color:var(--red);color:#fff}
-.btn-danger:hover{background:var(--red)}
-.btn-success{background:#15803d;border-color:var(--green);color:#fff}
-.btn-success:hover{background:#16a34a}
-.btn-sm{padding:4px 10px;font-size:12px}
+.btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-family:var(--font);font-weight:500;transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--border);border-color:var(--accent);color:var(--text)}
+.btn-primary{background:linear-gradient(180deg,var(--accent) 0%,var(--accent2) 100%);border-color:var(--accent2);color:#0b1a30;font-weight:700;box-shadow:0 2px 6px rgba(79,195,247,.25)}
+.btn-primary:hover{background:linear-gradient(180deg,#5fcffa 0%,#2eb0e8 100%);color:#08152a}
+.btn-danger{background:#7a1d1d;border-color:var(--red);color:#fff}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-success{background:#1a6e3a;border-color:var(--green);color:#fff}
+.btn-success:hover{background:var(--green);color:#0b1a30}
+.btn-gold{background:linear-gradient(180deg,#facc41 0%,#d99c14 100%);border-color:#d99c14;color:#3a2400;font-weight:700;box-shadow:0 2px 6px rgba(244,196,48,.3)}
+.btn-gold:hover{background:linear-gradient(180deg,#ffd95a 0%,#e6ab1c 100%)}
+.btn-sm{padding:5px 11px;font-size:12px;border-radius:6px}
 
 /* ── Status pill ── */
-.pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
-.pill.ok{background:#052e16;color:var(--green);border:1px solid #15803d}
-.pill.bad{background:#450a0a;color:var(--red);border:1px solid #991b1b}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:600;letter-spacing:.2px}
+.pill.ok{background:rgba(74,222,128,.14);color:var(--green);border:1px solid rgba(74,222,128,.4)}
+.pill.bad{background:rgba(248,113,113,.14);color:var(--red);border:1px solid rgba(248,113,113,.4)}
 .pill.idle{background:var(--bg3);color:var(--muted);border:1px solid var(--border)}
+.pill.gold{background:var(--gold-soft);color:var(--gold);border:1px solid rgba(244,196,48,.4)}
 
 /* ── Logs ── */
 .logs-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
@@ -63,16 +101,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .log-box textarea{flex:1;width:100%;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);resize:none}
 
 /* ── Routine HUD ── */
-.routine-hud{padding:10px;border-radius:8px;background:#0c4a6e;border:1px solid #0369a1;margin-top:8px}
-.routine-hud.recovery{background:#450a0a;border-color:#991b1b}
-.progress-bar{width:100%;background:var(--bg3);height:6px;border-radius:3px;margin:6px 0}
-.progress-fill{height:100%;border-radius:3px;background:var(--accent);transition:width .3s}
+.routine-hud{padding:12px 14px;border-radius:var(--radius);background:linear-gradient(135deg,#143a5e 0%,#0d2b48 100%);border:1px solid rgba(79,195,247,.35);margin-top:10px;box-shadow:inset 0 0 12px rgba(79,195,247,.08)}
+.routine-hud.recovery{background:linear-gradient(135deg,#5e1414 0%,#3a0d0d 100%);border-color:rgba(248,113,113,.4)}
+.progress-bar{width:100%;background:rgba(0,0,0,.3);height:7px;border-radius:4px;margin:8px 0;overflow:hidden}
+.progress-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent) 0%,var(--gold) 100%);transition:width .3s}
 
 /* ── Capture page ── */
-.capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
-.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
-.stat-card .num{font-size:28px;font-weight:700;color:var(--accent)}
-.stat-card .lbl{font-size:11px;color:var(--muted);margin-top:4px;text-transform:uppercase}
+.capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.stat-card{background:linear-gradient(180deg,var(--bg2) 0%,var(--bg-soft) 100%);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;text-align:center;box-shadow:var(--shadow-soft);transition:transform .15s,box-shadow .15s}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,8,24,.5)}
+.stat-card .num{font-size:30px;font-weight:700;color:var(--accent);text-shadow:0 0 12px rgba(79,195,247,.4)}
+.stat-card .lbl{font-size:11px;color:var(--muted);margin-top:6px;text-transform:uppercase;letter-spacing:1px}
 
 /* ── Annotate page ── */
 .annotate-layout{display:flex;flex:1;gap:0;min-height:0;overflow:hidden}
@@ -82,11 +121,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .ann-canvas-area canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain;touch-action:none}
 .class-item{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid transparent}
 .class-item:hover{background:var(--bg3)}
-.class-item.sel{border-color:var(--accent);background:#1e3a5f}
+.class-item.sel{border-color:var(--accent);background:var(--accent-soft)}
 .class-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
 .box-item{display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px}
 .box-item:hover{background:var(--bg3)}
-.box-item.sel{background:#1e3a5f;border:1px solid var(--accent)}
+.box-item.sel{background:var(--accent-soft);border:1px solid var(--accent)}
 .add-class-row{display:flex;gap:4px;margin:4px 0}
 .add-class-row input{flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none}
 .add-class-row input:focus{border-color:var(--accent)}
@@ -98,44 +137,53 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .assistant-sub{font-size:12px;color:var(--muted);margin:-10px 0 14px 0}
 .profile-actions{display:flex;gap:6px;align-items:center}
 .skill-list{display:flex;flex-direction:column;gap:8px}
-.skill-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:grab;user-select:none;transition:box-shadow .12s,transform .12s}
+.skill-row{display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--border);border-radius:var(--radius);background:linear-gradient(180deg,var(--bg-soft) 0%,var(--bg) 100%);cursor:grab;user-select:none;transition:box-shadow .12s,transform .12s,border-color .12s}
+.skill-row:hover{border-color:var(--accent)}
 .skill-row:active{cursor:grabbing}
 .skill-row.dragging{opacity:.4}
-.skill-row.drag-over{box-shadow:0 0 0 2px var(--accent);transform:translateY(-1px)}
-.skill-row.off{opacity:.55}
-.skill-row .skill-main{display:flex;align-items:center;gap:8px;flex:1}
-.skill-row .skill-handle{font-family:var(--mono);color:var(--muted);font-size:12px;min-width:18px;text-align:center}
+.skill-row.drag-over{box-shadow:0 0 0 2px var(--accent);transform:translateY(-1px);border-color:var(--accent)}
+.skill-row.off{opacity:.45;background:var(--bg)}
+.skill-row .skill-main{display:flex;align-items:center;gap:10px;flex:1}
+.skill-row .skill-handle{font-family:var(--mono);color:var(--gold);font-size:12px;font-weight:700;min-width:22px;text-align:center;background:var(--gold-soft);padding:2px 6px;border-radius:4px;border:1px solid rgba(244,196,48,.3)}
+.skill-row.off .skill-handle{color:var(--muted);background:transparent;border-color:var(--border)}
 .skill-row .skill-grip{color:var(--muted);font-size:14px;cursor:grab;padding:0 2px;letter-spacing:-1px}
-.skill-row .skill-label{font-size:13px}
-.skill-row .skill-id{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.skill-row .skill-label{font-size:13px;color:var(--text);font-weight:500}
+.skill-row .skill-id{font-size:10px;color:var(--muted);font-family:var(--mono);opacity:.7}
 .skill-row .skill-actions{display:flex;gap:4px}
-.profile-hint{font-size:11px;color:var(--muted);margin-top:6px}
+.profile-hint{font-size:11px;color:var(--muted);margin-top:8px;font-style:italic}
 
 /* ── Char picker ── */
-.fav-tray{display:flex;flex-wrap:wrap;gap:6px;min-height:72px;padding:8px;background:linear-gradient(180deg,#1e2a44 0%,#15202e 100%);border:1px dashed var(--accent);border-radius:6px;margin-bottom:8px}
-.fav-tray.empty::before{content:"未选择角色 · 从下方列表点击添加，在此拖动调整顺序";color:var(--muted);font-size:11px;width:100%;text-align:center;align-self:center;padding:12px 0}
-.fav-tray-item{position:relative;display:flex;flex-direction:column;align-items:center;padding:3px;border-radius:4px;border:2px solid var(--accent);background:#1e3a5f;cursor:grab;user-select:none;transition:transform .12s,box-shadow .12s}
-.fav-tray-item:hover{box-shadow:0 2px 8px rgba(58,132,255,.5)}
+.fav-tray{display:flex;flex-wrap:wrap;gap:8px;min-height:80px;padding:10px;background:linear-gradient(180deg,#1c2c4a 0%,#0f1c33 100%);border:1px dashed rgba(79,195,247,.5);border-radius:var(--radius);margin-bottom:10px}
+.fav-tray.empty::before{content:"未选择角色 · 从下方列表点击添加，在此拖动调整顺序";color:var(--muted);font-size:11px;width:100%;text-align:center;align-self:center;padding:14px 0}
+.fav-tray-item{position:relative;display:flex;flex-direction:column;align-items:center;padding:4px;border-radius:6px;border:2px solid var(--accent);background:#1c3556;cursor:grab;user-select:none;transition:transform .12s,box-shadow .12s}
+.fav-tray-item:hover{box-shadow:0 3px 10px rgba(79,195,247,.5);transform:translateY(-1px)}
 .fav-tray-item:active{cursor:grabbing}
 .fav-tray-item.dragging{opacity:.4}
-.fav-tray-item.drag-over{box-shadow:0 0 0 3px var(--accent)}
-.fav-tray-item .priority-badge{position:absolute;top:-4px;left:-4px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;padding:0 4px;border-radius:9px;line-height:18px;text-align:center;z-index:2;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.5)}
-.fav-tray-item .remove-btn{position:absolute;top:-6px;right:-6px;background:#d33;color:#fff;font-size:10px;width:16px;height:16px;border-radius:50%;line-height:16px;text-align:center;z-index:2;cursor:pointer;opacity:0;transition:opacity .15s}
+.fav-tray-item.drag-over{box-shadow:0 0 0 3px var(--gold)}
+.fav-tray-item .priority-badge{position:absolute;top:-5px;left:-5px;background:var(--gold);color:#3a2400;font-size:10px;font-weight:700;min-width:18px;height:18px;padding:0 5px;border-radius:9px;line-height:18px;text-align:center;z-index:2;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.6)}
+.fav-tray-item .remove-btn{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;font-size:10px;width:16px;height:16px;border-radius:50%;line-height:16px;text-align:center;z-index:2;cursor:pointer;opacity:0;transition:opacity .15s}
 .fav-tray-item:hover .remove-btn{opacity:1}
-.char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;max-height:350px;overflow-y:auto;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px}
-.char-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:3px;border-radius:4px;border:2px solid transparent;transition:all .15s;user-select:none}
-.char-item:hover{background:var(--bg3)}
+.char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;max-height:350px;overflow-y:auto;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)}
+.char-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px;border-radius:6px;border:2px solid transparent;transition:all .15s;user-select:none}
+.char-item:hover{background:var(--bg3);border-color:var(--accent)}
 .char-item.hidden{display:none}
-.char-avatar{width:44px;height:44px;object-fit:cover;border-radius:3px;pointer-events:none}
-.char-name{font-size:9px;margin-top:2px;text-align:center;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;pointer-events:none}
-.fav-search{width:100%;padding:6px 8px;margin-bottom:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;box-sizing:border-box}
+.char-avatar{width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none}
+.char-name{font-size:9px;margin-top:3px;text-align:center;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;pointer-events:none}
+.fav-search{width:100%;padding:8px 10px;margin-bottom:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;box-sizing:border-box;outline:none;transition:border-color .15s,box-shadow .15s}
+.fav-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* ── BA-themed scrollbar ── */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:5px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--accent)}
 </style>
 </head>
 <body>
 
 <!-- Sidebar Navigation -->
 <div class="sidebar">
-  <div class="logo" style="font-weight:700;font-size:14px;letter-spacing:-1px">BA</div>
+  <div class="logo" title="Blue Archive Daily Helper">BA</div>
   <button class="nav-btn active" onclick="showPage('agent')" title="助手控制台">A</button>
   <button class="nav-btn" onclick="showPage('capture')" title="采集中心">C</button>
   <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
@@ -150,8 +198,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 <!-- ════════════ AGENT PAGE ════════════ -->
 <div class="page active" id="page-agent">
-  <div class="page-title">私人碧蓝档案助手</div>
-  <div class="assistant-sub">纯本地日常收菜工作台：多档案、多账号标记、日常流程编排、收藏角色、OCR + 模板匹配 + YOLO 状态机驱动。</div>
+  <div class="page-title">老师专属碧蓝档案助手 <span class="pill gold" style="font-size:10px;margin-left:6px">Sensei Mode</span></div>
+  <div class="assistant-sub">纯本地日常收菜工作台 · 多档案 / 多账号 / Skill 顺序编排 / 红黄点智能跳过 / OCR + 模板 + YOLO 状态机驱动</div>
   <div class="card">
     <div class="form-row">
       <div class="form-group" style="min-width:260px">
@@ -233,9 +281,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <span id="sched_next_fire" style="font-size:11px;color:var(--muted);font-family:var(--mono)">—</span>
       </div>
     </div>
-    <div class="form-row" style="margin-top:6px">
-      <button class="btn-primary btn" id="btn_start">Start</button>
-      <button class="btn-danger btn" id="btn_stop">Stop</button>
+    <div class="form-row" style="margin-top:10px;gap:8px">
+      <button class="btn-primary btn" id="btn_start">▶ Start 日常</button>
+      <button class="btn-danger btn" id="btn_stop">■ Stop</button>
       <button class="btn" id="btn_goal_daily">填入日常模板</button>
       <button class="btn" id="btn_profile_save">保存档案</button>
       <div style="flex:1"></div>
@@ -402,7 +450,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <select id="roster_sample" style="flex:1;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"></select>
         <label style="font-size:11px;color:var(--muted)">cells:</label>
         <input type="number" id="roster_cpr" min="1" max="8" step="1" value="4" style="width:56px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
-        <button onclick="rosterSave()" style="padding:5px 12px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px">保存</button>
+        <button onclick="rosterSave()" class="btn btn-sm" style="background:var(--green);color:#0b1a30;border-color:var(--green);font-weight:700">保存</button>
         <button onclick="rosterReset()" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">重置</button>
       </div>
       <div style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
@@ -458,11 +506,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <button onclick="harvestPrev()" style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">← Prev</button>
         <button onclick="harvestNext()" style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">Next →</button>
         <button onclick="harvestJumpToUnedited()" title="跳到下一个未调过的帧" style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">跳到未调</button>
-        <button onclick="harvestApplyToRange()" title="把当前帧配置批量复制到后面 N 帧（未调过的）" style="padding:4px 10px;background:#3b82f6;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">批量应用到后 N 帧 →</button>
+        <button onclick="harvestApplyToRange()" class="btn btn-sm btn-primary" title="把当前帧配置批量复制到后面 N 帧（未调过的）">批量应用到后 N 帧 →</button>
         <input id="harvest_apply_range" type="number" value="50" min="1" max="1000" style="width:60px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px" title="N 的值"/>
         <span id="harvest_nav_info" style="font-size:11px;color:var(--muted);font-family:var(--mono)">—</span>
         <div style="flex:1"></div>
-        <span id="harvest_save_indicator" style="font-size:11px;font-family:var(--mono);padding:2px 8px;border-radius:3px;background:#16a34a;color:#fff">● 已存盘</span>
+        <span id="harvest_save_indicator" class="pill ok" style="font-family:var(--mono)">● 已存盘</span>
       </div>
       <div style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
         <canvas id="harvest_canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
