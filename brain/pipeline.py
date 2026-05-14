@@ -672,18 +672,33 @@ class DailyPipeline:
             pass
         print("[Pipeline] Stopped")
 
-    # Skill name → lobby-nav badge key.  Only skills whose entry point
-    # is a bottom-nav icon can use this routing.  Bounty/Arena enter via
-    # the right-side 任務 sidebar; Mail via top-right; DailyTasks via
-    # left sidebar; EventActivity via lobby carousel — so they don't
-    # appear here and always run.
+    # Skill name → lobby-badge key.  User rule (2026-05-13):
+    # "黄/红点才进，没点 pass to next" applies GLOBALLY to every
+    # collection skill, not just bottom-nav ones.  The lobby badge
+    # scanner returns badges from multiple regions:
+    #   - bottom nav: cafe / schedule / student / edit / social /
+    #     craft / shop / recruit
+    #   - top-right cluster: mail (envelope icon)
+    #   - left sidebar: daily_tasks_nav (任務 8/8 indicator)
+    #   - right sidebar: campaign_nav (活動進行中 / 任務 tile)
+    #
+    # Bounty / Arena / EventActivity are intentionally NOT mapped:
+    # - Bounty / Arena: lobby 任務 sidebar dot indicates event/campaign
+    #   tasks, not bounty/arena ticket count.  Tickets are checked
+    #   inside the skill (it bails in 10-15 ticks when 0 tickets) —
+    #   reliable cost vs. unreliable badge signal.
+    # - EventActivity: routed via lobby carousel detection +
+    #   _scan_event_nav_red_badges (inside-event nav badges), not
+    #   a single lobby dot.
     _SKILL_BADGE_MAP: Dict[str, str] = {
-        "Cafe": "cafe",
-        "Schedule": "schedule",
-        "Club": "social",
-        "Craft": "craft",
-        "Shop": "shop",
+        "Cafe":       "cafe",
+        "Schedule":   "schedule",
+        "Club":       "social",
+        "Craft":      "craft",
+        "Shop":       "shop",
         "PassReward": "recruit",
+        "Mail":       "mail",
+        "DailyTasks": "daily_tasks_nav",
     }
 
     def _should_skip_skill_by_badge(self, skill: BaseSkill) -> Optional[str]:

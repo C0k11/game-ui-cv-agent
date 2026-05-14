@@ -781,7 +781,70 @@ class ScreenState:
                 results[key] = "yellow"
             else:
                 results[key] = "none"
+        # Also scan extra fixed-position badges (top-right mail icon,
+        # left sidebar 任務, right sidebar campaign 任務) so the badge-
+        # skip routing extends GLOBALLY across all "go here if there's
+        # something to claim" skills, not just the bottom-nav skills.
+        results.update(self._scan_extra_badges(img, h, w))
         return results
+
+    # Extra badge regions (NOT bottom-nav).  Each entry is:
+    #   (key, (x0, y0, x1, y1)) — fixed normalised region to scan.
+    # Use a tight ROI around the dot's actual pixel cluster, not the
+    # whole icon — otherwise icon-internal colors leak as false positives.
+    _EXTRA_BADGE_REGIONS = (
+        # Top-right mail envelope.  Anchor centered around (0.91, 0.04).
+        # Red dot when unclaimed mail.
+        ("mail",            (0.890, 0.020, 0.940, 0.075)),
+        # Left sidebar 任務 8/8 indicator — daily-tasks unclaimed when
+        # red dot above the badge.  Anchor near (0.045, 0.18).
+        ("daily_tasks_nav", (0.020, 0.140, 0.075, 0.210)),
+        # Right sidebar 活動進行中 / 任務 stack — campaign or event
+        # tasks with unclaimed rewards.  Tile sits around y=0.70-0.95.
+        ("campaign_nav",    (0.890, 0.640, 0.980, 0.940)),
+    )
+
+    def _scan_extra_badges(self, img, h: int, w: int) -> Dict[str, str]:
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return {}
+        out: Dict[str, str] = {}
+        for key, (rx0, ry0, rx1, ry1) in self._EXTRA_BADGE_REGIONS:
+            x0 = max(0, int(rx0 * w))
+            y0 = max(0, int(ry0 * h))
+            x1 = min(w, int(rx1 * w))
+            y1 = min(h, int(ry1 * h))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            roi = img[y0:y1, x0:x1]
+            if roi.size == 0:
+                continue
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            red_total = 0
+            for mn, mx in self._NAV_DOT_RED_HSV:
+                mask = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
+                                          np.array(mx, dtype=np.uint8))
+                red_total += int(mask.sum() // 255)
+            yellow_total = 0
+            for mn, mx in self._NAV_DOT_YELLOW_HSV:
+                mask = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
+                                          np.array(mx, dtype=np.uint8))
+                yellow_total += int(mask.sum() // 255)
+            # Extra regions are larger so the floor scales up slightly
+            # to avoid catching anime-art reds in the campaign sidebar
+            # which sits on top of the school-uniform character art.
+            floor = self._NAV_DOT_MIN_PIXELS
+            if key == "campaign_nav":
+                floor = 180  # larger ROI, more bleed-through possible
+            if red_total >= floor:
+                out[key] = "red"
+            elif yellow_total >= floor:
+                out[key] = "yellow"
+            else:
+                out[key] = "none"
+        return out
 
     def is_loading(self) -> bool:
         """Detect loading screen, download progress, or game update.
