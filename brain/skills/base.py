@@ -943,10 +943,28 @@ class BaseSkill(ABC):
         region: Optional[Tuple[float, float, float, float]] = (0.6, 0.1, 1.0, 0.9),
     ) -> Optional[OcrBox]:
         """Locate an individual 領取 / Claim button (default region: right
-        side where per-item rewards usually sit)."""
-        return screen.find_any_text(
-            self._SINGLE_CLAIM_TEXTS, min_conf=min_conf, region=region,
-        )
+        side where per-item rewards usually sit).
+
+        Substring matching on 領取 also matches the bulk-claim variants
+        全部領取 / 一鍵領取 — which is wrong here, those are handled by
+        find_claim_all_button.  Filter the candidate list to drop boxes
+        whose normalised text *contains* a bulk-claim prefix.  Without
+        this filter, daily-tasks per-row claims kept clicking the
+        bottom-right 全部領取 button instead of the tier-bonus row's
+        own 領取 (run 2026-05-13 ~21:25: 20 throttled clicks at
+        (0.90,0.93) which was 全部領取, not the 8/8 領取 at (0.55,0.93)).
+        """
+        candidates = []
+        for pat in self._SINGLE_CLAIM_TEXTS:
+            candidates.extend(screen.find_text(pat, min_conf=min_conf, region=region))
+        # Drop boxes whose text is actually a bulk-claim variant.
+        _BULK_PREFIXES = ("全部", "一鍵", "一键", "一次")
+        for box in candidates:
+            txt = (box.text or "").strip()
+            if any(p in txt for p in _BULK_PREFIXES):
+                continue
+            return box
+        return None
 
     def is_empty_reward_list(self, screen: ScreenState) -> bool:
         """True if the current list view shows 'nothing to claim'."""
