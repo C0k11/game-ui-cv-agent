@@ -682,14 +682,18 @@ class DailyPipeline:
     #   - left sidebar: daily_tasks_nav (任務 8/8 indicator)
     #   - right sidebar: campaign_nav (活動進行中 / 任務 tile)
     #
-    # Bounty / Arena / EventActivity are intentionally NOT mapped:
-    # - Bounty / Arena: lobby 任務 sidebar dot indicates event/campaign
-    #   tasks, not bounty/arena ticket count.  Tickets are checked
-    #   inside the skill (it bails in 10-15 ticks when 0 tickets) —
-    #   reliable cost vs. unreliable badge signal.
-    # - EventActivity: routed via lobby carousel detection +
-    #   _scan_event_nav_red_badges (inside-event nav badges), not
-    #   a single lobby dot.
+    # Bounty / Arena both enter via the right-sidebar 任務 tile.  The
+    # tile dot semantics (per user 2026-05-13):
+    #   yellow → bounty/arena tickets available (悬赏通缉用黄点识别)
+    #   red    → event tasks have unclaimed rewards (活动任务红点)
+    # Either way the campaign tile is the entry, so any non-none state
+    # means "go look in there".  When the tile shows "none" both
+    # tickets are drained AND tasks claimed — safe to skip.
+    #
+    # EventActivity stays unmapped — its primary entry is the lobby
+    # carousel banner (which has its own indicator), and the inside-
+    # event _scan_event_nav_red_badges handles the within-event nav
+    # task-claim routing.
     _SKILL_BADGE_MAP: Dict[str, str] = {
         "Cafe":       "cafe",
         "Schedule":   "schedule",
@@ -699,6 +703,8 @@ class DailyPipeline:
         "PassReward": "recruit",
         "Mail":       "mail",
         "DailyTasks": "daily_tasks_nav",
+        "Bounty":     "campaign_nav",
+        "Arena":      "campaign_nav",
     }
 
     def _should_skip_skill_by_badge(self, skill: BaseSkill) -> Optional[str]:

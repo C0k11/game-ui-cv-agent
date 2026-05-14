@@ -320,9 +320,13 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   <details open style="margin-bottom:12px">
     <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">日常流程编排</summary>
     <div class="card" style="margin-top:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="font-size:12px;color:var(--muted)">按顺序执行你启用的收菜模块 · 直接拖动整行即可排序，也可用 ↑/↓ 微调。</div>
-        <button class="btn btn-sm" id="btn_skills_reset">恢复默认顺序</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <div style="font-size:12px;color:var(--muted);flex:1;min-width:240px">按顺序执行你启用的收菜模块 · 拖动整行排序，✓ 切换启用 · 无 dot 的 skill 会被红黄点检测自动跳过</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" id="btn_skills_all_on" title="勾选所有 skill">全选</button>
+          <button class="btn btn-sm" id="btn_skills_all_off" title="取消所有勾选 — 不跑日常，只把档案 / 设置加载">全不选</button>
+          <button class="btn btn-sm" id="btn_skills_reset" title="恢复 10-skill 生产顺序">恢复默认</button>
+        </div>
       </div>
       <div id="skill_list" class="skill-list"></div>
       <div id="skill_plan_status" class="profile-hint"></div>
@@ -932,6 +936,18 @@ $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'P
   renderSkillList(defaults,defaults);saveAgent();
   try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:{skill_order:defaults}})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}
 };
+// Bulk select-all / select-none — when user wants to skip dailies
+// entirely (just load profile) or quickly re-enable everything they
+// turned off.  Preserves current row ORDER, only toggles checkboxes.
+function _setAllSkillChecks(checked){
+  document.querySelectorAll('#skill_list .skill-row').forEach(row=>{
+    const cb=row.querySelector('input[type="checkbox"]');
+    if(cb){cb.checked=checked;row.classList.toggle('off',!checked);}
+  });
+  saveAgent();updateSkillPlanStatus();
+}
+$('btn_skills_all_on').onclick=()=>{_setAllSkillChecks(true);$('skill_plan_status').textContent='已全部启用';};
+$('btn_skills_all_off').onclick=()=>{_setAllSkillChecks(false);$('skill_plan_status').textContent='已全部关闭 — Start 后不会执行任何 skill';};
 
 ['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','event_max_rounds','event_ap_reserve','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url','bounty_branch_overpass','bounty_branch_railway','bounty_branch_classroom'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
