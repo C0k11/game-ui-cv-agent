@@ -864,7 +864,15 @@ $('btn_profile_delete').onclick=async()=>{
   try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delete_profile:name})});await loadServerConfig();await loadFavorites();saveAgent();$('profile_status').textContent='已删除档案';setTimeout(()=>{$('profile_status').textContent='';},1800);}catch(e){$('profile_status').textContent='删除失败';}
 };
 $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active_profile:currentProfileName()})});await loadServerConfig();await loadFavorites();saveAgent();}catch(e){$('profile_status').textContent='切换失败';}};
- $('btn_skills_reset').onclick=async()=>{const defaults=(APP_CFG.skill_options||[]).map(x=>x.id);renderSkillList(defaults,defaults);saveAgent();try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill_order:defaults})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}};
+ $('btn_skills_reset').onclick=async()=>{
+  // Prefer server-supplied default_skill_order (the validated 10-skill
+  // production flow); fall back to all options if missing.
+  const defaults = (APP_CFG.default_skill_order && APP_CFG.default_skill_order.length>0)
+    ? APP_CFG.default_skill_order
+    : (APP_CFG.skill_options||[]).map(x=>x.id);
+  renderSkillList(defaults,defaults);saveAgent();
+  try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:{skill_order:defaults}})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}
+};
 
 ['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','event_max_rounds','event_ap_reserve','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url','bounty_branch_overpass','bounty_branch_railway','bounty_branch_classroom'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);

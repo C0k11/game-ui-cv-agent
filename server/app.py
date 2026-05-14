@@ -43,46 +43,43 @@ APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 # Removed: lobby, ap_overflow, story_cleanup, joint_firing_drill,
 # total_assault, hard_farming, campaign_push.
 _SKILL_OPTIONS: List[Dict[str, str]] = [
-    # Production daily order (validated 2026-05-13).  All 10 skills
-    # below run end-to-end with badge-based skip routing — Cafe /
-    # Schedule / Club / Craft / Shop / PassReward auto-skip when their
-    # lobby nav icon shows no red/yellow dot.  Bounty / Arena / Mail /
-    # DailyTasks / EventActivity always run (their badges live outside
-    # the bottom-nav scan).
-    # State 1: 基建与免费资源
-    {"id": "cafe", "label": "[S1] 咖啡厅收益 / 邀请 / 摸头"},
-    # State 2: 票券类日常
-    {"id": "schedule", "label": "[S2] 课程表"},
-    {"id": "bounty", "label": "[S2] 悬赏通缉"},
-    {"id": "arena", "label": "[S2] 战术对抗赛"},
-    # State 3: 邮件 + 任务结算
-    {"id": "mail", "label": "[S3] 邮件一键领取"},
-    {"id": "daily_tasks", "label": "[S3] 每日任务一键领取"},
-    # State 4: 余下需要进入的菜单（badge-gated）
-    {"id": "club", "label": "[S4] 社团签到 AP（red dot 才进）"},
-    {"id": "craft", "label": "[S4] 制造（yellow dot 才进）"},
-    {"id": "pass_reward", "label": "[S4] 战令一键领取（recruit red dot 才进）"},
-    # State 5: 活动
-    {"id": "event_activity", "label": "[S5] 刷活动（剧情 / 任务 / 扫荡 / 商店）"},
+    # Production daily flow (validated 2026-05-13).  All skills below
+    # run end-to-end with badge-based skip routing — those with a lobby
+    # nav-icon mapping (cafe/schedule/club/craft/shop/pass_reward) auto-
+    # skip when their icon shows no red/yellow dot.  Sidebar-routed
+    # skills (bounty/arena/daily_tasks/mail/event_activity) always run.
+    # Order follows user's stated daily ritual:
+    #   cafe → schedule → club (social) → bounty/arena → daily_tasks
+    #   → craft → pass_reward → event_activity → mail (catch the day's
+    #   accumulated rewards LAST, after club/event push items to mailbox)
+    {"id": "cafe", "label": "[S1] 咖啡厅 收益 / 邀请 / 摸头（yellow dot 才进）"},
+    {"id": "schedule", "label": "[S2] 课程表（yellow dot 才进）"},
+    {"id": "club", "label": "[S3] 社团签到 AP（social red dot 才进）"},
+    {"id": "bounty", "label": "[S4] 悬赏通缉（票券）"},
+    {"id": "arena", "label": "[S4] 战术对抗赛（票券）"},
+    {"id": "daily_tasks", "label": "[S5] 每日任务一键领取"},
+    {"id": "craft", "label": "[S6] 制造（yellow dot 才进）"},
+    {"id": "pass_reward", "label": "[S6] 战令一键领取（recruit red dot 才进）"},
+    {"id": "event_activity", "label": "[S7] 刷活动 剧情 / 任务 / 扫荡 / 商店"},
+    {"id": "mail", "label": "[S8] 邮件一键领取（最后跑，捞 club/event 入库的奖励）"},
 
     # Optional extras (not default, kept for profile customization)
-    {"id": "shop", "label": "[可选-S4] 普通商店日购"},
-    {"id": "ap_planning", "label": "[可选-S3] 补给 / 每日免费 AP"},
+    {"id": "shop", "label": "[可选] 普通商店日购"},
+    {"id": "ap_planning", "label": "[可选] 补给 / 每日免费 AP"},
     {"id": "momo_talk", "label": "[可选] MomoTalk 未读"},
     {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿"},
 ]
-# Default order = production daily flow.  Mail runs TWICE — once at
-# start to claim yesterday's accumulated rewards (login bonus + leftover
-# event/club rewards), and once at end to catch this run's outputs:
-# Club sign-in pushes x10 AP to mailbox, EventActivity stage rewards go
-# there too.  Without the second Mail, today's rewards sit unclaimed
-# until tomorrow's run.  Duplicates in skill_order are supported by
-# the pipeline (re-instantiates via the shared registry; reset() clears
-# per-skill state).
+# Default order = the 10 production skills in display order.  Mail
+# moved to the END so it captures today's club sign-in AP, event
+# rewards, etc. that other skills push into the mailbox during this
+# run.  Yesterday's accumulated mail (login bonus, etc.) is also
+# claimed by the end-of-run Mail since BA's mailbox accumulates
+# until claimed — no need for an additional start-of-run Mail.
 _DEFAULT_SKILL_ORDER = [
-    "mail",
-    "cafe", "schedule", "bounty", "arena", "daily_tasks",
-    "club", "craft", "pass_reward", "event_activity",
+    "cafe", "schedule", "club",
+    "bounty", "arena", "daily_tasks",
+    "craft", "pass_reward",
+    "event_activity",
     "mail",
 ]
 _VALID_SKILL_IDS = {item["id"] for item in _SKILL_OPTIONS}
@@ -1447,6 +1444,10 @@ def get_app_config() -> Dict[str, Any]:
         "profile": profile,
         "profiles": cfg.get("profiles") or {},
         "skill_options": list(_SKILL_OPTIONS),
+        # The validated production order — frontend "restore default"
+        # button uses this instead of dumping every option (including
+        # optional extras).
+        "default_skill_order": list(_DEFAULT_SKILL_ORDER),
     }
 
 
