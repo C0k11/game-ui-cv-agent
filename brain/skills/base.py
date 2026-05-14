@@ -1034,11 +1034,20 @@ class BaseSkill(ABC):
 
         Returns an action if a popup was handled, None otherwise.
         """
-        # Notification modal (通知): OCR confidence can be low (~0.55-0.70),
-        # and this dialog may have both 取消/確認 buttons. Treat it as safe
-        # to dismiss so skills don't stall in enter states.
-        notification = screen.find_text_one(
-            "通知", region=(0.30, 0.12, 0.70, 0.32), min_conf=0.55
+        # Notification modal headers — anything that sits at the top of
+        # a center-screen dialog and has a 確認 button at the bottom is
+        # safe to dismiss.  Original detection was "通知" only, which
+        # missed sign-in/reward popups that use different headers:
+        #   - 社團簽到獎勵 (club daily sign-in, observed in
+        #     run_20260513_211309 t74: bot exited Club without clicking
+        #     the popup's 確認, leaving x10 AP rewards "stuck" because
+        #     the popup also describes the reward going to mail).
+        #   - 提示 (generic hint/tip dialog)
+        #   - 系統公告 (system announcement, rare)
+        notification = screen.find_any_text(
+            ["通知", "提示", "簽到獎勵", "签到奖励",
+             "系統公告", "系统公告", "公告"],
+            region=(0.20, 0.10, 0.80, 0.32), min_conf=0.55
         )
         if notification:
             # Check if this notification MUST be confirmed (not canceled):

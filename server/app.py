@@ -71,12 +71,19 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "momo_talk", "label": "[可选] MomoTalk 未读"},
     {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿"},
 ]
-# Default order = first 10 (the production daily order).  Optional
-# extras live in _SKILL_OPTIONS but aren't auto-included so a user
-# pressing "restore default" gets the validated set, not every plugin.
+# Default order = production daily flow.  Mail runs TWICE — once at
+# start to claim yesterday's accumulated rewards (login bonus + leftover
+# event/club rewards), and once at end to catch this run's outputs:
+# Club sign-in pushes x10 AP to mailbox, EventActivity stage rewards go
+# there too.  Without the second Mail, today's rewards sit unclaimed
+# until tomorrow's run.  Duplicates in skill_order are supported by
+# the pipeline (re-instantiates via the shared registry; reset() clears
+# per-skill state).
 _DEFAULT_SKILL_ORDER = [
-    "cafe", "schedule", "bounty", "arena", "mail", "daily_tasks",
+    "mail",
+    "cafe", "schedule", "bounty", "arena", "daily_tasks",
     "club", "craft", "pass_reward", "event_activity",
+    "mail",
 ]
 _VALID_SKILL_IDS = {item["id"] for item in _SKILL_OPTIONS}
 
@@ -123,14 +130,22 @@ def _normalize_profile_name(value: Any) -> str:
 
 
 def _normalize_skill_order(values: Any) -> List[str]:
+    # Mail is allowed to appear twice (run at pipeline start AND end so
+    # both yesterday's accumulated mail and today's just-generated
+    # rewards get claimed within a single run).  Other skills are
+    # deduped — running e.g. cafe twice doesn't gain anything.
+    _ALLOW_DUPLICATES = {"mail"}
     order: List[str] = []
     seen: Set[str] = set()
     if isinstance(values, list):
         for item in values:
             skill_id = str(item or "").strip()
-            if skill_id in _VALID_SKILL_IDS and skill_id not in seen:
-                order.append(skill_id)
-                seen.add(skill_id)
+            if skill_id not in _VALID_SKILL_IDS:
+                continue
+            if skill_id in seen and skill_id not in _ALLOW_DUPLICATES:
+                continue
+            order.append(skill_id)
+            seen.add(skill_id)
     if not order:
         return list(_DEFAULT_SKILL_ORDER)
     return order
