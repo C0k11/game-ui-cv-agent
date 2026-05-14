@@ -157,7 +157,22 @@ class DailyTasksSkill(BaseSkill):
         return action_wait(500, "entering daily tasks")
 
     def _claim_all(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click claim-all button repeatedly until no more rewards."""
+        """Click claim-all button repeatedly until no more rewards.
+
+        Two-phase strategy:
+        - Phase A (first ~5 attempts): use 一鍵領取 which sweeps the
+          whole task list in one click.
+        - Phase B (after Phase A or when 一鍵領取 stops being effective):
+          fall through to per-row 領取 buttons.  In BA the tier-bonus
+          rows ("完成每日任務8次以上 [領取]") have their OWN 領取 button
+          that 一鍵領取 doesn't always catch — explicit per-row clicks
+          are required.
+
+        The legacy "click 一鍵領取 forever until it disappears" approach
+        wasted 25 attempts when the button stayed visible but stopped
+        doing anything (run 2026-05-13 ~21:20: 25 throttled attempts on
+        the same 一鍵領取 button, tier-bonus never reached).
+        """
         self._claim_attempts += 1
 
         if self._claim_attempts > 25:
@@ -166,28 +181,42 @@ class DailyTasksSkill(BaseSkill):
             self._chest_phase = True
             return action_wait(300, "claim attempts exhausted, checking chests")
 
-        # Shared base-class claim helpers (normalize Trad/Simp/English).
-        claim = self.find_claim_all_button(screen)
-        if claim:
-            self.log(f"claiming all tasks (attempt {self._claim_attempts})")
-            self._claimed_count += 1
-            return action_click_box(claim, "claim all tasks")
-
         # Wider region than the default (0.6,0.1,1.0,0.9) — daily-tasks
         # page also has a TIER BONUS bar at the top (e.g. "完成每日任務
         # 8次以上 8/8 [領取]") whose 領取 button sits at y≈0.05-0.10,
-        # below the default 0.1 floor.  Pull the top edge to 0.02 so we
-        # don't miss those tier-bonus claims.
-        # User report (run 2026-05-13 ~21:00): bot claimed 15 individual
-        # rewards then exited without catching the 8/8 tier-bonus 領取
-        # because find_single_claim_button's default region cut it off.
-        single = self.find_single_claim_button(
-            screen, region=(0.55, 0.02, 1.0, 0.95)
-        )
+        # below the default 0.1 floor.  Pull the top edge to 0.02.
+        single_region = (0.55, 0.02, 1.0, 0.95)
+
+        # Phase A: try 一鍵領取 for the first 5 attempts.  If that button
+        # is still visible after 5 attempts we assume it's "stuck" (most
+        # rewards already gone, button persists for UI reasons) and
+        # switch to per-row mode.
+        if self._claim_attempts <= 5:
+            claim = self.find_claim_all_button(screen)
+            if claim:
+                self.log(f"claiming all tasks (attempt {self._claim_attempts})")
+                self._claimed_count += 1
+                return action_click_box(claim, "claim all tasks")
+
+        # Phase B: per-row 領取 (catches tier-bonus rows + anything
+        # 一鍵領取 skipped).
+        single = self.find_single_claim_button(screen, region=single_region)
         if single:
-            self.log(f"claiming individual task reward at ({single.cx:.2f},{single.cy:.2f})")
+            self.log(
+                f"claiming individual task reward at "
+                f"({single.cx:.2f},{single.cy:.2f}) attempt {self._claim_attempts}"
+            )
             self._claimed_count += 1
             return action_click_box(single, "claim single task")
+
+        # Phase B found nothing — if Phase A was skipped, try it now as
+        # a last-ditch sweep before declaring done.
+        if self._claim_attempts > 5:
+            claim = self.find_claim_all_button(screen)
+            if claim:
+                self.log(f"claim-all fallback (attempt {self._claim_attempts})")
+                self._claimed_count += 1
+                return action_click_box(claim, "claim all tasks")
 
         # No more claim buttons — move to chests
         self.log(f"no more tasks to claim ({self._claimed_count} claimed)")
