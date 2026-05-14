@@ -360,6 +360,8 @@ class EventActivitySkill(BaseSkill):
         self._shop_buy_dialog_stage = 0
         self._shop_buy_dialog_ticks = 0
         self._shop_tab_insufficient = False
+        self._shop_tab_grey_streak = 0
+        self._shop_balance_unknown_ticks = 0
 
         # Auto stage-down: if persisted shop state says the tab for our
         # current preferred_stage is exhausted, drop stage by 1 (and
@@ -4617,21 +4619,48 @@ class EventActivitySkill(BaseSkill):
             # failed; cheaper tiers of the same name may still be
             # affordable and will get their turn next iteration.
             if screen.is_button_grey(confirm_btn.cx, confirm_btn.cy):
-                self.log(
-                    f"shop: 確認 grayed for {self._shop_last_buy_target!r}"
-                    f"@{self._shop_last_buy_cost} — cancel, try cheaper tier"
-                )
                 if self._shop_last_buy_target:
                     tab_entry = self._shop_state.setdefault(
                         self._shop_current_tab, {"failed_buys": []})
                     tab_entry.setdefault("failed_buys", []).append(
                         (self._shop_last_buy_target, self._shop_last_buy_cost))
+                # Track consecutive grey-confirm failures in this tab.
+                # User feedback (2026-05-13): "都知道是 0 货币还在那一个
+                #个商品试" — when balance OCR fails (returns -1), the
+                # bot iterates EVERY cheaper item on the tab even if
+                # the underlying currency is genuinely empty.  3
+                # consecutive greyed confirms is a strong signal that
+                # the entire tab is unaffordable; abandon it.
+                self._shop_tab_grey_streak = getattr(
+                    self, "_shop_tab_grey_streak", 0
+                ) + 1
+                if self._shop_tab_grey_streak >= 3:
+                    self.log(
+                        f"shop: 3 consecutive 確認 greyed in tab "
+                        f"{self._shop_current_tab} — entire tab "
+                        f"unaffordable, abandoning"
+                    )
+                    self._shop_tab_grey_streak = 0
+                    self._shop_buy_dialog_stage = 0
+                    self._shop_buy_dialog_ticks = 0
+                    self._shop_buy_retry_count = 0
+                    self._shop_current_tab = ""  # pick next tab
+                    if cancel_btn:
+                        return action_click_box(cancel_btn, "shop: tab unaffordable, cancel + next tab")
+                    return action_back("shop: tab unaffordable, ESC + next tab")
+                self.log(
+                    f"shop: 確認 grayed for {self._shop_last_buy_target!r}"
+                    f"@{self._shop_last_buy_cost} — cancel, try cheaper tier "
+                    f"(grey streak {self._shop_tab_grey_streak}/3)"
+                )
                 self._shop_buy_dialog_stage = 0
                 self._shop_buy_dialog_ticks = 0
                 self._shop_buy_retry_count = 0
                 if cancel_btn:
                     return action_click_box(cancel_btn, "shop: cancel grayed confirm")
                 return action_back("shop: back out of grayed confirm dialog")
+            # Confirm not grey — reset the grey streak counter.
+            self._shop_tab_grey_streak = 0
             # Normal 確認 — click to complete purchase
             self._shop_buy_dialog_stage = 0
             self._shop_buy_dialog_ticks = 0
