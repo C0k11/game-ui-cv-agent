@@ -1406,6 +1406,44 @@ class DailyPipeline:
             return action_done("pipeline not running")
 
         self._total_ticks += 1
+
+        # Early bail-out: BA / MuMu not actually visible.  If the
+        # captured frame doesn't contain ANY BA-typical UI markers for
+        # 15+ consecutive ticks, we're probably capturing the wrong
+        # window (user run 2026-05-15 ~23:24: bot grabbed the Claude
+        # Code chat panel and ran 5 skills to timeout looking for cafe
+        # / schedule / etc. in conversation text).  Abort the whole
+        # pipeline instead of burning every skill's tick budget.
+        ba_markers = [
+            "咖啡", "課程", "课程", "學生", "学生", "招募",
+            "活動", "活动", "AP", "Auto", "戰鬥", "战斗",
+            "任務", "任务", "入場", "入场", "MomoTalk",
+        ]
+        has_ba_ui = any(
+            screen.find_any_text([m], min_conf=0.55) is not None
+            for m in ba_markers
+        )
+        if has_ba_ui:
+            self._no_ba_ticks = 0
+        else:
+            self._no_ba_ticks = getattr(self, "_no_ba_ticks", 0) + 1
+            if self._no_ba_ticks >= 15:
+                print(
+                    f"[Pipeline] No Blue Archive UI detected for "
+                    f"{self._no_ba_ticks} consecutive ticks — aborting "
+                    f"pipeline.  Check that MuMu is running, BA is "
+                    f"launched, the emulator window isn't minimised, "
+                    f"and the Window Title setting matches."
+                )
+                self._running = False
+                return action_done("pipeline aborted: no BA window detected")
+            # Wait briefly between checks instead of running skill ticks
+            # against an unrelated window.
+            return action_wait(
+                800,
+                f"waiting for BA / MuMu window ({self._no_ba_ticks}/15)"
+            )
+
         # First lobby-visit of the run → snapshot all 8 nav-icon badges.
         # Inexpensive (~5ms on a 4K screenshot) and only runs until the
         # first snapshot lands, so it can't impact steady-state perf.
