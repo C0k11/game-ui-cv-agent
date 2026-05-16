@@ -493,4 +493,18 @@ class ArenaSkill(BaseSkill):
         if screen.is_lobby():
             self.log(f"done ({self._fights_done} fights, {self._claim_clicks} rewards)")
             return action_done("arena complete")
+        # If we're back on the campaign hub (Mission screen with grid
+        # tiles visible), STOP exiting — the next campaign-based skill
+        # (EventActivity / TotalAssault / etc.) enters via the same
+        # hub.  Saves the 10-20 tick lobby round-trip per skill chain.
+        current = self.detect_current_screen(screen)
+        if current == "Mission":
+            on_hub = screen.find_any_text(
+                ["戰術大賽", "战术大赛", "懸賞通緝", "悬赏通缉",
+                 "大決戰", "大决战", "制約解除", "學園交流", "学园交流"],
+                min_conf=0.55,
+            )
+            if on_hub:
+                self.log(f"done on campaign hub ({self._fights_done} fights, {self._claim_clicks} rewards)")
+                return action_done("arena complete (on hub)")
         return action_back("arena exit: back to lobby")
