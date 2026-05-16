@@ -158,7 +158,14 @@ def _has_florence_runtime() -> bool:
 class CafeSkill(BaseSkill):
     def __init__(self):
         super().__init__("Cafe")
-        self.max_ticks = 100
+        # Bumped 100 → 160 (2026-05-13).  Full cafe flow on 1F+2F when
+        # both invites need long scrolls to find priority students
+        # easily exceeds 100 ticks: 1F invite (~20) + 1F headpat (~30)
+        # + switch (~5) + 2F invite (~40 with 9-12 scrolls to find
+        # priority) + 2F headpat (~30) ≈ 125 ticks.  Run 2026-05-13
+        # ~22:30 hit timeout right after starting 2F headpat (Wakamo
+        # invite succeeded, then "centering cafe view" → timeout).
+        self.max_ticks = 160
         self._enter_attempts: int = 0
         self._headpat_count: int = 0
         self._empty_scans: int = 0

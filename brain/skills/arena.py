@@ -59,16 +59,23 @@ class ArenaSkill(BaseSkill):
             self.log("timeout")
             return action_done("arena timeout")
 
-        # Battle result — dismiss and loop back to check_tickets
+        # Battle result — dismiss and loop back to check_tickets.
+        # The "WIN"/"LOSE" substring match was too loose: it caught
+        # ANY OCR box containing those letters (e.g. "Window" inside
+        # mistakenly-OCR'd desktop text → false-positive battle result
+        # logged "BackgroundtaskcompletedBackground...command").  Use
+        # the Chinese full words first (high specificity), then fall
+        # back to word-boundary regex for English so partial overlaps
+        # don't fire.
         battle_result = screen.find_any_text(
-            ["戰鬥結果", "战斗结果"],
-            min_conf=0.6
+            ["戰鬥結果", "战斗结果", "勝利", "胜利", "敗北", "败北",
+             "Victory", "Defeat"],
+            region=screen.CENTER, min_conf=0.6
         )
         if not battle_result:
-            battle_result = screen.find_any_text(
-                ["勝利", "胜利", "敗北", "败北", "Victory", "Defeat",
-                 "WIN", "LOSE"],
-                min_conf=0.6
+            battle_result = screen.find_text_one(
+                r"(?:^|[^A-Za-z])(?:WIN|LOSE)(?:[^A-Za-z]|$)",
+                region=screen.CENTER, min_conf=0.6,
             )
         if battle_result:
             self.log(f"battle result: {battle_result.text}")

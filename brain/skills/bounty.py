@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 from brain.skills.base import (
     BaseSkill, ScreenState,
     action_click, action_click_box, action_click_yolo,
-    action_wait, action_back, action_done, action_scroll,
+    action_wait, action_back, action_done, action_scroll, action_swipe,
 )
 
 
@@ -377,11 +377,15 @@ class BountySkill(BaseSkill):
         ]
 
         if enter_btns:
-            # First 2 ticks: scroll stage list down to reveal the last stage
+            # First 2 ticks: swipe stage list down to reveal the last stage.
+            # Switched from wheel-scroll to swipe per user 2026-05-13 —
+            # wheel events on MuMu can be interpreted as ZOOM gestures
+            # and de-center the lobby/page (the carousel/轮盘 went off-
+            # screen).  Swipe is always a drag, never a zoom.
             if self._stage_ticks <= 2:
-                self.log("scrolling stage list down")
-                return action_scroll(0.75, 0.60, clicks=-5,
-                                     reason="scroll stage list to bottom")
+                self.log("swiping stage list down")
+                return action_swipe(0.75, 0.70, 0.75, 0.30, 500,
+                                    reason="swipe stage list to bottom")
 
             # Click the bottom-most 入場 button (= last/hardest stage)
             last = max(enter_btns, key=lambda b: b.cy)
@@ -390,10 +394,10 @@ class BountySkill(BaseSkill):
             self._sweep_stage = 0
             return action_click_box(last, "enter last stage")
 
-        # No 入場 buttons visible — might need to scroll or stage list not loaded
+        # No 入場 buttons visible — might need to swipe or stage list not loaded
         if self._stage_ticks <= 4:
-            return action_scroll(0.75, 0.60, clicks=-5,
-                                 reason="scroll to find stages")
+            return action_swipe(0.75, 0.70, 0.75, 0.30, 500,
+                                reason="swipe to find stages")
 
         # Fallback: click bottom-right area where last 入場 typically is
         self.log("clicking last stage (hardcoded fallback)")
@@ -531,4 +535,20 @@ class BountySkill(BaseSkill):
         if screen.is_lobby():
             self.log("done")
             return action_done("bounty complete")
+        # If we're back on the campaign hub (Mission screen with 戰術大賽
+        # tile visible), STOP exiting — Arena is the next skill in the
+        # standard order and it enters via the same campaign hub.
+        # Exiting to lobby just to re-enter wastes 10-20 ticks per
+        # round-trip (user 2026-05-13: "进 campaign 打一个板块就退回主
+        # 界面一次，然后再进 campaign").
+        current = self.detect_current_screen(screen)
+        if current == "Mission":
+            on_hub = screen.find_any_text(
+                ["戰術大賽", "战术大赛", "懸賞通緝", "悬赏通缉",
+                 "大決戰", "大决战", "制約解除"],
+                min_conf=0.55,
+            )
+            if on_hub:
+                self.log("done (left on campaign hub for next skill)")
+                return action_done("bounty complete (on hub)")
         return action_back("bounty exit: back to lobby")

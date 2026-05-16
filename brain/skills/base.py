@@ -1249,10 +1249,33 @@ class BaseSkill(ABC):
                 self.log("notification popup (must-confirm): no buttons, fallback click confirm area")
                 return action_click(0.598, 0.701, "confirm notification (no btn fallback)")
 
-            # No buttons detected at all — OCR missed them.
-            # Click 確認 button area (center-bottom of dialog, large target).
-            self.log("notification popup: no buttons detected, clicking confirm area")
-            return action_click(0.50, 0.64, "dismiss notification popup (confirm area fallback)")
+            # No buttons detected by OCR — try template-match the cyan
+            # 確認 button before falling back to a hardcoded click.
+            # The inventory-full popup ("因持有數限制 / 請確認信箱")
+            # is a TALL popup whose 確認 button sits at y≈0.78, lower
+            # than the old hardcoded (0.50, 0.64) fallback which fell
+            # into the popup body and did nothing — burned the entire
+            # skill's tick budget (DailyTasks timeout, run_20260515_
+            # 230517 t890+).
+            try:
+                tpl = screen.find_template_one("task_fight_confirm", min_conf=0.65)
+                if tpl is None:
+                    tpl = screen.find_template_one("activity_fight_confirm", min_conf=0.65)
+                if tpl is not None:
+                    self.log(
+                        f"notification popup: OCR missed buttons, "
+                        f"template-matched 確認 at ({tpl.cx:.2f},{tpl.cy:.2f})"
+                    )
+                    return action_click(tpl.cx, tpl.cy, "dismiss notification popup (template match)")
+            except Exception:
+                pass
+            # Last-resort hardcoded fallback: BA's tall popups (inventory
+            # full, daily reward summary) put 確認 at center-bottom around
+            # (0.50, 0.78).  Shorter popups put it at (0.50, 0.64).  We
+            # try the BOTTOM coord first since the tall popup is the
+            # newer / more common failure case.
+            self.log("notification popup: no buttons detected, clicking confirm-area fallback (0.50, 0.78)")
+            return action_click(0.50, 0.78, "dismiss notification popup (bottom fallback)")
 
         # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
