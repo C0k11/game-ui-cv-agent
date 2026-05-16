@@ -1532,11 +1532,23 @@ class DailyPipeline:
             "bonus-setup", "bonus-team", "quick-edit",
         )
         _is_battle_wait = any(kw in action_reason.lower() for kw in _battle_wait_keywords)
+        # NEVER ESC-burst when a popup is currently on screen.  ESC on
+        # the exit-prompt popup ("是否結束?") confirms exit → lobby,
+        # which is exactly the "经常点进一个地方然后就喜欢退回主界面"
+        # the user complained about.  Popups have their own handler
+        # (see _handle_common_popups).
+        _popup_on_screen = bool(screen.find_any_text(
+            ["通知", "是否結束", "是否结束", "提示", "簽到獎勵",
+             "签到奖励", "獲得", "获得"],
+            region=(0.20, 0.10, 0.80, 0.40), min_conf=0.55,
+        ))
         if action_type == "wait" and self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
             if screen.is_lobby():
                 print(f"[Pipeline] Skill '{skill.name}' repeating wait on lobby for {self._stuck_counter} ticks, skipping ESC (unsafe on lobby)")
             elif _is_battle_wait:
                 print(f"[Pipeline] Skill '{skill.name}' battle in progress for {self._stuck_counter} ticks, skipping ESC (active battle)")
+            elif _popup_on_screen:
+                print(f"[Pipeline] Skill '{skill.name}' popup on screen for {self._stuck_counter} ticks, skipping ESC (use popup handler)")
             else:
                 print(
                     f"[Pipeline] Skill '{skill.name}' repeating wait '{action_reason}' "

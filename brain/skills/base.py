@@ -1187,9 +1187,21 @@ class BaseSkill(ABC):
                  "繼續活動", "继续活动", "續活動"],
                 region=screen.CENTER, min_conf=0.5,
             )
+            # Exit-game prompt: "是否結束？" / "是否结束？" — appears when
+            # ESC is pressed on lobby OR when over-ESC'ing inside a sub-
+            # screen pops up the "exit?" confirmation.  Clicking 確認
+            # WILL CLOSE THE GAME or back out of the current sub-screen
+            # to lobby.  User feedback (2026-05-15): "经常点进一个地方
+            # 然后就喜欢退回主界面" — bot was blindly confirming exit
+            # prompts.  Force CANCEL so the bot stays where it is.
+            exit_hint = screen.find_any_text(
+                ["是否結束", "是否结束", "結束遊戲", "结束游戏",
+                 "是否退出", "退出遊戲", "退出游戏"],
+                region=screen.CENTER, min_conf=0.5,
+            )
             must_confirm = (invite_hint or update_title or update_hint
-                            or sweep_hint or resume_battle_hint) and not friend_hint
-            must_cancel = bool(friend_hint)
+                            or sweep_hint or resume_battle_hint) and not (friend_hint or exit_hint)
+            must_cancel = bool(friend_hint or exit_hint)
 
             confirm_btn = screen.find_any_text(
                 ["確認", "确认", "確定", "确定", "繼續", "继续",
@@ -1203,14 +1215,17 @@ class BaseSkill(ABC):
                 min_conf=0.55,
             )
 
-            # Must-cancel notifications: NEVER confirm (e.g. friend-cafe visit)
+            # Must-cancel notifications: NEVER confirm.
+            #   friend_hint → don't visit friend cafe
+            #   exit_hint   → don't exit the current screen / game
             if must_cancel:
+                tag = "exit-prompt" if exit_hint else "friend-cafe"
                 if cancel_btn:
-                    self.log("notification popup (friend-cafe): clicking cancel")
-                    return action_click_box(cancel_btn, "cancel friend-cafe visit")
+                    self.log(f"notification popup ({tag}): clicking cancel")
+                    return action_click_box(cancel_btn, f"cancel {tag}")
                 # OCR missed the button — hardcoded cancel position (left of confirm)
-                self.log("notification popup (friend-cafe): cancel fallback click")
-                return action_click(0.402, 0.701, "cancel friend-cafe visit fallback")
+                self.log(f"notification popup ({tag}): cancel fallback click")
+                return action_click(0.402, 0.701, f"cancel {tag} fallback")
 
             # Must-confirm notifications: always click 確認 — UNLESS the
             # confirm button is grayed out (insufficient resources, e.g.
