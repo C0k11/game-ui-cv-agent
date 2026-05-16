@@ -41,6 +41,7 @@ from brain.skills.event_activity import EventActivitySkill
 from brain.skills.pass_reward import PassRewardSkill
 from brain.skills.story_mining import StoryMiningSkill
 from brain.skills.ap_planning import ApPlanningSkill
+from brain.skills.campaign_sweep import CampaignSweepSkill
 
 
 # ── OCR Engine (singleton) ──────────────────────────────────────────────
@@ -581,7 +582,12 @@ class DailyPipeline:
             "mail": MailSkill(),
             "daily_tasks": DailyTasksSkill(),
             "pass_reward": PassRewardSkill(),
+            "campaign_sweep": CampaignSweepSkill(),
         }
+        # CampaignSweep needs a reference to the registry so it can
+        # delegate to Bounty / Arena / EventActivity without creating
+        # an import cycle.  Wire after the dict is built.
+        self._skill_registry["campaign_sweep"].set_registry(self._skill_registry)
 
         names = skill_names or self.DEFAULT_SKILLS
         self._skill_order: List[str] = [n for n in names if n in self._skill_registry]

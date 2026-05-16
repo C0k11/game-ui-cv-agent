@@ -55,12 +55,13 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "cafe", "label": "[S1] 咖啡厅 收益 / 邀请 / 摸头（yellow dot 才进）"},
     {"id": "schedule", "label": "[S2] 课程表（yellow dot 才进）"},
     {"id": "club", "label": "[S3] 社团签到 AP（social red dot 才进）"},
-    {"id": "bounty", "label": "[S4] 悬赏通缉（票券）"},
-    {"id": "arena", "label": "[S4] 战术对抗赛（票券）"},
+    {"id": "campaign_sweep", "label": "[S4] 任务区 一键扫荡 悬赏/战术/活动（hub 内按 dot 跳过个别）"},
+    {"id": "bounty", "label": "[S4-细分] 悬赏通缉（票券）— campaign_sweep 已包含"},
+    {"id": "arena", "label": "[S4-细分] 战术对抗赛（票券）— campaign_sweep 已包含"},
     {"id": "daily_tasks", "label": "[S5] 每日任务一键领取"},
     {"id": "craft", "label": "[S6] 制造（yellow dot 才进）"},
     {"id": "pass_reward", "label": "[S6] 战令一键领取（recruit red dot 才进）"},
-    {"id": "event_activity", "label": "[S7] 刷活动 剧情 / 任务 / 扫荡 / 商店"},
+    {"id": "event_activity", "label": "[S7-细分] 刷活动 剧情 / 任务 / 扫荡 / 商店 — campaign_sweep 已包含"},
     {"id": "mail", "label": "[S8] 邮件一键领取（最后跑，捞 club/event 入库的奖励）"},
 
     # Optional extras (not default, kept for profile customization)
@@ -77,9 +78,11 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 # until claimed — no need for an additional start-of-run Mail.
 _DEFAULT_SKILL_ORDER = [
     "cafe", "schedule", "club",
-    "bounty", "arena", "daily_tasks",
+    "campaign_sweep",   # one entry replaces bounty + arena + event_activity;
+                        # internally scans hub tile dots and visits each
+                        # in priority order without lobby round-trips.
+    "daily_tasks",
     "craft", "pass_reward",
-    "event_activity",
     "mail",
 ]
 _VALID_SKILL_IDS = {item["id"] for item in _SKILL_OPTIONS}
