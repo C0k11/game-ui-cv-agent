@@ -1435,6 +1435,15 @@ class DailyPipeline:
             # Cafe / Schedule / Club internals
             "咖啡廳", "咖啡厅", "課程表", "课程表", "社團", "社团",
             "Lv.", "Cok11",
+            # Animated full-screen transitions (no nav-bar visible).
+            # Bond level-up screen (run_20260516_234050 t232 stuck here
+            # 29/30 because OCR only saw 絲升級 + 治愈力 + heart-25):
+            "羈絆", "羁绊", "升級", "升级", "治癒", "治愈", "體力", "体力",
+            # Mission-result / event-result / reward popup transitions
+            "獲得", "获得", "獎勵", "奖励", "結果", "结果",
+            "勝利", "胜利", "Victory", "VICTORY",
+            # Battle skip / cutscene
+            "Skip", "SKIP", "MENU", "Menu",
         ]
         has_ba_ui = any(
             screen.find_any_text([m], min_conf=0.50) is not None

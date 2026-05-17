@@ -1115,6 +1115,30 @@ class BaseSkill(ABC):
 
         Returns an action if a popup was handled, None otherwise.
         """
+        # Bond level-up screen (羈絆升級！) — full-screen transition that
+        # any affinity-earning skill can trigger (cafe headpat, schedule
+        # lesson, club AP claim, event battles, etc.).  Tap anywhere
+        # advances.  Run_20260516_234050 t232: bot got stuck here for
+        # 29 ticks waiting because no skill-specific handler caught it.
+        # Cafe / Schedule already have local handlers; this is the
+        # global safety net for skills that don't.
+        bond_screen = screen.find_any_text(
+            ["羈絆升級", "羁绊升级", "鲜升級", "絲升級", "升級！", "升级！"],
+            min_conf=0.55,
+        )
+        if bond_screen is None:
+            # Fallback: stat-text bottom row appears even when the title
+            # OCR misreads.  Pairs with no top OCR boxes (full-screen art).
+            stat_text = screen.find_any_text(
+                ["治癒力", "治愈力", "最大體力", "最大体力"],
+                region=(0.30, 0.85, 0.75, 1.0), min_conf=0.6,
+            )
+            if stat_text and len(screen.ocr_boxes) <= 8:
+                bond_screen = stat_text
+        if bond_screen is not None:
+            self.log(f"bond level-up screen detected '{bond_screen.text}', tap to dismiss")
+            return action_click(0.5, 0.5, "dismiss bond level-up")
+
         # Notification modal headers — anything that sits at the top of
         # a center-screen dialog and has a 確認 button at the bottom is
         # safe to dismiss.  Original detection was "通知" only, which
