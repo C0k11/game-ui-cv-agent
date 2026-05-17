@@ -36,16 +36,35 @@ from brain.skills.base import (
 )
 
 
-# Tile-text → sub-skill registry name.  When a tile shows a red/yellow
-# dot we look up the sub-skill here and delegate.  Order in this list
-# is the priority order for execution (reward-claim first, then
-# tickets, then event grinding which can consume a lot of AP).
-_TILE_TO_SUBSKILL: List[Tuple[Tuple[str, ...], str, str]] = [
-    # tile-text-variants, sub-skill registry key, display label
-    (("懸賞通緝", "悬赏通缉"),         "bounty",         "Bounty 悬赏通缉"),
-    (("戰術大賽", "战术大赛", "对抗"),  "arena",          "Arena 战术对抗"),
-    (("學園交流", "学园交流", "活動進行中", "活动进行中"),
-                                       "event_activity", "Event 活动"),
+# Tile-text → (sub_skill_name, display_label, gate_on_dot).
+#
+# OCR captures of the campaign hub tile names are noisy because tile
+# labels sit at the bottom of pictorial tiles in stylized fonts.  Real
+# captures (run_20260516_234945 t191) saw:
+#   懸賞通緝 → "通"           ← chopped to last char
+#   戰術大賽 → "术大赛"        ← chopped first char
+#   學園交流會 → "學園交流會"  ← clean
+#   活動進行中 → "活助進行中"  ← 動 misread as 助
+# So accept generous OCR variants.
+#
+# gate_on_dot semantics (per user 2026-05-17):
+#   - Bounty / Arena: ALWAYS queue.  Tile dot doesn't reflect ticket
+#     availability — BA only puts a dot on the campaign tile when there
+#     are unclaimed REWARDS (rare).  Tickets reset daily and the bot
+#     should ALWAYS try to spend them.  Sub-skill exits in ~10 ticks
+#     when 0 tickets so the cost is bounded.
+#   - Event: gate on dot (event content has visible 活動進行中 ribbon
+#     and the tile is the only signal that there's still story / quest
+#     / shop progress to make).
+_TILE_TO_SUBSKILL: List[Tuple[Tuple[str, ...], str, str, bool]] = [
+    # (tile-text-variants, sub-skill registry key, display label, gate_on_dot)
+    (("懸賞通緝", "悬赏通缉", "賞通緝", "悬通缉", "通緝", "通缉"),
+        "bounty", "Bounty 悬赏通缉", False),
+    (("戰術大賽", "战术大赛", "术大赛", "術大賽", "對抗", "对抗"),
+        "arena", "Arena 战术对抗", False),
+    (("學園交流", "学园交流", "活動進行中", "活助進行中",
+      "活動進行", "活动进行", "活动进行中"),
+        "event_activity", "Event 活动", True),
 ]
 
 
@@ -176,27 +195,42 @@ class CampaignSweepSkill(BaseSkill):
 
     def _scan_tiles(self, screen: ScreenState) -> List[Tuple[Any, str, str]]:
         """Return list of (anchor_box, display_label, sub_skill_name)
-        for tiles that currently have a red OR yellow badge.
+        for tiles that should be visited this run.
+
+        Sub-skills with gate_on_dot=False (Bounty, Arena) are queued
+        unconditionally if their tile is found on the hub — tickets
+        reset daily, dot only signals REWARDS not tickets, sub-skill
+        exits in ~10 ticks when no work.
+
+        Sub-skills with gate_on_dot=True (Event) require a red/yellow
+        dot on the tile.
 
         Order follows _TILE_TO_SUBSKILL priority.
         """
         out: List[Tuple[Any, str, str]] = []
-        for variants, sub_name, display in _TILE_TO_SUBSKILL:
+        for variants, sub_name, display, gate_on_dot in _TILE_TO_SUBSKILL:
             anchor = None
+            matched_variant = None
             for v in variants:
                 anchor = screen.find_text_one(v, min_conf=0.55)
                 if anchor:
+                    matched_variant = v
                     break
             if anchor is None:
+                self.log(f"tile {display!r}: not found on hub (OCR variants tried)")
+                continue
+            if not gate_on_dot:
+                out.append((anchor, display, sub_name))
+                self.log(f"tile {display!r}: queued (always-on, matched '{matched_variant}')")
                 continue
             # Tile dots live at the tile's top-right corner.  Probe a
-            # tight box anchored on the tile-label position.  Variants
-            # in tile size are small (templated grid) so a single
-            # offset is enough.
+            # tight box anchored on the tile-label position.
             state = screen.badge_state(anchor)
             if state in ("red", "yellow"):
                 out.append((anchor, display, sub_name))
-                self.log(f"tile {display!r}: {state} dot")
+                self.log(f"tile {display!r}: {state} dot, queued (matched '{matched_variant}')")
+            else:
+                self.log(f"tile {display!r}: no dot, skipping (matched '{matched_variant}')")
         return out
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:

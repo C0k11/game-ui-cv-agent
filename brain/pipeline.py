@@ -500,7 +500,11 @@ class DailyPipeline:
         # saved sweep team with rate-up students).  Defaults False per
         # user — they don't want a surprise second battle after quest
         # finishes.  Enable via profile option `enable_bonus_setup_battle`.
-        skill._enable_bonus_setup_battle = bool(opts.get("enable_bonus_setup_battle", False))
+        # Default True (per skill's own __init__ default).  Was False
+        # here for a while, which silently disabled the FSM the user
+        # explicitly wants ("活动还是没有把加成打满").  Profile may
+        # still explicitly disable by setting the option to False.
+        skill._enable_bonus_setup_battle = bool(opts.get("enable_bonus_setup_battle", True))
         # Farming + shop settings (formerly separate skills, now merged in)
         try:
             skill._preferred_stage = max(0, int(opts.get("event_farming_stage") or 0))
