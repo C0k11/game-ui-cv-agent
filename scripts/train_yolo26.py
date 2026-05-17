@@ -82,17 +82,28 @@ TRAIN_CONFIGS = {
         "out_name": "ba_ui_yolo26n_31",
     },
     "schedule_cells": {
-        # YOLO classifier on pre-cropped 全體課程表 cells.  Each cell is
-        # ~150×80 px containing one avatar (or empty grey background).
-        # 250+ character classes + __empty__ + __uncertain__ (user-
-        # reviewed) under data/yolo_datasets/schedule_cells/{train,val}.
-        # imgsz=128 is enough for a single avatar — much faster than 640.
+        # DEPRECATED alias — use 'avatar_cls' instead.
         "kind": "classify",
-        "data": REPO_ROOT / "data" / "yolo_datasets" / "schedule_cells",
+        "data": REPO_ROOT / "data" / "yolo_datasets" / "avatar_cls",
         "epochs": 100,
         "imgsz": 128,
         "batch": 128,
-        "out_name": "schedule_cells_yolo26n_cls",
+        "out_name": "avatar_cls_yolo26n",
+    },
+    "avatar_cls": {
+        # YOLO classifier on character avatars.
+        # train: data/captures/角色头像/ (250 EN CG) face-cropped +
+        #        data/captures/角色头像_crop_harvested_named/ (191 CN in-game)
+        #        with 5 aug variants each (orig + zoom_in + zoom_out + V±5%).
+        # val:   data/yolo_datasets/schedule_cells/<class>/*.jpg
+        #        (~676 trajectory crops, real deployment distribution).
+        # Classes canonicalized to EN names (matching 角色头像/Wakamo.png).
+        "kind": "classify",
+        "data": REPO_ROOT / "data" / "yolo_datasets" / "avatar_cls",
+        "epochs": 100,
+        "imgsz": 128,
+        "batch": 128,
+        "out_name": "avatar_cls_yolo26n",
     },
 }
 
