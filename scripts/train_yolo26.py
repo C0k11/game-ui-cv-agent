@@ -82,27 +82,29 @@ TRAIN_CONFIGS = {
         "out_name": "ba_ui_yolo26n_31",
     },
     "schedule_cells": {
-        # DEPRECATED alias — use 'avatar_cls' instead.
+        # YOLO classifier on cafe-invite trajectory crops.
+        # 80/20 split within data/yolo_datasets/schedule_cells/ (built
+        # by build_harvest_cls_dataset.py with PHASH_THRESHOLD=0 so
+        # affinity-number variants stay as separate training samples).
+        # imgsz=224 (224×224 is yolo cls standard, gives the model
+        # enough pixels to learn avatar features; 128 was too small).
         "kind": "classify",
-        "data": REPO_ROOT / "data" / "yolo_datasets" / "avatar_cls",
+        "data": REPO_ROOT / "data" / "yolo_datasets" / "schedule_cells",
         "epochs": 100,
-        "imgsz": 128,
-        "batch": 128,
+        "imgsz": 224,
+        "batch": 64,
         "out_name": "avatar_cls_yolo26n",
     },
     "avatar_cls": {
-        # YOLO classifier on character avatars.
-        # train: data/captures/角色头像/ (250 EN CG) face-cropped +
-        #        data/captures/角色头像_crop_harvested_named/ (191 CN in-game)
-        #        with 5 aug variants each (orig + zoom_in + zoom_out + V±5%).
-        # val:   data/yolo_datasets/schedule_cells/<class>/*.jpg
-        #        (~676 trajectory crops, real deployment distribution).
-        # Classes canonicalized to EN names (matching 角色头像/Wakamo.png).
+        # Curated subset of schedule_cells.  Built by build_avatar_cls_dataset.py
+        # which drops __empty__ / __uncertain__ and any class with <3 trajectory
+        # samples (the unsplittable ones).  Adds CN refs (if name_map matches)
+        # as bonus train samples in the same in-game distribution.
         "kind": "classify",
         "data": REPO_ROOT / "data" / "yolo_datasets" / "avatar_cls",
         "epochs": 100,
-        "imgsz": 128,
-        "batch": 128,
+        "imgsz": 224,
+        "batch": 64,
         "out_name": "avatar_cls_yolo26n",
     },
 }
@@ -179,8 +181,23 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
             mixup=0.0,
         )
     elif kind == "classify":
-        # Classifier on cropped cells: even tighter aug — cells are
-        # ~150×80 fixed-orientation single-avatar.
+        # Classifier on cropped avatars: MODERATE augmentation.
+        # Train and val are DIFFERENT frames of the same character
+        # (different lighting, sub-pixel jitter, JPEG variance) — we
+        # need generalization, not memorization.  Previous "zero aug"
+        # setup produced top1=7% (train loss → 0.08 while val loss
+        # climbed to 10 — textbook overfit).
+        #
+        # Keep DISABLED:
+        #   - fliplr (face flip is wrong)
+        #   - flipud (avatars never flip vertically)
+        #   - degrees (avatars never rotate)
+        #   - mosaic / mixup (not useful for portrait classification)
+        # Keep ENABLED:
+        #   - hsv jitter (lobby tint shifts slightly between sessions)
+        #   - slight scale / translate (crop position varies ±2-3px)
+        #   - erasing (occlusion robustness, helps with affinity-number
+        #     badges that partially overlay some avatars)
         train_kwargs.update(
             degrees=0.0,
             fliplr=0.0,
@@ -188,7 +205,11 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
             hsv_h=0.01,
             hsv_s=0.2,
             hsv_v=0.2,
-            erasing=0.0,
+            erasing=0.2,
+            scale=0.1,
+            translate=0.05,
+            mosaic=0.0,
+            mixup=0.0,
         )
     results = model.train(**train_kwargs)
     best = YOLO_ROOT / "runs" / cfg["out_name"] / "weights" / "best.pt"

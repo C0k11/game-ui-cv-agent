@@ -51,8 +51,10 @@ AVATAR_REF_DIR_EN = REPO / "data" / "captures" / "角色头像"
 AVATAR_REF_DIR_CN = REPO / "data" / "captures" / "角色头像_crop_harvested_named"
 OUT_ROOT = REPO / "data" / "yolo_datasets" / "schedule_cells"
 
-PER_CLASS_CAP = 40
-PHASH_THRESHOLD = 2
+PER_CLASS_CAP = 80        # bumped 40 → 80; YOLO cls needs more diversity per class
+PHASH_THRESHOLD = 0       # 0 = only drop exact (hamming=0) duplicates
+                          # was 2 — that collapsed affinity-number variants
+                          # the model NEEDS to learn to ignore
 VAL_RATIO = 0.20
 SEED = 42
 
