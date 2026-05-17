@@ -41,7 +41,14 @@ import imagehash
 REPO = Path(__file__).resolve().parents[1]
 TRAJ_ROOT = REPO / "data" / "trajectories"
 NAME_MAP_JSON = REPO / "data" / "student_name_map.json"
-AVATAR_REF_DIR = REPO / "data" / "captures" / "角色头像"
+# Two avatar reference dirs:
+#   AVATAR_REF_DIR_EN: 250 CG-quality English-named PNGs (Wakamo.png)
+#   AVATAR_REF_DIR_CN: 191 in-game-OCR'd Chinese-named PNGs (麻白.png)
+# Use BOTH as the known class set — trajectory OCR returns Chinese
+# names directly, so CN refs match without going through name_map.
+# EN refs cover legacy paths + characters not yet harvested in CN.
+AVATAR_REF_DIR_EN = REPO / "data" / "captures" / "角色头像"
+AVATAR_REF_DIR_CN = REPO / "data" / "captures" / "角色头像_crop_harvested_named"
 OUT_ROOT = REPO / "data" / "yolo_datasets" / "schedule_cells"
 
 PER_CLASS_CAP = 40
@@ -70,8 +77,16 @@ def load_name_map() -> dict[str, str]:
     return json.loads(NAME_MAP_JSON.read_text(encoding="utf-8"))
 
 
-def load_known_classes() -> set[str]:
-    return {p.stem for p in AVATAR_REF_DIR.glob("*.png")}
+def load_known_classes() -> tuple[set[str], set[str]]:
+    """Return (cn_classes, en_classes) — Chinese names + English names.
+
+    Trajectory OCR gives Chinese; matching against CN avoids the
+    student_name_map indirection (and the OCR variants that don't
+    appear in the map).  EN remains as fallback via the map.
+    """
+    cn = {p.stem for p in AVATAR_REF_DIR_CN.glob("*.png")} if AVATAR_REF_DIR_CN.exists() else set()
+    en = {p.stem for p in AVATAR_REF_DIR_EN.glob("*.png")} if AVATAR_REF_DIR_EN.exists() else set()
+    return cn, en
 
 
 def phash_of(roi_bgr: np.ndarray) -> imagehash.ImageHash:
@@ -91,23 +106,30 @@ def main() -> int:
     args = ap.parse_args()
 
     name_map = load_name_map()
-    known = load_known_classes()
-    print(f"[refs] {len(known)} character classes, {len(name_map)} CN→EN map entries")
+    cn_known, en_known = load_known_classes()
+    print(f"[refs] {len(cn_known)} CN-named refs (harvested) + {len(en_known)} EN-named refs (CG), "
+          f"{len(name_map)} CN→EN map entries")
 
     rng = random.Random(SEED)
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-    # Match resolver — given OCR text, return canonical class or None
+    # Match resolver — given OCR text, return canonical class or None.
+    # Preference order:
+    #   1. Direct CN match (most coverage, no indirection)
+    #   2. Direct EN match (legacy)
+    #   3. CN→EN via student_name_map.json (fallback for unknown CN)
     def resolve_class(text: str) -> str | None:
         if not text:
             return None
         t = _sanitize(text)
-        # Direct hit
-        if t in known:
+        if t in cn_known:
             return t
-        # Via CN→EN map
-        if t in name_map and name_map[t] in known:
-            return name_map[t]
+        if t in en_known:
+            return t
+        if t in name_map:
+            mapped = name_map[t]
+            if mapped in cn_known or mapped in en_known:
+                return mapped
         return None
 
     class_phashes: dict[str, list[imagehash.ImageHash]] = {}
