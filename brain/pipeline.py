@@ -1413,42 +1413,59 @@ class DailyPipeline:
 
         self._total_ticks += 1
 
-        # Early bail-out: BA / MuMu not actually visible.  If the
-        # captured frame doesn't contain ANY BA-typical UI markers for
-        # 15+ consecutive ticks, we're probably capturing the wrong
-        # window (user run 2026-05-15 ~23:24: bot grabbed the Claude
-        # Code chat panel and ran 5 skills to timeout looking for cafe
-        # / schedule / etc. in conversation text).  Abort the whole
-        # pipeline instead of burning every skill's tick budget.
+        # Early bail-out: BA / MuMu not actually visible.  Wide set of
+        # markers so legitimate BA states (title screen, loading, login,
+        # battle, any in-game menu) all count as "BA detected".  Only
+        # genuinely-foreign captures (Claude Code chat, browser, desktop)
+        # produce 0 matches.  Threshold raised to 30 because long boot /
+        # asset-download sequences can show "Now Loading" for 15+ ticks
+        # with no Chinese text in view.
         ba_markers = [
-            "咖啡", "課程", "课程", "學生", "学生", "招募",
-            "活動", "活动", "AP", "Auto", "戰鬥", "战斗",
-            "任務", "任务", "入場", "入场", "MomoTalk",
+            # Lobby bottom-nav (always visible on lobby)
+            "咖啡", "課程", "课程", "學生", "学生", "編輯", "编辑",
+            "社交", "製造", "制造", "商店", "招募",
+            # Lobby sidebar / top-right
+            "MomoTalk", "公告", "任務", "任务", "信箱", "郵件", "邮件",
+            # In-game / battle / event / mission markers
+            "活動", "活动", "AP", "Auto", "AUTO", "戰鬥", "战斗",
+            "入場", "入场", "出擊", "出击", "掃蕩", "扫荡",
+            # Boot / title / loading (so we don't abort during start-up)
+            "TOUCH", "TAP", "START", "Loading", "loading", "正在更新",
+            "下載", "下载", "Now",
+            # Cafe / Schedule / Club internals
+            "咖啡廳", "咖啡厅", "課程表", "课程表", "社團", "社团",
+            "Lv.", "Cok11",
         ]
         has_ba_ui = any(
-            screen.find_any_text([m], min_conf=0.55) is not None
+            screen.find_any_text([m], min_conf=0.50) is not None
             for m in ba_markers
         )
         if has_ba_ui:
             self._no_ba_ticks = 0
         else:
             self._no_ba_ticks = getattr(self, "_no_ba_ticks", 0) + 1
-            if self._no_ba_ticks >= 15:
+            # Save trajectory of these wait ticks too so we can debug
+            # WHY OCR didn't find any markers (was the frame black?  Did
+            # OCR run at all?).  Old code skipped trajectory save which
+            # left an empty run dir with no evidence.
+            wait_action = action_wait(
+                800,
+                f"waiting for BA / MuMu window ({self._no_ba_ticks}/30)"
+            )
+            self._save_trajectory(screenshot_path, screen, None, wait_action)
+            if self._no_ba_ticks >= 30:
                 print(
                     f"[Pipeline] No Blue Archive UI detected for "
                     f"{self._no_ba_ticks} consecutive ticks — aborting "
                     f"pipeline.  Check that MuMu is running, BA is "
                     f"launched, the emulator window isn't minimised, "
-                    f"and the Window Title setting matches."
+                    f"and the Window Title setting matches.  "
+                    f"Saved {self._no_ba_ticks} no-UI frames to the "
+                    f"trajectory dir for inspection."
                 )
                 self._running = False
                 return action_done("pipeline aborted: no BA window detected")
-            # Wait briefly between checks instead of running skill ticks
-            # against an unrelated window.
-            return action_wait(
-                800,
-                f"waiting for BA / MuMu window ({self._no_ba_ticks}/15)"
-            )
+            return wait_action
 
         # First lobby-visit of the run → snapshot all 8 nav-icon badges.
         # Inexpensive (~5ms on a 4K screenshot) and only runs until the
@@ -1603,11 +1620,14 @@ class DailyPipeline:
         return action
 
     def _save_trajectory(self, screenshot_path: str, screen: ScreenState,
-                         skill: BaseSkill, action: Dict[str, Any]) -> None:
+                         skill: Optional[BaseSkill], action: Dict[str, Any]) -> None:
         """Enqueue frame + OCR + action for async write to trajectory dir.
 
         Returns immediately — actual disk I/O happens on a background thread.
         Prevents ~10-50ms/tick blocking when writing to slow disks.
+
+        ``skill`` may be None for pre-skill no-BA-UI wait frames so the
+        debug trace shows WHY the pipeline couldn't reach the skill loop.
         """
         if self._traj_dir is None:
             return
@@ -1632,9 +1652,9 @@ class DailyPipeline:
         ]
         record = {
             "tick": self._total_ticks,
-            "skill": skill.name,
-            "sub_state": skill.sub_state,
-            "skill_ticks": skill.ticks,
+            "skill": skill.name if skill else "(no-ba-ui-wait)",
+            "sub_state": skill.sub_state if skill else "",
+            "skill_ticks": skill.ticks if skill else 0,
             "action": action,
             "ocr_boxes": ocr_data,
             "ocr_count": len(ocr_data),
