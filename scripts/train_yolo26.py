@@ -39,10 +39,23 @@ BASE_WEIGHT_CANDIDATES = [
     REPO_ROOT / "yolo26n.pt",
     REPO_ROOT / "data" / "models" / "yolo26n.pt",
 ]
+# Classifier weight — kind=="classify" configs prefer this.  If not
+# found locally, ultralytics will fetch from its model registry on
+# first use (`YOLO("yolo26n-cls.pt")`).
+CLS_BASE_WEIGHT_CANDIDATES = [
+    REPO_ROOT / "yolo26n-cls.pt",
+    REPO_ROOT / "data" / "models" / "yolo26n-cls.pt",
+    ML_CACHE / "models" / "yolo" / "yolo26n-cls.pt",
+]
 
 # Training configs.  Each entry produces one trained .pt.
+#
+# kind="detect" (default) uses yolo26n.pt and a data.yaml.
+# kind="classify" uses yolo26n-cls.pt and a folder path (each subfolder
+# is a class, images directly inside).
 TRAIN_CONFIGS = {
     "expanded": {
+        "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "expanded" / "data.yaml",
         "epochs": 200,
         "imgsz": 960,
@@ -50,6 +63,7 @@ TRAIN_CONFIGS = {
         "out_name": "expanded_yolo26n",
     },
     "emoticon_v2": {
+        "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "emoticon_v2" / "data.yaml",
         "epochs": 150,
         "imgsz": 640,
@@ -60,36 +74,62 @@ TRAIN_CONFIGS = {
         # 31-class UI only (no avatars) — smaller, faster, fine for
         # pure UI element detection.  Falls back here if expanded is
         # too slow / hits a class imbalance issue.
+        "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "full" / "data.yaml",
         "epochs": 200,
         "imgsz": 960,
         "batch": 32,
         "out_name": "ba_ui_yolo26n_31",
     },
+    "schedule_cells": {
+        # YOLO classifier on pre-cropped 全體課程表 cells.  Each cell is
+        # ~150×80 px containing one avatar (or empty grey background).
+        # 250+ character classes + __empty__ + __uncertain__ (user-
+        # reviewed) under data/yolo_datasets/schedule_cells/{train,val}.
+        # imgsz=128 is enough for a single avatar — much faster than 640.
+        "kind": "classify",
+        "data": REPO_ROOT / "data" / "yolo_datasets" / "schedule_cells",
+        "epochs": 100,
+        "imgsz": 128,
+        "batch": 128,
+        "out_name": "schedule_cells_yolo26n_cls",
+    },
 }
 
 
-def find_base_weight() -> Path:
-    for p in BASE_WEIGHT_CANDIDATES:
-        if p.exists():
-            return p
-    raise FileNotFoundError(
-        f"yolo26n.pt base weight not found in any of: {BASE_WEIGHT_CANDIDATES}"
+def find_base_weight(kind: str = "detect") -> str:
+    """Return base weight name/path for the given task kind.
+
+    For detect: looks for local yolo26n.pt copies, else falls back to
+    the bare model name so ultralytics fetches it.
+    For classify: looks for local yolo26n-cls.pt copies, else falls back
+    to the bare model name "yolo26n-cls.pt".
+    """
+    candidates = (
+        CLS_BASE_WEIGHT_CANDIDATES if kind == "classify"
+        else BASE_WEIGHT_CANDIDATES
     )
+    default_name = "yolo26n-cls.pt" if kind == "classify" else "yolo26n.pt"
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return default_name  # ultralytics auto-downloads
 
 
 def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
     """Train one model.  Returns path to best.pt or None on dry_run."""
     cfg = TRAIN_CONFIGS[config_name]
-    data_yaml = cfg["data"]
-    if not data_yaml.exists():
-        print(f"  data yaml missing: {data_yaml}")
+    kind = cfg.get("kind", "detect")
+    data_arg = cfg["data"]
+    # For detect, data is a yaml file.  For classify, it's a folder.
+    if not Path(data_arg).exists():
+        print(f"  data missing: {data_arg}")
         return None
 
-    base = find_base_weight()
-    print(f"\n==== TRAIN {config_name} ====")
+    base = find_base_weight(kind)
+    print(f"\n==== TRAIN {config_name} ({kind}) ====")
     print(f"  base:    {base}")
-    print(f"  data:    {data_yaml}")
+    print(f"  data:    {data_arg}")
     print(f"  epochs:  {cfg['epochs']}")
     print(f"  imgsz:   {cfg['imgsz']}")
     print(f"  batch:   {cfg['batch']}")
@@ -99,34 +139,47 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         return None
 
     from ultralytics import YOLO
-    model = YOLO(str(base))
-    results = model.train(
-        data=str(data_yaml),
+    model = YOLO(base)
+    train_kwargs = dict(
+        data=str(data_arg),
         epochs=cfg["epochs"],
         imgsz=cfg["imgsz"],
         batch=cfg["batch"],
         device=0,
         workers=4,
         patience=30,
-        # Static-UI augmentation: minimal
-        degrees=0.0,
-        fliplr=0.0,
-        flipud=0.0,
-        hsv_h=0.01,
-        hsv_s=0.3,
-        hsv_v=0.3,
-        mosaic=0.5,
-        mixup=0.0,
-        # Output location
         project=str(YOLO_ROOT / "runs"),
         name=cfg["out_name"],
         exist_ok=True,
-        # Save best + last
         save=True,
         save_period=-1,
-        # Verbose enough to track progress in log
         verbose=True,
     )
+    if kind == "detect":
+        # Static-UI augmentation: minimal
+        train_kwargs.update(
+            degrees=0.0,
+            fliplr=0.0,
+            flipud=0.0,
+            hsv_h=0.01,
+            hsv_s=0.3,
+            hsv_v=0.3,
+            mosaic=0.5,
+            mixup=0.0,
+        )
+    elif kind == "classify":
+        # Classifier on cropped cells: even tighter aug — cells are
+        # ~150×80 fixed-orientation single-avatar.
+        train_kwargs.update(
+            degrees=0.0,
+            fliplr=0.0,
+            flipud=0.0,
+            hsv_h=0.01,
+            hsv_s=0.2,
+            hsv_v=0.2,
+            erasing=0.0,
+        )
+    results = model.train(**train_kwargs)
     best = YOLO_ROOT / "runs" / cfg["out_name"] / "weights" / "best.pt"
     if best.exists():
         print(f"  done: {best}")
