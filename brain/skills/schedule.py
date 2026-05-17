@@ -74,6 +74,30 @@ _ROOM_STATUS_POS = [
     (0.11, 0.68), (0.38, 0.68), (0.65, 0.68),  # row 3
 ]
 
+# Strip-to-room mapping (fixes bug discovered via trajectory audit 2026-05-17).
+# The user drew the avatar strips COLUMN-MAJOR in the dashboard:
+#   col 1 top→bottom (strips 0,3,4), then col 2 top→bottom (strips 1,5,7),
+#   then col 3 top→bottom (strips 2,6,8).
+# But _ROOM_CLICK_POS / _ROOM_SLOT_NAMES are ROW-MAJOR.  The naive
+# `enumerate(strips)` → room_idx mapping wires strips 4-6 to the wrong
+# rooms (e.g. strip 4 = 載具庫 area mapped to room_idx 4 = 實驗室 →
+# detector finds a character in 載具庫 but click goes to 實驗室).
+#
+# Mapping verified by nearest-neighbor matching strip centers (cx,cy) to
+# _ROOM_CLICK_POS:
+#   strip 4 (0.19, 0.82) -> room 6 載具庫 (0.19, 0.74)  dist=0.08
+#   strip 5 (0.46, 0.61) -> room 4 實驗室 (0.46, 0.55)  dist=0.06
+#   strip 6 (0.73, 0.61) -> room 5 射擊場 (0.73, 0.55)  dist=0.06
+_STRIP_TO_ROOM_MAP = {
+    0: 0,  # strip 0 row1-col1  -> room 0 視聽室
+    1: 1,  # strip 1 row1-col2  -> room 1 體育館
+    2: 2,  # strip 2 row1-col3  -> room 2 圖書館
+    3: 3,  # strip 3 row2-col1  -> room 3 教室
+    4: 6,  # strip 4 row3-col1  -> room 6 載具庫    ← was wrong (→4 實驗室)
+    5: 4,  # strip 5 row2-col2  -> room 4 實驗室    ← was wrong (→5 射擊場)
+    6: 5,  # strip 6 row2-col3  -> room 5 射擊場    ← was wrong (→6 載具庫)
+}
+
 
 def _load_target_favorites() -> List[str]:
     """Load target character names from app_config.json.
@@ -476,11 +500,17 @@ class ScheduleSkill(BaseSkill):
         cells_per_room = int(self._avatar_regions_cfg.get("cells_per_room", 3))
 
         # ── 1. Build cell crops (only for rooms we'd actually want to click) ──
+        # strip_idx is the position in schedule_avatar_regions.json (column-major
+        # draw order).  room_idx is the canonical row-major index used by
+        # _ROOM_CLICK_POS / _ROOM_SLOT_NAMES.  Map via _STRIP_TO_ROOM_MAP.
         cells: List[Tuple[Any, int, int]] = []  # (crop_bgr, room_idx, cell_idx)
         room_skipped: Dict[int, str] = {}       # room_idx -> reason (for log)
-        for room_idx, s in enumerate(strips):
-            if room_idx >= _NUM_ROOMS:
-                break
+        for strip_idx, s in enumerate(strips):
+            room_idx = _STRIP_TO_ROOM_MAP.get(strip_idx)
+            if room_idx is None or room_idx >= _NUM_ROOMS:
+                # Strip outside the 7-room popup (legacy 9-strip configs had
+                # bottom-mid/bottom-right entries that don't match any room).
+                continue
             if statuses[room_idx] not in ("available", "unknown"):
                 room_skipped[room_idx] = f"status={statuses[room_idx]}"
                 continue
