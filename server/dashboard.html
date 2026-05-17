@@ -464,7 +464,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div style="display:flex;gap:8px;align-items:center">
         <select id="roster_sample" style="flex:1;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"></select>
         <label style="font-size:11px;color:var(--muted)">cells:</label>
-        <input type="number" id="roster_cpr" min="1" max="8" step="1" value="4" style="width:56px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+        <input type="number" id="roster_cpr" min="1" max="8" step="1" value="3" style="width:56px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
         <button onclick="rosterSave()" class="btn btn-sm" style="background:var(--green);color:#0b1a30;border-color:var(--green);font-weight:700">保存</button>
         <button onclick="rosterReset()" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">重置</button>
       </div>
@@ -1915,7 +1915,7 @@ window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)ann
    ════════════════════════════════════════════════════ */
 const ROSTER = {
   loaded: false,
-  cfg: { strips: [], cells_per_room: 4 },
+  cfg: { strips: [], cells_per_room: 3 },
   defaults: null,
   samples: [],
   bgImg: null,          // HTMLImageElement of current screenshot
@@ -1935,7 +1935,7 @@ async function rosterInit(){
     ROSTER.loaded = true;
     try {
       const resp = await api('/api/v1/schedule/avatar_regions');
-      ROSTER.cfg = { strips: resp.config.strips || [], cells_per_room: resp.config.cells_per_room || 4 };
+      ROSTER.cfg = { strips: resp.config.strips || [], cells_per_room: resp.config.cells_per_room || 3 };
       ROSTER.defaults = resp.defaults;
       $('roster_cpr').value = ROSTER.cfg.cells_per_room;
     } catch(e){ console.error(e); }
@@ -1958,7 +1958,7 @@ async function rosterInit(){
     } catch(e){ console.error(e); }
     rosterBindCanvas();
     $('roster_cpr').oninput = () => {
-      ROSTER.cfg.cells_per_room = Math.max(1, parseInt($('roster_cpr').value) || 4);
+      ROSTER.cfg.cells_per_room = Math.max(1, parseInt($('roster_cpr').value) || 3);
       rosterDraw();
     };
     window.addEventListener('resize', () => { if(currentPage === 'roster') rosterDraw(); });
@@ -2015,7 +2015,7 @@ function rosterDraw(){
     const dw = ROSTER.imgW * ROSTER.fit.scale, dh = ROSTER.imgH * ROSTER.fit.scale;
     ctx.drawImage(ROSTER.bgImg, x0, y0, dw, dh);
   }
-  const cpr = Math.max(1, ROSTER.cfg.cells_per_room || 4);
+  const cpr = Math.max(1, ROSTER.cfg.cells_per_room || 3);
   ROSTER.cfg.strips.forEach((s, i) => {
     const [x1, y1] = rosterNormToCanvas(s.x1, s.y1);
     const [x2, y2] = rosterNormToCanvas(s.x2, s.y2);
@@ -2274,7 +2274,7 @@ async function rosterSave(){
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         strips: ROSTER.cfg.strips,
-        cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 4),
+        cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 3),
       }),
     });
     $('roster_status').textContent = '已保存';
@@ -2298,7 +2298,7 @@ function rosterCopyJson(){
       x1: +s.x1.toFixed(4), y1: +s.y1.toFixed(4),
       x2: +s.x2.toFixed(4), y2: +s.y2.toFixed(4),
     })),
-    cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 4),
+    cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 3),
   };
   const text = JSON.stringify(payload, null, 2);
   $('roster_json').value = text;

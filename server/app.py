@@ -1769,32 +1769,49 @@ def save_schedule_avatar_regions(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/v1/schedule/roster_samples")
-def list_roster_samples(limit: int = Query(30)) -> Dict[str, Any]:
-    """List recent trajectory ticks where the roster popup was open.
+def list_roster_samples(limit: int = Query(60)) -> Dict[str, Any]:
+    """List recent trajectory ticks where the 全體課程表 overlay was open.
 
-    Returns ticks captured while ScheduleSkill was in the `check_roster`
-    sub-state — these are the frames suitable for tuning the cell grid.
+    Detection: any tick whose OCR contains the overlay header
+    "全體課程表" AND at least 2 room labels (視聽室/教室/圖書館/射擊場/
+    體育館/實驗室/載具庫).  This is broader than the previous filter
+    (Schedule + check_roster + "scanning roster avatars") which missed
+    overlay-open frames captured outside that exact sub-state.
+
+    Filter pulls from the most recent 20 trajectory runs to keep the
+    sample list manageable; widens or narrows via the `limit` query
+    param.
     """
     if not TRAJECTORIES_DIR.exists():
         return {"samples": []}
     samples: List[Dict[str, Any]] = []
+    _rooms = ("視聽室", "视听室", "教室", "圖書館", "图书馆",
+              "射擊場", "射击场", "體育館", "体育馆",
+              "實驗室", "实验室", "載具庫", "载具库")
     try:
         runs = sorted(
             [d for d in TRAJECTORIES_DIR.iterdir() if d.is_dir() and d.name.startswith("run_")],
             key=lambda p: p.name, reverse=True,
-        )[:10]
+        )[:20]
         for run in runs:
             for js in sorted(run.glob("tick_*.json")):
                 try:
                     d = json.loads(js.read_text(encoding="utf-8"))
                 except Exception:
                     continue
-                if d.get("skill") != "Schedule":
+                ocr_boxes = d.get("ocr_boxes") or []
+                has_header = any(
+                    "全體課程表" in (b.get("text") or "")
+                    or "全体课程表" in (b.get("text") or "")
+                    for b in ocr_boxes
+                )
+                if not has_header:
                     continue
-                if d.get("sub_state") != "check_roster":
-                    continue
-                action = (d.get("action") or {}).get("reason", "")
-                if "scanning roster avatars" not in action:
+                room_hits = sum(
+                    1 for b in ocr_boxes
+                    if any(rm in (b.get("text") or "") for rm in _rooms)
+                )
+                if room_hits < 2:
                     continue
                 jpg = js.with_suffix(".jpg")
                 if not jpg.exists():
