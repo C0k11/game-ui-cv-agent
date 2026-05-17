@@ -6,15 +6,17 @@ Game UI flow (observed from trajectory):
   - Click a location → enters the location detail view (isometric building)
   - Inside location: right ">" arrow to switch to next location
   - Click "全體課程表" button → opens roster overlay (rooms + students)
-  - Check roster for target characters via avatar template matching
+  - Check roster for target characters via YOLO26n-cls avatar classifier
+    (vision.avatar_classifier — 4-layer fast/vote/mutex/unknown pipeline)
   - Close roster via X → click ">" to switch location if no target
   - To start: click center building area or "開始日程" button
   - Repeat until tickets exhausted (持有票券 = 0)
 
-YOLO classes used (full.pt):
-  - 角色头像 (character portrait) — used for avatar matching
-  - 左切換 / 右切換 (switch arrows)
-  - 锁 (lock icon)
+Avatar identification migrated 2026-05-17 from template+histogram match
+(vision.avatar_matcher) to YOLO26n-cls (vision.avatar_classifier).
+Reasons: template match against full-body CG portraits at ~50px crop
+size produced false positives at 0.55 threshold; classifier hits
+top1=86.55% / top5=95.32% on val and emits temporal-voted verdicts.
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ from brain.skills.base import (
     action_click, action_click_box,
     action_wait, action_back, action_done,
 )
+from vision.avatar_classifier import get_default as get_avatar_classifier
 
 # Known location names (Traditional + Simplified Chinese)
 _LOCATION_NAMES = [
@@ -121,10 +124,9 @@ def _load_target_favorites() -> List[str]:
 # Minimum match score for lesson affection template matching.
 # reference uses 0.75; we use the same threshold for per-room student detection.
 _AFFECTION_MATCH_THRESHOLD = 0.75
-# Legacy avatar matcher threshold (kept as fallback).
-# Roster thumbnails are ~40-60px; small size hurts template correlation so
-# a lower threshold is required here than the 0.45 used elsewhere.
-_AVATAR_MATCH_THRESHOLD = 0.35
+# Avatar identification: handled by YOLO26n-cls (vision.avatar_classifier).
+# Acceptance is internal to the classifier — fast-path conf>=0.95+margin>=0.30
+# or 3-frame temporal vote.  No threshold lives here anymore.
 # Max locations to cycle through before executing at current (full circle).
 # Blue Archive has ~10 schedule locations; 12 gives safety margin.
 _MAX_LOCATIONS_FULL_CIRCLE = 12
@@ -162,8 +164,7 @@ class ScheduleSkill(BaseSkill):
         self._execute_ticks: int = 0
         self._start_clicked: bool = False
         self._roster_scan_ticks: int = 0
-        self._avatar_matcher = None
-        self._best_match_score: float = -1.0
+        self._avatar_clf = None  # vision.avatar_classifier singleton (lazy)
         self._stale_ticks: int = 0
         self._matched_room_idx: int = -1  # room index where favorite was found
         self._clicked_rooms_this_location: Set[int] = set()  # rooms clicked since last location switch
@@ -253,7 +254,6 @@ class ScheduleSkill(BaseSkill):
         self._starting_location = ""
         self._switch_ticks = 0
         self._execute_ticks = 0
-        self._best_match_score = -1.0
         self._stale_ticks = 0
         self._roster_scan_ticks = 0
         self._matched_room_idx = -1
@@ -261,16 +261,26 @@ class ScheduleSkill(BaseSkill):
         self._avatar_regions_cfg = self._load_avatar_regions_config()
         if self._target_favorites:
             self.log(f"target favorites loaded: {len(self._target_favorites)} characters")
-        # Lazy-init avatar matcher
-        if self._avatar_matcher is None and self._target_favorites:
-            try:
-                from vision.avatar_matcher import AvatarMatcher
-                avatar_dir = Path(__file__).resolve().parents[2] / "data" / "captures" / "角色头像"
-                self._avatar_matcher = AvatarMatcher(str(avatar_dir))
-                self.log(f"avatar matcher loaded from {avatar_dir}")
-            except Exception as e:
-                self.log(f"avatar matcher init failed: {e}")
-                self._avatar_matcher = None
+        # Lazy-init avatar classifier (YOLO26n-cls, ~290-line wrapper in vision/)
+        if self._avatar_clf is None and self._target_favorites:
+            self._avatar_clf = get_avatar_classifier()
+            if not self._avatar_clf.available:
+                self.log(
+                    f"avatar classifier model missing at {self._avatar_clf.model_path} — "
+                    f"falling back to pixel-only room picker"
+                )
+                self._avatar_clf = None
+            else:
+                self.log(f"avatar classifier ready ({self._avatar_clf.model_path.name})")
+        # Reset temporal vote buffers — this is a fresh schedule run
+        if self._avatar_clf is not None:
+            self._avatar_clf.reset_buffer(reason="schedule reset")
+        # Normalized favorite name set (matches classifier output format:
+        # 'Wakamo.png' → 'Wakamo', 'Toki_(Bunny_Girl).png' → 'Toki_(Bunny_Girl)')
+        self._fav_classes: Set[str] = {
+            unquote(f[:-4] if f.lower().endswith(".png") else f)
+            for f in self._target_favorites
+        }
         self._matched_avatar_pos: Optional[Tuple[float, float]] = None  # where the matched avatar is on popup
 
     # ── Ticket parsing ──
@@ -419,96 +429,6 @@ class ScheduleSkill(BaseSkill):
                 break
         return best
 
-    def _check_avatar_status(self, roi) -> dict:
-        """Detect green checkmark and heart+number on an avatar ROI via HSV.
-
-        Returns dict with:
-            'has_checkmark': bool  — green tick overlay (schedule already running)
-            'has_heart': bool      — pink/red heart overlay (affection indicator)
-        """
-        import cv2
-        import numpy as np
-        if roi is None or roi.size == 0:
-            return {"has_checkmark": False, "has_heart": False}
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        h, w = roi.shape[:2]
-        pixels = h * w
-        # Green checkmark: H=35-85, S>80, V>100 (bright green)
-        green_mask = cv2.inRange(hsv, np.array([35, 80, 100]), np.array([85, 255, 255]))
-        green_ratio = green_mask.sum() / 255 / max(1, pixels)
-        # Red/pink heart: H=0-10 or H=160-180, S>80, V>80
-        red_lo = cv2.inRange(hsv, np.array([0, 80, 80]), np.array([10, 255, 255]))
-        red_hi = cv2.inRange(hsv, np.array([160, 80, 80]), np.array([180, 255, 255]))
-        heart_mask = cv2.bitwise_or(red_lo, red_hi)
-        heart_ratio = heart_mask.sum() / 255 / max(1, pixels)
-        return {
-            "has_checkmark": green_ratio > 0.02,  # 2% green pixels = checkmark
-            "has_heart": heart_ratio > 0.01,       # 1% red pixels = heart
-        }
-
-    # reference template names differ from our config: Arisu→Aris, Bunny_Girl→Bunny, etc.
-    # This map bridges reference template base names to our config base names.
-    _reference_NAME_ALIASES = {
-        "Aris": "Arisu", "Arisu": "Aris",
-        "Hina": "Hina", "Ako": "Ako",
-    }
-    # reference suffix aliases: template suffix → our config suffix
-    _reference_SUFFIX_ALIASES = {
-        "Bunny": "Bunny_Girl", "Bunny_Girl": "Bunny",
-        "Track": "Sportswear", "Sportswear": "Track",
-        "Cheer Squad": "Cheerleader", "Cheerleader": "Cheer Squad",
-        "Camp": "Camping", "Camping": "Camp",
-        "Cycling": "Riding", "Riding": "Cycling",
-    }
-
-    def _build_fav_lookup(self) -> Set[str]:
-        """Build a set of all name variants that count as 'favorite'.
-
-        reference lesson_affection templates use names like 'Aris (Maid)',
-        while our config uses 'Arisu_(Maid).png'. Build a bridge so
-        template match results can be checked against favorites.
-        """
-        lookup: Set[str] = set()
-        for raw in self._target_favorites:
-            name = raw
-            if name.lower().endswith(".png"):
-                name = name[:-4]
-            name = unquote(name)
-            # Add as-is and common variants
-            for variant in [name, name.replace("_", " ")]:
-                lookup.add(variant)
-                lookup.add(variant.lower())
-            # Base name without suffix
-            base = name.split("(")[0].split("_")[0].strip()
-            if base:
-                lookup.add(base)
-                lookup.add(base.lower())
-                # Add reference alias for base name
-                alias = self._reference_NAME_ALIASES.get(base)
-                if alias:
-                    lookup.add(alias)
-                    lookup.add(alias.lower())
-            # Generate variants with base-name aliases and suffix aliases
-            import re as _re
-            m = _re.search(r"\((.+)\)", name)
-            suffix = m.group(1) if m else None
-            bases = [base]
-            alias = self._reference_NAME_ALIASES.get(base)
-            if alias:
-                bases.append(alias)
-            suffixes = [suffix] if suffix else []
-            if suffix:
-                alt_suffix = self._reference_SUFFIX_ALIASES.get(suffix)
-                if alt_suffix:
-                    suffixes.append(alt_suffix)
-            # Cross-product: all base names × all suffixes
-            for b in bases:
-                for s in suffixes:
-                    for fmt in [f"{b} ({s})", f"{b}_({s})"]:
-                        lookup.add(fmt)
-                        lookup.add(fmt.lower())
-        return lookup
-
     # Avatar region positions in 全體課程表 popup (normalized 0-1).
     # Each room card's avatar strip: where the small face icons appear.
     # Row/column grid: 3×3 layout, last row only has 1 room.
@@ -519,16 +439,23 @@ class ScheduleSkill(BaseSkill):
     _DEFAULT_CELLS_PER_ROOM = 4
 
     def _check_roster_avatars(self, screen: ScreenState) -> bool:
-        """Check roster overlay for favorite characters using 角色头像_crop.
+        """Check roster overlay for favorite characters via YOLO26n-cls.
 
         For each available room in the 全體課程表 popup:
-        1. Crop the avatar strip (where student faces are displayed)
-        2. Match only favorite students via AvatarMatcher (template+histogram)
-        3. If a favorite scores above threshold, mark that room
+          1. Crop each avatar cell from the configured strip (3 cells/room).
+          2. Batch them through AvatarClassifier (4-layer pipeline:
+             fast-path / temporal vote / Hungarian spatial mutex / unknown).
+          3. If any verdict's class name is in our favorite set with
+             source in {fast, vote, mutex(*)}, mark the room.
 
-        Uses our own 角色头像_crop assets (not reference templates).
+        Side effects on hit:
+          self._target_found = True
+          self._matched_room_idx = <room_idx>
         """
         if not self._target_favorites:
+            return False
+        if self._avatar_clf is None:
+            # classifier failed to load; pixel-only fallback runs in _check_roster
             return False
 
         try:
@@ -544,123 +471,96 @@ class ScheduleSkill(BaseSkill):
         except Exception:
             return False
 
-        # Get room statuses to only scan available rooms
         statuses = self._get_room_statuses(screen)
+        strips = self._avatar_regions_cfg.get("strips") or []
+        cells_per_room = int(self._avatar_regions_cfg.get("cells_per_room", 3))
 
-        best_name = None
-        best_score = -1.0
-        best_room = -1
-
-        # PRIMARY: use AvatarMatcher with 角色头像_crop (only favorites)
-        # Each room card holds UP TO 4 tiny student avatars side-by-side in a strip
-        # of ~21% × 12% (normalized). Feeding the full strip to the matcher forces
-        # the reference template to resize to the strip aspect ratio (wide+short),
-        # which destroys pixel-level correlation. Instead, slide an avatar-sized
-        # square cell across each strip and match each cell independently.
-        if self._avatar_matcher is not None:
-            fav_names = []
-            for raw in self._target_favorites:
-                name = raw
-                if name.lower().endswith(".png"):
-                    name = name[:-4]
-                name = unquote(name)
-                fav_names.append(name)
-
-            _CELLS_PER_ROOM = int(self._avatar_regions_cfg.get("cells_per_room", 4))
-            strips = self._avatar_regions_cfg.get("strips") or []
-            for room_idx, s in enumerate(strips):
-                if room_idx >= _NUM_ROOMS:
+        # ── 1. Build cell crops (only for rooms we'd actually want to click) ──
+        cells: List[Tuple[Any, int, int]] = []  # (crop_bgr, room_idx, cell_idx)
+        room_skipped: Dict[int, str] = {}       # room_idx -> reason (for log)
+        for room_idx, s in enumerate(strips):
+            if room_idx >= _NUM_ROOMS:
+                break
+            if statuses[room_idx] not in ("available", "unknown"):
+                room_skipped[room_idx] = f"status={statuses[room_idx]}"
+                continue
+            # Don't re-target a room we've already dispatched at this location
+            # (observed loop bug in run_20260422_214941 ticks 19–59 where the
+            # post-dispatch roster re-scan kept clicking the same favorite).
+            if room_idx in self._clicked_rooms_this_location:
+                room_skipped[room_idx] = "already-clicked"
+                continue
+            px1 = max(0, int(s["x1"] * w))
+            py1 = max(0, int(s["y1"] * h))
+            px2 = min(w, int(s["x2"] * w))
+            py2 = min(h, int(s["y2"] * h))
+            strip = img[py1:py2, px1:px2]
+            if strip.size == 0:
+                continue
+            strip_h, strip_w = strip.shape[:2]
+            cell_w = max(1, strip_w // cells_per_room)
+            cell_size = min(cell_w, strip_h)
+            if cell_size < 16:  # too tiny to be a real avatar
+                continue
+            sy = max(0, (strip_h - cell_size) // 2)
+            for slot in range(cells_per_room):
+                sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
+                if sx + cell_size > strip_w:
                     break
-                if statuses[room_idx] not in ("available", "unknown"):
+                cell = strip[sy:sy + cell_size, sx:sx + cell_size]
+                if cell.size == 0:
                     continue
-                # Don't re-target a room we've already dispatched a
-                # schedule to at this location.  Without this guard the
-                # scan cycle that runs after the roster reappears will
-                # re-match the same favorite and click the same room
-                # forever (observed in run_20260422_214941 ticks 19–59).
-                if room_idx in self._clicked_rooms_this_location:
-                    continue
-                px1 = int(s["x1"] * w)
-                py1 = int(s["y1"] * h)
-                px2 = int(s["x2"] * w)
-                py2 = int(s["y2"] * h)
-                strip = img[py1:py2, px1:px2]
-                if strip.size == 0:
-                    continue
-                strip_h, strip_w = strip.shape[:2]
-                cell_w = max(1, strip_w // _CELLS_PER_ROOM)
-                # Avatars are approximately square; crop a square cell
-                # centered vertically in the strip.
-                cell_size = min(cell_w, strip_h)
-                if cell_size < 16:  # too tiny to be a real avatar
-                    continue
-                sy = max(0, (strip_h - cell_size) // 2)
-                room_best_name: Optional[str] = None          # accepted favorite
-                room_best_score: float = -1.0                 # accepted favorite score
-                room_top_overall: Optional[str] = None        # best overall student in any cell
-                room_top_overall_score: float = -1.0          # (for calibration log)
-                # Open-set pool (all ~250 templates) cached inside the matcher.
-                all_names = self._avatar_matcher.all_template_names()
-                fav_set = set(fav_names)
-                # Accumulate per-slot debug (logged only when room has no
-                # favorite match, so logs don't flood on success).
-                _slot_debug: List[str] = []
-                for slot in range(_CELLS_PER_ROOM):
-                    sx = slot * cell_w + max(0, (cell_w - cell_size) // 2)
-                    if sx + cell_size > strip_w:
-                        break
-                    cell = strip[sy:sy + cell_size, sx:sx + cell_size]
-                    if cell.size == 0:
-                        continue
-                    # Open-set verification: score against EVERY template,
-                    # then accept the cell's favorite only when the best
-                    # overall match is itself a favorite.  Otherwise the
-                    # cell genuinely shows a non-favorite student that
-                    # merely resembles a favorite (e.g. base Kayoko vs.
-                    # Kayoko_(Dress)) — a common false-positive pattern.
-                    fav_m, fav_s, all_m, all_s = \
-                        self._avatar_matcher.match_avatar_open_set(
-                            cell, fav_set, all_names,
-                        )
-                    _slot_debug.append(
-                        f"s{slot}[all={all_m}/{all_s:.2f} fav={fav_m}/{fav_s:.2f}]"
-                    )
-                    if all_s > room_top_overall_score:
-                        room_top_overall = all_m
-                        room_top_overall_score = all_s
-                    if all_m in fav_set and fav_m == all_m and fav_s > room_best_score:
-                        room_best_name = fav_m
-                        room_best_score = fav_s
-                if room_best_name and room_best_score > _AVATAR_MATCH_THRESHOLD:
-                    self.log(
-                        f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                        f"★FAV '{room_best_name}' score={room_best_score:.2f}"
-                    )
-                    if room_best_score > best_score:
-                        best_name = room_best_name
-                        best_score = room_best_score
-                        best_room = room_idx
-                elif room_top_overall:
-                    # No cell passed open-set verification. Log per-slot
-                    # scores so user can audit: (a) favorite wasn't there,
-                    # (b) open-set picked non-favorite that looks more
-                    # similar, or (c) matcher signal is weak overall
-                    # (wiki-portrait vs in-game thumbnail mismatch).
-                    self.log(
-                        f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
-                        f"no favorite | " + " ".join(_slot_debug)
-                    )
+                cells.append((cell, room_idx, slot))
 
-        if best_name and best_room >= 0:
+        if not cells:
+            scanned = sum(1 for s in statuses if s in ("available", "unknown"))
+            self.log(
+                f"no avatar cells to scan (scanned={scanned} skipped={room_skipped})"
+            )
+            return False
+
+        # ── 2. Batch-classify all cells in this frame ──
+        frame_id = getattr(screen, "tick_id", -1) or self._roster_scan_ticks
+        verdicts = self._avatar_clf.classify_cells(cells, frame_id=frame_id)
+
+        # ── 3. Search verdicts for favorites; pick highest-confidence match ──
+        ACCEPT_SOURCES = {"fast", "vote"}  # mutex(*) also OK — handled below
+        best_room = -1
+        best_name: Optional[str] = None
+        best_conf = -1.0
+        per_room_log: Dict[int, List[str]] = {}
+        for v in verdicts:
+            per_room_log.setdefault(v.room_idx, []).append(
+                f"c{v.cell_idx}[{v.name}/{v.conf:.2f}/{v.source}]"
+            )
+            if v.name is None or v.name == "__unknown__":
+                continue
+            is_accepted = (
+                v.source in ACCEPT_SOURCES
+                or v.source.startswith("mutex(")
+            )
+            if not is_accepted:
+                continue
+            if v.name in self._fav_classes and v.conf > best_conf:
+                best_room = v.room_idx
+                best_name = v.name
+                best_conf = v.conf
+
+        if best_room >= 0 and best_name:
             self._target_found = True
             self._matched_room_idx = best_room
             self.log(
-                f"FAVORITE MATCH: '{best_name}' score={best_score:.2f} "
+                f"★FAVORITE MATCH: '{best_name}' conf={best_conf:.3f} "
                 f"in room {best_room} ({_ROOM_SLOT_NAMES[best_room]})"
             )
             return True
 
-        self.log(f"no favorite found in roster (scanned {sum(1 for s in statuses if s in ('available','unknown'))} rooms)")
+        # No favorite: emit per-room diag (one line per room) for calibration
+        for room_idx, slots in sorted(per_room_log.items()):
+            self.log(
+                f"room {room_idx} ({_ROOM_SLOT_NAMES[room_idx]}): "
+                f"no favorite | " + " ".join(slots)
+            )
         return False
 
     def _find_lowest_affection_card(self, screen: ScreenState):
@@ -1091,12 +991,20 @@ class ScheduleSkill(BaseSkill):
                 self._parse_tickets(screen)
                 return action_wait(300, "scanning roster tickets")
 
-            if self._roster_scan_ticks == 2:
-                if self._target_favorites:
-                    self._check_roster_avatars(screen)
-                return action_wait(300, "scanning roster avatars")
+            # Ticks 2-4: scan avatars up to 3 times so the classifier's
+            # temporal vote (3-frame buffer) can converge on ambiguous cells.
+            # Fast-path matches (conf>=0.95 + margin>=0.30) cause immediate
+            # _target_found=True and we fall through to room-pick on this
+            # same tick — no extra latency for the easy 80% case.
+            if 2 <= self._roster_scan_ticks <= 4 and self._target_favorites:
+                self._check_roster_avatars(screen)
+                if not self._target_found:
+                    return action_wait(
+                        300,
+                        f"scanning roster avatars (pass {self._roster_scan_ticks - 1}/3)",
+                    )
 
-            # Tick 3+: click a room name in the popup to open room info
+            # Tick 5+ (or earlier on fast-path hit): pick a room
             self._roster_scan_ticks = 0
             self._locations_checked += 1
             if cur_loc:
@@ -1263,6 +1171,8 @@ class ScheduleSkill(BaseSkill):
         if self._is_location_select(screen):
             self.sub_state = "select_location"
             self._clicked_rooms_this_location = set()
+            if self._avatar_clf is not None:
+                self._avatar_clf.reset_buffer(reason="back to location select")
             return action_wait(300, "back at location select")
 
         right = self._find_schedule_switch_arrow(screen)
@@ -1273,6 +1183,8 @@ class ScheduleSkill(BaseSkill):
             self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
             self._roster_scan_ticks = 0
             self._clicked_rooms_this_location = set()
+            if self._avatar_clf is not None:
+                self._avatar_clf.reset_buffer(reason="right-arrow location switch")
             return action_click_box(right, "right switch")
 
         # Hardcoded fallback: click right arrow position (visible as ">" on right edge)
@@ -1283,6 +1195,8 @@ class ScheduleSkill(BaseSkill):
             self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
             self._roster_scan_ticks = 0
             self._clicked_rooms_this_location = set()
+            if self._avatar_clf is not None:
+                self._avatar_clf.reset_buffer(reason="hardcoded-arrow location switch")
             return action_click(*_RIGHT_ARROW_POS, "right arrow (hardcoded)")
 
         # If still stuck after many attempts, go back to Location Select
