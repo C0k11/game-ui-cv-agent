@@ -1,34 +1,33 @@
-"""Build YOLO-cls dataset for the 全體課程表 cells using strip pre-sets.
+"""Build a CLEAN-AS-GROUND-TRUTH cell dataset for the 全體課程表 grid.
 
-Pipeline:
-  1. Read data/schedule_avatar_regions.json (9 strips × cells_per_room = 27 cells)
-  2. Walk data/yolo_datasets/schedule_roster/images_raw/ (1765 overlay shots)
-  3. For each overlay image, crop the 27 cell regions
-  4. For each cell:
-       a. Color-stats check → if mostly grey/white → bucket `__empty__/`
-       b. Otherwise run AvatarMatcher against all 250 reference avatars
-          and pick the best score
-       c. score >= STRONG_THRESHOLD (0.55) → bucket `<character>/`
-       d. otherwise → bucket `__uncertain__/` for manual review
-  5. Output structure ready for yolo26n-cls training:
-       data/yolo_datasets/schedule_cells/
-         train/<class>/<run>_<tick>_<cell_idx>.jpg
-         val/<class>/<run>_<tick>_<cell_idx>.jpg
-       (80/20 random split)
+Strategy decided 2026-05-17 with user + Gemini + Opus alignment:
 
-User workflow:
-  python scripts/build_schedule_cells_dataset.py
-  # → opens the dataset dir
-  # User reviews __uncertain__/ — drags into correct class folder
-  # User spot-checks a few mainstream classes for mis-labels
-  # Then: add config to scripts/train_yolo26.py and train yolo26n-cls
+  "5000 张干净的人工标注图，碾压 50000 张掺了 2% 水分的自动化图."
+
+  Don't use AvatarMatcher (template+hist score) for pre-labeling — it
+  generates false positives (similar-palette characters cross-match
+  at ~0.55) and silently poisons the training set.  Instead:
+
+    1. Walk all overlay screenshots.
+    2. For each of the 27 cell crops:
+       a. HSV color stats check → if mostly grey/white (S<=20 AND
+          V>=140) → __empty__ bucket with strict MD5 dedup.
+       b. Otherwise → __uncertain__ bucket with pHash dedup
+          (hamming distance <= 2 means already kept).
+    3. User manually creates character folders (Airi/, Wakamo/, etc.)
+       and drags from __uncertain__ → correct class.
+    4. Train YOLO26n-cls on the human-verified folder structure.
+
+  Expected compression: 47K cells → 5-10K unique cells in __uncertain__
+  plus a handful of __empty__ variants.  User reviews ~5-10K items in
+  Windows Explorer (large-icon view, multi-select drag), maybe 1-2 hours
+  of mindless work for a 100%-clean dataset.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import random
-import shutil
 import sys
 from pathlib import Path
 
@@ -40,41 +39,27 @@ import imagehash
 REPO = Path(__file__).resolve().parents[1]
 REGIONS_JSON = REPO / "data" / "schedule_avatar_regions.json"
 IMAGES_RAW = REPO / "data" / "yolo_datasets" / "schedule_roster" / "images_raw"
-AVATAR_REF_DIR = REPO / "data" / "captures" / "角色头像"
 OUT_ROOT = REPO / "data" / "yolo_datasets" / "schedule_cells"
 
-# Match thresholds (tuned against AvatarMatcher's combined template+hist score)
-STRONG_THRESHOLD = 0.55  # score >= → confident character match
 UNCERTAIN_BUCKET = "__uncertain__"
 EMPTY_BUCKET = "__empty__"
 VAL_RATIO = 0.20
 SEED = 42
-# Empty-cell color heuristic: mean BGR stays close to grey (low chroma)
-# AND brightness is high (white-ish) OR mid-tone grey.  BA's empty slot
-# is a flat grey-pink with very low saturation.
-EMPTY_SAT_MAX = 20      # HSV S <= 20 means basically neutral grey
-EMPTY_VAL_MIN = 140     # V >= 140 means not a dark gap
 
-# Per-character class dedup cap.  Static UI: 30 cells per character is
-# plenty diversity for a 128px classifier (BA avatars are sprites that
-# render identically beyond the affinity number badge).
-CLASS_MAX_PER_BUCKET = 30
-# Perceptual-hash hamming distance threshold for treating two cells as
-# "the same avatar variant".  <= 2 catches affinity-number-only diffs
-# AND tiny JPEG edge bleed but lets through real visual changes (cafe
-# event uniform variants etc.).
+# Empty-cell heuristic — flat grey-white with very low chroma.
+EMPTY_SAT_MAX = 20
+EMPTY_VAL_MIN = 140
+
+# Perceptual hash threshold for "essentially the same crop".
+# <= 2 catches affinity-number-only diffs + JPEG noise.
 PHASH_HAMMING_THRESHOLD = 2
-# Strict MD5 dedup is applied to __empty__ and __uncertain__ buckets —
-# user is going to manually review those, no point keeping duplicates.
 
 
 def md5_of(roi_bgr: np.ndarray) -> str:
-    """Hash raw pixels (exact match required)."""
     return hashlib.md5(roi_bgr.tobytes()).hexdigest()
 
 
 def phash_of(roi_bgr: np.ndarray) -> imagehash.ImageHash:
-    """Perceptual hash — robust to JPEG / small visual diffs."""
     rgb = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2RGB)
     return imagehash.phash(Image.fromarray(rgb))
 
@@ -91,38 +76,31 @@ def load_strips() -> tuple[list[dict], int]:
 
 
 def strip_cells(strip: dict, cpr: int) -> list[tuple[float, float, float, float]]:
-    """Slice a strip horizontally into N equal-width cells in normalised coords."""
     x1, y1, x2, y2 = strip["x1"], strip["y1"], strip["x2"], strip["y2"]
     width = x2 - x1
     out = []
     for i in range(cpr):
-        cx1 = x1 + width * i / cpr
-        cx2 = x1 + width * (i + 1) / cpr
-        out.append((cx1, y1, cx2, y2))
+        out.append((x1 + width * i / cpr, y1, x1 + width * (i + 1) / cpr, y2))
     return out
 
 
 def is_empty_cell(roi_bgr: np.ndarray) -> bool:
-    """Heuristic empty-cell detection via HSV color stats."""
     if roi_bgr is None or roi_bgr.size == 0:
         return True
     hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
     s_mean = float(np.mean(hsv[:, :, 1]))
     v_mean = float(np.mean(hsv[:, :, 2]))
-    # Low saturation + medium-to-high brightness = empty grey slot
     return s_mean <= EMPTY_SAT_MAX and v_mean >= EMPTY_VAL_MIN
 
 
 def main() -> int:
     strips, cpr = load_strips()
-    cells_per_image = len(strips) * cpr
-    print(f"[regions] {len(strips)} strips × {cpr} cells = {cells_per_image} cells/image")
-
-    # Build cell coordinates once (normalised)
-    cell_regions = []
-    for si, strip in enumerate(strips):
-        for ci, cell in enumerate(strip_cells(strip, cpr)):
-            cell_regions.append((si, ci, cell))
+    cell_regions = [
+        (si, ci, cell)
+        for si, strip in enumerate(strips)
+        for ci, cell in enumerate(strip_cells(strip, cpr))
+    ]
+    print(f"[regions] {len(strips)} strips × {cpr} cells = {len(cell_regions)} cells/image")
 
     images = sorted(IMAGES_RAW.glob("*.jpg"))
     print(f"[input]  {len(images)} overlay screenshots from {IMAGES_RAW}")
@@ -130,36 +108,37 @@ def main() -> int:
         print(f"  no input images — run build_schedule_yolo_dataset.py first")
         return 1
 
-    # Avatar matcher — load all 250 reference avatars
-    sys.path.insert(0, str(REPO))
-    from vision.avatar_matcher import AvatarMatcher
-    matcher = AvatarMatcher(str(AVATAR_REF_DIR))
-    candidates = sorted(p.stem for p in AVATAR_REF_DIR.glob("*.png"))
-    print(f"[refs]   {len(candidates)} character avatars loaded")
-
-    # Output dirs prepared lazily on first write
     rng = random.Random(SEED)
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    bucket_counts: dict[str, int] = {}
-    bucket_dropped: dict[str, int] = {}
+    # Pre-create the two output buckets (val + train) so structure exists
+    # even on early exit / kill.
+    for split in ("train", "val"):
+        for bucket in (EMPTY_BUCKET, UNCERTAIN_BUCKET):
+            (OUT_ROOT / split / bucket).mkdir(parents=True, exist_ok=True)
 
-    # Dedup state per bucket:
-    #   character buckets → pHash list (hamming <= threshold = drop), cap N=30
-    #   __empty__, __uncertain__ → MD5 set (exact match = drop, no cap)
-    char_phashes: dict[str, list[imagehash.ImageHash]] = {}
-    strict_md5: dict[str, set[str]] = {EMPTY_BUCKET: set(), UNCERTAIN_BUCKET: set()}
+    # Dedup state (global, not per-split — same image shouldn't appear
+    # twice across train + val either).
+    empty_md5_seen: set[str] = set()
+    uncertain_phash_seen: list[imagehash.ImageHash] = []
 
+    kept_empty = 0
+    kept_uncertain = 0
+    dropped_empty = 0
+    dropped_uncertain = 0
     total_cells = 0
+
     for img_idx, img_path in enumerate(images):
         if (img_idx + 1) % 100 == 0:
-            print(f"  processing {img_idx + 1}/{len(images)}... "
-                  f"kept={sum(bucket_counts.values())} "
-                  f"dropped={sum(bucket_dropped.values())}")
+            print(
+                f"  {img_idx + 1}/{len(images)} imgs "
+                f"| empty kept {kept_empty} (drop {dropped_empty}) "
+                f"| uncertain kept {kept_uncertain} (drop {dropped_uncertain})"
+            )
         bgr = cv2.imread(str(img_path))
         if bgr is None:
             continue
         h, w = bgr.shape[:2]
-        run_tick = img_path.stem  # e.g. "run_20260516_234945_tick_0087"
+        run_tick = img_path.stem
         for si, ci, (nx1, ny1, nx2, ny2) in cell_regions:
             px1 = max(0, int(nx1 * w))
             py1 = max(0, int(ny1 * h))
@@ -172,66 +151,45 @@ def main() -> int:
                 continue
             total_cells += 1
 
-            # Bucket selection
             if is_empty_cell(roi):
-                bucket = EMPTY_BUCKET
-            else:
-                name, score = matcher.match_avatar(roi, candidates)
-                if name is not None and score >= STRONG_THRESHOLD:
-                    bucket = name
-                else:
-                    bucket = UNCERTAIN_BUCKET
-
-            # Dedup
-            if bucket in strict_md5:
-                # __empty__ / __uncertain__ — strict MD5 (user reviews)
                 key = md5_of(roi)
-                if key in strict_md5[bucket]:
-                    bucket_dropped[bucket] = bucket_dropped.get(bucket, 0) + 1
+                if key in empty_md5_seen:
+                    dropped_empty += 1
                     continue
-                strict_md5[bucket].add(key)
+                empty_md5_seen.add(key)
+                bucket = EMPTY_BUCKET
+                kept_empty += 1
             else:
-                # Character bucket — pHash hamming dedup + N=30 cap
-                kept_phashes = char_phashes.setdefault(bucket, [])
-                if len(kept_phashes) >= CLASS_MAX_PER_BUCKET:
-                    bucket_dropped[bucket] = bucket_dropped.get(bucket, 0) + 1
-                    continue
                 ph = phash_of(roi)
                 is_near_dup = any(
-                    (ph - kept_ph) <= PHASH_HAMMING_THRESHOLD
-                    for kept_ph in kept_phashes
+                    (ph - seen_ph) <= PHASH_HAMMING_THRESHOLD
+                    for seen_ph in uncertain_phash_seen
                 )
                 if is_near_dup:
-                    bucket_dropped[bucket] = bucket_dropped.get(bucket, 0) + 1
+                    dropped_uncertain += 1
                     continue
-                kept_phashes.append(ph)
+                uncertain_phash_seen.append(ph)
+                bucket = UNCERTAIN_BUCKET
+                kept_uncertain += 1
 
-            # Save
             split = "val" if rng.random() < VAL_RATIO else "train"
-            out_dir = OUT_ROOT / split / bucket
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"{run_tick}_s{si}_c{ci}.jpg"
+            out_path = OUT_ROOT / split / bucket / f"{run_tick}_s{si}_c{ci}.jpg"
             cv2.imwrite(str(out_path), roi)
-            bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
 
-    print("\n[output] bucket counts (after dedup):")
-    for name in sorted(bucket_counts, key=lambda b: -bucket_counts[b])[:30]:
-        dropped = bucket_dropped.get(name, 0)
-        print(f"  {bucket_counts[name]:5d} kept  {dropped:6d} dropped   {name}")
-    if len(bucket_counts) > 30:
-        print(f"  ... and {len(bucket_counts) - 30} more classes")
-    print(f"\n[done] {OUT_ROOT}")
+    print()
+    print(f"[done] {OUT_ROOT}")
     print(f"  total cells scanned   : {total_cells}")
-    print(f"  total cells kept      : {sum(bucket_counts.values())}")
-    print(f"  total cells dropped   : {sum(bucket_dropped.values())}")
-    print(f"  __empty__ kept        : {bucket_counts.get(EMPTY_BUCKET, 0)} "
-          f"(dropped {bucket_dropped.get(EMPTY_BUCKET, 0)})")
-    print(f"  __uncertain__ kept    : {bucket_counts.get(UNCERTAIN_BUCKET, 0)} "
-          f"(dropped {bucket_dropped.get(UNCERTAIN_BUCKET, 0)})")
-    print(f"  character classes     : "
-          f"{len([k for k in bucket_counts if k not in (EMPTY_BUCKET, UNCERTAIN_BUCKET)])}")
-    print(f"\nNext: review {OUT_ROOT}/train/{UNCERTAIN_BUCKET}/ (move into correct")
-    print(f"      class folder).  Then add a yolo-cls config to train_yolo26.py.")
+    print(f"  __empty__     kept    : {kept_empty}    (dropped {dropped_empty})")
+    print(f"  __uncertain__ kept    : {kept_uncertain}    (dropped {dropped_uncertain})")
+    print()
+    print("Next:")
+    print(f"  1. Open Windows Explorer at:")
+    print(f"       {OUT_ROOT / 'train' / UNCERTAIN_BUCKET}")
+    print(f"  2. Set view to Large Icons.  Create character subfolders")
+    print(f"     (Airi/, Wakamo/, ...) IN train/ and val/ siblings.")
+    print(f"  3. Multi-select + drag from {UNCERTAIN_BUCKET}/ into the right class.")
+    print(f"  4. When __uncertain__ is empty (or only weird edge-cases), say go.")
+    print(f"     We then train yolo26n-cls on the verified folder structure.")
     return 0
 
 
