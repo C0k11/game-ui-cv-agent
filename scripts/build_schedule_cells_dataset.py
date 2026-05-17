@@ -25,6 +25,7 @@ User workflow:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import shutil
@@ -33,6 +34,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
+import imagehash
 
 REPO = Path(__file__).resolve().parents[1]
 REGIONS_JSON = REPO / "data" / "schedule_avatar_regions.json"
@@ -51,6 +54,29 @@ SEED = 42
 # is a flat grey-pink with very low saturation.
 EMPTY_SAT_MAX = 20      # HSV S <= 20 means basically neutral grey
 EMPTY_VAL_MIN = 140     # V >= 140 means not a dark gap
+
+# Per-character class dedup cap.  Static UI: 30 cells per character is
+# plenty diversity for a 128px classifier (BA avatars are sprites that
+# render identically beyond the affinity number badge).
+CLASS_MAX_PER_BUCKET = 30
+# Perceptual-hash hamming distance threshold for treating two cells as
+# "the same avatar variant".  <= 2 catches affinity-number-only diffs
+# AND tiny JPEG edge bleed but lets through real visual changes (cafe
+# event uniform variants etc.).
+PHASH_HAMMING_THRESHOLD = 2
+# Strict MD5 dedup is applied to __empty__ and __uncertain__ buckets —
+# user is going to manually review those, no point keeping duplicates.
+
+
+def md5_of(roi_bgr: np.ndarray) -> str:
+    """Hash raw pixels (exact match required)."""
+    return hashlib.md5(roi_bgr.tobytes()).hexdigest()
+
+
+def phash_of(roi_bgr: np.ndarray) -> imagehash.ImageHash:
+    """Perceptual hash — robust to JPEG / small visual diffs."""
+    rgb = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2RGB)
+    return imagehash.phash(Image.fromarray(rgb))
 
 
 def load_strips() -> tuple[list[dict], int]:
@@ -115,10 +141,20 @@ def main() -> int:
     rng = random.Random(SEED)
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     bucket_counts: dict[str, int] = {}
+    bucket_dropped: dict[str, int] = {}
 
+    # Dedup state per bucket:
+    #   character buckets → pHash list (hamming <= threshold = drop), cap N=30
+    #   __empty__, __uncertain__ → MD5 set (exact match = drop, no cap)
+    char_phashes: dict[str, list[imagehash.ImageHash]] = {}
+    strict_md5: dict[str, set[str]] = {EMPTY_BUCKET: set(), UNCERTAIN_BUCKET: set()}
+
+    total_cells = 0
     for img_idx, img_path in enumerate(images):
-        if (img_idx + 1) % 50 == 0:
-            print(f"  processing {img_idx + 1}/{len(images)}...")
+        if (img_idx + 1) % 100 == 0:
+            print(f"  processing {img_idx + 1}/{len(images)}... "
+                  f"kept={sum(bucket_counts.values())} "
+                  f"dropped={sum(bucket_dropped.values())}")
         bgr = cv2.imread(str(img_path))
         if bgr is None:
             continue
@@ -134,7 +170,9 @@ def main() -> int:
             roi = bgr[py1:py2, px1:px2]
             if roi.size == 0:
                 continue
-            # First: is it empty?
+            total_cells += 1
+
+            # Bucket selection
             if is_empty_cell(roi):
                 bucket = EMPTY_BUCKET
             else:
@@ -143,6 +181,32 @@ def main() -> int:
                     bucket = name
                 else:
                     bucket = UNCERTAIN_BUCKET
+
+            # Dedup
+            if bucket in strict_md5:
+                # __empty__ / __uncertain__ — strict MD5 (user reviews)
+                key = md5_of(roi)
+                if key in strict_md5[bucket]:
+                    bucket_dropped[bucket] = bucket_dropped.get(bucket, 0) + 1
+                    continue
+                strict_md5[bucket].add(key)
+            else:
+                # Character bucket — pHash hamming dedup + N=30 cap
+                kept_phashes = char_phashes.setdefault(bucket, [])
+                if len(kept_phashes) >= CLASS_MAX_PER_BUCKET:
+                    bucket_dropped[bucket] = bucket_dropped.get(bucket, 0) + 1
+                    continue
+                ph = phash_of(roi)
+                is_near_dup = any(
+                    (ph - kept_ph) <= PHASH_HAMMING_THRESHOLD
+                    for kept_ph in kept_phashes
+                )
+                if is_near_dup:
+                    bucket_dropped[bucket] = bucket_dropped.get(bucket, 0) + 1
+                    continue
+                kept_phashes.append(ph)
+
+            # Save
             split = "val" if rng.random() < VAL_RATIO else "train"
             out_dir = OUT_ROOT / split / bucket
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -150,16 +214,21 @@ def main() -> int:
             cv2.imwrite(str(out_path), roi)
             bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
 
-    print("\n[output] bucket counts:")
-    for name in sorted(bucket_counts, key=lambda b: -bucket_counts[b])[:25]:
-        print(f"  {bucket_counts[name]:6d}  {name}")
-    if len(bucket_counts) > 25:
-        print(f"  ... and {len(bucket_counts) - 25} more classes")
+    print("\n[output] bucket counts (after dedup):")
+    for name in sorted(bucket_counts, key=lambda b: -bucket_counts[b])[:30]:
+        dropped = bucket_dropped.get(name, 0)
+        print(f"  {bucket_counts[name]:5d} kept  {dropped:6d} dropped   {name}")
+    if len(bucket_counts) > 30:
+        print(f"  ... and {len(bucket_counts) - 30} more classes")
     print(f"\n[done] {OUT_ROOT}")
-    print(f"  total cells classified: {sum(bucket_counts.values())}")
-    print(f"  __empty__ : {bucket_counts.get(EMPTY_BUCKET, 0)}")
-    print(f"  __uncertain__ : {bucket_counts.get(UNCERTAIN_BUCKET, 0)}")
-    print(f"  character classes : "
+    print(f"  total cells scanned   : {total_cells}")
+    print(f"  total cells kept      : {sum(bucket_counts.values())}")
+    print(f"  total cells dropped   : {sum(bucket_dropped.values())}")
+    print(f"  __empty__ kept        : {bucket_counts.get(EMPTY_BUCKET, 0)} "
+          f"(dropped {bucket_dropped.get(EMPTY_BUCKET, 0)})")
+    print(f"  __uncertain__ kept    : {bucket_counts.get(UNCERTAIN_BUCKET, 0)} "
+          f"(dropped {bucket_dropped.get(UNCERTAIN_BUCKET, 0)})")
+    print(f"  character classes     : "
           f"{len([k for k in bucket_counts if k not in (EMPTY_BUCKET, UNCERTAIN_BUCKET)])}")
     print(f"\nNext: review {OUT_ROOT}/train/{UNCERTAIN_BUCKET}/ (move into correct")
     print(f"      class folder).  Then add a yolo-cls config to train_yolo26.py.")
