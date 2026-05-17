@@ -141,9 +141,15 @@ def _get_ocr():
 
 _yolo_models = []   # list of (model, conf_threshold, model_tag) tuples
 _yolo_lock = None
-# Only two purpose-built models: battle character heads + cafe emoticon bubbles
+# Only two purpose-built models: battle character heads + cafe emoticon bubbles.
+# emoticon migrated to YOLO26n (2026-05-17) — same architecture family as the
+# previous v8n but NMS-free, 122 layers / 2.4M params / 5.2 GFLOPs.  Validation
+# on emoticon_v2 dataset: P=0.994 R=1.000 mAP50=0.995 mAP50-95=0.994, inference
+# 0.4ms/frame.  Drop-in replacement — same single class "Emoticon_Action".
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
-_YOLO_EMOTICON = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
+_YOLO_EMOTICON_V26 = Path(r"D:\Project\ml_cache\models\yolo\runs\emoticon_yolo26n\weights\best.pt")
+_YOLO_EMOTICON_V8_LEGACY = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
+_YOLO_EMOTICON = _YOLO_EMOTICON_V26 if _YOLO_EMOTICON_V26.exists() else _YOLO_EMOTICON_V8_LEGACY
 
 # Context-aware YOLO: controls which models run each tick.
 # Values: 'cafe' (emoticon only), 'battle' (battle_heads only),

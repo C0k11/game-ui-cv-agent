@@ -95,14 +95,27 @@ def write_dataset(images: list[Path], classes: list[str]) -> None:
     out_labels.mkdir(parents=True, exist_ok=True)
 
     print(f"copying {len(images)} overlay screenshots → {out_imgs}")
+    copied = 0
+    skipped_locked = 0
+    skipped_existing = 0
     for src in images:
         # Prefix with run dir name so same-tick numbers don't collide
         run_name = src.parent.name
         dst = out_imgs / f"{run_name}_{src.name}"
-        if not dst.exists():
+        if dst.exists():
+            skipped_existing += 1
+            continue
+        try:
             shutil.copy2(src, dst)
-            # Create empty label file (user will fill via labeller)
             (out_labels / f"{dst.stem}.txt").touch()
+            copied += 1
+        except PermissionError:
+            # Backend may be writing this tick file; skip and continue.
+            skipped_locked += 1
+            continue
+        except Exception as exc:
+            print(f"  copy failed for {src.name}: {exc}")
+    print(f"  copied:{copied} existing:{skipped_existing} locked-skip:{skipped_locked}")
     print(f"  -> {out_imgs}")
 
     # data.yaml with classes from 角色头像/
