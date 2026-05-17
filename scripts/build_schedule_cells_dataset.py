@@ -54,6 +54,22 @@ EMPTY_VAL_MIN = 140
 # <= 2 catches affinity-number-only diffs + JPEG noise.
 PHASH_HAMMING_THRESHOLD = 2
 
+# The strip coordinates in schedule_avatar_regions.json were drawn
+# against a specific window resolution.  Same-aspect-ratio screenshots
+# at different resolutions still translate via normalized coords IN
+# THEORY, but in practice BA renders the roster overlay at a near-
+# fixed PIXEL size — so on a 4K capture the overlay occupies a smaller
+# normalized region than on a 2243×1262 capture.  Same normalized
+# coords pull the wrong area on mismatched sizes (the affinity number
+# leaks in, or strip clips off the avatar).
+#
+# Strategy: read the trajectory run whose JPG dimensions match the
+# size the strips were drawn at (default: pick the size with the most
+# images in the raw pool, currently 3840×2160).  Filter images_raw to
+# matching dimensions only.  Other sizes go through a separate
+# fallback path (re-harvest with their own per-size strips).
+REFERENCE_SIZE_OVERRIDE: tuple[int, int] | None = None  # set via CLI --size W,H
+
 
 def md5_of(roi_bgr: np.ndarray) -> str:
     return hashlib.md5(roi_bgr.tobytes()).hexdigest()
@@ -93,7 +109,40 @@ def is_empty_cell(roi_bgr: np.ndarray) -> bool:
     return s_mean <= EMPTY_SAT_MAX and v_mean >= EMPTY_VAL_MIN
 
 
+def _read_size(path: Path) -> tuple[int, int] | None:
+    """Return (W, H) of a JPG without loading the full pixel array."""
+    try:
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return None
+
+
+def _dominant_size(images: list[Path]) -> tuple[int, int]:
+    """Most common (W, H) in the input pool."""
+    from collections import Counter
+    sizes = Counter()
+    for p in images:
+        s = _read_size(p)
+        if s:
+            sizes[s] += 1
+    if not sizes:
+        return (0, 0)
+    return sizes.most_common(1)[0][0]
+
+
 def main() -> int:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--size",
+        default="auto",
+        help="W,H to filter input images to (matches strip definition). "
+             "'auto' picks most common dimension; 'all' processes every "
+             "image regardless (may produce bad crops on mismatched sizes).",
+    )
+    args = ap.parse_args()
+
     strips, cpr = load_strips()
     cell_regions = [
         (si, ci, cell)
@@ -102,10 +151,29 @@ def main() -> int:
     ]
     print(f"[regions] {len(strips)} strips × {cpr} cells = {len(cell_regions)} cells/image")
 
-    images = sorted(IMAGES_RAW.glob("*.jpg"))
-    print(f"[input]  {len(images)} overlay screenshots from {IMAGES_RAW}")
-    if not images:
+    all_images = sorted(IMAGES_RAW.glob("*.jpg"))
+    print(f"[input]  {len(all_images)} overlay screenshots in pool")
+    if not all_images:
         print(f"  no input images — run build_schedule_yolo_dataset.py first")
+        return 1
+
+    # Size filtering
+    if args.size == "all":
+        images = all_images
+        target_size = None
+        print(f"[filter] --size=all : keeping every image (mismatch risk)")
+    else:
+        if args.size == "auto":
+            target_size = _dominant_size(all_images)
+            print(f"[filter] --size=auto : detected dominant size {target_size[0]}x{target_size[1]}")
+        else:
+            w, h = (int(x) for x in args.size.split(","))
+            target_size = (w, h)
+            print(f"[filter] --size={w}x{h} (explicit)")
+        images = [p for p in all_images if _read_size(p) == target_size]
+        print(f"[filter] kept {len(images)} of {len(all_images)} ({100*len(images)/len(all_images):.1f}%) matching target size")
+    if not images:
+        print("  no images match the size filter — re-harvest at the right resolution")
         return 1
 
     rng = random.Random(SEED)
