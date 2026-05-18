@@ -33,6 +33,19 @@ CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 RAW_IMAGES_DIR = REPO_ROOT / "data" / "raw_images"
 RAW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Trajectory ticks are valid annotation sources too — same JPGs the live
+# pipeline captured, perfect for labeling UI states caught in-the-wild.
+# Exposed as datasets with `traj/<run_dir>` prefix so the frontend can
+# distinguish them from raw_images recordings.
+TRAJECTORIES_DIR = REPO_ROOT / "data" / "trajectories"
+
+# Universal master class registry shared across ALL annotation datasets.
+# Single source of truth so adding 确认键 in one dataset makes it
+# available in every other dataset without re-typing.  Per-dataset
+# classes.txt files are kept in sync (copy of master) so YOLO training
+# remains compatible — see _ensure_dataset_migrated().
+MASTER_CLASSES_FILE = RAW_IMAGES_DIR / "_classes.txt"
+
 CHARACTERS_DIR = CAPTURES_DIR / "角色头像"
 CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2461,18 +2474,165 @@ def run_harvest_dataset(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ── Dataset & Label Editor APIs ──────────────────────────────────────────
 
 def _safe_dataset_path(name: str) -> Path:
-    name = os.path.basename((name or "").strip())
+    """Resolve dataset name to filesystem dir.
+
+    Two name styles:
+      - 'run_xxx' / arbitrary  → under data/raw_images/
+      - 'traj/run_xxx'         → under data/trajectories/<run_xxx>/
+    """
+    name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="dataset name required")
-    p = (RAW_IMAGES_DIR / name).resolve()
+    if name.startswith("traj/"):
+        sub = os.path.basename(name[len("traj/"):].strip())
+        if not sub:
+            raise HTTPException(status_code=400, detail="dataset name required")
+        p = (TRAJECTORIES_DIR / sub).resolve()
+        if not str(p).startswith(str(TRAJECTORIES_DIR.resolve())):
+            raise HTTPException(status_code=400, detail="invalid trajectory dataset")
+        return p
+    sub = os.path.basename(name)
+    p = (RAW_IMAGES_DIR / sub).resolve()
     if not str(p).startswith(str(RAW_IMAGES_DIR.resolve())):
         raise HTTPException(status_code=400, detail="invalid dataset name")
     return p
 
 
+# ── Universal class registry helpers ──────────────────────────────────────
+
+def _load_master_classes() -> List[str]:
+    """Read the universal class registry shared across all datasets."""
+    if not MASTER_CLASSES_FILE.exists():
+        return []
+    return [
+        c.strip()
+        for c in MASTER_CLASSES_FILE.read_text(encoding="utf-8").splitlines()
+        if c.strip()
+    ]
+
+
+def _save_master_classes(names: List[str]) -> None:
+    MASTER_CLASSES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MASTER_CLASSES_FILE.write_text("\n".join(names) + "\n", encoding="utf-8")
+
+
+def _master_append(name: str) -> int:
+    """Append a class to master if not already present.  Returns its index."""
+    master = _load_master_classes()
+    if name in master:
+        return master.index(name)
+    master.append(name)
+    _save_master_classes(master)
+    return len(master) - 1
+
+
+def _bootstrap_master_from_existing() -> None:
+    """One-time: if master is empty, seed it from the union of every
+    existing per-dataset classes.txt (preserving first-seen order).
+
+    Idempotent: only runs when master file is absent or empty.
+    """
+    if _load_master_classes():
+        return
+    union: List[str] = []
+    seen: set = set()
+    if RAW_IMAGES_DIR.is_dir():
+        for d in sorted(RAW_IMAGES_DIR.iterdir()):
+            if not d.is_dir():
+                continue
+            sub = d / "frames" if (d / "frames").is_dir() else d
+            cf = sub / "classes.txt"
+            if not cf.exists():
+                continue
+            for c in cf.read_text(encoding="utf-8").splitlines():
+                c = c.strip()
+                if c and c not in seen:
+                    seen.add(c)
+                    union.append(c)
+    if union:
+        _save_master_classes(union)
+
+
+def _ensure_dataset_migrated(img_dir: Path) -> None:
+    """Lazy-migrate one dataset to master indices.
+
+    Side effects:
+      - any local class not in master gets appended to master
+      - label .txt files get remapped from local indices → master indices
+      - dataset's classes.txt is overwritten with a copy of master
+        (YOLO training keeps reading classes.txt as before)
+
+    Idempotent: no-op if dataset's classes.txt already matches master.
+    """
+    _bootstrap_master_from_existing()
+    master = _load_master_classes()
+    cf = img_dir / "classes.txt"
+    local: List[str] = []
+    if cf.exists():
+        local = [c.strip() for c in cf.read_text(encoding="utf-8").splitlines() if c.strip()]
+
+    # Fast path: already on master
+    if local == master and cf.exists():
+        return
+
+    # Append any local-only classes to master
+    new_master = list(master)
+    changed_master = False
+    for c in local:
+        if c not in new_master:
+            new_master.append(c)
+            changed_master = True
+    if changed_master:
+        _save_master_classes(new_master)
+        master = new_master
+
+    # Build remap: local_idx -> master_idx
+    remap: Dict[int, int] = {}
+    for li, c in enumerate(local):
+        if c in master:
+            remap[li] = master.index(c)
+
+    # Rewrite label files only if local indices differ from master
+    needs_label_remap = any(remap.get(i, i) != i for i in range(len(local)))
+    if needs_label_remap:
+        for label_file in img_dir.glob("*.txt"):
+            if label_file.name == "classes.txt":
+                continue
+            try:
+                content = label_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if not content.strip():
+                continue
+            new_lines = []
+            file_changed = False
+            for line in content.splitlines():
+                parts = line.strip().split()
+                if not parts:
+                    new_lines.append(line)
+                    continue
+                try:
+                    old_cls = int(parts[0])
+                except (ValueError, IndexError):
+                    new_lines.append(line)
+                    continue
+                new_cls = remap.get(old_cls, old_cls)
+                if new_cls != old_cls:
+                    file_changed = True
+                    parts[0] = str(new_cls)
+                new_lines.append(" ".join(parts))
+            if file_changed:
+                label_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    # Sync local classes.txt to be a copy of master
+    img_dir.mkdir(parents=True, exist_ok=True)
+    cf.write_text("\n".join(master) + "\n", encoding="utf-8")
+
+
 @app.get("/api/v1/datasets")
 def list_datasets() -> Dict[str, Any]:
     datasets = []
+    # ── raw_images recordings ──
     for d in sorted(RAW_IMAGES_DIR.iterdir()):
         if not d.is_dir():
             continue
@@ -2483,7 +2643,26 @@ def list_datasets() -> Dict[str, Any]:
             jpg_count += len(list(frames_dir.glob("*.jpg")))
         if jpg_count == 0:
             continue
-        datasets.append({"name": d.name, "image_count": jpg_count})
+        datasets.append({
+            "name": d.name,
+            "image_count": jpg_count,
+            "kind": "raw",
+        })
+    # ── trajectory runs (live-captured BA frames; great for in-the-wild
+    # state labeling).  Prefix `traj/` distinguishes from raw_images
+    # entries and routes _safe_dataset_path() to TRAJECTORIES_DIR.
+    if TRAJECTORIES_DIR.is_dir():
+        for d in sorted(TRAJECTORIES_DIR.iterdir(), reverse=True):
+            if not d.is_dir() or not d.name.startswith("run_"):
+                continue
+            jpg_count = len(list(d.glob("tick_*.jpg")))
+            if jpg_count == 0:
+                continue
+            datasets.append({
+                "name": f"traj/{d.name}",
+                "image_count": jpg_count,
+                "kind": "traj",
+            })
     return {"datasets": datasets}
 
 
@@ -2492,14 +2671,17 @@ def list_dataset_images(dataset: str = Query(...)) -> Dict[str, Any]:
     d = _safe_dataset_path(dataset)
     if not d.exists():
         raise HTTPException(status_code=404, detail="dataset not found")
-    # Images may be in root or /frames subfolder
+    # Images may be in root or /frames subfolder.  Trajectory ticks live
+    # directly in the run dir; raw_images may use a 'frames' subfolder.
     img_dir = d / "frames" if (d / "frames").is_dir() else d
+    # Accept both raw_images naming (frame_*.jpg) and trajectory naming
+    # (tick_*.jpg / arbitrary).
     images = sorted([p.name for p in img_dir.glob("*.jpg")])
-    # Load classes
-    classes_file = img_dir / "classes.txt"
-    classes = []
-    if classes_file.exists():
-        classes = [c for c in classes_file.read_text(encoding="utf-8").strip().split("\n") if c.strip()]
+    # Lazy-migrate this dataset to master class indices.  Idempotent —
+    # no-op if already on master.  For brand-new trajectory dirs this
+    # also seeds classes.txt with the master copy on first access.
+    _ensure_dataset_migrated(img_dir)
+    classes = _load_master_classes()
     # Load labels per image
     items = []
     for img_name in images:
@@ -2561,20 +2743,31 @@ def save_dataset_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.post("/api/v1/datasets/add_class")
 def add_dataset_class(payload: Dict[str, Any]) -> Dict[str, Any]:
-    dataset = str(payload.get("dataset") or "")
+    """Append a class to the MASTER registry.
+
+    The new class is immediately available in every dataset, not just
+    the one this request originated from.  We also sync the originating
+    dataset's local classes.txt so the YOLO training pipeline keeps
+    seeing the full registry on its next read.
+    """
     new_name = str(payload.get("name") or "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="class name required")
-    d = _safe_dataset_path(dataset)
-    img_dir = d / "frames" if (d / "frames").is_dir() else d
-    classes_file = img_dir / "classes.txt"
-    existing = []
-    if classes_file.exists():
-        existing = [c for c in classes_file.read_text(encoding="utf-8").strip().split("\n") if c.strip()]
-    if new_name not in existing:
-        existing.append(new_name)
-        classes_file.write_text("\n".join(existing) + "\n", encoding="utf-8")
-    return {"ok": True, "id": len(existing) - 1}
+    idx = _master_append(new_name)
+    # Sync the originating dataset's classes.txt (and optionally others).
+    dataset = str(payload.get("dataset") or "")
+    if dataset:
+        try:
+            d = _safe_dataset_path(dataset)
+            img_dir = d / "frames" if (d / "frames").is_dir() else d
+            img_dir.mkdir(parents=True, exist_ok=True)
+            master = _load_master_classes()
+            (img_dir / "classes.txt").write_text(
+                "\n".join(master) + "\n", encoding="utf-8"
+            )
+        except HTTPException:
+            pass  # dataset name invalid → still ok, master got the class
+    return {"ok": True, "id": idx}
 
 
 @app.post("/api/v1/datasets/delete_image")

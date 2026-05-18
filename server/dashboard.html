@@ -414,12 +414,16 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   </div>
   <div class="annotate-layout">
     <div class="ann-sidebar">
-      <h4>Classes</h4>
+      <h4>Classes <span id="ann_classcount" style="color:var(--muted);font-weight:normal"></span></h4>
+      <div class="add-class-row">
+        <input type="text" id="ann_class_filter" placeholder="search classes..." oninput="annFilterClasses()" style="flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none"/>
+        <button class="btn btn-sm" onclick="$('ann_class_filter').value='';annFilterClasses()" style="padding:3px 6px" title="Clear filter">✕</button>
+      </div>
       <div class="add-class-row">
         <input type="text" id="ann_new_class" placeholder="new class..." onkeydown="if(event.key==='Enter')annAddClass()"/>
         <button class="btn btn-sm btn-success" onclick="annAddClass()" style="padding:3px 6px">+</button>
       </div>
-      <div id="ann_classlist"></div>
+      <div id="ann_classlist" style="max-height:38vh;overflow-y:auto"></div>
       <h4>Boxes <span id="ann_boxcount"></span></h4>
       <div id="ann_boxlist"></div>
       <h4 id="ann_ocr_header" style="display:none">OCR <span id="ann_ocrcount"></span></h4>
@@ -1228,7 +1232,20 @@ async function annLoadDatasets(){
     const ds=await api('/api/v1/datasets');
     const sel=$('ann_dataset');const cur=sel.value;
     sel.innerHTML='<option value="">Select dataset...</option>';
-    (ds.datasets||[]).forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;sel.appendChild(o);});
+    // Group: raw_images recordings first, then trajectory runs.
+    const items=(ds.datasets||[]);
+    const raw=items.filter(d=>d.kind!=='traj');
+    const traj=items.filter(d=>d.kind==='traj');
+    if(raw.length){
+      const og=document.createElement('optgroup');og.label='Recordings (raw_images)';
+      raw.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
+      sel.appendChild(og);
+    }
+    if(traj.length){
+      const og=document.createElement('optgroup');og.label='Trajectories (live ticks)';
+      traj.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name.replace(/^traj\//,'')} (${d.image_count})`;og.appendChild(o);});
+      sel.appendChild(og);
+    }
     if(cur)sel.value=cur;
   }catch(e){}
 }
@@ -1247,12 +1264,29 @@ async function annLoadDataset(){
 
 function annBuildClassList(){
   const el=$('ann_classlist');el.innerHTML='';
+  const filterEl=$('ann_class_filter');
+  const q=(filterEl?filterEl.value:'').trim().toLowerCase();
+  let shown=0;
   ANN.classes.forEach((name,i)=>{
+    // Filter: substring match on name OR exact match on index number.
+    // (The selected class always stays visible so the user doesn't
+    // accidentally lose track of it while filtering.)
+    if(q){
+      const idxMatch=String(i)===q;
+      const nameMatch=name.toLowerCase().includes(q);
+      const isSelected=(i===ANN.drawClass);
+      if(!idxMatch&&!nameMatch&&!isSelected)return;
+    }
+    shown++;
     const d=document.createElement('div');d.className='class-item'+(i===ANN.drawClass?' sel':'');
     d.innerHTML=`<div class="class-dot" style="background:${COLORS[i%COLORS.length]}"></div>${i}: ${name}`;
     d.onclick=()=>{ANN.drawClass=i;annBuildClassList();};el.appendChild(d);
   });
+  const cc=$('ann_classcount');
+  if(cc)cc.textContent=q?`(${shown}/${ANN.classes.length})`:`(${ANN.classes.length})`;
 }
+
+function annFilterClasses(){annBuildClassList();}
 function annBuildBoxList(){
   const el=$('ann_boxlist');el.innerHTML='';if(!ANN.data.length)return;
   const labels=ANN.data[ANN.idx].labels;$('ann_boxcount').textContent=`(${labels.length})`;
