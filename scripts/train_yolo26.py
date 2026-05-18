@@ -120,6 +120,26 @@ TRAIN_CONFIGS = {
         "batch": 64,
         "out_name": "avatar_cls_yolo26n",
     },
+    "avatar_cls_v2": {
+        # Combined-source classifier: ~250-class BA student recognition.
+        # Train sources (per class, when available):
+        #   1. Trajectory cafe-invite crops (29 classes, ~25 high-quality samples)
+        #   2. 角色头像 CG portrait face-crop + 4 augmentations
+        #   3. 角色头像_crop in-game style ref + 4 augmentations
+        # Val: 角色头像_crop_harvested_named (CN-named, mapped to EN, ~35 classes)
+        #
+        # v2 first attempt dropped trajectory data — regressed to 16% on traj val.
+        # This version keeps it (~25 trajectory + ~10 ref per class for 29 chars,
+        # ~10 ref-only per class for the other 220).  patience=80 because
+        # 250-class convergence is slower than 29-class.
+        "kind": "classify",
+        "data": REPO_ROOT / "data" / "yolo_datasets" / "avatar_cls_v2",
+        "epochs": 200,
+        "imgsz": 224,
+        "batch": 64,
+        "out_name": "avatar_cls_v2_yolo26n",
+        "patience": 80,
+    },
 }
 
 
@@ -173,7 +193,7 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         batch=cfg["batch"],
         device=0,
         workers=4,
-        patience=30,
+        patience=cfg.get("patience", 30),
         project=str(YOLO_ROOT / "runs"),
         name=cfg["out_name"],
         exist_ok=True,
