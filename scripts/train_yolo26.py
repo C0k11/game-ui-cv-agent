@@ -62,6 +62,19 @@ TRAIN_CONFIGS = {
         "batch": 16,
         "out_name": "expanded_yolo26n",
     },
+    "static_ui": {
+        # 141 UI-state classes harvested from labeling sessions 2026-05-18+.
+        # Built by scripts/build_static_ui_dataset.py from every labeled
+        # capture under data/raw_images/ (plus trajectory dirs with labels).
+        # Static UI: BA sprites are pixel-identical at deploy = training,
+        # so overfit by design — high epoch count, near-zero augmentation.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "static_ui_v1" / "data.yaml",
+        "epochs": 250,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "static_ui_yolo26n",
+    },
     "emoticon_v2": {
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "emoticon_v2" / "data.yaml",

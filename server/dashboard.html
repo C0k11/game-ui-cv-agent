@@ -115,8 +115,16 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
 
 /* ── Annotate page ── */
 .annotate-layout{display:flex;flex:1;gap:0;min-height:0;overflow:hidden}
-.ann-sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;padding:10px;flex-shrink:0;display:flex;flex-direction:column;gap:4px}
-.ann-sidebar h4{font-size:11px;color:var(--muted);text-transform:uppercase;margin:8px 0 4px;letter-spacing:.3px}
+/* Sidebar uses INNER scrolling per section so the class search + add box
+   stay visible no matter how many boxes the current image has.  Without
+   this, a single image with many boxes pushes the class list off-screen. */
+.ann-sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);padding:10px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;min-height:0;overflow:hidden}
+.ann-sidebar h4{font-size:11px;color:var(--muted);text-transform:uppercase;margin:8px 0 4px;letter-spacing:.3px;flex-shrink:0}
+.ann-sidebar > .add-class-row{flex-shrink:0}
+#ann_classlist{flex:1 1 0;min-height:80px;overflow-y:auto}
+#ann_boxlist{flex:1 1 0;min-height:60px;overflow-y:auto;max-height:30vh}
+#ann_minimap{flex-shrink:0}
+.ann-help{flex-shrink:0}
 .ann-canvas-area{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;background:#0a0a0a}
 .ann-canvas-area canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain;touch-action:none}
 .class-item{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid transparent}
@@ -423,7 +431,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
         <input type="text" id="ann_new_class" placeholder="new class..." onkeydown="if(event.key==='Enter')annAddClass()"/>
         <button class="btn btn-sm btn-success" onclick="annAddClass()" style="padding:3px 6px">+</button>
       </div>
-      <div id="ann_classlist" style="max-height:38vh;overflow-y:auto"></div>
+      <div id="ann_classlist"></div>
       <h4>Boxes <span id="ann_boxcount"></span></h4>
       <div id="ann_boxlist"></div>
       <h4 id="ann_ocr_header" style="display:none">OCR <span id="ann_ocrcount"></span></h4>
