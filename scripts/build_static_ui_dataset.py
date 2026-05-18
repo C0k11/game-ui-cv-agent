@@ -125,6 +125,14 @@ def main() -> int:
     ap.add_argument("--val-ratio", type=float, default=VAL_RATIO)
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        help="Restrict to specific dataset names (under data/raw_images/ or "
+             "data/trajectories/).  Pass repeatedly for multiple.  Without "
+             "this flag, ALL labeled datasets are aggregated.",
+    )
     args = ap.parse_args()
 
     out_root = Path(args.out)
@@ -134,7 +142,17 @@ def main() -> int:
         return 1
     print(f"[master] {len(master)} classes")
 
-    pairs = collect_pairs(collect_label_dirs())
+    all_dirs = collect_label_dirs()
+    if args.only:
+        # Filter to user-specified datasets (matches by basename)
+        only_set = set(args.only)
+        filtered = [(d, tag) for d, tag in all_dirs if d.parent.name in only_set or d.name in only_set]
+        if not filtered:
+            print(f"[err] --only {args.only} matched 0 dirs (available: {[d.parent.name if d.name=='frames' else d.name for d, _ in all_dirs][:10]}...)")
+            return 1
+        print(f"[only] filtered {len(all_dirs)} -> {len(filtered)} label dirs")
+        all_dirs = filtered
+    pairs = collect_pairs(all_dirs)
     print(f"[scan] {len(pairs)} labeled (image, label) pairs across "
           f"{len(set(p[2] for p in pairs))} source datasets")
     if not pairs:

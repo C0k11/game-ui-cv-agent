@@ -75,6 +75,54 @@ TRAIN_CONFIGS = {
         "batch": 16,
         "out_name": "static_ui_yolo26n",
     },
+    "static_ui_v3": {
+        # imgsz=1920 retrain to fix small-icon regression (red dot / yellow
+        # dot / 青辉石 lost 30-50% mAP from v1→v2 because strict 5/18 data
+        # reduced per-class samples for small targets).
+        #
+        # At imgsz=1920, an 8px source icon becomes 6.8px in network input —
+        # right at P3 stride=8 detection floor.  At v2's 960 it was 3.4px,
+        # below detection minimum.  batch=8 because VRAM scales (imgsz/960)².
+        # Same data as v2 (only run_20260518_002646).
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "static_ui_v1" / "data.yaml",
+        "epochs": 250,
+        "imgsz": 1920,
+        "batch": 8,
+        "out_name": "static_ui_v3_yolo26n",
+        "patience": 50,
+    },
+    "head_detector": {
+        # Single-class 角色头像 detector.  Replaces sliding-window-with-
+        # classifier-confidence approach in schedule popup eval with a true
+        # YOLO bbox.  Training data:
+        #   - seed: 14 manual frames from pre-trim backup
+        #   - auto: trajectory schedule frames auto-labeled by avatar_cls v2
+        #     where top1 conf >= 0.85 (treats classifier as teacher)
+        # Single-class detection is much easier than multi-class; emoticon
+        # yolo26n got mAP 0.99 on similar task with 170 train.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "head_detector_v1" / "data.yaml",
+        "epochs": 200,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "head_detector_yolo26n",
+    },
+    "static_ui_v4": {
+        # v3 (imgsz=1920 batch=8) regressed top-bar classes (信用点/体力/青辉石)
+        # because halved batch size = halved per-epoch iterations for those
+        # already-sparse classes (5-7 train instances each).
+        # v4 attempt 1 (batch=12): cuDNN engine error — not OOM, FP16 algo
+        # heuristic failed at that specific tensor shape.
+        # v4 attempt 2 (batch=10): conservative middle ground vs v3's 8.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "static_ui_v1" / "data.yaml",
+        "epochs": 250,
+        "imgsz": 1920,
+        "batch": 10,
+        "out_name": "static_ui_v4_yolo26n",
+        "patience": 50,
+    },
     "emoticon_v2": {
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "emoticon_v2" / "data.yaml",
