@@ -93,6 +93,13 @@ def main() -> int:
     ap.add_argument("--cls-conf", type=float, default=0.5,
                     help="Avatar classifier confidence floor; tiles below this are dropped")
     ap.add_argument("--tta", action="store_true", help="Use test-time augmentation on classifier")
+    ap.add_argument(
+        "--mode",
+        default="geom",
+        choices=["geom", "head_det"],
+        help="geom = static_ui 房间区域 + precise 3-slot geometric slicing (current best, "
+             "head_detector v1 produced sloppy bboxes). head_det = use head_detector model.",
+    )
     args = ap.parse_args()
 
     bilingual = json.loads((REPO / "data" / "avatar_cls_names_bilingual.json").read_text(encoding="utf-8"))
@@ -113,13 +120,13 @@ def main() -> int:
     clf = YOLO(str(AVATAR_CLS_MODEL))
     clf_names = [clf.names[i] for i in sorted(clf.names.keys())]
     print(f"  avatar_cls: {len(clf_names)} classes")
-    # Head detector (optional) — if present, replaces sliding window
+    # Head detector (loaded only if --mode head_det)
     head_det = None
-    if HEAD_DETECTOR_MODEL.is_file():
+    if args.mode == "head_det" and HEAD_DETECTOR_MODEL.is_file():
         head_det = YOLO(str(HEAD_DETECTOR_MODEL))
         print(f"  head_detector: loaded ({HEAD_DETECTOR_MODEL.name})")
     else:
-        print(f"  head_detector: NOT FOUND — falling back to sliding window")
+        print(f"  mode: GEOMETRIC SLOT SLICING (static_ui 房间区域 → 3 precise cells)")
 
     # 房间区域 卡片下半部分是头像行，再等分 3 个 cell
     AVATAR_STRIP_Y_FRAC = (0.55, 1.0)  # bottom 45% of room card
@@ -206,7 +213,7 @@ th {{ background:#1a1d24; color:#aaa; font-size:11px; text-transform:uppercase }
             cv2.rectangle(annotated, (rx1, ry1), (rx2, ry2), (255, 200, 0), 2)
             cv2.putText(annotated, f'R{ri}', (rx1, ry1-6), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 200, 0), 2)
 
-        # ── PATH A: head detector ──
+        # ── PATH A: head detector (only when --mode head_det) ──
         if head_det is not None:
             hd_results = head_det(img, conf=0.25, verbose=False)[0]
             for hi, b in enumerate(hd_results.boxes):
@@ -214,7 +221,6 @@ th {{ background:#1a1d24; color:#aaa; font-size:11px; text-transform:uppercase }
                 crop = img[fy1:fy2, fx1:fx2]
                 if crop.size == 0:
                     continue
-                # Find which room (if any) this head is in
                 head_cx = (fx1+fx2)/2
                 head_cy = (fy1+fy2)/2
                 ri_assigned = -1
@@ -222,20 +228,63 @@ th {{ background:#1a1d24; color:#aaa; font-size:11px; text-transform:uppercase }
                     if rx1 <= head_cx <= rx2 and ry1 <= head_cy <= ry2:
                         ri_assigned = ri
                         break
-                # Classify with avatar_cls
                 r2 = clf.predict(crop, verbose=False, imgsz=224, augment=args.tta)[0]
                 probs = r2.probs.data.cpu().numpy()
                 top1_idx = int(np.argmax(probs))
                 top1_name = clf_names[top1_idx]
                 top1_conf = float(probs[top1_idx])
-                # Draw the head bbox (cyan = head detector)
                 cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), (255, 255, 0), 2)
                 cx_n = head_cx / w
                 cy_n = head_cy / h
                 head_crops.append((crop, cx_n, cy_n, ri_assigned, hi, float(b.conf[0]),
                                    top1_name, top1_conf, probs))
+        elif args.mode == "geom":
+            # ── PATH B (default): PRECISE geometric slicing ──
+            # Within each detected 房间区域 (room card), the avatar strip lives
+            # at bottom 30-45% of card height.  Slice strip into 3 even cells,
+            # crop a SQUARE centered on each cell (side = strip height).
+            # Empty slots → avatar_cls returns low conf → we drop them.
+            STRIP_TOP = 0.55   # strip starts at 55% down the card
+            STRIP_BOT = 1.00   # strip ends at card bottom
+            for ri, ((rx1, ry1, rx2, ry2), rconf) in enumerate(rooms):
+                rx1i, ry1i, rx2i, ry2i = int(rx1), int(ry1), int(rx2), int(ry2)
+                rh = ry2i - ry1i
+                rw = rx2i - rx1i
+                sy1 = ry1i + int(STRIP_TOP * rh)
+                sy2 = ry1i + int(STRIP_BOT * rh)
+                strip_h = sy2 - sy1
+                if strip_h < 20:
+                    continue
+                # 3 even slots horizontally
+                cell_w_full = rw / 3.0
+                side = min(int(cell_w_full), strip_h)  # square crop
+                for ci in range(3):
+                    cell_cx = rx1i + int((ci + 0.5) * cell_w_full)
+                    cell_cy = sy1 + strip_h // 2
+                    fx1 = cell_cx - side // 2
+                    fy1 = cell_cy - side // 2
+                    fx2 = fx1 + side
+                    fy2 = fy1 + side
+                    crop = img[max(0, fy1):min(h, fy2), max(0, fx1):min(w, fx2)]
+                    if crop.size == 0:
+                        continue
+                    r2 = clf.predict(crop, verbose=False, imgsz=224, augment=args.tta)[0]
+                    probs = r2.probs.data.cpu().numpy()
+                    top1_idx = int(np.argmax(probs))
+                    top1_conf = float(probs[top1_idx])
+                    top1_name = clf_names[top1_idx]
+                    # Skip empty slots: low avatar_cls conf means no avatar there
+                    if top1_conf < args.cls_conf:
+                        # Draw light gray placeholder
+                        cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), (120, 120, 120), 1)
+                        continue
+                    cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), (0, 255, 0), 2)
+                    cx_n = (fx1+fx2)/2/w
+                    cy_n = (fy1+fy2)/2/h
+                    head_crops.append((crop, cx_n, cy_n, ri, ci, rconf,
+                                       top1_name, top1_conf, probs))
         else:
-            # ── PATH B: fallback sliding window ──
+            # ── PATH C: legacy sliding window (kept for reference) ──
             for ri, ((rx1, ry1, rx2, ry2), rconf) in enumerate(rooms):
                 rx1, ry1, rx2, ry2 = int(rx1), int(ry1), int(rx2), int(ry2)
                 rh = ry2 - ry1

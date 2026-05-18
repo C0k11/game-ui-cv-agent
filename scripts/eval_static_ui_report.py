@@ -36,6 +36,7 @@ REPO = Path(__file__).resolve().parents[1]
 MODELS = {
     "v2": Path(r"D:\Project\ml_cache\models\yolo\runs\static_ui_yolo26n\weights\best.pt"),
     "v3": Path(r"D:\Project\ml_cache\models\yolo\runs\static_ui_v3_yolo26n\weights\best.pt"),
+    "v4": Path(r"D:\Project\ml_cache\models\yolo\runs\static_ui_v4_yolo26n\weights\best.pt"),
 }
 DATA_YAML = Path(r"D:\Project\ml_cache\models\yolo\dataset\static_ui_v1\data.yaml")
 
