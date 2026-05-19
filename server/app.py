@@ -2632,21 +2632,25 @@ def _ensure_dataset_migrated(img_dir: Path) -> None:
 @app.get("/api/v1/datasets")
 def list_datasets() -> Dict[str, Any]:
     datasets = []
-    # ── raw_images recordings ──
+    # ── raw_images recordings + val pools ──
+    # Naming convention:
+    #   run_<timestamp>/   → training data (kind="raw")
+    #   _val_<purpose>/    → dedicated validation pool (kind="val")
+    #                        Build scripts route these 100% to dataset val/.
     for d in sorted(RAW_IMAGES_DIR.iterdir()):
         if not d.is_dir():
             continue
-        # Count jpg files (may be in root or /frames subfolder)
         jpg_count = len(list(d.glob("*.jpg")))
         frames_dir = d / "frames"
         if frames_dir.is_dir():
             jpg_count += len(list(frames_dir.glob("*.jpg")))
         if jpg_count == 0:
             continue
+        kind = "val" if d.name.startswith("_val_") else "raw"
         datasets.append({
             "name": d.name,
             "image_count": jpg_count,
-            "kind": "raw",
+            "kind": kind,
         })
     # ── trajectory runs (live-captured BA frames; great for in-the-wild
     # state labeling).  Prefix `traj/` distinguishes from raw_images
@@ -3071,10 +3075,16 @@ def _capture_worker(dataset_name: str, interval: float, window_title: str):
             _CAPTURE_RUNNING = False
             return
 
+        # dataset_name may include a path separator for val pools
+        # (e.g., "_val_fused/frames"); construct the dir relative to RAW_IMAGES.
         out_dir = RAW_IMAGES_DIR / dataset_name
         out_dir.mkdir(parents=True, exist_ok=True)
         _CAPTURE_STATUS["dataset"] = dataset_name
         _CAPTURE_STATUS["error"] = ""
+
+        # Find next available index when appending to existing val pool dir
+        existing = list(out_dir.glob("frame_*.jpg")) + list(out_dir.glob("val_*.jpg"))
+        start_idx = len(existing)
 
         count = 0
         while _CAPTURE_RUNNING:
@@ -3085,7 +3095,7 @@ def _capture_worker(dataset_name: str, interval: float, window_title: str):
                 region = (rc.left, rc.top, rc.right, rc.bottom)
                 frame = camera.grab(region=region)
                 if frame is not None:
-                    fp = out_dir / f"frame_{count:06d}.jpg"
+                    fp = out_dir / f"frame_{start_idx + count:06d}.jpg"
                     cv2.imwrite(str(fp), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
                     count += 1
                     _CAPTURE_STATUS["frames"] = count
@@ -3103,16 +3113,35 @@ def _capture_worker(dataset_name: str, interval: float, window_title: str):
 
 @app.post("/api/v1/capture/start")
 def capture_start(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Start screen capture.
+
+    payload:
+      window_title: str  (default "MuMu")
+      interval:     float (default 0.5)
+      split:        "train" | "val"  (default "train")
+                    "val" routes frames to data/raw_images/_val_<purpose>/frames/
+                    which build scripts route 100% to validation, never train.
+      purpose:      "fused" | "static_ui" | str  (default "fused")
+                    Tags which model this val set evaluates.  Ignored if
+                    split=train.
+    """
     global _CAPTURE_THREAD, _CAPTURE_RUNNING, _CAPTURE_STATUS
     with _CAPTURE_LOCK:
         if _CAPTURE_RUNNING:
             return {"ok": False, "error": "already running", "status": _CAPTURE_STATUS}
         interval = float(payload.get("interval", 0.5))
         window_title = str(payload.get("window_title", "MuMu"))
+        split = str(payload.get("split", "train")).strip().lower()
+        purpose = str(payload.get("purpose", "fused")).strip().lower() or "fused"
         from datetime import datetime
-        ds_name = "run_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        if split == "val":
+            # Append to existing val pool; no timestamp suffix
+            ds_name = f"_val_{purpose}/frames"
+        else:
+            ds_name = "run_" + datetime.now().strftime("%Y%m%d_%H%M%S")
         _CAPTURE_RUNNING = True
-        _CAPTURE_STATUS = {"running": True, "frames": 0, "dataset": ds_name, "error": ""}
+        _CAPTURE_STATUS = {"running": True, "frames": 0, "dataset": ds_name,
+                           "split": split, "error": ""}
         _CAPTURE_THREAD = threading.Thread(
             target=_capture_worker,
             args=(ds_name, interval, window_title),

@@ -42,12 +42,18 @@ VAL_RATIO = 0.20
 SEED = 42
 
 
-def collect_label_dirs() -> List[Tuple[Path, str]]:
-    """Yield (label_dir, dataset_tag) for every dir potentially containing labels."""
+def collect_label_dirs(exclude_val_pool: bool = True) -> List[Tuple[Path, str]]:
+    """Yield (label_dir, dataset_tag) for every dir potentially containing labels.
+
+    By default, skips `_val_*` dirs (validation pools) — those are handled
+    separately by collect_val_pool_dirs() so they don't bleed into train.
+    """
     out: List[Tuple[Path, str]] = []
     if RAW.is_dir():
         for d in sorted(RAW.iterdir()):
             if not d.is_dir():
+                continue
+            if exclude_val_pool and d.name.startswith("_val_"):
                 continue
             sub = d / "frames" if (d / "frames").is_dir() else d
             out.append((sub, d.name))
@@ -58,6 +64,21 @@ def collect_label_dirs() -> List[Tuple[Path, str]]:
             # Only include trajectory dirs that have any non-classes label .txt
             if any(f for f in d.glob("*.txt") if f.name != "classes.txt"):
                 out.append((d, f"traj_{d.name}"))
+
+
+def collect_val_pool_dirs() -> List[Tuple[Path, str]]:
+    """Return label dirs from data/raw_images/_val_static_ui/frames/.
+
+    These are held-out frames the user labeled specifically for static_ui
+    validation — they go 100% to val, never to train.  Returns empty list
+    if no such pool exists.
+    """
+    out: List[Tuple[Path, str]] = []
+    pool = RAW / "_val_static_ui" / "frames"
+    if pool.is_dir():
+        if any(f for f in pool.glob("*.txt") if f.name != "classes.txt"):
+            out.append((pool, "_val_static_ui"))
+    return out
     return out
 
 
@@ -142,9 +163,8 @@ def main() -> int:
         return 1
     print(f"[master] {len(master)} classes")
 
-    all_dirs = collect_label_dirs()
+    all_dirs = collect_label_dirs(exclude_val_pool=True)
     if args.only:
-        # Filter to user-specified datasets (matches by basename)
         only_set = set(args.only)
         filtered = [(d, tag) for d, tag in all_dirs if d.parent.name in only_set or d.name in only_set]
         if not filtered:
@@ -154,18 +174,59 @@ def main() -> int:
         all_dirs = filtered
     pairs = collect_pairs(all_dirs)
     print(f"[scan] {len(pairs)} labeled (image, label) pairs across "
-          f"{len(set(p[2] for p in pairs))} source datasets")
+          f"{len(set(p[2] for p in pairs))} source datasets (train pool)")
     if not pairs:
         print("[err] no labeled data found")
         return 1
 
-    # Shuffle + split
+    # Dedicated val pool detection — if user labeled _val_static_ui/frames/,
+    # use 100% of pairs for train and val_pool for val.
+    val_pool_dirs = collect_val_pool_dirs()
+    val_pool_pairs = collect_pairs(val_pool_dirs) if val_pool_dirs else []
+
     rng = random.Random(args.seed)
-    rng.shuffle(pairs)
-    n_val = max(1, int(len(pairs) * args.val_ratio))
-    val_pairs = pairs[:n_val]
-    train_pairs = pairs[n_val:]
-    print(f"[split] train {len(train_pairs)}  val {len(val_pairs)}")
+    if val_pool_pairs:
+        train_pairs = pairs
+        val_pairs = val_pool_pairs
+        print(f"[split] dedicated val: train {len(train_pairs)} (100% of recordings) "
+              f"/ val {len(val_pairs)} (held-out _val_static_ui pool)")
+    else:
+        # Fallback: class-stratified split (rare classes pinned to train)
+        class_to_frames: dict = {}
+        for i, (im, lf, _) in enumerate(pairs):
+            try:
+                raw_lines = lf.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                try:
+                    raw_lines = lf.read_text(encoding="utf-16").splitlines()
+                except Exception:
+                    raw_lines = []
+            seen = set()
+            for line in raw_lines:
+                parts = line.strip().split()
+                if parts and parts[0].lstrip("-").isdigit():
+                    seen.add(int(parts[0]))
+            for c in seen:
+                class_to_frames.setdefault(c, []).append(i)
+
+        must_train: set = set()
+        for c, frame_idxs in sorted(class_to_frames.items(), key=lambda kv: len(kv[1])):
+            if len(frame_idxs) <= 3:
+                must_train.update(frame_idxs)
+            else:
+                must_train.update(frame_idxs[:2])
+
+        remaining = [i for i in range(len(pairs)) if i not in must_train]
+        rng.shuffle(remaining)
+        n_val_target = max(1, int(len(pairs) * args.val_ratio))
+        n_val_actual = min(n_val_target, len(remaining))
+        val_idx = set(remaining[:n_val_actual])
+        train_idx = set(range(len(pairs))) - val_idx
+
+        train_pairs = [pairs[i] for i in train_idx]
+        val_pairs = [pairs[i] for i in val_idx]
+        print(f"[split] stratified fallback: train {len(train_pairs)} / val {len(val_pairs)} "
+              f"({len(class_to_frames)} classes; sparse classes pinned to train)")
 
     if args.dry_run:
         print("[dry-run] would write to:", out_root)

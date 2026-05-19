@@ -376,10 +376,25 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     <div class="form-row">
       <div class="form-group"><label>Window Title</label><input id="cap_window" type="text" value="MuMu"/></div>
       <div class="form-group"><label>Interval (sec)</label><input id="cap_interval" type="number" value="0.5" step="0.1" style="width:80px"/></div>
+      <div class="form-group">
+        <label>Split</label>
+        <select id="cap_split" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)">
+          <option value="train">Train (new run_*)</option>
+          <option value="val">Val (held-out pool)</option>
+        </select>
+      </div>
+      <div class="form-group" id="cap_purpose_wrap" style="display:none">
+        <label>Purpose</label>
+        <select id="cap_purpose" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)">
+          <option value="fused">Fused Avatar</option>
+          <option value="static_ui">Static UI</option>
+        </select>
+      </div>
       <button class="btn btn-success" id="btn_cap_start" style="align-self:flex-end">Start Capture</button>
       <button class="btn btn-danger" id="btn_cap_stop" style="align-self:flex-end">Stop</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px" id="cap_error"></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px" id="cap_dest_hint">→ run_&lt;timestamp&gt; (train data)</div>
   </div>
   <div class="card">
     <h3>Existing Datasets</h3>
@@ -1081,10 +1096,34 @@ async function refreshCapture(){
     });
   }catch(e){}
 }
+// Toggle Purpose dropdown + destination hint based on Split selection
+function updateCapDestHint(){
+  const split=$('cap_split').value;
+  const purposeWrap=$('cap_purpose_wrap');
+  const hint=$('cap_dest_hint');
+  if(split==='val'){
+    purposeWrap.style.display='';
+    const purpose=$('cap_purpose').value;
+    hint.textContent=`→ _val_${purpose}/frames/ (append to val pool — never used for training)`;
+    hint.style.color='#f97316';
+  }else{
+    purposeWrap.style.display='none';
+    hint.textContent=`→ run_<timestamp> (new training data)`;
+    hint.style.color='var(--muted)';
+  }
+}
+$('cap_split').onchange=updateCapDestHint;
+$('cap_purpose').onchange=updateCapDestHint;
+updateCapDestHint();
 $('btn_cap_start').onclick=async()=>{
   try{
     const r=await api('/api/v1/capture/start',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({window_title:$('cap_window').value,interval:parseFloat($('cap_interval').value)||0.5})});
+      body:JSON.stringify({
+        window_title:$('cap_window').value,
+        interval:parseFloat($('cap_interval').value)||0.5,
+        split:$('cap_split').value,
+        purpose:$('cap_purpose').value,
+      })});
     if(capTimer)clearInterval(capTimer);
     capTimer=setInterval(refreshCapture,500);
     refreshCapture();
@@ -1240,17 +1279,26 @@ async function annLoadDatasets(){
     const ds=await api('/api/v1/datasets');
     const sel=$('ann_dataset');const cur=sel.value;
     sel.innerHTML='<option value="">Select dataset...</option>';
-    // Group: raw_images recordings first, then trajectory runs.
+    // 3 groups in priority order:
+    //   1. Validation pools (kind="val", _val_* dirs)  — most important for ML quality
+    //   2. Recordings (kind="raw")                     — training data
+    //   3. Trajectories (kind="traj")                  — live ticks for in-the-wild labels
     const items=(ds.datasets||[]);
-    const raw=items.filter(d=>d.kind!=='traj');
+    const val=items.filter(d=>d.kind==='val');
+    const raw=items.filter(d=>d.kind==='raw');
     const traj=items.filter(d=>d.kind==='traj');
+    if(val.length){
+      const og=document.createElement('optgroup');og.label='⚖️ Validation Pools (held-out)';
+      val.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
+      sel.appendChild(og);
+    }
     if(raw.length){
-      const og=document.createElement('optgroup');og.label='Recordings (raw_images)';
+      const og=document.createElement('optgroup');og.label='📦 Recordings (training data)';
       raw.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
       sel.appendChild(og);
     }
     if(traj.length){
-      const og=document.createElement('optgroup');og.label='Trajectories (live ticks)';
+      const og=document.createElement('optgroup');og.label='🎬 Trajectories (live ticks)';
       traj.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name.replace(/^traj\//,'')} (${d.image_count})`;og.appendChild(o);});
       sel.appendChild(og);
     }

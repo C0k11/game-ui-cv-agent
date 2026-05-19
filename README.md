@@ -164,7 +164,10 @@ Intra-class NMS: merge same-class tracks with center_dist < 1.0
 | Model | File | Training data | Metric | Role |
 |-------|------|---------------|--------|------|
 | Battle heads | `battle_heads.pt` | 52 hand-labelled frames + augmentation | mAP50 = 0.995 | BattleOverlay |
-| Cafe head-pat bubble | `headpat.pt` | 1,808 cafe frames (HSV auto-labelling) | mAP50 = 0.96 | Template fallback |
+| Cafe head-pat bubble | `emoticon_yolo26n/best.pt` | 170 frames, YOLO26n, 1 class | mAP50 = 0.995 | Template fallback |
+| Static UI elements | `static_ui_v4_yolo26n/best.pt` | 109 frames, 143 classes (UI icons, room cards, popups) | mAP50 = 0.339 (sparse-class limited) | UI anchor (in progress) |
+| Avatar classifier v2 | `avatar_cls_v2_yolo26n/best.pt` | 3,295 crops, 267 classes, character-only classifier (no detection) | top1 = 95.91% on trajectory val | Used in current 2-stage Path-C; being replaced by fused detector |
+| Fused avatar detector | `fused_avatar_yolo26m/best.pt` (in training) | 335 manual frames (5 UI contexts) + 486 synthetic composites + 79 negatives, 237 classes | TBD | One-shot avatar locate + classify, replaces 2-stage |
 | OCR recogniser | `ba_rec.onnx` | Trajectory crops + synthesised text | vocabulary acc = 55.8% | Full pipeline |
 
 ---
@@ -240,11 +243,56 @@ The dashboard's Trajectories page replays historical runs. The Roster page autom
 
 ## Training and Labelling
 
+### Capture → Annotate → Build → Train (YOLO26 datasets)
+
+The dashboard's Capture page now selects the destination split via two
+dropdowns: **Split** (`Train` / `Val`) and **Purpose** (`Fused Avatar` /
+`Static UI`).  Captured frames route automatically:
+
+| Split | Destination | Used for |
+|-------|-------------|----------|
+| Train | `data/raw_images/run_<timestamp>/` | model training |
+| Val (Fused Avatar) | `data/raw_images/_val_fused/frames/` | held-out validation for fused avatar detector |
+| Val (Static UI) | `data/raw_images/_val_static_ui/frames/` | held-out validation for static UI detector |
+
+The Annotate page groups datasets accordingly: **⚖️ Validation Pools**,
+**📦 Recordings** (training data), and **🎬 Trajectories** (live ticks).
+Class labels are the same across train and val — only the directory
+location determines split membership.
+
+### Dataset build pipeline
+
+The build scripts read everything under `data/raw_images/` and emit a YOLO
+dataset under `D:/Project/ml_cache/models/yolo/dataset/`:
+
 ```powershell
-# Capture data with DXcam
+py scripts/build_fused_avatar_dataset.py     # detector for character avatars
+py scripts/build_static_ui_dataset.py        # detector for UI icons / regions
+py scripts/train_yolo26.py fused_avatar_26m  # train (config in train_yolo26.py)
+py scripts/train_yolo26.py static_ui         # train
+```
+
+Split logic in both build scripts:
+
+1. **Dedicated val pool (preferred)** — if `_val_<purpose>/frames/` exists
+   with labelled `.txt` files, 100% of `run_*` frames go to train and the
+   pool goes to val.  No samples are stolen from train.
+2. **Stratified fallback** — when no val pool exists, build does a
+   class-stratified split: rare classes (≤3 samples) are pinned to train so
+   the model can still learn them, and more common classes get split 80/20.
+3. **Auto-harvested negatives** — `find_negative_frames()` walks
+   `data/trajectories/` and picks frames from contexts known to contain
+   no character avatars (Mail / DailyTasks / CampaignSweep / Bounty enter /
+   etc.), writing them with empty `.txt` labels.  Build mixes ~80 of these
+   into train and ~20 into val automatically — no user labelling required.
+
+### Older training pipelines
+
+```powershell
+# Capture data with DXcam (CLI variant)
 py scripts/collect_data.py --interval 0.5
 
-# Cafe head-pat: HSV auto-labelling + training
+# Cafe head-pat: HSV auto-labelling + training (legacy emoticon flow)
 py scripts/auto_label_headpat_v3.py
 py scripts/train_headpat_yolo.py
 

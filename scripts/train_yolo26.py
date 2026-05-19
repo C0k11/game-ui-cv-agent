@@ -168,6 +168,39 @@ TRAIN_CONFIGS = {
         "batch": 64,
         "out_name": "avatar_cls_yolo26n",
     },
+    "fused_avatar_26m": {
+        # Fused multi-class avatar DETECTOR: simultaneous bbox + character ID
+        # in one model, replaces the current 2-stage (head_detector → avatar_cls).
+        # 250 classes is fine-grained — yolo26n's 2.4M params can't discriminate
+        # all characters reliably (~10k params/class).  yolo26m's ~20M params
+        # = ~80k params/class, much more discriminative capacity.
+        #
+        # Data: manual user labels across 5 UI contexts (MomoTalk/cafe/schedule/
+        # 学生/battle) + synthetic composites (角色头像_crop refs pasted onto
+        # real schedule popup backgrounds at static_ui-detected room slots).
+        # Target: ~13k samples across 250 classes ≈ 50/class average.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "fused_avatar_v1" / "data.yaml",
+        "base": "yolo26m.pt",
+        "epochs": 200,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "fused_avatar_yolo26m",
+        "patience": 60,
+    },
+    "fused_avatar_26x": {
+        # Upgrade option: when fused_avatar_26m converges and we want to
+        # squeeze the last 5-10% mAP.  ~90M params, slower training/inference.
+        # Only train this if 26m results show clear capacity ceiling.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "fused_avatar_v1" / "data.yaml",
+        "base": "yolo26x.pt",
+        "epochs": 200,
+        "imgsz": 960,
+        "batch": 8,   # x is ~5x bigger than m, halve batch
+        "out_name": "fused_avatar_yolo26x",
+        "patience": 60,
+    },
     "avatar_cls_v2": {
         # Combined-source classifier: ~250-class BA student recognition.
         # Train sources (per class, when available):
@@ -220,7 +253,13 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         print(f"  data missing: {data_arg}")
         return None
 
-    base = find_base_weight(kind)
+    # Per-config base weight override (e.g. "yolo26m.pt" / "yolo26x.pt").
+    # Bare name lets ultralytics auto-fetch if not in repo root.
+    base_override = cfg.get("base")
+    if base_override:
+        base = base_override
+    else:
+        base = find_base_weight(kind)
     print(f"\n==== TRAIN {config_name} ({kind}) ====")
     print(f"  base:    {base}")
     print(f"  data:    {data_arg}")
