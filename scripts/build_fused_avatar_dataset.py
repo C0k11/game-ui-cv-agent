@@ -32,7 +32,7 @@ import json
 import random
 import shutil
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -42,13 +42,29 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 RAW_IMAGES = REPO / "data" / "raw_images"
 TRAJECTORIES = REPO / "data" / "trajectories"
-CROP_DIR = REPO / "data" / "captures" / "角色头像_crop"
-CROP_HARVESTED = REPO / "data" / "captures" / "角色头像_crop_harvested_named"
+CROP_DIR = REPO / "data" / "captures" / "角色头像_crop"                  # 54×59 EN-named
+CROP_HARVESTED = REPO / "data" / "captures" / "角色头像_crop_harvested_named"  # 54×59 CN-named (from game OCR)
+BIG_REF_DIR = REPO / "data" / "captures" / "角色头像"                    # 404×456 EN-named (large)
 NAME_MAP_JSON = REPO / "data" / "student_name_map.json"
+HARVEST_NAME_MAP_JSON = REPO / "data" / "captures" / "harvest_name_map.json"  # additional 205 CN→EN mappings
+EXTENSION_NAME_MAP_JSON = REPO / "data" / "student_name_map_extension.json"  # manual BA char extensions
 MASTER_FILE = RAW_IMAGES / "_classes.txt"
 OUT_ROOT = Path(r"D:\Project\ml_cache\models\yolo\dataset\fused_avatar_v1")
 
+SYNTH_TEMPLATES_DIR = REPO / "data" / "synth_templates"
+
 STATIC_UI_MODEL = Path(r"D:\Project\ml_cache\models\yolo\runs\static_ui_v4_yolo26n\weights\best.pt")
+
+# Known costume / skin suffixes that distinguish character variants.
+# User's master uses 一花泳装, student_name_map uses 一花(泳装),
+# EN files use Ichika_(Swimsuit).  This list lets us translate
+# CN-without-parens → CN-with-parens → EN.
+COSTUME_SUFFIXES = (
+    "泳装", "正月", "体育服", "TERROR", "私服", "应援团", "乐团", "礼服",
+    "睡衣", "魔女", "武装", "战斗", "万圣节", "骑士", "女仆", "兔女郎",
+    "新年", "盛装", "婚纱", "圣诞", "运动", "和服", "侍女", "黑色",
+    "幼女", "应援", "学校", "婴儿", "美少女", "假面舞会",
+)
 
 # Master class layout (per 2026-05-18 trim):
 #   indices  0..142 : UI classes from 5/18 trim (房间区域, 弹窗叉叉, etc.)
@@ -58,8 +74,12 @@ MASTER_UI_BOUNDARY = 143
 
 VAL_RATIO = 0.20
 SEED = 42
-PER_CLASS_CAP = 80     # cap synthetic samples per character (prevent bias)
+PER_CLASS_CAP = 200    # cap synthetic samples per character (raised from 80 → 200
+                       # to allow more position/scale variants per ref)
 SYNTH_PASTE_PROB = 0.70  # chance a slot gets a paste vs left empty
+USE_LARGE_REF_PROB = 0.40  # when both small & large refs are available, use
+                           # large (downsampled) this often — gives sharper
+                           # synthesized faces than upsampling small refs.
 NEGATIVE_TARGET = 120  # auto-harvest this many no-avatar frames as hard negatives
 
 # Skill+sub_state combos that reliably contain ZERO character avatars.
@@ -129,6 +149,166 @@ def load_master() -> List[str]:
         for c in MASTER_FILE.read_text(encoding="utf-8").splitlines()
         if c.strip()
     ]
+
+
+def cn_to_paren_form(cn_name: str) -> str:
+    """Convert master CN naming (一花泳装) to student_name_map key form (一花(泳装)).
+
+    Strategy: if name ends in a known costume suffix, insert parens before it.
+    Returns the original name if no suffix matches.
+    """
+    for sfx in COSTUME_SUFFIXES:
+        if cn_name.endswith(sfx) and len(cn_name) > len(sfx):
+            base = cn_name[:-len(sfx)]
+            return f"{base}({sfx})"
+    return cn_name
+
+
+def _make_trad_to_simp():
+    """Build a 繁→简 converter.  Prefers opencc if installed, else uses a
+    minimal mapping covering BA character-name chars."""
+    try:
+        from opencc import OpenCC
+        cc = OpenCC("t2s")
+        return cc.convert
+    except Exception:
+        pass
+    # Minimal fallback table — only covers chars commonly used in BA names
+    table = str.maketrans(
+        "亞愛陽麗靈葉節氣練結經顧讀東車馬見電華壽歲齋靜聲務態戰錢點舊親"
+        "離禮選讓雙邊團綠紅藍黃歡樂畫麼個兒後業髮豐夢鬧願鳥魚鶴鸚鵡鳳"
+        "黨貝鐵閉開韻響錄錯鄉鄰釋鑒鎖鍋釣銀銅錫鋼鎮醫斷證課註誌謝詢"
+        "詳話認說請誤識覽覺觀間聞閣閱陣陰階雜難雞風飛餘養饋騎驚體寧"
+        "豔靜變動連時間機億億兆勝點戀夢願節務態戰續總網絕辭",
+        "亚爱阳丽灵叶节气练结经顾读东车马见电华寿岁斋静声务态战钱点旧亲"
+        "离礼选让双边团绿红蓝黄欢乐画么个儿后业发丰梦闹愿鸟鱼鹤鹦鹉凤"
+        "党贝铁闭开韵响录错乡邻释鉴锁锅钓银铜锡钢镇医断证课注志谢询"
+        "详话认说请误识览觉观间闻阁阅阵阴阶杂难鸡风飞余养馈骑惊体宁"
+        "艳静变动连时间机亿亿兆胜点恋梦愿节务态战续总网绝辞",
+    )
+    return lambda s: s.translate(table)
+
+
+_TRAD_TO_SIMP = _make_trad_to_simp()
+
+
+def build_cn_to_en_lookup() -> Dict[str, str]:
+    """Build a CN-master-name → EN-file-name table.
+
+    Combines THREE sources, with 繁→简 normalization so master 简体 labels
+    can match harvest_name_map's 繁体 keys:
+      1. student_name_map.json — 261 variant entries
+      2. harvest_name_map.json:renamed — 205 entries (mostly 繁体)
+      3. For each entry, generate variants:
+         a. paren-removed (both ASCII () and fullwidth （） handled)
+         b. simplified-Chinese form (亞伽里 → 亚伽里)
+    """
+    out: Dict[str, str] = {}
+
+    def ingest(raw_map):
+        for cn, en in raw_map.items():
+            if not isinstance(en, str) or not en.strip():
+                continue
+            forms = {cn, _TRAD_TO_SIMP(cn)}
+            extras = set()
+            for f in forms:
+                stripped = (f.replace("(", "").replace(")", "")
+                             .replace("（", "").replace("）", ""))
+                if stripped != f:
+                    extras.add(stripped)
+            forms |= extras
+            for f in forms:
+                out[f] = en
+
+    if NAME_MAP_JSON.exists():
+        try:
+            ingest(json.loads(NAME_MAP_JSON.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    if HARVEST_NAME_MAP_JSON.exists():
+        try:
+            harvest = json.loads(HARVEST_NAME_MAP_JSON.read_text(encoding="utf-8"))
+            renamed = harvest.get("renamed") if isinstance(harvest, dict) else None
+            if isinstance(renamed, dict):
+                ingest(renamed)
+        except Exception:
+            pass
+
+    # Manual extension map (covers BA chars missing from the auto-built maps —
+    # 亚留, 爱丽丝, 紫, 千秋, 律, 律 etc. — built by hand from EN file inventory)
+    if EXTENSION_NAME_MAP_JSON.exists():
+        try:
+            ingest(json.loads(EXTENSION_NAME_MAP_JSON.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+
+    return out
+
+
+def load_refs_multi_source(fused_names: List[str]) -> Dict[str, Dict[str, np.ndarray]]:
+    """Load 2 ref images per character (small + large) — EN-named Yostar refs only.
+
+    Sources (all clean official artwork, no game-screen harvested noise):
+      * BIG_REF_DIR/<EN>.png  (404×456) — primary, sharp downsample-friendly
+      * CROP_DIR/<EN>.png     (54×59)   — small variant, native game-icon size
+
+    CN-named harvested refs (角色头像_crop_harvested_named/) are deliberately
+    NOT used — they contain UI clutter (heart, star, lv text residue) and
+    compression noise from being cut from real game screenshots.
+
+    For each master CN char (一花泳装), name conversion tries 3 forms:
+      1. Direct lookup in student_name_map (exact CN match)
+      2. Paren form via heuristic (一花泳装 → 一花(泳装))
+      3. Best-effort base-name match (strip suffixes one by one)
+
+    Returns: { char_name: { "small": np.ndarray | None, "large": np.ndarray | None } }
+    """
+    cn_to_en = build_cn_to_en_lookup()
+
+    def resolve_en(cn_name: str) -> Optional[str]:
+        # Try direct, then paren form, then progressive base-name fallback
+        if cn_name in cn_to_en:
+            return cn_to_en[cn_name]
+        paren = cn_to_paren_form(cn_name)
+        if paren != cn_name and paren in cn_to_en:
+            return cn_to_en[paren]
+        # Last resort: if name has a suffix, try base name alone
+        # (helps when master has a variant not in map but base char is)
+        for sfx in COSTUME_SUFFIXES:
+            if cn_name.endswith(sfx) and len(cn_name) > len(sfx):
+                base = cn_name[:-len(sfx)]
+                if base in cn_to_en:
+                    return cn_to_en[base]
+        return None
+
+    out: Dict[str, Dict[str, np.ndarray]] = {}
+    counts = {"small_en": 0, "large_en": 0, "unresolved_name": 0}
+    for c in fused_names:
+        en = resolve_en(c)
+        if not en:
+            counts["unresolved_name"] += 1
+            continue
+        entry: Dict[str, np.ndarray] = {}
+        small_p = CROP_DIR / f"{en}.png"
+        if small_p.exists():
+            im = imread_u(small_p)
+            if im is not None:
+                entry["small"] = im
+                counts["small_en"] += 1
+        big_p = BIG_REF_DIR / f"{en}.png"
+        if big_p.exists():
+            im = imread_u(big_p)
+            if im is not None:
+                entry["large"] = im
+                counts["large_en"] += 1
+        if entry:
+            out[c] = entry
+    print(f"[refs] EN-only mode (CN-harvested disabled)")
+    print(f"[refs] small (54×59):  {counts['small_en']}")
+    print(f"[refs] large (404×456): {counts['large_en']}")
+    print(f"[refs] name unresolved: {counts['unresolved_name']} / {len(fused_names)}")
+    print(f"[refs] unique chars covered: {len(out)}/{len(fused_names)}")
+    return out
 
 
 def load_character_names() -> List[str]:
@@ -307,6 +487,109 @@ def find_schedule_popup_bg_frames(limit: int) -> List[Path]:
     return out
 
 
+def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
+    """Adversarial augmentation (Gemini Path B): overlay random UI elements.
+
+    Trains the classifier to IGNORE Lv text / star / weapon icon / heart icon
+    / alpha-dim overlay — visual noise that appears in real game contexts
+    (cafe / schedule / student list / arena squad) but is NOT part of the
+    character identity.  Without this, model overfits to "MomoTalk blue
+    frame" or similar context-specific scaffolding.
+
+    Each overlay applies with random probability.  Coordinates are relative
+    to ref_img dimensions so it works for both small (54×59) and large
+    (404×456) refs.
+    """
+    h, w = ref_img.shape[:2]
+    out = ref_img.copy()
+
+    # 50% — Lv text bottom-left or top-left  (real games show Lv1..Lv90 or MAX)
+    if random.random() < 0.50:
+        lv = random.randint(1, 90)
+        text = f"Lv.{lv}" if random.random() < 0.75 else "MAX"
+        font_scale = max(0.30, min(0.55, w / 100.0))
+        x = random.choice([2, w - 35])
+        y = random.choice([int(h * 0.28), h - 5])
+        # White text with black outline for visibility
+        cv2.putText(out, text, (x, y), cv2.FONT_HERSHEY_DUPLEX,
+                    font_scale, (0, 0, 0), 2)
+        cv2.putText(out, text, (x, y), cv2.FONT_HERSHEY_DUPLEX,
+                    font_scale, (255, 255, 255), 1)
+
+    # 35% — Star (top-left)
+    if random.random() < 0.35:
+        cx = max(6, min(w - 6, random.randint(5, 12)))
+        cy = max(6, min(h - 6, random.randint(5, 12)))
+        r = max(3, w // 12)
+        cv2.circle(out, (cx, cy), r, (0, 220, 255), -1)  # yellow disc (simulated star)
+        cv2.circle(out, (cx, cy), r, (0, 80, 120), 1)    # outline
+
+    # 40% — Weapon-class icon (bottom-right corner)
+    if random.random() < 0.40:
+        size = max(8, w // 6)
+        color = random.choice([
+            (0, 0, 255),     # red
+            (0, 165, 255),   # orange
+            (255, 128, 0),   # blue (BGR)
+            (255, 0, 255),   # magenta
+            (255, 255, 0),   # cyan
+        ])
+        x1 = max(0, w - size - 1)
+        y1 = max(0, h - size - 1)
+        cv2.rectangle(out, (x1, y1), (w - 1, h - 1), color, -1)
+
+    # 25% — Heart with number (bottom-right area, common in schedule popup)
+    if random.random() < 0.25:
+        # Pink heart blob
+        size = max(4, w // 14)
+        cx = w - size - 2
+        cy = max(size + 2, h - size - 4)
+        cv2.circle(out, (cx, cy), size, (180, 50, 230), -1)
+        # Tiny number nearby
+        num = str(random.randint(1, 99))
+        cv2.putText(out, num, (max(0, cx - 8), min(h - 2, cy + size + 3)),
+                    cv2.FONT_HERSHEY_DUPLEX, max(0.25, w / 220.0),
+                    (255, 255, 255), 1)
+
+    # 25% — Alpha-dim (simulates "not selected" or "cooling down" state)
+    if random.random() < 0.25:
+        alpha = random.uniform(0.55, 0.85)
+        out = np.clip(out.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
+
+    return out
+
+
+def apply_border_ablation(ref_img: np.ndarray) -> np.ndarray:
+    """Random border crop/cover — forces classifier to use AVATAR pixels,
+    not the UI-frame style (MomoTalk's blue ring, schedule's pink ring etc.)
+    that becomes a 'cheat code' if model relies on it.
+    """
+    h, w = ref_img.shape[:2]
+    if random.random() > 0.40:  # only 40% of refs get this
+        return ref_img
+    out = ref_img.copy()
+    border = max(2, random.randint(2, max(3, w // 18)))
+    sides = random.choice(["top", "bot", "left", "right", "all-thin", "all-thick"])
+    color = (random.randint(0, 255),
+             random.randint(0, 255),
+             random.randint(0, 255))
+    if sides == "all-thick":
+        b = max(3, border + 2)
+    elif sides == "all-thin":
+        b = border
+    else:
+        b = border
+    if sides in ("top", "all-thin", "all-thick"):
+        out[:b, :] = color
+    if sides in ("bot", "all-thin", "all-thick"):
+        out[h - b:, :] = color
+    if sides in ("left", "all-thin", "all-thick"):
+        out[:, :b] = color
+    if sides in ("right", "all-thin", "all-thick"):
+        out[:, w - b:] = color
+    return out
+
+
 def synth_paste_into_room(
     bg_img: np.ndarray,
     ref_img: np.ndarray,
@@ -349,14 +632,479 @@ def synth_paste_into_room(
     return (px1, py1, px2, py2)
 
 
+
+def classify_ctx_by_norm_boxes(boxes_norm):
+    """Classify what UI context a labeled frame represents, by bbox layout.
+
+    Used by cross-context synth to find non-schedule contexts (student list,
+    momotalk, battle squad) to swap refs into.
+    """
+    n = len(boxes_norm)
+    if n == 0:
+        return "empty"
+    sorted_y = sorted([b[1] for b in boxes_norm])
+    y_unique = []
+    for y in sorted_y:
+        if not y_unique or abs(y - y_unique[-1]) > 0.05:
+            y_unique.append(y)
+    n_rows = len(y_unique)
+    widths = sorted([b[2] for b in boxes_norm])
+    median_w = widths[len(widths) // 2]
+    if n_rows >= 5 and median_w < 0.05:
+        return "momotalk"
+    if median_w > 0.08 and 8 <= n <= 14 and n_rows <= 3:
+        return "student_list"
+    if median_w < 0.06 and n >= 6:
+        return "schedule"
+    if 2 <= n <= 6 and median_w > 0.06:
+        return "battle_squad"
+    return "other"
+
+
+def build_cross_context_synth(
+    manual_samples: List[Tuple[Path, List[str]]],
+    ref_bundle: Dict[str, Dict[str, np.ndarray]],
+    fused_idx_map: Dict[str, int],
+    available_chars: List[str],
+    target_per_class: int,
+    class_counts: Counter,
+) -> List[Tuple[np.ndarray, List[str], str]]:
+    """Generate cross-context synthetic composites.
+
+    Strategy: use USER'S OWN labeled frames as backgrounds.  For each existing
+    bbox in a manual frame, with 55% probability REPLACE the avatar with a
+    fresh random ref (with UI overlay + border ablation augmentation applied).
+    The rest of the frame UI scaffolding stays intact (MomoTalk blue ring,
+    student list card chrome, battle squad bar, etc.) — this teaches the
+    model that character ID is *independent* of UI context.
+
+    Per-class cap shared with the schedule-popup synth via class_counts
+    Counter (passed in by reference).
+    """
+    # Pre-parse: group frames by detected context
+    by_ctx: Dict[str, List] = defaultdict(list)
+    for jpg, label_lines in manual_samples:
+        boxes_pixel = []
+        boxes_norm = []
+        for line in label_lines:
+            parts = line.split()
+            if len(parts) < 5 or not parts[0].lstrip("-").isdigit():
+                continue
+            try:
+                cls = int(parts[0])
+                cx, cy, w, h = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+            except ValueError:
+                continue
+            boxes_norm.append((cx, cy, w, h))
+            boxes_pixel.append((cls, cx, cy, w, h))
+        if not boxes_pixel:
+            continue
+        ctx = classify_ctx_by_norm_boxes(boxes_norm)
+        if ctx in ("schedule", "other", "empty"):
+            continue  # schedule has its own dedicated synth pipeline
+        by_ctx[ctx].append((jpg, boxes_pixel))
+
+    print(f"[cross-ctx] bg frames by context: "
+          f"{ {k: len(v) for k, v in by_ctx.items()} }")
+
+    out: List[Tuple[np.ndarray, List[str], str]] = []
+    N_VARIANTS = {
+        "student_list": 5,
+        "momotalk": 3,
+        "battle_squad": 5,
+        "cafe_invite": 4,
+    }
+    REPLACE_PROB = 0.55  # per-bbox replace chance
+
+    for ctx, frames in by_ctx.items():
+        n_var = N_VARIANTS.get(ctx, 3)
+        ctx_count = 0
+        for jpg, boxes_pixel in frames:
+            bg = imread_u(jpg)
+            if bg is None:
+                continue
+            H, W = bg.shape[:2]
+            for vi in range(n_var):
+                composite = bg.copy()
+                new_label_strs: List[str] = []
+                for orig_cls, cx, cy, w, h in boxes_pixel:
+                    x1 = int((cx - w / 2) * W)
+                    y1 = int((cy - h / 2) * H)
+                    x2 = int((cx + w / 2) * W)
+                    y2 = int((cy + h / 2) * H)
+                    bw = x2 - x1
+                    bh = y2 - y1
+                    if bw < 16 or bh < 16:
+                        new_label_strs.append(f"{orig_cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+                        continue
+
+                    if random.random() < REPLACE_PROB:
+                        tries = 0
+                        new_char = None
+                        while tries < 12:
+                            cand = random.choice(available_chars)
+                            if class_counts[cand] < target_per_class:
+                                new_char = cand
+                                break
+                            tries += 1
+                        if new_char is not None:
+                            bundle = ref_bundle[new_char]
+                            if bundle.get("large") is not None and random.random() < USE_LARGE_REF_PROB:
+                                ref = bundle["large"]
+                            elif bundle.get("small") is not None:
+                                ref = bundle["small"]
+                            else:
+                                ref = bundle["large"]
+                            ref = ref.copy()
+                            ref = apply_ui_overlay_aug(ref)
+                            ref = apply_border_ablation(ref)
+                            try:
+                                ref_resized = cv2.resize(ref, (bw, bh), interpolation=cv2.INTER_AREA)
+                            except Exception:
+                                # fall back to keeping original
+                                new_label_strs.append(f"{orig_cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+                                continue
+                            # Slight brightness jitter
+                            bri = random.uniform(0.92, 1.08)
+                            ref_jit = np.clip(ref_resized.astype(np.float32) * bri, 0, 255).astype(np.uint8)
+                            composite[y1:y2, x1:x2] = ref_jit
+                            new_cls = fused_idx_map[new_char]
+                            new_label_strs.append(f"{new_cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+                            class_counts[new_char] += 1
+                            continue
+                    # Keep original char (no paste needed, bg already has it)
+                    new_label_strs.append(f"{orig_cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+
+                if new_label_strs:
+                    out.append((composite, new_label_strs, f"synth_{ctx}"))
+                    ctx_count += 1
+        print(f"[cross-ctx] {ctx}: {ctx_count} composites generated")
+
+    return out
+
+
+
+def build_template_driven_synth(
+    fused_idx_map,
+    ref_bundle,
+    available_chars,
+):
+    """Generate synth using user-configured dashboard templates.
+
+    Each template at data/synth_templates/<context>.json specifies:
+      - sample_image: bg frame (path relative to synth_templates/)
+      - slot_rects_norm: where to paste refs (normalized 0-1 coords)
+      - ref_transform: crop region of ref + shape mask + scale
+      - augmentation: UI overlay probs, border ablation, brightness jitter
+      - synth_count: how many composites to generate per template
+
+    Replaces the static_ui-detected schedule synth AND the cross-context
+    manual-frame-as-bg synth with a single user-controlled pipeline.
+    """
+    out = []
+    if not SYNTH_TEMPLATES_DIR.is_dir():
+        print(f"[tpl-synth] no templates dir at {SYNTH_TEMPLATES_DIR}, skipping")
+        return out
+    class_counts = Counter()
+    tpl_files = sorted(SYNTH_TEMPLATES_DIR.glob("*.json"))
+    if not tpl_files:
+        print("[tpl-synth] no template JSON files found, skipping")
+        return out
+
+    for tpl_path in tpl_files:
+        try:
+            template = json.loads(tpl_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"[tpl-synth] {tpl_path.name}: failed to read ({e})")
+            continue
+        ctx_name = template.get("context") or tpl_path.stem
+        slots_norm = template.get("slot_rects_norm") or []
+        if not slots_norm:
+            print(f"[tpl-synth] {ctx_name}: no slots configured, skipping")
+            continue
+        sample_rel = template.get("sample_image") or ""
+        sample_path = SYNTH_TEMPLATES_DIR / sample_rel
+        if not sample_path.exists():
+            print(f"[tpl-synth] {ctx_name}: sample image missing ({sample_path}), skipping")
+            continue
+        bg = imread_u(sample_path)
+        if bg is None:
+            print(f"[tpl-synth] {ctx_name}: bg decode failed, skipping")
+            continue
+        H, W = bg.shape[:2]
+
+        rt = template.get("ref_transform") or {}
+        crop_n = rt.get("crop_n") or {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0}
+        cx1 = float(crop_n.get("x1", 0.0)); cy1 = float(crop_n.get("y1", 0.0))
+        cx2 = float(crop_n.get("x2", 1.0)); cy2 = float(crop_n.get("y2", 1.0))
+        shape_kind = rt.get("shape", "square")
+        radius_px = int(rt.get("radius_px", 4) or 0)
+        scale_factor = float(rt.get("scale", 1.0))
+
+        aug = template.get("augmentation") or {}
+        ui_overlay_prob = float(aug.get("ui_overlay_prob", 0.5))
+        ui_comp = aug.get("ui_components") or {}
+        border_prob = float(aug.get("border_ablation_prob", 0.4))
+        bri_jit = aug.get("brightness_jitter") or [0.92, 1.08]
+
+        target_count = int(template.get("synth_count", 200) or 200)
+        n_emitted = 0
+
+        # ── Round-robin char picker (guarantees every char appears in this
+        # context before any char repeats): refill a shuffled pool when empty.
+        # This is per-context, so each context sees every char ≈ N times where
+        # N = (target_count × slots) / len(chars).  For schedule_popup (17 slots
+        # × 200 composites = 3400 picks / 252 chars) → 13 picks per char min.
+        ctx_char_pool: List[str] = []
+        ctx_per_char_count: Counter = Counter()
+        def _pick_char_balanced():
+            nonlocal ctx_char_pool
+            # Refill pool if empty (also respects global PER_CLASS_CAP)
+            for _ in range(3):  # at most 3 refills
+                if not ctx_char_pool:
+                    ctx_char_pool = [c for c in available_chars
+                                     if class_counts[c] < PER_CLASS_CAP]
+                    random.shuffle(ctx_char_pool)
+                if not ctx_char_pool:
+                    return None  # all chars hit global cap
+                cand = ctx_char_pool.pop()
+                if class_counts[cand] < PER_CLASS_CAP:
+                    return cand
+            return None
+
+        for variant_i in range(target_count):
+            composite = bg.copy()
+            label_lines = []
+            for slot in slots_norm:
+                x1p = int(slot["x1"] * W); y1p = int(slot["y1"] * H)
+                x2p = int(slot["x2"] * W); y2p = int(slot["y2"] * H)
+                sw = x2p - x1p; sh = y2p - y1p
+                if sw < 8 or sh < 8:
+                    continue
+
+                char_name = _pick_char_balanced()
+                if char_name is None:
+                    continue
+                ctx_per_char_count[char_name] += 1
+
+                bundle = ref_bundle[char_name]
+                if bundle.get("large") is not None:
+                    ref = bundle["large"]
+                elif bundle.get("small") is not None:
+                    ref = bundle["small"]
+                else:
+                    continue
+                ref = ref.copy()
+                if ref.ndim == 3 and ref.shape[2] == 4:
+                    ref = ref[:, :, :3]
+
+                rh, rw = ref.shape[:2]
+                rx1 = int(cx1 * rw); ry1 = int(cy1 * rh)
+                rx2 = int(cx2 * rw); ry2 = int(cy2 * rh)
+                if rx2 - rx1 >= 4 and ry2 - ry1 >= 4:
+                    ref = ref[ry1:ry2, rx1:rx2]
+
+                # NOTE: aug (UI overlay + border ablation) applied AFTER resize
+                # below — at slot pixel resolution so effects are visible at
+                # the scale model actually sees during inference.
+
+                # ── Compute slot AABB (rect: x1..x2; quad: polygon AABB) ──
+                quad = slot.get("quad")
+                quad_px = None
+                if quad and len(quad) == 4:
+                    try:
+                        quad_px = np.array(
+                            [[float(q["x"]) * W, float(q["y"]) * H] for q in quad],
+                            dtype=np.float32,
+                        )
+                        aabb_x1 = max(0, int(quad_px[:, 0].min()))
+                        aabb_y1 = max(0, int(quad_px[:, 1].min()))
+                        aabb_x2 = min(W, int(quad_px[:, 0].max()))
+                        aabb_y2 = min(H, int(quad_px[:, 1].max()))
+                    except Exception:
+                        quad_px = None
+                if quad_px is None:
+                    aabb_x1, aabb_y1 = x1p, y1p
+                    aabb_x2, aabb_y2 = x2p, y2p
+                aabb_w = aabb_x2 - aabb_x1; aabb_h = aabb_y2 - aabb_y1
+                if aabb_w < 8 or aabb_h < 8:
+                    continue
+
+                # Preserve ref aspect ratio (COVER: fill AABB, overflow clipped)
+                rh0, rw0 = ref.shape[:2]
+                if rh0 <= 0 or rw0 <= 0:
+                    continue
+                ref_ar = rw0 / rh0
+                max_w = max(4, int(aabb_w * scale_factor))
+                max_h = max(4, int(aabb_h * scale_factor))
+                slot_ar = max_w / max(max_h, 1)
+                if ref_ar > slot_ar:
+                    target_h = max_h; target_w = max(4, int(target_h * ref_ar))
+                else:
+                    target_w = max_w; target_h = max(4, int(target_w / ref_ar))
+                try:
+                    resized = cv2.resize(ref, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                except Exception:
+                    continue
+                bri = random.uniform(float(bri_jit[0]), float(bri_jit[1]))
+                resized = np.clip(resized.astype(np.float32) * bri, 0, 255).astype(np.uint8)
+
+                # ── Apply aug AFTER resize at slot pixel resolution ──
+                aug_positions = rt.get("aug_positions") or {}
+                if random.random() < ui_overlay_prob:
+                    resized = _apply_ui_overlay_per_template(resized, ui_comp, aug_positions)
+                if random.random() < border_prob:
+                    resized = apply_border_ablation(resized)
+
+                # Shape mask (circle/rounded_rect) on resized ref
+                ref_mask = None
+                if shape_kind == "circle":
+                    ref_mask = np.zeros((target_h, target_w), dtype=np.uint8)
+                    cv2.circle(ref_mask, (target_w // 2, target_h // 2),
+                               min(target_w, target_h) // 2, 255, -1)
+                elif shape_kind == "rounded_rect" and radius_px > 0:
+                    ref_mask = np.zeros((target_h, target_w), dtype=np.uint8)
+                    r = min(radius_px, target_h // 2, target_w // 2)
+                    cv2.rectangle(ref_mask, (r, 0), (target_w - r, target_h), 255, -1)
+                    cv2.rectangle(ref_mask, (0, r), (target_w, target_h - r), 255, -1)
+                    cv2.circle(ref_mask, (r, r), r, 255, -1)
+                    cv2.circle(ref_mask, (target_w - r, r), r, 255, -1)
+                    cv2.circle(ref_mask, (r, target_h - r), r, 255, -1)
+                    cv2.circle(ref_mask, (target_w - r, target_h - r), r, 255, -1)
+
+                # Center ref in AABB; clip overflow to AABB ∩ image bounds
+                ref_left = aabb_x1 + (aabb_w - target_w) // 2
+                ref_top  = aabb_y1 + (aabb_h - target_h) // 2
+                clip_x1 = max(0, aabb_x1, ref_left)
+                clip_y1 = max(0, aabb_y1, ref_top)
+                clip_x2 = min(W, aabb_x2, ref_left + target_w)
+                clip_y2 = min(H, aabb_y2, ref_top + target_h)
+                if clip_x2 - clip_x1 < 4 or clip_y2 - clip_y1 < 4:
+                    continue
+                sx1 = clip_x1 - ref_left; sy1 = clip_y1 - ref_top
+                sx2 = sx1 + (clip_x2 - clip_x1); sy2 = sy1 + (clip_y2 - clip_y1)
+                source_slice = resized[sy1:sy2, sx1:sx2]
+
+                if ref_mask is not None:
+                    mask_slice = ref_mask[sy1:sy2, sx1:sx2]
+                    bg_patch = composite[clip_y1:clip_y2, clip_x1:clip_x2].copy()
+                    for cc in range(3):
+                        bg_patch[..., cc] = np.where(mask_slice > 0, source_slice[..., cc], bg_patch[..., cc])
+                    composite[clip_y1:clip_y2, clip_x1:clip_x2] = bg_patch
+                else:
+                    composite[clip_y1:clip_y2, clip_x1:clip_x2] = source_slice
+
+                if quad_px is not None:
+                    poly_full = np.zeros((H, W), dtype=np.uint8)
+                    cv2.fillPoly(poly_full, [quad_px.astype(np.int32)], 255)
+                    bg_aabb = bg[aabb_y1:aabb_y2, aabb_x1:aabb_x2]
+                    local_poly = poly_full[aabb_y1:aabb_y2, aabb_x1:aabb_x2]
+                    patch = composite[aabb_y1:aabb_y2, aabb_x1:aabb_x2]
+                    patch[local_poly == 0] = bg_aabb[local_poly == 0]
+                    composite[aabb_y1:aabb_y2, aabb_x1:aabb_x2] = patch
+
+                # YOLO label = visible region (clip rect)
+                cx_n = (clip_x1 + clip_x2) / 2 / W
+                cy_n = (clip_y1 + clip_y2) / 2 / H
+                bw_n = (clip_x2 - clip_x1) / W
+                bh_n = (clip_y2 - clip_y1) / H
+                cls_idx = fused_idx_map[char_name]
+                label_lines.append(f"{cls_idx} {cx_n:.6f} {cy_n:.6f} {bw_n:.6f} {bh_n:.6f}")
+                class_counts[char_name] += 1
+
+            if label_lines:
+                out.append((composite, label_lines, f"synth_tpl_{ctx_name}"))
+                n_emitted += 1
+
+        # Per-context coverage stats: every char should appear at least N times
+        if ctx_per_char_count:
+            counts = [ctx_per_char_count[c] for c in available_chars]
+            n_zero = sum(1 for c in available_chars if ctx_per_char_count[c] == 0)
+            n_covered = sum(1 for c in available_chars if ctx_per_char_count[c] > 0)
+            print(f"[tpl-synth] {ctx_name}: emitted {n_emitted} composites "
+                  f"(target {target_count}, {len(slots_norm)} slots/image)")
+            print(f"[tpl-synth] {ctx_name} coverage: "
+                  f"min={min(counts)} max={max(counts)} avg={sum(counts)/len(counts):.1f} "
+                  f"· covered {n_covered}/{len(available_chars)} chars · {n_zero} zero")
+        else:
+            print(f"[tpl-synth] {ctx_name}: emitted {n_emitted} composites")
+
+    print(f"[tpl-synth] total {len(out)} composites across {len(tpl_files)} templates")
+    print(f"[tpl-synth] class coverage: {len([c for c in class_counts if class_counts[c] > 0])} unique chars")
+    return out
+
+
+def _apply_ui_overlay_per_template(ref_img, ui_components, aug_positions=None):
+    """Apply UI overlay aug with user-configured anchor positions.
+    `aug_positions` = {lv:{x,y}, star:{x,y}, weapon:{x,y}, heart:{x,y}}
+    where x/y are normalized 0-1 within the slot.  ±5% jitter added.
+    """
+    h, w = ref_img.shape[:2]
+    out = ref_img.copy()
+    AP = aug_positions or {}
+    def _jit(v): return max(0.0, min(1.0, v + random.uniform(-0.05, 0.05)))
+
+    if random.random() < float(ui_components.get("lv_text", 0.5)):
+        pos = AP.get("lv") or {"x": 0.05, "y": 0.15}
+        nx, ny = _jit(float(pos.get("x", 0.05))), _jit(float(pos.get("y", 0.15)))
+        lv = random.randint(1, 90)
+        text = f"Lv.{lv}" if random.random() < 0.75 else "MAX"
+        font_scale = max(0.35, min(0.65, w / 100.0))
+        tw = int(35 * font_scale); th = int(20 * font_scale)
+        x = max(2, min(w - tw - 2, int(nx * w) - tw // 2))
+        y = max(th, min(h - 2, int(ny * h) + th // 2))
+        cv2.putText(out, text, (x, y), cv2.FONT_HERSHEY_DUPLEX, font_scale, (0, 0, 0), 2)
+        cv2.putText(out, text, (x, y), cv2.FONT_HERSHEY_DUPLEX, font_scale, (255, 255, 255), 1)
+    if random.random() < float(ui_components.get("star", 0.3)):
+        pos = AP.get("star") or {"x": 0.10, "y": 0.10}
+        nx, ny = _jit(float(pos.get("x", 0.10))), _jit(float(pos.get("y", 0.10)))
+        r = max(4, w // 12)
+        cx = max(r + 1, min(w - r - 1, int(nx * w)))
+        cy = max(r + 1, min(h - r - 1, int(ny * h)))
+        cv2.circle(out, (cx, cy), r, (0, 220, 255), -1)
+        cv2.circle(out, (cx, cy), r, (0, 80, 120), 1)
+    if random.random() < float(ui_components.get("weapon_icon", 0.4)):
+        pos = AP.get("weapon") or {"x": 0.85, "y": 0.85}
+        nx, ny = _jit(float(pos.get("x", 0.85))), _jit(float(pos.get("y", 0.85)))
+        size = max(10, w // 6)
+        color = random.choice([(0, 0, 255), (0, 165, 255), (255, 128, 0),
+                               (255, 0, 255), (255, 255, 0)])
+        cx = max(size // 2, min(w - size // 2, int(nx * w)))
+        cy = max(size // 2, min(h - size // 2, int(ny * h)))
+        cv2.rectangle(out, (cx - size // 2, cy - size // 2),
+                      (cx + size // 2, cy + size // 2), color, -1)
+    if random.random() < float(ui_components.get("heart", 0.2)):
+        pos = AP.get("heart") or {"x": 0.85, "y": 0.85}
+        nx, ny = _jit(float(pos.get("x", 0.85))), _jit(float(pos.get("y", 0.85)))
+        size = max(6, w // 7)
+        cx = max(size + 1, min(w - size - 1, int(nx * w)))
+        cy = max(size + 1, min(h - size - 1, int(ny * h)))
+        cv2.circle(out, (cx, cy), size, (147, 20, 255), -1)
+        cv2.circle(out, (cx, cy), size, (255, 255, 255), 2)
+        num = str(random.randint(1, 99))
+        font_scale = max(0.35, w / 130.0)
+        cv2.putText(out, num, (max(0, cx - size + 1), min(h - 2, cy + 4)),
+                    cv2.FONT_HERSHEY_DUPLEX, font_scale, (255, 255, 255), 1)
+    if random.random() < float(ui_components.get("alpha_dim", 0.25)):
+        alpha = random.uniform(0.55, 0.85)
+        out = np.clip(out.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
+    return out
+
+
 def build_synthetic_samples(
     char_names: List[str],
     fused_idx_map: Dict[str, int],
     bg_frames: List[Path],
     refs: Dict[str, np.ndarray],
     target_per_class: int,
+    ref_bundle: Optional[Dict[str, Dict[str, np.ndarray]]] = None,
 ) -> List[Tuple[np.ndarray, List[str], str]]:
-    """Generate synthetic composites.  Returns list of (img, yolo_lines, tag)."""
+    """Generate synthetic composites.  Returns list of (img, yolo_lines, tag).
+
+    If ref_bundle is provided, each paste draws between bundle["small"] and
+    bundle["large"] according to USE_LARGE_REF_PROB — large refs give sharper
+    downsampled faces with less aliasing than 54×59 upscaled.
+    """
     from ultralytics import YOLO
 
     if not STATIC_UI_MODEL.is_file():
@@ -430,7 +1178,27 @@ def build_synthetic_samples(
                 if char_name is None:
                     # All chars at cap, skip
                     continue
-                ref = refs[char_name]
+                # Pick small or large ref per paste — large gives sharper
+                # downsample at slot size ~60×60, small is original.
+                if ref_bundle and char_name in ref_bundle:
+                    bundle = ref_bundle[char_name]
+                    if bundle.get("large") is not None and random.random() < USE_LARGE_REF_PROB:
+                        ref = bundle["large"]
+                    elif bundle.get("small") is not None:
+                        ref = bundle["small"]
+                    else:
+                        ref = bundle.get("large") or refs[char_name]
+                else:
+                    ref = refs[char_name]
+
+                # ── Gemini Path B: adversarial augmentation ──
+                # Apply UI overlay (Lv text / star / weapon / heart / dim)
+                # + border ablation BEFORE paste, so model sees realistic
+                # noise on top of the ref.
+                ref = ref.copy()
+                ref = apply_ui_overlay_aug(ref)
+                ref = apply_border_ablation(ref)
+
                 room_int = (int(rx1), int(ry1), int(rx2), int(ry2))
                 paste_box = synth_paste_into_room(composite, ref, room_int, slot)
                 if paste_box is None:
@@ -517,42 +1285,80 @@ def main() -> int:
     # ── 2. Synthetic samples ──
     synth_samples_data: List[Tuple[np.ndarray, List[str], str]] = []
     if not args.skip_synth and len(fused_names) > 0:
-        # Refs lookup strategy:
-        #   1. CROP_HARVESTED uses CN names directly → primary source (matches master)
-        #   2. CROP_DIR uses EN names → optional fallback via student_name_map
-        # User labels are CN, so CROP_HARVESTED is the natural fit.
+        # Multi-source ref loading: combines CN-named harvested mini-crops,
+        # EN-named mini-crops via student_name_map bridge, and EN-named LARGE
+        # 404×456 portraits.  Per-char each may have "small" and/or "large".
+        ref_bundle = load_refs_multi_source(fused_names)
+
+        # Collapse into flat refs dict for build_synthetic_samples().  Per
+        # paste we pick small or large according to USE_LARGE_REF_PROB.  The
+        # synth function downsamples to slot size, so large refs give sharper
+        # antialiased results.
         refs: Dict[str, np.ndarray] = {}
-        for c in fused_names:
-            ref_path = CROP_HARVESTED / f"{c}.png"
-            if ref_path.exists():
-                im = imread_u(ref_path)
-                if im is not None:
-                    refs[c] = im
-        print(f"[refs] {len(refs)} refs from CROP_HARVESTED (CN-named)")
+        for c, bundle in ref_bundle.items():
+            # Default to small if available, else large
+            chosen = bundle.get("small") if bundle.get("small") is not None else bundle.get("large")
+            if chosen is not None:
+                refs[c] = chosen
+        # Stash the bundle on the args namespace for downstream access
+        args._ref_bundle = ref_bundle
 
-        # Fallback: try EN-named via CN→EN map for chars not yet covered
-        missing = [c for c in fused_names if c not in refs]
-        if missing and NAME_MAP_JSON.exists():
-            cn_to_en = json.loads(NAME_MAP_JSON.read_text(encoding="utf-8"))
-            extra = 0
-            for c in missing:
-                en = cn_to_en.get(c)
-                if not en:
-                    continue
-                ref_path = CROP_DIR / f"{en}.png"
-                if ref_path.exists():
-                    im = imread_u(ref_path)
-                    if im is not None:
-                        refs[c] = im
-                        extra += 1
-            print(f"[refs] +{extra} more via CN→EN name map (still missing {len(fused_names) - len(refs)})")
+        available_chars = [c for c in fused_names if c in ref_bundle]
 
-        bg_frames = find_schedule_popup_bg_frames(args.synth_bg_limit)
-        print(f"[bg] found {len(bg_frames)} schedule popup backgrounds")
+        # ── Synth path selection ──
+        # If dashboard templates exist at data/synth_templates/*.json, use the
+        # user-configured template-driven pipeline (preferred).  Otherwise fall
+        # back to legacy static_ui-detect + cross-context manual-frame swap.
+        templates_dir = SYNTH_TEMPLATES_DIR
+        template_files = list(templates_dir.glob("*.json")) if templates_dir.is_dir() else []
+        # Only count a template as "usable" if it has slots configured + sample image
+        usable_templates = []
+        for tp in template_files:
+            try:
+                td = json.loads(tp.read_text(encoding="utf-8"))
+                if td.get("slot_rects_norm") and td.get("sample_image"):
+                    sp = templates_dir / td["sample_image"]
+                    if sp.exists():
+                        usable_templates.append(tp.stem)
+            except Exception:
+                pass
 
-        synth_samples_data = build_synthetic_samples(
-            fused_names, fused_idx_map, bg_frames, refs, args.per_class_cap
-        )
+        if usable_templates:
+            print(f"[synth-mode] using DASHBOARD TEMPLATES ({len(usable_templates)} usable): "
+                  f"{usable_templates}")
+            synth_samples_data = build_template_driven_synth(
+                fused_idx_map=fused_idx_map,
+                ref_bundle=ref_bundle,
+                available_chars=available_chars,
+            )
+        else:
+            print("[synth-mode] no dashboard templates → falling back to legacy "
+                  "(static_ui rooms + cross-context manual-frame swap)")
+            bg_frames = find_schedule_popup_bg_frames(args.synth_bg_limit)
+            print(f"[bg] found {len(bg_frames)} schedule popup backgrounds")
+            synth_samples_data = build_synthetic_samples(
+                fused_names, fused_idx_map, bg_frames, refs, args.per_class_cap,
+                ref_bundle=ref_bundle,
+            )
+            from collections import Counter as _Counter
+            shared_counts = _Counter()
+            for _, lines, _ in synth_samples_data:
+                for line in lines:
+                    p = line.split()
+                    if p and p[0].isdigit():
+                        idx = int(p[0])
+                        if 0 <= idx < len(fused_names):
+                            shared_counts[fused_names[idx]] += 1
+            cross_ctx_samples = build_cross_context_synth(
+                manual_samples=manual_samples,
+                ref_bundle=ref_bundle,
+                fused_idx_map=fused_idx_map,
+                available_chars=available_chars,
+                target_per_class=args.per_class_cap,
+                class_counts=shared_counts,
+            )
+            print(f"[cross-ctx] generated {len(cross_ctx_samples)} additional composites")
+            synth_samples_data.extend(cross_ctx_samples)
 
     # ── 2b. Auto-harvested negative frames (no-avatar contexts) ──
     negative_frames: List[Path] = []

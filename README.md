@@ -13,6 +13,7 @@ The automation pipeline is built around OCR, template matching, and explicit sta
 - Event farming budget control adapted from [reference](https://github.com/pur1fying/blue_archive_auto_script) `activity_sweep_times`: two parameters `event_max_rounds` and `event_ap_reserve` bound multi-round sweeping without per-event JSON stage tables.
 - Custom OCR model fine-tuned on Blue Archive UI text (PP-OCRv4 base, Traditional/Simplified Chinese + English + Japanese mix), delivering a 20-point absolute gain in vocabulary accuracy.
 - Multi-tier YOLO26 vision: emoticon (cafe head-pat bubble), static UI icons, avatar classifier (267 characters), and an in-training fused avatar detector that combines bbox localisation and character ID into a single forward pass.
+- **Dashboard Synth Template Editor** (`S` tab): per-UI-context visual slot configurator — draw axis-aligned rects or free 4-point quads (parallelogram / trapezoid / arbitrary), interactive ref-crop tool that overlays the slot shape on a wiki portrait with zoom + pan, four draggable color markers for augmentation positions (Lv text / star / weapon / heart), per-context augmentation probabilities, and one-click randomise / preview / save. Build script consumes the saved templates and uses round-robin character sampling to guarantee every character appears in every context.
 - Real-time battle head lock at 240 Hz using DXcam capture, YOLOv8n, ByteTrack with freeze-and-predict rescue, rendered to a Win32 layered overlay window.
 - Asynchronous trajectory writer: each tick's screenshot and metadata are enqueued and flushed on a background thread, so disk I/O never blocks the main perception loop.
 - Annotation workspace with dedicated validation pools: dashboard's Capture page routes screenshots to `train` runs or to held-out `_val_<purpose>/frames/` pools, and the Annotate page groups datasets into Validation Pools / Recordings / Trajectories. Build scripts honour the pools so rare-class samples are never stolen from training.
@@ -29,7 +30,7 @@ The automation pipeline is built around OCR, template matching, and explicit sta
 | EventActivity | Event story → mission → challenge → farming + shop | OCR + banner template + state machine | Auto-identifies event by period text (`auto_YYYYMMDD`) so each rotation gets its own progress bucket; story-tab smart-skip avoids redundant clicks; story-done falls through to mission instead of exiting; mission phase always direct-sortie (no quick-edit) so initial clears use the saved team — quick-edit + auto-bonus is reserved for the farming phase to update the sweep team for the rate-up stage; first-visible-node detection persists so resumed runs don't re-scan completed chapters |
 | EventFarming | Normal / Hard / quest-type sweeps | OCR + state machine | `max_rounds` + `ap_reserve` budget |
 | Cafe | Income collection, invitation tickets, head-pat | Template (primary) + YOLO26n emoticon (fallback) | `happy_face` template first; YOLO26n `emoticon` (mAP50 = 0.995) rescues misses; 1F left-to-right, 2F right-to-left scan |
-| Schedule | Room assignment with favourite priority | OCR + `AvatarMatcher` (template + HSV); fused YOLO26m detector being trained | Region tuner on canvas; lobby-detect early exit; tuned `STAGE2_TOP_K=15` (≈32% faster, ≈18% more favourite hits than original); fused detector will replace AvatarMatcher once validated |
+| Schedule | Room assignment with favourite priority | OCR + `AvatarMatcher` (template + HSV); fused YOLO26x v3 detector being trained | Region tuner on canvas; lobby-detect early exit; tuned `STAGE2_TOP_K=15` (≈32% faster, ≈18% more favourite hits than original); fused detector (262 classes, 6 UI contexts) will replace AvatarMatcher once validated |
 | Club | AP collection | OCR | |
 | MomoTalk | Auto-reply to unread threads | OCR + state machine | Processes by unread count; auto-dialog / story skip |
 | Shop | Free daily items and affordable purchases | OCR + state machine | Detects completion / refresh states |
@@ -56,7 +57,7 @@ The automation pipeline is built around OCR, template matching, and explicit sta
 | Cafe fallback | YOLO26n `emoticon_yolo26n` | Head-pat bubble detection when templates miss | ~2 ms |
 | Character classification | YOLO26n `avatar_cls_v2` (267 classes) | Crop-in / class-out classifier for cafe invite + schedule popup | ~5 ms |
 | UI anchors (in progress) | YOLO26n `static_ui_v4` (143 classes) | Locate UI icons / popups / room cards / red-dot / coin badges for OCR-region anchoring | ~3 ms |
-| One-shot avatar detect (in training) | YOLO26m `fused_avatar_yolo26m` (~235 classes) | Joint bbox + character ID, set to replace the 2-stage head_detector + classifier path | ~5 ms |
+| One-shot avatar detect (in training) | YOLO26x `fused_avatar_yolo26x` v3 (262 classes, 6 UI contexts) | Joint bbox + character ID, set to replace the 2-stage head_detector + classifier path | ~10 ms |
 | Tracking | ByteTrack + EMA | Track association with freeze-and-predict rescue | <0.1 ms |
 
 The daily pipeline favours templates and HSV decisions where they are cheap and exact; YOLO26 models are added selectively for sub-problems that templates cannot solve at scale (open-set character ID, sparse UI icons, multi-context avatar detection). The battle-lock path remains on YOLOv8n at 240 Hz.
@@ -176,7 +177,7 @@ Intra-class NMS: merge same-class tracks with center_dist < 1.0
 | Cafe head-pat bubble | `emoticon_yolo26n/best.pt` | 170 frames, YOLO26n, 1 class | mAP50 = 0.995 | Template fallback |
 | Static UI elements | `static_ui_v4_yolo26n/best.pt` | 109 frames, 143 classes (UI icons, room cards, popups) | mAP50 = 0.339 (sparse-class limited) | UI anchor (in progress) |
 | Avatar classifier v2 | `avatar_cls_v2_yolo26n/best.pt` | 3,295 crops, 267 classes, character-only classifier (no detection) | top1 = 95.91% on trajectory val | Used in current 2-stage Path-C; being replaced by fused detector |
-| Fused avatar detector | `fused_avatar_yolo26m/best.pt` (in training) | 335 manual frames (5 UI contexts) + 486 synthetic composites + 79 negatives, 237 classes | TBD | One-shot avatar locate + classify, replaces 2-stage |
+| Fused avatar detector | `fused_avatar_yolo26x/best.pt` (v3 in training) | 336 manual frames + 3,229 template-driven synthetic composites (6 UI contexts, 19-20 round-robin appearances per character per context) + 79 negatives = 3,644 train frames / 32,493 boxes, 262 classes. Earlier v1 (26m) mAP50=0.597, v2 (26x) mAP50=0.617. | TBD (target ≥0.70) | One-shot avatar locate + classify, replaces 2-stage |
 | OCR recogniser | `ba_rec.onnx` | Trajectory crops + synthesised text | vocabulary acc = 55.8% | Full pipeline |
 
 ---

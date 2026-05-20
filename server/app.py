@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import socket
 import subprocess
@@ -3161,6 +3162,646 @@ def capture_stop() -> Dict[str, Any]:
 @app.get("/api/v1/capture/status")
 def capture_status_api() -> Dict[str, Any]:
     return {"status": _CAPTURE_STATUS}
+
+
+# ── Synth Template Editor ────────────────────────────────────────────
+# Lets the user define synthetic data composition templates per UI context.
+# Each context (schedule_popup, momotalk, student_list, battle_squad,
+# tactical_competition, cafe_invite, ...) gets its own JSON template with:
+#   - Slot rectangles where refs will be pasted (normalized 0-1 coords)
+#   - Ref crop transformation (which fraction of ref to use, shape mask)
+#   - Augmentation knobs (UI overlay probs, border ablation, brightness)
+# build_fused_avatar_dataset.py reads these templates instead of detecting
+# rooms via static_ui — gives the user pixel-perfect control.
+
+SYNTH_TEMPLATES_DIR = REPO_ROOT / "data" / "synth_templates"
+SYNTH_SAMPLES_DIR = SYNTH_TEMPLATES_DIR / "samples"
+
+
+def _synth_default_template(ctx: str) -> Dict[str, Any]:
+    """Return a sensible default template for a new context."""
+    return {
+        "context": ctx,
+        "sample_image": "",
+        "image_size": [1920, 1080],
+        "slot_rects_norm": [],  # list of {"x1","y1","x2","y2"} (normalized)
+        "ref_transform": {
+            "crop_n": {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0},
+            "shape": "square",       # square | rounded_rect | circle
+            "radius_px": 4,
+            "scale": 1.0,            # 1.0 = fill slot fully
+        },
+        "augmentation": {
+            "ui_overlay_prob": 0.50,
+            "ui_components": {
+                "lv_text":      0.50,
+                "star":         0.30,
+                "weapon_icon":  0.40,
+                "heart":        0.20,
+                "alpha_dim":    0.25,
+            },
+            "border_ablation_prob": 0.40,
+            "brightness_jitter": [0.92, 1.08],
+        },
+        "synth_count": 200,
+    }
+
+
+# Preset contexts that show up by default
+SYNTH_CONTEXTS_DEFAULT = [
+    "schedule_popup",
+    "student_list",
+    "momotalk",
+    "battle_squad",
+    "tactical_competition",
+    "cafe_invite",
+]
+
+
+@app.get("/api/v1/synth/templates")
+def synth_templates_list() -> Dict[str, Any]:
+    """List all template contexts (presets + any user-created files)."""
+    SYNTH_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    found = {}
+    for f in SYNTH_TEMPLATES_DIR.glob("*.json"):
+        ctx = f.stem
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            found[ctx] = {
+                "context": ctx,
+                "configured": True,
+                "n_slots": len(data.get("slot_rects_norm", [])),
+                "sample_image": data.get("sample_image", ""),
+            }
+        except Exception:
+            continue
+    # Include unconfigured presets
+    out = []
+    for ctx in SYNTH_CONTEXTS_DEFAULT:
+        if ctx in found:
+            out.append(found[ctx])
+        else:
+            out.append({"context": ctx, "configured": False, "n_slots": 0, "sample_image": ""})
+    # Add any extras (user-created beyond presets)
+    for ctx, info in found.items():
+        if ctx not in SYNTH_CONTEXTS_DEFAULT:
+            out.append(info)
+    return {"templates": out}
+
+
+@app.get("/api/v1/synth/template/{ctx}")
+def synth_template_get(ctx: str) -> Dict[str, Any]:
+    """Load a template — returns defaults if file doesn't exist yet."""
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    f = SYNTH_TEMPLATES_DIR / f"{safe}.json"
+    if f.exists():
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return _synth_default_template(safe)
+
+
+@app.post("/api/v1/synth/template/{ctx}")
+def synth_template_save(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Save a template JSON to data/synth_templates/<ctx>.json."""
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    SYNTH_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    f = SYNTH_TEMPLATES_DIR / f"{safe}.json"
+    # Stamp save time
+    payload = dict(payload or {})
+    payload["context"] = safe
+    payload["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    f.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "path": str(f)}
+
+
+@app.delete("/api/v1/synth/template/{ctx}")
+def synth_template_delete(ctx: str) -> Dict[str, Any]:
+    """Delete a template JSON and its sample image."""
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    tpl = SYNTH_TEMPLATES_DIR / f"{safe}.json"
+    removed = []
+    if tpl.exists():
+        tpl.unlink()
+        removed.append(str(tpl.name))
+    # Also remove the sample image if present
+    for ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+        s = SYNTH_SAMPLES_DIR / f"{safe}{ext}"
+        if s.exists():
+            s.unlink()
+            removed.append(f"samples/{s.name}")
+    return {"ok": True, "removed": removed}
+
+
+@app.post("/api/v1/synth/upload_sample/{ctx}")
+def synth_upload_sample(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy/decode an image into samples/ for use as template background.
+
+    Accepts EITHER:
+      * `source_path`: existing file on disk (relative to repo or absolute)
+      * `file_b64`: base64-encoded file bytes (with optional `data:image/...;base64,` prefix)
+                    + `filename` to determine the extension
+    """
+    import shutil as _shutil
+    import base64 as _b64
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    payload = payload or {}
+    src = (payload.get("source_path") or "").strip()
+    file_b64 = payload.get("file_b64") or ""
+    filename = payload.get("filename") or ""
+    SYNTH_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+    if file_b64:
+        # Strip optional data URI prefix
+        if "," in file_b64 and file_b64.startswith("data:"):
+            file_b64 = file_b64.split(",", 1)[1]
+        try:
+            raw = _b64.b64decode(file_b64)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"invalid file_b64: {e}")
+        if not raw:
+            raise HTTPException(status_code=400, detail="empty file_b64")
+        # Allow common image extensions; default to .jpg
+        ext = Path(filename).suffix.lower() if filename else ".jpg"
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+            ext = ".jpg"
+        dst = SYNTH_SAMPLES_DIR / f"{safe}{ext}"
+        dst.write_bytes(raw)
+    elif src:
+        p = Path(src)
+        if not p.is_absolute():
+            p = REPO_ROOT / src
+        if not p.exists() or not p.is_file():
+            raise HTTPException(status_code=404, detail=f"source not found: {p}")
+        dst = SYNTH_SAMPLES_DIR / f"{safe}{p.suffix.lower()}"
+        _shutil.copy2(p, dst)
+    else:
+        raise HTTPException(status_code=400, detail="source_path or file_b64 required")
+    # Also record in the template
+    template = synth_template_get(safe)
+    template["sample_image"] = f"samples/{dst.name}"
+    # Read actual image size
+    try:
+        import cv2 as _cv2
+        import numpy as _np
+        buf = _np.fromfile(str(dst), dtype=_np.uint8)
+        if buf.size:
+            im = _cv2.imdecode(buf, _cv2.IMREAD_COLOR)
+            if im is not None:
+                template["image_size"] = [im.shape[1], im.shape[0]]
+    except Exception:
+        pass
+    synth_template_save(safe, template)
+    return {"ok": True, "sample_image": template["sample_image"],
+            "image_size": template["image_size"]}
+
+
+@app.get("/api/v1/synth/ref_image/{cn_name}")
+def synth_ref_image(cn_name: str):
+    """Stream a character's wiki ref portrait (404×456 from 角色头像/, or 54×59
+    from 角色头像_crop/ as fallback) for the dashboard's crop tool.
+    """
+    from fastapi.responses import FileResponse
+    # Resolve CN → EN using all three name maps
+    name_maps: Dict[str, str] = {}
+    for fname in ("student_name_map.json", "student_name_map_extension.json"):
+        p = REPO_ROOT / "data" / fname
+        if p.exists():
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                for k, v in d.items():
+                    if isinstance(v, str):
+                        name_maps[k] = v
+            except Exception:
+                pass
+    harv = REPO_ROOT / "data" / "captures" / "harvest_name_map.json"
+    if harv.exists():
+        try:
+            hd = json.loads(harv.read_text(encoding="utf-8"))
+            for k, v in (hd.get("renamed") or {}).items():
+                if isinstance(v, str):
+                    name_maps[k] = v
+        except Exception:
+            pass
+    en = name_maps.get(cn_name)
+    if not en:
+        raise HTTPException(status_code=404, detail=f"no name map for {cn_name}")
+    big = REPO_ROOT / "data" / "captures" / "角色头像" / f"{en}.png"
+    crop = REPO_ROOT / "data" / "captures" / "角色头像_crop" / f"{en}.png"
+    p = big if big.exists() else (crop if crop.exists() else None)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"ref file not found for {en}")
+    return FileResponse(str(p), media_type="image/png")
+
+
+@app.get("/api/v1/synth/sample_image/{ctx}")
+def synth_sample_image(ctx: str):
+    """Stream the sample image bytes for a given context."""
+    from fastapi.responses import FileResponse
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    template = synth_template_get(safe)
+    rel = (template or {}).get("sample_image", "")
+    if not rel:
+        raise HTTPException(status_code=404, detail="no sample image set")
+    p = SYNTH_TEMPLATES_DIR / rel
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"file missing: {p}")
+    return FileResponse(str(p), media_type=f"image/{p.suffix.lstrip('.').lower()}")
+
+
+# Map context names to filename patterns in val_fused/frames/ for auto-default
+_SYNTH_CONTEXT_PATTERNS = {
+    "schedule_popup":       ["val_schedule_"],
+    "cafe_invite":          ["val_cafe_"],
+    "battle_squad":         ["val_arena_fight_", "frame_"],  # 选人 / 编队
+    "arena_squad":          ["val_arena_fight_"],
+    "tactical_competition": ["val_arena_op_"],               # val_arena_op_* = 战术大战
+    "momotalk":             ["frame_"],
+    "student_list":         ["frame_"],
+}
+
+
+@app.get("/api/v1/synth/suggested_sample/{ctx}")
+def synth_suggested_sample(ctx: str) -> Dict[str, Any]:
+    """Suggest sample images for a context (from val_fused/frames/).
+    Used by dashboard to auto-populate sample when user hasn't uploaded one yet.
+    """
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    patterns = _SYNTH_CONTEXT_PATTERNS.get(safe, ["val_"])
+    val_dir = REPO_ROOT / "data" / "raw_images" / "_val_fused" / "frames"
+    if not val_dir.exists():
+        return {"suggestions": []}
+    suggestions = []
+    for jpg in sorted(val_dir.glob("*.jpg")):
+        for pat in patterns:
+            if jpg.name.startswith(pat):
+                suggestions.append(str(jpg.relative_to(REPO_ROOT)))
+                break
+    return {"suggestions": suggestions[:20], "default": suggestions[0] if suggestions else ""}
+
+
+@app.get("/api/v1/synth/characters")
+def synth_characters() -> Dict[str, Any]:
+    """List all available character ref names (from 角色头像 + 角色头像_crop)
+    + their resolved CN names from master[143:]. Used by Preview to let user
+    pick which character to paste."""
+    # CN char names from master
+    master_file = REPO_ROOT / "data" / "raw_images" / "_classes.txt"
+    if not master_file.exists():
+        return {"characters": []}
+    lines = [l.strip() for l in master_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    chars_cn = lines[143:] if len(lines) > 143 else []
+    return {"characters": chars_cn}
+
+
+def _synth_apply_ui_overlay(ref_img, ui_components, aug_positions=None):
+    """Apply UI overlay aug with optional anchor positions (normalized within
+    slot, default to BA-game-like corners).  `aug_positions` is dict like
+    `{lv: {x,y}, star: {x,y}, weapon: {x,y}, heart: {x,y}}`.
+    """
+    import cv2 as _cv2
+    import numpy as _np
+    import random as _random
+    h, w = ref_img.shape[:2]
+    out = ref_img.copy()
+    AP = aug_positions or {}
+    # ±5% jitter so positions aren't pixel-identical across composites
+    def _jit(v): return max(0.0, min(1.0, v + _random.uniform(-0.05, 0.05)))
+
+    if _random.random() < float(ui_components.get("lv_text", 0.5)):
+        pos = AP.get("lv") or {"x": 0.05, "y": 0.15}
+        nx, ny = _jit(float(pos.get("x", 0.05))), _jit(float(pos.get("y", 0.15)))
+        lv = _random.randint(1, 90)
+        text = f"Lv.{lv}" if _random.random() < 0.75 else "MAX"
+        font_scale = max(0.35, min(0.65, w / 100.0))
+        # Anchor is text baseline center-ish — offset by char width
+        tw = int(35 * font_scale); th = int(20 * font_scale)
+        x = max(2, min(w - tw - 2, int(nx * w) - tw // 2))
+        y = max(th, min(h - 2, int(ny * h) + th // 2))
+        _cv2.putText(out, text, (x, y), _cv2.FONT_HERSHEY_DUPLEX, font_scale, (0, 0, 0), 2)
+        _cv2.putText(out, text, (x, y), _cv2.FONT_HERSHEY_DUPLEX, font_scale, (255, 255, 255), 1)
+    if _random.random() < float(ui_components.get("star", 0.3)):
+        pos = AP.get("star") or {"x": 0.10, "y": 0.10}
+        nx, ny = _jit(float(pos.get("x", 0.10))), _jit(float(pos.get("y", 0.10)))
+        r = max(4, w // 12)
+        cx = max(r + 1, min(w - r - 1, int(nx * w)))
+        cy = max(r + 1, min(h - r - 1, int(ny * h)))
+        _cv2.circle(out, (cx, cy), r, (0, 220, 255), -1)
+        _cv2.circle(out, (cx, cy), r, (0, 80, 120), 1)
+    if _random.random() < float(ui_components.get("weapon_icon", 0.4)):
+        pos = AP.get("weapon") or {"x": 0.85, "y": 0.85}
+        nx, ny = _jit(float(pos.get("x", 0.85))), _jit(float(pos.get("y", 0.85)))
+        size = max(10, w // 6)
+        color = _random.choice([(0, 0, 255), (0, 165, 255), (255, 128, 0),
+                                (255, 0, 255), (255, 255, 0)])
+        cx = max(size // 2, min(w - size // 2, int(nx * w)))
+        cy = max(size // 2, min(h - size // 2, int(ny * h)))
+        _cv2.rectangle(out, (cx - size // 2, cy - size // 2),
+                       (cx + size // 2, cy + size // 2), color, -1)
+    if _random.random() < float(ui_components.get("heart", 0.2)):
+        pos = AP.get("heart") or {"x": 0.85, "y": 0.85}
+        nx, ny = _jit(float(pos.get("x", 0.85))), _jit(float(pos.get("y", 0.85)))
+        size = max(6, w // 7)
+        cx = max(size + 1, min(w - size - 1, int(nx * w)))
+        cy = max(size + 1, min(h - size - 1, int(ny * h)))
+        _cv2.circle(out, (cx, cy), size, (147, 20, 255), -1)
+        _cv2.circle(out, (cx, cy), size, (255, 255, 255), 2)
+        num = str(_random.randint(1, 99))
+        font_scale = max(0.35, w / 130.0)
+        _cv2.putText(out, num, (max(0, cx - size + 1), min(h - 2, cy + 4)),
+                     _cv2.FONT_HERSHEY_DUPLEX, font_scale, (255, 255, 255), 1)
+    if _random.random() < float(ui_components.get("alpha_dim", 0.25)):
+        alpha = _random.uniform(0.55, 0.85)
+        out = _np.clip(out.astype(_np.float32) * alpha, 0, 255).astype(_np.uint8)
+    return out
+
+
+def _synth_apply_border_ablation(ref_img):
+    """Mirror of build script's apply_border_ablation — random colored bar on
+    one or more sides, forces classifier to use avatar pixels not UI frame."""
+    import numpy as _np
+    import random as _random
+    h, w = ref_img.shape[:2]
+    out = ref_img.copy()
+    border = max(2, _random.randint(2, max(3, w // 18)))
+    sides = _random.choice(["top", "bot", "left", "right", "all-thin", "all-thick"])
+    color = (_random.randint(0, 255), _random.randint(0, 255), _random.randint(0, 255))
+    b = max(3, border + 2) if sides == "all-thick" else border
+    if sides in ("top", "all-thin", "all-thick"):    out[:b, :] = color
+    if sides in ("bot", "all-thin", "all-thick"):    out[h - b:, :] = color
+    if sides in ("left", "all-thin", "all-thick"):   out[:, :b] = color
+    if sides in ("right", "all-thin", "all-thick"):  out[:, w - b:] = color
+    return out
+
+
+@app.post("/api/v1/synth/preview/{ctx}")
+def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Render a single preview composite using the current template config.
+
+    payload: {
+      "template": {...} (full template JSON from dashboard, not yet saved),
+      "char_cn": "若藻"  (optional — if given, paste this char in all slots;
+                          if not given, pick random chars)
+    }
+    Returns: { "image_b64": "...", "labels": [{class, name, xyxy}...] }
+    """
+    import base64
+    import cv2 as _cv2
+    import numpy as _np
+    import random as _random
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    tpl = (payload or {}).get("template")
+    if not isinstance(tpl, dict):
+        tpl = synth_template_get(safe)
+    char_cn = (payload or {}).get("char_cn", "").strip()
+
+    # Load sample bg
+    rel = tpl.get("sample_image", "")
+    if not rel:
+        raise HTTPException(status_code=400, detail="no sample image set")
+    bg_path = SYNTH_TEMPLATES_DIR / rel
+    if not bg_path.exists():
+        raise HTTPException(status_code=404, detail=f"bg missing: {bg_path}")
+    buf = _np.fromfile(str(bg_path), dtype=_np.uint8)
+    bg = _cv2.imdecode(buf, _cv2.IMREAD_COLOR)
+    if bg is None:
+        raise HTTPException(status_code=500, detail="bg decode failed")
+    H, W = bg.shape[:2]
+    composite = bg.copy()
+
+    # Resolve char → ref
+    big_dir = REPO_ROOT / "data" / "captures" / "角色头像"
+    crop_dir = REPO_ROOT / "data" / "captures" / "角色头像_crop"
+    name_maps = {}
+    for fname in ("student_name_map.json", "student_name_map_extension.json"):
+        p = REPO_ROOT / "data" / fname
+        if p.exists():
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                for k, v in d.items():
+                    if isinstance(v, str):
+                        name_maps[k] = v
+            except Exception:
+                pass
+    harv_p = REPO_ROOT / "data" / "captures" / "harvest_name_map.json"
+    if harv_p.exists():
+        try:
+            hd = json.loads(harv_p.read_text(encoding="utf-8"))
+            for k, v in (hd.get("renamed") or {}).items():
+                if isinstance(v, str):
+                    name_maps[k] = v
+        except Exception:
+            pass
+
+    def load_ref(cn_name: str, prefer_crop: bool = True):
+        """Load a ref for the character.
+
+        prefer_crop=True (default for slots): use the 54×59 head crop —
+          matches what game shows in schedule popup / momotalk / etc.
+        prefer_crop=False: use the 404×456 half-body portrait (e.g. student
+          list cards where bigger art is visible).
+        """
+        en = name_maps.get(cn_name)
+        if not en:
+            return None
+        order = (crop_dir, big_dir) if prefer_crop else (big_dir, crop_dir)
+        for d in order:
+            p = d / f"{en}.png"
+            if p.exists():
+                b = _np.fromfile(str(p), dtype=_np.uint8)
+                im = _cv2.imdecode(b, _cv2.IMREAD_COLOR)
+                if im is not None:
+                    return im
+        return None
+
+    # Get list of all CN characters with refs
+    master_p = REPO_ROOT / "data" / "raw_images" / "_classes.txt"
+    chars_all = []
+    if master_p.exists():
+        lines = [l.strip() for l in master_p.read_text(encoding="utf-8").splitlines() if l.strip()]
+        chars_all = [c for c in lines[143:] if c in name_maps]
+
+    rt = tpl.get("ref_transform", {}) or {}
+    crop_n = rt.get("crop_n", {})
+    cx1 = float(crop_n.get("x1", 0.0))
+    cy1 = float(crop_n.get("y1", 0.0))
+    cx2 = float(crop_n.get("x2", 1.0))
+    cy2 = float(crop_n.get("y2", 1.0))
+    shape = rt.get("shape", "square")
+    radius_px = int(rt.get("radius_px", 4) or 0)
+    scale = float(rt.get("scale", 1.0))
+    aug = tpl.get("augmentation", {}) or {}
+
+    labels = []
+    aug_stats = {"ui_overlay": 0, "border": 0, "total_slots": 0}
+    for slot in tpl.get("slot_rects_norm", []):
+        x1 = int(slot["x1"] * W); y1 = int(slot["y1"] * H)
+        x2 = int(slot["x2"] * W); y2 = int(slot["y2"] * H)
+        sw = x2 - x1; sh = y2 - y1
+        if sw < 8 or sh < 8:
+            continue
+        # Pick char
+        if char_cn:
+            chosen = char_cn
+        elif chars_all:
+            chosen = _random.choice(chars_all)
+        else:
+            chosen = None
+        if not chosen:
+            continue
+        # Slot-size-aware ref pick: big slot uses half-body, small uses head crop
+        prefer_crop = max(sw, sh) <= 140
+        ref = load_ref(chosen, prefer_crop=prefer_crop)
+        if ref is None:
+            continue
+        # Crop ref
+        rh, rw = ref.shape[:2]
+        rx1 = int(cx1 * rw); ry1 = int(cy1 * rh)
+        rx2 = int(cx2 * rw); ry2 = int(cy2 * rh)
+        if rx2 - rx1 < 4 or ry2 - ry1 < 4:
+            cropped = ref
+        else:
+            cropped = ref[ry1:ry2, rx1:rx2]
+        # ── Read aug config (apply AFTER resize for visibility at slot pixel res) ──
+        ui_overlay_prob = float(aug.get("ui_overlay_prob", 0.5))
+        ui_comp = aug.get("ui_components") or {}
+        border_prob = float(aug.get("border_ablation_prob", 0.4))
+        aug_stats["total_slots"] += 1
+        # ── Unified paste logic: ALWAYS preserve ref aspect ratio (no stretch).
+        # Compute the slot's pixel AABB (for rect: x1..x2,y1..y2; for quad: poly AABB).
+        # Fit ref inside AABB ("contain"), centered. For quad, apply polygon mask after
+        # so corners outside the quad show background, not stretched ref pixels.
+        quad = slot.get("quad")
+        quad_px = None
+        if quad and len(quad) == 4:
+            try:
+                quad_px = _np.array(
+                    [[float(q["x"]) * W, float(q["y"]) * H] for q in quad],
+                    dtype=_np.float32,
+                )
+                aabb_x1 = max(0, int(quad_px[:, 0].min()))
+                aabb_y1 = max(0, int(quad_px[:, 1].min()))
+                aabb_x2 = min(W, int(quad_px[:, 0].max()))
+                aabb_y2 = min(H, int(quad_px[:, 1].max()))
+            except Exception:
+                quad_px = None
+        if quad_px is None:
+            aabb_x1, aabb_y1 = x1, y1
+            aabb_x2, aabb_y2 = x2, y2
+        aabb_w = aabb_x2 - aabb_x1; aabb_h = aabb_y2 - aabb_y1
+        if aabb_w < 8 or aabb_h < 8:
+            continue
+        # Preserve ref aspect ratio (COVER: fill AABB, overflow clipped — no bg padding inside)
+        rh0, rw0 = cropped.shape[:2]
+        if rh0 <= 0 or rw0 <= 0:
+            continue
+        ref_ar = rw0 / rh0
+        max_w = max(4, int(aabb_w * scale))
+        max_h = max(4, int(aabb_h * scale))
+        slot_ar = max_w / max(max_h, 1)
+        # COVER: ref's smaller dim relative to slot fills, larger overflows
+        if ref_ar > slot_ar:
+            target_h = max_h; target_w = max(4, int(target_h * ref_ar))
+        else:
+            target_w = max_w; target_h = max(4, int(target_w / ref_ar))
+        try:
+            resized = _cv2.resize(cropped, (target_w, target_h), interpolation=_cv2.INTER_AREA)
+        except Exception:
+            continue
+        # ── Apply aug AFTER resize — effects are now sized for slot pixels,
+        # so Lv text / star / weapon / heart are visible at game resolution ──
+        aug_pos = (tpl.get("ref_transform") or {}).get("aug_positions") or {}
+        if _random.random() < ui_overlay_prob:
+            resized = _synth_apply_ui_overlay(resized.copy(), ui_comp, aug_pos)
+            aug_stats["ui_overlay"] += 1
+        if _random.random() < border_prob:
+            resized = _synth_apply_border_ablation(resized)
+            aug_stats["border"] += 1
+        # Shape mask (circle/rounded_rect) on the resized ref
+        ref_mask = None
+        if shape == "circle":
+            ref_mask = _np.zeros((target_h, target_w), dtype=_np.uint8)
+            _cv2.circle(ref_mask, (target_w//2, target_h//2), min(target_w, target_h)//2, 255, -1)
+        elif shape == "rounded_rect" and radius_px > 0:
+            ref_mask = _np.zeros((target_h, target_w), dtype=_np.uint8)
+            r = min(radius_px, target_h//2, target_w//2)
+            _cv2.rectangle(ref_mask, (r, 0), (target_w-r, target_h), 255, -1)
+            _cv2.rectangle(ref_mask, (0, r), (target_w, target_h-r), 255, -1)
+            _cv2.circle(ref_mask, (r, r), r, 255, -1)
+            _cv2.circle(ref_mask, (target_w-r, r), r, 255, -1)
+            _cv2.circle(ref_mask, (r, target_h-r), r, 255, -1)
+            _cv2.circle(ref_mask, (target_w-r, target_h-r), r, 255, -1)
+        # Center ref in AABB (may overflow AABB on one axis)
+        ref_left = aabb_x1 + (aabb_w - target_w) // 2
+        ref_top  = aabb_y1 + (aabb_h - target_h) // 2
+        # Clip ref paste region to AABB ∩ image bounds — overflow outside AABB
+        # is invisible (clipped here; further clipped by polygon mask if quad)
+        clip_x1 = max(0, aabb_x1, ref_left)
+        clip_y1 = max(0, aabb_y1, ref_top)
+        clip_x2 = min(W, aabb_x2, ref_left + target_w)
+        clip_y2 = min(H, aabb_y2, ref_top + target_h)
+        if clip_x2 - clip_x1 < 4 or clip_y2 - clip_y1 < 4:
+            continue
+        # Source slice within resized
+        sx1 = clip_x1 - ref_left; sy1 = clip_y1 - ref_top
+        sx2 = sx1 + (clip_x2 - clip_x1); sy2 = sy1 + (clip_y2 - clip_y1)
+        source_slice = resized[sy1:sy2, sx1:sx2]
+        # Paste (apply ref_mask shape if any)
+        if ref_mask is not None:
+            mask_slice = ref_mask[sy1:sy2, sx1:sx2]
+            bg_patch = composite[clip_y1:clip_y2, clip_x1:clip_x2].copy()
+            for cc in range(3):
+                bg_patch[..., cc] = _np.where(mask_slice > 0, source_slice[..., cc], bg_patch[..., cc])
+            composite[clip_y1:clip_y2, clip_x1:clip_x2] = bg_patch
+        else:
+            composite[clip_y1:clip_y2, clip_x1:clip_x2] = source_slice
+        # Quad: restore original bg outside polygon (within AABB)
+        if quad_px is not None:
+            poly_full = _np.zeros((H, W), dtype=_np.uint8)
+            _cv2.fillPoly(poly_full, [quad_px.astype(_np.int32)], 255)
+            bg_patch_aabb = bg[aabb_y1:aabb_y2, aabb_x1:aabb_x2]
+            local_poly = poly_full[aabb_y1:aabb_y2, aabb_x1:aabb_x2]
+            patch = composite[aabb_y1:aabb_y2, aabb_x1:aabb_x2]
+            patch[local_poly == 0] = bg_patch_aabb[local_poly == 0]
+            composite[aabb_y1:aabb_y2, aabb_x1:aabb_x2] = patch
+        # YOLO label box = visible ref region (clip rect)
+        px1, py1, px2, py2 = clip_x1, clip_y1, clip_x2, clip_y2
+        # ── end paste, fall through to label & overlay drawing ─────────
+        labels.append({"name": chosen, "xyxy": [px1, py1, px2, py2]})
+        # ── Overlay: yellow = the slot's TRUE shape (quad polygon or rect).
+        # This matches what the user configured in the editor.  We do NOT draw
+        # the inner ref AABB rect anymore (was confusing — looked like the slot
+        # was axis-aligned even when slot is a parallelogram).
+        if quad_px is not None:
+            # Thick yellow polygon outline = the slot quad
+            _cv2.polylines(composite, [quad_px.astype(_np.int32)], True, (0, 255, 255), 3)
+            # Tiny corner dots so 4 corners are obvious
+            for pt in quad_px.astype(_np.int32):
+                _cv2.circle(composite, tuple(pt.tolist()), 4, (0, 255, 255), -1)
+            # Label at top-left of AABB
+            _cv2.putText(composite, chosen, (aabb_x1+2, aabb_y1-4),
+                         _cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+        else:
+            # Rect slot: yellow rectangle along the actual slot bounds
+            _cv2.rectangle(composite, (aabb_x1, aabb_y1), (aabb_x2, aabb_y2), (0, 255, 255), 3)
+            _cv2.putText(composite, chosen, (aabb_x1+2, aabb_y1-4),
+                         _cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
+    # Encode
+    ok, enc = _cv2.imencode(".jpg", composite, [_cv2.IMWRITE_JPEG_QUALITY, 75])
+    if not ok:
+        raise HTTPException(status_code=500, detail="encode failed")
+    return {
+        "image_b64": base64.b64encode(enc.tobytes()).decode("ascii"),
+        "labels": labels,
+        "image_size": [W, H],
+        "aug_stats": aug_stats,
+        "aug_config": {
+            "ui_overlay_prob": float(aug.get("ui_overlay_prob", 0.0)),
+            "border_ablation_prob": float(aug.get("border_ablation_prob", 0.0)),
+            "ui_components": aug.get("ui_components") or {},
+        },
+    }
 
 
 # ── Game launch ───────────────────────────────────────────────────────

@@ -197,6 +197,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
   <button class="nav-btn" onclick="showPage('roster')" title="课程表头像调整">R</button>
   <button class="nav-btn" onclick="showPage('harvest')" title="头像素材采集（邀请卷等）">H</button>
+  <button class="nav-btn" onclick="showPage('synth')" title="合成数据模板编辑（生成训练用 composite 头像）">S</button>
   <div class="sidebar-bottom">
     <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API 文档">?</button>
   </div>
@@ -603,6 +604,191 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   </div>
 </div>
 
+<!-- ════════════ SYNTH TEMPLATE EDITOR PAGE ════════════ -->
+<div class="page" id="page-synth">
+  <div class="page-title">合成数据模板编辑器 <span class="pill gold" style="font-size:10px;margin-left:6px">Synth</span></div>
+  <div class="assistant-sub">为每个 UI context (课程表 / 学生清单 / MomoTalk / 战斗编队 / 战术大赛 / 咖啡邀请) 配置合成模板。<b>调好的样板</b> + <b>slot 位置</b> + <b>ref 裁剪</b> + <b>aug 频率</b> → build script 据此批量产合成训练数据。</div>
+
+  <div class="card" style="display:flex;gap:12px;align-items:stretch;height:calc(100vh - 180px);min-height:500px">
+    <!-- Canvas area -->
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--muted)">Context</label>
+        <select id="synth_context" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;min-width:180px"></select>
+        <button onclick="synthPickSample()" class="btn btn-sm" title="选本地图片文件 (也可以直接拖到画布上)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">📁 选样板图</button>
+        <button onclick="synthPickSampleByPath()" class="btn btn-sm" title="输入文件路径 (相对 repo 根 / 绝对路径)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">路径...</button>
+        <button onclick="synthZeroAug()" class="btn btn-sm" title="一键把所有 augmentation 概率设为 0 (Lv/Star/Weapon/Heart/Dim/Border 都关)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">关 Aug</button>
+        <button onclick="synthDefaultAug()" class="btn btn-sm" title="一键填推荐 augmentation 概率 (UI overlay 0.5, Lv 0.5, Star 0.3, Weapon 0.4, Heart 0.2, Dim 0.25, Border 0.4)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">推荐 Aug</button>
+        <button onclick="synthRandomAug()" class="btn btn-sm" title="每个 augmentation 概率随机化 (每次点都不同, 用来探索)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">🎲 Aug</button>
+        <button onclick="synthDeleteContext()" class="btn btn-sm" title="删除当前 context 模板 + 样板图" style="padding:5px 8px;background:#7f1d1d;border:1px solid #991b1b;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">🗑️ 删除</button>
+        <button onclick="synthSave()" class="btn btn-sm" style="background:var(--green);color:#0b1a30;border-color:var(--green);font-weight:700">保存模板</button>
+        <button onclick="synthPreview()" style="padding:5px 10px;background:var(--accent);color:#0b1a30;border:1px solid var(--accent);border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">Preview 合成</button>
+        <div style="display:flex;gap:2px;margin-left:8px">
+          <button onclick="synthZoomBy(1/1.25)" title="缩小 (-)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px 0 0 3px;color:var(--text);cursor:pointer;font-size:11px;font-family:var(--mono)">−</button>
+          <button onclick="SYNTH.zoom=1;SYNTH.panX=0;SYNTH.panY=0;synthDraw();$('synth_status').textContent='Zoom 100%';" title="复位 (F / 0)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-left:0;border-right:0;color:var(--text);cursor:pointer;font-size:11px">⟲</button>
+          <button onclick="synthZoomBy(1.25)" title="放大 (+)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:0 3px 3px 0;color:var(--text);cursor:pointer;font-size:11px;font-family:var(--mono)">+</button>
+        </div>
+        <span id="synth_status" style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto"></span>
+      </div>
+      <div id="synth_canvas_wrap" style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
+        <canvas id="synth_canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
+        <div id="synth_info" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none"></div>
+        <div id="synth_drop_hint" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#facc1530;border:3px dashed #facc15;border-radius:6px;color:#facc15;font-size:18px;font-weight:700;pointer-events:none;z-index:5">📥 松开放下样板图</div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.7">
+        <b>操作</b>: 拖框移动 · 拖边/角 resize (<kbd>Shift</kbd>+拖 = 锁正方形) · <kbd>右键</kbd>空白处新增 · <kbd>Q</kbd> 切换矩形⇄自由四边形 · <kbd>Del</kbd>/<kbd>Backspace</kbd> 删除选中 · <kbd>Ctrl+C/V</kbd> 复制粘贴 · 方向键微调 · <kbd>Ctrl+S</kbd> 保存<br>
+        <b>视图</b>: 滚轮 缩放 (锚定鼠标) · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> / <kbd>0</kbd> 复位 · <kbd>中键</kbd>/<kbd>Space</kbd>+左键拖 平移<br>
+        <b>样板图</b>: 点 <b>📁 选样板图</b> 或<b>直接把任意图片文件拖到画布上</b> (自动转格式/找路径都不需要)
+      </div>
+    </div>
+
+    <!-- Side panel: ref crop + augmentation config -->
+    <div style="width:320px;display:flex;flex-direction:column;gap:10px;font-size:12px;overflow-y:auto">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;color:var(--muted);text-transform:uppercase">Slots (<span id="synth_slot_count">0</span>)</span>
+        <button onclick="synthToggleQuad()" id="synth_toggle_quad_btn" title="选中 slot 后, 切换矩形 ⇄ 自由四边形 (拖 4 角变成平行四边形/梯形/任意四边形). 也可按 Q 键" style="margin-left:auto;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">◆ 矩形 ⇄ 四边形 (Q)</button>
+      </div>
+      <div id="synth_slot_list" style="max-height:140px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px"></div>
+
+      <!-- Ref crop -->
+      <details open style="border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--bg2)">
+        <summary style="cursor:pointer;user-select:none;font-weight:600">Ref 裁剪 (角色头像)</summary>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          <!-- Visual crop tool: pick a ref char, drag yellow rect on the wiki portrait -->
+          <div style="display:flex;gap:6px;align-items:center">
+            <label style="font-size:11px;color:var(--muted)">参考</label>
+            <select id="synth_crop_char" title="选一个角色查看 wiki 证件照, 拖黄框设定裁剪区, 所有角色统一截这部分" style="flex:1;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px;font-family:monospace"></select>
+            <button onclick="synthCropFitHead()" title="自动设成头部 region (0.10-0.90 x, 0.00-0.45 y)" style="padding:3px 6px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">头</button>
+            <button onclick="synthCropFitAll()" title="重置为整张 (0,0)-(1,1)" style="padding:3px 6px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">全</button>
+          </div>
+          <div style="position:relative;background:#0d0d10;border:1px solid var(--border);border-radius:4px;overflow:hidden;height:240px">
+            <canvas id="synth_crop_canvas" style="width:100%;height:100%;display:block;cursor:crosshair"></canvas>
+            <div id="synth_crop_info" style="position:absolute;bottom:4px;left:4px;background:#0009;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;font-family:var(--mono);pointer-events:none"></div>
+          </div>
+          <div style="font-size:10px;color:var(--muted);line-height:1.4">
+            🟡框 = slot · 拖证件照 = <b>平移</b> · 滚轮 = <b>放大缩小</b> (锚定鼠标)<br>
+            🔴Lv ⚪Star 🟠Weapon 💗Heart 4 个彩球 = aug 位置, <b>拖球设位置</b> (合成时会 ±5% 随机抖动)
+          </div>
+          <div style="display:grid;grid-template-columns:60px 1fr 50px;gap:6px;align-items:center">
+            <label style="font-size:11px;color:var(--muted)">crop x1</label>
+            <input type="range" id="synth_crop_x1" min="0" max="1" step="0.001" value="0"/>
+            <span id="synth_crop_x1_v" style="font-family:var(--mono);font-size:11px">0.00</span>
+            <label style="font-size:11px;color:var(--muted)">crop y1</label>
+            <input type="range" id="synth_crop_y1" min="0" max="1" step="0.001" value="0"/>
+            <span id="synth_crop_y1_v" style="font-family:var(--mono);font-size:11px">0.00</span>
+            <label style="font-size:11px;color:var(--muted)">crop x2</label>
+            <input type="range" id="synth_crop_x2" min="0" max="1" step="0.001" value="1"/>
+            <span id="synth_crop_x2_v" style="font-family:var(--mono);font-size:11px">1.00</span>
+            <label style="font-size:11px;color:var(--muted)">crop y2</label>
+            <input type="range" id="synth_crop_y2" min="0" max="1" step="0.001" value="1"/>
+            <span id="synth_crop_y2_v" style="font-family:var(--mono);font-size:11px">1.00</span>
+          </div>
+          <div style="display:grid;grid-template-columns:60px 1fr;gap:6px;align-items:center">
+            <label style="font-size:11px;color:var(--muted)">shape</label>
+            <select id="synth_shape" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px">
+              <option value="square">square</option>
+              <option value="rounded_rect">rounded_rect</option>
+              <option value="circle">circle</option>
+            </select>
+            <label style="font-size:11px;color:var(--muted)">radius px</label>
+            <input type="number" id="synth_radius" min="0" max="50" step="1" value="4" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+            <label style="font-size:11px;color:var(--muted)">scale</label>
+            <input type="number" id="synth_scale" min="0.3" max="1.2" step="0.05" value="1" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+          </div>
+        </div>
+      </details>
+
+      <!-- Augmentation -->
+      <details open style="border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--bg2)">
+        <summary style="cursor:pointer;user-select:none;font-weight:600">Augmentation (随机干扰)</summary>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:grid;grid-template-columns:90px 1fr 50px;gap:6px;align-items:center">
+            <label style="font-size:11px;color:var(--muted)">UI overlay总</label>
+            <input type="range" id="synth_aug_ui_total" min="0" max="1" step="0.05" value="0.5"/>
+            <span id="synth_aug_ui_total_v" style="font-family:var(--mono);font-size:11px">0.50</span>
+            <label style="font-size:11px;color:var(--muted)">  Lv 文字</label>
+            <input type="range" id="synth_aug_lv" min="0" max="1" step="0.05" value="0.5"/>
+            <span id="synth_aug_lv_v" style="font-family:var(--mono);font-size:11px">0.50</span>
+            <label style="font-size:11px;color:var(--muted)">  ⭐ Star</label>
+            <input type="range" id="synth_aug_star" min="0" max="1" step="0.05" value="0.3"/>
+            <span id="synth_aug_star_v" style="font-family:var(--mono);font-size:11px">0.30</span>
+            <label style="font-size:11px;color:var(--muted)">  Weapon</label>
+            <input type="range" id="synth_aug_weapon" min="0" max="1" step="0.05" value="0.4"/>
+            <span id="synth_aug_weapon_v" style="font-family:var(--mono);font-size:11px">0.40</span>
+            <label style="font-size:11px;color:var(--muted)">  ❤️ Heart</label>
+            <input type="range" id="synth_aug_heart" min="0" max="1" step="0.05" value="0.2"/>
+            <span id="synth_aug_heart_v" style="font-family:var(--mono);font-size:11px">0.20</span>
+            <label style="font-size:11px;color:var(--muted)">  Alpha dim</label>
+            <input type="range" id="synth_aug_dim" min="0" max="1" step="0.05" value="0.25"/>
+            <span id="synth_aug_dim_v" style="font-family:var(--mono);font-size:11px">0.25</span>
+            <label style="font-size:11px;color:var(--muted)">Border abl.</label>
+            <input type="range" id="synth_aug_border" min="0" max="1" step="0.05" value="0.4"/>
+            <span id="synth_aug_border_v" style="font-family:var(--mono);font-size:11px">0.40</span>
+          </div>
+          <div style="margin-top:6px;font-size:10px;color:var(--muted);line-height:1.5;padding:6px;background:#0d0d10;border-radius:3px;border-left:2px solid #7c3aed">
+            <b>UI 干扰说明</b> (训练 augmentation, 不是吸附框):<br>
+            • <b>Lv/Star/Weapon/Heart</b> = 随机位置随机大小贴在 slot 内, 让 model 学会"忽略 UI 装饰看头像本体"<br>
+            • 这些位置<b>不能手动微调</b>, 概率越高越多张合成图会带上对应干扰<br>
+            • <b>Border ablation</b> = 随机遮掉头像 4 边一小条, 学头像中心不学边框
+          </div>
+        </div>
+      </details>
+
+      <!-- Generation count -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center">
+        <label style="font-size:11px;color:var(--muted)">合成张数 (build 时)</label>
+        <input type="number" id="synth_count" min="10" max="5000" step="10" value="200" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted)">
+        <label>目标每角色出现</label>
+        <input type="number" id="synth_target_per_char" min="5" max="100" step="1" value="20" style="width:60px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+        <button onclick="synthAutoCount()" title="按当前 slot 数 + 252 角色 + 目标值, 反推 synth_count" style="padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">⚙ 自动算</button>
+        <span id="synth_target_hint" style="font-family:var(--mono);font-size:10px"></span>
+      </div>
+
+      <!-- Preview char picker -->
+      <details open style="border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--bg2)">
+        <summary style="cursor:pointer;user-select:none;font-weight:600">Preview 角色 (打样用)</summary>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;gap:6px">
+            <button onclick="synthRandomPreview()" title="清空选中, 每个 slot 都填不同的随机角色 (= 实际 build 的效果)" style="flex:1;padding:6px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px">🎲 随机所有 slot</button>
+            <button onclick="$('synth_char_pick').value='';$('synth_char_search').value='';synthRefreshCharList('');$('synth_status').textContent='已清空选中, 下次 Preview 用随机';" title="清空选中, 不立刻 preview" style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">清空</button>
+          </div>
+          <input type="text" id="synth_char_search" placeholder="搜角色名 (e.g. 若藻)..." style="padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+          <select id="synth_char_pick" size="6" style="background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px;font-family:monospace"></select>
+          <div style="font-size:10px;color:var(--muted)">选某角色 = 所有 slot 都用它 (查 slot 对齐) · 不选 = 随机 (跟 build 一致)</div>
+        </div>
+      </details>
+
+      <div id="synth_preview_holder" onclick="synthOpenPreviewModal()" title="点击放大查看 (大图支持滚轮缩放 + 拖拽)" style="border:1px dashed var(--border);border-radius:4px;padding:4px;min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0d0d10;overflow:hidden;cursor:zoom-in">
+        <div style="color:var(--muted);font-size:11px">点击 [Preview 合成] 看效果</div>
+      </div>
+
+      <!-- Fullscreen preview modal (zoom + pan) -->
+      <div id="synth_preview_modal" style="display:none;position:fixed;inset:0;background:#000d;z-index:9999;flex-direction:column">
+        <div style="display:flex;gap:8px;padding:10px;background:#111;border-bottom:1px solid var(--border);align-items:center">
+          <span style="color:#fff;font-weight:600;font-size:13px">Preview · </span>
+          <span id="synth_pv_info" style="color:#aaa;font-size:12px;font-family:var(--mono)"></span>
+          <div style="margin-left:auto;display:flex;gap:4px;align-items:center">
+            <button onclick="synthPreview()" title="重新生成 (R) — 把当前裁剪/aug 设置应用上看效果" style="padding:4px 10px;background:#7c3aed;border:1px solid #6d28d9;color:#fff;cursor:pointer;border-radius:3px;font-weight:600">🔄 重新生成</button>
+            <button onclick="synthRandomPreview()" title="随机角色重新生成" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px">🎲</button>
+            <span style="width:1px;background:#444;align-self:stretch;margin:0 4px"></span>
+            <button onclick="synthPvZoom(1/1.25)" title="缩小 (-)" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px;font-family:var(--mono)">−</button>
+            <span id="synth_pv_zoom" style="color:#fff;font-size:11px;font-family:var(--mono);min-width:50px;text-align:center">100%</span>
+            <button onclick="synthPvZoom(1.25)" title="放大 (+)" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px;font-family:var(--mono)">+</button>
+            <button onclick="synthPvReset()" title="复位 (F)" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px">⟲</button>
+            <button onclick="synthClosePreviewModal()" title="关闭 (Esc)" style="padding:4px 10px;background:#7f1d1d;border:1px solid #991b1b;color:#fff;cursor:pointer;border-radius:3px;font-weight:700">×</button>
+          </div>
+        </div>
+        <div id="synth_pv_stage" style="flex:1;overflow:hidden;position:relative;background:#0a0a0d;cursor:grab"></div>
+        <div style="padding:6px 12px;background:#111;border-top:1px solid var(--border);color:#888;font-size:11px;font-family:var(--mono)">
+          滚轮 缩放(锚定鼠标) · 拖拽 平移 · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> 复位 · <kbd>Esc</kbd> 关闭
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </div><!-- /main -->
 
 <script>
@@ -620,12 +806,13 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   $('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,roster:3,harvest:4}[name]].classList.add('active');
+  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,roster:3,harvest:4,synth:5}[name]].classList.add('active');
   currentPage = name;
   if (name === 'capture') refreshCapture();
   if (name === 'annotate') annLoadDatasets();
   if (name === 'roster') rosterInit();
   if (name === 'harvest') harvestInit();
+  if (name === 'synth') { synthInit(); synthAttachCanvasEvents(); }
 }
 
 /* ════════════════════════════════════════════════════
@@ -3205,6 +3392,1318 @@ async function harvestRun(){
     btn.disabled = false; btn.textContent = '开始采集';
   }
 }
+
+/* ════════════════════════════════════════════════════
+   SYNTH TEMPLATE EDITOR — canvas-based slot editor for
+   synthetic-data composition. Each context (schedule_popup
+   / student_list / momotalk / battle_squad / tactical_competition
+   / cafe_invite / arena_squad) gets its own template JSON
+   with slot rects + ref crop + aug config.
+   ════════════════════════════════════════════════════ */
+const SYNTH = {
+  context: null,
+  template: null,        // current loaded template object
+  bgImg: null,           // sample image
+  imgW: 1, imgH: 1,
+  slots: [],             // [{x1,y1,x2,y2, quad?:[{x,y}×4]}] in normalized coords
+  selIdx: -1,
+  dragMode: null,        // 'move' | 'resize-nw' | ... | 'quad-tl/tr/br/bl'
+  dragStart: null,
+  dragOrig: null,
+  clipboard: null,       // copied slot (deep-cloned, includes quad if any)
+  mouseNx: null,         // last mouse Nx over canvas (for Ctrl+V at mouse)
+  mouseNy: null,
+  zoom: 1.0,             // viewport zoom multiplier on top of base fit-scale
+  panX: 0, panY: 0,      // viewport pan offset in canvas px
+  panning: false,
+  panStart: null,
+  spaceHeld: false,      // Space key → drag-to-pan
+};
+
+/* ─── Quad helpers ────────────────────────────────────────────
+ * A slot can be axis-aligned rect (no quad) or a free 4-point quad.
+ * Quad points order: TL, TR, BR, BL.  When quad exists, x1/y1/x2/y2
+ * are kept as the AABB of the quad (so legacy code still works as
+ * an outer bbox + YOLO label box).                              */
+function synthGetQuad(s){
+  if (s.quad && s.quad.length === 4) return s.quad;
+  return [
+    {x: s.x1, y: s.y1}, {x: s.x2, y: s.y1},
+    {x: s.x2, y: s.y2}, {x: s.x1, y: s.y2},
+  ];
+}
+function synthSyncBBox(s){
+  if (!s.quad) return;
+  let minX = 1, minY = 1, maxX = 0, maxY = 0;
+  for (const p of s.quad){
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  s.x1 = minX; s.y1 = minY; s.x2 = maxX; s.y2 = maxY;
+}
+function synthPointInPoly(px, py, poly){
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj-xi)*(py-yi)/((yj-yi)||1e-9) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function synthZoomBy(factor, anchorMx, anchorMy){
+  const c = $('synth_canvas'); if (!c) return;
+  const fit = SYNTH._fit; if (!fit) return;
+  const mx = (anchorMx == null) ? c.width / 2 : anchorMx;
+  const my = (anchorMy == null) ? c.height / 2 : anchorMy;
+  const nxi = (mx - fit.ox) / fit.w;
+  const nyi = (my - fit.oy) / fit.h;
+  const newZoom = Math.max(0.3, Math.min(15, (SYNTH.zoom || 1) * factor));
+  if (newZoom === SYNTH.zoom) return;
+  SYNTH.zoom = newZoom;
+  const newScale = fit.baseScale * newZoom;
+  const newW = SYNTH.imgW * newScale, newH = SYNTH.imgH * newScale;
+  SYNTH.panX = (mx - nxi * newW) - (c.width - newW) / 2;
+  SYNTH.panY = (my - nyi * newH) - (c.height - newH) / 2;
+  synthDraw();
+  $('synth_status').textContent = `Zoom ${(newZoom*100).toFixed(0)}% — F/0 复位`;
+}
+
+function synthToggleQuad(){
+  if (SYNTH.selIdx < 0) {
+    $('synth_status').textContent = '先选中一个 slot';
+    return;
+  }
+  const s = SYNTH.slots[SYNTH.selIdx];
+  if (s.quad) {
+    // Reset to axis-aligned rect (snap to current AABB)
+    synthSyncBBox(s);
+    delete s.quad;
+    $('synth_status').textContent = `#${SYNTH.selIdx+1} → 矩形模式`;
+  } else {
+    // Convert rect → quad with 4 corner control points
+    s.quad = [
+      {x: s.x1, y: s.y1}, {x: s.x2, y: s.y1},
+      {x: s.x2, y: s.y2}, {x: s.x1, y: s.y2},
+    ];
+    $('synth_status').textContent = `#${SYNTH.selIdx+1} → 自由四边形 (拖 4 个角随意变形)`;
+  }
+  synthDraw(); synthUpdateSlotList();
+}
+
+async function synthInit(){
+  const sel = $('synth_context');
+  try {
+    const r = await api('/api/v1/synth/templates');
+    sel.innerHTML = '';
+    (r.templates || []).forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.context;
+      o.textContent = `${t.context}${t.configured?' ✓':' (新)'}  · ${t.n_slots} slots`;
+      sel.appendChild(o);
+    });
+  } catch(e){ console.error(e); }
+  sel.onchange = () => synthLoadContext(sel.value);
+  if (sel.value) await synthLoadContext(sel.value);
+  // Wire all sliders (crop sliders also redraw the visual crop canvas)
+  ['crop_x1','crop_y1','crop_x2','crop_y2','aug_ui_total','aug_lv','aug_star','aug_weapon','aug_heart','aug_dim','aug_border'].forEach(id => {
+    const el = $('synth_' + id);
+    if (el) el.oninput = () => {
+      $('synth_' + id + '_v').textContent = parseFloat(el.value).toFixed(2);
+      if (id.startsWith('crop_')) synthCropDraw();
+    };
+  });
+  // Shape / radius / scale changes also redraw the crop canvas
+  ['shape','radius','scale'].forEach(id => {
+    const el = $('synth_' + id);
+    if (el) {
+      const handler = () => synthCropDraw();
+      el.onchange = handler;
+      el.oninput = handler;
+    }
+  });
+  // Attach mouse handlers for visual crop tool
+  synthCropAttach();
+  // Load characters list for preview picker AND crop ref picker
+  try {
+    const c = await api('/api/v1/synth/characters');
+    SYNTH._charList = c.characters || [];
+    synthRefreshCharList('');
+    $('synth_char_search').oninput = (e) => synthRefreshCharList(e.target.value);
+    // Populate crop ref char dropdown (separate, full list, first one auto-loaded)
+    const cropSel = $('synth_crop_char');
+    if (cropSel) {
+      cropSel.innerHTML = '';
+      (SYNTH._charList || []).forEach(name => {
+        const o = document.createElement('option'); o.value = name; o.textContent = name;
+        cropSel.appendChild(o);
+      });
+      cropSel.onchange = () => synthCropLoadChar(cropSel.value);
+      if (cropSel.value) await synthCropLoadChar(cropSel.value);
+    }
+  } catch(e){ console.error(e); }
+}
+
+function synthRefreshCharList(q){
+  const el = $('synth_char_pick'); if (!el) return;
+  const arr = (SYNTH._charList || []).filter(c => !q || c.includes(q.trim()));
+  el.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '(random — fill slots with random chars)';
+  el.appendChild(empty);
+  arr.slice(0, 200).forEach(c => {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    el.appendChild(o);
+  });
+}
+
+async function synthLoadContext(ctx){
+  SYNTH.context = ctx;
+  try {
+    const t = await api(`/api/v1/synth/template/${ctx}`);
+    SYNTH.template = t;
+    SYNTH.slots = (t.slot_rects_norm||[]).map(r => {
+      const c = {...r};
+      if (r.quad && Array.isArray(r.quad) && r.quad.length === 4) {
+        c.quad = r.quad.map(p => ({x: +p.x, y: +p.y}));
+      }
+      return c;
+    });
+    SYNTH.imgW = (t.image_size||[1920,1080])[0];
+    SYNTH.imgH = (t.image_size||[1920,1080])[1];
+    SYNTH.bgImg = null;
+    // Load sample image if any — fallback: auto-suggest one
+    let sample = t.sample_image;
+    if (!sample) {
+      try {
+        const sg = await api(`/api/v1/synth/suggested_sample/${ctx}`);
+        if (sg.default) {
+          // Auto-upload it as default sample
+          $('synth_status').textContent = '自动选样板: ' + sg.default;
+          await api(`/api/v1/synth/upload_sample/${ctx}`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({source_path: sg.default})
+          });
+          // Re-read template to get updated sample_image
+          const t2 = await api(`/api/v1/synth/template/${ctx}`);
+          SYNTH.template = t2;
+          sample = t2.sample_image;
+          SYNTH.imgW = (t2.image_size||[1920,1080])[0];
+          SYNTH.imgH = (t2.image_size||[1920,1080])[1];
+        }
+      } catch(e){ console.warn('auto-suggest failed:', e); }
+    }
+    if (sample) {
+      const img = new Image();
+      img.onload = () => { SYNTH.bgImg = img; SYNTH.imgW = img.naturalWidth; SYNTH.imgH = img.naturalHeight; synthDraw(); };
+      img.onerror = () => { SYNTH.bgImg = null; synthDraw(); };
+      img.src = `/api/v1/synth/sample_image/${ctx}?_=${Date.now()}`;
+    }
+    // Pop UI values from template
+    const rt = t.ref_transform || {};
+    const cn = rt.crop_n || {x1:0,y1:0,x2:1,y2:1};
+    $('synth_crop_x1').value = cn.x1; $('synth_crop_x1_v').textContent = cn.x1.toFixed(2);
+    $('synth_crop_y1').value = cn.y1; $('synth_crop_y1_v').textContent = cn.y1.toFixed(2);
+    $('synth_crop_x2').value = cn.x2; $('synth_crop_x2_v').textContent = cn.x2.toFixed(2);
+    $('synth_crop_y2').value = cn.y2; $('synth_crop_y2_v').textContent = cn.y2.toFixed(2);
+    $('synth_shape').value = rt.shape || 'square';
+    $('synth_radius').value = rt.radius_px ?? 4;
+    $('synth_scale').value = rt.scale ?? 1.0;
+    // Load saved aug positions (if any); else keep current defaults
+    const apSaved = rt.aug_positions || {};
+    for (const key of ['lv', 'star', 'weapon', 'heart']) {
+      const p = apSaved[key];
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y) && SYNTH_CROP.augPositions[key]) {
+        SYNTH_CROP.augPositions[key].x = +p.x;
+        SYNTH_CROP.augPositions[key].y = +p.y;
+      }
+    }
+    const aug = t.augmentation || {};
+    const uc = aug.ui_components || {};
+    $('synth_aug_ui_total').value = aug.ui_overlay_prob ?? 0.5;     $('synth_aug_ui_total_v').textContent = (aug.ui_overlay_prob ?? 0.5).toFixed(2);
+    $('synth_aug_lv').value     = uc.lv_text     ?? 0.5; $('synth_aug_lv_v').textContent     = (uc.lv_text??0.5).toFixed(2);
+    $('synth_aug_star').value   = uc.star        ?? 0.3; $('synth_aug_star_v').textContent   = (uc.star??0.3).toFixed(2);
+    $('synth_aug_weapon').value = uc.weapon_icon ?? 0.4; $('synth_aug_weapon_v').textContent = (uc.weapon_icon??0.4).toFixed(2);
+    $('synth_aug_heart').value  = uc.heart       ?? 0.2; $('synth_aug_heart_v').textContent  = (uc.heart??0.2).toFixed(2);
+    $('synth_aug_dim').value    = uc.alpha_dim   ?? 0.25;$('synth_aug_dim_v').textContent    = (uc.alpha_dim??0.25).toFixed(2);
+    $('synth_aug_border').value = aug.border_ablation_prob ?? 0.4;  $('synth_aug_border_v').textContent = (aug.border_ablation_prob ?? 0.4).toFixed(2);
+    $('synth_count').value = t.synth_count ?? 200;
+    synthDraw();
+    synthUpdateSlotList();
+  } catch(e){
+    console.error(e);
+    $('synth_status').textContent = '加载失败: ' + e.message;
+  }
+}
+
+function synthDraw(){
+  const c = $('synth_canvas'); if (!c) return;
+  const ctx = c.getContext('2d');
+  // Fit canvas to its CSS size
+  const rect = c.getBoundingClientRect();
+  c.width = rect.width; c.height = rect.height;
+  ctx.fillStyle = '#0d0d10';
+  ctx.fillRect(0, 0, c.width, c.height);
+  if (!SYNTH.bgImg) {
+    ctx.fillStyle = '#888';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Click 上传样板图 to set background', c.width/2, c.height/2);
+    return;
+  }
+  // Compute fit (base fit-to-window × user zoom, with pan offset)
+  const baseScale = Math.min(c.width / SYNTH.imgW, c.height / SYNTH.imgH);
+  const scale = baseScale * (SYNTH.zoom || 1);
+  const w = SYNTH.imgW * scale, h = SYNTH.imgH * scale;
+  const ox = (c.width - w) / 2 + (SYNTH.panX || 0);
+  const oy = (c.height - h) / 2 + (SYNTH.panY || 0);
+  SYNTH._fit = {scale, ox, oy, w, h, baseScale};
+  ctx.imageSmoothingEnabled = (SYNTH.zoom || 1) < 2;  // crisper pixels at high zoom
+  ctx.drawImage(SYNTH.bgImg, ox, oy, w, h);
+  // Draw slots
+  SYNTH.slots.forEach((s, i) => {
+    const sel = i === SYNTH.selIdx;
+    const isQuad = !!s.quad;
+    ctx.strokeStyle = sel ? '#facc15' : (isQuad ? '#a78bfa' : '#22c55e');
+    ctx.lineWidth = sel ? 3 : 2;
+    if (isQuad) {
+      const pts = s.quad.map(p => ({x: ox + p.x*w, y: oy + p.y*h}));
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let k = 1; k < 4; k++) ctx.lineTo(pts[k].x, pts[k].y);
+      ctx.closePath();
+      ctx.stroke();
+      // Draw 4 corner handles when selected
+      if (sel) {
+        ctx.fillStyle = '#facc15';
+        for (const p of pts) ctx.fillRect(p.x-4, p.y-4, 8, 8);
+      }
+      // Label at TL
+      ctx.fillStyle = '#000a';
+      ctx.fillRect(pts[0].x, pts[0].y-18, 50, 16);
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`#${i+1}◆`, pts[0].x+3, pts[0].y-5);
+    } else {
+      const x1 = ox + s.x1*w, y1 = oy + s.y1*h;
+      const x2 = ox + s.x2*w, y2 = oy + s.y2*h;
+      ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+      ctx.fillStyle = '#000a';
+      ctx.fillRect(x1, y1-18, 50, 16);
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`#${i+1}`, x1+3, y1-5);
+    }
+  });
+  $('synth_info').textContent = `${SYNTH.context} · ${SYNTH.slots.length} slots · ${SYNTH.imgW}×${SYNTH.imgH}`;
+}
+
+function synthUpdateSlotList(){
+  $('synth_slot_count').textContent = SYNTH.slots.length;
+  const el = $('synth_slot_list');
+  if (!el) return;
+  el.innerHTML = '';
+  SYNTH.slots.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.style.cssText = 'padding:3px 6px;margin:1px 0;background:'+(i===SYNTH.selIdx?'#3a3a4a':'transparent')+';border-radius:3px;cursor:pointer;font-family:monospace;font-size:10px';
+    const tag = s.quad ? ' ◆' : '';
+    d.textContent = `#${i+1}${tag}  ${s.x1.toFixed(3)},${s.y1.toFixed(3)} → ${s.x2.toFixed(3)},${s.y2.toFixed(3)}`;
+    d.onclick = () => { SYNTH.selIdx = i; synthDraw(); synthUpdateSlotList(); };
+    el.appendChild(d);
+  });
+}
+
+// Mouse interaction
+function synthCanvasToNorm(mx, my){
+  const fit = SYNTH._fit; if (!fit) return null;
+  const nx = (mx - fit.ox) / fit.w;
+  const ny = (my - fit.oy) / fit.h;
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
+  return {x: nx, y: ny};
+}
+
+function synthHitTest(mx, my){
+  const fit = SYNTH._fit; if (!fit) return {idx: -1, mode: null};
+  const H = 8;  // handle px
+  for (let i = SYNTH.slots.length - 1; i >= 0; i--) {
+    const s = SYNTH.slots[i];
+    if (s.quad) {
+      // Hit-test quad corners first
+      const pts = s.quad.map(p => ({x: fit.ox + p.x*fit.w, y: fit.oy + p.y*fit.h}));
+      const corners = ['quad-tl', 'quad-tr', 'quad-br', 'quad-bl'];
+      for (let k = 0; k < 4; k++){
+        if (mx >= pts[k].x-H && mx <= pts[k].x+H && my >= pts[k].y-H && my <= pts[k].y+H){
+          return {idx: i, mode: corners[k]};
+        }
+      }
+      // Then interior (point-in-polygon, in canvas px space)
+      if (synthPointInPoly(mx, my, pts)) return {idx: i, mode: 'move'};
+    } else {
+      const x1 = fit.ox + s.x1 * fit.w, y1 = fit.oy + s.y1 * fit.h;
+      const x2 = fit.ox + s.x2 * fit.w, y2 = fit.oy + s.y2 * fit.h;
+      if (mx >= x1-H && mx <= x1+H && my >= y1-H && my <= y1+H) return {idx: i, mode: 'resize-nw'};
+      if (mx >= x2-H && mx <= x2+H && my >= y1-H && my <= y1+H) return {idx: i, mode: 'resize-ne'};
+      if (mx >= x1-H && mx <= x1+H && my >= y2-H && my <= y2+H) return {idx: i, mode: 'resize-sw'};
+      if (mx >= x2-H && mx <= x2+H && my >= y2-H && my <= y2+H) return {idx: i, mode: 'resize-se'};
+      if (mx >= x1 && mx <= x2 && my >= y1 && my <= y2) return {idx: i, mode: 'move'};
+    }
+  }
+  return {idx: -1, mode: null};
+}
+
+function synthAttachCanvasEvents(){
+  const c = $('synth_canvas'); if (!c) return;
+  // ── Drag-drop image file onto canvas to set as sample ──────
+  const wrap = $('synth_canvas_wrap') || c.parentElement;
+  const hint = $('synth_drop_hint');
+  const showHint = (show) => { if (hint) hint.style.display = show ? 'flex' : 'none'; };
+  if (wrap && !wrap._synthDropAttached){
+    wrap._synthDropAttached = true;
+    ['dragenter','dragover'].forEach(ev => wrap.addEventListener(ev, (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault(); showHint(true);
+      }
+    }));
+    ['dragleave','dragend'].forEach(ev => wrap.addEventListener(ev, (e) => {
+      // Only hide when leaving the wrap itself (not entering child)
+      if (e.target === wrap || !wrap.contains(e.relatedTarget)) showHint(false);
+    }));
+    wrap.addEventListener('drop', (e) => {
+      e.preventDefault(); showHint(false);
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) synthUploadSampleFile(f);
+    });
+  }
+  c.onmousedown = (e) => {
+    // Middle-button OR Space+left-button → start panning
+    if (e.button === 1 || (e.button === 0 && SYNTH.spaceHeld)) {
+      e.preventDefault();
+      SYNTH.panning = true;
+      SYNTH.panStart = {cx: e.clientX, cy: e.clientY, panX: SYNTH.panX, panY: SYNTH.panY};
+      c.style.cursor = 'grabbing';
+      return;
+    }
+    if (e.button !== 0) return;  // only left-button for slot interaction
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const hit = synthHitTest(mx, my);
+    SYNTH.selIdx = hit.idx;
+    SYNTH.dragMode = hit.mode;
+    SYNTH.dragStart = {mx, my};
+    if (hit.idx >= 0) {
+      const src = SYNTH.slots[hit.idx];
+      SYNTH.dragOrig = {...src};
+      if (src.quad) SYNTH.dragOrig.quad = src.quad.map(p => ({...p}));
+    }
+    synthDraw(); synthUpdateSlotList();
+  };
+  c.onmousemove = (e) => {
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    // Always track mouse position in normalized image coords
+    const n = synthCanvasToNorm(mx, my);
+    if (n) { SYNTH.mouseNx = n.x; SYNTH.mouseNy = n.y; }
+    // Panning takes priority
+    if (SYNTH.panning && SYNTH.panStart) {
+      SYNTH.panX = SYNTH.panStart.panX + (e.clientX - SYNTH.panStart.cx);
+      SYNTH.panY = SYNTH.panStart.panY + (e.clientY - SYNTH.panStart.cy);
+      synthDraw();
+      return;
+    }
+    if (SYNTH.spaceHeld) { c.style.cursor = 'grab'; } else { c.style.cursor = 'crosshair'; }
+    if (!SYNTH.dragMode || SYNTH.selIdx < 0) return;
+    const fit = SYNTH._fit; if (!fit) return;
+    const dx = (mx - SYNTH.dragStart.mx) / fit.w;
+    const dy = (my - SYNTH.dragStart.my) / fit.h;
+    const s = SYNTH.slots[SYNTH.selIdx];
+    const o = SYNTH.dragOrig;
+    const lockSquare = e.shiftKey && SYNTH.dragMode && SYNTH.dragMode !== 'move' && !SYNTH.dragMode.startsWith('quad-');
+    // ── Quad corner drag: move single point only ─────────────
+    if (SYNTH.dragMode && SYNTH.dragMode.startsWith('quad-') && o.quad) {
+      const ki = {'quad-tl':0, 'quad-tr':1, 'quad-br':2, 'quad-bl':3}[SYNTH.dragMode];
+      s.quad = o.quad.map(p => ({...p}));
+      s.quad[ki] = {
+        x: Math.max(0, Math.min(1, o.quad[ki].x + dx)),
+        y: Math.max(0, Math.min(1, o.quad[ki].y + dy)),
+      };
+      synthSyncBBox(s);
+      synthDraw(); synthUpdateSlotList();
+      return;
+    }
+    // ── Quad whole-shape move: translate all 4 points ────────
+    if (SYNTH.dragMode === 'move' && o.quad) {
+      // Clamp so the entire quad stays in [0,1]
+      const minX = Math.min(...o.quad.map(p=>p.x)), maxX = Math.max(...o.quad.map(p=>p.x));
+      const minY = Math.min(...o.quad.map(p=>p.y)), maxY = Math.max(...o.quad.map(p=>p.y));
+      const cdx = Math.max(-minX, Math.min(1 - maxX, dx));
+      const cdy = Math.max(-minY, Math.min(1 - maxY, dy));
+      s.quad = o.quad.map(p => ({x: p.x + cdx, y: p.y + cdy}));
+      synthSyncBBox(s);
+      synthDraw(); synthUpdateSlotList();
+      return;
+    }
+    if (SYNTH.dragMode === 'move') {
+      const W = o.x2 - o.x1, H = o.y2 - o.y1;
+      s.x1 = Math.max(0, Math.min(1-W, o.x1 + dx));
+      s.y1 = Math.max(0, Math.min(1-H, o.y1 + dy));
+      s.x2 = s.x1 + W; s.y2 = s.y1 + H;
+    } else if (SYNTH.dragMode === 'resize-se') {
+      let nx2 = Math.max(o.x1+0.01, Math.min(1, o.x2 + dx));
+      let ny2 = Math.max(o.y1+0.01, Math.min(1, o.y2 + dy));
+      if (lockSquare) {
+        const sidePx = Math.max((nx2-o.x1)*SYNTH.imgW, (ny2-o.y1)*SYNTH.imgH);
+        nx2 = Math.min(1, o.x1 + sidePx/SYNTH.imgW);
+        ny2 = Math.min(1, o.y1 + sidePx/SYNTH.imgH);
+      }
+      s.x2 = nx2; s.y2 = ny2;
+    } else if (SYNTH.dragMode === 'resize-nw') {
+      let nx1 = Math.max(0, Math.min(o.x2-0.01, o.x1 + dx));
+      let ny1 = Math.max(0, Math.min(o.y2-0.01, o.y1 + dy));
+      if (lockSquare) {
+        const sidePx = Math.max((o.x2-nx1)*SYNTH.imgW, (o.y2-ny1)*SYNTH.imgH);
+        nx1 = Math.max(0, o.x2 - sidePx/SYNTH.imgW);
+        ny1 = Math.max(0, o.y2 - sidePx/SYNTH.imgH);
+      }
+      s.x1 = nx1; s.y1 = ny1;
+    } else if (SYNTH.dragMode === 'resize-ne') {
+      let nx2 = Math.max(o.x1+0.01, Math.min(1, o.x2 + dx));
+      let ny1 = Math.max(0, Math.min(o.y2-0.01, o.y1 + dy));
+      if (lockSquare) {
+        const sidePx = Math.max((nx2-o.x1)*SYNTH.imgW, (o.y2-ny1)*SYNTH.imgH);
+        nx2 = Math.min(1, o.x1 + sidePx/SYNTH.imgW);
+        ny1 = Math.max(0, o.y2 - sidePx/SYNTH.imgH);
+      }
+      s.x2 = nx2; s.y1 = ny1;
+    } else if (SYNTH.dragMode === 'resize-sw') {
+      let nx1 = Math.max(0, Math.min(o.x2-0.01, o.x1 + dx));
+      let ny2 = Math.max(o.y1+0.01, Math.min(1, o.y2 + dy));
+      if (lockSquare) {
+        const sidePx = Math.max((o.x2-nx1)*SYNTH.imgW, (ny2-o.y1)*SYNTH.imgH);
+        nx1 = Math.max(0, o.x2 - sidePx/SYNTH.imgW);
+        ny2 = Math.min(1, o.y1 + sidePx/SYNTH.imgH);
+      }
+      s.x1 = nx1; s.y2 = ny2;
+    }
+    synthDraw(); synthUpdateSlotList();
+  };
+  c.onmouseup = () => {
+    SYNTH.dragMode = null; SYNTH.dragOrig = null;
+    if (SYNTH.panning) { SYNTH.panning = false; c.style.cursor = SYNTH.spaceHeld ? 'grab' : 'crosshair'; }
+    // After slot edit, refresh the ref-crop canvas so its representative slot stays in sync
+    if (typeof synthCropDraw === 'function') synthCropDraw();
+  };
+  c.onmouseleave = () => {
+    SYNTH.dragMode = null; SYNTH.dragOrig = null;
+    SYNTH.mouseNx = null; SYNTH.mouseNy = null;
+    if (SYNTH.panning) { SYNTH.panning = false; c.style.cursor = 'crosshair'; }
+  };
+  // Mouse wheel = zoom anchored at cursor
+  c.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const fit = SYNTH._fit; if (!fit) return;
+    // Image-space coords under cursor BEFORE zoom (may be outside [0,1])
+    const nxi = (mx - fit.ox) / fit.w;
+    const nyi = (my - fit.oy) / fit.h;
+    const factor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
+    const newZoom = Math.max(0.3, Math.min(15, (SYNTH.zoom || 1) * factor));
+    if (newZoom === SYNTH.zoom) return;
+    SYNTH.zoom = newZoom;
+    const newScale = fit.baseScale * newZoom;
+    const newW = SYNTH.imgW * newScale, newH = SYNTH.imgH * newScale;
+    const targetOx = mx - nxi * newW;
+    const targetOy = my - nyi * newH;
+    SYNTH.panX = targetOx - (c.width - newW) / 2;
+    SYNTH.panY = targetOy - (c.height - newH) / 2;
+    synthDraw();
+    $('synth_status').textContent = `Zoom ${(newZoom*100).toFixed(0)}% — F/0 复位 · 中键/Space+拖 平移`;
+  }, {passive: false});
+
+  c.oncontextmenu = (e) => {
+    e.preventDefault();
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const n = synthCanvasToNorm(mx, my); if (!n) return;
+    // Add visually-square rect centered on cursor (default 100px side)
+    const sidePx = 100;
+    const halfW = (sidePx / SYNTH.imgW) / 2;
+    const halfH = (sidePx / SYNTH.imgH) / 2;
+    const newSlot = {x1: Math.max(0, n.x - halfW), y1: Math.max(0, n.y - halfH),
+                     x2: Math.min(1, n.x + halfW), y2: Math.min(1, n.y + halfH)};
+    SYNTH.slots.push(newSlot);
+    SYNTH.selIdx = SYNTH.slots.length - 1;
+    synthDraw(); synthUpdateSlotList();
+  };
+  // Keyboard
+  window.addEventListener('keydown', (e) => {
+    if ($('page-synth') && !$('page-synth').classList.contains('active')) return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && SYNTH.selIdx >= 0) {
+      SYNTH.slots.splice(SYNTH.selIdx, 1);
+      SYNTH.selIdx = -1;
+      synthDraw(); synthUpdateSlotList();
+      e.preventDefault();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { synthSave(); e.preventDefault(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && SYNTH.selIdx >= 0) {
+      const src = SYNTH.slots[SYNTH.selIdx];
+      SYNTH.clipboard = {...src};
+      if (src.quad) SYNTH.clipboard.quad = src.quad.map(p => ({...p}));
+      const cl = SYNTH.clipboard;
+      const wpx = ((cl.x2-cl.x1)*SYNTH.imgW).toFixed(0);
+      const hpx = ((cl.y2-cl.y1)*SYNTH.imgH).toFixed(0);
+      const tag = cl.quad ? '◆四边形' : '矩形';
+      $('synth_status').textContent = `已复制 ${tag} #${SYNTH.selIdx+1} (${wpx}×${hpx}px AABB) — 移到目标位置按 Ctrl+V`;
+      e.preventDefault();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v' && SYNTH.clipboard) {
+      const cl = SYNTH.clipboard;
+      const w = cl.x2 - cl.x1, h = cl.y2 - cl.y1;
+      let cx, cy;
+      if (Number.isFinite(SYNTH.mouseNx) && Number.isFinite(SYNTH.mouseNy)) {
+        cx = SYNTH.mouseNx; cy = SYNTH.mouseNy;
+      } else {
+        cx = (cl.x1 + cl.x2)/2 + 0.03; cy = (cl.y1 + cl.y2)/2 + 0.03;
+      }
+      const nx1 = Math.max(0, Math.min(1-w, cx - w/2));
+      const ny1 = Math.max(0, Math.min(1-h, cy - h/2));
+      const newSlot = {x1: nx1, y1: ny1, x2: nx1+w, y2: ny1+h};
+      if (cl.quad) {
+        const oldCx = (cl.x1 + cl.x2)/2, oldCy = (cl.y1 + cl.y2)/2;
+        const newCx = nx1 + w/2, newCy = ny1 + h/2;
+        const dxq = newCx - oldCx, dyq = newCy - oldCy;
+        newSlot.quad = cl.quad.map(p => ({
+          x: Math.max(0, Math.min(1, p.x + dxq)),
+          y: Math.max(0, Math.min(1, p.y + dyq)),
+        }));
+      }
+      SYNTH.slots.push(newSlot);
+      SYNTH.selIdx = SYNTH.slots.length - 1;
+      $('synth_status').textContent = `已粘贴, 共 ${SYNTH.slots.length} slots`;
+      synthDraw(); synthUpdateSlotList();
+      e.preventDefault();
+    }
+    if (SYNTH.selIdx >= 0 && e.key.startsWith('Arrow')) {
+      const step = e.shiftKey ? 0.005 : 0.001;
+      const s = SYNTH.slots[SYNTH.selIdx];
+      let dxK = 0, dyK = 0;
+      if (e.key === 'ArrowLeft')  dxK = -step;
+      if (e.key === 'ArrowRight') dxK = step;
+      if (e.key === 'ArrowUp')    dyK = -step;
+      if (e.key === 'ArrowDown')  dyK = step;
+      if (s.quad) {
+        const minX = Math.min(...s.quad.map(p=>p.x)), maxX = Math.max(...s.quad.map(p=>p.x));
+        const minY = Math.min(...s.quad.map(p=>p.y)), maxY = Math.max(...s.quad.map(p=>p.y));
+        const cdx = Math.max(-minX, Math.min(1 - maxX, dxK));
+        const cdy = Math.max(-minY, Math.min(1 - maxY, dyK));
+        s.quad = s.quad.map(p => ({x: p.x + cdx, y: p.y + cdy}));
+        synthSyncBBox(s);
+      } else {
+        const W = s.x2 - s.x1, H = s.y2 - s.y1;
+        s.x1 = Math.max(0, Math.min(1-W, s.x1 + dxK));
+        s.y1 = Math.max(0, Math.min(1-H, s.y1 + dyK));
+        s.x2 = s.x1 + W; s.y2 = s.y1 + H;
+      }
+      synthDraw(); synthUpdateSlotList();
+      e.preventDefault();
+    }
+    // Q key toggles quad mode on selected slot
+    if (e.key === 'q' && !e.ctrlKey && !e.metaKey && SYNTH.selIdx >= 0) {
+      synthToggleQuad();
+      e.preventDefault();
+    }
+    // Zoom reset
+    if ((e.key === 'f' || e.key === '0') && !e.ctrlKey && !e.metaKey) {
+      SYNTH.zoom = 1; SYNTH.panX = 0; SYNTH.panY = 0;
+      synthDraw();
+      $('synth_status').textContent = 'Zoom 重置 (100% · 居中)';
+      e.preventDefault();
+    }
+    // Space → pan mode (cursor: grab)
+    if (e.key === ' ' && !SYNTH.spaceHeld) {
+      SYNTH.spaceHeld = true;
+      const cv = $('synth_canvas'); if (cv) cv.style.cursor = 'grab';
+      e.preventDefault();
+    }
+    // +/- keyboard zoom
+    if ((e.key === '=' || e.key === '+') && !e.ctrlKey && !e.metaKey) {
+      synthZoomBy(1.25); e.preventDefault();
+    }
+    if ((e.key === '-' || e.key === '_') && !e.ctrlKey && !e.metaKey) {
+      synthZoomBy(1/1.25); e.preventDefault();
+    }
+  });
+  // Space key release → exit pan mode
+  window.addEventListener('keyup', (e) => {
+    if ($('page-synth') && !$('page-synth').classList.contains('active')) return;
+    if (e.key === ' ') {
+      SYNTH.spaceHeld = false;
+      const cv = $('synth_canvas');
+      if (cv && !SYNTH.panning) cv.style.cursor = 'crosshair';
+    }
+  });
+}
+
+function synthBuildPayload(){
+  return {
+    context: SYNTH.context,
+    sample_image: SYNTH.template?.sample_image || '',
+    image_size: [SYNTH.imgW, SYNTH.imgH],
+    slot_rects_norm: SYNTH.slots,
+    ref_transform: {
+      crop_n: {
+        x1: parseFloat($('synth_crop_x1').value),
+        y1: parseFloat($('synth_crop_y1').value),
+        x2: parseFloat($('synth_crop_x2').value),
+        y2: parseFloat($('synth_crop_y2').value),
+      },
+      shape: $('synth_shape').value,
+      radius_px: parseInt($('synth_radius').value, 10) || 0,
+      scale: parseFloat($('synth_scale').value),
+      aug_positions: {
+        lv:     {x: SYNTH_CROP.augPositions.lv.x,     y: SYNTH_CROP.augPositions.lv.y},
+        star:   {x: SYNTH_CROP.augPositions.star.x,   y: SYNTH_CROP.augPositions.star.y},
+        weapon: {x: SYNTH_CROP.augPositions.weapon.x, y: SYNTH_CROP.augPositions.weapon.y},
+        heart:  {x: SYNTH_CROP.augPositions.heart.x,  y: SYNTH_CROP.augPositions.heart.y},
+      },
+    },
+    augmentation: {
+      ui_overlay_prob: parseFloat($('synth_aug_ui_total').value),
+      ui_components: {
+        lv_text:     parseFloat($('synth_aug_lv').value),
+        star:        parseFloat($('synth_aug_star').value),
+        weapon_icon: parseFloat($('synth_aug_weapon').value),
+        heart:       parseFloat($('synth_aug_heart').value),
+        alpha_dim:   parseFloat($('synth_aug_dim').value),
+      },
+      border_ablation_prob: parseFloat($('synth_aug_border').value),
+      brightness_jitter: [0.92, 1.08],
+    },
+    synth_count: parseInt($('synth_count').value, 10) || 200,
+  };
+}
+
+async function synthSave(){
+  if (!SYNTH.context) return;
+  try {
+    const p = synthBuildPayload();
+    const r = await api(`/api/v1/synth/template/${SYNTH.context}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(p)
+    });
+    $('synth_status').textContent = '✓ 已保存 ' + new Date().toLocaleTimeString();
+    // Refresh dropdown info
+    synthInit();
+  } catch(e){
+    $('synth_status').textContent = '保存失败: ' + e.message;
+  }
+}
+
+async function synthUploadSampleFile(f){
+  if (!SYNTH.context) { $('synth_status').textContent = '先选 context'; return; }
+  if (!f || !f.type || !f.type.startsWith('image/')) {
+    $('synth_status').textContent = '只支持图片文件 (jpg/png/webp)';
+    return;
+  }
+  $('synth_status').textContent = `上传中: ${f.name} (${(f.size/1024).toFixed(0)} KB)...`;
+  try {
+    const b64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(f);
+    });
+    const r = await api(`/api/v1/synth/upload_sample/${SYNTH.context}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({file_b64: b64, filename: f.name})
+    });
+    $('synth_status').textContent = `✓ ${f.name} → ${r.image_size.join('×')}`;
+    await synthLoadContext(SYNTH.context);
+  } catch(e){
+    $('synth_status').textContent = '上传失败: ' + e.message;
+  }
+}
+
+function synthPickSample(){
+  if (!SYNTH.context) { $('synth_status').textContent = '先选 context'; return; }
+  // Trigger hidden file input
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/jpeg,image/png,image/webp,image/bmp,image/*';
+  inp.onchange = (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (f) synthUploadSampleFile(f);
+  };
+  inp.click();
+}
+
+function synthPickSampleByPath(){
+  const src = prompt('输入样板图路径 (相对于 repo 根, 或绝对路径):');
+  if (!src || !src.trim()) return;
+  api(`/api/v1/synth/upload_sample/${SYNTH.context}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({source_path: src.trim()})
+  }).then(r => {
+    $('synth_status').textContent = `✓ 路径加载: ${r.image_size.join('×')}`;
+    synthLoadContext(SYNTH.context);
+  }).catch(e => { $('synth_status').textContent = '失败: ' + e.message; });
+}
+
+/* ─── Visual ref-crop tool ──────────────────────────────────
+ * Loads a character's wiki portrait into a side-panel canvas, draws
+ * the crop rectangle (driven by synth_crop_x1/y1/x2/y2 sliders), and
+ * lets the user drag the rect with mouse.  Crop applies to ALL chars
+ * uniformly (it's a template-level setting).                       */
+const SYNTH_CROP = {
+  charCn: null,
+  refImg: null,
+  dragMode: null,     // 'pan' | 'aug-lv' | 'aug-star' | 'aug-weapon' | 'aug-heart'
+  dragStart: null,
+  dragOrig: null,
+  _fit: null,
+  // Aug positions (normalized inside slot 0-1). Defaults match BA UI common spots.
+  augPositions: {
+    lv:     {x: 0.05, y: 0.15, color: '#ffffff', label: 'Lv'},
+    star:   {x: 0.10, y: 0.10, color: '#ffd700', label: '★'},
+    weapon: {x: 0.85, y: 0.85, color: '#ff8c00', label: '⚔'},
+    heart:  {x: 0.85, y: 0.85, color: '#ff1493', label: '♥'},
+  },
+};
+
+function synthCropSetSliders(x1, y1, x2, y2){
+  // Clamp to [0,1] with x1<x2 and y1<y2 (minimum span 0.02)
+  x1 = Math.max(0, Math.min(0.98, x1));
+  y1 = Math.max(0, Math.min(0.98, y1));
+  x2 = Math.max(x1 + 0.02, Math.min(1, x2));
+  y2 = Math.max(y1 + 0.02, Math.min(1, y2));
+  $('synth_crop_x1').value = x1.toFixed(3); $('synth_crop_x1_v').textContent = x1.toFixed(2);
+  $('synth_crop_y1').value = y1.toFixed(3); $('synth_crop_y1_v').textContent = y1.toFixed(2);
+  $('synth_crop_x2').value = x2.toFixed(3); $('synth_crop_x2_v').textContent = x2.toFixed(2);
+  $('synth_crop_y2').value = y2.toFixed(3); $('synth_crop_y2_v').textContent = y2.toFixed(2);
+  synthCropDraw();
+}
+function synthCropFitHead(){ synthCropSetSliders(0.10, 0.00, 0.90, 0.45); }
+function synthCropFitAll(){  synthCropSetSliders(0.00, 0.00, 1.00, 1.00); }
+
+async function synthCropLoadChar(cn){
+  if (!cn) return;
+  SYNTH_CROP.charCn = cn;
+  const img = new Image();
+  img.onload = () => { SYNTH_CROP.refImg = img; synthCropDraw(); };
+  img.onerror = () => { SYNTH_CROP.refImg = null; synthCropDraw(); };
+  img.src = `/api/v1/synth/ref_image/${encodeURIComponent(cn)}?_=${Date.now()}`;
+}
+
+function synthCropDraw(){
+  const c = $('synth_crop_canvas'); if (!c) return;
+  const rect = c.getBoundingClientRect();
+  c.width = rect.width; c.height = rect.height;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0d0d10'; ctx.fillRect(0, 0, c.width, c.height);
+  if (!SYNTH_CROP.refImg) {
+    ctx.fillStyle = '#888'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('选 "参考" 下拉里的角色查看 wiki 证件照', c.width/2, c.height/2);
+    return;
+  }
+  const im = SYNTH_CROP.refImg;
+  const refW = im.naturalWidth, refH = im.naturalHeight;
+
+  // ── Get the first slot's actual shape (rect or quad), in template pixel coords ──
+  // slotPts_px is always a 4-corner polygon; for rect mode it's TL/TR/BR/BL of the rect.
+  let slotPts_px;
+  if (SYNTH.slots && SYNTH.slots.length > 0 && SYNTH.imgW > 1 && SYNTH.imgH > 1) {
+    const s = SYNTH.slots[0];
+    if (s.quad && s.quad.length === 4) {
+      slotPts_px = s.quad.map(p => ({x: p.x * SYNTH.imgW, y: p.y * SYNTH.imgH}));
+    } else {
+      slotPts_px = [
+        {x: s.x1 * SYNTH.imgW, y: s.y1 * SYNTH.imgH},
+        {x: s.x2 * SYNTH.imgW, y: s.y1 * SYNTH.imgH},
+        {x: s.x2 * SYNTH.imgW, y: s.y2 * SYNTH.imgH},
+        {x: s.x1 * SYNTH.imgW, y: s.y2 * SYNTH.imgH},
+      ];
+    }
+  } else {
+    slotPts_px = [{x:0,y:0},{x:200,y:0},{x:200,y:200},{x:0,y:200}];
+  }
+  // AABB of slot in pixel coords
+  const xs = slotPts_px.map(p => p.x), ys = slotPts_px.map(p => p.y);
+  const aabbX1 = Math.min(...xs), aabbY1 = Math.min(...ys);
+  const aabbX2 = Math.max(...xs), aabbY2 = Math.max(...ys);
+  const aabbW = aabbX2 - aabbX1, aabbH = aabbY2 - aabbY1;
+
+  // Scale AABB to fit ~70% of canvas preserving aspect
+  const slotMax = Math.min(c.width, c.height) * 0.70;
+  const slotAspect = aabbW / Math.max(aabbH, 1);
+  let sw, sh;
+  if (slotAspect >= 1) { sw = slotMax; sh = sw / slotAspect; }
+  else { sh = slotMax; sw = sh * slotAspect; }
+  const scaleToCanvas = sw / aabbW;
+  const sx = (c.width - sw) / 2, sy = (c.height - sh) / 2;
+  // Transform slot polygon to canvas coords
+  const slotPts = slotPts_px.map(p => ({
+    x: sx + (p.x - aabbX1) * scaleToCanvas,
+    y: sy + (p.y - aabbY1) * scaleToCanvas,
+  }));
+
+  // Read crop_n
+  const cx1 = parseFloat($('synth_crop_x1').value) || 0;
+  const cy1 = parseFloat($('synth_crop_y1').value) || 0;
+  const cx2 = parseFloat($('synth_crop_x2').value) || 1;
+  const cy2 = parseFloat($('synth_crop_y2').value) || 1;
+  const cw = Math.max(0.001, cx2 - cx1);
+  const ch = Math.max(0.001, cy2 - cy1);
+
+  // Replicate paste logic: ref's crop region COVERS the SLOT AABB (sw × sh)
+  // preserving aspect ratio — fills slot, larger axis overflows (clipped by polygon).
+  const cropNatW = cw * refW, cropNatH = ch * refH;
+  const cropAspect = cropNatW / Math.max(cropNatH, 1);
+  const canvasSlotAspect = sw / Math.max(sh, 1);
+  let cropCanvasW, cropCanvasH;
+  if (cropAspect > canvasSlotAspect) {
+    // Crop wider than slot → fit height, overflow width
+    cropCanvasH = sh; cropCanvasW = sh * cropAspect;
+  } else {
+    // Crop taller than slot → fit width, overflow height
+    cropCanvasW = sw; cropCanvasH = sw / cropAspect;
+  }
+  const refScale = cropCanvasW / cropNatW;
+  const refCanvasW = refW * refScale;
+  const refCanvasH = refH * refScale;
+  const cropCenterXInRef = (cx1 + cx2) / 2;
+  const cropCenterYInRef = (cy1 + cy2) / 2;
+  const slotCenterX = sx + sw / 2, slotCenterY = sy + sh / 2;
+  const refX = slotCenterX - cropCenterXInRef * refCanvasW;
+  const refY = slotCenterY - cropCenterYInRef * refCanvasH;
+
+  SYNTH_CROP._fit = {sx, sy, sw, sh, refX, refY, refCanvasW, refCanvasH, refScale, refW, refH, slotPts};
+
+  // Read shape config (circle / rounded_rect / square)
+  const shape = ($('synth_shape') && $('synth_shape').value) || 'square';
+  const radiusPx = parseInt(($('synth_radius') && $('synth_radius').value) || '0', 10);
+  // Convert template-pixel radius to canvas pixels (scaleToCanvas = sw/aabbW)
+  const radiusCanvas = radiusPx * scaleToCanvas;
+  const inscribedR = Math.min(sw, sh) / 2;  // for circle (slotCenterX/Y already declared above)
+
+  // Helper: build the shape mask path (inscribed in slot AABB sx,sy,sw,sh)
+  const drawShapePath = (ctx2) => {
+    ctx2.beginPath();
+    if (shape === 'circle') {
+      ctx2.arc(slotCenterX, slotCenterY, inscribedR, 0, Math.PI * 2);
+    } else if (shape === 'rounded_rect' && radiusCanvas > 0) {
+      const r = Math.min(radiusCanvas, sw/2, sh/2);
+      if (ctx2.roundRect) {
+        ctx2.roundRect(sx, sy, sw, sh, r);
+      } else {
+        // Manual rounded rect
+        ctx2.moveTo(sx + r, sy);
+        ctx2.lineTo(sx + sw - r, sy);
+        ctx2.arc(sx + sw - r, sy + r, r, -Math.PI/2, 0);
+        ctx2.lineTo(sx + sw, sy + sh - r);
+        ctx2.arc(sx + sw - r, sy + sh - r, r, 0, Math.PI/2);
+        ctx2.lineTo(sx + r, sy + sh);
+        ctx2.arc(sx + r, sy + sh - r, r, Math.PI/2, Math.PI);
+        ctx2.lineTo(sx, sy + r);
+        ctx2.arc(sx + r, sy + r, r, Math.PI, 3*Math.PI/2);
+      }
+    } else {
+      ctx2.rect(sx, sy, sw, sh);
+    }
+  };
+  const drawPolyPath = (ctx2) => {
+    ctx2.beginPath();
+    ctx2.moveTo(slotPts[0].x, slotPts[0].y);
+    for (let i = 1; i < 4; i++) ctx2.lineTo(slotPts[i].x, slotPts[i].y);
+    ctx2.closePath();
+  };
+
+  // 1. Dimmed full ref outside everything
+  ctx.globalAlpha = 0.30;
+  ctx.drawImage(im, refX, refY, refCanvasW, refCanvasH);
+  ctx.globalAlpha = 1.0;
+  // 2. Full-opacity ref clipped to (slot polygon) ∩ (shape mask)
+  ctx.save();
+  drawPolyPath(ctx); ctx.clip();
+  drawShapePath(ctx); ctx.clip();
+  ctx.drawImage(im, refX, refY, refCanvasW, refCanvasH);
+  ctx.restore();
+  // 3. Slot polygon outline (yellow, dashed if shape isn't square — to show that
+  //    the slot AABB is wider than what's actually visible)
+  const isQuad = SYNTH.slots && SYNTH.slots.length > 0 && !!SYNTH.slots[0].quad;
+  const shapeRestricts = (shape === 'circle' || (shape === 'rounded_rect' && radiusCanvas > 0));
+  ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
+  if (shapeRestricts) ctx.setLineDash([4, 3]); else ctx.setLineDash([]);
+  drawPolyPath(ctx); ctx.stroke();
+  ctx.setLineDash([]);
+  // 4. Shape outline (solid yellow) — this is the ACTUAL visible boundary
+  if (shapeRestricts) {
+    ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
+    drawShapePath(ctx); ctx.stroke();
+  }
+  // 5. Corner dots on slot polygon
+  ctx.fillStyle = '#facc15';
+  for (const p of slotPts) ctx.fillRect(p.x-3, p.y-3, 6, 6);
+
+  // 6. Aug position markers — 4 colored draggable dots positioned inside the slot AABB.
+  // Their normalized coords are 0-1 inside slot. We map to canvas px via slot AABB sx/sy/sw/sh.
+  const augOrder = ['lv', 'star', 'weapon', 'heart'];
+  const augHandlePx = {};
+  for (const key of augOrder) {
+    const p = SYNTH_CROP.augPositions[key];
+    if (!p) continue;
+    const px = sx + p.x * sw, py = sy + p.y * sh;
+    augHandlePx[key] = {x: px, y: py};
+    // Halo
+    ctx.fillStyle = '#000a';
+    ctx.beginPath(); ctx.arc(px, py, 10, 0, Math.PI * 2); ctx.fill();
+    // Filled circle
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
+    // Border
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.stroke();
+    // Label inside
+    ctx.fillStyle = key === 'lv' ? '#000' : '#fff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(p.label, px, py + 1);
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  SYNTH_CROP._aug_handles_px = augHandlePx;
+
+  const info = $('synth_crop_info');
+  if (info) {
+    const slotTag = isQuad ? '◆四边形' : '矩形';
+    const shapeTag = shape === 'circle' ? '⚪circle'
+                    : shape === 'rounded_rect' ? `▢rounded(r=${radiusPx})`
+                    : '⬛square';
+    info.textContent = `${SYNTH_CROP.charCn} · slot ${slotTag} ${aabbW.toFixed(0)}×${aabbH.toFixed(0)} · shape ${shapeTag} · zoom ${(1/cw*100).toFixed(0)}%`;
+  }
+}
+
+function synthCropAttach(){
+  const c = $('synth_crop_canvas'); if (!c || c._synthAttached) return;
+  c._synthAttached = true;
+  // Drag = pan ref OR move aug marker (test markers first)
+  c.onmousedown = (e) => {
+    if (!SYNTH_CROP.refImg || !SYNTH_CROP._fit) return;
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    // Hit-test aug handles (10px hit radius)
+    const handles = SYNTH_CROP._aug_handles_px || {};
+    for (const key of ['lv', 'star', 'weapon', 'heart']) {
+      const h = handles[key]; if (!h) continue;
+      const dx = mx - h.x, dy = my - h.y;
+      if (dx*dx + dy*dy <= 144) {  // 12px radius
+        SYNTH_CROP.dragMode = 'aug-' + key;
+        SYNTH_CROP.dragStart = {mx, my};
+        c.style.cursor = 'grabbing';
+        return;
+      }
+    }
+    SYNTH_CROP.dragMode = 'pan';
+    SYNTH_CROP.dragStart = {mx, my};
+    SYNTH_CROP.dragOrig = {
+      x1: parseFloat($('synth_crop_x1').value),
+      y1: parseFloat($('synth_crop_y1').value),
+      x2: parseFloat($('synth_crop_x2').value),
+      y2: parseFloat($('synth_crop_y2').value),
+      refCanvasW: SYNTH_CROP._fit.refCanvasW,
+      refCanvasH: SYNTH_CROP._fit.refCanvasH,
+    };
+    c.style.cursor = 'grabbing';
+  };
+  c.onmousemove = (e) => {
+    if (!SYNTH_CROP.dragMode || !SYNTH_CROP._fit) return;
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const fit = SYNTH_CROP._fit;
+    // Aug marker drag: convert mouse to normalized within slot AABB
+    if (SYNTH_CROP.dragMode.startsWith('aug-')) {
+      const key = SYNTH_CROP.dragMode.slice(4);
+      const nx = (mx - fit.sx) / Math.max(fit.sw, 1);
+      const ny = (my - fit.sy) / Math.max(fit.sh, 1);
+      if (SYNTH_CROP.augPositions[key]) {
+        SYNTH_CROP.augPositions[key].x = Math.max(0, Math.min(1, nx));
+        SYNTH_CROP.augPositions[key].y = Math.max(0, Math.min(1, ny));
+        synthCropDraw();
+      }
+      return;
+    }
+    // Pan ref
+    const dx_canvas = mx - SYNTH_CROP.dragStart.mx;
+    const dy_canvas = my - SYNTH_CROP.dragStart.my;
+    const o = SYNTH_CROP.dragOrig;
+    const d_n_x = -dx_canvas / o.refCanvasW;
+    const d_n_y = -dy_canvas / o.refCanvasH;
+    let x1 = o.x1 + d_n_x, x2 = o.x2 + d_n_x;
+    let y1 = o.y1 + d_n_y, y2 = o.y2 + d_n_y;
+    const cw = x2 - x1, ch = y2 - y1;
+    if (x1 < 0) { x1 = 0; x2 = cw; }
+    if (x2 > 1) { x2 = 1; x1 = 1 - cw; }
+    if (y1 < 0) { y1 = 0; y2 = ch; }
+    if (y2 > 1) { y2 = 1; y1 = 1 - ch; }
+    synthCropSetSliders(x1, y1, x2, y2);
+  };
+  c.onmouseup = c.onmouseleave = () => {
+    SYNTH_CROP.dragMode = null; SYNTH_CROP.dragOrig = null;
+    if (c.style.cursor === 'grabbing') c.style.cursor = 'crosshair';
+  };
+  // Wheel = zoom (crop window expands/shrinks), anchored at mouse
+  c.addEventListener('wheel', (e) => {
+    if (!SYNTH_CROP.refImg || !SYNTH_CROP._fit) return;
+    e.preventDefault();
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const fit = SYNTH_CROP._fit;
+    // Mouse position in ref normalized coords
+    const ref_nx = (mx - fit.refX) / fit.refCanvasW;
+    const ref_ny = (my - fit.refY) / fit.refCanvasH;
+    if (ref_nx < 0 || ref_nx > 1 || ref_ny < 0 || ref_ny > 1) return;
+    let x1 = parseFloat($('synth_crop_x1').value);
+    let y1 = parseFloat($('synth_crop_y1').value);
+    let x2 = parseFloat($('synth_crop_x2').value);
+    let y2 = parseFloat($('synth_crop_y2').value);
+    const cw = x2 - x1, ch = y2 - y1;
+    // Zoom in (wheel up, deltaY<0) = crop window SHRINKS, ref appears bigger in slot
+    const factor = e.deltaY < 0 ? 1 / 1.15 : 1.15;  // window size factor
+    let newCw = Math.max(0.05, Math.min(1, cw * factor));
+    let newCh = Math.max(0.05, Math.min(1, ch * factor));
+    // Anchor at mouse: keep ref_nx at the same RELATIVE position within crop window
+    const relX = (ref_nx - x1) / Math.max(cw, 1e-6);
+    const relY = (ref_ny - y1) / Math.max(ch, 1e-6);
+    let newX1 = ref_nx - relX * newCw;
+    let newY1 = ref_ny - relY * newCh;
+    let newX2 = newX1 + newCw;
+    let newY2 = newY1 + newCh;
+    // Clamp
+    if (newX1 < 0) { newX2 -= newX1; newX1 = 0; }
+    if (newX2 > 1) { newX1 -= (newX2 - 1); newX2 = 1; }
+    if (newX1 < 0) { newX1 = 0; newX2 = Math.min(1, newCw); }
+    if (newY1 < 0) { newY2 -= newY1; newY1 = 0; }
+    if (newY2 > 1) { newY1 -= (newY2 - 1); newY2 = 1; }
+    if (newY1 < 0) { newY1 = 0; newY2 = Math.min(1, newCh); }
+    synthCropSetSliders(newX1, newY1, newX2, newY2);
+  }, {passive: false});
+}
+
+/* ─── Preview modal state + helpers ────────────────────────── */
+const SYNTH_PV = {
+  imgSrc: null, imgW: 0, imgH: 0,
+  zoom: 1, panX: 0, panY: 0,
+  panning: false, panStart: null,
+  info: '',
+};
+
+function synthAutoCount(){
+  // Reverse-engineer synth_count from "target per char" + slot count.
+  // Picks per composite = N slots. Total picks = synth_count × N.
+  // Each char appears total_picks / 252 times (with round-robin balancing).
+  // Solve for synth_count: synth_count = ceil(target × 252 / N).
+  const nSlots = SYNTH.slots.length;
+  if (nSlots === 0) { $('synth_status').textContent = '先画 slot 才能算'; return; }
+  const target = Math.max(1, parseInt($('synth_target_per_char').value, 10) || 20);
+  const nChars = (SYNTH._charList || []).length || 252;
+  const cnt = Math.ceil(target * nChars / nSlots);
+  $('synth_count').value = cnt;
+  $('synth_target_hint').textContent = `= ⌈${target}×${nChars}/${nSlots}⌉ = ${cnt} 张`;
+  $('synth_status').textContent = `✓ ${SYNTH.context}: 每角色至少 ${target} 次 → synth_count=${cnt}`;
+}
+
+async function synthDeleteContext(){
+  if (!SYNTH.context) { $('synth_status').textContent = '没选 context'; return; }
+  if (!confirm(`删除 context "${SYNTH.context}" 的模板和样板图? (不可恢复)`)) return;
+  try {
+    await api(`/api/v1/synth/template/${SYNTH.context}`, {method: 'DELETE'});
+    $('synth_status').textContent = `✓ 已删除 ${SYNTH.context}`;
+    SYNTH.context = null;
+    SYNTH.slots = []; SYNTH.bgImg = null; SYNTH.selIdx = -1;
+    synthDraw(); synthUpdateSlotList();
+    await synthInit();  // refresh dropdown
+  } catch(e){
+    $('synth_status').textContent = '删除失败: ' + e.message;
+  }
+}
+
+function synthZeroAug(){
+  ['aug_ui_total','aug_lv','aug_star','aug_weapon','aug_heart','aug_dim','aug_border'].forEach(id => {
+    const el = $('synth_' + id);
+    if (el) { el.value = '0'; $('synth_' + id + '_v').textContent = '0.00'; }
+  });
+  $('synth_status').textContent = '✓ 所有 augmentation 关掉了 (Save 后生效)';
+}
+
+function synthDefaultAug(){
+  // Recommended preset (Gemini Path B + border ablation defaults)
+  const preset = {
+    aug_ui_total: 0.5, aug_lv: 0.5, aug_star: 0.3,
+    aug_weapon: 0.4, aug_heart: 0.2, aug_dim: 0.25, aug_border: 0.4,
+  };
+  Object.entries(preset).forEach(([id, v]) => {
+    const el = $('synth_' + id);
+    if (el) { el.value = String(v); $('synth_' + id + '_v').textContent = v.toFixed(2); }
+  });
+  $('synth_status').textContent = '✓ 推荐 augmentation 已填 (Save 后生效)';
+}
+
+function synthRandomAug(){
+  // Randomize each aug probability in sensible ranges
+  const ranges = {
+    aug_ui_total: [0.30, 0.70],
+    aug_lv:       [0.30, 0.70],
+    aug_star:     [0.15, 0.45],
+    aug_weapon:   [0.20, 0.55],
+    aug_heart:    [0.10, 0.30],
+    aug_dim:      [0.15, 0.35],
+    aug_border:   [0.25, 0.55],
+  };
+  Object.entries(ranges).forEach(([id, [lo, hi]]) => {
+    const el = $('synth_' + id); if (!el) return;
+    const v = lo + Math.random() * (hi - lo);
+    el.value = v.toFixed(3); $('synth_' + id + '_v').textContent = v.toFixed(2);
+  });
+  $('synth_status').textContent = '✓ Augmentation 随机化了 (Save 后生效)';
+}
+
+async function synthRandomPreview(){
+  // Clear character selection so server picks random per-slot, then preview
+  const sel = $('synth_char_pick'); if (sel) sel.value = '';
+  await synthPreview();
+}
+
+async function synthPreview(){
+  if (!SYNTH.context) return;
+  const charCn = $('synth_char_pick').value || '';
+  try {
+    const payload = {template: synthBuildPayload(), char_cn: charCn};
+    const r = await api(`/api/v1/synth/preview/${SYNTH.context}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const src = `data:image/jpeg;base64,${r.image_b64}`;
+    const [iw, ih] = r.image_size || [0, 0];
+    const aug = r.aug_stats || {};
+    const cfg = r.aug_config || {};
+    const augLabel = (aug.total_slots > 0)
+      ? ` · aug: UI ${aug.ui_overlay}/${aug.total_slots} (p=${(cfg.ui_overlay_prob||0).toFixed(2)}) · border ${aug.border}/${aug.total_slots} (p=${(cfg.border_ablation_prob||0).toFixed(2)})`
+      : '';
+    const info = `${r.labels.length} slots · ${iw}×${ih}${augLabel}` + (charCn ? ` · char: ${charCn}` : ' · random chars');
+    SYNTH_PV.imgSrc = src; SYNTH_PV.imgW = iw; SYNTH_PV.imgH = ih; SYNTH_PV.info = info;
+    // Update side-panel thumbnail
+    const holder = $('synth_preview_holder');
+    holder.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = 'max-width:100%;max-height:200px;display:block;margin:0 auto;pointer-events:none';
+    holder.appendChild(img);
+    const cap = document.createElement('div');
+    cap.style.cssText = 'font-size:10px;color:var(--muted);margin-top:4px;text-align:center;pointer-events:none';
+    cap.textContent = info + ' · 🔍 点击放大';
+    holder.appendChild(cap);
+    $('synth_status').textContent = '✓ Preview ready';
+    // Auto-open modal (first time, can also be reopened by clicking thumbnail)
+    synthOpenPreviewModal();
+  } catch(e){
+    $('synth_status').textContent = 'Preview 失败: ' + e.message;
+  }
+}
+
+function synthOpenPreviewModal(){
+  if (!SYNTH_PV.imgSrc) return;  // nothing to show yet
+  const modal = $('synth_preview_modal');
+  if (!modal) return;
+  const wasOpen = (modal.style.display === 'flex');
+  modal.style.display = 'flex';
+  $('synth_pv_info').textContent = SYNTH_PV.info;
+  // Only reset zoom/pan when newly opened (preserve view during re-generates)
+  if (!wasOpen) { SYNTH_PV.zoom = 1; SYNTH_PV.panX = 0; SYNTH_PV.panY = 0; }
+  synthPvRender();
+}
+function synthClosePreviewModal(){
+  const modal = $('synth_preview_modal'); if (modal) modal.style.display = 'none';
+}
+function synthPvReset(){ SYNTH_PV.zoom = 1; SYNTH_PV.panX = 0; SYNTH_PV.panY = 0; synthPvRender(); }
+function synthPvZoom(factor, anchorMx, anchorMy){
+  const stage = $('synth_pv_stage'); if (!stage) return;
+  const sr = stage.getBoundingClientRect();
+  const baseScale = Math.min(sr.width / SYNTH_PV.imgW, sr.height / SYNTH_PV.imgH);
+  if (!isFinite(baseScale) || baseScale <= 0) return;
+  const mx = (anchorMx == null) ? sr.width/2 : anchorMx;
+  const my = (anchorMy == null) ? sr.height/2 : anchorMy;
+  const curScale = baseScale * SYNTH_PV.zoom;
+  const curW = SYNTH_PV.imgW * curScale, curH = SYNTH_PV.imgH * curScale;
+  const curOx = (sr.width - curW)/2 + SYNTH_PV.panX;
+  const curOy = (sr.height - curH)/2 + SYNTH_PV.panY;
+  const nxi = (mx - curOx) / curW, nyi = (my - curOy) / curH;
+  const newZoom = Math.max(0.2, Math.min(20, SYNTH_PV.zoom * factor));
+  if (newZoom === SYNTH_PV.zoom) return;
+  SYNTH_PV.zoom = newZoom;
+  const newScale = baseScale * newZoom;
+  const newW = SYNTH_PV.imgW * newScale, newH = SYNTH_PV.imgH * newScale;
+  SYNTH_PV.panX = (mx - nxi * newW) - (sr.width - newW) / 2;
+  SYNTH_PV.panY = (my - nyi * newH) - (sr.height - newH) / 2;
+  synthPvRender();
+}
+function synthPvRender(){
+  const stage = $('synth_pv_stage'); if (!stage || !SYNTH_PV.imgSrc) return;
+  const sr = stage.getBoundingClientRect();
+  const baseScale = Math.min(sr.width / SYNTH_PV.imgW, sr.height / SYNTH_PV.imgH);
+  const scale = baseScale * SYNTH_PV.zoom;
+  const w = SYNTH_PV.imgW * scale, h = SYNTH_PV.imgH * scale;
+  const ox = (sr.width - w)/2 + SYNTH_PV.panX;
+  const oy = (sr.height - h)/2 + SYNTH_PV.panY;
+  stage.innerHTML = `<img src="${SYNTH_PV.imgSrc}" style="position:absolute;left:${ox}px;top:${oy}px;width:${w}px;height:${h}px;image-rendering:${SYNTH_PV.zoom>=2?'pixelated':'auto'};user-select:none;pointer-events:none;-webkit-user-drag:none"/>`;
+  $('synth_pv_zoom').textContent = (SYNTH_PV.zoom*100).toFixed(0) + '%';
+}
+
+(function synthPvAttach(){
+  // Script is at end of body so DOM should be ready; run on next tick to be safe
+  const attach = () => {
+    const stage = $('synth_pv_stage'); if (!stage) return;
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const sr = stage.getBoundingClientRect();
+      const mx = e.clientX - sr.left, my = e.clientY - sr.top;
+      synthPvZoom(e.deltaY < 0 ? 1.15 : 1/1.15, mx, my);
+    }, {passive: false});
+    stage.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 && e.button !== 1) return;
+      e.preventDefault();
+      SYNTH_PV.panning = true;
+      SYNTH_PV.panStart = {cx: e.clientX, cy: e.clientY, panX: SYNTH_PV.panX, panY: SYNTH_PV.panY};
+      stage.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!SYNTH_PV.panning) return;
+      SYNTH_PV.panX = SYNTH_PV.panStart.panX + (e.clientX - SYNTH_PV.panStart.cx);
+      SYNTH_PV.panY = SYNTH_PV.panStart.panY + (e.clientY - SYNTH_PV.panStart.cy);
+      synthPvRender();
+    });
+    window.addEventListener('mouseup', () => {
+      if (SYNTH_PV.panning) { SYNTH_PV.panning = false; stage.style.cursor = 'grab'; }
+    });
+    // Keyboard while modal open
+    window.addEventListener('keydown', (e) => {
+      const modal = $('synth_preview_modal');
+      if (!modal || modal.style.display === 'none') return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'Escape') { synthClosePreviewModal(); e.preventDefault(); }
+      if (e.key === '+' || e.key === '=') { synthPvZoom(1.25); e.preventDefault(); }
+      if (e.key === '-' || e.key === '_') { synthPvZoom(1/1.25); e.preventDefault(); }
+      if (e.key === 'f' || e.key === '0') { synthPvReset(); e.preventDefault(); }
+      if (e.key === 'r' || e.key === 'R') { synthPreview(); e.preventDefault(); }
+    });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attach);
+  } else {
+    setTimeout(attach, 0);
+  }
+})();
 </script>
 </body>
 </html>

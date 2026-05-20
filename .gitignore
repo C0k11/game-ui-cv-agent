@@ -89,3 +89,13 @@ data/event_progress.json
 data/story_progress.json
 data/ocr_model/trt_cache/
 .claude/
+
+# Build / preview / alignment outputs (regenerated on demand)
+_alignment_report.json
+_alignment_report.md
+_synth_v4_mosaic.jpg
+synth_preview_aug_test.jpg
+_yolo_class_to_ref.txt
+build_v3.log
+train_v3_26x.log
+*.bak_before_fix
