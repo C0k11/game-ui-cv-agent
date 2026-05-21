@@ -1,32 +1,32 @@
-"""Watch fused_avatar_yolo26x training and emit a human-friendly progress
+"""Watch a YOLO training run and emit a human-friendly progress
 file every minute.  Pure-python loop, no Claude/agent involvement.
 
-Reads:  D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/results.csv
-Writes: D:/Project/ai game secretary/_TRAIN_PROGRESS.md  (refresh in any editor)
-        D:/Project/ai game secretary/_TRAIN_PROGRESS.csv (excel-friendly, latest 50)
-
-Stops automatically when results.csv reaches 200 rows (= training done) or
-when ./_TRAIN_STOP file appears.
-
 Usage:
-    py scripts/monitor_train.py
+    py scripts/monitor_train.py                       # default = v4
+    py scripts/monitor_train.py --run fused_avatar_yolo26x --epochs 200
 """
 from __future__ import annotations
+import argparse
 import csv
 import datetime as _dt
 from pathlib import Path
 import time
 
 REPO = Path(__file__).resolve().parents[1]
-RESULTS = Path("D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/results.csv")
+RUNS_ROOT = Path("D:/Project/ml_cache/models/yolo/runs")
 OUT_MD = REPO / "_TRAIN_PROGRESS.md"
 OUT_CSV = REPO / "_TRAIN_PROGRESS.csv"
 STOP = REPO / "_TRAIN_STOP"
 
-# Baselines
-V1_MAP50 = 0.597  # 26m epoch 168
-V2_MAP50 = 0.617  # 26x epoch 134
-TARGET_EPOCHS = 200
+# Baselines (mAP50)
+V1_MAP50 = 0.597  # 26m epoch 168 (v1)
+V2_MAP50 = 0.617  # 26x epoch 134 (v2)
+V3_MAP50 = 0.680  # 26x epoch 124 best (v3, heavy-aug overfit)
+
+# Will be filled by argparse
+RUN_NAME = "fused_avatar_yolo26x_v4"
+TARGET_EPOCHS = 100
+RESULTS = RUNS_ROOT / RUN_NAME / "results.csv"
 
 
 def read_results():
@@ -90,20 +90,19 @@ def emit_md(rows):
     filled = int(bar_len * progress_pct / 100)
     bar = "█" * filled + "░" * (bar_len - filled)
 
-    # Status vs baseline
-    if last["mAP50"] >= V2_MAP50:
-        status_v2 = f"✅ 超过 v2 (+{(last['mAP50']-V2_MAP50)*100:.2f}pp)"
-    else:
-        status_v2 = f"⏳ 差 {(V2_MAP50-last['mAP50'])*100:.2f}pp"
-    if last["mAP50"] >= V1_MAP50:
-        status_v1 = f"✅ 超过 v1 (+{(last['mAP50']-V1_MAP50)*100:.2f}pp)"
-    else:
-        status_v1 = f"⏳ 差 {(V1_MAP50-last['mAP50'])*100:.2f}pp"
+    # Status vs baselines
+    def _stat(name, base):
+        if last["mAP50"] >= base:
+            return f"✅ 超过 {name} (+{(last['mAP50']-base)*100:.2f}pp)"
+        return f"⏳ 差 {(base-last['mAP50'])*100:.2f}pp vs {name}"
+    status_v1 = _stat("v1", V1_MAP50)
+    status_v2 = _stat("v2", V2_MAP50)
+    status_v3 = _stat("v3", V3_MAP50)
 
     eta = fmt_eta(last["epoch"], last["time"])
 
     md = []
-    md.append("# 🏋️ fused_avatar_yolo26x v3 Training Progress")
+    md.append(f"# 🏋️ {RUN_NAME} Training Progress")
     md.append("")
     md.append(f"**Last refresh**: `{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}` · "
               f"**Epoch**: `{last['epoch']}/{TARGET_EPOCHS}` · **ETA**: `{eta}`")
@@ -114,17 +113,19 @@ def emit_md(rows):
     md.append("")
     md.append("## Current vs Baselines")
     md.append("")
-    md.append("| Metric | Current | v1 (26m) | v2 (26x) | Status |")
-    md.append("|---|---|---|---|---|")
-    md.append(f"| **mAP50** | **{last['mAP50']:.4f}** | 0.5970 | 0.6170 | {status_v1} / {status_v2} |")
-    md.append(f"| **mAP50-95** | **{last['mAP50_95']:.4f}** | ~0.30 | ~0.40 | (more strict IoU) |")
-    md.append(f"| Precision | {last['precision']:.4f} | | | |")
-    md.append(f"| Recall | {last['recall']:.4f} | | | |")
-    md.append(f"| Train cls_loss | {last['cls_loss']:.4f} | | | (lower=better) |")
-    md.append(f"| Val cls_loss | {last['val_cls_loss']:.4f} | | | |")
+    md.append("| Metric | Current | v1 (26m) | v2 (26x) | v3 (26x heavy-aug) | Status |")
+    md.append("|---|---|---|---|---|---|")
+    md.append(f"| **mAP50** | **{last['mAP50']:.4f}** | 0.5970 | 0.6170 | 0.6803 | {status_v3} |")
+    md.append(f"| **mAP50-95** | **{last['mAP50_95']:.4f}** | ~0.30 | ~0.40 | 0.6229 | (stricter IoU) |")
+    md.append(f"| Precision | {last['precision']:.4f} | | | | |")
+    md.append(f"| Recall | {last['recall']:.4f} | | | | |")
+    md.append(f"| Train cls_loss | {last['cls_loss']:.4f} | | | | (lower=better) |")
+    md.append(f"| Val cls_loss | {last['val_cls_loss']:.4f} | | | | (climbing = overfit) |")
     md.append("")
     md.append(f"**🏆 Best epoch so far**: `#{best['epoch']}` with mAP50 = **{best['mAP50']:.4f}** "
               f"(mAP50-95 = {best['mAP50_95']:.4f})")
+    md.append("")
+    md.append(f"_v1/v2/v3 status_: {status_v1} · {status_v2} · {status_v3}")
     md.append("")
     md.append("## Last 15 Epochs")
     md.append("")
@@ -146,7 +147,7 @@ def emit_md(rows):
     md.append("- Or open `_TRAIN_PROGRESS.csv` in Excel/LibreOffice")
     md.append("- This file updates every 60 seconds while monitor_train.py is running")
     md.append("")
-    md.append(f"*Training task: `bskz702hu` · output: `D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/`*")
+    md.append(f"*Training output: `D:/Project/ml_cache/models/yolo/runs/{RUN_NAME}/`*")
 
     _safe_write(OUT_MD, "\n".join(md))
 
@@ -170,15 +171,24 @@ def emit_csv(rows):
 
 
 def main() -> int:
+    global RUN_NAME, TARGET_EPOCHS, RESULTS
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run", default=RUN_NAME, help="run dir name under runs/")
+    ap.add_argument("--epochs", type=int, default=TARGET_EPOCHS, help="target epoch count")
+    args = ap.parse_args()
+    RUN_NAME = args.run
+    TARGET_EPOCHS = args.epochs
+    RESULTS = RUNS_ROOT / RUN_NAME / "results.csv"
+
     print(f"[monitor] watching {RESULTS}")
     print(f"[monitor] writing  {OUT_MD}")
     print(f"[monitor] writing  {OUT_CSV}")
+    print(f"[monitor] target epochs: {TARGET_EPOCHS}")
     print(f"[monitor] stop file: touch {STOP} to exit")
     last_epoch = -1
     while True:
         rows = read_results()
         if rows is None:
-            # results.csv not yet — write placeholder
             emit_md([])
         else:
             emit_md(rows)
@@ -188,7 +198,7 @@ def main() -> int:
                 print(f"[monitor] epoch {cur} mAP50={rows[-1]['mAP50']:.4f}")
                 last_epoch = cur
             if cur >= TARGET_EPOCHS:
-                print("[monitor] training complete (epoch 200 reached)")
+                print(f"[monitor] training complete (epoch {TARGET_EPOCHS} reached)")
                 return 0
         if STOP.exists():
             print("[monitor] STOP file detected, exiting")

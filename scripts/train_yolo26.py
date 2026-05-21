@@ -306,14 +306,24 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
 
     from ultralytics import YOLO
     # If --resume, load last.pt and resume (epoch + lr scheduler state preserved)
+    # Ultralytics resume mode: ONLY pass resume=True to .train(), all other args
+    # come from the saved args.yaml beside last.pt. Passing extra kwargs makes
+    # ultralytics silently fall back to "fresh training with last.pt as base".
     last_pt = YOLO_ROOT / "runs" / cfg["out_name"] / "weights" / "last.pt"
     if RESUME_FLAG and last_pt.exists():
         print(f"  RESUME from: {last_pt}")
         model = YOLO(str(last_pt))
-    else:
-        if RESUME_FLAG:
-            print(f"  --resume requested but {last_pt} missing → starting fresh")
-        model = YOLO(base)
+        results = model.train(resume=True)
+        best = YOLO_ROOT / "runs" / cfg["out_name"] / "weights" / "best.pt"
+        if best.exists():
+            print(f"  done: {best}")
+            return best
+        print("  warning: best.pt not found after training")
+        return None
+
+    if RESUME_FLAG:
+        print(f"  --resume requested but {last_pt} missing → starting fresh")
+    model = YOLO(base)
     train_kwargs = dict(
         data=str(data_arg),
         epochs=cfg["epochs"],
@@ -328,7 +338,6 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         save=True,
         save_period=-1,
         verbose=True,
-        resume=(RESUME_FLAG and last_pt.exists()),
     )
     if kind == "detect":
         # Static-UI augmentation: minimal
