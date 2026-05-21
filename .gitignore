@@ -109,3 +109,7 @@ _val_cleanup.html
 _v*_manual*.json
 _v*_actual.json
 _v3_manual_baseline.json
+
+# Inference visualization output (annotated images, regenerated on demand)
+_test_inference/
+_test_v4_manual/

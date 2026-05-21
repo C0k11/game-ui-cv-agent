@@ -1,4 +1,4 @@
-"""Test fused_avatar_yolo26x best.pt on real trajectory frames — no labeling
+"""Test fused_avatar best.pt on real trajectory frames — no labeling
 required, just sanity-check what the model predicts on actual game UI.
 
 Outputs:
@@ -6,15 +6,19 @@ Outputs:
   - _test_inference/_summary.md                        (per-image detection counts + top-5 conf)
 
 Usage:
-    py scripts/test_inference_real.py
-    py scripts/test_inference_real.py --conf 0.20  (lower to see borderline detections)
+    py scripts/test_inference_real.py                 # default = v4 best_manual.pt
+    py scripts/test_inference_real.py --weights ...   # custom checkpoint
+    py scripts/test_inference_real.py --conf 0.20     # lower to see borderline detections
 """
 from __future__ import annotations
 import argparse
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-WEIGHTS = Path("D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/weights/best.pt")
+# Default: v4 SHIP version (ep11 weights, manual mAP50 0.9657)
+DEFAULT_WEIGHTS = Path(
+    "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v4/weights/best_manual.pt"
+)
 OUT_DIR = REPO / "_test_inference"
 
 # User-curated test frames
@@ -38,23 +42,25 @@ SCHEDULE_FRAMES = [
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--weights", default=str(DEFAULT_WEIGHTS), type=Path)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--imgsz", type=int, default=960)
     args = ap.parse_args()
 
-    if not WEIGHTS.exists():
-        print(f"[err] weights missing: {WEIGHTS}")
+    weights = Path(args.weights)
+    if not weights.exists():
+        print(f"[err] weights missing: {weights}")
         return 1
     OUT_DIR.mkdir(exist_ok=True)
     (OUT_DIR / "cafe").mkdir(exist_ok=True)
     (OUT_DIR / "schedule").mkdir(exist_ok=True)
 
     from ultralytics import YOLO
-    model = YOLO(str(WEIGHTS))
+    model = YOLO(str(weights))
     classes = model.names
 
-    summary = ["# fused_avatar_yolo26x best.pt — real-frame inference test", ""]
-    summary.append(f"- weights: `{WEIGHTS}`")
+    summary = [f"# fused_avatar — real-frame inference test ({weights.name})", ""]
+    summary.append(f"- weights: `{weights}`")
     summary.append(f"- conf threshold: {args.conf}, imgsz: {args.imgsz}")
     summary.append("")
 
