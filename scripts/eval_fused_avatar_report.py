@@ -34,7 +34,7 @@ import yaml
 from ultralytics import YOLO
 
 REPO = Path(__file__).resolve().parents[1]
-MODEL_PATH = Path(r"D:\Project\ml_cache\models\yolo\runs\fused_avatar_yolo26m\weights\best.pt")
+MODEL_PATH = Path(r"D:\Project\ml_cache\models\yolo\runs\fused_avatar_yolo26x\weights\best.pt")
 DATA_YAML = Path(r"D:\Project\ml_cache\models\yolo\dataset\fused_avatar_v1\data.yaml")
 
 
@@ -87,24 +87,40 @@ def load_truth_boxes(label_path: Path, img_w: int, img_h: int, names: List[str])
 
 
 def match_truth_to_pred(truths: List[Dict], preds: List[Dict], iou_thr: float = 0.5):
+    """Match GT boxes to predictions with conf-aware priority.
+
+    Algorithm:
+      1. Sort preds by confidence desc (high-conf preds get first pick)
+      2. For each pred (in conf order), find best unmatched GT with IoU>=thr
+      3. If found, match pred→GT; mark both as used
+      4. Remaining unmatched GTs = misses, remaining unmatched preds = FPs
+
+    This avoids the "low-conf duplicate steals match from high-conf real
+    prediction" quirk when NMS-free models output near-identical boxes.
+    """
     used_pred = set()
-    matches, misses, wrong_cls = [], [], []
-    for ti, t in enumerate(truths):
-        best_p, best_iou = -1, 0.0
-        for pi, p in enumerate(preds):
-            if pi in used_pred:
+    used_gt = set()
+    matches, wrong_cls = [], []
+    # Sort pred indices by confidence desc
+    pred_order = sorted(range(len(preds)), key=lambda i: -preds[i].get("conf", 0))
+    for pi in pred_order:
+        if pi in used_pred:
+            continue
+        best_t, best_iou = -1, 0.0
+        for ti, t in enumerate(truths):
+            if ti in used_gt:
                 continue
-            v = iou(t["xyxy"], p["xyxy"])
+            v = iou(t["xyxy"], preds[pi]["xyxy"])
             if v > best_iou:
-                best_iou, best_p = v, pi
-        if best_iou >= iou_thr and best_p >= 0:
-            used_pred.add(best_p)
-            if preds[best_p]["name"] == t["name"]:
-                matches.append((ti, best_p))
+                best_iou, best_t = v, ti
+        if best_iou >= iou_thr and best_t >= 0:
+            used_pred.add(pi)
+            used_gt.add(best_t)
+            if preds[pi]["name"] == truths[best_t]["name"]:
+                matches.append((best_t, pi))
             else:
-                wrong_cls.append((ti, best_p))
-        else:
-            misses.append(ti)
+                wrong_cls.append((best_t, pi))
+    misses = [ti for ti in range(len(truths)) if ti not in used_gt]
     fps = [pi for pi in range(len(preds)) if pi not in used_pred]
     return matches, misses, fps, wrong_cls
 

@@ -1,5 +1,5 @@
 {
-  "context": "battle_squad",
+  "context": "battle_squad_val",
   "sample_image": "samples/battle_squad.jpg",
   "image_size": [
     2255,
@@ -493,7 +493,7 @@
     }
   },
   "augmentation": {
-    "ui_overlay_prob": 1,
+    "ui_overlay_prob": 0.5,
     "ui_components": {
       "lv_text": 1,
       "star": 1,
@@ -501,12 +501,13 @@
       "heart": 0,
       "alpha_dim": 0
     },
-    "border_ablation_prob": 1,
+    "border_ablation_prob": 0.5,
     "brightness_jitter": [
       0.92,
       1.08
     ]
   },
-  "synth_count": 266,
-  "saved_at": "2026-05-20T20:23:07"
+  "synth_count": 60,
+  "saved_at": "2026-05-20T20:23:07",
+  "use_for": "val"
 }

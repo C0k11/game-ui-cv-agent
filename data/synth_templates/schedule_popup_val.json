@@ -1,5 +1,5 @@
 {
-  "context": "schedule_popup",
+  "context": "schedule_popup_val",
   "sample_image": "samples/schedule_popup.jpg",
   "image_size": [
     2404,
@@ -445,7 +445,7 @@
     }
   },
   "augmentation": {
-    "ui_overlay_prob": 1,
+    "ui_overlay_prob": 0.5,
     "ui_components": {
       "lv_text": 0,
       "star": 0,
@@ -453,14 +453,14 @@
       "heart": 1,
       "alpha_dim": 1
     },
-    "border_ablation_prob": 1,
+    "border_ablation_prob": 0.5,
     "brightness_jitter": [
       0.92,
       1.08
     ]
   },
-  "synth_count": 297,
+  "synth_count": 60,
   "bbox_mode": "full",
-  "use_for": "train",
+  "use_for": "val",
   "saved_at": "2026-05-20T20:49:56"
 }

@@ -450,6 +450,13 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div id="ann_classlist"></div>
       <h4>Boxes <span id="ann_boxcount"></span></h4>
       <div id="ann_boxlist"></div>
+      <h4>Find frames with class <span id="ann_findcount" style="color:var(--muted);font-weight:normal"></span></h4>
+      <div class="add-class-row">
+        <input type="text" id="ann_findclass" placeholder="class idx or name, e.g. 361 or 昴" onkeydown="if(event.key==='Enter')annFindFrames()" style="flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none"/>
+        <button class="btn btn-sm btn-success" onclick="annFindFrames()" style="padding:3px 6px" title="搜索包含该 class 的 frame">🔍</button>
+        <button class="btn btn-sm" onclick="$('ann_findclass').value='';$('ann_findlist').innerHTML='';$('ann_findcount').textContent='';" style="padding:3px 6px" title="清空">✕</button>
+      </div>
+      <div id="ann_findlist" style="flex-shrink:0;max-height:240px;min-height:0;overflow-y:auto;background:#0d0d10;border:1px solid var(--border);border-radius:3px;font-size:11px;font-family:var(--mono)"></div>
       <h4 id="ann_ocr_header" style="display:none">OCR <span id="ann_ocrcount"></span></h4>
       <div id="ann_ocrlist"></div>
       <div id="ann_ocr_edit" style="display:none;margin:4px 0">
@@ -615,6 +622,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <label style="font-size:11px;color:var(--muted)">Context</label>
         <select id="synth_context" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;min-width:180px"></select>
+        <button onclick="synthNewTemplate()" class="btn btn-sm" title="新建自定义模板 (任意命名, e.g. tactical_tight)" style="padding:5px 10px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">+ 新建</button>
         <button onclick="synthPickSample()" class="btn btn-sm" title="选本地图片文件 (也可以直接拖到画布上)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">📁 选样板图</button>
         <button onclick="synthPickSampleByPath()" class="btn btn-sm" title="输入文件路径 (相对 repo 根 / 绝对路径)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">路径...</button>
         <button onclick="synthZeroAug()" class="btn btn-sm" title="一键把所有 augmentation 概率设为 0 (Lv/Star/Weapon/Heart/Dim/Border 都关)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">关 Aug</button>
@@ -738,6 +746,21 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center">
         <label style="font-size:11px;color:var(--muted)">合成张数 (build 时)</label>
         <input type="number" id="synth_count" min="10" max="5000" step="10" value="200" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
+      </div>
+      <!-- BBox mode + use_for -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center;font-size:11px;color:var(--muted)">
+        <label title="full = 框=slot AABB (适合 popup); tight_face = 紧框只包脸 (适合战斗/学生清单); both = 50% 概率各一种">bbox 模式</label>
+        <select id="synth_bbox_mode" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px">
+          <option value="full">full (slot AABB)</option>
+          <option value="tight_face">tight_face (脸部紧框)</option>
+          <option value="both">both (50/50 混)</option>
+        </select>
+        <label title="train = 进训练集 (默认); val = 进 val 集 (合成 val); both = 都进">用途</label>
+        <select id="synth_use_for" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px">
+          <option value="train">train (默认)</option>
+          <option value="val">val (合成 val)</option>
+          <option value="both">both (train + val)</option>
+        </select>
       </div>
       <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted)">
         <label>目标每角色出现</label>
@@ -1530,6 +1553,89 @@ function annBuildClassList(){
 }
 
 function annFilterClasses(){annBuildClassList();}
+
+/* Find all frames in current dataset that contain a given class.
+   Input accepts: numeric idx (e.g. "361"), or part of class name (e.g. "昴", "Subaru"),
+   matched against ANN.classes by index or substring (CN + EN if mapped). */
+function annFindFrames(){
+  const inp = $('ann_findclass'); if (!inp) return;
+  const q = (inp.value || '').trim();
+  const listEl = $('ann_findlist'); const countEl = $('ann_findcount');
+  if (!ANN.data || !ANN.data.length) {
+    listEl.innerHTML = '<div style="padding:6px;color:var(--muted)">先选 dataset</div>';
+    countEl.textContent = '';
+    return;
+  }
+  if (!q) {
+    listEl.innerHTML = '';
+    countEl.textContent = '';
+    return;
+  }
+  // Resolve query to list of class indices.
+  // Priority: 1) integer idx → exact, 2) exact class name → that one only,
+  // 3) fallback to substring match (multiple classes).
+  let targetIdx = new Set();
+  const asInt = parseInt(q, 10);
+  if (!isNaN(asInt) && String(asInt) === q && asInt >= 0 && asInt < ANN.classes.length) {
+    targetIdx.add(asInt);
+  } else {
+    // Exact name match
+    const exact = ANN.classes.findIndex(n => n === q);
+    if (exact >= 0) {
+      targetIdx.add(exact);
+    } else {
+      // Fallback: substring match
+      ANN.classes.forEach((name, i) => {
+        if (name && name.includes(q)) targetIdx.add(i);
+      });
+    }
+  }
+  if (targetIdx.size === 0) {
+    listEl.innerHTML = `<div style="padding:6px;color:#f87171">没找到匹配的 class: "${q}"</div>`;
+    countEl.textContent = '';
+    return;
+  }
+  // Collect frames per class
+  const matches = [];  // [{imgIdx, img, boxes: [{cls, name, count}]}]
+  ANN.data.forEach((item, imgIdx) => {
+    const perClass = {};
+    (item.labels || []).forEach(lb => {
+      if (targetIdx.has(lb.cls)) {
+        perClass[lb.cls] = (perClass[lb.cls] || 0) + 1;
+      }
+    });
+    if (Object.keys(perClass).length) {
+      const boxes = Object.entries(perClass).map(([c, n]) => ({
+        cls: +c, name: ANN.classes[+c] || `cls_${c}`, count: n,
+      }));
+      matches.push({imgIdx, img: item.img, boxes});
+    }
+  });
+  // Render
+  const tag = Array.from(targetIdx).map(i => `${i}:${ANN.classes[i]||'?'}`).join(', ');
+  countEl.textContent = `${matches.length} 张 frame 含 [${tag}]`;
+  if (!matches.length) {
+    listEl.innerHTML = `<div style="padding:6px;color:#22c55e">✓ "${q}" 在当前 dataset 里 0 frames — 干净的</div>`;
+    return;
+  }
+  listEl.innerHTML = '';
+  // Add "Jump to first" header
+  const head = document.createElement('div');
+  head.style.cssText = 'padding:4px 6px;background:#1e293b;color:#facc15;cursor:pointer;font-weight:700;border-bottom:1px solid var(--border)';
+  head.innerHTML = `▶ 跳到第 1 张匹配 (frame ${matches[0].img.replace('.jpg','').replace('.png','').split('_').pop()})`;
+  head.onclick = () => annAutoSave(() => { ANN.idx = matches[0].imgIdx; });
+  listEl.appendChild(head);
+  matches.forEach((m, k) => {
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:3px 6px;cursor:pointer;border-bottom:1px solid var(--border);font-size:11px';
+    div.onmouseenter = () => div.style.background = '#3a3a4a';
+    div.onmouseleave = () => div.style.background = '';
+    const tagBoxes = m.boxes.map(b => `${b.name}×${b.count}`).join(' ');
+    div.innerHTML = `<span style="color:#facc15;font-weight:600">${k+1}.</span> ${m.img} <span style="color:var(--muted)">${tagBoxes}</span>`;
+    div.onclick = () => { annAutoSave(() => { ANN.idx = m.imgIdx; }); };
+    listEl.appendChild(div);
+  });
+}
 function annBuildBoxList(){
   const el=$('ann_boxlist');el.innerHTML='';if(!ANN.data.length)return;
   const labels=ANN.data[ANN.idx].labels;$('ann_boxcount').textContent=`(${labels.length})`;
@@ -3629,6 +3735,8 @@ async function synthLoadContext(ctx){
     $('synth_aug_dim').value    = uc.alpha_dim   ?? 0.25;$('synth_aug_dim_v').textContent    = (uc.alpha_dim??0.25).toFixed(2);
     $('synth_aug_border').value = aug.border_ablation_prob ?? 0.4;  $('synth_aug_border_v').textContent = (aug.border_ablation_prob ?? 0.4).toFixed(2);
     $('synth_count').value = t.synth_count ?? 200;
+    $('synth_bbox_mode').value = t.bbox_mode || 'full';
+    $('synth_use_for').value = t.use_for || 'train';
     synthDraw();
     synthUpdateSlotList();
   } catch(e){
@@ -4084,6 +4192,8 @@ function synthBuildPayload(){
       brightness_jitter: [0.92, 1.08],
     },
     synth_count: parseInt($('synth_count').value, 10) || 200,
+    bbox_mode: $('synth_bbox_mode').value || 'full',
+    use_for: $('synth_use_for').value || 'train',
   };
 }
 
@@ -4512,6 +4622,48 @@ function synthAutoCount(){
   $('synth_count').value = cnt;
   $('synth_target_hint').textContent = `= ⌈${target}×${nChars}/${nSlots}⌉ = ${cnt} 张`;
   $('synth_status').textContent = `✓ ${SYNTH.context}: 每角色至少 ${target} 次 → synth_count=${cnt}`;
+}
+
+async function synthNewTemplate(){
+  const name = prompt('新模板名 (英文字母/下划线, e.g. tactical_tight, schedule_val):');
+  if (!name || !name.trim()) return;
+  const safe = name.trim().replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+  if (!safe) { alert('名字无效'); return; }
+  // Create blank template via save endpoint
+  try {
+    const payload = {
+      context: safe,
+      sample_image: '',
+      image_size: [1920, 1080],
+      slot_rects_norm: [],
+      ref_transform: {
+        crop_n: {x1:0, y1:0, x2:1, y2:1},
+        shape: 'square',
+        radius_px: 4,
+        scale: 1.0,
+      },
+      augmentation: {
+        ui_overlay_prob: 0,
+        ui_components: {},
+        border_ablation_prob: 0,
+      },
+      synth_count: 200,
+      bbox_mode: 'full',
+      use_for: 'train',
+    };
+    await api(`/api/v1/synth/template/${safe}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    $('synth_status').textContent = `✓ 新建 ${safe}`;
+    await synthInit();
+    // Select the new one
+    const sel = $('synth_context');
+    sel.value = safe;
+    await synthLoadContext(safe);
+  } catch(e) {
+    $('synth_status').textContent = '新建失败: ' + e.message;
+  }
 }
 
 async function synthDeleteContext(){

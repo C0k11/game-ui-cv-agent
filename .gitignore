@@ -97,5 +97,10 @@ _synth_v4_mosaic.jpg
 synth_preview_aug_test.jpg
 _yolo_class_to_ref.txt
 build_v3.log
+build_v4.log
 train_v3_26x.log
+train_v4_26x.log
+_TRAIN_PROGRESS.md
+_TRAIN_PROGRESS.csv
+_val_cleanup.html
 *.bak_before_fix

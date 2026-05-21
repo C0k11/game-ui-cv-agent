@@ -848,6 +848,8 @@ def build_template_driven_synth(
         bri_jit = aug.get("brightness_jitter") or [0.92, 1.08]
 
         target_count = int(template.get("synth_count", 200) or 200)
+        bbox_mode = template.get("bbox_mode", "full")  # full | tight_face | both
+        use_for = template.get("use_for", "train")  # train | val | both
         n_emitted = 0
 
         # ── Round-robin char picker (guarantees every char appears in this
@@ -1003,17 +1005,43 @@ def build_template_driven_synth(
                     patch[local_poly == 0] = bg_aabb[local_poly == 0]
                     composite[aabb_y1:aabb_y2, aabb_x1:aabb_x2] = patch
 
-                # YOLO label = visible region (clip rect)
-                cx_n = (clip_x1 + clip_x2) / 2 / W
-                cy_n = (clip_y1 + clip_y2) / 2 / H
-                bw_n = (clip_x2 - clip_x1) / W
-                bh_n = (clip_y2 - clip_y1) / H
+                # YOLO label: choose bbox style per template's bbox_mode
+                #   "full"       = clip rect (slot AABB ~ where ref is pasted)
+                #   "tight_face" = inner region matching how user labels battle
+                #                  scenes (just the head/face, not slot card)
+                #   "both"       = 50/50 random pick
+                actual_mode = bbox_mode
+                if actual_mode == "both":
+                    actual_mode = random.choice(["full", "tight_face"])
+                if actual_mode == "tight_face":
+                    # Tight: inset 10% left/right, top 5% to 55% (upper-half face)
+                    cw_full = clip_x2 - clip_x1
+                    ch_full = clip_y2 - clip_y1
+                    tx1 = clip_x1 + int(cw_full * 0.10)
+                    tx2 = clip_x2 - int(cw_full * 0.10)
+                    ty1 = clip_y1 + int(ch_full * 0.05)
+                    ty2 = clip_y1 + int(ch_full * 0.55)
+                    if tx2 - tx1 < 8 or ty2 - ty1 < 8:
+                        # Tight crop too small → fall back to full
+                        tx1, ty1, tx2, ty2 = clip_x1, clip_y1, clip_x2, clip_y2
+                else:
+                    tx1, ty1, tx2, ty2 = clip_x1, clip_y1, clip_x2, clip_y2
+                cx_n = (tx1 + tx2) / 2 / W
+                cy_n = (ty1 + ty2) / 2 / H
+                bw_n = (tx2 - tx1) / W
+                bh_n = (ty2 - ty1) / H
                 cls_idx = fused_idx_map[char_name]
                 label_lines.append(f"{cls_idx} {cx_n:.6f} {cy_n:.6f} {bw_n:.6f} {bh_n:.6f}")
                 class_counts[char_name] += 1
 
             if label_lines:
-                out.append((composite, label_lines, f"synth_tpl_{ctx_name}"))
+                # Tag with use_for so downstream split routes to train/val
+                tag = f"synth_tpl_{ctx_name}"
+                if use_for == "val":
+                    tag = f"synth_val_tpl_{ctx_name}"
+                elif use_for == "both":
+                    tag = f"synth_both_tpl_{ctx_name}"
+                out.append((composite, label_lines, tag))
                 n_emitted += 1
 
         # Per-context coverage stats: every char should appear at least N times
@@ -1459,21 +1487,54 @@ def main() -> int:
             "\n".join(lines) + "\n", encoding="utf-8"
         )
         n_train_boxes += len(lines)
+    # Route synth samples by their tag (use_for=val or both routes some to val/)
+    n_synth_train = n_synth_val = 0
+    n_val_boxes_synth = 0
     for si, (composite, lines, tag) in enumerate(synth_samples_data):
+        # Tags: "synth_tpl_<ctx>" → train only
+        #       "synth_val_tpl_<ctx>" → val only
+        #       "synth_both_tpl_<ctx>" → both (write to train + duplicate to val)
         stem = f"synth__{si:05d}"
-        imwrite_u(OUT_ROOT / "images/train" / (stem + ".jpg"), composite)
-        (OUT_ROOT / "labels/train" / (stem + ".txt")).write_text(
-            "\n".join(lines) + "\n", encoding="utf-8"
-        )
-        n_train_boxes += len(lines)
+        if tag.startswith("synth_val_"):
+            imwrite_u(OUT_ROOT / "images/val" / (stem + ".jpg"), composite)
+            (OUT_ROOT / "labels/val" / (stem + ".txt")).write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
+            n_synth_val += 1
+            n_val_boxes_synth += len(lines)
+        elif tag.startswith("synth_both_"):
+            imwrite_u(OUT_ROOT / "images/train" / (stem + ".jpg"), composite)
+            (OUT_ROOT / "labels/train" / (stem + ".txt")).write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
+            n_train_boxes += len(lines)
+            n_synth_train += 1
+            # Also write to val (same image, will get different stem to avoid collision)
+            val_stem = f"synth_v__{si:05d}"
+            imwrite_u(OUT_ROOT / "images/val" / (val_stem + ".jpg"), composite)
+            (OUT_ROOT / "labels/val" / (val_stem + ".txt")).write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
+            n_synth_val += 1
+            n_val_boxes_synth += len(lines)
+        else:
+            # Default: train
+            imwrite_u(OUT_ROOT / "images/train" / (stem + ".jpg"), composite)
+            (OUT_ROOT / "labels/train" / (stem + ".txt")).write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
+            n_train_boxes += len(lines)
+            n_synth_train += 1
     for jpg in neg_train:
         stem = f"neg__{jpg.parent.name}__{jpg.stem}"
         shutil.copy2(jpg, OUT_ROOT / "images/train" / (stem + ".jpg"))
         (OUT_ROOT / "labels/train" / (stem + ".txt")).write_text("", encoding="utf-8")
-    n_train_files = len(train_manual) + len(synth_samples_data) + len(neg_train)
+    n_train_files = len(train_manual) + n_synth_train + len(neg_train)
     print(f"[emit] train: {n_train_files} files "
-          f"({len(train_manual)} manual + {len(synth_samples_data)} synth + "
+          f"({len(train_manual)} manual + {n_synth_train} synth + "
           f"{len(neg_train)} negatives), {n_train_boxes} positive boxes")
+    if n_synth_val:
+        print(f"[emit] val + {n_synth_val} synth-val frames ({n_val_boxes_synth} boxes)")
 
     # ── 4. data.yaml ──
     yaml_lines = [

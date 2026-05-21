@@ -34,6 +34,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ML_CACHE = Path("D:/Project/ml_cache")
 YOLO_ROOT = ML_CACHE / "models" / "yolo"
 
+# Global resume flag — set by main() from --resume CLI arg
+RESUME_FLAG: bool = False
+
 # Base weight — already in repo root + data/models
 BASE_WEIGHT_CANDIDATES = [
     REPO_ROOT / "yolo26n.pt",
@@ -189,17 +192,47 @@ TRAIN_CONFIGS = {
         "patience": 60,
     },
     "fused_avatar_26x": {
-        # Upgrade option: when fused_avatar_26m converges and we want to
-        # squeeze the last 5-10% mAP.  ~90M params, slower training/inference.
-        # Only train this if 26m results show clear capacity ceiling.
+        # v3 配置 (2026-05-20 训完, best 0.68 但中期过拟合) — 留作历史 baseline
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "fused_avatar_v1" / "data.yaml",
         "base": "yolo26x.pt",
         "epochs": 200,
         "imgsz": 960,
-        "batch": 8,   # x is ~5x bigger than m, halve batch
+        "batch": 8,
         "out_name": "fused_avatar_yolo26x",
-        "patience": 60,
+        "patience": 0,
+        "weight_decay": 0.001,
+        "dropout": 0.1,
+        "mosaic": 0.7,
+        "close_mosaic": 10,
+        "mixup": 0.10,
+        "copy_paste": 0.10,
+    },
+    "fused_avatar_26x_v4": {
+        # v4: warm-start from v3 best.pt + lighter aug (v3 教训).
+        # 目标: cafe/momotalk/schedule 维持 88-95% recall, battle/tactical
+        # 从 30% → 65-75%, 整体 mAP 0.78-0.85.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "fused_avatar_v1" / "data.yaml",
+        # v3 best.pt 当 warm-start (复用 252 类特征)
+        "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x" / "weights" / "best.pt"),
+        "epochs": 100,           # warm-start 不需要 200
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "fused_avatar_yolo26x_v4",
+        "patience": 30,          # 加回 early stop, v3 过拟合是教训
+        # Regularization 回保守 (v3 重正则反而过拟合, 因为 aug 太狠)
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        # Aug 大幅降低 — v3 学到的 lesson
+        "mosaic": 0.3,           # 0.7 → 0.3
+        "close_mosaic": 5,       # 100 epoch 里最后 5 关 mosaic
+        "mixup": 0.0,            # 直接移除 (细粒度致命毒药)
+        "copy_paste": 0.0,       # 移除
+        # 低 LR 保护 warm-start 特征
+        "lr0": 0.003,            # 默认 0.01 的 1/3
+        # 翻转 (BA 角色无方向区别, 加倍数据)
+        "fliplr": 0.5,
     },
     "avatar_cls_v2": {
         # Combined-source classifier: ~250-class BA student recognition.
@@ -272,7 +305,15 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         return None
 
     from ultralytics import YOLO
-    model = YOLO(base)
+    # If --resume, load last.pt and resume (epoch + lr scheduler state preserved)
+    last_pt = YOLO_ROOT / "runs" / cfg["out_name"] / "weights" / "last.pt"
+    if RESUME_FLAG and last_pt.exists():
+        print(f"  RESUME from: {last_pt}")
+        model = YOLO(str(last_pt))
+    else:
+        if RESUME_FLAG:
+            print(f"  --resume requested but {last_pt} missing → starting fresh")
+        model = YOLO(base)
     train_kwargs = dict(
         data=str(data_arg),
         epochs=cfg["epochs"],
@@ -287,6 +328,7 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         save=True,
         save_period=-1,
         verbose=True,
+        resume=(RESUME_FLAG and last_pt.exists()),
     )
     if kind == "detect":
         # Static-UI augmentation: minimal
@@ -300,6 +342,12 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
             mosaic=0.5,
             mixup=0.0,
         )
+        # Per-config aug / regularization overrides (e.g. fused_avatar_26x)
+        for k in ("mosaic", "mixup", "copy_paste", "close_mosaic",
+                  "weight_decay", "dropout", "hsv_h", "hsv_s", "hsv_v",
+                  "degrees", "fliplr", "flipud", "scale", "translate", "lr0"):
+            if k in cfg:
+                train_kwargs[k] = cfg[k]
     elif kind == "classify":
         # Classifier on cropped avatars: MODERATE augmentation.
         # Train and val are DIFFERENT frames of the same character
@@ -350,8 +398,12 @@ def main() -> int:
         help="Which dataset to train on (default: all)",
     )
     ap.add_argument("--dry-run", action="store_true", help="Print plan without training")
+    ap.add_argument("--resume", action="store_true",
+                    help="Resume from last.pt (preserves epoch + LR scheduler state)")
     args = ap.parse_args()
 
+    global RESUME_FLAG
+    RESUME_FLAG = args.resume
     targets = list(TRAIN_CONFIGS.keys()) if args.config == "all" else [args.config]
     results = []
     for cfg_name in targets:
