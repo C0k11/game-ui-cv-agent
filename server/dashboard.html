@@ -2107,13 +2107,24 @@ annCanvas.addEventListener('pointerdown',e=>{
     // Multi-select modifiers:
     //   Shift+click box     → add to selection (or remove if already in)
     //   Ctrl+click box      → remove from selection
-    //   plain click         → single-select
+    //   plain click on UNSELECTED box → single-select (clears multi)
+    //   plain click on ALREADY-SELECTED box → KEEP selection, promote to anchor
+    //     (so user can immediately drag the whole group; clicking an in-group
+    //      box must not collapse the multi-selection — that's the bug fix.)
     if(e.shiftKey){
       if(_annSelHas(hit)) _annSelRemove(hit); else _annSelAdd(hit);
     } else if(e.ctrlKey){
       _annSelRemove(hit);
     } else {
-      _annSelSingle(hit);
+      if(!_annSelHas(hit)){
+        _annSelSingle(hit);
+      } else if(hit !== ANN.selIdx){
+        // demote old anchor into selSet, promote hit to anchor — preserves group
+        if(ANN.selIdx >= 0) ANN.selSet.add(ANN.selIdx);
+        ANN.selSet.delete(hit);
+        ANN.selIdx = hit;
+      }
+      // else hit === current anchor: nothing to change
     }
     annUpdateOCRUI();annDraw();
     // Prepare batch-move if multiple selected; otherwise single-box move
