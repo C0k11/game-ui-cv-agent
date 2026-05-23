@@ -443,6 +443,25 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
     <button class="btn btn-sm" id="btn_ocr_batch" onclick="annBatchOCR()" title="Batch scan all images">Batch</button>
     <button class="btn btn-sm" id="btn_ocr_folder" onclick="annOpenOCRFolder()" title="Open OCR results folder">Open Folder</button>
+    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <!-- X2: Multi-select group toolbar (only visible when ≥ 2 boxes selected) -->
+    <span id="ann_group_toolbar" style="display:none;align-items:center;gap:2px">
+      <span id="ann_group_count" style="color:#06b6d4;font-size:11px;font-family:var(--mono);font-weight:700;padding:0 4px"></span>
+      <button class="btn btn-sm" onclick="annAlignLeft()" title="左对齐">⫷</button>
+      <button class="btn btn-sm" onclick="annAlignCenterH()" title="水平居中">≡H</button>
+      <button class="btn btn-sm" onclick="annAlignRight()" title="右对齐">⫸</button>
+      <span style="width:6px"></span>
+      <button class="btn btn-sm" onclick="annAlignTop()" title="顶对齐">⫶T</button>
+      <button class="btn btn-sm" onclick="annAlignCenterV()" title="垂直居中">≡V</button>
+      <button class="btn btn-sm" onclick="annAlignBottom()" title="底对齐">⫶B</button>
+      <span style="width:6px"></span>
+      <button class="btn btn-sm" onclick="annDistributeH()" title="水平均匀分布 (≥3)">↔</button>
+      <button class="btn btn-sm" onclick="annDistributeV()" title="垂直均匀分布 (≥3)">↕</button>
+      <span style="width:6px"></span>
+      <button class="btn btn-sm" onclick="annMatchSize()" title="尺寸跟随 anchor">⛶=</button>
+      <button class="btn btn-sm" onclick="annArrayGenerate()" title="阵列生成 (Shift+G, 选 2 个时用)">⋯N</button>
+      <button class="btn btn-sm" onclick="annStampAction()" title="保存/粘贴 stamp (Shift+T)">⎘</button>
+    </span>
     <span class="info" id="ann_fileinfo">-</span>
   </div>
   <div class="annotate-layout">
@@ -530,7 +549,9 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
         <div id="synth_drop_hint" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#facc1530;border:3px dashed #facc15;border-radius:6px;color:#facc15;font-size:18px;font-weight:700;pointer-events:none;z-index:5">📥 松开放下样板图</div>
       </div>
       <div style="font-size:11px;color:var(--muted);line-height:1.7">
-        <b>操作</b>: 拖框移动 · 拖边/角 resize (<kbd>Shift</kbd>+拖 = 锁正方形) · <kbd>右键</kbd>空白处新增 · <kbd>Q</kbd> 切换矩形⇄自由四边形 · <kbd>Del</kbd>/<kbd>Backspace</kbd> 删除选中 · <kbd>Ctrl+C/V</kbd> 复制粘贴 · 方向键微调 · <kbd>Ctrl+S</kbd> 保存<br>
+        <b>操作</b>: 拖框移动 · 拖边/角 resize · <kbd>右键</kbd>空白处新增 · <kbd>Q</kbd> 切换矩形⇄自由四边形 · <kbd>Del</kbd> 删除 · <kbd>Ctrl+C/V/D</kbd> 复制/粘贴/复制原位 · <kbd>方向键</kbd> 微调(Shift=10px) · <kbd>Ctrl+Z/Y</kbd> 撤销/重做 · <kbd>Ctrl+S</kbd> 保存<br>
+        <b>多选</b>: <kbd>Shift/Ctrl+空白拖</kbd> 框选/反选 · <kbd>Shift+点击</kbd> 加选 · <kbd>Ctrl+点击</kbd> 减选 · <kbd>双击 box</kbd> 选同类 · <kbd>Ctrl+A</kbd> 全选 · <kbd>Esc</kbd> 清空选中 · 拖动时 <kbd>Shift</kbd>=锁水平 / <kbd>Ctrl</kbd>=锁垂直<br>
+        <b>批量</b>: <kbd>Shift+V</kbd> 复制上一帧 · <kbd>Shift+P</kbd> 任意帧 picker · <kbd>Shift+G</kbd> 阵列生成 · <kbd>Shift+T</kbd> Stamp 保存/粘贴<br>
         <b>视图</b>: 滚轮 缩放 (锚定鼠标) · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> / <kbd>0</kbd> 复位 · <kbd>左键</kbd>拖空白 / <kbd>中键</kbd>拖 平移<br>
         <b>样板图</b>: 点 <b>📁 选样板图</b> 或<b>直接把任意图片文件拖到画布上</b> (自动转格式/找路径都不需要)
       </div>
@@ -1288,8 +1309,48 @@ let ANN={
   zoom:1,offX:0,offY:0,fitZoom:1,
   rotateKey:false,  // true while R is held down
   polyPoints:null,  // freehand polygon points during drawing [{x,y}...]
-  clipboard:null    // copied label for Ctrl+C/V
+  clipboard:null,   // copied SINGLE label for Ctrl+C/V (kept for back-compat)
+  // ── Multi-selection (Phase 1) ──
+  selSet:new Set(), // additional box idx beyond selIdx; selIdx is the "anchor" / primary
+  lassoStart:null,  // image-space {x,y} when Shift+left-drag starts on empty
+  lassoEnd:null,    // current lasso rect endpoint
+  lassoMode:null,   // 'replace' | 'add' | 'remove' (Shift = add, Ctrl = remove)
+  groupDragOrig:null,// array of {idx, xc, yc, w, h, points} for batch move
+  groupClipboard:null,// {labels: [...], anchor: {x,y}} for Ctrl+C/V batch
+  stamp:null         // {labels: [...], anchor: {x,y}} saved stamp for cross-frame paste
 };
+
+// ── Selection helpers ──
+// Treat selSet ∪ {selIdx} as the effective selection. selIdx is preserved as
+// the "anchor" (last-clicked) so existing single-select code paths keep working.
+function _annSelected(){
+  if(!ANN.data.length) return [];
+  const cur = ANN.data[ANN.idx];
+  if(!cur || !cur.labels) return [];
+  const ids = new Set(ANN.selSet);
+  if(ANN.selIdx >= 0 && ANN.selIdx < cur.labels.length) ids.add(ANN.selIdx);
+  // filter out indices that no longer exist (after deletions)
+  return [...ids].filter(i => i >= 0 && i < cur.labels.length).sort((a,b)=>a-b);
+}
+function _annSelClear(){ ANN.selSet = new Set(); ANN.selIdx = -1; }
+function _annSelSingle(i){ ANN.selSet = new Set(); ANN.selIdx = i; }
+function _annSelAdd(i){
+  if(i < 0) return;
+  if(ANN.selIdx < 0){ ANN.selIdx = i; return; }
+  if(i !== ANN.selIdx) ANN.selSet.add(i);
+}
+function _annSelRemove(i){
+  if(i < 0) return;
+  ANN.selSet.delete(i);
+  if(ANN.selIdx === i){
+    // promote one from selSet to anchor, or -1 if none
+    const next = ANN.selSet.values().next();
+    if(!next.done){ ANN.selIdx = next.value; ANN.selSet.delete(next.value); }
+    else ANN.selIdx = -1;
+  }
+}
+function _annSelHas(i){ return i === ANN.selIdx || ANN.selSet.has(i); }
+function _annSelSize(){ return _annSelected().length; }
 
 /* ── U3: Image preload cache (LRU, max 5 entries) ───────────────
    Why: each annLoadImage previously created a fresh Image() and waited
@@ -1511,10 +1572,26 @@ annMinimap.addEventListener('pointerup',e=>{
   _minimapDragging=false;
 });
 
-// double-click on main canvas to zoom in at point
+// double-click on main canvas:
+//   on a box   → L8: select all boxes with same class (replaces selection)
+//   on empty   → zoom in 2.5x at point
 annCanvas.addEventListener('dblclick',e=>{
   if(!ANN.bgImg)return;
   e.preventDefault();
+  const pos=annGetMouse(e);
+  const hit=annHitBox(pos.x,pos.y);
+  if(hit>=0){
+    const cls=ANN.data[ANN.idx].labels[hit].cls;
+    ANN.selIdx=hit;
+    ANN.selSet=new Set();
+    ANN.data[ANN.idx].labels.forEach((lb,i)=>{
+      if(i!==hit && lb.cls===cls) ANN.selSet.add(i);
+    });
+    const n=_annSelSize();
+    showToast(`已选中 ${n} 个 ${ANN.classes[cls]||`cls_${cls}`} 标注`,'info',1500);
+    annDraw();
+    return;
+  }
   const scr=annGetScreen(e);
   annZoomTo(ANN.zoom*2.5,scr.x,scr.y);
 });
@@ -1556,10 +1633,13 @@ $('ann_dataset').onchange=()=>annLoadDataset();
 async function annLoadDataset(){
   const ds=$('ann_dataset').value;if(!ds)return;
   ANN.dataset=ds;
-  // U3 + U1: full reset of cross-dataset state. New dataset → new images,
-  // new history; stale cache entries from old dataset are irrelevant.
+  // U3 + U1 + Phase 1/2: full reset of cross-dataset state. New dataset →
+  // new images, new history, no leftover selection / clipboard / stamp.
   _annCacheClear();
   _annClearHistory();
+  ANN.selSet = new Set();
+  ANN.groupClipboard = null;
+  ANN.stamp = null;
   try{
     const r=await api('/api/v1/datasets/images?dataset='+encodeURIComponent(ds));
     ANN.data=r.images||[];ANN.classes=r.classes||[];
@@ -1680,16 +1760,29 @@ function annBuildBoxList(){
   const el=$('ann_boxlist');el.innerHTML='';if(!ANN.data.length)return;
   const labels=ANN.data[ANN.idx].labels;$('ann_boxcount').textContent=`(${labels.length})`;
   labels.forEach((lb,i)=>{
-    const d=document.createElement('div');d.className='box-item'+(i===ANN.selIdx?' sel':'');
+    const d=document.createElement('div');
+    const inSel = (i===ANN.selIdx) || ANN.selSet.has(i);
+    d.className='box-item'+(inSel?' sel':'');
     const cn=ANN.classes[lb.cls]||`cls_${lb.cls}`;
     d.innerHTML=`<div class="class-dot" style="background:${COLORS[lb.cls%COLORS.length]}"></div>${cn}`;
-    d.onclick=()=>{ANN.selIdx=i;annDraw();};el.appendChild(d);
+    // Click: plain = single-select, Shift = add/toggle, Ctrl = remove
+    d.onclick=(ev)=>{
+      if(ev.shiftKey){
+        if(_annSelHas(i)) _annSelRemove(i); else _annSelAdd(i);
+      } else if(ev.ctrlKey){
+        _annSelRemove(i);
+      } else {
+        _annSelSingle(i);
+      }
+      annBuildBoxList(); annDraw();
+    };
+    el.appendChild(d);
   });
 }
 
 async function annLoadImage(){
   if(!ANN.data.length){annDraw();return;}
-  ANN.selIdx=-1;ocrSelIdx=-1;
+  ANN.selIdx=-1;ANN.selSet=new Set();ocrSelIdx=-1;
   const filename = ANN.data[ANN.idx].img;
   try {
     const img = await _annLoadImageBlob(filename);  // U3: cached load
@@ -1722,7 +1815,11 @@ function annDraw(){
   // draw YOLO labels (with rotation + shape + polygon support)
   const labels=ANN.data[ANN.idx].labels;
   labels.forEach((lb,i)=>{
-    const color=COLORS[lb.cls%COLORS.length];const isSel=(i===ANN.selIdx);
+    const color=COLORS[lb.cls%COLORS.length];
+    // L1/L2: "in selection" = anchor OR additional selected. isAnchor still
+    // controls per-box handle/rotate UI (only one box at a time gets handles).
+    const isAnchor=(i===ANN.selIdx);
+    const isSel=isAnchor||ANN.selSet.has(i);
     const shape=lb.shape||'rect';
 
     // ── Polygon shape ──
@@ -1743,8 +1840,8 @@ function annDraw(){
       const labelText=cn+` [poly ${lb.points.length}pt]`;
       const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(lbl_scr.x,lbl_scr.y-fs-4,tm.width+6,fs+4);
       ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,lbl_scr.x+3,lbl_scr.y-4);
-      if(isSel){
-        // vertex handles (white)
+      if(isAnchor){
+        // vertex handles (white) — only on anchor, not on multi-selected
         lb.points.forEach(p=>{
           const ps=img2scr(p.x*ANN.imgW,p.y*ANN.imgH);
           ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
@@ -1792,8 +1889,8 @@ function annDraw(){
     const labelText=cn+shapeTag;
     const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(-bw/2,-bh/2-fs-4,tm.width+6,fs+4);
     ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,-bw/2+3,-bh/2-4);
-    if(isSel){
-      // corner handles
+    if(isAnchor){
+      // corner handles — only on anchor, not on multi-selected
       [[-bw/2,-bh/2],[bw/2,-bh/2],[-bw/2,bh/2],[bw/2,bh/2]].forEach(([hx,hy])=>{
         ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
         ctx.beginPath();ctx.arc(hx,hy,HANDLE,0,Math.PI*2);ctx.fill();ctx.stroke();
@@ -1823,6 +1920,35 @@ function annDraw(){
       ctx.fillStyle=isSel?'rgba(80,80,0,0.9)':'rgba(0,0,0,0.8)';ctx.fillRect(sx,sy+sh,tm2.width+4,fs+4);
       ctx.fillStyle=isSel?'#ffff00':'#00ffcc';ctx.fillText(label,sx+2,sy+sh+fs);
     });
+  }
+
+  // L1: lasso rect (Shift/Ctrl + left-drag on empty)
+  if(ANN.dragMode==='lasso' && ANN.lassoStart && ANN.lassoEnd){
+    const s1=img2scr(ANN.lassoStart.x,ANN.lassoStart.y);
+    const s2=img2scr(ANN.lassoEnd.x,ANN.lassoEnd.y);
+    const lx=Math.min(s1.x,s2.x), ly=Math.min(s1.y,s2.y);
+    const lw=Math.abs(s1.x-s2.x), lh=Math.abs(s1.y-s2.y);
+    const color = ANN.lassoMode==='remove' ? '#f87171' : '#06b6d4';
+    ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.strokeRect(lx,ly,lw,lh);ctx.setLineDash([]);
+    ctx.fillStyle=color;ctx.globalAlpha=0.10;ctx.fillRect(lx,ly,lw,lh);ctx.globalAlpha=1;
+  }
+  // Multi-select count badge (top-left corner of canvas)
+  const _selN = _annSelSize();
+  if(_selN > 1){
+    ctx.fillStyle='rgba(6,182,212,0.85)';ctx.fillRect(8,8,140,24);
+    ctx.fillStyle='#fff';ctx.font='bold 13px sans-serif';
+    ctx.fillText(`${_selN} boxes selected`,14,25);
+  }
+  // X2: show/hide align toolbar based on selection size
+  const _grpTb = document.getElementById('ann_group_toolbar');
+  const _grpCnt = document.getElementById('ann_group_count');
+  if(_grpTb){
+    if(_selN >= 2){
+      _grpTb.style.display = 'inline-flex';
+      if(_grpCnt) _grpCnt.textContent = `[${_selN} 选中]`;
+    } else {
+      _grpTb.style.display = 'none';
+    }
   }
 
   // draw in-progress box or freehand polygon
@@ -1972,16 +2098,57 @@ annCanvas.addEventListener('pointerdown',e=>{
     if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];return;}
     ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;
   }
-  // left-click: hit handle → resize/rotate; hit box → select+move; hit OCR → select; empty → pan
+  // left-click: hit handle → resize/rotate; hit box → select+move; hit OCR → select; empty → pan or lasso
   const h=annHitHandle(pos.x,pos.y);
   if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   const hit=annHitBox(pos.x,pos.y);
-  if(hit>=0){ANN.selIdx=hit;ocrSelIdx=-1;annUpdateOCRUI();annDraw();ANN.dragMode='move';ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[hit];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
+  if(hit>=0){
+    ocrSelIdx=-1;
+    // Multi-select modifiers:
+    //   Shift+click box     → add to selection (or remove if already in)
+    //   Ctrl+click box      → remove from selection
+    //   plain click         → single-select
+    if(e.shiftKey){
+      if(_annSelHas(hit)) _annSelRemove(hit); else _annSelAdd(hit);
+    } else if(e.ctrlKey){
+      _annSelRemove(hit);
+    } else {
+      _annSelSingle(hit);
+    }
+    annUpdateOCRUI();annDraw();
+    // Prepare batch-move if multiple selected; otherwise single-box move
+    const sel=_annSelected();
+    if(sel.length === 0){ return; }
+    ANN.dragMode='move';ANN.dragStart=pos;
+    if(sel.length === 1){
+      const lb=ANN.data[ANN.idx].labels[sel[0]];
+      ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};
+      ANN.groupDragOrig=null;
+    } else {
+      // Capture origin of every selected box for synchronized translation
+      ANN.groupDragOrig=sel.map(i=>{
+        const lb=ANN.data[ANN.idx].labels[i];
+        return {idx:i,xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};
+      });
+      ANN.dragOrig=null;
+    }
+    annCanvas.setPointerCapture(e.pointerId);
+    return;
+  }
   // check OCR box hit
   const ocrHit=annHitOCR(pos.x,pos.y);
-  if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annUpdateOCRUI();annDraw();return;}
-  // left-click on empty space = pan the image (drawing is right-click only)
-  ANN.selIdx=-1;ocrSelIdx=-1;annUpdateOCRUI();
+  if(ocrHit>=0){ocrSelIdx=ocrHit;_annSelClear();annUpdateOCRUI();annDraw();return;}
+  // Empty space:
+  //   Shift+left-drag → lasso rect (multi-select)
+  //   plain left-drag → pan (legacy)
+  if(e.shiftKey || e.ctrlKey){
+    ANN.dragMode='lasso';
+    ANN.lassoStart=pos;ANN.lassoEnd=pos;
+    ANN.lassoMode = e.ctrlKey ? 'remove' : 'add';
+    annCanvas.setPointerCapture(e.pointerId);
+    return;
+  }
+  _annSelClear();ocrSelIdx=-1;annUpdateOCRUI();
   ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};
   annCanvas.setPointerCapture(e.pointerId);annCanvas.classList.add('panning');annDraw();
 });
@@ -1994,10 +2161,29 @@ annCanvas.addEventListener('pointermove',e=>{
     annDraw();return;
   }
   const pos=annGetMouse(e);
+  if(ANN.dragMode==='lasso'){ANN.lassoEnd=pos;annDraw();return;}
   if(ANN.dragMode==='draw'){ANN.dragOrig=pos;annDraw();return;}
   if(ANN.dragMode==='draw_poly'){ANN.polyPoints.push(pos);annDraw();return;}
   if(!ANN.dragStart)return;
-  const dx=pos.x-ANN.dragStart.x, dy=pos.y-ANN.dragStart.y;
+  // L4: Shift = lock to horizontal-only (dy=0), Ctrl = lock to vertical-only (dx=0)
+  let dx=pos.x-ANN.dragStart.x, dy=pos.y-ANN.dragStart.y;
+  if(ANN.dragMode==='move'){
+    if(e.shiftKey && !e.ctrlKey) dy = 0;
+    else if(e.ctrlKey && !e.shiftKey) dx = 0;
+  }
+  // L3: batch move when multiple boxes selected
+  if(ANN.dragMode==='move' && ANN.groupDragOrig){
+    const ddx=dx/ANN.imgW, ddy=dy/ANN.imgH;
+    for(const o of ANN.groupDragOrig){
+      const lb=ANN.data[ANN.idx].labels[o.idx];
+      if(!lb) continue;
+      lb.xc=o.xc+ddx; lb.yc=o.yc+ddy;
+      if(lb.shape==='polygon' && lb.points && o.points){
+        for(let i=0;i<lb.points.length;i++){lb.points[i].x=o.points[i].x+ddx;lb.points[i].y=o.points[i].y+ddy;}
+      }
+    }
+    ANN.dirty=true;annDraw();return;
+  }
   if(ANN.selIdx<0||!ANN.dragOrig)return;
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
   if(ANN.dragMode==='rotate'){
@@ -2105,10 +2291,32 @@ annCanvas.addEventListener('pointerup',e=>{
       ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;
     }
   }
+  // L1: finalize lasso → collect boxes whose center lies in the rect
+  if(ANN.dragMode==='lasso' && ANN.lassoStart && ANN.lassoEnd){
+    const x1=Math.min(ANN.lassoStart.x,ANN.lassoEnd.x), x2=Math.max(ANN.lassoStart.x,ANN.lassoEnd.x);
+    const y1=Math.min(ANN.lassoStart.y,ANN.lassoEnd.y), y2=Math.max(ANN.lassoStart.y,ANN.lassoEnd.y);
+    const minSize = 3; // ignore micro-drags
+    if(Math.abs(x2-x1) > minSize && Math.abs(y2-y1) > minSize){
+      const cur=ANN.data[ANN.idx];
+      const inside=[];
+      for(let i=0;i<cur.labels.length;i++){
+        const lb=cur.labels[i];
+        const cx=lb.xc*ANN.imgW, cy=lb.yc*ANN.imgH;
+        if(cx>=x1 && cx<=x2 && cy>=y1 && cy<=y2) inside.push(i);
+      }
+      if(ANN.lassoMode==='remove'){
+        for(const i of inside) _annSelRemove(i);
+      } else {
+        // 'add' (or 'replace' if no modifier — but pointerdown forces shift/ctrl)
+        for(const i of inside) _annSelAdd(i);
+      }
+    }
+    ANN.lassoStart=null;ANN.lassoEnd=null;ANN.lassoMode=null;
+  }
   // U1: snapshot AFTER drag-edit completes (not during pointermove).
   // _annPushHistory is a no-op if labels didn't actually change.
-  const wasEditing = ANN.dragMode && ANN.dragMode !== 'pan';
-  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;ANN.polyPoints=null;
+  const wasEditing = ANN.dragMode && ANN.dragMode !== 'pan' && ANN.dragMode !== 'lasso';
+  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;ANN.polyPoints=null;ANN.groupDragOrig=null;
   annCanvas.classList.remove('panning','drawing');
   if(wasEditing) _annPushHistory();
   annDraw();
@@ -2141,15 +2349,112 @@ document.addEventListener('keydown',e=>{
   // U1: Undo / Redo. Ctrl+Z = undo. Ctrl+Y or Ctrl+Shift+Z = redo (covers both Win and Mac conventions).
   if(e.ctrlKey&&!e.shiftKey&&(k==='z'||k==='Z')){e.preventDefault();annUndo();return;}
   if(e.ctrlKey&&((k==='y'||k==='Y')||(e.shiftKey&&(k==='z'||k==='Z')))){e.preventDefault();annRedo();return;}
-  if(e.ctrlKey&&k==='c'&&ANN.selIdx>=0){e.preventDefault();ANN.clipboard=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));return;}
-  if(e.ctrlKey&&k==='v'&&ANN.clipboard){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.clipboard));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;_annPushHistory();annDraw();return;}
-  if(e.ctrlKey&&k==='d'&&ANN.selIdx>=0){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;_annPushHistory();annDraw();return;}
+  // Ctrl+A: select all boxes in current frame
+  if(e.ctrlKey&&!e.shiftKey&&(k==='a'||k==='A')){
+    e.preventDefault();
+    const n = ANN.data[ANN.idx].labels.length;
+    if(n>0){
+      ANN.selIdx = 0;
+      ANN.selSet = new Set();
+      for(let i=1;i<n;i++) ANN.selSet.add(i);
+      annDraw();
+    }
+    return;
+  }
+  // Escape: clear selection
+  if(k==='Escape' && (ANN.selIdx>=0 || ANN.selSet.size>0)){
+    _annSelClear();annDraw();return;
+  }
+  // L9: Ctrl+C / Ctrl+V — single OR group (preserve relative positions on paste)
+  if(e.ctrlKey&&!e.shiftKey&&(k==='c'||k==='C')){
+    const sel=_annSelected();
+    if(sel.length===0) return;
+    e.preventDefault();
+    if(sel.length===1){
+      ANN.clipboard=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[sel[0]]));
+      ANN.groupClipboard=null;
+    } else {
+      // Capture labels + anchor (centroid) for relative-position paste
+      const labels=sel.map(i=>JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i])));
+      const cx=labels.reduce((s,l)=>s+l.xc,0)/labels.length;
+      const cy=labels.reduce((s,l)=>s+l.yc,0)/labels.length;
+      ANN.groupClipboard={labels, anchor:{x:cx, y:cy}};
+      ANN.clipboard=null;
+      showToast(`已复制 ${labels.length} 个标注 (Ctrl+V 粘贴)`,'info',1500);
+    }
+    return;
+  }
+  if(e.ctrlKey&&!e.shiftKey&&(k==='v'||k==='V')){
+    e.preventDefault();
+    if(ANN.groupClipboard){
+      // Group paste: place at centroid + 3% offset, preserve relative positions
+      const {labels, anchor} = ANN.groupClipboard;
+      const newAnchorX = anchor.x + 0.03, newAnchorY = anchor.y + 0.03;
+      const startIdx = ANN.data[ANN.idx].labels.length;
+      for(const lb of labels){
+        const cp=JSON.parse(JSON.stringify(lb));
+        const dx = cp.xc - anchor.x, dy = cp.yc - anchor.y;
+        cp.xc = newAnchorX + dx; cp.yc = newAnchorY + dy;
+        if(cp.points) cp.points = cp.points.map(p=>({x:p.x+0.03, y:p.y+0.03}));
+        ANN.data[ANN.idx].labels.push(cp);
+      }
+      ANN.selSet = new Set();
+      ANN.selIdx = startIdx;
+      for(let i=startIdx+1; i<ANN.data[ANN.idx].labels.length; i++) ANN.selSet.add(i);
+      ANN.dirty=true;_annPushHistory();annDraw();
+      return;
+    }
+    if(ANN.clipboard){
+      const cp=JSON.parse(JSON.stringify(ANN.clipboard));cp.xc+=0.03;cp.yc+=0.03;
+      if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));
+      ANN.data[ANN.idx].labels.push(cp);
+      ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.selSet=new Set();
+      ANN.dirty=true;_annPushHistory();annDraw();
+      return;
+    }
+    return;
+  }
+  // Ctrl+D: duplicate selection (single or group, in place + offset)
+  if(e.ctrlKey&&!e.shiftKey&&(k==='d'||k==='D')){
+    const sel=_annSelected();
+    if(sel.length===0) return;
+    e.preventDefault();
+    const startIdx = ANN.data[ANN.idx].labels.length;
+    for(const i of sel){
+      const cp=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i]));
+      cp.xc+=0.03;cp.yc+=0.03;
+      if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));
+      ANN.data[ANN.idx].labels.push(cp);
+    }
+    ANN.selIdx=startIdx;ANN.selSet=new Set();
+    for(let i=startIdx+1;i<ANN.data[ANN.idx].labels.length;i++) ANN.selSet.add(i);
+    ANN.dirty=true;_annPushHistory();annDraw();
+    return;
+  }
   if(e.ctrlKey&&k==='0'){e.preventDefault();annZoomFit();return;}
   // Shift+P: open paste-from-frame picker (replace current labels with a
   // chosen labeled frame's labels). Destructive but Ctrl+Z restorable.
   if(e.shiftKey&&!e.ctrlKey&&(k==='p'||k==='P')){
     e.preventDefault();
     annOpenPastePicker();
+    return;
+  }
+
+  // X1 Shift+G: array generation. Select exactly 2 boxes (first + last),
+  // press Shift+G, input N (total count), system generates N-2 intermediate
+  // boxes at equal spacing between them. Massive win for grid UI (row of 60
+  // yellow dots etc.) — 2 clicks + 1 prompt instead of 60 clicks.
+  if(e.shiftKey&&!e.ctrlKey&&(k==='g'||k==='G')){
+    e.preventDefault();
+    annArrayGenerate();
+    return;
+  }
+
+  // X3 Shift+T: paste saved stamp at current mouse pos (T = sTamp). If no
+  // stamp saved yet but selection exists, save it first; otherwise paste.
+  if(e.shiftKey&&!e.ctrlKey&&(k==='t'||k==='T')){
+    e.preventDefault();
+    annStampAction();
     return;
   }
 
@@ -2168,14 +2473,51 @@ document.addEventListener('keydown',e=>{
     showToast(`已从 ${src.img} 复制 ${src.labels.length} 个标注 (Ctrl+Z 可撤销)`,'success',2500);
     return;
   }
+  // L5: Arrow keys nudge selection (1px, Shift = 10px). Page nav (A/D) below.
+  const sel=_annSelected();
+  if(sel.length>0 && (k==='ArrowUp'||k==='ArrowDown'||k==='ArrowLeft'||k==='ArrowRight')){
+    e.preventDefault();
+    const step = (e.shiftKey ? 10 : 1);
+    const ddx = (k==='ArrowLeft' ? -step : k==='ArrowRight' ? step : 0) / ANN.imgW;
+    const ddy = (k==='ArrowUp' ? -step : k==='ArrowDown' ? step : 0) / ANN.imgH;
+    for(const i of sel){
+      const lb=ANN.data[ANN.idx].labels[i];
+      lb.xc += ddx; lb.yc += ddy;
+      if(lb.shape==='polygon' && lb.points){
+        for(let j=0;j<lb.points.length;j++){lb.points[j].x+=ddx;lb.points[j].y+=ddy;}
+      }
+    }
+    ANN.dirty=true;_annPushHistory();annDraw();
+    return;
+  }
   if(k==='d'||k==='ArrowRight'){annNext();return;}
   if(k==='a'||k==='ArrowLeft'){annPrev();return;}
   if(k==='='||k==='+'){annZoomIn();return;}
   if(k==='-'){annZoomOut();return;}
   if(e.shiftKey&&k==='Delete'){e.preventDefault();annDeleteImage();return;}
   if((k==='Delete'||k==='Backspace')&&ocrSelIdx>=0){annDeleteOCRBox();return;}
-  if((k==='Delete'||k==='Backspace')&&ANN.selIdx>=0){ANN.data[ANN.idx].labels.splice(ANN.selIdx,1);ANN.selIdx=-1;ANN.dirty=true;_annPushHistory();annDraw();return;}
-  if(/^[0-9]$/.test(k)&&ANN.selIdx>=0&&!e.ctrlKey){ANN.data[ANN.idx].labels[ANN.selIdx].cls=parseInt(k);ANN.dirty=true;_annPushHistory();annDraw();return;}
+  // L6: Delete selection (single or group). Splice in reverse to keep indices stable.
+  if((k==='Delete'||k==='Backspace')){
+    const selDel=_annSelected();
+    if(selDel.length>0){
+      for(const i of selDel.slice().sort((a,b)=>b-a)){
+        ANN.data[ANN.idx].labels.splice(i,1);
+      }
+      _annSelClear();
+      ANN.dirty=true;_annPushHistory();annDraw();
+      return;
+    }
+  }
+  // L7: 0-9 set class on selection (single or group)
+  if(/^[0-9]$/.test(k)&&!e.ctrlKey){
+    const selCls=_annSelected();
+    if(selCls.length>0){
+      const cls=parseInt(k);
+      for(const i of selCls){ ANN.data[ANN.idx].labels[i].cls=cls; }
+      ANN.dirty=true;_annPushHistory();annDraw();
+      return;
+    }
+  }
 });
 
 // navigation
@@ -2285,6 +2627,161 @@ async function annSave(){
     }
   })();
   return _annSavingPromise;
+}
+
+// ── X1: Array generation (Shift+G) ──
+// Take exactly 2 selected boxes as anchors, generate N-2 intermediate ones
+// at uniform spacing. Useful for grid-like UI (rows of dots, item slots, etc).
+function annArrayGenerate(){
+  const sel = _annSelected();
+  if(sel.length !== 2){
+    showToast('需要选中正好 2 个 box (起点 + 终点)','error',2500);
+    return;
+  }
+  const input = prompt('阵列总数 N (含起止):', '6');
+  if(input === null) return;
+  const N = parseInt(input);
+  if(!Number.isFinite(N) || N < 3 || N > 200){
+    showToast('N 必须在 3-200 之间','error',2500);
+    return;
+  }
+  const labels = ANN.data[ANN.idx].labels;
+  const a = labels[sel[0]], b = labels[sel[1]];
+  // Step deltas
+  const dx = (b.xc - a.xc) / (N - 1);
+  const dy = (b.yc - a.yc) / (N - 1);
+  // Generate N-2 intermediate boxes (clone of 'a' template, position interpolated)
+  const startIdx = labels.length;
+  for(let i = 1; i < N - 1; i++){
+    const cp = JSON.parse(JSON.stringify(a));
+    cp.xc = a.xc + dx * i;
+    cp.yc = a.yc + dy * i;
+    if(cp.points){
+      const odx = cp.xc - a.xc, ody = cp.yc - a.yc;
+      cp.points = cp.points.map(p => ({x: p.x + odx, y: p.y + ody}));
+    }
+    labels.push(cp);
+  }
+  // Select the newly created boxes + original anchors
+  ANN.selIdx = sel[0];
+  ANN.selSet = new Set([sel[1]]);
+  for(let i = startIdx; i < labels.length; i++) ANN.selSet.add(i);
+  ANN.dirty = true;
+  _annPushHistory();
+  annDraw(); annBuildBoxList();
+  showToast(`已生成 ${N - 2} 个等距 box (共 ${N} 个，Ctrl+Z 可撤销)`,'success',2500);
+}
+
+// ── X3: Stamp (Shift+T) ──
+// First call with selection → save as stamp. Subsequent calls → paste stamp
+// at current frame (center anchored at the stamp's saved centroid + offset).
+// Persists across frame navigation but cleared on dataset switch.
+function annStampAction(){
+  const sel = _annSelected();
+  if(sel.length > 0 && !ANN.stamp){
+    // Save as stamp on first invocation with selection
+    const labels = sel.map(i => JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i])));
+    const cx = labels.reduce((s,l) => s + l.xc, 0) / labels.length;
+    const cy = labels.reduce((s,l) => s + l.yc, 0) / labels.length;
+    ANN.stamp = {labels, anchor: {x: cx, y: cy}};
+    showToast(`Stamp 已保存 (${labels.length} 个 box)。再按 Shift+T 粘贴到任意帧`,'info',3000);
+    return;
+  }
+  if(!ANN.stamp){
+    showToast('未保存 stamp。先选中几个 box 再按 Shift+T','info',2000);
+    return;
+  }
+  // Paste stamp at center + 3% offset
+  const {labels, anchor} = ANN.stamp;
+  const startIdx = ANN.data[ANN.idx].labels.length;
+  for(const lb of labels){
+    const cp = JSON.parse(JSON.stringify(lb));
+    const dx = cp.xc - anchor.x, dy = cp.yc - anchor.y;
+    cp.xc = anchor.x + dx + 0.02; cp.yc = anchor.y + dy + 0.02;
+    if(cp.points) cp.points = cp.points.map(p => ({x: p.x + 0.02, y: p.y + 0.02}));
+    ANN.data[ANN.idx].labels.push(cp);
+  }
+  ANN.selIdx = startIdx;
+  ANN.selSet = new Set();
+  for(let i = startIdx + 1; i < ANN.data[ANN.idx].labels.length; i++) ANN.selSet.add(i);
+  ANN.dirty = true;
+  _annPushHistory();
+  annDraw(); annBuildBoxList();
+  showToast(`已粘贴 stamp (${labels.length} 个 box)`,'success',1800);
+}
+function annStampClear(){ ANN.stamp = null; showToast('Stamp 已清除','info',1500); }
+
+// ── X2: Group alignment / distribution ──
+// All operate on _annSelected() (>= 2 needed for most ops).
+function _annAlignBounds(){
+  const sel = _annSelected();
+  if(sel.length < 2) return null;
+  const labels = ANN.data[ANN.idx].labels;
+  const boxes = sel.map(i => labels[i]);
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for(const b of boxes){
+    minX = Math.min(minX, b.xc - b.w/2);
+    minY = Math.min(minY, b.yc - b.h/2);
+    maxX = Math.max(maxX, b.xc + b.w/2);
+    maxY = Math.max(maxY, b.yc + b.h/2);
+  }
+  return {sel, boxes, minX, minY, maxX, maxY, cx: (minX+maxX)/2, cy: (minY+maxY)/2};
+}
+function annAlignLeft(){
+  const b = _annAlignBounds(); if(!b) return;
+  for(const lb of b.boxes) lb.xc = b.minX + lb.w/2;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annAlignRight(){
+  const b = _annAlignBounds(); if(!b) return;
+  for(const lb of b.boxes) lb.xc = b.maxX - lb.w/2;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annAlignTop(){
+  const b = _annAlignBounds(); if(!b) return;
+  for(const lb of b.boxes) lb.yc = b.minY + lb.h/2;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annAlignBottom(){
+  const b = _annAlignBounds(); if(!b) return;
+  for(const lb of b.boxes) lb.yc = b.maxY - lb.h/2;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annAlignCenterH(){
+  const b = _annAlignBounds(); if(!b) return;
+  for(const lb of b.boxes) lb.xc = b.cx;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annAlignCenterV(){
+  const b = _annAlignBounds(); if(!b) return;
+  for(const lb of b.boxes) lb.yc = b.cy;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annDistributeH(){
+  const b = _annAlignBounds(); if(!b || b.boxes.length<3) return;
+  const sorted = b.boxes.slice().sort((a,c) => a.xc - c.xc);
+  const step = (sorted[sorted.length-1].xc - sorted[0].xc) / (sorted.length - 1);
+  for(let i=1;i<sorted.length-1;i++) sorted[i].xc = sorted[0].xc + step*i;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annDistributeV(){
+  const b = _annAlignBounds(); if(!b || b.boxes.length<3) return;
+  const sorted = b.boxes.slice().sort((a,c) => a.yc - c.yc);
+  const step = (sorted[sorted.length-1].yc - sorted[0].yc) / (sorted.length - 1);
+  for(let i=1;i<sorted.length-1;i++) sorted[i].yc = sorted[0].yc + step*i;
+  ANN.dirty=true;_annPushHistory();annDraw();
+}
+function annMatchSize(){
+  const sel = _annSelected();
+  if(sel.length < 2 || ANN.selIdx < 0) return;
+  const ref = ANN.data[ANN.idx].labels[ANN.selIdx];
+  for(const i of sel){
+    if(i === ANN.selIdx) continue;
+    const lb = ANN.data[ANN.idx].labels[i];
+    lb.w = ref.w; lb.h = ref.h;
+  }
+  ANN.dirty=true;_annPushHistory();annDraw();
+  showToast(`${sel.length-1} 个 box 已匹配 anchor 尺寸`,'info',1500);
 }
 
 // ── Paste-from-frame picker ── (Shift+P)
