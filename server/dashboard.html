@@ -106,6 +106,15 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
 .progress-bar{width:100%;background:rgba(0,0,0,.3);height:7px;border-radius:4px;margin:8px 0;overflow:hidden}
 .progress-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent) 0%,var(--gold) 100%);transition:width .3s}
 
+/* ── Toast (currently used by annotation save errors) ── */
+.toast-stack{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999;pointer-events:none;max-width:480px}
+.toast{padding:10px 16px;border-radius:6px;font-size:13px;font-family:var(--font);box-shadow:0 4px 16px rgba(0,0,0,.5);pointer-events:auto;border-left:4px solid var(--border);background:var(--bg2);color:var(--text);animation:toastIn .2s ease-out;word-break:break-word}
+.toast.error{border-left-color:var(--red);background:linear-gradient(90deg,#3a0e0e 0%,var(--bg2) 70%)}
+.toast.success{border-left-color:var(--green);background:linear-gradient(90deg,#0e3a1f 0%,var(--bg2) 70%)}
+.toast.info{border-left-color:var(--accent)}
+.toast.fade-out{opacity:0;transition:opacity .3s}
+@keyframes toastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
+
 /* ── Capture page ── */
 .capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
 .stat-card{background:linear-gradient(180deg,var(--bg2) 0%,var(--bg-soft) 100%);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;text-align:center;box-shadow:var(--shadow-soft);transition:transform .15s,box-shadow .15s}
@@ -126,7 +135,9 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
 #ann_minimap{flex-shrink:0}
 .ann-help{flex-shrink:0}
 .ann-canvas-area{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;background:#0a0a0a}
-.ann-canvas-area canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain;touch-action:none}
+.ann-canvas-area canvas{cursor:grab;max-width:100%;max-height:100%;object-fit:contain;touch-action:none}
+.ann-canvas-area canvas.panning{cursor:grabbing}
+.ann-canvas-area canvas.drawing{cursor:crosshair}
 .class-item{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;border:1px solid transparent}
 .class-item:hover{background:var(--bg3)}
 .class-item.sel{border-color:var(--accent);background:var(--accent-soft)}
@@ -195,8 +206,6 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   <button class="nav-btn active" onclick="showPage('agent')" title="助手控制台">A</button>
   <button class="nav-btn" onclick="showPage('capture')" title="采集中心">C</button>
   <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
-  <button class="nav-btn" onclick="showPage('roster')" title="课程表头像调整">R</button>
-  <button class="nav-btn" onclick="showPage('harvest')" title="头像素材采集（邀请卷等）">H</button>
   <button class="nav-btn" onclick="showPage('synth')" title="合成数据模板编辑（生成训练用 composite 头像）">S</button>
   <div class="sidebar-bottom">
     <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API 文档">?</button>
@@ -467,7 +476,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div class="ann-help">
         <b>Controls:</b><br>
         <kbd>A</kbd>/<kbd>D</kbd> navigate<br>
-        <kbd>Click empty</kbd> draw box/polygon<br>
+        <kbd>Left-drag empty</kbd> pan image<br>
         <kbd>Click box</kbd> select &amp; drag to move<br>
         <kbd>Drag corner</kbd> resize<br>
         <kbd>Right-drag</kbd> draw new box/polygon<br>
@@ -484,129 +493,6 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     </div>
     <div class="ann-canvas-area">
       <canvas id="ann_canvas"></canvas>
-    </div>
-  </div>
-</div>
-
-<!-- ════════════ ROSTER TUNER PAGE ════════════ -->
-<div class="page" id="page-roster">
-  <div class="page-title">课程表头像识别区域调整</div>
-  <div class="assistant-sub">鼠标直接<b>拖动矩形/拉角 resize</b> 调整每个房间的头像带。红框 = 头像带，绿框 = 实际送去匹配的 cell。<kbd>Right-click</kbd> 空白处新增一条；<kbd>Del</kbd> 删除选中；<kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> 复制选中框并在鼠标位置粘贴（保持尺寸）；<kbd>Ctrl+S</kbd> 保存。</div>
-
-  <div class="card" style="display:flex;gap:12px;align-items:stretch;height:calc(100vh - 180px);min-height:500px">
-    <!-- Canvas area -->
-    <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0">
-      <div style="display:flex;gap:8px;align-items:center">
-        <select id="roster_sample" style="flex:1;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"></select>
-        <label style="font-size:11px;color:var(--muted)">cells:</label>
-        <input type="number" id="roster_cpr" min="1" max="8" step="1" value="3" style="width:56px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
-        <button onclick="rosterSave()" class="btn btn-sm" style="background:var(--green);color:#0b1a30;border-color:var(--green);font-weight:700">保存</button>
-        <button onclick="rosterReset()" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">重置</button>
-      </div>
-      <div style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
-        <canvas id="roster_canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
-        <div id="roster_status" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none"></div>
-      </div>
-    </div>
-
-    <!-- Side panel: strip list + help -->
-    <div style="width:260px;display:flex;flex-direction:column;gap:8px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase">Strips (<span id="roster_count">0</span>)</div>
-      <div id="roster_list" style="flex:1;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px;min-height:120px"></div>
-      <div style="font-size:11px;color:var(--muted);line-height:1.7">
-        <b>操作</b><br>
-        · 拖动框体 = 移动<br>
-        · 拖边/角 = resize<br>
-        · 右键空白 = 新增<br>
-        · <kbd>Del</kbd> = 删除选中<br>
-        · <kbd>Ctrl+C</kbd> = 复制选中框（保存宽高）<br>
-        · <kbd>Ctrl+V</kbd> = 在鼠标位置粘贴（保持尺寸）<br>
-        · <kbd>Ctrl+D</kbd> = 就地复制（小偏移）<br>
-        · 方向键 = 微调位置（Shift = 大步）<br>
-        · <kbd>Ctrl+S</kbd> = 保存
-      </div>
-      <details style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:6px">
-        <summary style="cursor:pointer;user-select:none">JSON 导入导出（跨机器迁移）</summary>
-        <div style="display:flex;gap:4px;margin-top:6px">
-          <button onclick="rosterCopyJson()" style="flex:1;padding:4px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">Copy JSON</button>
-          <button onclick="rosterPasteJson()" style="flex:1;padding:4px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">Paste JSON</button>
-        </div>
-        <textarea id="roster_json" placeholder="粘贴另一台机器调好的 strips JSON 到这里" style="width:100%;height:100px;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:monospace;font-size:10px;padding:4px;resize:vertical;box-sizing:border-box"></textarea>
-      </details>
-    </div>
-  </div>
-</div>
-
-<!-- ════════════ HARVEST PAGE (avatar + name template extraction) ════════════ -->
-<div class="page" id="page-harvest">
-  <div class="page-title">头像素材采集（邀请卷 / 咖啡厅）</div>
-  <div class="assistant-sub">选一个<b>自己录制的 dataset</b>（用 Screen Capture 录你开着 MomoTalk 邀请 / 咖啡厅邀请的屏幕），画布上翻帧找一张标准帧，拖蓝框 = 头像、绿框 = 名字，设网格重复，<b>开始采集</b>会扫 dataset 里的每张图，OCR 名字并把头像以 <code>&lt;名字&gt;.png</code> 保存。</div>
-
-  <div class="card" style="display:flex;gap:12px;align-items:stretch;height:calc(100vh - 180px);min-height:500px">
-    <!-- Canvas area -->
-    <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <label style="font-size:11px;color:var(--muted)">预设</label>
-        <select id="harvest_preset" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;min-width:140px"></select>
-        <label style="font-size:11px;color:var(--muted)">Dataset</label>
-        <select id="harvest_dataset" style="flex:1;min-width:180px;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"><option value="">Select dataset...</option></select>
-        <button onclick="harvestReloadDatasets()" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">刷新</button>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button onclick="harvestPrev()" style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">← Prev</button>
-        <button onclick="harvestNext()" style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">Next →</button>
-        <button onclick="harvestJumpToUnedited()" title="跳到下一个未调过的帧" style="padding:4px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">跳到未调</button>
-        <button onclick="harvestApplyToRange()" class="btn btn-sm btn-primary" title="把当前帧配置批量复制到后面 N 帧（未调过的）">批量应用到后 N 帧 →</button>
-        <input id="harvest_apply_range" type="number" value="50" min="1" max="1000" style="width:60px;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px" title="N 的值"/>
-        <span id="harvest_nav_info" style="font-size:11px;color:var(--muted);font-family:var(--mono)">—</span>
-        <div style="flex:1"></div>
-        <span id="harvest_save_indicator" class="pill ok" style="font-family:var(--mono)">● 已存盘</span>
-      </div>
-      <div style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
-        <canvas id="harvest_canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
-        <div id="harvest_status" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none"></div>
-      </div>
-      <div style="font-size:11px;color:var(--muted);line-height:1.6">
-        蓝框 = 头像区 | 绿框 = 名字区 | 拖框移动 · 拖角 resize · 只对<b>第一格</b>标，其余用网格重复<br>
-        <b>点击</b>框体选中（出现白色发光边） · <b>方向键微调</b>（Shift=×10 粗调，Alt=×0.25 超细）· <b>长按方向键</b>连续平移 · <b>Esc</b> 取消选中
-      </div>
-    </div>
-
-    <!-- Side panel: grid controls + run -->
-    <div style="width:300px;display:flex;flex-direction:column;gap:10px;font-size:12px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase">预设关键词</div>
-      <input id="harvest_keywords" type="text" placeholder="逗号分隔：邀請,邀请,MomoTalk" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"/>
-
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-top:4px">网格重复</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <label>列数 (cols)<input id="harvest_cols" type="number" min="1" max="12" value="1" style="width:100%;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)"/></label>
-        <label>行数 (rows)<input id="harvest_rows" type="number" min="1" max="20" value="5" style="width:100%;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)"/></label>
-        <label>dx (归一化)<input id="harvest_dx" type="number" min="0" max="1" step="0.001" value="0" style="width:100%;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)"/></label>
-        <label>dy (归一化)<input id="harvest_dy" type="number" min="0" max="1" step="0.001" value="0.1" style="width:100%;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)"/></label>
-      </div>
-
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-top:4px">运行参数</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <label>OCR 阈值<input id="harvest_min_conf" type="number" min="0" max="1" step="0.05" value="0.6" style="width:100%;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)"/></label>
-        <label>最多帧数<input id="harvest_max_frames" type="number" min="10" max="2000" value="200" style="width:100%;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text)"/></label>
-      </div>
-
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button onclick="harvestReloadFromPreset()" title="把磁盘上保存的预设框重新载入（会覆盖当前画的）" style="flex:1;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">重载预设</button>
-        <button onclick="harvestSaveConfig()" style="flex:1;padding:6px;background:#22c55e;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px">保存配置</button>
-      </div>
-      <button onclick="harvestRun()" id="btn_harvest_run" style="padding:8px;background:var(--accent);color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600">开始采集</button>
-      <details style="font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:6px">
-        <summary style="cursor:pointer;user-select:none">手动导出/导入 perImage（灾难恢复）</summary>
-        <div style="display:flex;gap:4px;margin-top:6px">
-          <button onclick="harvestExportPerImage()" style="flex:1;padding:4px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">复制 JSON</button>
-          <button onclick="harvestImportPerImage()" style="flex:1;padding:4px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">粘贴 JSON</button>
-        </div>
-        <textarea id="harvest_per_image_json" placeholder="粘贴之前备份过的 perImage JSON" style="width:100%;height:80px;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:monospace;font-size:10px;padding:4px;resize:vertical;box-sizing:border-box"></textarea>
-      </details>
-
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">运行结果</div>
-      <div id="harvest_result" style="flex:1;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;line-height:1.5">(未运行)</div>
     </div>
   </div>
 </div>
@@ -645,7 +531,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       </div>
       <div style="font-size:11px;color:var(--muted);line-height:1.7">
         <b>操作</b>: 拖框移动 · 拖边/角 resize (<kbd>Shift</kbd>+拖 = 锁正方形) · <kbd>右键</kbd>空白处新增 · <kbd>Q</kbd> 切换矩形⇄自由四边形 · <kbd>Del</kbd>/<kbd>Backspace</kbd> 删除选中 · <kbd>Ctrl+C/V</kbd> 复制粘贴 · 方向键微调 · <kbd>Ctrl+S</kbd> 保存<br>
-        <b>视图</b>: 滚轮 缩放 (锚定鼠标) · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> / <kbd>0</kbd> 复位 · <kbd>中键</kbd>/<kbd>Space</kbd>+左键拖 平移<br>
+        <b>视图</b>: 滚轮 缩放 (锚定鼠标) · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> / <kbd>0</kbd> 复位 · <kbd>左键</kbd>拖空白 / <kbd>中键</kbd>拖 平移<br>
         <b>样板图</b>: 点 <b>📁 选样板图</b> 或<b>直接把任意图片文件拖到画布上</b> (自动转格式/找路径都不需要)
       </div>
     </div>
@@ -812,6 +698,21 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
   </div>
 </div>
 
+<!-- ── Paste-from-frame picker modal (Shift+P) ── -->
+<div id="ann_paste_picker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)annClosePastePicker()">
+  <div style="background:#0d0d10;border:1px solid var(--border);border-radius:6px;padding:14px;width:560px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;gap:10px;font-family:var(--mono)">
+    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between">
+      <div><b style="color:var(--text)">复制全部标注 from frame</b></div>
+      <span style="color:var(--muted);font-size:11px">↑↓ 选择 · Enter 复制 · Esc 取消</span>
+    </div>
+    <input type="text" id="ann_paste_search" placeholder="过滤 frame 名 (例: frame_00020)" autocomplete="off"
+      style="padding:6px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:12px;outline:none;font-family:var(--mono)"
+      onkeyup="annPastePickerFilter()" onkeydown="annPastePickerKeyDown(event)"/>
+    <div id="ann_paste_list" style="flex:1;overflow-y:auto;min-height:200px;max-height:50vh;background:#000;border:1px solid var(--border);border-radius:3px;font-size:11px"></div>
+    <div style="color:var(--muted);font-size:11px">列表按 box 数 降序排序，仅显示已标注的 frame</div>
+  </div>
+</div>
+
 </div><!-- /main -->
 
 <script>
@@ -823,18 +724,47 @@ async function api(path, opts) {
   return ct.includes('application/json') ? r.json() : r.text();
 }
 
+/* ── Toast helper (minimal; used by annotation save errors today) ──
+   showToast(msg, type='info'|'error'|'success', durMs=4000) */
+function showToast(msg, type='info', durMs=4000){
+  let stack = document.getElementById('toast_stack');
+  if(!stack){
+    stack = document.createElement('div');
+    stack.id = 'toast_stack';
+    stack.className = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  stack.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('fade-out');
+    setTimeout(() => t.remove(), 300);
+  }, durMs);
+  return t;
+}
+
+/* ── beforeunload guard: warn on unsaved annotations ──
+   Triggers modern browsers' native "Leave site?" confirmation. */
+window.addEventListener('beforeunload', e => {
+  if (typeof ANN !== 'undefined' && ANN && ANN.dirty){
+    e.preventDefault();
+    e.returnValue = '';  // legacy Chrome/Firefox compat
+    return '';
+  }
+});
+
 /* ── Page Navigation ── */
 let currentPage = 'agent';
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   $('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,roster:3,harvest:4,synth:5}[name]].classList.add('active');
+  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,synth:3}[name]].classList.add('active');
   currentPage = name;
   if (name === 'capture') refreshCapture();
   if (name === 'annotate') annLoadDatasets();
-  if (name === 'roster') rosterInit();
-  if (name === 'harvest') harvestInit();
   if (name === 'synth') { synthInit(); synthAttachCanvasEvents(); }
 }
 
@@ -1360,6 +1290,112 @@ let ANN={
   polyPoints:null,  // freehand polygon points during drawing [{x,y}...]
   clipboard:null    // copied label for Ctrl+C/V
 };
+
+/* ── U3: Image preload cache (LRU, max 5 entries) ───────────────
+   Why: each annLoadImage previously created a fresh Image() and waited
+   on decode+layout (0.5-1.5s per frame). With cache + neighbor prefetch
+   翻 page is ~instant once the cache warms up. */
+const _annImgCache = new Map();  // filename -> {img: HTMLImageElement, loaded: bool}
+const _ANN_CACHE_MAX = 5;
+function _annCacheGet(filename){
+  if(!_annImgCache.has(filename)) return null;
+  // LRU bump: re-insert at end
+  const entry = _annImgCache.get(filename);
+  _annImgCache.delete(filename);
+  _annImgCache.set(filename, entry);
+  return entry;
+}
+function _annCachePut(filename, entry){
+  if(_annImgCache.has(filename)) _annImgCache.delete(filename);
+  _annImgCache.set(filename, entry);
+  while(_annImgCache.size > _ANN_CACHE_MAX){
+    const oldest = _annImgCache.keys().next().value;
+    _annImgCache.delete(oldest);
+  }
+}
+function _annCacheClear(){ _annImgCache.clear(); }
+function _annLoadImageBlob(filename){
+  // Returns Promise<HTMLImageElement>. Coalesces concurrent loads for same filename.
+  return new Promise((resolve, reject) => {
+    const cached = _annCacheGet(filename);
+    if(cached && cached.loaded){ resolve(cached.img); return; }
+    if(cached && !cached.loaded){
+      cached.img.addEventListener('load', () => resolve(cached.img), {once:true});
+      cached.img.addEventListener('error', reject, {once:true});
+      return;
+    }
+    const img = new Image();
+    const entry = {img, loaded:false};
+    _annCachePut(filename, entry);
+    img.onload = () => { entry.loaded = true; resolve(img); };
+    img.onerror = reject;
+    img.src = `/api/v1/datasets/image?dataset=${encodeURIComponent(ANN.dataset)}&filename=${encodeURIComponent(filename)}`;
+  });
+}
+function _annPrefetchNeighbors(){
+  if(!ANN.data.length || !ANN.dataset) return;
+  const n = ANN.data.length;
+  const nextIdx = (ANN.idx + 1) % n;
+  const prevIdx = (ANN.idx - 1 + n) % n;
+  // Defer to next tick so the main image's decode happens first
+  setTimeout(() => {
+    _annLoadImageBlob(ANN.data[nextIdx].img).catch(()=>{});
+    if(prevIdx !== nextIdx) _annLoadImageBlob(ANN.data[prevIdx].img).catch(()=>{});
+  }, 50);
+}
+
+/* ── U1: Undo/Redo history (per-image, snapshot on atomic ops) ──
+   Snapshots are JSON strings of the labels array. Pushed only on
+   "atomic operation complete" (pointerup after drag, Delete, paste,
+   class change, Florence add, Shift+V copy-all), NOT on every
+   pointermove (would explode memory). Cap 50 steps per image. */
+const _annHistory = new Map();  // imgIdx -> {stack: snapshot[], cursor: number}
+const _ANN_HISTORY_MAX = 50;
+function _annHistorySnapshot(){
+  if(!ANN.data.length) return '[]';
+  return JSON.stringify(ANN.data[ANN.idx].labels);
+}
+function _annInitHistoryIfEmpty(){
+  if(!ANN.data.length) return;
+  if(!_annHistory.has(ANN.idx)){
+    _annHistory.set(ANN.idx, {stack:[_annHistorySnapshot()], cursor:0});
+  }
+}
+function _annPushHistory(){
+  if(!ANN.data.length) return;
+  _annInitHistoryIfEmpty();
+  const h = _annHistory.get(ANN.idx);
+  const cur = _annHistorySnapshot();
+  if(h.stack[h.cursor] === cur) return;  // no change → no-op
+  // Truncate forward history (any redo branch is invalidated by new edit)
+  h.stack.length = h.cursor + 1;
+  h.stack.push(cur);
+  if(h.stack.length > _ANN_HISTORY_MAX){
+    h.stack.shift();  // drop oldest, cursor unchanged (still points to new top)
+  } else {
+    h.cursor++;
+  }
+}
+function _annClearHistory(){ _annHistory.clear(); }
+function annUndo(){
+  if(!ANN.data.length) return;
+  const h = _annHistory.get(ANN.idx);
+  if(!h || h.cursor <= 0){ showToast('已是最早状态','info',1500); return; }
+  h.cursor--;
+  ANN.data[ANN.idx].labels = JSON.parse(h.stack[h.cursor]);
+  ANN.selIdx = -1; ANN.dirty = true;
+  annDraw();
+}
+function annRedo(){
+  if(!ANN.data.length) return;
+  const h = _annHistory.get(ANN.idx);
+  if(!h || h.cursor >= h.stack.length - 1){ showToast('已是最新状态','info',1500); return; }
+  h.cursor++;
+  ANN.data[ANN.idx].labels = JSON.parse(h.stack[h.cursor]);
+  ANN.selIdx = -1; ANN.dirty = true;
+  annDraw();
+}
+
 const HANDLE=7;
 const ROT_HANDLE_DIST=28; // px from top-center to rotation handle
 const annCanvas=$('ann_canvas');
@@ -1520,6 +1556,10 @@ $('ann_dataset').onchange=()=>annLoadDataset();
 async function annLoadDataset(){
   const ds=$('ann_dataset').value;if(!ds)return;
   ANN.dataset=ds;
+  // U3 + U1: full reset of cross-dataset state. New dataset → new images,
+  // new history; stale cache entries from old dataset are irrelevant.
+  _annCacheClear();
+  _annClearHistory();
   try{
     const r=await api('/api/v1/datasets/images?dataset='+encodeURIComponent(ds));
     ANN.data=r.images||[];ANN.classes=r.classes||[];
@@ -1647,17 +1687,25 @@ function annBuildBoxList(){
   });
 }
 
-function annLoadImage(){
+async function annLoadImage(){
   if(!ANN.data.length){annDraw();return;}
   ANN.selIdx=-1;ocrSelIdx=-1;
-  ANN.bgImg=new Image();
-  ANN.bgImg.onload=()=>{
-    ANN.imgW=ANN.bgImg.width;ANN.imgH=ANN.bgImg.height;annZoomFit();
-    annUpdateOCRUI();annDraw();
-    // auto-scan if OCR on and this image has no OCR yet
-    if(ANN.ocrOn&&!annCurImg().ocr) annRunOCR();
-  };
-  ANN.bgImg.src=`/api/v1/datasets/image?dataset=${encodeURIComponent(ANN.dataset)}&filename=${encodeURIComponent(ANN.data[ANN.idx].img)}`;
+  const filename = ANN.data[ANN.idx].img;
+  try {
+    const img = await _annLoadImageBlob(filename);  // U3: cached load
+    // Guard against navigation race: user may have moved on while we awaited.
+    if(!ANN.data.length || ANN.data[ANN.idx].img !== filename) return;
+    ANN.bgImg = img;
+    ANN.imgW = img.naturalWidth || img.width;
+    ANN.imgH = img.naturalHeight || img.height;
+    annZoomFit();
+    annUpdateOCRUI(); annDraw();
+    _annInitHistoryIfEmpty();  // U1: record initial state for undo
+    if(ANN.ocrOn && !annCurImg().ocr) annRunOCR();
+  } catch(e){
+    console.error('Image load failed:', filename, e);
+  }
+  _annPrefetchNeighbors();  // U3: warm cache for next/prev frame
 }
 function annCurImg(){return ANN.data[ANN.idx]||{};}
 
@@ -1913,17 +1961,18 @@ function _pointLineDist(p,a,b){
 annCanvas.addEventListener('pointerdown',e=>{
   if(!ANN.data.length)return;
   // middle button = pan
-  if(e.button===1){e.preventDefault();ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};annCanvas.setPointerCapture(e.pointerId);return;}
+  if(e.button===1){e.preventDefault();ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};annCanvas.setPointerCapture(e.pointerId);annCanvas.classList.add('panning');return;}
   const pos=annGetMouse(e);
   // right-click = draw (any shape)
   if(e.button===2){
     e.preventDefault();
     annCanvas.setPointerCapture(e.pointerId);
+    annCanvas.classList.add('drawing');
     const shape=($('ann_shape')||{}).value||'rect';
     if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];return;}
     ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;
   }
-  // left-click: try handle/box hit first, then fall through to draw if nothing hit
+  // left-click: hit handle → resize/rotate; hit box → select+move; hit OCR → select; empty → pan
   const h=annHitHandle(pos.x,pos.y);
   if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   const hit=annHitBox(pos.x,pos.y);
@@ -1931,11 +1980,10 @@ annCanvas.addEventListener('pointerdown',e=>{
   // check OCR box hit
   const ocrHit=annHitOCR(pos.x,pos.y);
   if(ocrHit>=0){ocrSelIdx=ocrHit;ANN.selIdx=-1;annUpdateOCRUI();annDraw();return;}
-  // left-click on empty space = draw (same as right-click)
-  annCanvas.setPointerCapture(e.pointerId);
-  const shape=($('ann_shape')||{}).value||'rect';
-  if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];ANN.selIdx=-1;annDraw();return;}
-  ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;ANN.selIdx=-1;annDraw();
+  // left-click on empty space = pan the image (drawing is right-click only)
+  ANN.selIdx=-1;ocrSelIdx=-1;annUpdateOCRUI();
+  ANN.dragMode='pan';ANN.dragStart=annGetScreen(e);ANN.dragOrig={offX:ANN.offX,offY:ANN.offY};
+  annCanvas.setPointerCapture(e.pointerId);annCanvas.classList.add('panning');annDraw();
 });
 annCanvas.addEventListener('pointermove',e=>{
   if(!ANN.dragMode)return;
@@ -2057,7 +2105,13 @@ annCanvas.addEventListener('pointerup',e=>{
       ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;
     }
   }
-  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;ANN.polyPoints=null;annDraw();
+  // U1: snapshot AFTER drag-edit completes (not during pointermove).
+  // _annPushHistory is a no-op if labels didn't actually change.
+  const wasEditing = ANN.dragMode && ANN.dragMode !== 'pan';
+  ANN.dragMode=null;ANN.dragStart=null;ANN.dragOrig=null;ANN.polyPoints=null;
+  annCanvas.classList.remove('panning','drawing');
+  if(wasEditing) _annPushHistory();
+  annDraw();
 });
 annCanvas.addEventListener('contextmenu',e=>e.preventDefault());
 
@@ -2072,27 +2126,74 @@ annCanvas.addEventListener('wheel',e=>{
 // keyboard
 document.addEventListener('keydown',e=>{
   if(currentPage!=='annotate'||!ANN.data.length)return;
-  if(e.ctrlKey&&e.key==='s'){e.preventDefault();annSave();return;}
-  if(e.ctrlKey&&e.key==='c'&&ANN.selIdx>=0){e.preventDefault();ANN.clipboard=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));return;}
-  if(e.ctrlKey&&e.key==='v'&&ANN.clipboard){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.clipboard));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;annDraw();return;}
-  if(e.ctrlKey&&e.key==='d'&&ANN.selIdx>=0){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;annDraw();return;}
-  if(e.ctrlKey&&e.key==='0'){e.preventDefault();annZoomFit();return;}
-  if(e.key==='d'||e.key==='ArrowRight'){annNext();return;}
-  if(e.key==='a'||e.key==='ArrowLeft'){annPrev();return;}
-  if(e.key==='='||e.key==='+'){annZoomIn();return;}
-  if(e.key==='-'){annZoomOut();return;}
-  if(e.shiftKey&&e.key==='Delete'){e.preventDefault();annDeleteImage();return;}
-  if((e.key==='Delete'||e.key==='Backspace')&&ocrSelIdx>=0){annDeleteOCRBox();return;}
-  if((e.key==='Delete'||e.key==='Backspace')&&ANN.selIdx>=0){ANN.data[ANN.idx].labels.splice(ANN.selIdx,1);ANN.selIdx=-1;ANN.dirty=true;annDraw();return;}
-  if(/^[0-9]$/.test(e.key)&&ANN.selIdx>=0&&!e.ctrlKey){ANN.data[ANN.idx].labels[ANN.selIdx].cls=parseInt(e.key);ANN.dirty=true;annDraw();return;}
+  // Skip ann shortcuts when focus is in an input/textarea/select. Without
+  // this guard the paste-picker search field would see D/A/0-9 etc. trigger
+  // global navigation while user is typing a filter. Ctrl+S is preserved as
+  // an exception because Save is universal & expected even mid-typing.
+  const tag = (e.target && e.target.tagName) || '';
+  const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  const k = e.key;  // shorthand
+  if(inInput){
+    if(e.ctrlKey&&(k==='s'||k==='S')){e.preventDefault();annSave();}
+    return;
+  }
+  if(e.ctrlKey&&k==='s'){e.preventDefault();annSave();return;}
+  // U1: Undo / Redo. Ctrl+Z = undo. Ctrl+Y or Ctrl+Shift+Z = redo (covers both Win and Mac conventions).
+  if(e.ctrlKey&&!e.shiftKey&&(k==='z'||k==='Z')){e.preventDefault();annUndo();return;}
+  if(e.ctrlKey&&((k==='y'||k==='Y')||(e.shiftKey&&(k==='z'||k==='Z')))){e.preventDefault();annRedo();return;}
+  if(e.ctrlKey&&k==='c'&&ANN.selIdx>=0){e.preventDefault();ANN.clipboard=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));return;}
+  if(e.ctrlKey&&k==='v'&&ANN.clipboard){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.clipboard));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;_annPushHistory();annDraw();return;}
+  if(e.ctrlKey&&k==='d'&&ANN.selIdx>=0){e.preventDefault();const cp=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[ANN.selIdx]));cp.xc+=0.03;cp.yc+=0.03;if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));ANN.data[ANN.idx].labels.push(cp);ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;_annPushHistory();annDraw();return;}
+  if(e.ctrlKey&&k==='0'){e.preventDefault();annZoomFit();return;}
+  // Shift+P: open paste-from-frame picker (replace current labels with a
+  // chosen labeled frame's labels). Destructive but Ctrl+Z restorable.
+  if(e.shiftKey&&!e.ctrlKey&&(k==='p'||k==='P')){
+    e.preventDefault();
+    annOpenPastePicker();
+    return;
+  }
+
+  // U2: Shift+V copies ALL labels from previous frame (wraps around).
+  // Destructive (replaces current frame's labels) but safe — Ctrl+Z restores.
+  if(e.shiftKey&&!e.ctrlKey&&(k==='v'||k==='V')){
+    e.preventDefault();
+    const n = ANN.data.length;
+    const prevIdx = (ANN.idx - 1 + n) % n;
+    const src = ANN.data[prevIdx];
+    if(!src || !src.labels){ showToast('上一张没有标注','info',1500); return; }
+    ANN.data[ANN.idx].labels = JSON.parse(JSON.stringify(src.labels));
+    ANN.selIdx = -1; ANN.dirty = true;
+    _annPushHistory();
+    annDraw();
+    showToast(`已从 ${src.img} 复制 ${src.labels.length} 个标注 (Ctrl+Z 可撤销)`,'success',2500);
+    return;
+  }
+  if(k==='d'||k==='ArrowRight'){annNext();return;}
+  if(k==='a'||k==='ArrowLeft'){annPrev();return;}
+  if(k==='='||k==='+'){annZoomIn();return;}
+  if(k==='-'){annZoomOut();return;}
+  if(e.shiftKey&&k==='Delete'){e.preventDefault();annDeleteImage();return;}
+  if((k==='Delete'||k==='Backspace')&&ocrSelIdx>=0){annDeleteOCRBox();return;}
+  if((k==='Delete'||k==='Backspace')&&ANN.selIdx>=0){ANN.data[ANN.idx].labels.splice(ANN.selIdx,1);ANN.selIdx=-1;ANN.dirty=true;_annPushHistory();annDraw();return;}
+  if(/^[0-9]$/.test(k)&&ANN.selIdx>=0&&!e.ctrlKey){ANN.data[ANN.idx].labels[ANN.selIdx].cls=parseInt(k);ANN.dirty=true;_annPushHistory();annDraw();return;}
 });
 
 // navigation
-function annAutoSave(fn){if(ANN.dirty)annSave();fn();annLoadImage();}
-function annNext(){annAutoSave(()=>{ANN.idx=(ANN.idx+1)%ANN.data.length;});}
-function annPrev(){annAutoSave(()=>{ANN.idx=(ANN.idx-1+ANN.data.length)%ANN.data.length;});}
-function annJumpEmpty(){annAutoSave(()=>{for(let i=1;i<=ANN.data.length;i++){const j=(ANN.idx+i)%ANN.data.length;if(ANN.data[j].labels.length===0){ANN.idx=j;return;}}});}
-function annJumpLabeled(){annAutoSave(()=>{for(let i=1;i<=ANN.data.length;i++){const j=(ANN.idx+i)%ANN.data.length;if(ANN.data[j].labels.length>0){ANN.idx=j;return;}}});}
+// G2: awaits the save POST before navigating so we never lose in-memory
+// edits to a race. If the save fails, dirty stays true, toast is shown,
+// and navigation is aborted — user keeps their edits and can retry.
+async function annAutoSave(fn){
+  if(ANN.dirty){
+    await annSave();
+    if(ANN.dirty) return;  // save failed; preserve edits, do not navigate
+  }
+  fn();
+  annLoadImage();
+}
+async function annNext(){await annAutoSave(()=>{ANN.idx=(ANN.idx+1)%ANN.data.length;});}
+async function annPrev(){await annAutoSave(()=>{ANN.idx=(ANN.idx-1+ANN.data.length)%ANN.data.length;});}
+async function annJumpEmpty(){await annAutoSave(()=>{for(let i=1;i<=ANN.data.length;i++){const j=(ANN.idx+i)%ANN.data.length;if(ANN.data[j].labels.length===0){ANN.idx=j;return;}}});}
+async function annJumpLabeled(){await annAutoSave(()=>{for(let i=1;i<=ANN.data.length;i++){const j=(ANN.idx+i)%ANN.data.length;if(ANN.data[j].labels.length>0){ANN.idx=j;return;}}});}
 
 function annIoU(a,b){
   const ax1=a.xc-a.w/2, ay1=a.yc-a.h/2, ax2=a.xc+a.w/2, ay2=a.yc+a.h/2;
@@ -2124,7 +2225,7 @@ async function annRunFlorence(){
       const dup=cur.labels.some(lb=>lb.cls===cls&&annIoU(lb,cand)>0.6);
       if(!dup){cur.labels.push(cand);added++;}
     });
-    if(added>0){ANN.dirty=true;annDraw();}
+    if(added>0){ANN.dirty=true;_annPushHistory();annDraw();}
     btn.textContent=added>0?`Florence +${added}`:`Florence 0`;
     setTimeout(()=>{btn.textContent='Florence';},1800);
   }catch(e){
@@ -2136,10 +2237,12 @@ async function annRunFlorence(){
 }
 
 // save/delete
-async function annSave(){
-  if(!ANN.data.length)return;
-  const item=ANN.data[ANN.idx];
-  const lines=item.labels.map(lb=>{
+// Serialize a labels array into the on-disk text format. Pulled out so
+// annSave can re-serialize after the POST returns and verify the user
+// didn't keep editing while the request was in flight (race-free dirty
+// clear).
+function _annSerializeLabels(labels){
+  return labels.map(lb=>{
     const shape=lb.shape||'rect';
     if(shape==='polygon'&&lb.points&&lb.points.length>=3){
       // polygon format: cls xc yc w h 0.0 polygon x1,y1;x2,y2;...
@@ -2150,20 +2253,133 @@ async function annSave(){
     const angle=lb.angle||0;
     if(angle||shape!=='rect') return `${base} ${angle.toFixed(6)} ${shape}`;
     return base;
-  });
-  try{
-    await api('/api/v1/datasets/save_labels',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({dataset:ANN.dataset,img:item.img,labels:lines.join('\n')})});
-    ANN.dirty=false;annDraw();
-  }catch(e){console.error('Save failed:',e);}
+  }).join('\n');
 }
+
+// Shared in-flight save promise (de-dupes concurrent annSave calls so we
+// don't fire multiple POSTs for the same image when user mashes Save / Next
+// / Ctrl+S in quick succession).
+let _annSavingPromise=null;
+
+async function annSave(){
+  if(!ANN.data.length)return;
+  if(_annSavingPromise)return _annSavingPromise;  // join the in-flight save
+  const item=ANN.data[ANN.idx];
+  const sentText=_annSerializeLabels(item.labels);
+  _annSavingPromise=(async()=>{
+    try{
+      await api('/api/v1/datasets/save_labels',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({dataset:ANN.dataset,img:item.img,labels:sentText})});
+      // Only clear dirty if (a) user is still on the same image AND (b)
+      // labels haven't been edited during the POST. Otherwise leave dirty
+      // true so the new edits get saved on the next save attempt.
+      if(ANN.data[ANN.idx]===item && _annSerializeLabels(item.labels)===sentText){
+        ANN.dirty=false;annDraw();
+      }
+    }catch(e){
+      console.error('Save failed:',e);
+      showToast(`保存失败 (${item.img}): ${e.message||e}`,'error',6000);
+      // dirty stays true intentionally — user keeps in-memory edits
+    }finally{
+      _annSavingPromise=null;
+    }
+  })();
+  return _annSavingPromise;
+}
+
+// ── Paste-from-frame picker ── (Shift+P)
+// Lets the user copy all labels from an arbitrary already-labeled frame into
+// the current frame. Common case: standing at a lobby/home frame that's
+// identical to one labeled earlier — pick that earlier frame, copy its
+// labels, then nudge. Destructive but Ctrl+Z restorable (snapshots history).
+let _annPastePickerIdx = 0;
+let _annPastePickerRows = [];
+
+function annOpenPastePicker(){
+  if(!ANN.data || !ANN.data.length) return;
+  const modal = document.getElementById('ann_paste_picker');
+  if(!modal) return;
+  modal.style.display = 'flex';
+  document.getElementById('ann_paste_search').value = '';
+  annPastePickerFilter();
+  setTimeout(()=>document.getElementById('ann_paste_search').focus(), 0);
+}
+function annClosePastePicker(){
+  const modal = document.getElementById('ann_paste_picker');
+  if(modal) modal.style.display = 'none';
+}
+function annPastePickerFilter(){
+  const q = (document.getElementById('ann_paste_search').value||'').toLowerCase().trim();
+  const rows = ANN.data
+    .map((d, idx) => ({idx, name: d.img, count: (d.labels||[]).length}))
+    .filter(r => r.count > 0 && r.idx !== ANN.idx)  // skip empty + current
+    .filter(r => !q || r.name.toLowerCase().includes(q));
+  rows.sort((a, b) => (b.count - a.count) || (a.idx - b.idx));
+  _annPastePickerRows = rows;
+  _annPastePickerIdx = 0;
+  annPastePickerRender();
+}
+function annPastePickerRender(){
+  const list = document.getElementById('ann_paste_list');
+  if(!list) return;
+  if(_annPastePickerRows.length === 0){
+    list.innerHTML = '<div style="padding:14px;color:var(--muted);text-align:center">无匹配 frame</div>';
+    return;
+  }
+  const html = _annPastePickerRows.map((r, i) => {
+    const sel = i === _annPastePickerIdx;
+    const bg = sel ? 'background:#1a3a4d' : '';
+    return `<div onclick="_annPastePickerIdx=${i};annPastePickerConfirm()" style="padding:6px 10px;cursor:pointer;${bg};border-bottom:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center">
+      <span>${r.name}</span>
+      <span style="color:var(--muted);font-size:10px">[${r.count} box${r.count>1?'es':''}] · idx ${r.idx}</span>
+    </div>`;
+  }).join('');
+  list.innerHTML = html;
+  const selEl = list.children[_annPastePickerIdx];
+  if(selEl) selEl.scrollIntoView({block:'nearest'});
+}
+function annPastePickerKeyDown(e){
+  const k = e.key;
+  if(k === 'Escape'){ e.preventDefault(); annClosePastePicker(); return; }
+  if(k === 'Enter'){ e.preventDefault(); annPastePickerConfirm(); return; }
+  if(k === 'ArrowDown'){
+    e.preventDefault();
+    _annPastePickerIdx = Math.min(_annPastePickerIdx + 1, _annPastePickerRows.length - 1);
+    annPastePickerRender();
+    return;
+  }
+  if(k === 'ArrowUp'){
+    e.preventDefault();
+    _annPastePickerIdx = Math.max(_annPastePickerIdx - 1, 0);
+    annPastePickerRender();
+    return;
+  }
+}
+function annPastePickerConfirm(){
+  if(!_annPastePickerRows.length){ annClosePastePicker(); return; }
+  const r = _annPastePickerRows[_annPastePickerIdx];
+  const src = ANN.data[r.idx];
+  if(!src || !src.labels || !src.labels.length){ annClosePastePicker(); return; }
+  ANN.data[ANN.idx].labels = JSON.parse(JSON.stringify(src.labels));
+  ANN.selIdx = -1;
+  ANN.dirty = true;
+  _annPushHistory();
+  annDraw();
+  annClosePastePicker();
+  showToast(`已从 ${src.img} 复制 ${src.labels.length} 个标注 (Ctrl+Z 可撤销)`, 'success', 2500);
+}
+
 async function annDeleteImage(){
   if(!ANN.data.length)return;
   if(!confirm(`Delete ${ANN.data[ANN.idx].img}?`))return;
   try{
     await api('/api/v1/datasets/delete_image',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({dataset:ANN.dataset,img:ANN.data[ANN.idx].img})});
-    ANN.data.splice(ANN.idx,1);if(!ANN.data.length)return;
+    ANN.data.splice(ANN.idx,1);
+    // U1: indices after the deleted one have all shifted by -1, so the
+    // idx-keyed history Map is now misaligned. Cheapest correct fix: clear.
+    _annClearHistory();
+    if(!ANN.data.length)return;
     if(ANN.idx>=ANN.data.length)ANN.idx=ANN.data.length-1;
     ANN.dirty=false;annLoadImage();
   }catch(e){console.error(e);}
@@ -2289,1215 +2505,6 @@ async function annOpenOCRFolder(){
 
 // resize handler
 window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)annDraw();});
-
-/* ════════════════════════════════════════════════════
-   ROSTER TUNER — canvas editor for schedule avatar region strips.
-   Data model: flat list of {x1,y1,x2,y2} strips in normalized 0-1 coords.
-   Rendering: raw image drawn to canvas, strips overlaid with handles, cell
-   grid computed per frame. Mouse events translate screen↔image↔norm space.
-   ════════════════════════════════════════════════════ */
-const ROSTER = {
-  loaded: false,
-  cfg: { strips: [], cells_per_room: 3 },
-  defaults: null,
-  samples: [],
-  bgImg: null,          // HTMLImageElement of current screenshot
-  imgW: 0, imgH: 0,     // natural dims
-  fit: { sx: 0, sy: 0, scale: 1 }, // canvas-space fit
-  selected: -1,         // index of selected strip
-  drag: null,           // {mode:'move'|'resize', handle, startX, startY, orig:{...}}
-  hoverHandle: null,    // 'n','s','e','w','nw','ne','sw','se','move',null
-  mouseNx: null,        // last mouse position in normalized image coords (for Ctrl+V)
-  mouseNy: null,
-  clipboard: null,      // {w, h} — normalized width/height of the copied strip
-};
-const ROSTER_HANDLE_PX = 8;
-
-async function rosterInit(){
-  if(!ROSTER.loaded){
-    ROSTER.loaded = true;
-    try {
-      const resp = await api('/api/v1/schedule/avatar_regions');
-      ROSTER.cfg = { strips: resp.config.strips || [], cells_per_room: resp.config.cells_per_room || 3 };
-      ROSTER.defaults = resp.defaults;
-      $('roster_cpr').value = ROSTER.cfg.cells_per_room;
-    } catch(e){ console.error(e); }
-    try {
-      const s = await api('/api/v1/schedule/roster_samples?limit=60');
-      ROSTER.samples = s.samples || [];
-      const sel = $('roster_sample');
-      sel.innerHTML = '';
-      if(ROSTER.samples.length === 0){
-        sel.innerHTML = '<option value="">（暂无采样 — 先跑一次含 schedule 的任务）</option>';
-      } else {
-        ROSTER.samples.forEach(smp => {
-          const o = document.createElement('option');
-          o.value = smp.jpg;
-          o.textContent = `${smp.run} · tick ${smp.tick}`;
-          sel.appendChild(o);
-        });
-        sel.onchange = rosterLoadImage;
-      }
-    } catch(e){ console.error(e); }
-    rosterBindCanvas();
-    $('roster_cpr').oninput = () => {
-      ROSTER.cfg.cells_per_room = Math.max(1, parseInt($('roster_cpr').value) || 3);
-      rosterDraw();
-    };
-    window.addEventListener('resize', () => { if(currentPage === 'roster') rosterDraw(); });
-    window.addEventListener('keydown', rosterKeyDown);
-  }
-  rosterLoadImage();
-}
-
-function rosterLoadImage(){
-  const jpg = $('roster_sample').value;
-  if(!jpg){ ROSTER.bgImg = null; rosterDraw(); $('roster_status').textContent = '选择一个采样'; return; }
-  $('roster_status').textContent = '加载中...';
-  const img = new Image();
-  img.onload = () => {
-    ROSTER.bgImg = img;
-    ROSTER.imgW = img.naturalWidth;
-    ROSTER.imgH = img.naturalHeight;
-    $('roster_status').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
-    rosterDraw();
-  };
-  img.onerror = () => { $('roster_status').textContent = '加载失败'; };
-  img.src = `/api/v1/schedule/roster_image?jpg=${encodeURIComponent(jpg)}&_=${Date.now()}`;
-}
-
-function rosterFit(){
-  const cvs = $('roster_canvas');
-  const rect = cvs.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  cvs.width = Math.max(1, Math.floor(rect.width * dpr));
-  cvs.height = Math.max(1, Math.floor(rect.height * dpr));
-  if(!ROSTER.bgImg){ ROSTER.fit = { sx:0, sy:0, scale: dpr }; return { cvs, dpr }; }
-  const scale = Math.min(cvs.width / ROSTER.imgW, cvs.height / ROSTER.imgH);
-  const drawW = ROSTER.imgW * scale, drawH = ROSTER.imgH * scale;
-  ROSTER.fit = { sx: (cvs.width - drawW) / 2, sy: (cvs.height - drawH) / 2, scale };
-  return { cvs, dpr };
-}
-
-function rosterNormToCanvas(x, y){
-  return [ROSTER.fit.sx + x * ROSTER.imgW * ROSTER.fit.scale,
-          ROSTER.fit.sy + y * ROSTER.imgH * ROSTER.fit.scale];
-}
-function rosterCanvasToNorm(cx, cy){
-  return [(cx - ROSTER.fit.sx) / (ROSTER.imgW * ROSTER.fit.scale),
-          (cy - ROSTER.fit.sy) / (ROSTER.imgH * ROSTER.fit.scale)];
-}
-
-function rosterDraw(){
-  const { cvs } = rosterFit();
-  const ctx = cvs.getContext('2d');
-  ctx.fillStyle = '#0d0d10';
-  ctx.fillRect(0, 0, cvs.width, cvs.height);
-  if(ROSTER.bgImg){
-    const [x0, y0] = [ROSTER.fit.sx, ROSTER.fit.sy];
-    const dw = ROSTER.imgW * ROSTER.fit.scale, dh = ROSTER.imgH * ROSTER.fit.scale;
-    ctx.drawImage(ROSTER.bgImg, x0, y0, dw, dh);
-  }
-  const cpr = Math.max(1, ROSTER.cfg.cells_per_room || 3);
-  ROSTER.cfg.strips.forEach((s, i) => {
-    const [x1, y1] = rosterNormToCanvas(s.x1, s.y1);
-    const [x2, y2] = rosterNormToCanvas(s.x2, s.y2);
-    const w = x2 - x1, h = y2 - y1;
-    const isSel = i === ROSTER.selected;
-    // Strip rect: red fill + stroke
-    ctx.fillStyle = isSel ? 'rgba(239,68,68,0.22)' : 'rgba(239,68,68,0.10)';
-    ctx.fillRect(x1, y1, w, h);
-    ctx.strokeStyle = isSel ? '#ef4444' : '#dc2626';
-    ctx.lineWidth = isSel ? 2 : 1.5;
-    ctx.strokeRect(x1, y1, w, h);
-    // Cell overlays: green squares
-    const cellW = w / cpr;
-    const cellSize = Math.min(cellW, h);
-    const cy = y1 + (h - cellSize) / 2;
-    ctx.strokeStyle = '#22c55e';
-    ctx.lineWidth = 1.5;
-    for(let k = 0; k < cpr; k++){
-      const cx = x1 + k * cellW + (cellW - cellSize) / 2;
-      if(cx + cellSize > x2 + 0.5) break;
-      ctx.strokeRect(cx, cy, cellSize, cellSize);
-    }
-    // Index label
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px system-ui';
-    ctx.fillText(`#${i}`, x1 + 4, y1 + 14);
-    // Resize handles (only if selected)
-    if(isSel){
-      const hs = ROSTER_HANDLE_PX;
-      ctx.fillStyle = '#fff';
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 1;
-      const handles = [
-        [x1, y1], [x2, y1], [x1, y2], [x2, y2],
-        [(x1+x2)/2, y1], [(x1+x2)/2, y2], [x1, (y1+y2)/2], [x2, (y1+y2)/2],
-      ];
-      handles.forEach(([hx, hy]) => {
-        ctx.fillRect(hx - hs/2, hy - hs/2, hs, hs);
-        ctx.strokeRect(hx - hs/2, hy - hs/2, hs, hs);
-      });
-    }
-  });
-  rosterRenderList();
-}
-
-function rosterRenderList(){
-  const el = $('roster_list');
-  $('roster_count').textContent = ROSTER.cfg.strips.length;
-  el.innerHTML = '';
-  ROSTER.cfg.strips.forEach((s, i) => {
-    const row = document.createElement('div');
-    row.style.cssText = `display:flex;gap:4px;align-items:center;padding:4px 6px;margin-bottom:2px;border-radius:3px;cursor:pointer;font-size:11px;${i === ROSTER.selected ? 'background:rgba(239,68,68,0.2);border:1px solid #ef4444' : 'background:transparent'}`;
-    row.innerHTML = `<span style="flex:1">#${i} <span style="color:var(--muted)">(${s.x1.toFixed(2)},${s.y1.toFixed(2)})→(${s.x2.toFixed(2)},${s.y2.toFixed(2)})</span></span><button data-del="${i}" style="padding:0 5px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer">×</button>`;
-    row.onclick = (e) => { if(e.target.tagName !== 'BUTTON'){ ROSTER.selected = i; rosterDraw(); } };
-    el.appendChild(row);
-  });
-  el.querySelectorAll('button[data-del]').forEach(b => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      const i = +b.dataset.del;
-      ROSTER.cfg.strips.splice(i, 1);
-      if(ROSTER.selected === i) ROSTER.selected = -1;
-      else if(ROSTER.selected > i) ROSTER.selected--;
-      rosterDraw();
-    };
-  });
-}
-
-function rosterHitTest(cx, cy){
-  // returns {idx, handle} where handle is 'move'|'nw'|'ne'|'sw'|'se'|'n'|'s'|'e'|'w'|null
-  const hs = ROSTER_HANDLE_PX;
-  // Prefer checking selected strip's handles first
-  const order = [];
-  if(ROSTER.selected >= 0) order.push(ROSTER.selected);
-  for(let i = ROSTER.cfg.strips.length - 1; i >= 0; i--) if(i !== ROSTER.selected) order.push(i);
-  for(const i of order){
-    const s = ROSTER.cfg.strips[i];
-    const [x1, y1] = rosterNormToCanvas(s.x1, s.y1);
-    const [x2, y2] = rosterNormToCanvas(s.x2, s.y2);
-    if(i === ROSTER.selected){
-      // corner handles
-      const corners = { nw:[x1,y1], ne:[x2,y1], sw:[x1,y2], se:[x2,y2],
-                        n:[(x1+x2)/2,y1], s:[(x1+x2)/2,y2], w:[x1,(y1+y2)/2], e:[x2,(y1+y2)/2] };
-      for(const [h, [hx, hy]] of Object.entries(corners)){
-        if(Math.abs(cx-hx) <= hs && Math.abs(cy-hy) <= hs) return { idx: i, handle: h };
-      }
-    }
-    if(cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2){
-      return { idx: i, handle: 'move' };
-    }
-  }
-  return { idx: -1, handle: null };
-}
-
-function rosterBindCanvas(){
-  const cvs = $('roster_canvas');
-  const getPos = (e) => {
-    const r = cvs.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr];
-  };
-  cvs.addEventListener('mousedown', (e) => {
-    if(e.button === 2) return; // right-click handled in contextmenu
-    const [cx, cy] = getPos(e);
-    const hit = rosterHitTest(cx, cy);
-    if(hit.idx >= 0){
-      ROSTER.selected = hit.idx;
-      const s = ROSTER.cfg.strips[hit.idx];
-      ROSTER.drag = {
-        handle: hit.handle,
-        startX: cx, startY: cy,
-        orig: {...s},
-      };
-    } else {
-      ROSTER.selected = -1;
-    }
-    rosterDraw();
-  });
-  cvs.addEventListener('mousemove', (e) => {
-    const [cx, cy] = getPos(e);
-    // track mouse in normalized coords (for Ctrl+V paste at cursor)
-    const [nx, ny] = rosterCanvasToNorm(cx, cy);
-    if(nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1){
-      ROSTER.mouseNx = nx; ROSTER.mouseNy = ny;
-    } else {
-      ROSTER.mouseNx = null; ROSTER.mouseNy = null;
-    }
-    if(ROSTER.drag){
-      const d = ROSTER.drag;
-      const s = ROSTER.cfg.strips[ROSTER.selected];
-      if(!s) return;
-      const scaleW = ROSTER.imgW * ROSTER.fit.scale;
-      const scaleH = ROSTER.imgH * ROSTER.fit.scale;
-      const dxN = (cx - d.startX) / scaleW;
-      const dyN = (cy - d.startY) / scaleH;
-      if(d.handle === 'move'){
-        const w = d.orig.x2 - d.orig.x1;
-        const h = d.orig.y2 - d.orig.y1;
-        let nx1 = Math.max(0, Math.min(1-w, d.orig.x1 + dxN));
-        let ny1 = Math.max(0, Math.min(1-h, d.orig.y1 + dyN));
-        s.x1 = nx1; s.y1 = ny1; s.x2 = nx1 + w; s.y2 = ny1 + h;
-      } else {
-        let { x1, y1, x2, y2 } = d.orig;
-        if(d.handle.includes('w')) x1 = Math.min(x2 - 0.005, Math.max(0, d.orig.x1 + dxN));
-        if(d.handle.includes('e')) x2 = Math.max(x1 + 0.005, Math.min(1, d.orig.x2 + dxN));
-        if(d.handle.includes('n')) y1 = Math.min(y2 - 0.005, Math.max(0, d.orig.y1 + dyN));
-        if(d.handle.includes('s')) y2 = Math.max(y1 + 0.005, Math.min(1, d.orig.y2 + dyN));
-        s.x1 = x1; s.y1 = y1; s.x2 = x2; s.y2 = y2;
-      }
-      rosterDraw();
-    } else {
-      const hit = rosterHitTest(cx, cy);
-      const cursors = { move:'move', nw:'nwse-resize', se:'nwse-resize', ne:'nesw-resize',
-                        sw:'nesw-resize', n:'ns-resize', s:'ns-resize', e:'ew-resize', w:'ew-resize' };
-      cvs.style.cursor = cursors[hit.handle] || 'crosshair';
-    }
-  });
-  cvs.addEventListener('mouseup', () => { ROSTER.drag = null; });
-  cvs.addEventListener('mouseleave', () => { ROSTER.drag = null; ROSTER.mouseNx = null; ROSTER.mouseNy = null; });
-  cvs.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    const [cx, cy] = getPos(e);
-    const hit = rosterHitTest(cx, cy);
-    if(hit.idx < 0){
-      // Empty: add new strip at click location
-      const [nx, ny] = rosterCanvasToNorm(cx, cy);
-      if(nx < 0 || ny < 0 || nx > 1 || ny > 1) return;
-      const w = 0.22, h = 0.12;
-      const x1 = Math.max(0, Math.min(1-w, nx - w/2));
-      const y1 = Math.max(0, Math.min(1-h, ny - h/2));
-      ROSTER.cfg.strips.push({ x1, y1, x2: x1+w, y2: y1+h });
-      ROSTER.selected = ROSTER.cfg.strips.length - 1;
-      rosterDraw();
-    }
-  });
-}
-
-function rosterKeyDown(e){
-  if(currentPage !== 'roster') return;
-  // Don't hijack shortcuts while typing in inputs/textareas
-  const inField = document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName);
-  if(inField) return;
-  if(e.ctrlKey && e.key.toLowerCase() === 's'){ e.preventDefault(); rosterSave(); return; }
-  // Ctrl+C: copy selected strip's shape (width/height) to internal clipboard
-  if(e.ctrlKey && e.key.toLowerCase() === 'c' && ROSTER.selected >= 0){
-    e.preventDefault();
-    const s = ROSTER.cfg.strips[ROSTER.selected];
-    ROSTER.clipboard = { w: s.x2 - s.x1, h: s.y2 - s.y1 };
-    $('roster_status').textContent = `已复制 #${ROSTER.selected} 的形状 (${(ROSTER.clipboard.w*100).toFixed(1)}%×${(ROSTER.clipboard.h*100).toFixed(1)}%) — 移动鼠标后按 Ctrl+V 粘贴`;
-    setTimeout(() => { if($('roster_status') && ROSTER.bgImg) $('roster_status').textContent = `${ROSTER.imgW}×${ROSTER.imgH}`; }, 2500);
-    return;
-  }
-  // Ctrl+V: paste clipboard shape centered on current mouse position (fallback: offset from selected)
-  if(e.ctrlKey && e.key.toLowerCase() === 'v'){
-    e.preventDefault();
-    if(!ROSTER.clipboard){
-      $('roster_status').textContent = '剪贴板为空 — 先按 Ctrl+C 复制一个框';
-      setTimeout(() => { if($('roster_status') && ROSTER.bgImg) $('roster_status').textContent = `${ROSTER.imgW}×${ROSTER.imgH}`; }, 2000);
-      return;
-    }
-    const { w, h } = ROSTER.clipboard;
-    let cx, cy;
-    if(Number.isFinite(ROSTER.mouseNx) && Number.isFinite(ROSTER.mouseNy)){
-      cx = ROSTER.mouseNx; cy = ROSTER.mouseNy;
-    } else if(ROSTER.selected >= 0){
-      const s = ROSTER.cfg.strips[ROSTER.selected];
-      cx = (s.x1 + s.x2) / 2 + 0.02;
-      cy = (s.y1 + s.y2) / 2 + 0.02;
-    } else {
-      cx = 0.5; cy = 0.5;
-    }
-    const x1 = Math.max(0, Math.min(1 - w, cx - w / 2));
-    const y1 = Math.max(0, Math.min(1 - h, cy - h / 2));
-    ROSTER.cfg.strips.push({ x1, y1, x2: x1 + w, y2: y1 + h });
-    ROSTER.selected = ROSTER.cfg.strips.length - 1;
-    rosterDraw();
-    return;
-  }
-  // Ctrl+D: quick duplicate at small offset (keeps shape, no mouse needed)
-  if(e.ctrlKey && e.key.toLowerCase() === 'd' && ROSTER.selected >= 0){
-    e.preventDefault();
-    const s = ROSTER.cfg.strips[ROSTER.selected];
-    const w = s.x2 - s.x1, h = s.y2 - s.y1;
-    const x1 = Math.max(0, Math.min(1 - w, s.x1 + 0.02));
-    const y1 = Math.max(0, Math.min(1 - h, s.y1 + 0.02));
-    ROSTER.cfg.strips.push({ x1, y1, x2: x1 + w, y2: y1 + h });
-    ROSTER.selected = ROSTER.cfg.strips.length - 1;
-    rosterDraw();
-    return;
-  }
-  if((e.key === 'Delete' || e.key === 'Backspace') && ROSTER.selected >= 0){
-    e.preventDefault();
-    ROSTER.cfg.strips.splice(ROSTER.selected, 1);
-    ROSTER.selected = -1;
-    rosterDraw();
-  }
-  // Arrow key nudge
-  const nudge = e.shiftKey ? 0.01 : 0.002;
-  if(ROSTER.selected >= 0 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
-    e.preventDefault();
-    const s = ROSTER.cfg.strips[ROSTER.selected];
-    if(e.key === 'ArrowLeft'){ s.x1 -= nudge; s.x2 -= nudge; }
-    else if(e.key === 'ArrowRight'){ s.x1 += nudge; s.x2 += nudge; }
-    else if(e.key === 'ArrowUp'){ s.y1 -= nudge; s.y2 -= nudge; }
-    else if(e.key === 'ArrowDown'){ s.y1 += nudge; s.y2 += nudge; }
-    s.x1 = Math.max(0, s.x1); s.y1 = Math.max(0, s.y1);
-    s.x2 = Math.min(1, s.x2); s.y2 = Math.min(1, s.y2);
-    rosterDraw();
-  }
-}
-
-async function rosterSave(){
-  try {
-    await api('/api/v1/schedule/avatar_regions', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        strips: ROSTER.cfg.strips,
-        cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 3),
-      }),
-    });
-    $('roster_status').textContent = '已保存';
-    setTimeout(() => { if($('roster_status')) $('roster_status').textContent = `${ROSTER.imgW}×${ROSTER.imgH}`; }, 1500);
-  } catch(e){
-    alert('保存失败: ' + e.message);
-  }
-}
-
-function rosterReset(){
-  if(!ROSTER.defaults) return;
-  ROSTER.cfg = JSON.parse(JSON.stringify(ROSTER.defaults));
-  $('roster_cpr').value = ROSTER.cfg.cells_per_room;
-  ROSTER.selected = -1;
-  rosterDraw();
-}
-
-function rosterCopyJson(){
-  const payload = {
-    strips: ROSTER.cfg.strips.map(s => ({
-      x1: +s.x1.toFixed(4), y1: +s.y1.toFixed(4),
-      x2: +s.x2.toFixed(4), y2: +s.y2.toFixed(4),
-    })),
-    cells_per_room: Math.max(1, parseInt($('roster_cpr').value) || 3),
-  };
-  const text = JSON.stringify(payload, null, 2);
-  $('roster_json').value = text;
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(
-      () => { $('roster_status').textContent = '已复制到剪贴板'; setTimeout(() => { $('roster_status').textContent = `${ROSTER.imgW}×${ROSTER.imgH}`; }, 1500); },
-      () => { $('roster_status').textContent = '已写入文本框 (剪贴板失败)'; },
-    );
-  } else {
-    $('roster_json').select();
-    $('roster_status').textContent = '请手动 Ctrl+C 复制';
-  }
-}
-
-function rosterPasteJson(){
-  const text = $('roster_json').value.trim();
-  if(!text){
-    alert('先在文本框粘贴要套用的 JSON');
-    return;
-  }
-  let parsed;
-  try { parsed = JSON.parse(text); }
-  catch(e){ alert('JSON 解析失败: ' + e.message); return; }
-  const strips = Array.isArray(parsed) ? parsed : parsed.strips;
-  if(!Array.isArray(strips) || strips.length === 0){
-    alert('JSON 应为 {strips:[...]} 或 strip 数组');
-    return;
-  }
-  const cleaned = [];
-  for(const s of strips){
-    const x1 = +s.x1, y1 = +s.y1, x2 = +s.x2, y2 = +s.y2;
-    if(![x1,y1,x2,y2].every(n => Number.isFinite(n) && n >= 0 && n <= 1)){ continue; }
-    if(x2 <= x1 || y2 <= y1){ continue; }
-    cleaned.push({ x1, y1, x2, y2 });
-  }
-  if(cleaned.length === 0){ alert('没有合法的 strip（需要 0-1 范围且 x2>x1, y2>y1）'); return; }
-  ROSTER.cfg.strips = cleaned;
-  if(Number.isFinite(+parsed.cells_per_room) && +parsed.cells_per_room >= 1){
-    ROSTER.cfg.cells_per_room = Math.min(8, Math.max(1, Math.round(+parsed.cells_per_room)));
-    $('roster_cpr').value = ROSTER.cfg.cells_per_room;
-  }
-  ROSTER.selected = -1;
-  rosterDraw();
-  $('roster_status').textContent = `已套用 ${cleaned.length} strips（未保存，点保存写盘）`;
-}
-
-/* ════════════════════════════════════════════════════
-   HARVEST PAGE — avatar + name template extraction
-   ════════════════════════════════════════════════════ */
-const HARV = {
-  loaded: false,
-  cfg: null,             // full config from server (presets)
-  active: 'momotalk_invite',
-  bgImg: null,
-  imgW: 0, imgH: 0,
-  fit: { sx:0, sy:0, scale:1 },
-  // boxes + grid are the CURRENT frame's state (visible on canvas).
-  // When user navigates away, this snapshot is written into HARV.perImage[filename].
-  // When navigating to a frame that has a saved snapshot, we load it back here.
-  // Frames with no saved snapshot inherit the CURRENT (= previous frame's
-  // state or preset default) on display, and only enter perImage once
-  // the user actually modifies them (tracked by userEditedThisFrame).
-  boxes: {               // normalized 0-1
-    avatar: {x1:0.05, y1:0.20, x2:0.15, y2:0.30, color:'#3b82f6', label:'头像'},
-    name:   {x1:0.16, y1:0.22, x2:0.28, y2:0.28, color:'#22c55e', label:'名字'},
-  },
-  grid: {dx:0, dy:0.1, cols:1, rows:5},
-  perImage: {},          // filename -> {avatar_box, name_box, grid}
-  currentFile: null,     // the filename currently on canvas
-  userEditedThisFrame: false,  // set true on any drag/input for the current frame
-  drag: null,
-  dataset: null,
-  saveTimer: null,       // debounce handle for autosave
-  saveSeq: 0,            // increments per save kickoff
-  saveInFlight: 0,       // last saved seq (for UI indicator)
-  selected: null,        // null | 'avatar' | 'name' — arrow keys nudge this
-  mouseDownAt: null,     // {x,y,t} — click-vs-drag discrimination
-};
-
-const HARV_LS_KEY = 'private_ba_assistant.harvest.perImage';  // localStorage fallback
-
-function harvestSetSaveIndicator(state){
-  // state: 'dirty' | 'saving' | 'saved' | 'error'
-  const el = $('harvest_save_indicator');
-  if(!el) return;
-  const MAP = {
-    dirty:  {text: '● 未保存', bg: '#dc2626'},   // red
-    saving: {text: '● 存盘中', bg: '#f59e0b'},   // amber
-    saved:  {text: `● 已存盘 (${Object.keys(HARV.perImage).length} 帧)`, bg: '#16a34a'}, // green
-    error:  {text: '● 存盘失败', bg: '#dc2626'},
-  };
-  const s = MAP[state] || MAP.saved;
-  el.textContent = s.text;
-  el.style.background = s.bg;
-}
-
-function harvestAutosavePersist(){
-  // Debounced write: both localStorage (instant, survives refresh) and
-  // disk (persistent across browser close). Keyed by (preset, dataset).
-  if(!HARV.active || !HARV.dataset) return;
-  harvestSetSaveIndicator('dirty');
-  // localStorage: key by preset::dataset so multiple datasets coexist.
-  // This is synchronous and reliable — survives any page refresh right now.
-  try {
-    const lsKey = `${HARV_LS_KEY}::${HARV.active}::${HARV.dataset}`;
-    localStorage.setItem(lsKey, JSON.stringify(HARV.perImage));
-  } catch(e){}
-  // Disk: debounced 400ms so rapid drags coalesce but don't linger long.
-  clearTimeout(HARV.saveTimer);
-  HARV.saveTimer = setTimeout(async () => {
-    harvestSetSaveIndicator('saving');
-    const seq = ++HARV.saveSeq;
-    try {
-      await api('/api/v1/harvest/per_image', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          preset: HARV.active,
-          dataset: HARV.dataset,
-          per_image: HARV.perImage,
-        }),
-      });
-      HARV.saveInFlight = seq;
-      HARV.saveTimer = null;
-      harvestSetSaveIndicator('saved');
-    } catch(e){
-      // Disk save failed (maybe backend down) — localStorage already has it.
-      console.warn('per_image disk save failed:', e.message);
-      harvestSetSaveIndicator('error');
-    }
-  }, 400);
-}
-
-async function harvestLoadPerImage(){
-  // Try disk first; fall back to localStorage. Disk is more recent if both exist.
-  const lsKey = `${HARV_LS_KEY}::${HARV.active}::${HARV.dataset}`;
-  let fromDisk = null;
-  try {
-    const r = await api(`/api/v1/harvest/per_image?preset=${encodeURIComponent(HARV.active)}&dataset=${encodeURIComponent(HARV.dataset)}`);
-    fromDisk = r.per_image || {};
-  } catch(e){
-    fromDisk = null;
-  }
-  let fromLS = null;
-  try {
-    const raw = localStorage.getItem(lsKey);
-    if(raw) fromLS = JSON.parse(raw);
-  } catch(e){}
-  // Prefer whichever has more entries (disk wins on tie since it's the source of truth)
-  const diskN = fromDisk ? Object.keys(fromDisk).length : 0;
-  const lsN   = fromLS   ? Object.keys(fromLS).length   : 0;
-  if(diskN >= lsN && fromDisk) HARV.perImage = fromDisk;
-  else if(fromLS) HARV.perImage = fromLS;
-  else HARV.perImage = {};
-  harvestSetSaveIndicator('saved');
-}
-
-async function harvestInit(){
-  if(!HARV.loaded){
-    HARV.loaded = true;
-    HARV.images = [];
-    HARV.idx = 0;
-    HARV.userEdited = false;   // true once user manually drags anything
-    // Load config
-    try {
-      const r = await api('/api/v1/harvest/config');
-      HARV.cfg = r.config;
-      HARV.active = HARV.cfg.active_preset || 'momotalk_invite';
-      harvestPopulatePresets();
-    } catch(e){ console.error('harvest config load fail:', e); }
-    harvestLoadPresetIntoUI();  // first-time only: populate boxes from preset
-    // Wire canvas
-    harvestBindCanvas();
-    window.addEventListener('resize', () => { if(currentPage === 'harvest') harvestDraw(); });
-    window.addEventListener('keydown', (e) => {
-      if(currentPage !== 'harvest') return;
-      if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-      // Escape → deselect
-      if(e.key === 'Escape'){
-        if(HARV.selected){ HARV.selected = null; harvestDraw(); e.preventDefault(); return; }
-      }
-      const arrow = {ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1]}[e.key];
-      if(!arrow) return;
-      // If a box is selected, arrow keys nudge it (auto-repeats on key hold).
-      // Shift → 10x step (coarse), Alt → 0.1x (super fine).
-      if(HARV.selected){
-        e.preventDefault();
-        const [dx, dy] = arrow;
-        let step = 0.002;  // ~2 px on 1000px-wide canvas
-        if(e.shiftKey) step = 0.02;
-        if(e.altKey)   step = 0.0005;
-        const b = HARV.boxes[HARV.selected];
-        if(!b) return;
-        const w = b.x2 - b.x1, h = b.y2 - b.y1;
-        let nx1 = Math.max(0, Math.min(1-w, b.x1 + dx*step));
-        let ny1 = Math.max(0, Math.min(1-h, b.y1 + dy*step));
-        b.x1 = nx1; b.y1 = ny1; b.x2 = nx1+w; b.y2 = ny1+h;
-        HARV.userEditedThisFrame = true;
-        if(HARV.currentFile){
-          HARV.perImage[HARV.currentFile] = harvestCaptureCurrentState();
-          harvestAutosavePersist();
-        }
-        harvestUpdateNavInfo();
-        harvestDraw();
-        return;
-      }
-      // Nothing selected → frame nav (only ← → mapped, ↑ ↓ silent)
-      if(e.key === 'ArrowLeft'){ e.preventDefault(); harvestPrev(); }
-      if(e.key === 'ArrowRight'){ e.preventDefault(); harvestNext(); }
-    });
-    $('harvest_preset').onchange = () => {
-      HARV.active = $('harvest_preset').value;
-      // Switching preset DOES load its saved boxes — user asked for a
-      // different template.  Warn if pending edits would be lost.
-      if(HARV.userEdited && !confirm('切换预设会覆盖你当前画的框，继续？')){
-        $('harvest_preset').value = HARV.active;  // revert selection
-        return;
-      }
-      harvestLoadPresetIntoUI();
-      HARV.userEdited = false;
-    };
-    $('harvest_dataset').onchange = harvestLoadDataset;
-    await harvestReloadDatasets();
-  } else {
-    // Returning to the page — just re-render current state, do NOT
-    // re-load preset (would clobber user's unsaved edits).
-    harvestDraw();
-    harvestUpdateNavInfo();
-  }
-}
-
-async function harvestReloadDatasets(){
-  const sel = $('harvest_dataset');
-  const cur = sel.value;
-  try {
-    const r = await api('/api/v1/datasets');
-    sel.innerHTML = '<option value="">Select dataset...</option>';
-    (r.datasets || []).forEach(d => {
-      const o = document.createElement('option');
-      o.value = d.name;
-      o.textContent = `${d.name} (${d.image_count})`;
-      sel.appendChild(o);
-    });
-    if(cur) sel.value = cur;
-    if(sel.value) harvestLoadDataset();
-  } catch(e){ console.error(e); }
-}
-
-async function harvestLoadDataset(){
-  const ds = $('harvest_dataset').value;
-  if(!ds){ HARV.images = []; HARV.bgImg = null; harvestDraw(); harvestUpdateNavInfo(); return; }
-  try {
-    const r = await api('/api/v1/datasets/images?dataset=' + encodeURIComponent(ds));
-    HARV.dataset = ds;
-    HARV.images = (r.images || []).map(i => i.img);
-    HARV.idx = 0;
-    // Load per-frame state from disk/localStorage for this (preset, dataset) pair
-    await harvestLoadPerImage();
-    harvestUpdateNavInfo();
-    harvestLoadCurrentImage();
-  } catch(e){ console.error(e); $('harvest_status').textContent='加载失败: '+e.message; }
-}
-
-function harvestUpdateNavInfo(){
-  const n = HARV.images ? HARV.images.length : 0;
-  if(!n){ $('harvest_nav_info').textContent = '(empty dataset)'; return; }
-  const fname = HARV.images[HARV.idx] || '';
-  const edited = HARV.perImage[fname] ? ' · ★已调' : '';
-  const totalEdited = Object.keys(HARV.perImage).length;
-  const saveState = (HARV.saveTimer || HARV.saveSeq !== HARV.saveInFlight) ? ' · 存盘中…' : ' · 已存盘';
-  $('harvest_nav_info').textContent = `${HARV.idx+1} / ${n} — ${fname}${edited}  [已调 ${totalEdited} 帧${totalEdited ? saveState : ''}]`;
-}
-
-function harvestCaptureCurrentState(){
-  // Snapshot the visible state (boxes + grid) into a serializable object.
-  return {
-    avatar_box: {x1:HARV.boxes.avatar.x1, y1:HARV.boxes.avatar.y1, x2:HARV.boxes.avatar.x2, y2:HARV.boxes.avatar.y2},
-    name_box:   {x1:HARV.boxes.name.x1,   y1:HARV.boxes.name.y1,   x2:HARV.boxes.name.x2,   y2:HARV.boxes.name.y2},
-    grid: {
-      dx: parseFloat($('harvest_dx').value)||0,
-      dy: parseFloat($('harvest_dy').value)||0,
-      cols: parseInt($('harvest_cols').value)||1,
-      rows: parseInt($('harvest_rows').value)||1,
-    },
-  };
-}
-
-function harvestApplyStateToUI(state){
-  if(!state) return;
-  if(state.avatar_box) Object.assign(HARV.boxes.avatar, state.avatar_box);
-  if(state.name_box)   Object.assign(HARV.boxes.name,   state.name_box);
-  if(state.grid){
-    $('harvest_dx').value   = state.grid.dx ?? 0;
-    $('harvest_dy').value   = state.grid.dy ?? 0;
-    $('harvest_cols').value = state.grid.cols ?? 1;
-    $('harvest_rows').value = state.grid.rows ?? 1;
-  }
-}
-
-function harvestPersistCurrentFrameIfEdited(){
-  // Save current frame's state to perImage ONLY if user has edited since
-  // last save. This gives "previous frame is a template" semantics: a
-  // frame the user merely glanced at doesn't get frozen.
-  if(HARV.userEditedThisFrame && HARV.currentFile){
-    HARV.perImage[HARV.currentFile] = harvestCaptureCurrentState();
-    harvestAutosavePersist();  // debounced disk + instant localStorage
-  }
-  HARV.userEditedThisFrame = false;
-}
-
-function harvestLoadCurrentImage(){
-  if(!HARV.images || !HARV.images.length){ HARV.bgImg = null; harvestDraw(); return; }
-  const fname = HARV.images[HARV.idx];
-  // If this frame has its own saved state, restore it.  Otherwise keep
-  // the current state on canvas (acts as "starting template" inherited
-  // from previous frame, matching user's mental model of
-  // "上一帧只是给个起始位置").
-  if(HARV.perImage[fname]){
-    harvestApplyStateToUI(HARV.perImage[fname]);
-  }
-  HARV.currentFile = fname;
-  HARV.userEditedThisFrame = false;
-  $('harvest_status').textContent = '加载中...';
-  const img = new Image();
-  img.onload = () => {
-    HARV.bgImg = img;
-    HARV.imgW = img.naturalWidth;
-    HARV.imgH = img.naturalHeight;
-    $('harvest_status').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
-    harvestUpdateNavInfo();
-    harvestDraw();
-  };
-  img.onerror = () => { $('harvest_status').textContent = '加载失败'; };
-  img.src = `/api/v1/datasets/image?dataset=${encodeURIComponent(HARV.dataset)}&filename=${encodeURIComponent(fname)}&_=${Date.now()}`;
-}
-
-function harvestPrev(){
-  if(!HARV.images || !HARV.images.length) return;
-  harvestPersistCurrentFrameIfEdited();
-  HARV.idx = (HARV.idx - 1 + HARV.images.length) % HARV.images.length;
-  harvestLoadCurrentImage();
-}
-function harvestNext(){
-  if(!HARV.images || !HARV.images.length) return;
-  harvestPersistCurrentFrameIfEdited();
-  HARV.idx = (HARV.idx + 1) % HARV.images.length;
-  harvestLoadCurrentImage();
-}
-
-function harvestJumpToUnedited(){
-  if(!HARV.images || !HARV.images.length) return;
-  harvestPersistCurrentFrameIfEdited();
-  const start = HARV.idx;
-  for(let step = 1; step <= HARV.images.length; step++){
-    const i = (start + step) % HARV.images.length;
-    const fname = HARV.images[i];
-    if(!HARV.perImage[fname]){
-      HARV.idx = i;
-      harvestLoadCurrentImage();
-      return;
-    }
-  }
-  alert('所有帧都已调过');
-}
-
-function harvestApplyToRange(){
-  if(!HARV.images || !HARV.images.length){ alert('先选 dataset'); return; }
-  const n = parseInt($('harvest_apply_range').value)||50;
-  if(n < 1){ alert('N 必须 ≥ 1'); return; }
-  // Snapshot current canvas state (doesn't require user-edited flag; user
-  // explicitly clicked the button to propagate).
-  const state = harvestCaptureCurrentState();
-  const curFname = HARV.images[HARV.idx];
-  let written = 0;
-  let skipped = 0;
-  for(let k = 0; k <= n; k++){
-    const i = HARV.idx + k;
-    if(i >= HARV.images.length) break;
-    const fname = HARV.images[i];
-    // Overwrite anything NOT yet edited; keep already-tuned frames intact
-    if(fname !== curFname && HARV.perImage[fname]){
-      skipped++;
-      continue;
-    }
-    HARV.perImage[fname] = JSON.parse(JSON.stringify(state));
-    written++;
-  }
-  harvestAutosavePersist();
-  harvestUpdateNavInfo();
-  $('harvest_status').textContent = `批量应用: 写入 ${written} 帧，跳过已调 ${skipped} 帧`;
-}
-
-function harvestPopulatePresets(){
-  const sel = $('harvest_preset');
-  sel.innerHTML = '';
-  const presets = HARV.cfg?.presets || {};
-  Object.entries(presets).forEach(([k, v]) => {
-    const o = document.createElement('option');
-    o.value = k;
-    o.textContent = v.label || k;
-    sel.appendChild(o);
-  });
-  sel.value = HARV.active;
-}
-
-function harvestLoadPresetIntoUI(){
-  const p = (HARV.cfg?.presets || {})[HARV.active] || {};
-  const ab = p.avatar_box || {x1:0.05,y1:0.20,x2:0.15,y2:0.30};
-  const nb = p.name_box   || {x1:0.16,y1:0.22,x2:0.28,y2:0.28};
-  const g = p.grid || {dx:0, dy:0.1, cols:1, rows:5};
-  HARV.boxes.avatar = {...HARV.boxes.avatar, ...ab};
-  HARV.boxes.name   = {...HARV.boxes.name,   ...nb};
-  $('harvest_dx').value = g.dx ?? 0;
-  $('harvest_dy').value = g.dy ?? 0.1;
-  $('harvest_cols').value = g.cols ?? 1;
-  $('harvest_rows').value = g.rows ?? 5;
-  $('harvest_keywords').value = (p.ocr_keywords || []).join(',');
-  harvestDraw();
-}
-
-function harvestFit(){
-  const cvs = $('harvest_canvas');
-  const rect = cvs.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  cvs.width = Math.max(1, Math.floor(rect.width * dpr));
-  cvs.height = Math.max(1, Math.floor(rect.height * dpr));
-  if(!HARV.bgImg){ HARV.fit = {sx:0, sy:0, scale: dpr}; return { cvs, dpr }; }
-  const cw = cvs.width, ch = cvs.height;
-  const iw = HARV.imgW, ih = HARV.imgH;
-  const scale = Math.min(cw/iw, ch/ih);
-  const dw = iw*scale, dh = ih*scale;
-  const sx = (cw - dw) / 2, sy = (ch - dh) / 2;
-  HARV.fit = { sx, sy, scale };
-  return { cvs, dpr };
-}
-
-function harvestImgToCanvas(nx, ny){
-  const f = HARV.fit;
-  return { x: f.sx + nx * HARV.imgW * f.scale, y: f.sy + ny * HARV.imgH * f.scale };
-}
-function harvestCanvasToImg(cx, cy){
-  const f = HARV.fit;
-  const px = (cx - f.sx) / f.scale;
-  const py = (cy - f.sy) / f.scale;
-  return { nx: Math.max(0, Math.min(1, px / HARV.imgW)), ny: Math.max(0, Math.min(1, py / HARV.imgH)) };
-}
-
-function harvestDraw(){
-  const { cvs, dpr } = harvestFit();
-  const ctx = cvs.getContext('2d');
-  ctx.fillStyle = '#0d0d10';
-  ctx.fillRect(0,0,cvs.width,cvs.height);
-  if(HARV.bgImg){
-    const f = HARV.fit;
-    ctx.drawImage(HARV.bgImg, f.sx, f.sy, HARV.imgW*f.scale, HARV.imgH*f.scale);
-  }
-  // Draw grid (all cells) — lightly for context
-  const cols = parseInt($('harvest_cols').value)||1;
-  const rows = parseInt($('harvest_rows').value)||1;
-  const dx = parseFloat($('harvest_dx').value)||0;
-  const dy = parseFloat($('harvest_dy').value)||0;
-  for(const key of ['avatar','name']){
-    const b = HARV.boxes[key];
-    const isSelected = (HARV.selected === key);
-    for(let i=0;i<cols;i++){
-      for(let j=0;j<rows;j++){
-        const isFirst = (i===0 && j===0);
-        const isColStep = (i===1 && j===0);  // second column, first row
-        const isRowStep = (i===0 && j===1);  // first column, second row
-        const isStepHandle = (isColStep || isRowStep);
-        const ox = i*dx, oy = j*dy;
-        const p1 = harvestImgToCanvas(b.x1+ox, b.y1+oy);
-        const p2 = harvestImgToCanvas(b.x2+ox, b.y2+oy);
-        // Selected box → glow on its first-cell drawing
-        if(isFirst && isSelected){
-          ctx.save();
-          ctx.shadowColor = b.color;
-          ctx.shadowBlur = 14 * dpr;
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 3 * dpr;
-          ctx.globalAlpha = 1.0;
-          ctx.strokeRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
-          ctx.restore();
-        }
-        ctx.strokeStyle = b.color;
-        ctx.lineWidth = (isFirst || isStepHandle) ? 2*dpr : 1*dpr;
-        ctx.globalAlpha = isFirst ? 1.0 : (isStepHandle ? 0.75 : 0.30);
-        if(isStepHandle){ ctx.setLineDash([4*dpr, 3*dpr]); }
-        ctx.strokeRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
-        if(isStepHandle){ ctx.setLineDash([]); }
-        if(isFirst){
-          ctx.fillStyle = b.color;
-          ctx.globalAlpha = 0.85;
-          ctx.font = `${11*dpr}px system-ui`;
-          ctx.fillText(b.label, p1.x+3*dpr, p1.y-3*dpr);
-          // Corner handles (resize)
-          const hs = 6*dpr;
-          ctx.globalAlpha = 1.0;
-          [[p1.x,p1.y],[p2.x,p1.y],[p1.x,p2.y],[p2.x,p2.y]].forEach(([x,y])=>{
-            ctx.fillStyle = b.color;
-            ctx.fillRect(x-hs/2, y-hs/2, hs, hs);
-          });
-        }
-        if(isStepHandle){
-          // Draw a draggable center dot + label explaining it controls
-          // dx (col step) or dy (row step).  Only drawn on the AVATAR
-          // preview cells to avoid duplicate handles; one handle moves
-          // BOTH avatar and name box offsets by design.
-          if(key === 'avatar'){
-            const cx = (p1.x + p2.x) / 2;
-            const cy = (p1.y + p2.y) / 2;
-            ctx.fillStyle = '#fbbf24';  // amber
-            ctx.globalAlpha = 1.0;
-            ctx.beginPath();
-            ctx.arc(cx, cy, 7*dpr, 0, Math.PI*2);
-            ctx.fill();
-            ctx.fillStyle = '#111';
-            ctx.font = `${10*dpr}px system-ui`;
-            const tag = isColStep ? 'dx' : 'dy';
-            const tw = ctx.measureText(tag).width;
-            ctx.fillText(tag, cx - tw/2, cy + 3.5*dpr);
-          }
-        }
-      }
-    }
-    ctx.globalAlpha = 1.0;
-  }
-}
-
-function harvestBindCanvas(){
-  const cvs = $('harvest_canvas');
-  // Redraw when grid inputs change + mark edited + commit to perImage
-  ['harvest_cols','harvest_rows','harvest_dx','harvest_dy'].forEach(id => {
-    $(id).oninput = () => {
-      HARV.userEdited = true;
-      HARV.userEditedThisFrame = true;
-      if(HARV.currentFile){
-        HARV.perImage[HARV.currentFile] = harvestCaptureCurrentState();
-        harvestAutosavePersist();
-      }
-      harvestUpdateNavInfo();
-      harvestDraw();
-    };
-  });
-  cvs.onmousedown = (ev) => {
-    if(!HARV.bgImg) return;
-    const rect = cvs.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const cx = (ev.clientX - rect.left) * dpr;
-    const cy = (ev.clientY - rect.top) * dpr;
-    const { nx, ny } = harvestCanvasToImg(cx, cy);
-    HARV.mouseDownAt = {x: cx, y: cy, t: Date.now(), nx, ny};
-    const hs = 0.015; // 1.5% tolerance for handles
-    // Priority 1: step-offset handles (amber dots on 2nd-col / 2nd-row cells)
-    const dx = parseFloat($('harvest_dx').value)||0;
-    const dy = parseFloat($('harvest_dy').value)||0;
-    const cols = parseInt($('harvest_cols').value)||1;
-    const rows = parseInt($('harvest_rows').value)||1;
-    const av = HARV.boxes.avatar;
-    const avCx = (av.x1+av.x2)/2, avCy = (av.y1+av.y2)/2;
-    if(cols > 1){
-      const hx = avCx + dx, hy = avCy;  // col step handle center
-      if(Math.abs(nx-hx)<hs && Math.abs(ny-hy)<hs){
-        HARV.drag = {type:'step_dx', orig:{dx}, startNX:nx, anchorCx:avCx};
-        return;
-      }
-    }
-    if(rows > 1){
-      const hx = avCx, hy = avCy + dy;  // row step handle center
-      if(Math.abs(nx-hx)<hs && Math.abs(ny-hy)<hs){
-        HARV.drag = {type:'step_dy', orig:{dy}, startNY:ny, anchorCy:avCy};
-        return;
-      }
-    }
-    // Priority 2: corners of first-cell boxes (resize)
-    for(const key of ['avatar','name']){
-      const b = HARV.boxes[key];
-      const corners = {
-        tl:[b.x1,b.y1], tr:[b.x2,b.y1], bl:[b.x1,b.y2], br:[b.x2,b.y2],
-      };
-      for(const [cName, [cX, cY]] of Object.entries(corners)){
-        if(Math.abs(nx-cX)<hs && Math.abs(ny-cY)<hs){
-          HARV.drag = {type:'resize', key, corner:cName, orig:{...b}};
-          return;
-        }
-      }
-    }
-    // Priority 3: body (move)
-    for(const key of ['avatar','name']){
-      const b = HARV.boxes[key];
-      if(nx>b.x1 && nx<b.x2 && ny>b.y1 && ny<b.y2){
-        HARV.drag = {type:'move', key, startNX:nx, startNY:ny, orig:{...b}};
-        return;
-      }
-    }
-  };
-  cvs.onmousemove = (ev) => {
-    if(!HARV.drag) return;
-    const rect = cvs.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const cx = (ev.clientX - rect.left) * dpr;
-    const cy = (ev.clientY - rect.top) * dpr;
-    // Ignore micro-jitter so a simple click doesn't accidentally scoot the
-    // box by 1-2px (which would then get persisted as an "edit").
-    const md = HARV.mouseDownAt;
-    if(md){
-      const dist2 = (cx - md.x)*(cx - md.x) + (cy - md.y)*(cy - md.y);
-      if(dist2 < (4*dpr)*(4*dpr)) return;
-    }
-    const { nx, ny } = harvestCanvasToImg(cx, cy);
-    HARV.userEdited = true;
-    HARV.userEditedThisFrame = true;
-    if(HARV.drag.type === 'step_dx'){
-      // new dx = position of 2nd-col cell center minus first-col center
-      const newDx = Math.max(0, Math.min(1, nx - HARV.drag.anchorCx));
-      $('harvest_dx').value = newDx.toFixed(4);
-      harvestDraw();
-      return;
-    }
-    if(HARV.drag.type === 'step_dy'){
-      const newDy = Math.max(0, Math.min(1, ny - HARV.drag.anchorCy));
-      $('harvest_dy').value = newDy.toFixed(4);
-      harvestDraw();
-      return;
-    }
-    const b = HARV.boxes[HARV.drag.key];
-    const o = HARV.drag.orig;
-    if(HARV.drag.type === 'move'){
-      const dnx = nx - HARV.drag.startNX;
-      const dny = ny - HARV.drag.startNY;
-      const w = o.x2 - o.x1, h = o.y2 - o.y1;
-      let nx1 = Math.max(0, Math.min(1-w, o.x1 + dnx));
-      let ny1 = Math.max(0, Math.min(1-h, o.y1 + dny));
-      b.x1 = nx1; b.y1 = ny1; b.x2 = nx1+w; b.y2 = ny1+h;
-    } else if(HARV.drag.type === 'resize'){
-      const c = HARV.drag.corner;
-      if(c === 'tl'){ b.x1 = Math.min(nx, o.x2-0.005); b.y1 = Math.min(ny, o.y2-0.005); }
-      if(c === 'tr'){ b.x2 = Math.max(nx, o.x1+0.005); b.y1 = Math.min(ny, o.y2-0.005); }
-      if(c === 'bl'){ b.x1 = Math.min(nx, o.x2-0.005); b.y2 = Math.max(ny, o.y1+0.005); }
-      if(c === 'br'){ b.x2 = Math.max(nx, o.x1+0.005); b.y2 = Math.max(ny, o.y1+0.005); }
-    }
-    harvestDraw();
-  };
-  cvs.onmouseup = (ev) => {
-    // Decide click vs drag by ACTUAL movement, not by whether drag was armed.
-    // (mousedown on a box body arms a move-drag; if user releases without
-    // moving, we should treat it as a click-to-select.)
-    const md = HARV.mouseDownAt;
-    HARV.mouseDownAt = null;
-    let moved = false;
-    let curCx = 0, curCy = 0;
-    if(md){
-      const rect = cvs.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      curCx = (ev.clientX - rect.left) * dpr;
-      curCy = (ev.clientY - rect.top) * dpr;
-      const dist2 = (curCx - md.x)*(curCx - md.x) + (curCy - md.y)*(curCy - md.y);
-      moved = dist2 >= (4*dpr)*(4*dpr);
-    }
-    if(HARV.drag && moved){
-      // Real drag → commit edit.
-      HARV.drag = null;
-      if(HARV.userEditedThisFrame && HARV.currentFile){
-        HARV.perImage[HARV.currentFile] = harvestCaptureCurrentState();
-        harvestAutosavePersist();
-        harvestUpdateNavInfo();
-      }
-    } else {
-      // Either no drag armed, or armed but no movement → treat as click.
-      HARV.drag = null;
-      if(!moved && md && HARV.bgImg){
-        const { nx, ny } = harvestCanvasToImg(curCx, curCy);
-        let hit = null;
-        for(const key of ['avatar','name']){
-          const b = HARV.boxes[key];
-          if(nx>b.x1 && nx<b.x2 && ny>b.y1 && ny<b.y2){ hit = key; break; }
-        }
-        HARV.selected = hit;  // null when clicked empty → deselect
-        harvestDraw();
-      }
-    }
-  };
-  cvs.onmouseleave = () => {
-    if(HARV.drag){
-      HARV.drag = null;
-      if(HARV.userEditedThisFrame && HARV.currentFile){
-        HARV.perImage[HARV.currentFile] = harvestCaptureCurrentState();
-        harvestAutosavePersist();
-        harvestUpdateNavInfo();
-      }
-    }
-    HARV.mouseDownAt = null;
-  };
-}
-
-function harvestExportPerImage(){
-  const txt = JSON.stringify(HARV.perImage, null, 2);
-  $('harvest_per_image_json').value = txt;
-  navigator.clipboard?.writeText(txt).then(
-    () => { $('harvest_status').textContent = `已复制到剪贴板 (${Object.keys(HARV.perImage).length} 帧)`; },
-    () => { $('harvest_status').textContent = '已填入文本框，请手动复制'; },
-  );
-}
-
-function harvestImportPerImage(){
-  const raw = $('harvest_per_image_json').value.trim();
-  if(!raw){ alert('文本框是空的'); return; }
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch(e){ alert('JSON 解析失败: ' + e.message); return; }
-  if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)){
-    alert('必须是 {filename: {...}} 形式的对象'); return;
-  }
-  const n = Object.keys(parsed).length;
-  if(!confirm(`导入 ${n} 帧到当前 dataset？会覆盖现有 ${Object.keys(HARV.perImage).length} 帧`)) return;
-  HARV.perImage = parsed;
-  harvestAutosavePersist();
-  harvestUpdateNavInfo();
-  harvestLoadCurrentImage();  // re-render current frame from imported state
-  $('harvest_status').textContent = `已导入 ${n} 帧`;
-}
-
-async function harvestReloadFromPreset(){
-  if(HARV.userEdited && !confirm('重载会覆盖当前画的框，继续？')) return;
-  try {
-    const r = await api('/api/v1/harvest/config');
-    HARV.cfg = r.config;
-  } catch(e){ alert('加载失败: '+e.message); return; }
-  harvestLoadPresetIntoUI();
-  HARV.userEdited = false;
-  $('harvest_status').textContent = '已从磁盘重载预设';
-}
-
-async function harvestSaveConfig(){
-  if(!HARV.cfg) return;
-  const presets = HARV.cfg.presets || {};
-  const key = HARV.active;
-  const cur = presets[key] || {};
-  const keywords = ($('harvest_keywords').value || '')
-    .split(',').map(s=>s.trim()).filter(Boolean);
-  presets[key] = {
-    ...cur,
-    label: cur.label || key,
-    avatar_box: {x1:HARV.boxes.avatar.x1,y1:HARV.boxes.avatar.y1,x2:HARV.boxes.avatar.x2,y2:HARV.boxes.avatar.y2},
-    name_box:   {x1:HARV.boxes.name.x1,y1:HARV.boxes.name.y1,x2:HARV.boxes.name.x2,y2:HARV.boxes.name.y2},
-    grid: {
-      dx: parseFloat($('harvest_dx').value)||0,
-      dy: parseFloat($('harvest_dy').value)||0,
-      cols: parseInt($('harvest_cols').value)||1,
-      rows: parseInt($('harvest_rows').value)||1,
-    },
-    ocr_keywords: keywords,
-  };
-  try {
-    await api('/api/v1/harvest/config', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ config: { presets, active_preset: key } }),
-    });
-    $('harvest_status').textContent = '已保存配置';
-    HARV.cfg.presets = presets;
-  } catch(e){
-    alert('保存失败: ' + e.message);
-  }
-}
-
-async function harvestRun(){
-  const btn = $('btn_harvest_run');
-  const out = $('harvest_result');
-  const ds = $('harvest_dataset').value;
-  if(!ds){ alert('先选一个 dataset'); return; }
-  // Commit whatever is currently on canvas before running, and flush any
-  // pending debounced save to disk so the run uses the freshest data.
-  harvestPersistCurrentFrameIfEdited();
-  if(HARV.saveTimer){
-    clearTimeout(HARV.saveTimer); HARV.saveTimer = null;
-    try {
-      await api('/api/v1/harvest/per_image', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ preset: HARV.active, dataset: HARV.dataset, per_image: HARV.perImage }),
-      });
-    } catch(e){}
-  }
-  const tunedCount = Object.keys(HARV.perImage).length;
-  if(tunedCount === 0){
-    if(!confirm('你还没调过任何一帧，是否只用默认预设跑整个 dataset？')) return;
-  }
-  btn.disabled = true; btn.textContent = '采集中...';
-  out.textContent = `运行中（已调 ${tunedCount} 帧，其余帧沿用最近的调整）...`;
-  try {
-    await harvestSaveConfig();
-    const body = {
-      preset: HARV.active,
-      dataset: ds,
-      min_conf: parseFloat($('harvest_min_conf').value) || 0.6,
-      max_frames: parseInt($('harvest_max_frames').value) || 0, // 0 = all
-      per_image: HARV.perImage,
-    };
-    const r = await api('/api/v1/harvest/run_dataset', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body),
-    });
-    let text = `output: ${r.output_dir}\n`;
-    text += `dataset: ${r.dataset}\n`;
-    text += `frames_used: ${r.frames_used}\n`;
-    text += `pairs_attempted: ${r.pairs_attempted}\n`;
-    text += `ocr_misses: ${r.ocr_misses}\n`;
-    text += `unique_names_saved: ${r.unique_names_saved}\n\n`;
-    text += `sample (first 20):\n`;
-    for(const [k,v] of Object.entries(r.sample || {})){
-      text += `  ${k}  conf=${(v.conf||0).toFixed(2)}  src=${v.source_frame}\n`;
-    }
-    out.textContent = text;
-  } catch(e){
-    out.textContent = '错误: ' + e.message;
-  } finally {
-    btn.disabled = false; btn.textContent = '开始采集';
-  }
-}
 
 /* ════════════════════════════════════════════════════
    SYNTH TEMPLATE EDITOR — canvas-based slot editor for

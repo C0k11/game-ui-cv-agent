@@ -113,3 +113,5 @@ _v3_manual_baseline.json
 # Inference visualization output (annotated images, regenerated on demand)
 _test_inference/
 _test_v4_manual/
+_ref_spotcheck_vis/
+_ref_stride50_vis/

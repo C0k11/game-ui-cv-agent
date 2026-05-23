@@ -242,18 +242,23 @@ The freeze-and-predict step is the difference between “loses lock the moment a
 flowchart LR
     A[Agent] -- profile / skill order / AP / favorites --> P((pipeline))
     HUD[HUD] -- read-only live state --> P
-    R[Roster] -- canvas region editor<br/>save schedule slots --> CFG[(config.json)]
     C[Capture] -- DXcam capture<br/>route to train / val pool --> RAW[(raw_images)]
-    AN[Annotate] -- YOLO / OCR labels<br/>find-class search<br/>cross-image copy/paste --> RAW
+    AN[Annotate] -- YOLO / OCR labels<br/>undo · prefetch<br/>cross-frame paste --> RAW
     S[Synth Templates] -- 6+ contexts<br/>quad slots + ref crop<br/>aug positions --> TPL[(synth_templates)]
     T[Trajectories] -- replay ticks --> TRJ[(trajectories)]
 ```
 
 - **Home (Agent)** — profile switching, skill ordering, AP / event budgets, favorite-character selection, dry-run toggle.
 - **HUD** — live pipeline state (current skill, sub-state, tick count, AP, last action reason).
-- **Roster** — canvas editor for the schedule avatar regions. Left-drag to move; drag a handle to resize; right-click empty space to add; `Del` to remove; `Ctrl+C` / `Ctrl+V` to copy a box and paste at the cursor; `Ctrl+D` to duplicate in place; arrow keys to nudge; `Ctrl+S` to save. JSON export / import for cross-machine migration.
 - **Capture** — DXcam screen capture with split routing (`Train (new run_*)` vs `Val (held-out pool)`) and a Purpose selector (`Fused Avatar` → `_val_fused/frames/`, `Static UI` → `_val_static_ui/frames/`). Live destination hint.
-- **Annotate** — YOLO / OCR labeling workspace. Rectangles, ellipses, polygons; right-drag to draw on Windows pointer events; **find-frames-with-class** search (idx / name); dataset dropdown grouped into Validation Pools / Recordings / Trajectories.
+- **Annotate** — YOLO / OCR labeling workspace, hardened for long sessions:
+  - Shapes: rectangles, ellipses, polygons; right-drag to draw on Windows pointer events.
+  - **Undo / Redo**: `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) with per-frame independent 50-step history. Snapshots at every atomic op (resize / move / rotate / vertex drag / class change / paste / Florence-add).
+  - **Cross-frame paste**: `Shift+V` clones the **previous frame's** labels onto the current one (wraps around). `Shift+P` opens a picker modal — filter / arrow-keys / Enter to choose **any already-labeled frame** as the source (sorted by box count). Both go through history so `Ctrl+Z` reverts cleanly.
+  - **Image cache & prefetch**: LRU cache (cap 8) keeps recent frames decoded; loading a frame triggers async prefetch of its neighbors → 0-latency `A` / `D` paging.
+  - **Loss-proof saves**: `beforeunload` guard blocks reload / tab-close while edits are unsaved; `annAutoSave` `await`s the POST before navigation (race-free dirty clear via post-send re-serialization); a shared in-flight promise de-dupes concurrent `Save / Next / Ctrl+S` mashes into a single POST. Save failures surface as right-corner toasts and keep `dirty` so the next attempt re-tries.
+  - **Find by class**: search box accepts class idx or name, lists every frame containing that class.
+  - Dataset dropdown grouped into Validation Pools / Recordings / Trajectories.
 - **Synth Templates (S)** — the heart of training data generation. Per-context visual slot editor with axis-aligned rect or free 4-point quad slots, interactive ref crop with slot-overlay preview, four draggable colored markers for augmentation anchor positions (Lv / star / weapon / heart), tight-face vs full bbox modes, per-context augmentation probabilities, fullscreen preview modal with zoom + pan + dice (random characters).
 - **Trajectories** — replay of historical runs (screenshot, OCR, YOLO, action, reason) per tick.
 
