@@ -1639,13 +1639,14 @@ $('ann_dataset').onchange=()=>annLoadDataset();
 async function annLoadDataset(){
   const ds=$('ann_dataset').value;if(!ds)return;
   ANN.dataset=ds;
-  // U3 + U1 + Phase 1/2: full reset of cross-dataset state. New dataset →
-  // new images, new history, no leftover selection / clipboard / stamp.
+  // U3 + U1 + Phase 1/2: cross-dataset reset. New dataset → new images cache,
+  // new history. Selection cleared (idx no longer makes sense).
+  // BUT keep clipboard / groupClipboard / stamp ACROSS dataset switches —
+  // the whole point of those is to let you copy in train and paste in val
+  // (class IDs are remapped by name at paste time, see Ctrl+V handler).
   _annCacheClear();
   _annClearHistory();
   ANN.selSet = new Set();
-  ANN.groupClipboard = null;
-  ANN.stamp = null;
   try{
     const r=await api('/api/v1/datasets/images?dataset='+encodeURIComponent(ds));
     ANN.data=r.images||[];ANN.classes=r.classes||[];
@@ -2382,47 +2383,80 @@ document.addEventListener('keydown',e=>{
   if(k==='Escape' && (ANN.selIdx>=0 || ANN.selSet.size>0)){
     _annSelClear();annDraw();return;
   }
-  // L9: Ctrl+C / Ctrl+V — single OR group (preserve relative positions on paste)
+  // L9: Ctrl+C / Ctrl+V — single OR group (preserve relative positions on paste).
+  // Cross-dataset safe: clipboard stores class NAME alongside id; on paste,
+  // class id is remapped via current dataset's class table. Unmappable
+  // classes are dropped with a toast count.
   if(e.ctrlKey&&!e.shiftKey&&(k==='c'||k==='C')){
     const sel=_annSelected();
     if(sel.length===0) return;
     e.preventDefault();
+    const _withName = (lb) => {
+      const cp = JSON.parse(JSON.stringify(lb));
+      cp._srcClassName = ANN.classes[cp.cls];  // tag class name at copy time
+      return cp;
+    };
     if(sel.length===1){
-      ANN.clipboard=JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[sel[0]]));
+      ANN.clipboard=_withName(ANN.data[ANN.idx].labels[sel[0]]);
       ANN.groupClipboard=null;
     } else {
-      // Capture labels + anchor (centroid) for relative-position paste
-      const labels=sel.map(i=>JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i])));
+      const labels=sel.map(i=>_withName(ANN.data[ANN.idx].labels[i]));
       const cx=labels.reduce((s,l)=>s+l.xc,0)/labels.length;
       const cy=labels.reduce((s,l)=>s+l.yc,0)/labels.length;
-      ANN.groupClipboard={labels, anchor:{x:cx, y:cy}};
+      ANN.groupClipboard={labels, anchor:{x:cx, y:cy}, srcDataset:ANN.dataset};
       ANN.clipboard=null;
-      showToast(`已复制 ${labels.length} 个标注 (Ctrl+V 粘贴)`,'info',1500);
+      showToast(`已复制 ${labels.length} 个标注 (Ctrl+V 粘贴, 跨 dataset 自动 remap)`,'info',1800);
     }
     return;
   }
   if(e.ctrlKey&&!e.shiftKey&&(k==='v'||k==='V')){
     e.preventDefault();
+    // Build class-name → current-id lookup once
+    const nameToId = new Map();
+    ANN.classes.forEach((n,i)=>nameToId.set(n,i));
+    const _remap = (cp) => {
+      if(cp._srcClassName !== undefined){
+        const newId = nameToId.get(cp._srcClassName);
+        if(newId === undefined) return null;  // unmappable → drop
+        cp.cls = newId;
+        delete cp._srcClassName;
+      }
+      return cp;
+    };
     if(ANN.groupClipboard){
-      // Group paste: place at centroid + 3% offset, preserve relative positions
       const {labels, anchor} = ANN.groupClipboard;
       const newAnchorX = anchor.x + 0.03, newAnchorY = anchor.y + 0.03;
       const startIdx = ANN.data[ANN.idx].labels.length;
+      let dropped = 0;
       for(const lb of labels){
         const cp=JSON.parse(JSON.stringify(lb));
+        if(_remap(cp) === null){ dropped++; continue; }
         const dx = cp.xc - anchor.x, dy = cp.yc - anchor.y;
         cp.xc = newAnchorX + dx; cp.yc = newAnchorY + dy;
         if(cp.points) cp.points = cp.points.map(p=>({x:p.x+0.03, y:p.y+0.03}));
         ANN.data[ANN.idx].labels.push(cp);
       }
+      const added = ANN.data[ANN.idx].labels.length - startIdx;
+      if(added === 0){
+        showToast(`粘贴失败: 源帧的 class 在当前 dataset schema 都不存在`,'error',3000);
+        return;
+      }
       ANN.selSet = new Set();
       ANN.selIdx = startIdx;
       for(let i=startIdx+1; i<ANN.data[ANN.idx].labels.length; i++) ANN.selSet.add(i);
       ANN.dirty=true;_annPushHistory();annDraw();
+      if(dropped > 0){
+        showToast(`粘贴 ${added} 个 (${dropped} 个未映射 class 跳过)`,'info',2200);
+      }
       return;
     }
     if(ANN.clipboard){
-      const cp=JSON.parse(JSON.stringify(ANN.clipboard));cp.xc+=0.03;cp.yc+=0.03;
+      const cp=JSON.parse(JSON.stringify(ANN.clipboard));
+      if(_remap(cp) === null){
+        showToast(`粘贴失败: class "${ANN.clipboard._srcClassName}" 在当前 dataset 不存在`,'error',3000);
+        return;
+      }
+      cp.xc+=0.03;cp.yc+=0.03;
       if(cp.points)cp.points=cp.points.map(p=>({x:p.x+0.03,y:p.y+0.03}));
       ANN.data[ANN.idx].labels.push(cp);
       ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.selSet=new Set();
@@ -2696,27 +2730,46 @@ function annArrayGenerate(){
 function annStampAction(){
   const sel = _annSelected();
   if(sel.length > 0 && !ANN.stamp){
-    // Save as stamp on first invocation with selection
-    const labels = sel.map(i => JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i])));
+    // Save as stamp on first invocation with selection (tag class names for
+    // cross-dataset paste — same scheme as Ctrl+C clipboard).
+    const labels = sel.map(i => {
+      const cp = JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i]));
+      cp._srcClassName = ANN.classes[cp.cls];
+      return cp;
+    });
     const cx = labels.reduce((s,l) => s + l.xc, 0) / labels.length;
     const cy = labels.reduce((s,l) => s + l.yc, 0) / labels.length;
-    ANN.stamp = {labels, anchor: {x: cx, y: cy}};
-    showToast(`Stamp 已保存 (${labels.length} 个 box)。再按 Shift+T 粘贴到任意帧`,'info',3000);
+    ANN.stamp = {labels, anchor: {x: cx, y: cy}, srcDataset: ANN.dataset};
+    showToast(`Stamp 已保存 (${labels.length} 个 box, 跨 dataset 自动 remap)。再按 Shift+T 粘贴`,'info',3000);
     return;
   }
   if(!ANN.stamp){
     showToast('未保存 stamp。先选中几个 box 再按 Shift+T','info',2000);
     return;
   }
-  // Paste stamp at center + 3% offset
+  // Paste stamp at center + 2% offset, remap class names → current dataset ids
   const {labels, anchor} = ANN.stamp;
+  const nameToId = new Map();
+  ANN.classes.forEach((n,i)=>nameToId.set(n,i));
   const startIdx = ANN.data[ANN.idx].labels.length;
+  let dropped = 0;
   for(const lb of labels){
     const cp = JSON.parse(JSON.stringify(lb));
+    if(cp._srcClassName !== undefined){
+      const newId = nameToId.get(cp._srcClassName);
+      if(newId === undefined){ dropped++; continue; }
+      cp.cls = newId;
+      delete cp._srcClassName;
+    }
     const dx = cp.xc - anchor.x, dy = cp.yc - anchor.y;
     cp.xc = anchor.x + dx + 0.02; cp.yc = anchor.y + dy + 0.02;
     if(cp.points) cp.points = cp.points.map(p => ({x: p.x + 0.02, y: p.y + 0.02}));
     ANN.data[ANN.idx].labels.push(cp);
+  }
+  const added = ANN.data[ANN.idx].labels.length - startIdx;
+  if(added === 0){
+    showToast(`Stamp 粘贴失败: 源帧的 class 在当前 dataset schema 都不存在`,'error',3000);
+    return;
   }
   ANN.selIdx = startIdx;
   ANN.selSet = new Set();
@@ -2724,7 +2777,8 @@ function annStampAction(){
   ANN.dirty = true;
   _annPushHistory();
   annDraw(); annBuildBoxList();
-  showToast(`已粘贴 stamp (${labels.length} 个 box)`,'success',1800);
+  const tag = dropped > 0 ? `, ${dropped} 个未映射跳过` : '';
+  showToast(`已粘贴 stamp ${added} 个 box${tag}`,'success',1800);
 }
 function annStampClear(){ ANN.stamp = null; showToast('Stamp 已清除','info',1500); }
 
