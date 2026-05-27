@@ -726,11 +726,17 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div><b style="color:var(--text)">复制全部标注 from frame</b></div>
       <span style="color:var(--muted);font-size:11px">↑↓ 选择 · Enter 复制 · Esc 取消</span>
     </div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
+      <span>Dataset:</span>
+      <select id="ann_paste_dataset"
+        onchange="annPastePickerLoadDataset()"
+        style="flex:1;padding:5px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;font-family:var(--mono);outline:none"></select>
+    </div>
     <input type="text" id="ann_paste_search" placeholder="过滤 frame 名 (例: frame_00020)" autocomplete="off"
       style="padding:6px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:12px;outline:none;font-family:var(--mono)"
       onkeyup="annPastePickerFilter()" onkeydown="annPastePickerKeyDown(event)"/>
     <div id="ann_paste_list" style="flex:1;overflow-y:auto;min-height:200px;max-height:50vh;background:#000;border:1px solid var(--border);border-radius:3px;font-size:11px"></div>
-    <div style="color:var(--muted);font-size:11px">列表按 box 数 降序排序，仅显示已标注的 frame</div>
+    <div style="color:var(--muted);font-size:11px">列表按 box 数 降序 · 跨 dataset 时 class id 自动按 name 重映射（找不到的 class 跳过）</div>
   </div>
 </div>
 
@@ -2797,11 +2803,15 @@ function annMatchSize(){
 
 // ── Paste-from-frame picker ── (Shift+P)
 // Lets the user copy all labels from an arbitrary already-labeled frame into
-// the current frame. Common case: standing at a lobby/home frame that's
-// identical to one labeled earlier — pick that earlier frame, copy its
-// labels, then nudge. Destructive but Ctrl+Z restorable (snapshots history).
+// the current frame. Supports cross-dataset paste (e.g. train → val) — when
+// source dataset is different, class IDs are remapped by class NAME so that
+// schema differences don't corrupt labels (unmapped classes are dropped).
+// Destructive but Ctrl+Z restorable (snapshots history).
 let _annPastePickerIdx = 0;
 let _annPastePickerRows = [];
+let _annPastePickerSrcDataset = null;   // currently-loaded source dataset name
+let _annPastePickerSrcData = [];        // remote frames + labels (when source != current)
+let _annPastePickerSrcClasses = [];     // remote classes list
 
 function annOpenPastePicker(){
   if(!ANN.data || !ANN.data.length) return;
@@ -2809,6 +2819,16 @@ function annOpenPastePicker(){
   if(!modal) return;
   modal.style.display = 'flex';
   document.getElementById('ann_paste_search').value = '';
+  // Build dataset dropdown (same options as the main ANN dataset selector)
+  const mainSel = document.getElementById('ann_dataset');
+  const pickerSel = document.getElementById('ann_paste_dataset');
+  if(mainSel && pickerSel){
+    pickerSel.innerHTML = mainSel.innerHTML;
+    pickerSel.value = ANN.dataset;  // default to current dataset
+  }
+  _annPastePickerSrcDataset = ANN.dataset;
+  _annPastePickerSrcData = [];
+  _annPastePickerSrcClasses = ANN.classes;
   annPastePickerFilter();
   setTimeout(()=>document.getElementById('ann_paste_search').focus(), 0);
 }
@@ -2816,11 +2836,50 @@ function annClosePastePicker(){
   const modal = document.getElementById('ann_paste_picker');
   if(modal) modal.style.display = 'none';
 }
+
+// Called when user picks a different dataset from the dropdown.
+async function annPastePickerLoadDataset(){
+  const sel = document.getElementById('ann_paste_dataset');
+  const newDs = sel.value;
+  if(!newDs){
+    _annPastePickerSrcDataset = null;
+    _annPastePickerSrcData = [];
+    _annPastePickerRows = [];
+    annPastePickerRender();
+    return;
+  }
+  _annPastePickerSrcDataset = newDs;
+  if(newDs === ANN.dataset){
+    // Use in-memory data
+    _annPastePickerSrcData = [];
+    _annPastePickerSrcClasses = ANN.classes;
+    annPastePickerFilter();
+    return;
+  }
+  // Fetch remote dataset (frames + labels + classes)
+  const list = document.getElementById('ann_paste_list');
+  if(list) list.innerHTML = '<div style="padding:14px;color:var(--muted);text-align:center">加载中…</div>';
+  try{
+    const r = await api('/api/v1/datasets/images?dataset=' + encodeURIComponent(newDs));
+    _annPastePickerSrcData = r.images || [];
+    _annPastePickerSrcClasses = r.classes || [];
+    annPastePickerFilter();
+  } catch(e){
+    console.error('[picker] failed to load dataset', newDs, e);
+    if(list) list.innerHTML = `<div style="padding:14px;color:#f87171;text-align:center">加载失败: ${e}</div>`;
+  }
+}
+
 function annPastePickerFilter(){
   const q = (document.getElementById('ann_paste_search').value||'').toLowerCase().trim();
-  const rows = ANN.data
+  // Decide which data source to filter — in-memory (current ds) vs remote (cross ds)
+  const usingCurrent = _annPastePickerSrcDataset === ANN.dataset;
+  const data = usingCurrent ? ANN.data : _annPastePickerSrcData;
+  const rows = data
     .map((d, idx) => ({idx, name: d.img, count: (d.labels||[]).length}))
-    .filter(r => r.count > 0 && r.idx !== ANN.idx)  // skip empty + current
+    .filter(r => r.count > 0)
+    // skip current frame only when source is current dataset
+    .filter(r => !(usingCurrent && r.idx === ANN.idx))
     .filter(r => !q || r.name.toLowerCase().includes(q));
   rows.sort((a, b) => (b.count - a.count) || (a.idx - b.idx));
   _annPastePickerRows = rows;
@@ -2866,15 +2925,44 @@ function annPastePickerKeyDown(e){
 function annPastePickerConfirm(){
   if(!_annPastePickerRows.length){ annClosePastePicker(); return; }
   const r = _annPastePickerRows[_annPastePickerIdx];
-  const src = ANN.data[r.idx];
+  const usingCurrent = _annPastePickerSrcDataset === ANN.dataset;
+  const srcData = usingCurrent ? ANN.data : _annPastePickerSrcData;
+  const srcClasses = usingCurrent ? ANN.classes : _annPastePickerSrcClasses;
+  const src = srcData[r.idx];
   if(!src || !src.labels || !src.labels.length){ annClosePastePicker(); return; }
-  ANN.data[ANN.idx].labels = JSON.parse(JSON.stringify(src.labels));
+
+  // Class id remap (only needed cross-dataset): source cls id → name → current ds cls id.
+  // Unmappable classes are dropped + counted for toast.
+  const nameToCurId = new Map();
+  ANN.classes.forEach((n, i) => nameToCurId.set(n, i));
+  let dropped = 0;
+  const remapped = [];
+  for(const lb of src.labels){
+    const cp = JSON.parse(JSON.stringify(lb));
+    if(!usingCurrent){
+      const srcName = srcClasses[lb.cls];
+      if(!srcName){ dropped++; continue; }
+      const newId = nameToCurId.get(srcName);
+      if(newId === undefined){ dropped++; continue; }
+      cp.cls = newId;
+    }
+    remapped.push(cp);
+  }
+  if(remapped.length === 0){
+    showToast(`复制失败: 源帧的所有 class 在当前 dataset schema 都不存在 (${dropped} dropped)`, 'error', 3500);
+    annClosePastePicker();
+    return;
+  }
+  ANN.data[ANN.idx].labels = remapped;
   ANN.selIdx = -1;
+  ANN.selSet = new Set();
   ANN.dirty = true;
   _annPushHistory();
   annDraw();
   annClosePastePicker();
-  showToast(`已从 ${src.img} 复制 ${src.labels.length} 个标注 (Ctrl+Z 可撤销)`, 'success', 2500);
+  const tag = usingCurrent ? '' : ` (跨 dataset: ${_annPastePickerSrcDataset})`;
+  const dropTag = dropped > 0 ? `, ${dropped} 个 class 未映射跳过` : '';
+  showToast(`已从 ${src.img} 复制 ${remapped.length} 个标注${tag}${dropTag} (Ctrl+Z 可撤销)`, 'success', 3000);
 }
 
 async function annDeleteImage(){
