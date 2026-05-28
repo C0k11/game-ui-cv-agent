@@ -21,6 +21,25 @@ from brain.skills.base import (
 )
 
 
+# UI v1 + OCR-fallback helper.  YOLO first (more robust to BA's stylized
+# fonts), OCR fallback so the skill keeps working if ui_yolo26m_v1 is
+# missing or returns no hit for some edge frame.
+# Lazy import for find_yolo_box — brain.pipeline imports CraftSkill at top,
+# so importing pipeline at module load creates a circular dep.
+def _find_button(screen: ScreenState, yolo_classes, ocr_texts,
+                 yolo_conf=0.45, ocr_conf=0.6, region=None):
+    try:
+        from brain.pipeline import find_yolo_box
+        box = find_yolo_box(screen, yolo_classes, min_conf=yolo_conf)
+        if box is not None:
+            return box
+    except Exception:
+        pass  # YOLO unavailable → fall through to OCR
+    if region is not None:
+        return screen.find_any_text(ocr_texts, region=region, min_conf=ocr_conf)
+    return screen.find_any_text(ocr_texts, min_conf=ocr_conf)
+
+
 class CraftSkill(BaseSkill):
     def __init__(self):
         super().__init__("Craft")
@@ -114,11 +133,12 @@ class CraftSkill(BaseSkill):
             self._craft_ticks = 0
             return action_wait(300, "claim done")
 
-        # Look for 一次領取 / 一次领取 / 全部領取
-        claim = screen.find_any_text(
-            ["一次領取", "一次领取", "一鍵領取", "一键领取",
-             "全部領取", "全部领取"],
-            min_conf=0.6
+        # Look for 一次領取 / 一次领取 / 全部領取 — YOLO first (UI v1)
+        claim = _find_button(
+            screen,
+            yolo_classes=["一次领取黄色", "全部领取_黄", "领取_黄", "领取奖励_黄"],
+            ocr_texts=["一次領取", "一次领取", "一鍵領取", "一键领取",
+                       "全部領取", "全部领取"],
         )
         if claim:
             self._claim_count += 1
@@ -153,9 +173,12 @@ class CraftSkill(BaseSkill):
                     return action_click_box(accel, "use acceleration ticket")
 
             # After clicking start, check for confirm popup OR craft completion
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确"],
-                region=screen.CENTER, min_conf=0.7
+            confirm = _find_button(
+                screen,
+                yolo_classes=["确认键"],
+                ocr_texts=["確認", "确认", "確定", "确定", "確", "确"],
+                ocr_conf=0.7,
+                region=screen.CENTER,
             )
             if confirm:
                 self.log("confirming craft")
@@ -167,10 +190,11 @@ class CraftSkill(BaseSkill):
                 return action_click_box(confirm, "confirm craft")
 
             # Craft may complete without confirm popup — check for reward/claim
-            claim = screen.find_any_text(
-                ["一次領取", "一次领取", "一鍵領取", "一键领取",
-                 "全部領取", "全部领取"],
-                min_conf=0.6
+            claim = _find_button(
+                screen,
+                yolo_classes=["一次领取黄色", "全部领取_黄", "领取_黄", "领取奖励_黄"],
+                ocr_texts=["一次領取", "一次领取", "一鍵領取", "一键领取",
+                           "全部領取", "全部领取"],
             )
             if claim:
                 self.log("craft completed, claiming")
@@ -198,10 +222,11 @@ class CraftSkill(BaseSkill):
 
             return action_wait(500, "waiting for craft confirm popup")
 
-        # Look for 開始製造 / 开始制造 button (inside quick craft panel)
-        start = screen.find_any_text(
-            ["開始製造", "开始制造", "開始制造", "开始製造"],
-            min_conf=0.6
+        # Look for 開始製造 / 开始制造 button — YOLO first
+        start = _find_button(
+            screen,
+            yolo_classes=["开始制造"],
+            ocr_texts=["開始製造", "开始制造", "開始制造", "开始製造"],
         )
         if start:
             self.log("clicking 開始製造")
@@ -221,10 +246,11 @@ class CraftSkill(BaseSkill):
             self._pending_cycle_started = True
             return action_click_box(open_btn, "start craft (次開放)")
 
-        # Look for 快速製造 / 快速制造 button
-        quick = screen.find_any_text(
-            ["快速製造", "快速制造"],
-            min_conf=0.6
+        # Look for 快速製造 / 快速制造 button — YOLO first
+        quick = _find_button(
+            screen,
+            yolo_classes=["快速制造"],
+            ocr_texts=["快速製造", "快速制造"],
         )
         if quick:
             self.log("clicking 快速製造")
