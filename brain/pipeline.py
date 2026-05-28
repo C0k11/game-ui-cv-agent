@@ -373,11 +373,23 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
         wanted_tags = None  # None = no filter
     else:
         wanted_tags = set(t.strip() for t in context.split("+") if t.strip())
+    # Per-detector inference imgsz. ui_v1 was trained on 2255×1268 frames
+    # at imgsz=960, but pipeline captures at 3840×2160 (4K MuMu). Default
+    # imgsz=640 loses small UI elements completely (verified: 0 detections
+    # on lobby tick 1). 1920 brings detection back to expected mAP. Other
+    # detectors were trained at smaller native frame sizes — 960 is fine.
+    _IMGSZ_BY_TAG = {
+        "ui": 1920,        # critical fix for 4K production frames
+        "avatar": 960,     # fused_avatar trained at 960
+        "battle": 960,
+        "cafe": 640,       # emoticon — 1 class, simple, default ok
+    }
     for yolo, model_conf, model_tag in _yolo_models:
         if wanted_tags is not None and model_tag not in wanted_tags:
             continue
         try:
-            yolo_results = yolo(img, conf=model_conf, verbose=False)
+            ifsz = _IMGSZ_BY_TAG.get(model_tag, 960)
+            yolo_results = yolo(img, conf=model_conf, imgsz=ifsz, verbose=False)
             for r in yolo_results:
                 for box in r.boxes:
                     bx1, by1, bx2, by2 = box.xyxy[0].tolist()
