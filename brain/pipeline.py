@@ -1685,6 +1685,33 @@ class DailyPipeline:
             self._save_trajectory(screenshot_path, screen, skill, intercept)
             return intercept
 
+        # Dot-driven skip: on the FIRST tick after skill start, call
+        # should_run(screen). Daily-harvest skills (cafe / mail / schedule /
+        # club / daily_tasks / event_activity) override should_run to look
+        # for their red/yellow dot — no dot = no work = advance to next skill.
+        # Battle / sweep skills don't override should_run so always pass.
+        if skill.ticks == 0:
+            try:
+                if not skill.should_run(screen):
+                    print(f"[Pipeline] '{skill.name}' should_run=False (no dot) → skip")
+                    self._results.append(
+                        SkillResult(
+                            skill_name=skill.name,
+                            status="skipped",
+                            ticks=0,
+                            duration_s=0.0,
+                            reason="no relevant dot on lobby",
+                        )
+                    )
+                    self._current_idx += 1
+                    if self._current_idx >= len(self._skill_order):
+                        self._running = False
+                        return action_done("all skills complete (last was dot-skipped)")
+                    self._start_current_skill()
+                    return action_wait(200, f"{skill.name} skipped — moving on")
+            except Exception as e:
+                print(f"[Pipeline] should_run check failed for {skill.name}: {e}")
+
         # Let skill decide
         action = skill.tick(screen)
         action = self._dedup_click(action)

@@ -966,6 +966,81 @@ class BaseSkill(ABC):
         self.ticks = 0
         self._log_lines = []
 
+    # ── Dot-driven skip check (overridden by daily-harvest skills) ──
+    # When pipeline is about to start this skill, it first calls should_run()
+    # on the current ScreenState. Default = True (always run). Daily-harvest
+    # skills (cafe / mail / schedule / club / daily_tasks / event_activity)
+    # override this to look for their associated red/yellow dot on the lobby
+    # screen and return False if there's no work to do.
+    #
+    # Battle / sweep / arena / bounty skills DO NOT override — they always
+    # run when the user enables them in skill_order.
+    def should_run(self, screen: ScreenState) -> bool:
+        """Return False to make pipeline skip this skill entirely.
+        Called once at skill entry before tick(). Default = always run."""
+        return True
+
+    def dot_in_region(self, screen: ScreenState,
+                       region: Tuple[float, float, float, float],
+                       *, dot_classes: Tuple[str, ...] = ("红点", "黄点"),
+                       min_conf: float = 0.35) -> bool:
+        """Helper for should_run: is there a red/yellow dot inside this
+        normalized rect (x1, y1, x2, y2)?  Uses ui_yolo26m_v1 detections
+        already on screen.yolo_boxes (no extra inference)."""
+        if not screen.yolo_boxes:
+            return False
+        x1, y1, x2, y2 = region
+        for b in screen.yolo_boxes:
+            if b.confidence < min_conf:
+                continue
+            if b.cls_name not in dot_classes:
+                continue
+            cx, cy = (b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2
+            if x1 <= cx <= x2 and y1 <= cy <= y2:
+                return True
+        return False
+
+    def dot_on_entry(self, screen: ScreenState,
+                      entry_class_names,
+                      *, dot_classes: Tuple[str, ...] = ("红点", "黄点"),
+                      min_conf_entry: float = 0.4,
+                      min_conf_dot: float = 0.35) -> bool:
+        """Stronger should_run helper: are any of the listed entry icons
+        currently on screen AND covered by a red/yellow dot?
+
+        Returns True when:
+          (a) Entry icon NOT visible (we're probably not on lobby, can't
+              decide here — defer to skill's own logic), OR
+          (b) Entry icon visible AND a red/yellow dot center sits inside it.
+        Returns False ONLY when entry IS visible but NO dot covers it
+        (clean "no work to do" signal → skill can be skipped).
+        """
+        if not screen.yolo_boxes:
+            return True  # detector disabled, can't decide → pass
+        targets = list(entry_class_names) if isinstance(entry_class_names, (list, tuple)) else [entry_class_names]
+        target_set = set(targets)
+        target_lower = [t.lower() for t in targets]
+        entries = []
+        dots = []
+        for b in screen.yolo_boxes:
+            cn = b.cls_name
+            cn_low = (cn or "").lower()
+            if b.confidence >= min_conf_entry and (
+                cn in target_set or any(t in cn_low or cn_low in t for t in target_lower)
+            ):
+                entries.append(b)
+            elif b.confidence >= min_conf_dot and cn in dot_classes:
+                dots.append(b)
+        if not entries:
+            return True  # not on lobby (entry not visible) → defer
+        for d in dots:
+            dcx = (d.x1 + d.x2) / 2
+            dcy = (d.y1 + d.y2) / 2
+            for e in entries:
+                if e.x1 <= dcx <= e.x2 and e.y1 <= dcy <= e.y2:
+                    return True
+        return False  # entry visible, no dot → no work
+
     def log(self, msg: str) -> None:
         line = f"[{self.name}] {msg}"
         self._log_lines.append(line)

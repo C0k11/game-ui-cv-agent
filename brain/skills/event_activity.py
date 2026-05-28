@@ -57,6 +57,13 @@ _BANNER_MATCH_THRESHOLD = 0.55
 
 
 class EventActivitySkill(BaseSkill):
+    # 活动入口在 lobby 上有自己的 banner/icon;  当 event 还有未完成内容时上面
+    # 会挂红/黄点. 找不到入口 (event 已关/不在 lobby) 则不阻拦, 让 skill 自己跑.
+    _LOBBY_DOT_ENTRIES = ["当期活动结束还剩_活动入口"]
+
+    def should_run(self, screen):
+        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+
     def __init__(self):
         super().__init__("EventActivity")
         # 12 story nodes (mostly cutscenes, ~10t each) + 12 quest battles

@@ -27,6 +27,11 @@ from brain.skills.base import (
 
 
 class DailyTasksSkill(BaseSkill):
+    _LOBBY_DOT_ENTRIES = ["任务大厅入口"]
+
+    def should_run(self, screen):
+        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+
     def __init__(self):
         super().__init__("DailyTasks")
         self.max_ticks = 50

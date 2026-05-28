@@ -156,6 +156,13 @@ def _has_florence_runtime() -> bool:
 
 
 class CafeSkill(BaseSkill):
+    # Cafe-related lobby entries that may carry a red/yellow dot when
+    # there's something to do (earnings / invite slot open / pet ready).
+    _LOBBY_DOT_ENTRIES = ["咖啡厅入口", "咖啡厅邀请卷", "咖啡厅收益"]
+
+    def should_run(self, screen):
+        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+
     def __init__(self):
         super().__init__("Cafe")
         # Bumped 100 → 160 (2026-05-13).  Full cafe flow on 1F+2F when

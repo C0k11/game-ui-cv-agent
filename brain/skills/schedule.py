@@ -171,6 +171,11 @@ _ROOM_DETECT_REGIONS_NORM = [
 
 
 class ScheduleSkill(BaseSkill):
+    _LOBBY_DOT_ENTRIES = ["课程表入口", "课程表票"]
+
+    def should_run(self, screen):
+        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+
     def __init__(self):
         super().__init__("Schedule")
         self.max_ticks = 120

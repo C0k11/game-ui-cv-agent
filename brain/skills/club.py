@@ -16,6 +16,11 @@ from brain.skills.base import (
 
 
 class ClubSkill(BaseSkill):
+    _LOBBY_DOT_ENTRIES = ["社交入口"]
+
+    def should_run(self, screen):
+        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+
     def __init__(self):
         super().__init__("Club")
         self.max_ticks = 30
