@@ -32,10 +32,21 @@
       "v1": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v1/weights/best.pt",
         "model_arch": "yolo26m",
-        "trained_on": "2026-05-27",
-        "mAP50": "TBD",
-        "mAP50_95": "TBD",
-        "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate."
+        "trained_on": "2026-05-28",
+        "mAP50": 0.8625,
+        "mAP50_95": 0.7396,
+        "P": 0.7616,
+        "R": 0.8574,
+        "best_at_epoch": 77,
+        "training_hours": 10.56,
+        "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate. Best mAP50 hit at ep77; saturated thereafter. v0 baseline (static_ui_v4) was 0.339 — v1 is +52.6pp improvement.",
+        "worst_classes_ap50": {
+          "27_移动至2号点": 0.000,
+          "95_活动商店": 0.055,
+          "1_右切换": 0.341,
+          "96_活动任务": 0.359,
+          "31_返回键": 0.476
+        }
       }
     }
   },
