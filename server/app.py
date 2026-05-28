@@ -74,14 +74,13 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "daily_routine", "label": "[★] 日常收菜 全套 (mail/cafe/schedule/club/daily_tasks/craft/event/pass_reward/momo/story/shop/ap, 内部按 dot 判断)"},
     {"id": "campaign_sweep", "label": "[★] 一键扫荡 悬赏/战术/活动副本 (hub 内按 dot 跳过个别)"},
 
-    # ── 战斗/扫荡 单独入口 (campaign_sweep 已包含, 单独跑也行) ──
-    {"id": "bounty", "label": "[战斗] 悬赏通缉 (票券) — campaign_sweep 已包含"},
-    {"id": "arena", "label": "[战斗] 战术对抗赛 (票券) — campaign_sweep 已包含"},
-
-    # 注: 旧 12 个收菜 skill id (cafe/schedule/club/daily_tasks/craft/
-    # pass_reward/event_activity/mail/shop/ap_planning/momo_talk/story_mining)
-    # 已从此处删除. 它们仍在 brain/pipeline.py 的 _skill_registry 里 (因为
-    # DailyRoutineSkill 内部需要实例化), 但 dashboard 不再让用户单独勾选.
+    # 注: 旧 14 个 skill id 已从 dashboard 删除 —
+    #   收菜 12 个 (cafe/schedule/club/daily_tasks/craft/pass_reward/
+    #     event_activity/mail/shop/ap_planning/momo_talk/story_mining)
+    #     全部并入 daily_routine.
+    #   战斗扫荡 2 个 (bounty / arena) 全部并入 campaign_sweep.
+    # 它们仍在 brain/pipeline.py 的 _skill_registry 里 (因为 daily_routine
+    # 和 campaign_sweep 内部需要实例化), 但 dashboard 不再让用户单独勾选.
     # 老 profile 里残留的这些 id 会在 app.py 校验时被过滤掉, 用户重新
     # save profile 即可清理.
 ]
