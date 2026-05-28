@@ -42,6 +42,7 @@ from brain.skills.pass_reward import PassRewardSkill
 from brain.skills.story_mining import StoryMiningSkill
 from brain.skills.ap_planning import ApPlanningSkill
 from brain.skills.campaign_sweep import CampaignSweepSkill
+from brain.skills.daily_routine import DailyRoutineSkill
 
 
 # ── OCR Engine (singleton) ──────────────────────────────────────────────
@@ -661,20 +662,16 @@ class DailyPipeline:
         return skill
 
     DEFAULT_SKILLS = [
-        "event_activity",   # 1.  Full event loop: story/mission/farming/shop
-        "cafe",             # 2.  Collect earnings, headpat students
-        "schedule",         # 4.  Run schedules with tickets
-        "club",             # 5.  Claim club AP (社交→社團)
-        "momo_talk",        # 6.  Auto-complete unread MomoTalk conversations
-        "shop",             # 7.  Buy daily items (一般 tab, select all, purchase)
-        "craft",            # 8.  Quick-craft items + claim finished crafts
-        "story_mining",     # 9.  Auto-play 短篇/支線 unplayed chapters
-        "bounty",           # 10. Sweep bounty tickets (3 branches)
-        "arena",            # 11. PvP fights + claim rewards
-        "mail",             # 12. Collect mail rewards (AP, items)
-        "daily_tasks",      # 13. Claim daily task rewards + activity chests
-        "pass_reward",      # 14. Claim battle pass mission/reward tabs
-        "ap_planning",      # 15. Free AP claim + optional AP purchase planning
+        # ── Battle / sweep skills (explicit user control) ──
+        "campaign_sweep",   # 1.  One-tap sweep of tickets (bounty/arena/event)
+        "bounty",           # 2.  Sweep bounty tickets (if not covered by sweep)
+        "arena",            # 3.  PvP fights + claim rewards
+        # ── Daily harvest (all bundled) ──
+        # Cycles through mail / event_activity / cafe / schedule / club /
+        # daily_tasks / craft / pass_reward / momo_talk / story_mining /
+        # shop / ap_planning. Each sub uses its own dot check (craft skips
+        # the dot check per user spec — always enters).
+        "daily_routine",    # 4.  All daily harvest in one go (dot-driven)
     ]
     # 回马枪 (post-loop second event sweep): handled inline at pipeline level
     # after all skills finish — see _maybe_huimaqiang().
@@ -720,6 +717,12 @@ class DailyPipeline:
             "daily_tasks": DailyTasksSkill(),
             "pass_reward": PassRewardSkill(),
             "campaign_sweep": CampaignSweepSkill(),
+            # Single dispatcher for all daily-harvest sub-flows
+            # (mail / cafe / schedule / club / daily_tasks / event_activity
+            #  / craft / pass_reward / momo_talk / story_mining / shop /
+            #  ap_planning). Battle skills (bounty / arena / campaign_sweep)
+            # stay as separate skill_order entries.
+            "daily_routine": DailyRoutineSkill(),
         }
         # CampaignSweep needs a reference to the registry so it can
         # delegate to Bounty / Arena / EventActivity without creating
@@ -948,6 +951,10 @@ class DailyPipeline:
             "JointFiringDrill": f"{_BASE_DETECTORS}+battle",
             "CampaignPush": f"{_BASE_DETECTORS}+battle",
             "EventActivity": f"{_BASE_DETECTORS}+battle",
+            # DailyRoutine wraps cafe + event_activity etc, needs every
+            # daily-flow detector (cafe emoticon, battle for event_activity
+            # quest battles, plus base ui+avatar).
+            "DailyRoutine": f"{_BASE_DETECTORS}+cafe+battle",
         }
         yolo_ctx = _SKILL_YOLO_MAP.get(skill.name, _BASE_DETECTORS)
         set_yolo_context(yolo_ctx)
