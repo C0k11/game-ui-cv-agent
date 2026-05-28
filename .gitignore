@@ -115,3 +115,8 @@ _test_inference/
 _test_v4_manual/
 _ref_spotcheck_vis/
 _ref_stride50_vis/
+
+# Dataset audit reports (regenerated on demand by ad-hoc scripts)
+_train_context_audit.md
+_train_val_audit.md
+_ui_v1_class_breakdown.md

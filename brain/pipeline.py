@@ -146,15 +146,69 @@ _yolo_lock = None
 # previous v8n but NMS-free, 122 layers / 2.4M params / 5.2 GFLOPs.  Validation
 # on emoticon_v2 dataset: P=0.994 R=1.000 mAP50=0.995 mAP50-95=0.994, inference
 # 0.4ms/frame.  Drop-in replacement — same single class "Emoticon_Action".
+# Per-process session id, used for grouping hard-example dumps from one run
+import datetime as _dt
+_PIPELINE_SESSION_ID = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# ── Model registry — single source of truth for active model paths ──
+# data/model_registry.json drives which version is "live".  Hardcoded paths
+# below are fallbacks for back-compat / when registry is unreachable.
+
+def _load_model_registry() -> dict:
+    """Read data/model_registry.json. Returns {} on any error."""
+    try:
+        reg_path = Path(__file__).resolve().parent.parent / "data" / "model_registry.json"
+        if reg_path.is_file():
+            import json
+            return json.loads(reg_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[Pipeline] model_registry load failed: {e}")
+    return {}
+
+def _resolve_path(model_key: str, fallback: Path) -> Path:
+    """Resolve an active model's weights path via registry, fall back to literal."""
+    reg = _load_model_registry()
+    section = reg.get(model_key)
+    if not section:
+        return fallback
+    active = section.get("active")
+    versions = section.get("versions", {})
+    info = versions.get(active, {})
+    p = info.get("path")
+    if p and Path(p).is_file():
+        return Path(p)
+    return fallback
+
+
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
 _YOLO_EMOTICON_V26 = Path(r"D:\Project\ml_cache\models\yolo\runs\emoticon_yolo26n\weights\best.pt")
 _YOLO_EMOTICON_V8_LEGACY = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
 _YOLO_EMOTICON = _YOLO_EMOTICON_V26 if _YOLO_EMOTICON_V26.exists() else _YOLO_EMOTICON_V8_LEGACY
 
+# ── Fused avatar v4 (251-class student head detector) ──
+# Manual mAP50 = 0.9657 on hand-curated 29-frame val (vs v3 baseline 0.683).
+# best_manual.pt = ep11 weights (true best, vs best.pt = ep15 nominal-best
+# that was synth-fitness-biased). See yolo_migration memory for details.
+_YOLO_FUSED_AVATAR_V4 = _resolve_path("fused_avatar", Path(
+    r"D:\Project\ml_cache\models\yolo\runs\fused_avatar_yolo26x_v4\weights\best_manual.pt"
+))
+
+# ── UI v1 (~145-class static UI detector) ──
+# Replaces OCR-driven button finding in most skills. Trained 2026-05-27 from
+# COCO yolo26m + 1220 frames (oversampled minority classes target=12) + 51
+# hand-curated val frames. Target mAP50 ≥ 0.85.
+_YOLO_UI_V1 = _resolve_path("ui", Path(
+    r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v1\weights\best.pt"
+))
+
 # Context-aware YOLO: controls which models run each tick.
-# Values: 'cafe' (emoticon only), 'battle' (battle_heads only),
-#         'all' (both), 'none' (skip YOLO entirely).
-_yolo_context = "none"  # default: skip YOLO until a skill needs it
+# Value semantics:
+#   'none'                   skip YOLO entirely (default)
+#   'all'                    run every loaded model
+#   single tag e.g. 'cafe'   run only that detector
+#   '+'-joined e.g. 'ui+avatar' or 'cafe+ui'   run multiple detectors
+# Legacy callers passing 'cafe' / 'battle' still work unchanged.
+_yolo_context = "none"
 _yolo_context_lock = None
 
 def set_yolo_context(ctx: str) -> None:
@@ -210,6 +264,15 @@ def _get_yolo():
             candidates.append((_YOLO_BATTLE_HEADS, 0.45, "battle"))
         if _YOLO_EMOTICON.is_file():
             candidates.append((_YOLO_EMOTICON, 0.15, "cafe"))
+        # Fused avatar (251 BA student heads).  conf 0.35 = balanced
+        # precision/recall on manual val.  Tagged "avatar" — opt-in per skill.
+        if _YOLO_FUSED_AVATAR_V4.is_file():
+            candidates.append((_YOLO_FUSED_AVATAR_V4, 0.35, "avatar"))
+        # UI v1 (~145 static UI classes — buttons, dots, banners, etc).
+        # conf 0.30 = lower threshold since UI bbox quality is high but some
+        # minority classes need slack.  Tagged "ui" — most skills will need this.
+        if _YOLO_UI_V1.is_file():
+            candidates.append((_YOLO_UI_V1, 0.30, "ui"))
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
@@ -303,9 +366,14 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
             print(f"[Pipeline] YOLO unavailable: {_yolo_status}")
             _run_yolo_on_image._warned = True
         return yolo_boxes
+    # Parse context: 'all' = run everything, 'a+b' = run tags a or b,
+    # single tag = run only that tag.
+    if context == "all":
+        wanted_tags = None  # None = no filter
+    else:
+        wanted_tags = set(t.strip() for t in context.split("+") if t.strip())
     for yolo, model_conf, model_tag in _yolo_models:
-        # Context filter: skip models not relevant to current skill
-        if context != "all" and model_tag != context:
+        if wanted_tags is not None and model_tag not in wanted_tags:
             continue
         try:
             yolo_results = yolo(img, conf=model_conf, verbose=False)
@@ -339,6 +407,65 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
             print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
             import traceback; traceback.print_exc()
     return yolo_boxes
+
+
+# ── Top-level detector helpers for skills ──────────────────────────────
+# Skills should NOT call _run_yolo_on_image directly — use these.  They
+# operate on the current ScreenState's yolo_boxes (already populated each
+# tick by the pipeline observation step) so there's no extra inference cost.
+
+def find_yolo_box(screen: ScreenState, class_names: List[str],
+                   min_conf: float = 0.3) -> Optional[YoloBox]:
+    """Return the highest-confidence YoloBox matching any of class_names,
+    or None.  Use this in skills to replace OCR-driven button finding:
+
+        # OLD:
+        btn = screen.find_any_text(["一次領取", "一次领取"], min_conf=0.6)
+        # NEW:
+        btn = find_yolo_box(screen, ["一次领取_黄", "一次领取"], min_conf=0.5) \\
+              or screen.find_any_text(["一次領取", "一次领取"], min_conf=0.6)
+
+    Matches by class_name exact-equal first, then case-insensitive substring
+    fallback.  Returns the box with highest confidence among matches.
+    """
+    if not screen.yolo_boxes:
+        return None
+    name_set = set(class_names)
+    name_lower = [n.lower() for n in class_names]
+    hits: List[YoloBox] = []
+    for b in screen.yolo_boxes:
+        if b.confidence < min_conf:
+            continue
+        # exact match
+        if b.cls_name in name_set:
+            hits.append(b)
+            continue
+        # substring fallback
+        bn = (b.cls_name or "").lower()
+        if any(q in bn or bn in q for q in name_lower):
+            hits.append(b)
+    if not hits:
+        return None
+    return max(hits, key=lambda x: x.confidence)
+
+
+def find_all_yolo_boxes(screen: ScreenState, class_names: List[str],
+                         min_conf: float = 0.3) -> List[YoloBox]:
+    """Like find_yolo_box but returns ALL matches sorted by confidence."""
+    if not screen.yolo_boxes:
+        return []
+    name_set = set(class_names)
+    name_lower = [n.lower() for n in class_names]
+    hits: List[YoloBox] = []
+    for b in screen.yolo_boxes:
+        if b.confidence < min_conf:
+            continue
+        if b.cls_name in name_set:
+            hits.append(b); continue
+        bn = (b.cls_name or "").lower()
+        if any(q in bn or bn in q for q in name_lower):
+            hits.append(b)
+    return sorted(hits, key=lambda x: -x.confidence)
 
 
 def _find_florence_hit(screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> Optional[OcrBox]:
@@ -808,17 +935,21 @@ class DailyPipeline:
         self._last_wait_reason = ""
         self._stuck_counter = 0
         # Set YOLO context based on skill — only run relevant model(s)
+        # Each skill gets ui+avatar by default (almost every skill needs to
+        # click buttons + see students), plus skill-specific extras.
+        # Use 'ui+avatar+cafe' '+'-joined syntax to load multiple detectors.
+        _BASE_DETECTORS = "ui+avatar"
         _SKILL_YOLO_MAP = {
-            "Cafe": "cafe",         # emoticon model for headpat bubbles
-            "Bounty": "battle",     # battle_heads for auto-battle
-            "Arena": "battle",
-            "EventFarming": "battle",
-            "TotalAssault": "battle",
-            "JointFiringDrill": "battle",
-            "CampaignPush": "battle",
-            "EventActivity": "battle",
+            "Cafe": f"{_BASE_DETECTORS}+cafe",         # +emoticon bubbles
+            "Bounty": f"{_BASE_DETECTORS}+battle",     # +battle_heads
+            "Arena": f"{_BASE_DETECTORS}+battle",
+            "EventFarming": f"{_BASE_DETECTORS}+battle",
+            "TotalAssault": f"{_BASE_DETECTORS}+battle",
+            "JointFiringDrill": f"{_BASE_DETECTORS}+battle",
+            "CampaignPush": f"{_BASE_DETECTORS}+battle",
+            "EventActivity": f"{_BASE_DETECTORS}+battle",
         }
-        yolo_ctx = _SKILL_YOLO_MAP.get(skill.name, "none")
+        yolo_ctx = _SKILL_YOLO_MAP.get(skill.name, _BASE_DETECTORS)
         set_yolo_context(yolo_ctx)
         print(f"[Pipeline] Starting skill '{skill.name}'")
 
@@ -1422,6 +1553,23 @@ class DailyPipeline:
             return action_done("pipeline not running")
 
         self._total_ticks += 1
+
+        # Hard-example mining: auto-save borderline-conf detections for human
+        # review later. No-op if no detections in the noisy conf band, so cost
+        # is tiny (a list comp).  Module-level cap prevents disk spam.
+        try:
+            from brain.hard_example_mining import maybe_save_hard_example
+            cur_skill = self.current_skill
+            maybe_save_hard_example(
+                screenshot_path=screenshot_path or None,
+                yolo_boxes=screen.yolo_boxes or [],
+                run_id=_PIPELINE_SESSION_ID,
+                tick=self._total_ticks,
+                skill_name=cur_skill.name if cur_skill else "",
+                sub_state=getattr(cur_skill, "sub_state", "") if cur_skill else "",
+            )
+        except Exception:
+            pass  # mining is best-effort, never break the tick loop
 
         # Early bail-out: BA / MuMu not actually visible.  Wide set of
         # markers so legitimate BA states (title screen, loading, login,

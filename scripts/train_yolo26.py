@@ -234,6 +234,49 @@ TRAIN_CONFIGS = {
         # 翻转 (BA 角色无方向区别, 加倍数据)
         "fliplr": 0.5,
     },
+    "ui_yolo26m_v1": {
+        # Static UI detector — first proper train.
+        # Schema: 447 classes (145 in actual use after audit), 4 themes:
+        #   - 顶栏 info (清辉石/体力/信用点/红点/黄点/...)
+        #   - 通用按钮 (确认/取消/X/返回/领取/...)
+        #   - 弹窗触发 (X 关闭 / 弹窗内 buttons)
+        #   - context-specific (cafe invite / craft buttons / momotalk markers / ...)
+        #
+        # Data: 3 train dirs (run_20260521_103956_distinct + 2 补录) + _ui_val_pool.
+        # Minority classes oversampled via symlink (scripts/oversample_minority_classes.py).
+        #
+        # Aug rationale for static UI:
+        #   - UI is essentially overfit-tolerant (train ≈ test distribution)
+        #   - mosaic 0.5 = middle ground, gives context diversity
+        #   - mixup / copy_paste / fliplr / rotate ALL OFF (UI has direction +
+        #     no "translucent button fade-in" reality)
+        #   - hsv jitter + scale/translate KEPT for cross-resolution robustness
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
+        "base": "yolo26m.pt",     # COCO from-scratch, NOT warm-start
+        "epochs": 100,
+        "patience": 30,
+        "imgsz": 960,
+        "batch": 16,              # 26m lighter than 26x, can double batch
+        "out_name": "ui_yolo26m_v1",
+        "lr0": 0.01,              # default
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        # AUG — UI-specific
+        "mosaic": 0.5,
+        "close_mosaic": 10,
+        "mixup": 0.0,
+        "copy_paste": 0.0,
+        "fliplr": 0.0,            # ✗ UI has direction (X always top-right)
+        "flipud": 0.0,            # ✗
+        "degrees": 0.0,           # ✗ UI orthogonal only
+        "perspective": 0.0,       # ✗
+        "hsv_h": 0.015,
+        "hsv_s": 0.3,
+        "hsv_v": 0.3,
+        "scale": 0.5,             # ★ key for cross-aspect-ratio robustness
+        "translate": 0.1,
+    },
     "avatar_cls_v2": {
         # Combined-source classifier: ~250-class BA student recognition.
         # Train sources (per class, when available):
@@ -354,7 +397,8 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         # Per-config aug / regularization overrides (e.g. fused_avatar_26x)
         for k in ("mosaic", "mixup", "copy_paste", "close_mosaic",
                   "weight_decay", "dropout", "hsv_h", "hsv_s", "hsv_v",
-                  "degrees", "fliplr", "flipud", "scale", "translate", "lr0"):
+                  "degrees", "fliplr", "flipud", "scale", "translate", "lr0",
+                  "perspective"):
             if k in cfg:
                 train_kwargs[k] = cfg[k]
     elif kind == "classify":

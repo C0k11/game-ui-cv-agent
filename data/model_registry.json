@@ -1,0 +1,70 @@
+{
+  "_doc": "Single source of truth for active model versions. brain/pipeline.py reads this to find weights paths.  When training a new version, add a new entry under versions{} and bump active.  Old versions stay listed for rollback.",
+  "fused_avatar": {
+    "active": "v4",
+    "task": "detect",
+    "n_classes": 251,
+    "versions": {
+      "v4": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v4/weights/best_manual.pt",
+        "model_arch": "yolo26x",
+        "trained_on": "2026-05-20",
+        "manual_mAP50": 0.9657,
+        "manual_mAP50_95": 0.8321,
+        "manual_R": 0.9574,
+        "notes": "ep11 weights via manual_fitness_watcher (not ep15 nominal-best, which was synth-bias-fitted)"
+      },
+      "v3": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/weights/best.pt",
+        "model_arch": "yolo26x",
+        "trained_on": "2026-05-20",
+        "manual_mAP50": 0.683,
+        "notes": "baseline before v4 warm-start"
+      }
+    }
+  },
+  "ui": {
+    "active": "v1",
+    "task": "detect",
+    "n_classes": 448,
+    "n_classes_in_use": 156,
+    "versions": {
+      "v1": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v1/weights/best.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-05-27",
+        "mAP50": "TBD",
+        "mAP50_95": "TBD",
+        "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate."
+      }
+    }
+  },
+  "emoticon": {
+    "active": "v26n",
+    "task": "detect",
+    "n_classes": 1,
+    "versions": {
+      "v26n": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/emoticon_yolo26n/weights/best.pt",
+        "model_arch": "yolo26n",
+        "trained_on": "2026-05-17",
+        "mAP50": 0.995,
+        "notes": "single class Emoticon_Action, cafe headpat bubbles"
+      }
+    }
+  },
+  "battle_heads": {
+    "active": "legacy",
+    "task": "detect",
+    "n_classes": 4,
+    "versions": {
+      "legacy": {
+        "path": "D:/Project/ml_cache/models/yolo/battle_heads.pt",
+        "model_arch": "yolov8n",
+        "trained_on": "early-2026",
+        "mAP50": 0.995,
+        "notes": "old v8n, to be retrained with yolo26 + VFX augmentation"
+      }
+    }
+  }
+}
