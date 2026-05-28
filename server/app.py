@@ -78,19 +78,12 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "bounty", "label": "[战斗] 悬赏通缉 (票券) — campaign_sweep 已包含"},
     {"id": "arena", "label": "[战斗] 战术对抗赛 (票券) — campaign_sweep 已包含"},
 
-    # ── 旧收菜 skill, 已并入 daily_routine (默认 OFF, 仅兼容老 profile) ──
-    {"id": "cafe", "label": "[已并入 daily_routine] 咖啡厅 收益/邀请/摸头"},
-    {"id": "schedule", "label": "[已并入 daily_routine] 课程表"},
-    {"id": "club", "label": "[已并入 daily_routine] 社团签到 AP"},
-    {"id": "daily_tasks", "label": "[已并入 daily_routine] 每日任务一键领取"},
-    {"id": "craft", "label": "[已并入 daily_routine] 制造"},
-    {"id": "pass_reward", "label": "[已并入 daily_routine] 战令一键领取"},
-    {"id": "event_activity", "label": "[已并入 daily_routine] 活动 剧情/任务/扫荡/商店"},
-    {"id": "mail", "label": "[已并入 daily_routine] 邮件一键领取"},
-    {"id": "shop", "label": "[已并入 daily_routine] 普通商店日购"},
-    {"id": "ap_planning", "label": "[已并入 daily_routine] 补给 / 每日免费 AP"},
-    {"id": "momo_talk", "label": "[已并入 daily_routine] MomoTalk 未读"},
-    {"id": "story_mining", "label": "[已并入 daily_routine] 短篇 / 支线剧情挖矿"},
+    # 注: 旧 12 个收菜 skill id (cafe/schedule/club/daily_tasks/craft/
+    # pass_reward/event_activity/mail/shop/ap_planning/momo_talk/story_mining)
+    # 已从此处删除. 它们仍在 brain/pipeline.py 的 _skill_registry 里 (因为
+    # DailyRoutineSkill 内部需要实例化), 但 dashboard 不再让用户单独勾选.
+    # 老 profile 里残留的这些 id 会在 app.py 校验时被过滤掉, 用户重新
+    # save profile 即可清理.
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
