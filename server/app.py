@@ -62,27 +62,35 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # nav-icon mapping (cafe/schedule/club/craft/shop/pass_reward) auto-
     # skip when their icon shows no red/yellow dot.  Sidebar-routed
     # skills (bounty/arena/daily_tasks/mail/event_activity) always run.
-    # Order follows user's stated daily ritual:
-    #   cafe → schedule → club (social) → bounty/arena → daily_tasks
-    #   → craft → pass_reward → event_activity → mail (catch the day's
-    #   accumulated rewards LAST, after club/event push items to mailbox)
-    {"id": "cafe", "label": "[S1] 咖啡厅 收益 / 邀请 / 摸头（yellow dot 才进）"},
-    {"id": "schedule", "label": "[S2] 课程表（yellow dot 才进）"},
-    {"id": "club", "label": "[S3] 社团签到 AP（social red dot 才进）"},
-    {"id": "campaign_sweep", "label": "[S4] 任务区 一键扫荡 悬赏/战术/活动（hub 内按 dot 跳过个别）"},
-    {"id": "bounty", "label": "[S4-细分] 悬赏通缉（票券）— campaign_sweep 已包含"},
-    {"id": "arena", "label": "[S4-细分] 战术对抗赛（票券）— campaign_sweep 已包含"},
-    {"id": "daily_tasks", "label": "[S5] 每日任务一键领取"},
-    {"id": "craft", "label": "[S6] 制造（yellow dot 才进）"},
-    {"id": "pass_reward", "label": "[S6] 战令一键领取（recruit red dot 才进）"},
-    {"id": "event_activity", "label": "[S7-细分] 刷活动 剧情 / 任务 / 扫荡 / 商店 — campaign_sweep 已包含"},
-    {"id": "mail", "label": "[S8] 邮件一键领取（最后跑，捞 club/event 入库的奖励）"},
+    # 2026-05-28 unification: 12 个收菜 skill 全部并入 daily_routine 单一入口
+    # (mail/cafe/schedule/club/daily_tasks/craft/event_activity/pass_reward/
+    #  momo_talk/story_mining/shop/ap_planning, 内部按 dot 自动判断 + craft
+    #  强制进入). 战斗/扫荡类 skill (campaign_sweep/bounty/arena) 保留独立条目
+    # 因为用户要对 AP / 票券消耗有显式控制.
+    #
+    # 旧 skill id 保留兼容老 profile, 标 [已并入 daily_routine] + 默认不勾选.
 
-    # Optional extras (not default, kept for profile customization)
-    {"id": "shop", "label": "[可选] 普通商店日购"},
-    {"id": "ap_planning", "label": "[可选] 补给 / 每日免费 AP"},
-    {"id": "momo_talk", "label": "[可选] MomoTalk 未读"},
-    {"id": "story_mining", "label": "[可选] 短篇 / 支线剧情挖矿"},
+    # ── 推荐 (新 profile 默认勾这 2 个) ──
+    {"id": "daily_routine", "label": "[★] 日常收菜 全套 (mail/cafe/schedule/club/daily_tasks/craft/event/pass_reward/momo/story/shop/ap, 内部按 dot 判断)"},
+    {"id": "campaign_sweep", "label": "[★] 一键扫荡 悬赏/战术/活动副本 (hub 内按 dot 跳过个别)"},
+
+    # ── 战斗/扫荡 单独入口 (campaign_sweep 已包含, 单独跑也行) ──
+    {"id": "bounty", "label": "[战斗] 悬赏通缉 (票券) — campaign_sweep 已包含"},
+    {"id": "arena", "label": "[战斗] 战术对抗赛 (票券) — campaign_sweep 已包含"},
+
+    # ── 旧收菜 skill, 已并入 daily_routine (默认 OFF, 仅兼容老 profile) ──
+    {"id": "cafe", "label": "[已并入 daily_routine] 咖啡厅 收益/邀请/摸头"},
+    {"id": "schedule", "label": "[已并入 daily_routine] 课程表"},
+    {"id": "club", "label": "[已并入 daily_routine] 社团签到 AP"},
+    {"id": "daily_tasks", "label": "[已并入 daily_routine] 每日任务一键领取"},
+    {"id": "craft", "label": "[已并入 daily_routine] 制造"},
+    {"id": "pass_reward", "label": "[已并入 daily_routine] 战令一键领取"},
+    {"id": "event_activity", "label": "[已并入 daily_routine] 活动 剧情/任务/扫荡/商店"},
+    {"id": "mail", "label": "[已并入 daily_routine] 邮件一键领取"},
+    {"id": "shop", "label": "[已并入 daily_routine] 普通商店日购"},
+    {"id": "ap_planning", "label": "[已并入 daily_routine] 补给 / 每日免费 AP"},
+    {"id": "momo_talk", "label": "[已并入 daily_routine] MomoTalk 未读"},
+    {"id": "story_mining", "label": "[已并入 daily_routine] 短篇 / 支线剧情挖矿"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
@@ -91,13 +99,12 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 # claimed by the end-of-run Mail since BA's mailbox accumulates
 # until claimed — no need for an additional start-of-run Mail.
 _DEFAULT_SKILL_ORDER = [
-    "cafe", "schedule", "club",
-    "campaign_sweep",   # one entry replaces bounty + arena + event_activity;
-                        # internally scans hub tile dots and visits each
-                        # in priority order without lobby round-trips.
-    "daily_tasks",
-    "craft", "pass_reward",
-    "mail",
+    # 2026-05-28 归一化默认顺序 — 新 profile 默认勾这 2 个就跑完整套日常。
+    # 战斗扫荡先消耗 AP / 体力，然后 daily_routine 一次扫所有收菜。
+    "campaign_sweep",   # 一键扫荡 悬赏/战术/活动副本
+    "daily_routine",    # 所有收菜 (mail/cafe/schedule/club/daily_tasks/craft/
+                        #  event_activity/pass_reward/momo_talk/story_mining/
+                        #  shop/ap_planning, 内部 dot 自动判断 + craft 强制进)
 ]
 _VALID_SKILL_IDS = {item["id"] for item in _SKILL_OPTIONS}
 
