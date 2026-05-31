@@ -49,7 +49,7 @@ flowchart LR
 
 ## Highlights
 
-- **22 composable daily skills** — lobby cleanup, AP overflow guard, event farming, cafe (income / invite / head-pat), schedule assignment with favorite priority, club, MomoTalk, shop, crafting, story cleanup, bounty, arena, joint firing drill, total assault, mail, daily tasks, pass rewards, AP planning, hard-mode farming, campaign push, event boomerang.
+- **One-call daily routine** — two meta-skills (`DailyRoutine` + `CampaignSweep`) orchestrate the full harvest: lobby cleanup, cafe (income / invite / head-pat), schedule with favorite priority, club, MomoTalk, shop, crafting, story mining, mail, daily tasks, pass rewards, bounty, arena, AP planning, campaign push. Each sub-skill is still runnable standalone from the dashboard skill list.
 - **Fused multi-class avatar detector (YOLO26x)** — single forward pass produces bbox + character ID across 252 classes and 6 UI contexts (schedule popup, student list, momotalk, cafe invite, battle squad, tactical competition). Replaces the older 2-stage `head_detector → avatar_cls` path.
 - **Dashboard synthetic template editor** — a full visual tool to configure synth data per UI context: draw axis-aligned rect or free 4-point quad slots, interactive ref crop with slot-overlay preview, four draggable colored markers for augmentation anchor positions (Lv / star / weapon / heart), tight-face vs full bbox modes, per-context augmentation probabilities, one-click sample image swap (drag-drop or path), and live preview render with zoom + pan modal.
 - **Round-robin synthesis** — the build script draws characters from a per-context shuffled pool, so every character appears in every context the configured number of times (no rare-class starvation).
@@ -230,28 +230,39 @@ A typical v3 review cycle on the 49 manual val frames surfaced ~14 cases where t
 
 ## Skill Matrix
 
-> Detection stacks below reflect the original design. Navigation across all daily skills is now driven by the `ui_yolo26m_v5` detector (YOLO cls → click the returned box); the OCR / template entries remain only for numeric reads and a few cheap glyph fallbacks.
+All daily-skill navigation and clicks run on the `ui_yolo26m_v5` detector: a
+skill finds its target (button / tab / popup / region) by trained class and
+clicks the returned box — **no hardcoded screen coordinates**. OCR is scoped to
+numeric reads (AP / tickets / counts); `cv2.matchTemplate` / HSV survive as a few
+cheap glyph fallbacks. The pipeline ships two **meta-skills** that orchestrate
+the rest so a full run is one entry instead of twenty:
+
+| Meta-skill | Bundles | Notes |
+|---|---|---|
+| **DailyRoutine** | lobby cleanup → cafe → schedule → club → momotalk → shop → craft → mail → daily tasks → pass → story | One-call daily harvest; loadout `ui+cafe+battle` |
+| **CampaignSweep** | bounty + arena (+ event when active) | Enters the mission hub once, scans tiles by `HUB_*` cls + red/yellow dot, delegates to each sub-skill on the hub (no lobby round-trips); sets each sub's detector loadout |
 
 | Skill | Function | Detection stack | Notes |
 |---|---|---|---|
-| Lobby | Popup / announcement / notification cleanup, sign-in | OCR + templates | Handles update banners and `TOUCH TO START` |
-| AP overflow guard | Dumps AP via event farming when AP ≥ 900 | OCR numeric | Prevents cafe-settlement deadlock |
-| EventActivity | Event story → mission → challenge → farming + shop | OCR + banner template + state machine | Per-rotation `auto_YYYYMMDD` progress bucket; story-tab smart-skip; direct-sortie for mission, quick-edit reserved for farming rate-up |
-| EventFarming | Normal / Hard / quest-type sweeps | OCR + state machine | `event_max_rounds` + `event_ap_reserve` budget |
-| Cafe | Income collection, invitation tickets, head-pat | Template + YOLO26n emoticon (fallback) | 1F left-to-right, 2F right-to-left |
-| Schedule | Room assignment with favorite priority | OCR + `AvatarMatcher` + (in-rollout) `fused_avatar_yolo26x` | Region tuner on canvas; tuned `STAGE2_TOP_K=15` |
-| Club | AP collection | OCR | |
-| MomoTalk | Auto-reply to unread threads | OCR + state machine | Processes by unread count; auto-dialog / story skip |
-| Shop | Free daily + affordable purchases | OCR + state machine | Detects completion / refresh states |
-| Craft | Claim finished and queue quick craft | OCR + state machine | |
-| StoryCleanup | Main / group / mini stories | OCR + state machine | Menu-driven skip with formation handling |
-| Bounty | Highest-difficulty sweep | OCR + state machine | Rotates three branches; ticket recheck |
-| Arena | Reward claim + auto-battle | OCR + state machine | Cooldown wait, best-opponent selection |
-| JointFiringDrill / TotalAssault | Auto-participation | OCR + state machine | |
-| Mail / DailyTasks / PassReward | One-click claim | OCR | |
-| ApPlanning | Free-AP + purchase strategy | OCR + numeric | Configurable purchase cap |
-| HardFarming / CampaignPush | Stage-specific / fallback sweeps | OCR + state machine | |
-| BattleOverlay | Live head-box lock | YOLOv8n + ByteTrack + Kalman | DXcam + Win32 transparent overlay, lead-aim prediction, tuned for 60 FPS source |
+| Cafe | Income, invitation tickets, head-pat | YOLO UI + YOLO26n emoticon | 1F left-to-right, 2F right-to-left; earnings/invite by cls |
+| Schedule | Room assignment, favorite priority | YOLO UI + `fused_avatar` (student ID) | Canvas region tuner; `STAGE2_TOP_K=15` |
+| Club | AP collection | YOLO UI | |
+| MomoTalk | Auto-reply unread threads | YOLO UI (unread badge / chat region cls) | auto-dialog + story skip |
+| Shop | Free daily + affordable buys | YOLO UI (`选择购买` / `全部选择` / 绿勾) | refresh / sold-out by cls |
+| Craft | Claim finished + queue quick craft | YOLO UI | |
+| StoryMining | Main / side / mini stories | YOLO UI (`new` mark, chapter / skip / menu cls) | finds unplayed chapters by cls, menu-driven skip |
+| Bounty | Highest-difficulty sweep | YOLO UI (`HUB_BOUNTY`, branch cls) | rotates branches, exits on all-done |
+| Arena | Reward claim + auto-battle | YOLO UI + `fused_avatar` (opponent heads) | opponent selected by avatar / `cls92` region — no fixed position |
+| Mail / DailyTasks / PassReward | One-click claim | YOLO UI (claim-all / 红点 cls) | digit drain-check deferred to OCR |
+| ApPlanning | Free-AP + purchase strategy | YOLO UI + OCR numeric | configurable purchase cap |
+| CampaignPush | Stage sweep / fallback | YOLO UI + battle | |
+| EventActivity | Event story → mission → farming | YOLO UI + battle | currently disabled in the active path |
+| BattleOverlay | Live head-box lock | YOLOv8n + ByteTrack + Kalman | DXcam + Win32 overlay, lead-aim prediction, 60 FPS source |
+
+> Global popups (rewards, level-up, exit / friend-cafe dialogs, disconnect) are
+> handled once in the pipeline interceptor by cls before any skill ticks — a
+> stuck backout-able modal is dismissed via 取消/X, never ESC (ESC could confirm
+> the exit-game dialog).
 
 ---
 
