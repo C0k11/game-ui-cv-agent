@@ -157,7 +157,7 @@ flowchart LR
     T5 --> S
     T6 --> S
     T7 --> S
-    M --> D[Combined dataset<br/>~4200 train / ~500 val]
+    M --> D[Combined dataset<br/>real + synth + neg / held-out val]
     S --> D
     N --> D
     V --> D
