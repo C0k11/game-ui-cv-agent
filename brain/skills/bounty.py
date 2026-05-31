@@ -1,20 +1,24 @@
-"""BountySkill: Handle 悬赏通缉 (Bounties) sweep.
+"""BountySkill: Handle 悬赏通缉 (Bounties) sweep — PURE YOLO (OCR-free).
 
 Flow:
-1. ENTER: From lobby, click 任務 → navigate to bounties tab
-2. CHECK_TICKETS: OCR parse "剩余 X/Y" — if 0, exit immediately
-3. SELECT_STAGE: Click the highest/last stage in list
-4. SWEEP: Click 掃蕩 → Max → 確認 — full sweep flow
-5. EXIT: Back to lobby
+1. ENTER: From lobby click 任务大厅入口 (NAV_TASKS) → campaign hub → click
+   悬赏通缉 (HUB_BOUNTY) → bounty screen.
+2. CHECK_TICKETS: confirm we're on bounty screen via 悬赏通缉票 (TICKET_BOUNTY).
+   DIGIT-DEFERRED — we no longer parse "剩余 X/Y"; the sweep loop self-
+   terminates when 入场键/扫荡开始 grey out or disappear.
+3. SELECT_STAGE: click the bottom-most 入场键 (STAGE_ENTER) = hardest stage.
+4. SWEEP: MAX_可点击 (QTY_MAX) → 扫荡开始 (SWEEP_START) → 确认键 (BTN_CONFIRM)
+   → dismiss 获得奖励 (GOT_REWARD). MAX sweeps ALL tickets in one shot.
+5. EXIT: back to lobby (or stay on hub for the next campaign skill).
 
-Key detection patterns:
-- Ticket count: "剩余 X/Y", "X/Y" near ticket area
-- AP exhausted: "AP不足", "體力不足"
-- Sweep buttons: "掃蕩", "最大", "確認", "扫荡", "Max"
+Migration note (2026-05-29): every OCR find_text*/find_any_text/has_text
+call was replaced by find_cls/click_cls against ui_classes constants. OCR
+is globally disabled (pipeline._OCR_ENABLED=False) so screen.ocr_boxes is
+always empty. Digit reads (ticket / sortie counts) are DEFERRED — see the
+`# DIGIT-DEFERRED:` notes — and the flow is driven by button STATE instead.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -23,13 +27,17 @@ from brain.skills.base import (
     action_click, action_click_box, action_click_yolo,
     action_wait, action_back, action_done, action_scroll, action_swipe,
 )
+from brain.skills import ui_classes as UC
 
 
 class BountySkill(BaseSkill):
+    # Each branch maps to its YOLO cls (weak — 12f each in v1, but exists)
+    # plus a hardcoded fallback card position in the right-side panel,
+    # gated behind a tick counter (NO cls fires after a few ticks).
     _ALL_BRANCHES = [
-        ("高架公路", ["高架公路", "高架", "Overpass"], (0.90, 0.25)),
-        ("沙漠鐵道", ["沙漠鐵道", "沙漠铁道", "沙漠", "Railway"], (0.90, 0.41)),
-        ("教室", ["教室", "Classroom"], (0.90, 0.57)),
+        ("高架公路", UC.STAGE_HIGHWAY, (0.90, 0.25)),
+        ("沙漠铁道", UC.STAGE_DESERT_RAIL, (0.90, 0.41)),
+        ("教室", UC.STAGE_CLASSROOM, (0.90, 0.57)),
     ]
 
     @staticmethod
@@ -39,6 +47,9 @@ class BountySkill(BaseSkill):
         Returns a filtered subset of _ALL_BRANCHES preserving the ORDER
         the user specified in the config. If no config / empty list, all
         branches are enabled (default behavior).
+
+        Config values may use traditional-Chinese names (沙漠鐵道) — match
+        those to our simplified cls-keyed branch names too.
         """
         try:
             import json
@@ -51,30 +62,47 @@ class BountySkill(BaseSkill):
             enabled = profile.get("bounty_branches")
             if not isinstance(enabled, list) or not enabled:
                 return list(BountySkill._ALL_BRANCHES)
+            # Accept both simplified (cls) names and the legacy traditional
+            # aliases the config might still hold.
+            alias_map = {
+                "高架公路": "高架公路", "高架": "高架公路", "Overpass": "高架公路",
+                "沙漠铁道": "沙漠铁道", "沙漠鐵道": "沙漠铁道", "沙漠": "沙漠铁道",
+                "Railway": "沙漠铁道",
+                "教室": "教室", "Classroom": "教室",
+            }
             by_name = {b[0]: b for b in BountySkill._ALL_BRANCHES}
-            return [by_name[n] for n in enabled if n in by_name]
+            out = []
+            for n in enabled:
+                key = alias_map.get(n, n)
+                if key in by_name and by_name[key] not in out:
+                    out.append(by_name[key])
+            return out or list(BountySkill._ALL_BRANCHES)
         except Exception:
             return list(BountySkill._ALL_BRANCHES)
 
     def __init__(self):
         super().__init__("Bounty")
         self.max_ticks = 60
-        self._tickets_remaining: int = -1  # -1 = unknown
-        self._sweep_stage: int = 0  # 0=select, 1=click sweep, 2=click max, 3=confirm, 4=done
+        self._sweep_stage: int = 0  # 0=select MAX, 1=sweep start, 2=confirm, 3=dismiss result
         self._sweep_attempts: int = 0
+        self._sweep_clicks: int = 0  # SAFETY CAP — caps sweep cycles (DIGIT-DEFERRED)
         self._enter_attempts: int = 0
         self._branch_idx: int = 0
         self._branches = list(self._ALL_BRANCHES)
+        self._done_branches: set = set()   # branch indices already swept
+        self._all_done: bool = False       # every enabled branch attempted
 
     def reset(self) -> None:
         super().reset()
-        self._tickets_remaining = -1
         self._sweep_stage = 0
         self._sweep_attempts = 0
+        self._sweep_clicks = 0
         self._stage_ticks = 0
         self._loc_ticks = 0
         self._enter_attempts = 0
         self._branch_idx = 0
+        self._done_branches = set()
+        self._all_done = False
         self._branches = self._load_enabled_branches()
         if self._branches:
             self.log(f"bounty branches enabled: {[b[0] for b in self._branches]}")
@@ -82,13 +110,29 @@ class BountySkill(BaseSkill):
             self.log("no bounty branches enabled — will exit")
 
     def _advance_branch(self) -> None:
+        """Mark the current branch as swept (one MAX sweep clears all its
+        tickets) and rotate to the next UNDONE branch. Sets self._all_done
+        when every enabled branch has been attempted once.
+
+        FIX 2026-05-29: the old modulo-rotate looped forever on a single
+        enabled branch (教室) — sweep → 'advance' back to 教室 → sweep …
+        until max_ticks, and it also reset _sweep_clicks each time so the
+        safety cap never accumulated. Now each branch is done exactly once."""
         if not self._branches:
+            self._all_done = True
             return
-        self._branch_idx = (self._branch_idx + 1) % len(self._branches)
+        self._done_branches.add(self._branch_idx)
+        remaining = [i for i in range(len(self._branches))
+                     if i not in self._done_branches]
+        if not remaining:
+            self._all_done = True
+            return
+        self._branch_idx = remaining[0]
         self._loc_ticks = 0
         self._stage_ticks = 0
         self._sweep_stage = 0
         self._sweep_attempts = 0
+        self._sweep_clicks = 0
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -100,24 +144,14 @@ class BountySkill(BaseSkill):
         if not self._branches:
             return action_done("no bounty branches enabled in config")
 
-        # AP exhausted popup — can appear at any time during sweep
-        no_ap = screen.find_any_text(
-            ["AP不足", "體力不足", "体力不足", "購買AP", "购买AP"],
-            min_conf=0.6
-        )
-        if no_ap:
-            self.log("AP exhausted")
-            self.sub_state = "exit"
-            cancel = screen.find_any_text(["取消"], min_conf=0.7)
-            if cancel:
-                return action_click_box(cancel, "cancel AP purchase")
-            return action_back("dismiss AP popup")
+        # AP-exhausted popup — can appear at any time during sweep.
+        # GAP: no YOLO cls for the "AP不足/體力不足" popup. _handle_common_popups
+        # (still OCR, migrated separately) catches the exit/buy prompt and
+        # cancels it. Until that lands we surface it via the generic
+        # cancel/close path below rather than blind-clicking.
 
-        # Sweep result popup — dismiss and continue
-        result = screen.find_any_text(
-            ["獲得獎勵", "获得奖励", "戰鬥結果", "战斗结果"],
-            region=screen.CENTER, min_conf=0.6
-        )
+        # Sweep-result popup — dismiss and continue. (OCR "獲得獎勵" → GOT_REWARD)
+        result = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
         if result:
             self.log("sweep result popup, dismissing")
             return action_click(0.5, 0.9, "dismiss sweep result")
@@ -148,112 +182,51 @@ class BountySkill(BaseSkill):
         return action_wait(300, "bounty unknown state")
 
     def _is_bounty_screen(self, screen: ScreenState) -> bool:
-        """Detect bounty screen via unique markers (header OCR is unreliable).
+        """Detect the bounty stage screen via its YOLO signature.
 
-        Bounty screen has: "票券" (ticket count), "關卡目錄" (stage catalog),
-        "入場" buttons on the right side, or the LocationSelect panel with
-        3 branch cards (高架公路/沙漠鐵道/教室).
+        The bounty screen's unique marker is the 悬赏通缉票 (TICKET_BOUNTY)
+        sweep-ticket icon — exactly what PAGE_SIGNATURES["Bounty"] keys on.
+        (OCR header/票券/關卡目錄/LocationSelect probes → TICKET_BOUNTY cls.)
         """
-        # Check header region for any bounty-like text (including partial OCR)
-        header = screen.find_any_text(
-            ["懸賞通緝", "悬赏通缉", "懸賞", "悬赏", "通緝", "通缉", "悬通"],
-            region=(0.0, 0.0, 0.3, 0.08), min_conf=0.5
-        )
-        if header:
-            return True
-        # Ticket count label — broadened region to include y=0.10-0.20
-        # (observed "持有票券6/6" at y=0.14 on LocationSelect screen).
-        tickets = screen.find_any_text(
-            ["持有票券", "通緝票券", "通缉票券", "通票券"],
-            region=(0.0, 0.10, 0.35, 0.35), min_conf=0.7
-        )
-        if tickets:
-            return True
-        catalog = screen.find_any_text(
-            ["關卡目錄", "关卡目录"],
-            region=(0.55, 0.10, 0.85, 0.20), min_conf=0.7
-        )
-        if catalog:
-            return True
-        # LocationSelect tag — English artifact from OCR on the 選擇委託 panel
-        loc_tag = screen.find_any_text(
-            ["LocationSelect", "Location", "選擇委托", "选择委托",
-             "選擇委託", "选择委托"],
-            region=(0.45, 0.10, 0.85, 0.22), min_conf=0.7
-        )
-        if loc_tag:
-            return True
-        # Fallback: detect ≥2 of the 3 branch location cards
-        # (高架公路, 沙漠鐵道, 教室) visible in the right half, far-right x.
-        branch_hits = 0
-        for name, aliases, _ in self._ALL_BRANCHES:
-            hit = screen.find_any_text(
-                aliases, region=(0.78, 0.15, 1.0, 0.75), min_conf=0.7
-            )
-            if hit:
-                branch_hits += 1
-        if branch_hits >= 2:
-            return True
-        return False
+        return self.find_cls(screen, UC.TICKET_BOUNTY, conf=0.30) is not None
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_attempts += 1
         current = self.detect_current_screen(screen)
 
-        # Direct bounty screen detection (header OCR often fails)
+        # Already on the bounty stage screen?
         if current == "Bounty" or self._is_bounty_screen(screen):
             self.log("inside bounty")
             self.sub_state = "check_tickets"
             return action_wait(500, "entered bounty")
 
-        # Accidentally entered Daily Tasks? Back out.
-        if current == "DailyTasks":
-            self.log("wrong screen: Daily Tasks, backing out")
-            return action_back("back from Daily Tasks")
-
         if current == "Lobby":
-            # "任務" is NOT in the bottom nav bar. It's on the RIGHT SIDE
-            # of the lobby (~0.93, 0.83) as a campaign entry button.
-            # Same approach as EventFarmingSkill._enter_campaign.
-            campaign_btn = screen.find_any_text(
-                ["任務", "任务"],
-                region=(0.80, 0.70, 1.0, 0.90), min_conf=0.6
-            )
-            if campaign_btn:
-                self.log(f"clicking campaign entry '{campaign_btn.text}'")
-                return action_click_box(campaign_btn, "click campaign entry (right side)")
-            # Hardcoded fallback — campaign button position on lobby
-            return action_click(0.95, 0.83, "click campaign area (hardcoded)")
+            # 任务 is NOT in the bottom nav bar — it's the right-side campaign
+            # entry tile (NAV_TASKS = 任务大厅入口). (OCR "任務"/"任务" → NAV_TASKS)
+            tap = self.click_cls(screen, UC.NAV_TASKS, "open campaign hub (NAV_TASKS)", conf=0.30)
+            if tap:
+                self.log("clicking campaign entry (NAV_TASKS)")
+                return tap
+            # NO hardcoded fallback (no-hardcode rule — fixed fractions break on
+            # window resize / scaling / layout shift). NAV_TASKS detects ~0.97
+            # on real lobby; if it momentarily misses, wait for a clean frame.
+            return action_wait(400, "lobby: NAV_TASKS not seen, waiting")
 
+        # On the campaign / Mission hub — click 悬赏通缉 (HUB_BOUNTY) tile.
+        if current == "Mission":
+            tap = self.click_cls(screen, UC.HUB_BOUNTY, "click bounty tile (HUB_BOUNTY)", conf=0.30)
+            if tap:
+                self.log("clicking bounty tile (HUB_BOUNTY)")
+                return tap
+            # NO hardcoded fallback. HUB_BOUNTY conf fluctuates (under-trained,
+            # to be fixed in v4); wait for a frame where it resolves rather than
+            # blind-clicking a fixed grid position. enter_attempts>20 exits.
+            return action_wait(500, "hub: HUB_BOUNTY not seen, waiting")
+
+        # On some other known screen — back out toward the hub/lobby.
         if current and current not in ("Bounty", "Mission"):
             self.log(f"wrong screen '{current}', backing out")
             return action_back(f"back from {current}")
-
-        # In Mission/Campaign hub — find 懸賞通緝 menu item
-        # OCR frequently misreads: "懸賞通緝" → "通" / "悬通" / "懸賞" / partial
-        # Full search includes partial OCR variants
-        if current == "Mission":
-            bounty_tab = screen.find_any_text(
-                ["懸賞通緝", "悬赏通缉", "懸賞", "悬赏", "通緝", "通缉",
-                 "悬通", "Bounty"],
-                min_conf=0.5
-            )
-            if bounty_tab:
-                self.log(f"clicking bounty '{bounty_tab.text}'")
-                return action_click_box(bounty_tab, "click bounty in campaign")
-
-            # OCR may read just "通" — single char at the bounty icon position
-            # Campaign grid: bounty is at ~(0.56, 0.55) from trajectory data
-            single = screen.find_text_one("通", region=(0.45, 0.45, 0.70, 0.60),
-                                          min_conf=0.8)
-            if single and len(single.text) <= 2:
-                self.log(f"clicking bounty (OCR partial '{single.text}')")
-                return action_click_box(single, "click bounty (partial OCR)")
-
-            # Hardcoded fallback: bounty position in campaign grid
-            if self._enter_attempts > 5:
-                self.log("clicking bounty at hardcoded position")
-                return action_click(0.56, 0.55, "click bounty (hardcoded)")
 
         if self._enter_attempts > 20:
             self.log("can't reach bounty, giving up")
@@ -263,159 +236,156 @@ class BountySkill(BaseSkill):
         return action_wait(500, "entering bounty")
 
     def _check_tickets(self, screen: ScreenState) -> Dict[str, Any]:
-        """Check remaining bounty tickets via OCR (票券 X/Y or similar).
+        """Confirm we're on the bounty screen, then proceed to select a stage.
 
-        OCR reads "懸賞通緝票券 6/6" as "通票券6/6".
-        Must filter to ticket-related text to avoid matching AP "57/240".
+        DIGIT-DEFERRED: the original parsed "持有票券 X/Y" via OCR digits and
+        exited when X==0. We no longer read digits. Instead we confirm the
+        bounty screen via the 悬赏通缉票 (TICKET_BOUNTY) cls and let the sweep
+        loop self-terminate when 入场键/扫荡开始 grey out or vanish (= no
+        tickets / no AP). The 0-ticket early-exit is therefore handled
+        downstream by button state, not a count read.
         """
-        # Check if "持有票券" label exists (confirms we're on bounty screen)
-        has_ticket_label = screen.find_any_text(
-            ["持有票券", "票券"],
-            region=(0.0, 0.08, 0.25, 0.20), min_conf=0.7
-        )
-
-        for box in screen.ocr_boxes:
-            if box.confidence < 0.5:
-                continue
-            m = re.search(r'(\d+)\s*/\s*(\d+)', box.text)
-            if not m:
-                continue
-            # Prioritize ticket-specific text (票券/剩余/次數)
-            # Exclude top-bar AP/currency which also has X/Y format
-            is_ticket = any(k in box.text for k in ["票券", "剩余", "剩餘", "次數", "次数"])
-            # Also match if "持有票券" label nearby and box is in ticket area
-            if not is_ticket and has_ticket_label and box.cy > 0.10 and box.cy < 0.20:
-                is_ticket = True
-            if is_ticket or (box.cy > 0.10 and "/" in box.text and int(m.group(2)) <= 20):
-                remaining = int(m.group(1))
-                total = int(m.group(2))
-                self._tickets_remaining = remaining
-                self.log(f"bounty tickets: {remaining}/{total}")
-                if remaining == 0:
-                    self.log("no tickets remaining, exiting")
-                    self.sub_state = "exit"
-                    return action_wait(300, "no bounty tickets")
-                self.sub_state = "select_location"
-                branch_name = self._branches[self._branch_idx][0]
-                return action_wait(300, f"have {remaining} tickets, selecting '{branch_name}'")
-
-        # If we can't parse tickets after a few ticks, proceed anyway
-        if self.ticks > 10:
-            self.log("couldn't parse ticket count, proceeding to select location")
+        # All enabled branches have been swept once → done.
+        if self._all_done:
+            self.sub_state = "exit"
+            return action_wait(300, "all bounty branches swept → exit")
+        if self._is_bounty_screen(screen):
             self.sub_state = "select_location"
-            return action_wait(300, "ticket parse timeout")
+            branch_name = self._branches[self._branch_idx][0]
+            # DIGIT-DEFERRED: no ticket count to log/gate on.
+            return action_wait(300, f"on bounty screen, selecting '{branch_name}'")
 
-        return action_wait(500, "looking for ticket count")
+        # Not confirmed on bounty screen yet — wait a few ticks, then proceed
+        # optimistically (TICKET_BOUNTY is weak @20f; absence != not-here).
+        if self.ticks > 10:
+            self.log("TICKET_BOUNTY not confirmed, proceeding to select location")
+            self.sub_state = "select_location"
+            return action_wait(300, "bounty screen unconfirmed, proceeding")
+
+        return action_wait(500, "confirming bounty screen (TICKET_BOUNTY)")
 
     def _select_location(self, screen: ScreenState) -> Dict[str, Any]:
-        """Select a bounty location from LocationSelect screen.
+        """Select the target bounty branch from the right-side location panel.
 
-        The bounty LocationSelect shows 3 location cards:
-        - 高架公路 (~y 0.22-0.27)
-        - 沙漠鐵道 (~y 0.38-0.43)
-        - 教室 (~y 0.54-0.59)
-
-        Click the first available location to enter its stage list.
-        If already past LocationSelect (stage list visible with 入場), skip ahead.
+        The bounty LocationSelect shows 3 branch cards (高架公路 / 沙漠铁道 /
+        教室). Click the configured branch to open its stage list.
+        (OCR alias match + hardcoded card pos → per-branch cls + gated pos.)
         """
         self._loc_ticks = getattr(self, '_loc_ticks', 0) + 1
-        branch_name, aliases, fallback_pos = self._branches[self._branch_idx]
+        branch_name, branch_cls, fallback_pos = self._branches[self._branch_idx]
 
-        # Try selecting the target branch by OCR first.
-        for alias in aliases:
-            hit = screen.find_text_one(alias, region=(0.68, 0.12, 1.0, 0.72), min_conf=0.55)
-            if hit:
-                self.log(f"selecting branch '{branch_name}' via '{hit.text}'")
-                self.sub_state = "select_stage"
-                self._stage_ticks = 0
-                return action_click_box(hit, f"select bounty branch '{branch_name}'")
-
-        # Hardcoded fallback for this branch (location cards in right panel).
-        if self._loc_ticks > 2:
-            self.log(f"selecting branch '{branch_name}' at hardcoded position")
-            self.sub_state = "select_stage"
-            self._stage_ticks = 0
-            return action_click(*fallback_pos, f"select bounty branch '{branch_name}' (hardcoded)")
-
-        # Already in stage list? Continue with stage selection.
-        enter_btns = [
-            b for b in screen.ocr_boxes
-            if b.confidence >= 0.6 and b.cx > 0.70
-            and ("入場" in b.text or "入场" in b.text)
-        ]
-        if enter_btns:
+        # Already in the stage list? (入场键 visible on the right side) → skip ahead.
+        if self.find_cls(screen, [UC.STAGE_ENTER, UC.STAGE_ENTER_LOCKED],
+                         conf=0.30, region=(0.60, 0.15, 1.0, 0.95)):
             self.log(f"stage list visible for branch '{branch_name}'")
             self.sub_state = "select_stage"
             self._stage_ticks = 0
             return action_wait(300, "stage list visible")
 
+        # Select the target branch card by its cls (right panel).
+        tap = self.click_cls(screen, branch_cls,
+                             f"select bounty branch '{branch_name}'",
+                             conf=0.30, region=(0.60, 0.12, 1.0, 0.80))
+        if tap:
+            self.log(f"selecting branch '{branch_name}' (cls {branch_cls})")
+            self.sub_state = "select_stage"
+            self._stage_ticks = 0
+            return tap
+
+        # NO hardcoded fallback (no-hardcode rule). branch cls is under-trained
+        # (to be fixed in v4); wait for a frame where it resolves. After a
+        # timeout, proceed to select_stage anyway (the stage list may already
+        # be showing this branch) rather than blind-clicking a fixed card pos.
         if self._loc_ticks > 8:
-            self.log("location select timeout, trying select_stage anyway")
+            self.log("location select timeout (branch cls not seen), trying select_stage anyway")
             self.sub_state = "select_stage"
             self._stage_ticks = 0
             return action_wait(300, "location select timeout")
 
-        return action_wait(500, f"waiting for branch '{branch_name}'")
+        return action_wait(500, f"waiting for branch '{branch_name}' (cls {branch_cls})")
 
     def _select_stage(self, screen: ScreenState) -> Dict[str, Any]:
-        """Select the last (highest) stage from the stage list (關卡目錄).
+        """Enter the last (highest / hardest) stage from the stage list.
 
-        The bounty screen shows:
-        - Left panel: branch info (懸賞通緝：教室, ticket count, school buffs)
-        - Right panel: stage list (關卡目錄) with numbered stages + 入場 buttons
-
-        We scroll the stage list down to ensure the last stage is visible,
-        then click the bottom-most 入場 button.
+        Right panel shows numbered stages each with an 入场键 (STAGE_ENTER)
+        button. We swipe the list to the bottom, then click the bottom-most
+        unlocked 入场键 (= hardest stage). (OCR 入場 boxes → STAGE_ENTER cls.)
         """
         self._stage_ticks = getattr(self, '_stage_ticks', 0) + 1
 
-        # Look for 入場 buttons on the RIGHT side (stage list, x > 0.70)
-        enter_btns = [
-            b for b in screen.ocr_boxes
-            if b.confidence >= 0.6 and b.cx > 0.70
-            and ("入場" in b.text or "入场" in b.text)
-        ]
+        # 入场键 buttons on the RIGHT side (stage list). Prefer unlocked over
+        # locked; if only locked present this branch isn't accessible.
+        enter_btns = self.find_all_cls(screen, UC.STAGE_ENTER,
+                                       conf=0.30, region=(0.60, 0.15, 1.0, 0.98))
 
         if enter_btns:
             # First 2 ticks: swipe stage list down to reveal the last stage.
-            # Switched from wheel-scroll to swipe per user 2026-05-13 —
-            # wheel events on MuMu can be interpreted as ZOOM gestures
-            # and de-center the lobby/page (the carousel/轮盘 went off-
-            # screen).  Swipe is always a drag, never a zoom.
+            # Swipe (never wheel-scroll) — MuMu interprets wheel as zoom and
+            # de-centers the page (user 2026-05-13).
             if self._stage_ticks <= 2:
                 self.log("swiping stage list down")
                 return action_swipe(0.75, 0.70, 0.75, 0.30, 500,
                                     reason="swipe stage list to bottom")
 
-            # Click the bottom-most 入場 button (= last/hardest stage)
+            # Click the bottom-most 入场键 (= last / hardest stage).
             last = max(enter_btns, key=lambda b: b.cy)
-            self.log(f"clicking last stage 入場 at ({last.cx:.2f},{last.cy:.2f})")
+            self.log(f"clicking last stage 入场键 at ({last.cx:.2f},{last.cy:.2f})")
             self.sub_state = "sweep"
             self._sweep_stage = 0
-            return action_click_box(last, "enter last stage")
+            self._sweep_attempts = 0
+            return action_click_box(last, "enter last stage (STAGE_ENTER)")
 
-        # No 入場 buttons visible — might need to swipe or stage list not loaded
+        # Only locked entries? This branch has no playable stage — rotate.
+        locked = self.find_all_cls(screen, UC.STAGE_ENTER_LOCKED,
+                                   conf=0.30, region=(0.60, 0.15, 1.0, 0.98))
+        if locked and self._stage_ticks > 2:
+            self.log("only locked stages on this branch, rotating")
+            self._advance_branch()
+            self.sub_state = "check_tickets"
+            return action_wait(300, "branch locked, next branch")
+
+        # No 入场键 visible yet — swipe to find stages.
         if self._stage_ticks <= 4:
             return action_swipe(0.75, 0.70, 0.75, 0.30, 500,
                                 reason="swipe to find stages")
 
-        # Fallback: click bottom-right area where last 入場 typically is
-        self.log("clicking last stage (hardcoded fallback)")
-        self.sub_state = "sweep"
-        self._sweep_stage = 0
-        return action_click(0.87, 0.88, "enter last stage (fallback)")
+        # GAP: no STAGE_ENTER cls resolved after swiping. Surface it instead
+        # of blind-clicking a hardcoded coord (per OCR-free spec). Rotate
+        # branch so we don't get wedged on a screen we can't read.
+        self.log("select_stage: no STAGE_ENTER cls found (training gap) — rotating branch")
+        self._advance_branch()
+        self.sub_state = "check_tickets"
+        return action_wait(300, "no STAGE_ENTER cls, next branch")
 
     def _sweep(self, screen: ScreenState) -> Dict[str, Any]:
-        """Multi-step sweep inside the 任務資訊 popup.
+        """Multi-step sweep inside the 任务信息 popup.
 
-        Flow after clicking 入場:
-        1. 任務資訊 popup opens → shows MAX/MIN and 掃蕩開始
-        2. Click MAX to set sweep count
-        3. Click 掃蕩開始 to start sweep
-        4. Confirm dialog (通知: 要使用XAP掃蕩Y次嗎？) → 確認
-        5. Dismiss result popup
+        Flow after clicking 入场键:
+        1. Popup opens → click MAX_可点击 (QTY_MAX) to set sweep count to max.
+        2. Click 扫荡开始 (SWEEP_START) to start.
+        3. Confirm dialog → 确认键 (BTN_CONFIRM).
+        4. Dismiss 获得奖励 (GOT_REWARD) result popup.
+
+        DIGIT-DEFERRED: MAX sweeps ALL remaining tickets in a single confirm,
+        so this is normally ONE cycle per stage entry — we do NOT loop on a
+        ticket count. _sweep_clicks is a hard SAFETY CAP on confirm cycles.
         """
         self._sweep_attempts += 1
+
+        # Lost navigation: drifted off the bounty stage/popup screens to the
+        # campaign hub or lobby mid-sweep → this branch is over, finish it.
+        # (Prevents the t0041+ wedge where the bot sat on the hub forever
+        # "looking for 扫荡开始" because the sweep flow had already exited.)
+        if self._sweep_attempts > 3 and not (
+            self.find_cls(screen, [UC.QTY_MAX, UC.QTY_MAX_GREY, UC.SWEEP_START], conf=0.30)
+            or self.find_cls(screen, [UC.STAGE_ENTER, UC.STAGE_ENTER_LOCKED], conf=0.30)
+        ):
+            cur = self.detect_current_screen(screen)
+            if cur in ("Mission", "Lobby"):
+                self.log(f"drifted to {cur} mid-sweep — finishing branch")
+                self._advance_branch()
+                self.sub_state = "exit" if self._all_done else "check_tickets"
+                return action_wait(300, f"drifted to {cur}, finishing branch")
 
         if self._sweep_attempts > 25:
             self.log("sweep stuck, rotating branch")
@@ -423,111 +393,108 @@ class BountySkill(BaseSkill):
             self.sub_state = "check_tickets"
             return action_wait(300, "sweep timeout, try next branch")
 
-        # Stage 0: Wait for 任務資訊 popup → click MAX
+        # SAFETY CAP: bail after ~10 sweep confirm cycles regardless (DIGIT-
+        # DEFERRED — we can't read remaining count to stop precisely).
+        if self._sweep_clicks >= 10:
+            self.log("sweep safety cap (10 cycles) hit, rotating branch")
+            self._advance_branch()
+            self.sub_state = "check_tickets"
+            return action_wait(300, "sweep cap reached, next branch")
+
+        # Stage 0: popup open → click MAX (set sweep count to max).
+        # (OCR "MAX"/"MIN"/"任務資訊" → QTY_MAX cls)
         if self._sweep_stage == 0:
-            max_btn = screen.find_any_text(["MAX"], min_conf=0.7)
+            max_btn = self.find_cls(screen, UC.QTY_MAX, conf=0.30)
             if max_btn:
-                self.log("popup open, clicking MAX")
+                self.log("popup open, clicking MAX_可点击")
                 self._sweep_stage = 1
-                return action_click_box(max_btn, "click MAX for sweep count")
+                return action_click_box(max_btn, "set sweep count MAX (QTY_MAX)")
 
-            # Popup indicators
-            popup = screen.find_any_text(
-                ["MIN", "任務資訊", "任務資讯", "任务资讯"],
-                min_conf=0.6
-            )
-            if popup:
-                return action_wait(300, "popup open, looking for MAX")
+            # MAX greyed out → already at max (count==1 or capped). Proceed.
+            if self.find_cls(screen, UC.QTY_MAX_GREY, conf=0.30):
+                self.log("MAX greyed (already max), proceeding to 扫荡开始")
+                self._sweep_stage = 1
+                return action_wait(200, "MAX grey, go to sweep start")
 
-            # Popup not open yet — re-click last 入場
-            enter_btns = [
-                b for b in screen.ocr_boxes
-                if b.confidence >= 0.6 and b.cx > 0.70
-                and ("入場" in b.text or "入场" in b.text)
-            ]
-            if enter_btns:
-                last = max(enter_btns, key=lambda b: b.cy)
-                return action_click_box(last, "re-click last 入場")
-            return action_wait(400, "waiting for stage popup")
+            # Popup not open yet — re-click the last 入场键 to (re)open it.
+            re_enter = self.click_cls(
+                screen, UC.STAGE_ENTER, "re-open stage popup (STAGE_ENTER)",
+                conf=0.30, region=(0.60, 0.15, 1.0, 0.98))
+            if re_enter:
+                return re_enter
+            return action_wait(400, "waiting for stage popup (QTY_MAX)")
 
-        # Stage 1: Click 掃蕩開始
+        # Stage 1: click 扫荡开始 (SWEEP_START).
         if self._sweep_stage == 1:
-            sweep_start = screen.find_any_text(
-                ["掃蕩開始", "扫荡开始"], min_conf=0.5
-            )
+            sweep_start = self.find_cls(screen, UC.SWEEP_START, conf=0.30)
             if sweep_start:
-                self.log("clicking 掃蕩開始")
+                # NOTE: no 扫荡开始_灰 cls trained, so a ticket-less greyed
+                # button can't be cls-detected (count is DIGIT-DEFERRED). Per
+                # the no-HSV spec we don't pixel-check; one MAX sweep + one-pass
+                # branch exit bounds it instead. (TRAIN: 扫荡开始_灰 cls.)
+                self.log("clicking 扫荡开始 (SWEEP_START)")
                 self._sweep_stage = 2
-                return action_click_box(sweep_start, "click 掃蕩開始")
+                return action_click_box(sweep_start, "click 扫荡开始 (SWEEP_START)")
 
-            # Partial OCR: 掃蕩開始 may read as "開始" in upper region
-            for box in screen.find_text("開始", min_conf=0.5):
-                if 0.4 < box.cy < 0.65 and box.cx > 0.5:
-                    self._sweep_stage = 2
-                    return action_click_box(box, "click 掃蕩開始 (partial OCR)")
-            for box in screen.find_text("开始", min_conf=0.5):
-                if 0.4 < box.cy < 0.65 and box.cx > 0.5:
-                    self._sweep_stage = 2
-                    return action_click_box(box, "click 掃蕩開始 (partial OCR)")
-
-            # Fallback: click 掃蕩 text in panel
-            for box in screen.find_text("掃蕩", min_conf=0.5):
-                if box.cy > 0.25 and box.cx > 0.5:
-                    self._sweep_stage = 2
-                    return action_click_box(box, "click sweep start")
-            return action_wait(400, "looking for 掃蕩開始")
-
-        # Stage 2: Confirm sweep dialog (通知: 要使用XAP掃蕩Y次嗎？)
-        if self._sweep_stage == 2:
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确", "Confirm"],
-                region=(0.3, 0.3, 0.8, 0.95), min_conf=0.6
-            )
-            if confirm:
-                self._sweep_stage = 3
-                return action_click_box(confirm, "confirm sweep")
-
-            # Check if sweep result already appeared (interceptor handled confirm)
-            sweep_done = screen.find_any_text(
-                ["掃蕩完成", "扫荡完成"], min_conf=0.5
-            )
-            if sweep_done:
-                self._sweep_stage = 3
-                return action_wait(200, "sweep result appeared")
-
-            skip = screen.find_any_text(["跳過", "跳过", "Skip"], min_conf=0.7)
-            if skip:
-                return action_click_box(skip, "skip animation")
-
-            # If the 任務資訊 popup returned (MAX visible in sweep panel area),
-            # the interceptor already handled confirm + result dismissal.
-            # Close the popup and exit.
-            if self._sweep_attempts > 8:
-                popup_max = screen.find_any_text(
-                    ["MAX"], region=(0.5, 0.3, 0.95, 0.5), min_conf=0.7
-                )
-                if popup_max:
-                    self.log("sweep completed (popup returned)")
-                    self._advance_branch()
-                    self.sub_state = "check_tickets"
-                    return action_back("close popup after sweep")
-
-            return action_wait(400, "waiting for confirm dialog")
-
-        # Stage 3+: Dismiss sweep result and exit
-        if self._sweep_stage >= 3:
-            ok = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确", "OK"],
-                min_conf=0.6
-            )
-            if ok:
-                done_branch = self._branches[self._branch_idx][0]
-                self.log(f"sweep done on '{done_branch}', moving to next branch")
+            # SWEEP_START gone entirely after we already swept at least once
+            # → finished. (DIGIT-DEFERRED termination signal.)
+            if self._sweep_clicks > 0:
+                self.log("扫荡开始 gone after sweep — branch done")
                 self._advance_branch()
                 self.sub_state = "check_tickets"
-                return action_click_box(ok, "dismiss sweep result")
-            # Click anywhere to dismiss
-            return action_click(0.5, 0.9, "dismiss sweep result")
+                return action_wait(300, "sweep start gone, next branch")
+            return action_wait(400, "looking for 扫荡开始 (SWEEP_START)")
+
+        # Stage 2: confirm sweep dialog → 确认键 (BTN_CONFIRM).
+        # (OCR "確認/确认/確定..." → BTN_CONFIRM cls)
+        if self._sweep_stage == 2:
+            confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
+                                    region=(0.30, 0.30, 0.95, 0.95))
+            if confirm:
+                self._sweep_clicks += 1
+                self.log(f"confirming sweep (cycle {self._sweep_clicks})")
+                self._sweep_stage = 3
+                return action_click_box(confirm, "confirm sweep (BTN_CONFIRM)")
+
+            # Confirm dialog handled out-of-band (by _handle_common_popups
+            # once migrated, or auto-dismissed) → result popup appears.
+            if self.find_cls(screen, UC.GOT_REWARD, conf=0.30):
+                self._sweep_stage = 3
+                return action_wait(200, "result popup appeared")
+
+            # If the 任务信息 popup is back (QTY_MAX visible again), the sweep
+            # already completed and the dialog/result were dismissed for us.
+            if self._sweep_attempts > 8 and self.find_cls(screen, UC.QTY_MAX, conf=0.30):
+                self.log("sweep completed (popup returned)")
+                self._advance_branch()
+                self.sub_state = "check_tickets"
+                return action_back("close popup after sweep")
+
+            return action_wait(400, "waiting for confirm dialog (BTN_CONFIRM)")
+
+        # Stage 3+: dismiss 获得奖励 result, then loop / rotate branch.
+        if self._sweep_stage >= 3:
+            got = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+            if got:
+                done_branch = self._branches[self._branch_idx][0]
+                self.log(f"sweep done on '{done_branch}', dismissing result")
+                self._advance_branch()
+                self.sub_state = "check_tickets"
+                return action_click(0.5, 0.9, "dismiss sweep result (GOT_REWARD)")
+
+            # A confirm dialog may also appear here (BTN_CONFIRM) on some
+            # sweep result layouts.
+            confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
+                                    region=(0.30, 0.30, 0.95, 0.95))
+            if confirm:
+                self._advance_branch()
+                self.sub_state = "check_tickets"
+                return action_click_box(confirm, "dismiss sweep result (BTN_CONFIRM)")
+
+            # Nothing recognized — tap center-bottom to dismiss, then rotate.
+            self._advance_branch()
+            self.sub_state = "check_tickets"
+            return action_click(0.5, 0.9, "tap to dismiss sweep result")
 
         return action_wait(400, "sweep processing")
 
@@ -535,20 +502,13 @@ class BountySkill(BaseSkill):
         if screen.is_lobby():
             self.log("done")
             return action_done("bounty complete")
-        # If we're back on the campaign hub (Mission screen with 戰術大賽
-        # tile visible), STOP exiting — Arena is the next skill in the
-        # standard order and it enters via the same campaign hub.
-        # Exiting to lobby just to re-enter wastes 10-20 ticks per
-        # round-trip (user 2026-05-13: "进 campaign 打一个板块就退回主
-        # 界面一次，然后再进 campaign").
+        # If we're back on the campaign hub (Mission screen), STOP exiting —
+        # Arena/other campaign skills enter via the same hub. Exiting to
+        # lobby just to re-enter wastes 10-20 ticks per round-trip
+        # (user 2026-05-13). Detect the hub via YOLO signature.
+        # (OCR hub-tile probe → detect_current_screen == "Mission")
         current = self.detect_current_screen(screen)
         if current == "Mission":
-            on_hub = screen.find_any_text(
-                ["戰術大賽", "战术大赛", "懸賞通緝", "悬赏通缉",
-                 "大決戰", "大决战", "制約解除"],
-                min_conf=0.55,
-            )
-            if on_hub:
-                self.log("done (left on campaign hub for next skill)")
-                return action_done("bounty complete (on hub)")
+            self.log("done (left on campaign hub for next skill)")
+            return action_done("bounty complete (on hub)")
         return action_back("bounty exit: back to lobby")

@@ -17,6 +17,19 @@ Avatar identification migrated 2026-05-17 from template+histogram match
 Reasons: template match against full-body CG portraits at ~50px crop
 size produced false positives at 0.55 threshold; classifier hits
 top1=86.55% / top5=95.32% on val and emits temporal-voted verdicts.
+
+Button/navigation layer migrated 2026-05-28 from OCR text matching to
+YOLO ui cls (find_cls / detect_screen_yolo).  See ui_classes.py — all
+click targets resolve through named cls constants; OCR is retained ONLY
+for the ticket digit read (持有票券 X/Y).  Avatar recognition, roster
+overlay scan, room-slot coords, and the dispatch state machine are
+UNCHANGED — only the "find a button / which page am I on" plumbing moved
+to YOLO.
+
+  IMPORTANT (interceptor dead-loop guard): SCHED_ALL (全體課程表) is the
+  schedule WORK surface, not a popup.  We never treat it as a dismissable
+  popup inside this skill — the pipeline interceptor previously closed it
+  and trapped the skill in a re-open loop (task #3).
 """
 from __future__ import annotations
 
@@ -27,28 +40,29 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote
 
 from brain.skills.base import (
-    BaseSkill, ScreenState, OcrBox,
-    action_click, action_click_box,
+    BaseSkill, ScreenState, OcrBox, YoloBox,
+    action_click, action_click_yolo,
     action_wait, action_back, action_done,
 )
+from brain.skills import ui_classes as UC
 from vision.avatar_classifier import get_default as get_avatar_classifier
 
-# Known location names (Traditional + Simplified Chinese)
-_LOCATION_NAMES = [
-    "夏莱公室", "夏莱辦公室", "夏莱办公室",
-    "夏莱居住區", "夏莱居住区",
-    "格黑娜學園", "格黑娜学园",
-    "阿拜多斯", "千年研究",
-    "百鬼夜行", "紅冬", "红冬",
-    "山海經", "山海经", "瓦爾基里", "瓦尔基里",
-    "SRT", "聯邦學園", "联邦学园",
+# Schedule location-select tiles that HAVE a YOLO ui cls.  Ordered the
+# same way the Location-Select screen lays them out (办公室 / 居住区 /
+# 格黑娜 / 阿拜多斯 / 千年).  Clicking + visited-tracking now key off
+# cls_name instead of OCR'd location names.
+#
+# GAP: the remaining schedule regions (百鬼夜行 / 紅冬 / 山海經 /
+# 瓦爾基里 / SRT / 聯邦學園) have NO ui cls yet — see migration report.
+# We cycle past them via the right-arrow switch (which also has no cls and
+# is a documented gap) rather than OCR-clicking their tiles.
+_SCHOOL_TILES = [
+    UC.SCHOOL_OFFICE,      # 夏莱办公室   (first location — full-circle anchor)
+    UC.SCHOOL_DORM,        # 夏莱居住区
+    UC.SCHOOL_GEHENNA,     # 格黑娜学院中央区
+    UC.SCHOOL_ABYDOS,      # 阿拜多斯高中
+    UC.SCHOOL_MILLENNIUM,  # 千年研究所
 ]
-
-# Hardcoded UI positions (normalized) observed from screenshots
-_RIGHT_ARROW_POS = (0.99, 0.50)   # Right edge ">" arrow for location switch
-_ROSTER_X_POS = (0.89, 0.14)      # X close button on roster overlay
-_BUILD_CENTER_POS = (0.50, 0.50)  # Center hexagon in location detail
-_ROSTER_TAB_POS = (0.84, 0.91)
 
 # ── Room grid positions in 全體課程表 popup ──
 # Measured from actual MuMu 3840×2160 screenshots (normalized 0-1).
@@ -171,7 +185,7 @@ _ROOM_DETECT_REGIONS_NORM = [
 
 
 class ScheduleSkill(BaseSkill):
-    _LOBBY_DOT_ENTRIES = ["课程表入口", "课程表票"]
+    _LOBBY_DOT_ENTRIES = [UC.NAV_SCHEDULE, UC.SCHED_TICKET]
 
     def should_run(self, screen):
         return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
@@ -629,108 +643,98 @@ class ScheduleSkill(BaseSkill):
         self.log(f"lowest affection: {val} at ({cx:.2f},{cy:.2f})")
         return (cx, cy)
 
-    # ── Screen detection helpers ──
+    # ── Screen detection helpers (YOLO cls signatures) ──
+    #
+    # All page judgement runs off the schedule ui cls instead of OCR
+    # headers.  Region splits distinguish the two faces of SCHED_ALL
+    # (全體課程表): top-center = roster overlay header (open); bottom-right
+    # = the button that OPENS the roster (inside-location detail view).
 
+    # SCHED_ALL when it is the roster overlay TITLE (top-center band).
+    _ROSTER_HEADER_REGION = (0.15, 0.0, 0.85, 0.22)
+    # SCHED_ALL when it is the open-roster BUTTON (bottom-right).
+    _ROSTER_OPEN_BTN_REGION = (0.55, 0.78, 1.0, 1.0)
+
+    def _on_schedule_page(self, screen: ScreenState) -> bool:
+        """Any schedule surface (location-select / location-detail / roster).
+
+        Signature = detect_screen_yolo()=="Schedule" (SCHED_ALL / SCHED_TICKET
+        / SCHED_START visible) OR a school-area tile is on screen (the
+        Location-Select list shows the SCHOOL_* tiles but may carry none of
+        the SCHED_* cls)."""
+        if self.detect_screen_yolo(screen) == "Schedule":
+            return True
+        return self.find_cls(screen, _SCHOOL_TILES, conf=0.30) is not None
+
+    # Backwards-compatible alias used throughout the state machine.
     def _is_schedule(self, screen: ScreenState) -> bool:
-        """Detect schedule UI: header shows 課程 (traditional) or 课程 (simplified)."""
-        return (
-            screen.has_text("課程", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)
-            or screen.has_text("课程", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)
-            or screen.has_text("程表", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)
-        )
+        return self._on_schedule_page(screen)
 
     def _is_location_select(self, screen: ScreenState) -> bool:
-        """Detect Location Select screen (list of all locations).
+        """Detect Location Select screen (the list of all school areas).
 
-        Must distinguish from location detail (inside one location).
-        Location Select has "LocationSelect" text and/or multiple RANK entries.
-        Location Detail only has ONE RANK at the top-right.
-        """
-        if screen.has_text("LocationSelect", min_conf=0.6):
-            return True
-        # Multiple RANK entries at different y positions → list of locations
-        rank_hits = screen.find_text("RANK", min_conf=0.7)
-        if len(rank_hits) >= 2:
-            ys = sorted(b.cy for b in rank_hits)
-            if ys[-1] - ys[0] > 0.10:
-                return True
-        return False
+        Signature = at least one SCHOOL_* tile cls visible AND the roster
+        overlay is NOT open (the roster header would otherwise sit on top)."""
+        if self._find_roster_header(screen) is not None:
+            return False
+        return self.find_cls(screen, _SCHOOL_TILES, conf=0.30) is not None
+
+    def _find_roster_header(self, screen: ScreenState) -> Optional[YoloBox]:
+        """SCHED_ALL appearing as the roster overlay TITLE (top-center)."""
+        return self.find_cls(
+            screen, UC.SCHED_ALL, conf=0.30, region=self._ROSTER_HEADER_REGION,
+        )
+
+    def _find_roster_open_btn(self, screen: ScreenState) -> Optional[YoloBox]:
+        """SCHED_ALL appearing as the open-roster BUTTON (bottom-right)."""
+        return self.find_cls(
+            screen, UC.SCHED_ALL, conf=0.30, region=self._ROSTER_OPEN_BTN_REGION,
+        )
 
     def _is_roster_overlay(self, screen: ScreenState) -> bool:
-        """Detect full roster overlay (全體課程表 shown as title at top center).
+        """Detect the full roster overlay (全體課程表 title at top-center).
 
-        Wider region and partial matches for MuMu emulator compatibility.
-        """
-        # Full title match (widened region)
-        title = screen.find_any_text(
-            ["全體課程表", "全体课程表", "全體課程", "全体课程", "全體程表", "全体程表"],
-            region=(0.20, 0.02, 0.80, 0.25),
-            min_conf=0.5
-        )
-        if title:
-            return True
-        partial_title = screen.find_any_text(
-            ["程表"],
-            region=(0.20, 0.02, 0.80, 0.25),
-            min_conf=0.6
-        )
-        if partial_title and self._roster_open:
-            return True
-        if self._is_location_select(screen):
-            return False
-        # Fallback: roster overlay shows room rows ("教室" / "房間" text in center)
-        # plus the overlay has a dark background with student avatars
-        room_label = screen.find_any_text(
-            ["教室", "房間", "房间"],
-            region=(0.05, 0.15, 0.50, 0.85),
-            min_conf=0.55
-        )
-        if room_label and self._roster_open:
-            return True
-        return False
+        NOTE: SCHED_ALL here is the schedule WORK surface — NOT a popup to
+        close.  The pipeline interceptor must not dismiss it (task #3)."""
+        return self._find_roster_header(screen) is not None
 
     def _is_inside_location(self, screen: ScreenState) -> bool:
-        """Detect location detail view (inside one location, isometric building).
+        """Detect the location detail view (inside one school, iso building).
 
-        Has "全體課程表" button at bottom-right and schedule header, but is NOT
-        the Location Select list (which has multiple RANK entries).
-        """
-        if not self._is_schedule(screen):
-            return False
+        Has the 全體課程表 OPEN button (bottom-right) but the roster overlay
+        is not yet open, and it is not the Location-Select list."""
+        if self._find_roster_header(screen) is not None:
+            return False  # roster open, not the plain detail view
         if self._is_location_select(screen):
             return False
-        btn = screen.find_any_text(
-            ["全體課程表", "全体课程表"],
-            region=(0.75, 0.85, 1.0, 1.0),
-            min_conf=0.5
+        return self._find_roster_open_btn(screen) is not None
+
+    def _find_schedule_close(self, screen: ScreenState) -> Optional[YoloBox]:
+        """Find the roster close-X via YOLO BTN_CLOSE_X cls (top-right)."""
+        return self.find_cls(
+            screen, UC.BTN_CLOSE_X, conf=0.30, region=(0.70, 0.0, 0.98, 0.30),
         )
-        if btn:
-            return True
-        if screen.has_text("RANK", min_conf=0.7):
-            return True
-        return False
 
-    def _find_schedule_close(self, screen: ScreenState) -> Optional[OcrBox]:
-        """Find roster close button via OCR only (no Florence)."""
-        return screen.find_text_one(r"^[Xx×]$", region=(0.72, 0.02, 0.94, 0.28), min_conf=0.7)
-
-    def _find_schedule_switch_arrow(self, screen: ScreenState) -> Optional[OcrBox]:
-        """Find right switch arrow via OCR only (no Florence)."""
-        return screen.find_text_one(">", region=(0.90, 0.35, 1.0, 0.65), min_conf=0.7)
+    def _find_schedule_switch_arrow(self, screen: ScreenState) -> Optional[YoloBox]:
+        """Find the right location-switch arrow via YOLO ARROW_RIGHT cls."""
+        return self.find_cls(
+            screen, UC.ARROW_RIGHT, conf=0.30, region=(0.88, 0.30, 1.0, 0.70),
+        )
 
     def _close_roster_action(self, screen: ScreenState, next_state: str, reason: str) -> Dict[str, Any]:
-        """Helper to close the roster overlay and transition to next_state.
+        """Close the roster overlay and transition to next_state.
 
-        Uses YOLO X detection first, then hardcoded position fallback.
-        (OCR X detection skipped per project rule: all X buttons via YOLO only.)
-        """
+        Resolves the close-X via YOLO BTN_CLOSE_X cls.  If the cls isn't
+        visible we surface the gap (log + wait) rather than blind-clicking a
+        hardcoded corner."""
         self._roster_open = False
         close_btn = self._find_schedule_close(screen)
         if close_btn:
             self.sub_state = next_state
-            return action_click_box(close_btn, f"close roster X ({reason})")
+            return action_click_yolo(close_btn, f"close roster X ({reason}, YOLO 弹窗叉叉)")
+        self.log(f"close roster: no BTN_CLOSE_X cls ({reason}) — YOLO gap; waiting")
         self.sub_state = next_state
-        return action_click(*_ROSTER_X_POS, f"close roster X fallback ({reason})")
+        return action_wait(400, f"waiting for roster close-X cls ({reason})")
 
     # ── State handlers ──
 
@@ -743,72 +747,52 @@ class ScheduleSkill(BaseSkill):
 
         # ── Popup handling ──
 
-        # Ticket exhausted popup
+        # Schedule result / reward popup — tap the GOT_REWARD cls to dismiss
+        # (replaces OCR 獲得獎勵/日程結果 + blind center-tap).
+        got_reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        if got_reward is not None:
+            self.log("schedule result/reward popup, tapping to dismiss (YOLO 获得奖励)")
+            self._roster_open = False
+            return action_click_yolo(got_reward, "dismiss schedule result (YOLO 获得奖励)")
+
+        # Bond / region level-up full-screen splash (羈絆升級！/ 地區升級).
+        # These are tap-to-dismiss过场 surfaces the schedule can trigger by
+        # raising affinity.  Resolve via the dedicated splash cls (same as
+        # story_mining); tap anywhere advances.
+        splash = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=0.30)
+        if splash is not None:
+            self.log(f"level-up splash ({splash.cls_name}), tapping to dismiss")
+            return action_click(0.5, 0.5, f"dismiss splash ({splash.cls_name})")
+
+        # Ticket-exhausted popup.  The body text "日程券不足" has no ui cls,
+        # so the OCR guard stays (full-screen text guard — allowed); the
+        # button it dismisses is resolved via YOLO BTN_CONFIRM / BTN_CLOSE_X.
         no_ticket = screen.find_any_text(
             ["日程券不足", "日程券已用完", "沒有日程券", "没有日程券"],
             region=screen.CENTER,
             min_conf=0.6,
         )
         if no_ticket:
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確", "确"],
-                region=screen.CENTER, min_conf=0.7
+            confirm = self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=0.30, region=screen.CENTER,
             )
-            if confirm:
+            if confirm is not None:
                 self.log(f"tickets exhausted ({self._tickets_used} used)")
                 self.sub_state = "exit"
-                return action_click_box(confirm, "confirm no tickets")
+                return action_click_yolo(confirm, "confirm no tickets (YOLO 确认键)")
             close_btn = self._find_schedule_close(screen)
-            if close_btn:
+            if close_btn is not None:
                 self.sub_state = "exit"
-                return action_click_box(close_btn, "close ticket popup")
+                return action_click_yolo(close_btn, "close ticket popup (YOLO 弹窗叉叉)")
+            self.log("ticket-exhausted popup but no BTN_CONFIRM/X cls — YOLO gap; waiting")
             self.sub_state = "exit"
-            return action_click(0.5, 0.8, "dismiss ticket popup")
+            return action_wait(400, "waiting for ticket-popup button cls")
 
-        # Schedule result / reward popup — tap to dismiss
-        result = screen.find_any_text(
-            ["日程結果", "日程结果", "獲得獎勵", "获得奖励"],
-            region=screen.CENTER, min_conf=0.6
-        )
-        if result:
-            self.log("schedule result popup, tapping to dismiss")
-            self._roster_open = False
-            return action_click(0.5, 0.9, "dismiss schedule result")
-
-        # Rank-up / bond level up popup (好感度升級 / 羈絆升級)
-        # Schedule also raises bond, so these popups can appear here too.
-        if screen.find_any_text(["好感度", "Rank Up"], min_conf=0.6):
-            self.log("rank-up popup, tapping to dismiss")
-            return action_click(0.5, 0.5, "dismiss rankup popup")
-
-        # Bond level up screen (羈絆升級！) — full-screen animation
-        bond_stat = screen.find_any_text(
-            ["治愈力", "治癒力", "最大體力", "最大体力"],
-            min_conf=0.6
-        )
-        if bond_stat:
-            self.log("bond level up screen (stat text), tapping to dismiss")
-            return action_click(0.5, 0.5, "dismiss bond level up")
-
-        # Pre-level-up / bond notification screen
-        if not self._is_schedule(screen):
-            bond_notif = screen.find_any_text(
-                ["羈絆升級", "鲜升級", "羈絆點數", "羈絆"],
-                min_conf=0.6
-            )
-            if bond_notif:
-                self.log("bond notification screen, tapping to dismiss")
-                return action_click(0.5, 0.5, "dismiss bond notification")
-
-        # Generic popups
+        # Generic popups (confirm/cancel dialogs, notifications) — base helper
+        # already resolves buttons via OCR+YOLO bottom-up fallback.
         popup = self._handle_common_popups(screen)
         if popup:
             return popup
-
-        # Skip animation
-        skip = screen.find_any_text(["SKIP", "Skip", "跳過", "跳过"], min_conf=0.7)
-        if skip:
-            return action_click_box(skip, "skip schedule animation")
 
         if screen.is_loading():
             return action_wait(800, "schedule loading")
@@ -834,7 +818,7 @@ class ScheduleSkill(BaseSkill):
         return action_wait(300, "schedule unknown state")
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        current = self.detect_current_screen(screen)
+        current = self.detect_screen_yolo(screen)
         roster_overlay = self._is_roster_overlay(screen)
         inside_location = self._is_inside_location(screen)
         location_select = self._is_location_select(screen)
@@ -846,12 +830,14 @@ class ScheduleSkill(BaseSkill):
             return action_wait(500, "entered schedule")
 
         if current == "Lobby":
-            nav = self._nav_to(screen, ["課程表", "课程表", "課程", "课程", "程表"])
+            # YOLO 课程表入口 cls (lobby bottom-nav schedule icon).
+            nav = self.click_cls(screen, UC.NAV_SCHEDULE, "click schedule nav", conf=0.30)
             if nav:
                 return nav
-            return action_wait(300, "waiting for schedule button")
+            self.log("on lobby but no 课程表入口 cls — YOLO gap; waiting")
+            return action_wait(400, "waiting for 课程表入口 cls")
 
-        if current and current != "Schedule":
+        if current is not None and current != "Schedule":
             self.log(f"wrong screen '{current}', backing out")
             return action_back(f"back from {current}")
 
@@ -862,7 +848,7 @@ class ScheduleSkill(BaseSkill):
         if not self._is_schedule(screen):
             # If we're back on lobby, the skill ended — don't keep pressing
             # back (which would open the exit-game dialog and loop forever).
-            if screen.is_lobby():
+            if self.detect_screen_yolo(screen) == "Lobby":
                 self.log("on lobby, schedule already exited — finishing skill")
                 self._stale_ticks = 0
                 self.sub_state = "exit"
@@ -900,87 +886,86 @@ class ScheduleSkill(BaseSkill):
         # Full-circle safety: if we've cycled through too many locations, execute
         if self._locations_checked >= _MAX_LOCATIONS_FULL_CIRCLE:
             self.log(f"full circle done ({self._locations_checked} locations), entering for execute")
-            for loc_name in _LOCATION_NAMES:
-                loc = screen.find_text_one(loc_name, min_conf=0.6)
-                if loc:
-                    self.sub_state = "execute"
-                    self._execute_ticks = 0
-                    return action_click_box(loc, "enter location for fallback execute")
-            rank_hits = screen.find_text("RANK", min_conf=0.7)
-            if rank_hits:
-                rank_hits.sort(key=lambda b: b.cy)
-                target = rank_hits[0]
+            tile = self.find_cls(screen, _SCHOOL_TILES, conf=0.30)
+            if tile is not None:
                 self.sub_state = "execute"
                 self._execute_ticks = 0
-                return action_click(min(target.cx + 0.18, 0.75), target.cy, "enter location for fallback execute")
-            self.log("no locations found, exiting")
+                return action_click_yolo(tile, f"enter location for fallback execute (YOLO {tile.cls_name})")
+            self.log("no school-tile cls found for fallback execute — YOLO gap; exiting")
             self.sub_state = "exit"
-            return action_wait(300, "no locations found")
+            return action_wait(300, "no school tiles found")
 
-        # First entry: always start at 夏莱办公室 (the first location)
+        # First entry: always start at 夏莱办公室 (the full-circle anchor).
         if not self._starting_location:
-            for loc_name in ["夏莱公室", "夏莱辦公室", "夏莱办公室"]:
-                loc = screen.find_text_one(loc_name, min_conf=0.6)
-                if loc:
-                    self._starting_location = loc.text
-                    self._visited_locations.add(loc.text)
-                    self.log(f"starting at '{loc.text}' (will full-circle back)")
-                    self.sub_state = "check_roster"
-                    self._roster_open = False
-                    self._wait_ticks = 0
-                    return action_click_box(loc, f"enter location '{loc.text}'")
-            # 夏莱 not visible — click first available location
-            for loc_name in _LOCATION_NAMES:
-                loc = screen.find_text_one(loc_name, min_conf=0.6)
-                if loc:
-                    self._starting_location = loc.text
-                    self._visited_locations.add(loc.text)
-                    self.log(f"starting at '{loc.text}' (夏莱 not visible)")
-                    self.sub_state = "check_roster"
-                    self._roster_open = False
-                    self._wait_ticks = 0
-                    return action_click_box(loc, f"enter location '{loc.text}'")
-            # Fallback: click first RANK entry
-            rank_hits = screen.find_text("RANK", min_conf=0.7)
-            if rank_hits:
-                rank_hits.sort(key=lambda b: b.cy)
-                self._starting_location = "RANK"
+            office = self.find_cls(screen, UC.SCHOOL_OFFICE, conf=0.30)
+            if office is not None:
+                self._starting_location = office.cls_name
+                self._visited_locations.add(office.cls_name)
+                self.log(f"starting at '{office.cls_name}' (will full-circle back)")
                 self.sub_state = "check_roster"
                 self._roster_open = False
                 self._wait_ticks = 0
-                return action_click_box(rank_hits[0], "enter first location via RANK")
-
-        # Subsequent entries from Location Select (after back from switch_location)
-        for loc_name in _LOCATION_NAMES:
-            loc = screen.find_text_one(loc_name, min_conf=0.6)
-            if loc and loc.text not in self._visited_locations:
-                self._visited_locations.add(loc.text)
-                self.log(f"clicking location '{loc.text}' (new)")
+                return action_click_yolo(office, f"enter location '{office.cls_name}'")
+            # 办公室 tile not visible — start at the first visible school tile.
+            tile = self._first_visible_school_tile(screen)
+            if tile is not None:
+                self._starting_location = tile.cls_name
+                self._visited_locations.add(tile.cls_name)
+                self.log(f"starting at '{tile.cls_name}' (办公室 not visible)")
                 self.sub_state = "check_roster"
                 self._roster_open = False
                 self._wait_ticks = 0
-                return action_click_box(loc, f"enter location '{loc.text}'")
+                return action_click_yolo(tile, f"enter location '{tile.cls_name}'")
+            self.log("no school-tile cls visible to start — YOLO gap; waiting")
+            return action_wait(400, "waiting for school-tile cls")
 
-        # All known names visited — click any RANK entry
-        rank_hits = screen.find_text("RANK", min_conf=0.7)
-        if rank_hits:
-            rank_hits.sort(key=lambda b: b.cy)
-            target = rank_hits[0]
-            self.log(f"all locations visited, clicking RANK at ({target.cx:.2f},{target.cy:.2f})")
+        # Subsequent entries from Location Select: click the first UNVISITED
+        # school tile (top-to-bottom). Visited tracked by cls_name.
+        tile = self._first_visible_school_tile(screen, skip_visited=True)
+        if tile is not None:
+            self._visited_locations.add(tile.cls_name)
+            self.log(f"clicking location '{tile.cls_name}' (new)")
             self.sub_state = "check_roster"
             self._roster_open = False
             self._wait_ticks = 0
-            return action_click(min(target.cx + 0.18, 0.75), target.cy, "enter location via RANK (all visited)")
+            return action_click_yolo(tile, f"enter location '{tile.cls_name}'")
 
-        return action_wait(500, "looking for locations")
+        # All cls-backed school tiles visited. The remaining regions
+        # (百鬼夜行 / 紅冬 / 山海經 / 瓦爾基里 / SRT / 聯邦學園) have no cls —
+        # documented gap. Re-enter the first visible tile so we still execute
+        # whatever rooms remain rather than stalling.
+        tile = self._first_visible_school_tile(screen)
+        if tile is not None:
+            self.log(f"all cls tiles visited, re-entering '{tile.cls_name}' (no-cls regions are a gap)")
+            self.sub_state = "check_roster"
+            self._roster_open = False
+            self._wait_ticks = 0
+            return action_click_yolo(tile, f"enter location '{tile.cls_name}' (all visited)")
+
+        self.log("no school-tile cls visible — YOLO gap; waiting")
+        return action_wait(500, "looking for school-tile cls")
+
+    def _first_visible_school_tile(
+        self, screen: ScreenState, *, skip_visited: bool = False,
+    ) -> Optional[YoloBox]:
+        """Return the top-most school-area tile cls on the Location-Select
+        screen (optionally skipping ones already in _visited_locations).
+
+        Ordered top-to-bottom (cy then cx) so cycling is deterministic."""
+        tiles = self.find_all_cls(screen, _SCHOOL_TILES, conf=0.30)
+        if skip_visited:
+            tiles = [t for t in tiles if t.cls_name not in self._visited_locations]
+        if not tiles:
+            return None
+        return min(tiles, key=lambda b: (round(b.cy, 3), b.cx))
 
     def _detect_current_location(self, screen: ScreenState) -> str:
-        """Detect the current location name from the building detail view header."""
-        for loc_name in _LOCATION_NAMES:
-            hit = screen.find_text_one(loc_name, region=(0.60, 0.10, 1.0, 0.25), min_conf=0.6)
-            if hit:
-                return hit.text
-        return ""
+        """Detect the current location from the detail-view via school tile cls.
+
+        Best-effort bookkeeping for _visited_locations only (never a click).
+        Returns the cls_name of any school tile visible, or ""."""
+        tile = self.find_cls(screen, _SCHOOL_TILES, conf=0.30)
+        return tile.cls_name if tile is not None else ""
 
     def _check_roster(self, screen: ScreenState) -> Dict[str, Any]:
         """Inside a location: open roster, check for targets/locks, decide."""
@@ -999,17 +984,15 @@ class ScheduleSkill(BaseSkill):
         self._wait_ticks = 0
 
         # Recovery: if roster was open but now it's gone (accidentally closed),
-        # try to re-open the 全體課程表 button
+        # try to re-open the 全體課程表 button (YOLO SCHED_ALL, bottom-right).
         if not roster_overlay and self._roster_open:
             self.log("roster was open but closed unexpectedly, re-opening")
             self._roster_open = False
             self._roster_scan_ticks = 0
-            full_tab = screen.find_any_text(
-                ["全體課程表", "全体课程表"],
-                region=(0.60, 0.80, 1.0, 1.0), min_conf=0.5
-            )
-            if full_tab:
-                return action_click_box(full_tab, "re-open roster after accidental close")
+            full_tab = self._find_roster_open_btn(screen)
+            if full_tab is not None:
+                return action_click_yolo(full_tab, "re-open roster after accidental close (YOLO 全体课程表)")
+            self.log("re-open: no SCHED_ALL button cls — YOLO gap; waiting")
             return action_wait(300, "looking for roster button to re-open")
 
         # Detect current location name (visible in building detail header)
@@ -1113,7 +1096,11 @@ class ScheduleSkill(BaseSkill):
                 self._start_clicked = False
                 return action_click(click_x, click_y, f"click room slot {slot_name}")
 
-            # All rooms done/locked/already-clicked → switch to next location
+            # All rooms done/locked/already-clicked, OR room-status pixel
+            # check returned all-unknown (couldn't read the cards) → switch
+            # to next location. The room picker is the preserved pixel/coord
+            # logic above; we no longer OCR-click room names as a fallback
+            # (iron rule: no OCR button finding).
             any_known = any(s != "unknown" for s in statuses)
             if any_known:
                 done_count = sum(1 for s in statuses if s == "done")
@@ -1121,69 +1108,38 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"no available room (done={done_count}/{_NUM_ROOMS}, clicked={clicked_count}), switching location")
                 return self._close_roster_action(screen, "switch_location", "no available rooms")
 
-            # OCR fallback: find room names via OCR and click one (prefer higher tier = later in list)
-            _ROOM_NAMES = [
-                "視聽室", "體育館", "圖書館",
-                "教室", "實驗室", "射擊場",
-                "載具庫",
-                # Simplified variants
-                "视听室", "体育馆", "图书馆",
-                "实验室", "射击场", "载具库",
-            ]
-            found_rooms = []
-            for name in _ROOM_NAMES:
-                hit = screen.find_text_one(name, region=(0.08, 0.15, 0.92, 0.85), min_conf=0.40)
-                if hit:
-                    found_rooms.append(hit)
+            self.log("room statuses all-unknown (pixel read failed), switching location")
+            return self._close_roster_action(screen, "switch_location", "no rooms detected")
 
-            if found_rooms:
-                # Click the last found room (higher tier rooms are listed later)
-                target = found_rooms[-1]
-                self.log(f"clicking room '{target.text}' at ({target.cx:.3f},{target.cy:.3f}) in roster popup")
-                self._roster_open = False
-                self.sub_state = "execute"
-                self._execute_ticks = 0
-                self._start_clicked = False
-                return action_click_box(target, f"click room {target.text}")
-
-            # No room names found — switch to next location
-            self.log("no room names found in roster, switching location")
-            return self._close_roster_action(screen, "switch_location", "no rooms found")
-
-        # Not in roster overlay — open it if we haven't yet
+        # Not in roster overlay — open it if we haven't yet (YOLO SCHED_ALL btn).
         if not self._roster_open:
-            full_tab = screen.find_any_text(
-                ["全體課程表", "全体课程表"],
-                region=(0.60, 0.80, 1.0, 1.0),
-                min_conf=0.5
-            )
-            if full_tab:
-                self.log(f"clicking '{full_tab.text}' to view roster")
+            full_tab = self._find_roster_open_btn(screen)
+            if full_tab is not None:
+                self.log(f"clicking '{full_tab.cls_name}' to view roster (YOLO)")
                 self._roster_open = True
                 self._roster_scan_ticks = 0
-                return action_click_box(full_tab, "open full schedule roster")
+                return action_click_yolo(full_tab, "open full schedule roster (YOLO 全体课程表)")
 
             if self._wait_ticks < 2:
                 self._wait_ticks += 1
-                return action_wait(300, "looking for 全體課程表")
+                return action_wait(300, "looking for 全体课程表 cls")
 
-            self.log("full roster button not found, clicking roster fallback area")
-            self._roster_open = True
+            # Button cls not visible after grace ticks — surface the gap
+            # rather than blind-clicking a hardcoded tab corner.
+            self.log("full roster button cls not found — YOLO gap; switching location")
             self._roster_scan_ticks = 0
             self._wait_ticks = 0
-            return action_click(*_ROSTER_TAB_POS, "open full schedule roster fallback")
+            self._locations_checked += 1
+            self.sub_state = "switch_location"
+            return action_wait(300, "roster button cls missing, switching")
 
-        # Roster was opened but overlay detection failed (YOLO/OCR miss).
+        # Roster was opened but overlay detection failed (YOLO miss).
         # Give it a few ticks grace period before giving up.
         self._roster_scan_ticks += 1
-        retry_tab = screen.find_any_text(
-            ["全體課程表", "全体课程表"],
-            region=(0.60, 0.80, 1.0, 1.0),
-            min_conf=0.5
-        )
-        if retry_tab and self._roster_scan_ticks <= 2:
-            self.log("roster overlay missing after open, retrying roster button")
-            return action_click_box(retry_tab, "retry open full schedule roster")
+        retry_tab = self._find_roster_open_btn(screen)
+        if retry_tab is not None and self._roster_scan_ticks <= 2:
+            self.log("roster overlay missing after open, retrying roster button (YOLO)")
+            return action_click_yolo(retry_tab, "retry open full schedule roster (YOLO 全体课程表)")
         if self._roster_scan_ticks <= 3:
             return action_wait(400, f"waiting for roster overlay to appear ({self._roster_scan_ticks}/3)")
 
@@ -1211,8 +1167,8 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "back at location select")
 
         right = self._find_schedule_switch_arrow(screen)
-        if right:
-            self.log("clicking right switch")
+        if right is not None:
+            self.log("clicking right switch (YOLO 右切换)")
             self.sub_state = "check_roster"
             self._roster_open = False
             self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
@@ -1220,27 +1176,18 @@ class ScheduleSkill(BaseSkill):
             self._clicked_rooms_this_location = set()
             if self._avatar_clf is not None:
                 self._avatar_clf.reset_buffer(reason="right-arrow location switch")
-            return action_click_box(right, "right switch")
+            return action_click_yolo(right, "right switch (YOLO 右切换)")
 
-        # Hardcoded fallback: click right arrow position (visible as ">" on right edge)
-        if self._switch_ticks <= 3:
-            self.log("clicking right arrow at hardcoded position")
-            self.sub_state = "check_roster"
-            self._roster_open = False
-            self._wait_ticks = -2  # cooldown: skip 2 ticks for location transition
-            self._roster_scan_ticks = 0
-            self._clicked_rooms_this_location = set()
-            if self._avatar_clf is not None:
-                self._avatar_clf.reset_buffer(reason="hardcoded-arrow location switch")
-            return action_click(*_RIGHT_ARROW_POS, "right arrow (hardcoded)")
-
-        # If still stuck after many attempts, go back to Location Select
-        if self._switch_ticks > 6:
-            self.log("switch stuck, going back to location select")
+        # ARROW_RIGHT cls not visible. Rather than blind-click a hardcoded
+        # right-edge coord (iron rule), back out to Location Select and pick
+        # the next unvisited tile there — a clean state-machine path.
+        if self._switch_ticks > 3:
+            self.log("switch arrow cls missing, going back to location select")
             self.sub_state = "select_location"
-            return action_back("back to location select (switch stuck)")
+            return action_back("back to location select (no ARROW_RIGHT cls)")
 
-        return action_wait(400, "looking for switch arrows")
+        self.log("no ARROW_RIGHT cls — YOLO gap; waiting")
+        return action_wait(400, "looking for ARROW_RIGHT switch cls")
 
     def _execute(self, screen: ScreenState) -> Dict[str, Any]:
         """Wait for room info popup → click 開始 → animation → report → confirm → loop.
@@ -1266,7 +1213,7 @@ class ScheduleSkill(BaseSkill):
 
         # ── Handle non-schedule screens (animation, bond popups, etc.) ──
         if not self._is_schedule(screen):
-            if screen.is_lobby():
+            if self.detect_screen_yolo(screen) == "Lobby":
                 self.log("drifted to lobby during schedule execute, re-entering schedule")
                 self._animation_ticks = 0
                 self._execute_ticks = 0
@@ -1276,11 +1223,9 @@ class ScheduleSkill(BaseSkill):
                 self.sub_state = "enter"
                 return action_wait(300, "re-enter schedule from lobby")
 
-            start_visible = screen.find_any_text(
-                ["課程表開始", "课程表開始", "课程表开始", "開始", "开始"],
-                min_conf=0.5,
-            )
-            if start_visible:
+            # Start button (SCHED_START) visible mid-transition → proceed.
+            start_visible = self.find_cls(screen, UC.SCHED_START, conf=0.30)
+            if start_visible is not None:
                 pass  # Fall through to start-button logic
             else:
                 self._animation_ticks += 1
@@ -1303,27 +1248,21 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "tickets exhausted")
 
         # ── PRIORITY 1: Report popup (schedule just finished) ──
-        # OCR often misses the stylized 確認 button on blue background.
-        # If we see the report title, click the confirm button at known position.
-        report_popup = screen.find_any_text(
-            ["課程表報告", "课程表报告"],
-            region=(0.30, 0.10, 0.70, 0.30), min_conf=0.5
+        # The 課程表報告 result popup's only actionable is its blue 確認
+        # button. Resolve it via YOLO BTN_CONFIRM in the center-bottom band.
+        # (No SCHED_START/SCHED_ALL here yet — so a BTN_CONFIRM in this band
+        # means the report popup, not a room-info start.)
+        report_confirm = self.find_cls(
+            screen, UC.BTN_CONFIRM, conf=0.30, region=(0.30, 0.55, 0.70, 0.92),
         )
-        report_confirm = screen.find_any_text(
-            ["確認", "确认"],
-            region=(0.30, 0.60, 0.70, 0.90), min_conf=0.5
-        )
-        if report_popup or report_confirm:
-            self.log(f"schedule report confirmed (ticket #{self._tickets_used})")
+        if report_confirm is not None and self.find_cls(screen, UC.SCHED_START, conf=0.30) is None:
+            self.log(f"schedule report confirmed (ticket #{self._tickets_used}, YOLO 确认键)")
             self._start_clicked = False
             self._execute_ticks = 0
             self._roster_open = True  # game re-opens roster after report
             self._roster_scan_ticks = 0
             self.sub_state = "check_roster"
-            if report_confirm:
-                return action_click_box(report_confirm, "confirm schedule report")
-            # OCR missed 確認 button — click at known position (center-bottom of popup)
-            return action_click(0.50, 0.82, "confirm schedule report (hardcoded)")
+            return action_click_yolo(report_confirm, "confirm schedule report (YOLO 确认键)")
 
         # If we already clicked 開始, do not click it repeatedly every tick.
         # Wait a few ticks for transition/animation before retrying.
@@ -1335,25 +1274,15 @@ class ScheduleSkill(BaseSkill):
             else:
                 return action_wait(500, "waiting for schedule to start")
 
-        # ── PRIORITY 2: Start button (room info popup open) ──
-        start = screen.find_any_text(
-            ["課程表開始", "课程表開始", "课程表开始",
-             "開始日程", "开始日程", "START"],
-            min_conf=0.5,
-        )
-        if not start:
-            start = screen.find_any_text(
-                ["開始", "开始"],
-                region=(0.25, 0.60, 0.75, 0.95),
-                min_conf=0.6,
-            )
-        if start:
-            self.log(f"starting schedule #{self._tickets_used + 1}: '{start.text}'")
+        # ── PRIORITY 2: Start button (room info popup open) — YOLO SCHED_START.
+        start = self.find_cls(screen, UC.SCHED_START, conf=0.30)
+        if start is not None:
+            self.log(f"starting schedule #{self._tickets_used + 1} (YOLO 课程表开始)")
             self._tickets_used += 1
             self._roster_open = False
             self._start_clicked = True
             self._execute_ticks = 0
-            return action_click_box(start, "start schedule")
+            return action_click_yolo(start, "start schedule (YOLO 课程表开始)")
 
         # ── PRIORITY 3: Location Select → re-enter ──
         if self._is_location_select(screen):
@@ -1377,28 +1306,25 @@ class ScheduleSkill(BaseSkill):
             self.sub_state = "check_roster"
             return action_wait(300, "back to check_roster (roster reappeared)")
 
-        # ── PRIORITY 5: Click avatar icons on location map ──
-        # Avatar icons on the isometric map are the clickable elements.
-        # Each avatar has a small affection number (10-30) below it.
-        # Click directly ON the avatar icon (slightly above the number).
-        avatar_nums = screen.find_text(
-            r"^\d{1,2}$", region=(0.05, 0.15, 0.95, 0.90), min_conf=0.45
-        )
-        avatar_nums = [b for b in avatar_nums if b.text.isdigit() and 5 <= int(b.text) <= 40]
-        if avatar_nums:
-            idx = (self._execute_ticks - 1) % len(avatar_nums)
-            target = avatar_nums[idx]
-            # Click slightly above the number — the avatar icon is just above it
-            click_y = max(0.08, target.cy - 0.04)
-            self.log(f"clicking avatar icon '{target.text}' at ({target.cx:.2f},{click_y:.2f})")
-            return action_click(target.cx, click_y,
-                                f"click avatar {target.text}")
-
-        # Fallback: click center area
-        return action_click(0.50, 0.45, "click map center fallback")
+        # ── PRIORITY 5: No SCHED_START / report / roster cls visible ──
+        # The room-info popup should have opened from the _ROOM_CLICK_POS
+        # click in _check_roster. If SCHED_START never appears, the
+        # _execute_ticks>8 guard above kicks us to the next location. We do
+        # NOT blind-click avatar icons / map center (iron rule) — surface
+        # the gap and wait.
+        self.log("no SCHED_START/report/roster cls in execute — YOLO gap; waiting")
+        return action_wait(400, "execute: waiting for SCHED_START cls")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        if screen.is_lobby():
+        # On lobby iff YOLO nav-icon signature present.
+        if self.detect_screen_yolo(screen) == "Lobby":
             self.log("back in lobby, done")
             return action_done("schedule complete")
-        return action_back("schedule exit: back to lobby")
+        # Prefer YOLO home/back button over blind ESC.
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_yolo(home, "schedule exit: home button (YOLO 回大厅)")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_yolo(back, "schedule exit: back button (YOLO 返回键)")
+        return action_back("schedule exit: ESC toward lobby")

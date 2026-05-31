@@ -41,22 +41,76 @@ TRAIN_SOURCES = [
     "run_20260527_094158",           # craft 补录 (149)
     "run_20260527_101545",           # craft 补录 (15)
     "run_20260518_002646",           # tiny补 — covers cls 97 活动剧情_已选择 (2)
+    "run_20260529_000756",           # 新capture: lobby入口文字重标 + momotalk按钮 (34)
+    "run_20260529_123209",           # 新capture: YOLO预标 + 手工补标 (506)
+    "_synth_bond",                   # overlay 合成: 441/442 贴多样背景 (300, 真帧仅2-4)
+    "_synth_bond_goto",              # avatar-slot 合成: 441+449 momotalk对话屏换头像 (300)
+    "_synth_bond_enter",            # avatar-slot 合成: 442+449 羁绊面板屏换头像 (300)
     # NOTE: run_20260518_163513 / run_20260228_* / run_20260307_* are
     # fused_avatar labels (character heads), NOT UI — DO NOT include.
+    # _synth_* dirs are UI-synth output (build_ui_synth.py) — add as needed.
 ]
 VAL_SOURCE = "_ui_val_pool"
 
+# Classes to drop entirely when building (bad/un-learnable labels).
+# NONE currently. cls 92 (战术大赛对战选择区域) was dropped on a bogus
+# "recall 0.0 even on train" reading — but v3 detects ALL opponent-row regions
+# cleanly (verified on a live 戰術大賽 screenshot), so it IS learnable and is in
+# fact the cleanest arena opponent-select signal (bounds each opponent row, no
+# avatar model needed). Kept for v5.
+DROP_CLASSES: set = set()
 
-def link_pair(src_jpg: Path, src_txt: Path, dst_jpg: Path, dst_txt: Path):
-    """Symlink (or copy if FS rejects) a (jpg, txt) pair into dst paths."""
-    for src, dst in [(src_jpg, dst_jpg), (src_txt, dst_txt)]:
-        if dst.exists():
-            dst.unlink()
+
+def sanitize_label_text(text: str) -> str:
+    """Clean YOLO label content: keep first 5 tokens per line (cls cx cy w h),
+    validate int+4floats, drop DROP_CLASSES + invalid lines.
+
+    The annotation tool sometimes appends trailing tokens (e.g. ``<angle> rect``
+    or ``conf rect``) which makes YOLO treat the frame as CORRUPT and silently
+    drop it. Truncating to 5 tokens fixes that. Returns cleaned text (with a
+    trailing newline if non-empty), preserving empty files as "" (negatives).
+    """
+    out_lines = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        parts = parts[:5]
         try:
-            # Resolve to real file in case src is itself a symlink (oversample copies)
-            dst.symlink_to(src.resolve())
-        except OSError:
-            shutil.copy2(src, dst)
+            cls = int(parts[0])
+            coords = [float(x) for x in parts[1:5]]
+        except ValueError:
+            continue
+        if cls in DROP_CLASSES:
+            continue
+        out_lines.append(f"{cls} {coords[0]} {coords[1]} {coords[2]} {coords[3]}")
+    return ("\n".join(out_lines) + "\n") if out_lines else ""
+
+
+def link_pair(src_jpg: Path, src_txt: Path, dst_jpg: Path, dst_txt: Path) -> str:
+    """Symlink (or copy if FS rejects) the jpg, and write a SANITIZED copy of
+    the txt into dst paths.
+
+    The label is parse+rewritten (not symlinked) so trailing ``rect``/``conf``/
+    angle tokens are stripped and DROP_CLASSES lines removed — symlinking would
+    propagate the corrupt source verbatim. Returns the cleaned label text so
+    callers can tally negatives without re-reading.
+    """
+    if dst_jpg.exists():
+        dst_jpg.unlink()
+    try:
+        # Resolve to real file in case src is itself a symlink (oversample copies)
+        dst_jpg.symlink_to(src_jpg.resolve())
+    except OSError:
+        shutil.copy2(src_jpg, dst_jpg)
+
+    cleaned = sanitize_label_text(src_txt.read_text(encoding="utf-8"))
+    if dst_txt.exists():
+        dst_txt.unlink()
+    dst_txt.write_text(cleaned, encoding="utf-8")
+    return cleaned
 
 
 def main() -> int:
@@ -121,10 +175,9 @@ def main() -> int:
             stem = f"{s}__{jpg.stem}"
             dst_jpg = img_train / f"{stem}.jpg"
             dst_txt = lbl_train / f"{stem}.txt"
-            link_pair(jpg, txt, dst_jpg, dst_txt)
-            # Tally empty vs non-empty
-            lines = [l for l in txt.read_text(encoding="utf-8").splitlines() if l.strip()]
-            if not lines:
+            cleaned = link_pair(jpg, txt, dst_jpg, dst_txt)
+            # Tally empty vs non-empty (use sanitized output, not raw source)
+            if not cleaned.strip():
                 train_negatives += 1
             train_added += 1
         print(f"[train] {s}: +{train_added - n_before} frames")
@@ -149,9 +202,8 @@ def main() -> int:
         stem = jpg.stem
         dst_jpg = img_val / f"{stem}.jpg"
         dst_txt = lbl_val / f"{stem}.txt"
-        link_pair(jpg, txt, dst_jpg, dst_txt)
-        lines = [l for l in txt.read_text(encoding="utf-8").splitlines() if l.strip()]
-        if not lines:
+        cleaned = link_pair(jpg, txt, dst_jpg, dst_txt)
+        if not cleaned.strip():
             val_empty += 1
         val_added += 1
     print(f"[val] total {val_added} frames added (skipped {val_skipped} unpaired, "

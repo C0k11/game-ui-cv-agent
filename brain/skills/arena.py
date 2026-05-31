@@ -1,23 +1,22 @@
 """ArenaSkill: Handle 戰術對抗賽 (Tactical PvP Arena) daily routine.
 
-Flow:
-1. ENTER: From lobby, click 戰術對抗賽
-2. CLAIM_REWARDS: Claim daily ranking rewards
-3. CHECK_TICKETS: Parse remaining fight count (X/5)
-4. SELECT_OPPONENT: Pick bottommost opponent (easiest win or fast loss)
-5. FIGHT: Click 出擊 → skip battle → handle result
-6. Loop back to CHECK_TICKETS until 0
-7. EXIT: Back to lobby
+PURE-YOLO (2026-05-29): all navigation + clicking goes through the UI YOLO
+model's cls names (NO OCR — `screen.ocr_boxes` is empty). cls constants live
+in brain/skills/ui_classes.py. Counts (tickets X/5, cooldown timer) are read
+from DIGITS via OCR — that path is DEFERRED (OCR re-enabled later, digit-only),
+so for bring-up we drive the flow by BUTTON STATE + safety caps instead of
+parsed numbers. Every removed count check is marked `# DIGIT-DEFERRED:`.
 
-Key patterns:
-- Header: "戰術對抗賽" / "战术对抗赛"
-- Rewards: "領取獎勵" / "领取奖励"
-- Ticket: "剩余 X/5" or "X/5"
-- Battle: "出擊" / "出击" / "跳過" / "Skip"
+Flow:
+1. ENTER: lobby → 任务大厅入口(NAV_TASKS) → hub → 战术大赛(HUB_ARENA) tile
+2. CLAIM_REWARDS: claim daily ranking rewards (领取奖励_黄)
+3. CHECK_TICKETS: (DIGIT-DEFERRED) gate by fight cap + button state
+4. SELECT_OPPONENT: click top opponent row (no cls for rows → fixed pos)
+5. FIGHT: 攻击编制(ATTACK_FORMATION) → 跳过战斗 + 出击(SORTIE) → result
+6. Loop until cap / no tickets, then EXIT to lobby
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Dict
 
 from brain.skills.base import (
@@ -25,79 +24,93 @@ from brain.skills.base import (
     action_click, action_click_box, action_click_yolo,
     action_wait, action_back, action_done,
 )
+from brain.skills import ui_classes as UC
 
 
 class ArenaSkill(BaseSkill):
+    # DIGIT-DEFERRED: can't read the X/5 ticket count without OCR digits.
+    # Daily max is 5 fights; cap there as a safety bound. The flow also
+    # exits early when it can't actually start a fight (出击 greyed/absent).
+    # Daily max is 5 PVP fights — cap there as a safety bound.
+    _MAX_FIGHTS_BRINGUP = 5
+    # Blind cooldown between fights (~30s real cooldown; can't read the
+    # timer without OCR). 0.8s/tick ADB → ~38 ticks. DIGIT-DEFERRED.
+    _COOLDOWN_TICKS = 38
+
     def __init__(self):
         super().__init__("Arena")
-        self.max_ticks = 200  # increased for cooldown waits
-        self._tickets_remaining: int = -1
+        self.max_ticks = 300
         self._fights_done: int = 0
         self._claim_ticks: int = 0
         self._claim_clicks: int = 0
-        self._fight_stage: int = 0  # 0=opponent popup, 1=formation, 2=battle
+        self._fight_stage: int = 0   # 0=opponent popup, 1=formation, 2=battle
         self._fight_ticks: int = 0
-        self._cooldown_ticks: int = 0  # wait ticks after a fight (30s cooldown)
+        self._skip_clicked: bool = False  # per-fight 跳过战斗 toggled?
+        self._cooldown_ticks: int = 0
+        self._check_ticks: int = 0
+        self._result_pending: bool = False  # battle-result dialog dedup
 
     def reset(self) -> None:
         super().reset()
-        self._tickets_remaining = -1
         self._fights_done = 0
         self._claim_ticks = 0
         self._claim_clicks = 0
         self._fight_stage = 0
         self._fight_ticks = 0
+        self._skip_clicked = False
         self._cooldown_ticks = 0
+        self._check_ticks = 0
+        self._result_pending = False
+        self._select_attempts = 0
+        self._enter_ticks = 0   # FIX: was never reset → stale count caused
+        self._hub_clicks = 0    # premature ESC right after clicking the tile
 
-    def _is_arena(self, screen: ScreenState) -> bool:
-        return self._is_arena_screen(screen)
+    # ── screen detection (pure YOLO) ─────────────────────────────────
+    def _is_arena_screen(self, screen: ScreenState) -> bool:
+        """In arena if the ticket icon (main screen) OR the formation
+        buttons (攻击编制 / 出击) are visible."""
+        return bool(
+            self.find_cls(screen, UC.TICKET_ARENA, conf=0.30)
+            or self.find_cls(screen, UC.ATTACK_FORMATION, conf=0.30)
+            or self.find_cls(screen, UC.SORTIE, conf=0.30)
+        )
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
-
         if self.ticks >= self.max_ticks:
             self.log("timeout")
             return action_done("arena timeout")
 
-        # Battle result — dismiss and loop back to check_tickets.
-        # The "WIN"/"LOSE" substring match was too loose: it caught
-        # ANY OCR box containing those letters (e.g. "Window" inside
-        # mistakenly-OCR'd desktop text → false-positive battle result
-        # logged "BackgroundtaskcompletedBackground...command").  Use
-        # the Chinese full words first (high specificity), then fall
-        # back to word-boundary regex for English so partial overlaps
-        # don't fire.
-        battle_result = screen.find_any_text(
-            ["戰鬥結果", "战斗结果", "勝利", "胜利", "敗北", "败北",
-             "Victory", "Defeat"],
-            region=screen.CENTER, min_conf=0.6
-        )
-        if not battle_result:
-            battle_result = screen.find_text_one(
-                r"(?:^|[^A-Za-z])(?:WIN|LOSE)(?:[^A-Za-z]|$)",
-                region=screen.CENTER, min_conf=0.6,
-            )
-        if battle_result:
-            self.log(f"battle result: {battle_result.text}")
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确", "OK"],
-                min_conf=0.6
-            )
-            if confirm:
+        # ── Battle-result dialog (戰鬥結果 WIN/LOSE) → confirm, fight done ──
+        # The dialog shows WIN *or* LOSE with a centered 确认键 (a LOSE has
+        # neither 战斗胜利 nor 获得奖励). It can land while we're in fight /
+        # check_tickets / select_opponent, and it sits OVER the arena screen
+        # (持有票券/TICKET_ARENA visible behind it), so it MUST be handled from
+        # ALL those states — otherwise the dialog blocks opponent clicks and we
+        # loop forever "waiting for 對戰對象 popup" (the t0103-0153 bug, where a
+        # stage-2 TICKET_ARENA check matched the dialog's background and falsely
+        # declared the fight done). _result_pending dedups so one dialog counts
+        # as one fight even if it persists a few ticks.
+        if self.sub_state in ("fight", "check_tickets", "select_opponent"):
+            res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
+                                        region=(0.34, 0.55, 0.66, 0.80))
+            res_marker = (self.find_cls(screen, UC.BATTLE_WIN, conf=0.35)
+                          or self.find_cls(screen, UC.GOT_REWARD, conf=0.35))
+            if res_confirm or res_marker:
+                if not self._result_pending:
+                    self._fights_done += 1
+                    self._result_pending = True
+                    self.log(f"fight {self._fights_done} result → dismiss")
                 self._fight_stage = 0
                 self._fight_ticks = 0
-                self._fights_done += 1
+                self._skip_clicked = False
+                self._cooldown_ticks = 0
                 self.sub_state = "check_tickets"
-                return action_click_box(confirm, "dismiss battle result")
-            return action_click(0.5, 0.9, "tap to dismiss battle result")
-
-        # EXP bar / rank-up screen — tap to dismiss
-        exp_screen = screen.find_any_text(
-            ["經驗值", "经验值", "EXP", "Touch to Continue"],
-            min_conf=0.6
-        )
-        if exp_screen:
-            return action_click(0.5, 0.5, "dismiss exp/rank screen")
+                if res_confirm:
+                    return action_click_box(res_confirm, "dismiss battle result (确认键)")
+                return action_click(0.5, 0.9, "tap to dismiss battle result")
+            else:
+                self._result_pending = False
 
         popup = self._handle_common_popups(screen)
         if popup:
@@ -105,17 +118,6 @@ class ArenaSkill(BaseSkill):
 
         if screen.is_loading():
             return action_wait(800, "arena loading")
-
-        # If 對戰對象 popup is open but we're NOT in fight mode, close it.
-        # This happens when a double-click on campaign entry accidentally opens
-        # the popup with the wrong (bottom) opponent.
-        if self.sub_state not in ("fight", ""):
-            vs_marker = screen.find_any_text(
-                ["VS"], region=(0.35, 0.35, 0.65, 0.55), min_conf=0.8
-            )
-            if vs_marker:
-                self.log("opponent popup unexpectedly open, closing")
-                return action_back("close opponent popup")
 
         if self.sub_state == "":
             self.sub_state = "enter"
@@ -132,379 +134,226 @@ class ArenaSkill(BaseSkill):
             return self._fight(screen)
         if self.sub_state == "exit":
             return self._exit(screen)
-
         return action_wait(300, "arena unknown state")
 
-    def _is_arena_screen(self, screen: ScreenState) -> bool:
-        """Detect arena screen via unique markers (header OCR is unreliable).
-
-        Arena screen has: "對戰對象" / "對手情報", "攻擊編制",
-        "持有票券" with X/5 pattern.
-        """
-        # Check header region for any arena-like text (including partial OCR)
-        header = screen.find_any_text(
-            ["戰術大賽", "战术大赛", "戰術對抗", "战术对抗",
-             "術大赛", "術大賽", "大賽", "大赛"],
-            region=(0.0, 0.0, 0.3, 0.08), min_conf=0.5
-        )
-        if header:
-            return True
-        # Fallback: arena-specific UI elements
-        opponent = screen.find_any_text(
-            ["對戰對象", "对战对象", "對對象", "對手情報", "对手情报"],
-            region=(0.2, 0.08, 0.7, 0.50), min_conf=0.7
-        )
-        if opponent:
-            return True
-        attack = screen.find_any_text(
-            ["攻擊編制", "攻击编制", "攻撃编制", "攻擎编制", "攻擎編制"],
-            region=(0.3, 0.70, 0.7, 0.90), min_conf=0.5
-        )
-        if attack:
-            return True
-        return False
-
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        self._enter_ticks = getattr(self, '_enter_ticks', 0) + 1
+        self._enter_ticks = getattr(self, "_enter_ticks", 0) + 1
         current = self.detect_current_screen(screen)
 
-        # Direct arena screen detection (header OCR often fails)
         if current == "PVP" or self._is_arena_screen(screen):
             self.log("inside arena")
             self.sub_state = "claim_rewards"
             return action_wait(500, "entered arena")
 
-        # Accidentally entered Daily Tasks? Back out.
-        if current == "DailyTasks":
-            return action_back("back from Daily Tasks")
-
         if current == "Lobby":
-            # Arena is NOT in the bottom nav bar.
-            # Must enter via campaign menu: click right-side 任務 button → then 對抗賽
-            campaign_btn = screen.find_any_text(
-                ["任務", "任务"],
-                region=(0.80, 0.70, 1.0, 0.90), min_conf=0.6
-            )
-            if campaign_btn:
-                self.log(f"clicking campaign entry '{campaign_btn.text}'")
-                return action_click_box(campaign_btn, "click campaign entry for arena")
-            return action_click(0.95, 0.83, "click campaign area (hardcoded)")
+            # Arena is NOT in the bottom nav — enter via the right-side
+            # 任务大厅入口 tile → campaign hub.
+            act = self.click_cls(screen, UC.NAV_TASKS,
+                                 "open campaign hub for arena", conf=0.30)
+            if act:
+                return act
+            # cls miss: surface it (no blind hardcoded click).
+            return action_wait(400, "lobby: 任务大厅入口 cls not seen yet")
 
         if current == "Mission":
-            # Inside campaign menu — find 戰術大賽 (PvP Arena).
-            # OCR frequently misreads: "戰術大賽" → "术大赛" / "戰術" / "大賽" / partial.
-            pvp = screen.find_any_text(
-                ["戰術大賽", "战术大赛", "對抗", "对抗", "大賽", "大赛",
-                 "术大赛", "戰術", "PVP", "Arena"],
-                min_conf=0.5
-            )
-            if pvp:
-                self.log(f"clicking arena '{pvp.text}'")
-                return action_click_box(pvp, "click arena in campaign")
-
-            # Are we on a DETAIL sub-page (Decisive Battle boss detail,
-            # bounty detail, etc.) instead of the campaign hub?  These
-            # have "Mission"-like cues but no 戰術 anchor.  Telltale:
-            # detail-specific markers like 最高紀錄, 游玩提示, 帮手設定
-            # — none of which appear on the campaign hub grid.  Back out
-            # so we land on the actual hub.
-            #
-            # Without this we burn 60 enter_ticks clicking a hardcoded
-            # coord that does nothing because we're past the hub already
-            # (run_20260513_195859 t300-376: bot stuck on 制約解除決戰
-            # 賽特的憤怒 detail, clicked (0.73,0.81) ~70x).
-            detail_marker = screen.find_any_text(
-                ["最高紀錄", "最高纪录", "游玩提示", "遊玩提示",
-                 "帮手設定", "幫手設定", "助手设定",
-                 "活動期間", "活动期间"],
-                min_conf=0.5,
-            )
-            if detail_marker and self._enter_ticks > 3:
-                self.log(f"on detail page '{detail_marker.text}', ESC out to hub")
-                return action_back("back out of campaign detail page")
-
-            # Hardcoded fallback: 戰術大賽 position in campaign grid (~0.73, 0.81)
-            if self._enter_ticks > 5:
-                self.log("clicking arena at hardcoded position")
-                return action_click(0.73, 0.81, "click arena (hardcoded)")
-
-            return action_wait(500, "looking for arena in campaign menu")
+            # On campaign hub — click the 战术大赛 tile.
+            act = self.click_cls(screen, UC.HUB_ARENA,
+                                 "click arena tile on hub", conf=0.30)
+            if act:
+                self._hub_clicks += 1
+                return act
+            # Tile not visible THIS tick. If we already clicked it, we're
+            # mid-transition into arena — WAIT, do NOT ESC (ESC right after
+            # the click backs out of the loading arena → drifts to lobby,
+            # the t0032 bug). Only ESC if we NEVER found the tile (likely a
+            # detail sub-page) after many ticks.
+            if self._hub_clicks == 0 and self._enter_ticks > 8:
+                return action_back("hub: 战术大赛 tile never found, ESC out")
+            return action_wait(500, "hub: waiting for arena (post-click transition)")
 
         if self._enter_ticks > 20:
             self.log("can't reach arena, giving up")
             self.sub_state = "exit"
             return action_wait(300, "arena enter timeout")
-
-        if current and current != "PVP":
+        if current:
             return action_back(f"back from {current}")
-
         return action_wait(500, "entering arena")
 
     def _claim_rewards(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click all 領取獎勵 buttons on the left panel (time + daily rewards).
-
-        Arena layout (left panel, x < 0.35):
-          - 時間獎勵 +80/分  →  領取獎勵  (累積量 reward, y≈0.52)
-          - 每日獎勵 --:--    →  領取獎勵  (持有票券 reward, y≈0.64)
-        OCR often reads the yellow buttons as just "领取" (2 chars), not "領取獎勵".
-
-        Strategy: click bottom (daily) first, then click top (time) once.
-        The time reward regenerates instantly, so limit to max 3 total clicks
-        to avoid wasting ticks in an infinite claim loop.
-        """
+        """Claim 领取奖励 buttons in the left panel. YOLO: 领取奖励_黄 /
+        领取_黄 active; 领取奖励_灰 means already claimed."""
         self._claim_ticks += 1
-
-        # Hard limit: 3 actual clicks is enough (1 daily + 1 time + 1 buffer)
         if self._claim_clicks >= 3 or self._claim_ticks > 10:
             self.log(f"reward claim done ({self._claim_clicks} clicks)")
             self.sub_state = "check_tickets"
             return action_wait(300, "claim rewards done")
 
-        # Find ALL 領取/领取 buttons in the left panel (x < 0.35).
-        # OCR reads "领取" not "領取獎勵", so search for the short form.
-        claims = screen.find_text(
-            "領取|领取",
-            region=(0.15, 0.40, 0.40, 0.75), min_conf=0.5
+        # Active claim buttons = the YELLOW cls (grey/claimed buttons are a
+        # SEPARATE trained cls 领取奖励_灰, so they simply don't match here —
+        # no HSV grey-check needed, per pure-YOLO spec).
+        claims = self.find_all_cls(
+            screen,
+            [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_ALL_YELLOW],
+            conf=0.30,
         )
-        # Filter out greyed-out buttons.  Once a reward is claimed BA
-        # paints the 領取 button grey and ignores clicks — every tick
-        # the OCR still reads the text, so without this check the bot
-        # bangs on the same dead button until _claim_clicks hits 3
-        # (user feedback 2026-05-13: "灰色就成了，没必要浪费时间").
-        live_claims = [
-            c for c in claims
-            if not screen.is_button_grey(c.cx, c.cy)
-        ]
-        if live_claims:
-            # Click BOTTOM first (sort by y descending).
-            # Reason: the top button (累積量 time reward) regenerates instantly
-            # after claiming, so clicking topmost first causes an infinite loop.
-            # The bottom button (持有票券 daily reward) only appears once per day.
-            live_claims.sort(key=lambda b: b.cy, reverse=True)
-            claim = live_claims[0]
-            self._claim_clicks += 1
-            self.log(f"claiming reward #{self._claim_clicks}: '{claim.text}' at y={claim.cy:.2f} ({len(live_claims)}/{len(claims)} live)")
-            return action_click_box(claim, "claim arena reward")
-        # All visible 領取 buttons are grey → already claimed.
         if claims:
-            self.log(f"all {len(claims)} claim buttons grey (already claimed), skipping")
-            self.sub_state = "check_tickets"
-            return action_wait(200, "claim rewards already grey")
+            # bottom-first (daily reward regen-free; time reward regenerates)
+            claims.sort(key=lambda b: b.cy, reverse=True)
+            self._claim_clicks += 1
+            self.log(f"claim reward #{self._claim_clicks}: {claims[0].cls_name}")
+            return action_click_box(claims[0], "claim arena reward")
 
-        # No claim buttons visible — either all claimed or popup blocking
-        if self._claim_clicks > 0:
-            # Already clicked at least once, wait for popup to clear
-            return action_wait(400, "waiting for reward popup to clear")
-
-        # No rewards found at all — move on
+        # Only grey claims (or none) → nothing left to claim.
+        self.log("no active arena rewards (grey/none)")
         self.sub_state = "check_tickets"
-        return action_wait(300, "no rewards to claim")
+        return action_wait(200, "claim rewards done (grey)")
 
     def _check_tickets(self, screen: ScreenState) -> Dict[str, Any]:
-        """Check remaining arena fight tickets.
+        """DIGIT-DEFERRED: original parsed 持有票券 X/5 + 等待時間 timer.
+        Without OCR digits we gate by fight cap + blind cooldown, and let
+        _fight detect 'can't start' (出击 greyed/absent) to stop early."""
+        self._check_ticks += 1
 
-        OCR reads "持有票券 5/5". Must filter by "票券" to avoid matching
-        "累量0/1,000K" (accumulated points) which regex reads as 0/1.
+        # Safety cap (daily max).
+        if self._fights_done >= self._MAX_FIGHTS_BRINGUP:
+            self.log(f"fight cap reached ({self._fights_done}), exiting")
+            self.sub_state = "exit"
+            return action_wait(300, "arena fight cap reached")
 
-        Also handles 30-second cooldown between fights: if "等待時間" shows
-        an active timer (not --:--), wait before selecting next opponent.
-        """
-        # ── Cooldown check (30s between fights) ──
-        if self._fights_done > 0:
-            wait_time = screen.find_any_text(
-                ["等待時間", "等待时间"],
-                region=(0.0, 0.55, 0.55, 0.80), min_conf=0.5
-            )
-            if wait_time:
-                # Check if timer is active (not --:--)
-                # Look for digits NEAR the "等待時間" label (within ±0.04 y).
-                # Must not match "每日02:02" (daily reward timer at y≈0.61).
-                wt_y = wait_time.cy  # y of "等待時間" label (~0.73)
-                for box in screen.ocr_boxes:
-                    if box.confidence < 0.4:
-                        continue
-                    if abs(box.cy - wt_y) > 0.04:
-                        continue  # Must be same row as 等待時間
-                    if box.cx > 0.55:
-                        continue
-                    # Active timer: contains digits like "0:28" or "00:28"
-                    timer_match = re.search(r'(\d+):(\d+)', box.text)
-                    if timer_match and "--" not in box.text:
-                        mins = int(timer_match.group(1))
-                        secs = int(timer_match.group(2))
-                        total_secs = mins * 60 + secs
-                        # Cap at 60s — cooldown is 30s, anything longer is a misread
-                        if 0 < total_secs <= 60:
-                            self._cooldown_ticks += 1
-                            if self._cooldown_ticks > 15:
-                                self.log("cooldown wait too long, forcing proceed")
-                                self._cooldown_ticks = 0
-                                break
-                            self.log(f"cooldown active: {mins}:{secs:02d} (tick {self._cooldown_ticks})")
-                            return action_wait(3000, f"arena cooldown {mins}:{secs:02d}")
-            # Reset cooldown counter once timer is gone
-            self._cooldown_ticks = 0
+        # Blind cooldown between fights (~30s real). DIGIT-DEFERRED.
+        if self._fights_done > 0 and self._cooldown_ticks < self._COOLDOWN_TICKS:
+            self._cooldown_ticks += 1
+            return action_wait(800, f"arena cooldown {self._cooldown_ticks}/{self._COOLDOWN_TICKS}")
 
-        for box in screen.ocr_boxes:
-            if box.confidence < 0.5:
-                continue
-            m = re.search(r'(\d+)\s*/\s*(\d+)', box.text)
-            if not m:
-                continue
-            # Must contain 票券 to be the ticket count
-            if "票券" not in box.text:
-                continue
-            remaining = int(m.group(1))
-            total = int(m.group(2))
-            self._tickets_remaining = remaining
-            self.log(f"arena tickets: {remaining}/{total}")
-            if remaining == 0:
-                self.log("no tickets left, exiting")
-                self.sub_state = "exit"
-                return action_wait(300, "no arena tickets")
+        # Confirm we're on the arena main screen before selecting an opponent.
+        if self._is_arena_screen(screen):
+            self._check_ticks = 0
             self.sub_state = "select_opponent"
-            return action_wait(300, f"{remaining} fights remaining")
-
-        # Couldn't parse — try to proceed anyway
-        if self.ticks > 15:
+            return action_wait(300, "selecting opponent")
+        # Not confirmed. If we've drifted back to lobby/hub, the arena run is
+        # over (or entry failed) — exit cleanly instead of waiting forever
+        # (the t0035-48 'waiting for arena main screen' wedge on lobby).
+        cur = self.detect_current_screen(screen)
+        if cur in ("Lobby", "Mission"):
+            self.log(f"drifted to {cur}, arena run over")
+            self.sub_state = "exit"
+            return action_wait(300, "arena: drifted out, exit")
+        # Mid-transition / TICKET_ARENA weak — proceed optimistically after a
+        # few ticks (DIGIT-DEFERRED: select_opponent uses a fixed position).
+        if self._check_ticks > 6:
+            self._check_ticks = 0
             self.sub_state = "select_opponent"
-            return action_wait(300, "ticket parse timeout, trying to fight")
-
-        return action_wait(500, "looking for ticket count")
+            return action_wait(300, "arena screen unconfirmed, proceeding")
+        return action_wait(400, "waiting for arena main screen")
 
     def _select_opponent(self, screen: ScreenState) -> Dict[str, Any]:
-        """Pick the top-ranked opponent (lowest 第XXX名 number).
-
-        Arena layout: left panel (player info) + right panel (opponent list).
-        Opponents show 第XXX名 (rank) at x > 0.35.
-        Player's own rank is at x < 0.30.
-        """
-        # Find all 第XXX名 patterns in the right half
-        candidates = []
-        for box in screen.ocr_boxes:
-            if box.confidence < 0.7 or box.cx < 0.35:
-                continue  # Skip left panel (player's own rank)
-            m = re.search(r'第(\d+)名', box.text)
-            if m:
-                rank = int(m.group(1))
-                candidates.append((rank, box))
-
-        if candidates:
-            # Pick lowest rank number = highest position
-            candidates.sort(key=lambda x: x[0])
-            best_rank, best_box = candidates[0]
-            self.log(f"selecting opponent #{best_rank}")
-            self.sub_state = "fight"
-            self._fight_stage = 0
-            self._fight_ticks = 0
-            return action_click_box(best_box, f"select opponent #{best_rank}")
-
-        # Fallback: click top-right area where first opponent row is
-        self.log("selecting top opponent (fallback)")
+        """Pick an opponent by clicking its AVATAR HEAD (detected by the
+        avatar model on the right panel) — NO hardcoded position, so it works
+        at any window size / desktop scaling / layout (per the no-hardcode
+        rule). Opponent heads are avatar-tagged boxes with cx > 0.6 (left side
+        is the player's own info). Click the TOP-most opponent.
+        DIGIT-DEFERRED: rank-based 'easiest opponent' pick returns with OCR."""
+        self._select_attempts = getattr(self, "_select_attempts", 0) + 1
+        if self._select_attempts > 8:
+            self.log("opponent select kept failing (no opponent head / popup), exiting")
+            self.sub_state = "exit"
+            return action_wait(300, "arena: opponent select failed")
+        # avatar-model boxes on the RIGHT = opponent heads
+        heads = [b for b in (screen.yolo_boxes or [])
+                 if getattr(b, "model_tag", "") == "avatar"
+                 and b.cx > 0.6 and 0.12 <= b.cy <= 0.95 and b.confidence >= 0.30]
+        if not heads:
+            # No opponent head detected yet — surface the gap, don't blind-click.
+            self.log(f"no opponent head detected (avatar) #{self._select_attempts}, waiting")
+            return action_wait(400, "waiting for opponent heads (avatar)")
+        top = min(heads, key=lambda b: b.cy)   # top-most opponent
+        self.log(f"selecting opponent at head ({top.cx:.2f},{top.cy:.2f}) [{top.cls_name}]")
         self.sub_state = "fight"
         self._fight_stage = 0
         self._fight_ticks = 0
-        return action_click(0.65, 0.30, "select top opponent (fallback)")
+        self._skip_clicked = False
+        return action_click_box(top, "select opponent (avatar head)")
 
     def _fight(self, screen: ScreenState) -> Dict[str, Any]:
-        """Handle the fight sequence:
-
-        Stage 0: 對戰對象 popup → click 攻擊編制
-        Stage 1: Formation screen → click 出擊
-        Stage 2: Battle in progress (auto/skip, result handled in tick())
-        """
+        """Stage 0: 對戰對象 popup → 攻击编制. Stage 1: formation →
+        (跳过战斗) + 出击. Stage 2: battle (result handled in tick)."""
         self._fight_ticks += 1
-
-        # Stage 2 (battle) can take 40+ ticks — use higher timeout.
-        # NEVER action_back during stage 2: it triggers exit dialog → lobby.
-        max_ticks = 70 if self._fight_stage >= 2 else 40
+        max_ticks = 80 if self._fight_stage >= 2 else 40
         if self._fight_ticks > max_ticks:
             self.log(f"fight timeout (stage={self._fight_stage})")
-            self.sub_state = "check_tickets"
             self._fight_ticks = 0
+            self.sub_state = "check_tickets"
             if self._fight_stage >= 2:
-                # Battle likely ended but result was missed — just wait
                 return action_wait(500, "fight timeout (battle)")
-            return action_back("fight timeout")
+            return action_back("fight timeout, back")
 
-        # Stage 0: 對戰對象 popup — click 攻擊編制 button
+        # Stage 0: opponent popup → 攻击编制
         if self._fight_stage == 0:
-            # OCR frequently misreads 擊 as 擎 ("攻擎编制" instead of "攻擊編制")
-            attack_form = screen.find_any_text(
-                ["攻擊編制", "攻击编制", "攻撃编制", "攻擊編", "攻击编",
-                 "攻擎编制", "攻擎編制"],  # OCR misreads 擊 as 擎
-                min_conf=0.5
-            )
-            if not attack_form:
-                # Region-filtered partial match for bottom-center button area
-                attack_form = screen.find_any_text(
-                    ["編制", "编制"],
-                    region=(0.3, 0.70, 0.7, 0.90), min_conf=0.6
-                )
-            if attack_form:
-                self.log("clicking 攻擊編制")
+            act = self.click_cls(screen, UC.ATTACK_FORMATION,
+                                 "click 攻击编制", conf=0.30)
+            if act:
                 self._fight_stage = 1
-                return action_click_box(attack_form, "click 攻擊編制")
-
-            # If still on arena main screen (no popup), re-select opponent
+                self._select_attempts = 0   # popup opened — real progress
+                return act
+            # popup didn't open / closed → re-select after a few ticks
             if self._fight_ticks > 3:
                 if self._is_arena_screen(screen):
                     self.sub_state = "select_opponent"
                     return action_wait(300, "popup didn't open, re-selecting")
-                # After 10 ticks without progress, go back to check_tickets
-                # to re-establish arena state (screen may have refreshed)
                 if self._fight_ticks > 10:
                     self.sub_state = "check_tickets"
                     self._fight_ticks = 0
-                    return action_wait(500, "fight stuck, re-checking tickets")
-
+                    return action_wait(500, "fight stuck, re-checking")
             return action_wait(500, "waiting for 對戰對象 popup")
 
-        # Stage 1: Formation screen — click 出擊
+        # Stage 1: formation → optionally skip-battle, then 出击
         if self._fight_stage == 1:
-            # OCR frequently misreads 擊 as 擎 ("出擎" instead of "出擊")
-            sortie = screen.find_any_text(
-                ["出擊", "出击", "出擎"],
-                min_conf=0.6
-            )
+            sortie = self.find_cls(screen, UC.SORTIE, conf=0.30)
             if sortie:
-                self.log("clicking 出擊")
+                # NOTE: there's no 出击_灰 cls trained, so a ticket-less greyed
+                # 出击 can't be cls-detected (count is DIGIT-DEFERRED). Per the
+                # no-HSV spec we don't pixel-check; the fight-cap + opponent-
+                # select cap bound the loop. (TRAIN: 出击_灰 cls.)
+                # Toggle 跳过战斗 once (instant resolve, faster) before sortie.
+                if not self._skip_clicked:
+                    skip = self.find_cls(screen, UC.BATTLE_SKIP_TOGGLE, conf=0.30)
+                    if skip:
+                        self._skip_clicked = True
+                        return action_click_box(skip, "toggle 跳过战斗")
+                self.log("clicking 出击")
                 self._fight_stage = 2
-                return action_click_box(sortie, "click 出擊")
+                return action_click_box(sortie, "click 出击")
+            return action_wait(500, "waiting for formation 出击")
 
-            # Check for 跳過戰鬥 checkbox — it's on the formation screen
-            # but we just need to click 出擊, not the checkbox
-            return action_wait(500, "waiting for formation screen")
-
-        # Stage 2: Battle in progress — result handled globally in tick()
-        if self._fight_stage >= 2:
-            # Try SKIP during battle (Skip button, not 跳過戰鬥 checkbox)
-            skip = screen.find_any_text(
-                ["SKIP", "Skip"],
-                min_conf=0.7
-            )
-            if skip:
-                return action_click_box(skip, "skip battle")
-            return action_wait(1000, "battle in progress")
-
-        return action_wait(500, "fight processing")
+        # Stage 2: battle in progress. The 戰鬥結果 WIN/LOSE dialog is caught
+        # by the top-level result handler (runs every tick from the "fight"
+        # state). Here we only cover the case where a WIN/获得奖励 popup was
+        # already dismissed by the global interceptor — leaving us back on the
+        # CLEAN arena main screen with no dialog. (_result_pending dedups vs
+        # the top handler so the fight isn't counted twice.)
+        if self._fight_ticks > 4 and self.find_cls(screen, UC.TICKET_ARENA, conf=0.30):
+            self.log("back on arena main (result auto-dismissed) — fight complete")
+            self._fight_stage = 0
+            self._fight_ticks = 0
+            self._skip_clicked = False
+            if not self._result_pending:
+                self._fights_done += 1
+            self._result_pending = False
+            self._cooldown_ticks = 0
+            self.sub_state = "check_tickets"
+            return action_wait(300, "fight done, back on arena main")
+        skip = self.find_cls(screen, UC.BATTLE_SKIP, conf=0.30)
+        if skip:
+            return action_click_box(skip, "skip battle")
+        return action_wait(1000, "battle in progress")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
             self.log(f"done ({self._fights_done} fights, {self._claim_clicks} rewards)")
             return action_done("arena complete")
-        # If we're back on the campaign hub (Mission screen with grid
-        # tiles visible), STOP exiting — the next campaign-based skill
-        # (EventActivity / TotalAssault / etc.) enters via the same
-        # hub.  Saves the 10-20 tick lobby round-trip per skill chain.
-        current = self.detect_current_screen(screen)
-        if current == "Mission":
-            on_hub = screen.find_any_text(
-                ["戰術大賽", "战术大赛", "懸賞通緝", "悬赏通缉",
-                 "大決戰", "大决战", "制約解除", "學園交流", "学园交流"],
-                min_conf=0.55,
-            )
-            if on_hub:
-                self.log(f"done on campaign hub ({self._fights_done} fights, {self._claim_clicks} rewards)")
-                return action_done("arena complete (on hub)")
+        # If back on the campaign hub, stop here so the next campaign skill
+        # reuses the hub (no lobby round-trip).
+        if self.detect_current_screen(screen) == "Mission":
+            self.log(f"done on hub ({self._fights_done} fights)")
+            return action_done("arena complete (on hub)")
         return action_back("arena exit: back to lobby")

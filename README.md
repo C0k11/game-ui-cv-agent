@@ -2,7 +2,7 @@
 
 Fully automated daily routine and real-time battle target lock for *Blue Archive*. Runs entirely on a local Windows machine — no cloud dependencies, no game modification.
 
-The automation is built on a vision-first stack: a 252-class **fused YOLO26 avatar detector** identifies who is at which UI slot in a single forward pass, a fine-tuned OCR head reads numeric / text fields where templates fall short, and an explicit state machine drives 22 daily skills through MuMu Player 12 via DXcam capture + PostMessage / ADB input. A Windows-native WebView2 launcher and a feature-rich annotation dashboard make data collection and model iteration first-class workflows.
+The automation is built on a vision-first stack. **UI navigation and clicks are driven entirely by a 451-class YOLO26m UI detector** — every button, tab, popup, badge and region the bot acts on is located by a trained class, never by a hardcoded screen coordinate, so the same logic works across window sizes and desktop scaling. A 252-class **fused YOLO26 avatar detector** identifies who is at which slot in a single forward pass, OCR is reserved for reading numeric fields (AP / tickets / counts), and an explicit state machine drives the daily skills through MuMu Player 12 via DXcam capture + PostMessage / ADB input. A Windows-native WebView2 launcher and a feature-rich annotation dashboard make data collection and model iteration first-class workflows.
 
 ---
 
@@ -13,8 +13,9 @@ The automation is built on a vision-first stack: a 252-class **fused YOLO26 avat
 | **Platform** | Windows 10 / 11, NVIDIA GPU recommended (RTX 3060+) |
 | **Game runtime** | MuMu Player 12 (60 FPS cap) |
 | **Daily skills** | 22 composable, ordered, dry-runnable |
-| **Vision tier** | YOLO26x (252-class avatar) + YOLO26n (UI / emoticon) + YOLOv8n (battle head) |
-| **OCR** | PP-OCRv4 fine-tuned on BA glyphs (+20 pp vocabulary accuracy) |
+| **Vision tier** | YOLO26m (451-class UI) + YOLO26x (252-class avatar) + YOLO26n (emoticon) + YOLOv8n (battle head) |
+| **UI detection** | `ui_yolo26m_v5` — pure-YOLO navigation, no hardcoded click positions; ≈99.5% real-frame hit rate |
+| **OCR** | PP-OCRv4 fine-tuned on BA glyphs (+20 pp vocab); scoped to numeric fields |
 | **Battle lock** | 60-240 Hz DXcam + ByteTrack with freeze-and-predict rescue |
 | **Annotation** | Dashboard with synth template editor, val cleanup tool, eval HTML report |
 
@@ -26,9 +27,9 @@ The automation is built on a vision-first stack: a 252-class **fused YOLO26 avat
 flowchart LR
     A[MuMu Player 12<br/>60 FPS Blue Archive] -->|DXcam capture| B[Pipeline tick]
     B --> C{Skill<br/>state machine}
-    C -->|"OCR text"| D[PP-OCRv4 BA-tuned]
+    C -->|"UI nav / click"| F[YOLO26m ui_v5<br/>451 classes]
     C -->|"avatar ID"| E[YOLO26x fused_avatar<br/>252 classes]
-    C -->|"UI anchors"| F[YOLO26n static_ui<br/>143 classes]
+    C -->|"numeric fields"| D[PP-OCRv4 BA-tuned]
     C -->|"head pat"| G[YOLO26n emoticon]
     C -->|"head lock"| H[YOLOv8n + ByteTrack]
     D --> I[Action decision]
@@ -66,9 +67,9 @@ flowchart LR
 ```mermaid
 flowchart TD
     F[Game frame<br/>1920x1080 / 60 FPS] --> R{Region of interest}
-    R -->|"Full screen text"| O[PP-OCRv4<br/>BA fine-tuned<br/>~50 ms]
+    R -->|"UI icons / buttons"| SU[YOLO26m ui_v5<br/>451 classes<br/>~6 ms]
     R -->|"Avatar slots"| FA[YOLO26x fused_avatar<br/>252 classes<br/>~10 ms]
-    R -->|"UI icons"| SU[YOLO26n static_ui<br/>143 classes<br/>~3 ms]
+    R -->|"Numeric fields"| O[PP-OCRv4<br/>BA fine-tuned<br/>~50 ms]
     R -->|"Cafe bubble"| EM[YOLO26n emoticon<br/>1 class<br/>~2 ms]
     R -->|"Battle heads"| BH[YOLOv8n battle_heads<br/>1 class<br/>~2 ms]
     BH --> BT[ByteTrack + EMA<br/>freeze-and-predict<br/>&lt;0.1 ms]
@@ -79,16 +80,51 @@ flowchart TD
 
 | Tier | Component | Purpose | Latency |
 |---|---|---|---|
-| Primary text | PP-OCRv4 BA-tuned | Full-screen CN / EN / JP text | ~50 ms |
-| Primary template | `cv2.matchTemplate` | Stable button / red-dot matching | <1 ms |
-| Primary color | HSV pixel analysis | Room occupancy, button enabled, checkmarks | <1 ms |
+| **UI primary** | **YOLO26m `ui_yolo26m_v5`** | 451-class UI: buttons / tabs / popups / badges / regions — drives all navigation + clicks | ~6 ms |
 | Avatar ID | **YOLO26x `fused_avatar_yolo26x`** | 252-class joint bbox + character ID across 6 UI contexts | ~10 ms |
-| UI anchors | YOLO26n `static_ui_v4` | 143-class UI icons / popups / cards / coin badges for OCR region anchoring | ~3 ms |
+| Numeric OCR | PP-OCRv4 BA-tuned | AP / ticket / count digits only (text nav handed to YOLO) | ~50 ms |
 | Cafe fallback | YOLO26n `emoticon_yolo26n` | Head-pat bubble when templates miss | ~2 ms |
 | Battle lock | YOLOv8n `battle_heads.pt` | Single-class head detection at 60+ FPS | ~2 ms |
 | Tracking | ByteTrack + EMA | Track association with freeze-and-predict rescue | <0.1 ms |
 
-The daily pipeline reaches for templates and HSV decisions where they are cheap and exact; YOLO26 models are layered in for sub-problems templates cannot solve at scale (open-set character ID, sparse UI icons, multi-context avatar detection). Battle lock stays on the smaller YOLOv8n for headroom.
+UI navigation runs purely off the `ui_yolo26m_v5` detector: a skill finds its target button/tab/region by trained class and clicks the returned box — **no hardcoded screen coordinates**, so the same logic survives window-size and desktop-scaling changes. OCR is deliberately scoped to numeric fields; the avatar detector handles open-set character ID. `cv2.matchTemplate` / HSV remain as cheap fallbacks for a few stable glyphs. Battle lock stays on the smaller YOLOv8n for headroom. Active model versions are resolved at runtime from `data/model_registry.json`, so shipping a new model is a one-line `active` bump (with older versions kept for instant rollback).
+
+---
+
+## UI Detector — Pure-YOLO Navigation
+
+UI detection is the backbone of the daily pipeline: `ui_yolo26m_v5` is a 451-class YOLO26m that locates every actionable element, and skills click the returned box rather than any fixed coordinate.
+
+### Why pure-YOLO (OCR demoted)
+
+The pipeline used to navigate by OCR text + `matchTemplate`, which broke on font rendering, localization, and resolution. The migration disabled OCR for navigation entirely (`_OCR_ENABLED=False`, kept only for digits) to force every nav/click path through a trained class — surfacing and then fixing every hidden coordinate/OCR dependency. Result: navigation is resolution- and scale-independent, and the failure mode is an honest "class not detected" rather than a silent mis-click.
+
+### Training the detector — what actually moved the needle
+
+Early UI models (v1–v3) detected common buttons but missed sparse elements (MomoTalk entry, daily-claim, buy-pyroxene, momotalk chat region, bond-story buttons) — a textbook **overfit**: a handful of unique frames blown up ~200× by oversample-duplication, with augmentation off, so the model memorized backgrounds instead of learning the element.
+
+| Lever | Effect |
+|---|---|
+| **Spatial aug** (`mosaic`, `copy_paste`, `scale`, `translate`, `hsv_v`) | Breaks position/background dependence — the core overfit fix |
+| **`fliplr/flipud/degrees = 0`** | UI has left/right semantics (左切换 ↔ 右切换); flipping corrupts labels |
+| **Synthetic compositing** (`build_ui_synth.py`) | Pastes a rare element (e.g. bond-story button) onto hundreds of real backgrounds — gives diversity that duplication cannot |
+| **Dedup + moderate oversample** | `build_ui_v2.py` dedupes 16157→2377 unique frames (cut 95% dup copies), then rebalances thin classes to ~30 (not 200) |
+| **`close_mosaic` tail** | Last 10 epochs train on clean single frames, aligning with the eval distribution for a final accuracy bump |
+
+### Eval discipline — the small val pool lies
+
+The 51-frame held-out val pool contains **zero** instances of the weak classes it was meant to measure, so its mAP is blind to exactly what mattered. Two consequences became standing rules:
+
+- **`last.pt` beat the nominal `best.pt`** on real frames — the blind val picked the wrong checkpoint. Models are shipped from a frozen `last.pt` (`best_real.pt`) after a real-frame check, not from val-mAP alone.
+- The trustworthy signal is a **fresh real-capture eval** (`eval_weak_val.py` reports per-class recall on hand-labeled captures) plus **visual review in the dashboard** (`YOLO预填` overlays the live model on new frames).
+
+### History
+
+| Version | Arch | Data | Real-frame result |
+|---|---|---|---|
+| v3 | YOLO26m | OCR-relabeled lobby + oversample, aug off | weak classes (daily-claim / MomoTalk / pyroxene / chat region) at recall 0.0 |
+| **v4** | YOLO26m | + 900 synth (bond) + spatial aug, from COCO | mAP50 **0.915** on 1052 real held-out frames (vs v3 0.862); weak classes 0.0 → ~1.0 |
+| **v5** *(active)* | YOLO26m | warm-start from v4, ui_v2 (deduped + 1052 real + shop frames), restored cls92, +选择购买 (nc 451) | ≈99.5% real-frame hit rate; only thin region-select tiles remain (queued for v6) |
 
 ---
 
@@ -193,6 +229,8 @@ A typical v3 review cycle on the 49 manual val frames surfaced ~14 cases where t
 ---
 
 ## Skill Matrix
+
+> Detection stacks below reflect the original design. Navigation across all daily skills is now driven by the `ui_yolo26m_v5` detector (YOLO cls → click the returned box); the OCR / template entries remain only for numeric reads and a few cheap glyph fallbacks.
 
 | Skill | Function | Detection stack | Notes |
 |---|---|---|---|
@@ -394,7 +432,8 @@ ml_cache/
 
 - **3D battle character recognition** — Open question. The 252-class model is trained on 2D wiki refs + UI slots; recognizing the 3D in-game model would need either targeted 3D screenshots (~50–200 per character) or a face-embedding pipeline. Feasibility analysis lives in `memory/yolo_migration.md`.
 - **Battle multi-class detector** — Planned upgrade from the YOLOv8n single-class head detector to a YOLO26m/x detector covering player students + ~50 enemy types + ~30 bosses. 60 FPS budget makes 26m at imgsz=640 a strong fit; TensorRT FP16 export is the deployment path.
-- **Static UI auto-labeling at scale** — The current `static_ui_v4` (mAP50 = 0.339) is data-bound. The plan: hybrid of `cv2.matchTemplate` for stable buttons (yellow confirm, X, red-dot, currency icons) and AssetStudio-extracted UI textures pasted by the existing synth pipeline.
+- **UI detector v6 — thin region-select tiles** — `ui_yolo26m_v5` hits ≈99.5% on real frames; the residual misses are the location-select screen's region tiles (夏莱办公室 / 居住区 / 阿拜多斯) and `全部领取_灰`, each trained on only ~3 unique frames. Fix is a small targeted capture pass + warm-start v6 — not a re-architecture.
+- **Arena opponent select via `cls92`** — the restored `战术大赛对战选择区域` class cleanly bounds each opponent row, so arena can select opponents from the UI detector alone and drop the heavier avatar model from that path. Planned for the v5+ refactor.
 
 ---
 

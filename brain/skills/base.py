@@ -31,6 +31,10 @@ class YoloBox:
     y1: float
     x2: float
     y2: float
+    # Which detector produced this box: "ui" / "avatar" / "battle" / "cafe".
+    # Lets skills filter by source model (e.g. arena opponent heads come from
+    # the avatar model, not the ui model) without guessing from cls_name.
+    model_tag: str = ""
 
     @property
     def cx(self) -> float:
@@ -667,16 +671,20 @@ class ScreenState:
     CENTER = (0.25, 0.15, 0.75, 0.85)
 
     def is_lobby(self) -> bool:
-        """Detect if we're on the main lobby screen.
+        """Detect if we're on the main lobby screen — pure YOLO (no OCR).
 
-        Lobby has bottom nav with multiple buttons: 咖啡廳/咖啡厅, 課程表, 商店, etc.
+        Lobby shows the 8 bottom-nav entry icons (咖啡厅入口/课程表入口/...).
+        Seeing >=2 of those cls = lobby. v3 detects all 8 at 0.91-0.99 on
+        real frames, so 2 is a safe floor that still rejects sub-pages
+        (which only carry a lingering nav bar partially, if at all).
         """
-        nav_hits = 0
-        nav_texts = ["咖啡", "課程", "课程", "學生", "学生", "社交", "製造", "制造", "商店", "招募"]
-        for t in nav_texts:
-            if self.find_text_one(t, region=self.NAV_BAR, min_conf=0.5):
-                nav_hits += 1
-        return nav_hits >= 3
+        from brain.skills.ui_classes import LOBBY_NAV_ICONS
+        want = set(LOBBY_NAV_ICONS)
+        hits = sum(
+            1 for b in (self.yolo_boxes or [])
+            if b.cls_name in want and b.confidence >= 0.30
+        )
+        return hits >= 2
 
     # Names → (TC, SC) text variants for the 8 bottom-nav icons.  Used by
     # scan_lobby_nav_badges() so callers get a stable english key
@@ -732,60 +740,44 @@ class ScreenState:
         Caller should ensure they're on lobby (is_lobby() == True) before
         calling — running on non-lobby screens may catch false positives
         from whatever happens to live in the bottom strip.
+
+        PURE-YOLO (2026-05-29): maps DOT_RED / DOT_YELLOW detections to the
+        nearest nav-entry cls by horizontal proximity (a badge sits just
+        above-right of its icon). Only entries WITH a nearby dot are
+        returned ('red'/'yellow'); entries with no dot are OMITTED rather
+        than marked 'none', so the badge-skip optimiser treats them as
+        'unknown' → runs the skill. That's the safe choice during bring-up
+        (we never wrongly skip real work). The 'none'-marking optimisation
+        comes back once the YOLO flow is verified end-to-end.
         """
-        try:
-            import cv2
-            import numpy as np
-        except Exception:
+        boxes = [b for b in (self.yolo_boxes or []) if b.confidence >= 0.30]
+        if not boxes:
             return {}
-        img = self.load_image()
-        if img is None:
-            return {}
-        h, w = img.shape[:2]
+        from brain.skills import ui_classes as UC
+        # nav-entry cls -> stable english key (matches _SKILL_BADGE_MAP)
+        entry_key = {
+            UC.NAV_CAFE: "cafe", UC.NAV_SCHEDULE: "schedule",
+            UC.NAV_STUDENT: "student", UC.NAV_EDIT: "edit",
+            UC.NAV_SOCIAL: "social", UC.NAV_CRAFT: "craft",
+            UC.NAV_SHOP: "shop", UC.NAV_RECRUIT: "recruit",
+            UC.NAV_MAIL: "mail", UC.NAV_TASKS: "campaign_nav",
+        }
+        entries = [(entry_key[b.cls_name], b)
+                   for b in boxes if b.cls_name in entry_key]
+        reds = [b for b in boxes if b.cls_name == UC.DOT_RED]
+        yellows = [b for b in boxes if b.cls_name == UC.DOT_YELLOW]
         results: Dict[str, str] = {}
-        for key, variants in self._LOBBY_NAV_VARIANTS:
-            anchor = None
-            for v in variants:
-                anchor = self.find_text_one(v, region=self.NAV_BAR, min_conf=0.5)
-                if anchor:
-                    break
-            if not anchor:
-                continue
-            cx = (anchor.x1 + anchor.x2) / 2.0
-            # Tight ROI: right of label, between icon bottom and label top.
-            x0 = max(0, int((cx + 0.005) * w))
-            x1 = min(w, int((cx + 0.045) * w))
-            y0 = max(0, int(0.905 * h))
-            y1 = min(h, int(0.945 * h))
-            if x1 <= x0 or y1 <= y0:
-                continue
-            roi = img[y0:y1, x0:x1]
-            if roi.size == 0:
-                continue
-            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            red_total = 0
-            for mn, mx in self._NAV_DOT_RED_HSV:
-                mask = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
-                                          np.array(mx, dtype=np.uint8))
-                red_total += int(mask.sum() // 255)
-            yellow_total = 0
-            for mn, mx in self._NAV_DOT_YELLOW_HSV:
-                mask = cv2.inRange(hsv, np.array(mn, dtype=np.uint8),
-                                          np.array(mx, dtype=np.uint8))
-                yellow_total += int(mask.sum() // 255)
-            # Red dominates yellow if both fire (red is the stronger
-            # "claim me" signal; yellow is "go look at this").
-            if red_total >= self._NAV_DOT_MIN_PIXELS:
+        for key, eb in entries:
+            # campaign tile (任务大厅入口) is large — its dots sit well above
+            # the tile centre; bottom-nav dots sit just above their icon.
+            dx = 0.06 if key == "campaign_nav" else 0.05
+            dy_above = 0.30 if key == "campaign_nav" else 0.03
+            def near(d):
+                return abs(d.cx - eb.cx) <= dx and (eb.cy - dy_above) <= d.cy <= eb.cy + 0.02
+            if any(near(d) for d in reds):
                 results[key] = "red"
-            elif yellow_total >= self._NAV_DOT_MIN_PIXELS:
+            elif any(near(d) for d in yellows):
                 results[key] = "yellow"
-            else:
-                results[key] = "none"
-        # Also scan extra fixed-position badges (top-right mail icon,
-        # left sidebar 任務, right sidebar campaign 任務) so the badge-
-        # skip routing extends GLOBALLY across all "go here if there's
-        # something to claim" skills, not just the bottom-nav skills.
-        results.update(self._scan_extra_badges(img, h, w))
         return results
 
     # Extra badge regions (NOT bottom-nav).  Each entry is:
@@ -847,45 +839,26 @@ class ScreenState:
         return out
 
     def is_loading(self) -> bool:
-        """Detect loading screen, download progress, or game update.
+        """Detect in-game loading spinner — pure YOLO (加载中 cls, no OCR).
 
-        Covers the FULL startup sequence:
-        1. "Now Loading..." — post-title-screen loading
-        2. "正在更新。[N/M] X.XX%" — game asset download progress
-        3. "驗證下載檔案中" — file verification after download
-        4. "重置遊戲資料中" — game data reset / cache rebuild
-        5. "下載中" / "Downloading" — generic download state
+        KNOWN GAP (pure-YOLO bring-up): the startup download/verify/reset
+        screens ("Now Loading", "正在更新", "驗證下載檔案中") have NO YOLO
+        cls yet, so with OCR disabled they are not detected here. In-game
+        transient scene loads carry the 加载中 spinner (cls 22, 45f trained),
+        which this catches. If a startup/download screen ever stalls the
+        pipeline, the fix is to train a cls for it (NOT re-enable OCR here).
         """
-        if self.has_text("Loading", min_conf=0.7) or self.has_text("loading", min_conf=0.7):
-            return True
-        # Bottom-of-screen progress text during startup / update.
-        # OCR garbles these regularly (e.g. "驗證下载檔案中" → mixed Trad/Simp).
-        if self.find_any_text(
-            [
-                # Download in progress
-                "下載中", "下载中", "Downloading", "ダウンロード",
-                "資料下載", "资料下载",
-                # Game update ("正在更新。 [N/M] X%")
-                "正在更新", "正在更新。", "正在更新°",
-                # File verification
-                "檔案驗證", "档案验证", "驗證下載", "验证下载",
-                "驗證下载", "驗證檔案", "验证档案",
-                # Data reset
-                "重置遊戲", "重置游戏", "重置游資", "重置游资",
-                "資料中", "资料中",
-                # Generic download completion
-                "下載檔案", "下载档案",
-            ],
-            region=(0.0, 0.80, 0.60, 1.0), min_conf=0.40,
-        ):
-            return True
+        for b in (self.yolo_boxes or []):
+            if b.cls_name == "加载中" and b.confidence >= 0.35:
+                return True
         return False
 
     def is_dialog(self) -> bool:
-        """Detect a popup/dialog (has 確認/取消 or 確定 buttons)."""
-        return (self.has_text("確認", region=self.CENTER, min_conf=0.8) or
-                self.has_text("确认", region=self.CENTER, min_conf=0.8) or
-                self.has_text("確定", region=self.CENTER, min_conf=0.8))
+        """Detect a popup/dialog — pure YOLO (确认键 button present)."""
+        for b in (self.yolo_boxes or []):
+            if b.cls_name == "确认键" and b.confidence >= 0.30:
+                return True
+        return False
 
 
 # ── Action helpers ──────────────────────────────────────────────────────
@@ -1059,6 +1032,162 @@ class BaseSkill(ABC):
         "暫無", "暂无", "No Mail", "No Tasks",
     ]
 
+    # ════════════════════════════════════════════════════════════════
+    # YOLO-only UI resolution (canonical — use these, NOT find_ui/OCR).
+    # cls names come from brain/skills/ui_classes.py. Exact-match only
+    # (ScreenState.find_yolo uses substring, which mis-matches e.g.
+    # "领取_黄" vs "全部领取_黄"). No OCR fallback by design: if YOLO
+    # can't see a cls, surface the gap (log+wait) instead of hiding it.
+    # ════════════════════════════════════════════════════════════════
+    def find_cls(
+        self,
+        screen: ScreenState,
+        cls_names,
+        *,
+        conf: float = 0.30,
+        region: Optional[Tuple[float, float, float, float]] = None,
+    ) -> Optional[YoloBox]:
+        """Return highest-conf YOLO box whose cls_name EXACTLY equals one of
+        cls_names (str or list), optionally constrained to a region. None if
+        no match. This is the primary click-target resolver for all skills."""
+        if isinstance(cls_names, str):
+            cls_names = [cls_names]
+        want = set(cls_names)
+        best = None
+        for b in (screen.yolo_boxes or []):
+            if b.confidence < conf:
+                continue
+            if b.cls_name not in want:
+                continue
+            if region is not None:
+                if not (region[0] <= b.cx <= region[2] and region[1] <= b.cy <= region[3]):
+                    continue
+            if best is None or b.confidence > best.confidence:
+                best = b
+        return best
+
+    def find_all_cls(
+        self,
+        screen: ScreenState,
+        cls_names,
+        *,
+        conf: float = 0.30,
+        region: Optional[Tuple[float, float, float, float]] = None,
+    ) -> List[YoloBox]:
+        """Like find_cls but returns ALL exact matches sorted by conf desc."""
+        if isinstance(cls_names, str):
+            cls_names = [cls_names]
+        want = set(cls_names)
+        hits = []
+        for b in (screen.yolo_boxes or []):
+            if b.confidence < conf:
+                continue
+            if b.cls_name not in want:
+                continue
+            if region is not None:
+                if not (region[0] <= b.cx <= region[2] and region[1] <= b.cy <= region[3]):
+                    continue
+            hits.append(b)
+        return sorted(hits, key=lambda b: -b.confidence)
+
+    def click_cls(
+        self,
+        screen: ScreenState,
+        cls_names,
+        reason: str,
+        *,
+        conf: float = 0.30,
+        region: Optional[Tuple[float, float, float, float]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Find a cls by exact name + click it. Returns action dict or None
+        (caller decides what to do on miss — usually log+wait)."""
+        box = self.find_cls(screen, cls_names, conf=conf, region=region)
+        if box is None:
+            return None
+        return action_click_box(box, f"{reason} (YOLO {box.cls_name} {box.confidence:.2f})")
+
+    def detect_screen_yolo(self, screen: ScreenState) -> Optional[str]:
+        """Detect current page from YOLO cls signatures (no OCR).
+
+        Returns page name (Lobby/Mail/Schedule/Cafe/Craft/MomoTalk/Story/
+        Battle) or None if no signature matches. See ui_classes.PAGE_SIGNATURES.
+        Lobby is checked last so a sub-page's own cls wins over a lingering
+        nav-bar (nav icons are visible inside many pages)."""
+        from brain.skills import ui_classes as UC
+        # Non-lobby pages first (more specific)
+        for page, (cls_list, min_n) in UC.PAGE_SIGNATURES.items():
+            if page == "Lobby":
+                continue
+            n = sum(1 for c in cls_list if self.find_cls(screen, c, conf=0.30) is not None)
+            if n >= min_n:
+                return page
+        # Lobby last
+        lobby_cls, lobby_min = UC.PAGE_SIGNATURES["Lobby"]
+        n = sum(1 for c in lobby_cls if self.find_cls(screen, c, conf=0.30) is not None)
+        if n >= lobby_min:
+            return "Lobby"
+        return None
+
+    def find_ui(
+        self,
+        screen: ScreenState,
+        yolo_classes: List[str],
+        ocr_texts: Optional[List[str]] = None,
+        *,
+        yolo_conf: float = 0.40,
+        ocr_conf: float = 0.6,
+        region: Optional[Tuple[float, float, float, float]] = None,
+    ):
+        """[LEGACY] Find a UI element using YOLO first, OCR fallback.
+
+        DEPRECATED for new code — use find_cls/click_cls (YOLO-only). Kept
+        for skills not yet migrated off OCR fallback.
+
+        This is the canonical button-finder for sub-skills. Pass a list of
+        YOLO cls_name strings (from ui_v1 model — see data/yolo_datasets/
+        ui_v1_auto/classes.txt names referenced by trajectory yolo_boxes):
+        e.g. ['咖啡厅入口', '弹窗叉叉', '全部领取_黄', '邀请键', '确认键'].
+
+        Falls back to OCR text-matching when YOLO misses, so legacy skills
+        keep working. Returns whichever box type matched (YoloBox or OcrBox)
+        — both have .x1/.y1/.x2/.y2 + .cx/.cy via cx_ny accessors so the
+        caller's action_click_box() doesn't care which it got.
+
+        Args:
+            yolo_classes: list of cls_name to try first (exact or substring).
+            ocr_texts: OCR substrings to try if YOLO misses. None = no fallback.
+            yolo_conf / ocr_conf: per-method confidence floors.
+            region: (x1,y1,x2,y2) normalized 0..1 to constrain YOLO+OCR hits.
+        """
+        # YOLO first (already in screen.yolo_boxes — no extra inference).
+        if yolo_classes and screen.yolo_boxes:
+            name_set = set(yolo_classes)
+            name_lower = [str(n).lower() for n in yolo_classes]
+            hits = []
+            for b in screen.yolo_boxes:
+                if b.confidence < yolo_conf:
+                    continue
+                # region clip
+                if region is not None:
+                    cx = (b.x1 + b.x2) / 2
+                    cy = (b.y1 + b.y2) / 2
+                    if not (region[0] <= cx <= region[2] and region[1] <= cy <= region[3]):
+                        continue
+                # exact match
+                if b.cls_name in name_set:
+                    hits.append(b)
+                    continue
+                # substring fallback
+                bn = (b.cls_name or "").lower()
+                if any(q in bn or bn in q for q in name_lower):
+                    hits.append(b)
+            if hits:
+                return max(hits, key=lambda x: x.confidence)
+        # OCR fallback
+        if ocr_texts:
+            return screen.find_any_text(ocr_texts, min_conf=ocr_conf, region=region)
+        return None
+
     def find_claim_all_button(
         self,
         screen: ScreenState,
@@ -1068,7 +1197,21 @@ class BaseSkill(ABC):
     ) -> Optional[OcrBox]:
         """Locate a 一鍵領取 / 全部領取 / Claim All button in any of its
         Trad/Simp/English forms. Returns OcrBox or None.
+
+        NOTE: prefer self.find_ui([yolo_cls...], [...ocr_texts]) for new
+        code — YOLO ui_v1 has '全部领取_黄' (107) which is more reliable
+        than OCR for grey/yellow state.
         """
+        # YOLO ui_v1 has dedicated cls — try it first.
+        yolo_btn = self.find_ui(
+            screen,
+            ["全部领取_黄", "全部领取_灰"],
+            None,
+            yolo_conf=0.35,
+            region=region,
+        )
+        if yolo_btn is not None:
+            return yolo_btn
         return screen.find_any_text(
             self._CLAIM_ALL_TEXTS, min_conf=min_conf, region=region,
         )
@@ -1117,7 +1260,20 @@ class BaseSkill(ABC):
         ...
 
     def detect_current_screen(self, screen: ScreenState) -> Optional[str]:
-        """Detect current screen based on OCR header and nav bar cues."""
+        """Detect current screen — pure YOLO (OCR-free per 2026-05-29 spec).
+
+        Delegates to detect_screen_yolo (PAGE_SIGNATURES). Returns the same
+        legacy vocabulary skills already branch on: Lobby / Mail / Schedule /
+        Cafe / Craft / MomoTalk / Story / Battle / PVP / Bounty / Mission.
+        Returns None when no signature matches (caller decides: usually
+        wait or ESC). DailyTasks has no YOLO signature yet — returns None
+        there (skills that special-cased it now just fall through, harmless).
+        """
+        return self.detect_screen_yolo(screen)
+
+    def _detect_current_screen_ocr(self, screen: ScreenState) -> Optional[str]:
+        """[DEAD — OCR disabled] Legacy OCR header detection, kept for the
+        digit-OCR re-enable phase. Not called while _OCR_ENABLED is False."""
         if screen.is_lobby():
             return "Lobby"
 
@@ -1383,6 +1539,34 @@ class BaseSkill(ABC):
                     return action_click(tpl.cx, tpl.cy, "dismiss notification popup (template match)")
             except Exception:
                 pass
+            # YOLO ui_v1 bottom-up fallback: ui detector has "确认键" and
+            # "弹窗叉叉" classes — if OCR + template both miss, try YOLO
+            # boxes before the hardcoded coord (which is height-specific
+            # and gets wrong popups). Added 2026-05-28 after DailyTasks
+            # got stuck for 30+ ticks on the 因持有數限制 inventory popup
+            # because (0.50, 0.78) fell into background "TOUCH TO CONTINUE"
+            # text instead of the 確認 button at (~0.50, 0.55).
+            try:
+                yolo_confirm = None
+                yolo_x = None
+                for yb in getattr(screen, "yolo_boxes", []) or []:
+                    name = getattr(yb, "cls_name", "") or ""
+                    if yolo_confirm is None and name in ("确认键", "確認鍵", "确认按钮"):
+                        yolo_confirm = yb
+                    elif yolo_x is None and name in ("弹窗叉叉", "彈窗叉叉", "关闭键"):
+                        yolo_x = yb
+                if yolo_confirm is not None:
+                    cx = (yolo_confirm.x1 + yolo_confirm.x2) / 2
+                    cy = (yolo_confirm.y1 + yolo_confirm.y2) / 2
+                    self.log(f"notification popup: OCR missed, YOLO 确认键 at ({cx:.2f},{cy:.2f})")
+                    return action_click(cx, cy, "dismiss notification popup (YOLO 确认键)")
+                if yolo_x is not None:
+                    cx = (yolo_x.x1 + yolo_x.x2) / 2
+                    cy = (yolo_x.y1 + yolo_x.y2) / 2
+                    self.log(f"notification popup: OCR missed, YOLO 弹窗叉叉 at ({cx:.2f},{cy:.2f})")
+                    return action_click(cx, cy, "dismiss notification popup (YOLO X)")
+            except Exception:
+                pass
             # Last-resort hardcoded fallback: BA's tall popups (inventory
             # full, daily reward summary) put 確認 at center-bottom around
             # (0.50, 0.78).  Shorter popups put it at (0.50, 0.64).  We
@@ -1440,11 +1624,42 @@ class BaseSkill(ABC):
             return None
         return action_back(f"{self.name}: press back toward lobby")
 
+    # OCR-text → YOLO ui_v1 cls_name map for bottom-nav entries.
+    # YOLO cls is more reliable than OCR for these icons (consistent location,
+    # icon-based not text-based). Added 2026-05-28 — user asked to drive
+    # click logic from UI model cls instead of OCR strings.
+    _NAV_OCR_TO_YOLO: Dict[str, List[str]] = {
+        "咖啡廳": ["咖啡厅入口"], "咖啡厅": ["咖啡厅入口"], "咖啡": ["咖啡厅入口"],
+        "課程表": ["课程表入口"], "课程表": ["课程表入口"],
+        "學生": ["学生入口"],   "学生": ["学生入口"],
+        "編輯": ["编辑入口"],   "编辑": ["编辑入口"],
+        "社交": ["社交入口"],   "社團": ["社交入口"], "社团": ["社交入口"],
+        "製造": ["制造入口"],   "制造": ["制造入口"],
+        "商店": ["商店入口"],
+        "招募": ["招募入口"],
+        "任務": ["任务大厅入口"], "任务": ["任务大厅入口"],
+        "信箱": ["邮件箱"],     "郵箱": ["邮件箱"], "邮箱": ["邮件箱"],
+        "郵件": ["邮件箱"],     "邮件": ["邮件箱"], "Mail": ["邮件箱"],
+    }
+
     def _nav_to(self, screen: ScreenState, nav_texts: List[str]) -> Optional[Dict[str, Any]]:
-        """Click a bottom nav bar button by text."""
+        """Click a bottom nav bar button by text — YOLO first, OCR fallback."""
+        # Gather YOLO cls candidates from the OCR text list.
+        yolo_cls: List[str] = []
+        for t in nav_texts:
+            yolo_cls.extend(self._NAV_OCR_TO_YOLO.get(t, []))
+        # Dedupe preserving order.
+        seen = set()
+        yolo_cls = [c for c in yolo_cls if not (c in seen or seen.add(c))]
+        if yolo_cls and screen.yolo_boxes:
+            hit = self.find_ui(screen, yolo_cls, None, yolo_conf=0.35)
+            if hit is not None:
+                self.log(f"nav YOLO click '{hit.cls_name}'")
+                return action_click_box(hit, f"nav to '{hit.cls_name}'")
+        # OCR fallback (original behavior).
         for t in nav_texts:
             hit = screen.find_text_one(t, region=screen.NAV_BAR, min_conf=0.5)
             if hit:
-                self.log(f"nav click '{hit.text}'")
+                self.log(f"nav OCR click '{hit.text}'")
                 return action_click_box(hit, f"nav to '{hit.text}'")
         return None

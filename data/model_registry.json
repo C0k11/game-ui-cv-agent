@@ -24,11 +24,50 @@
     }
   },
   "ui": {
-    "active": "v1",
+    "active": "v5",
     "task": "detect",
-    "n_classes": 448,
-    "n_classes_in_use": 156,
+    "n_classes": 451,
+    "n_classes_in_use": 160,
+    "_infer_imgsz": 960,
+    "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v5": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v5/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-05-31",
+        "trained_epoch": 60,
+        "n_classes": 451,
+        "notes": "warm-start 微调 from v4 (Transferred 756/768; cls头因nc450→451重学). 数据集 ui_v2: 旧train去重(16157→2377唯一, 砍200x oversample过拟合源)+ run_20260531_110516(1052真实)+ run_20260531_143201(37商店, 补选择购买/已选中/绿勾)+ bond synth(441/442/449). cls92恢复. nc=451(新增450选择购买). 薄类适度oversample到30(450→50). lr0=0.005, 60ep, v4同款空间aug, close_mosaic末10ep. best_real.pt=ep60 last.pt冻结(close_mosaic干净收尾, blindval 0.585→0.606). MUST infer @imgsz=960.",
+        "eval_note": "无独立held-out(1052/37已进train); 真实验收=dashboard目检. blind _ui_val_pool(51帧)仅early-stop, 末值mAP50≈0.606(不可比v4的0.915@1052). 关键train实例: 92=144/450=56/54=83/绿勾=485/441=415/442=510/449=918.",
+        "known_gap": "盯回退类 cls83关卡得星_0/cls112 MIN_灰色(v4曾回退); arena待改用cls92区域选对手(去avatar依赖)."
+      },
+      "v4": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v4/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-05-29",
+        "trained_epoch": 31,
+        "notes": "synth(900帧: 441/442/449 贴多样背景)+空间aug(mosaic0.5/copy_paste0.3/scale0.3/translate0.1/hsv_v0.3, fliplr/flipud/degrees=0)修过拟合. from COCO, batch12 imgsz960 cache=disk. 训练ep31中断(机器睡, 未到close_mosaic@140)但已胜v3. best_real.pt = ep31 last.pt 的冻结副本 (NOT nominal best.pt — real-eval: last 0.915 > best 0.877, blind 51帧 val 再次误导). MUST infer @ imgsz=960.",
+        "eval_real_held_out": "run_20260531_110516 (1052真实held-out帧/140类/10634实例): mAP50 0.915 vs v3 0.862. 修好: 449 momotalk聊天区 0→0.964, 7每日领奖 0→1.0, 8MomoTalk入口 0→1.0, 395购买青辉石 0.014→1.0, 139进入章节 0.25→1.0, 142点击继续 0→0.916, 136战斗胜利 0→1.0, 442进入羁绊 0.667→0.833. synth+aug 成功.",
+        "known_gap": "cls92 战术大赛对战选择区域=0 (v4训练时被drop; v3也0@IoU0.5因巨框定位差但能粗检供arena点击; v5恢复). 小回退待v5补: cls83 关卡得星_0 0.83→0.11, cls112 MIN_灰色 0.71→0.29 (ep31欠训)."
+      },
+      "v3": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v3/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-05-29",
+        "trained_epoch": 34,
+        "notes": "lobby 入口 cls 改标文字(底栏8+MomoTalk+每日领奖+任务大厅) + oversample target=200 (157 cls 全>=200) + 5训练目录(加000756新capture). from COCO (NOT warm-start), patience30 early-stop@ep34, aug全0, batch12, cache=disk. best_real.pt=ep34 last.pt (val-best ep4 只检4入口, ep34 检全8入口 — val 再次误导, ship 看真实截图). MUST infer @ imgsz=960.",
+        "verified_real_frame": "lobby tick_0010 底栏8入口全检出 0.88-0.99 (v2全0!); 训练帧 每日领奖0.98/MomoTalk0.97/咖啡厅0.99; mail 一次领取0.89. 邮件箱cls4 仍0 (19px太小, oversample救不了, 靠红点兜底).",
+        "known_gap": "邮件箱(19px小图标)检不出靠mail.py红点兜底; 每日领奖/MomoTalk 在特殊lobby(banner布局变)泛化弱, 正常lobby OK"
+      },
+      "v2": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v2/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-05-28",
+        "trained_epoch": 16,
+        "val_mAP50_at_best": 0.8705,
+        "notes": "Retrain with oversample target=60 (770→4472 frames) + ALL aug=0 (clean UI glyph learning, user spec). best_real.pt = ep16 last.pt — picked over ep5 val-best because real-screenshot generalization is better at ep16 (val mAP is inflated by oversample-duplicate same-distribution val set; ep16 detects 一次领取黄色 conf 0.936 on real mail frame, ep5 misses it). Training was killed at ep16 (resume deadlocked on 4472-img re-scan). MUST infer @ imgsz=960.",
+        "verified_real_frame": "mail tick_0012: 一次领取黄色 0.936, 体力 0.935, 领取蓝色 0.97 — vs v1 @1920 only cls417 0.567"
+      },
       "v1": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v1/weights/best.pt",
         "model_arch": "yolo26m",
@@ -39,7 +78,7 @@
         "R": 0.8574,
         "best_at_epoch": 77,
         "training_hours": 10.56,
-        "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate. Best mAP50 hit at ep77; saturated thereafter. v0 baseline (static_ui_v4) was 0.339 — v1 is +52.6pp improvement.",
+        "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate. SUPERSEDED by v2 — key cls (一次领取/邀请键 etc) under-trained at 12f. Kept for rollback.",
         "worst_classes_ap50": {
           "27_移动至2号点": 0.000,
           "95_活动商店": 0.055,

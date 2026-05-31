@@ -1,33 +1,44 @@
-"""DailyTasksSkill: Claim daily quest rewards and activity chests.
+"""DailyTasksSkill: Claim daily quest rewards. YOLO-only clicks.
 
-Runs AFTER mail to collect daily task completion rewards (AP, gems, items)
-and activity milestone chests that accumulated during the pipeline run.
+Design (2026-05-28 full YOLO rewrite, mirrors mail.py):
+- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
+- NO OCR button fallback, NO detect_current_screen (OCR), NO hardcoded blind
+  coordinates. If YOLO can't see a needed cls, log + wait (surface the gap)
+  rather than fake-finish.
+- The ONLY OCR is the battle-active guard (AUTO / 戰鬥時間) — there's no
+  ui_v1 cls for that full-screen text and it's cheap + rare (same as mail).
+
+States: enter → claim → exit
 
 Flow:
-1. ENTER: From lobby, navigate to daily tasks / 工作 / 每日任務
-2. CLAIM_ALL: Click 一鍵領取 to claim all completed tasks
-3. CLAIM_CHESTS: Click activity milestone chests (top bar) if available
-4. EXIT: Back to lobby
+1. ENTER:  From lobby, click 任務大廳入口 (UC.NAV_TASKS) to open the task hall.
+           Cooldown after click so we don't re-tap the entry icon.
+2. CLAIM:  Click 全部領取_黃 (UC.CLAIM_ALL_YELLOW) to sweep all completed
+           tasks; fall through to per-row 領取_黃 / 領取獎勵_黃 for tier-bonus
+           rows the sweep misses. Dismiss 獲得獎勵 result popups.
+3. EXIT:   Back to lobby (detect_screen_yolo() == "Lobby").
 
-Key patterns:
-- Navigation: "工作" / "任務" / "Tasks" / "每日" / "Daily"
-- Claim all: "一鍵領取" / "全部領取" / "Claim All"
-- Activity chests: YOLO or OCR detection of chest icons at top
-- Reward popup: "獲得道具" / "獲得獎勵" — tap to dismiss
+KNOWN cls GAPS (need training data — see report):
+- daily_tasks page has NO dedicated page-signature cls. We infer "on tasks
+  page" heuristically: detect_screen_yolo() != "Lobby" AND a CLAIM_* cls is
+  visible. A dedicated 任務大廳 header/title cls would make this clean.
+- 活躍度寶箱 (activity-milestone chests) have NO YOLO cls — the entire chest
+  phase was REMOVED. Re-add once a chest cls is trained.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
     action_click, action_click_box,
     action_wait, action_back, action_done,
 )
+from brain.skills import ui_classes as UC
 
 
 class DailyTasksSkill(BaseSkill):
-    _LOBBY_DOT_ENTRIES = ["任务大厅入口"]
+    _LOBBY_DOT_ENTRIES = [UC.NAV_TASKS]
 
     def should_run(self, screen):
         return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
@@ -37,45 +48,58 @@ class DailyTasksSkill(BaseSkill):
         self.max_ticks = 50
         self._claim_attempts: int = 0
         self._claimed_count: int = 0
-        self._chests_claimed: int = 0
-        self._chest_phase: bool = False  # True = looking for chests
+        self._post_claim_wait: int = 0
+        self._enter_click_cooldown: int = 0
+        # Entry-clicked gate: only treat a claim-cls screen as "our page"
+        # AFTER we've clicked our own entry icon. Stops串页 — a residual claim
+        # page from the previous skill, or a transient YOLO claim-cls misfire,
+        # no longer false-trips _on_tasks_page while we're still on lobby.
+        self._entered: bool = False
 
     def reset(self) -> None:
         super().reset()
         self._claim_attempts = 0
         self._claimed_count = 0
-        self._chests_claimed = 0
-        self._chest_phase = False
+        self._post_claim_wait = 0
+        self._enter_click_cooldown = 0
+        self._entered = False
 
+    # ── page inference via YOLO cls (no OCR) ──────────────────────────
+    def _on_tasks_page(self, screen: ScreenState) -> bool:
+        """Inside daily-tasks iff we've clicked our own entry (self._entered)
+        AND we're NOT on lobby AND a claim cls (active or grey) is visible.
+        No dedicated page cls exists (gap); the entry gate is what keeps this
+        heuristic from串页 onto a leftover/other-skill claim screen. Pure
+        predicate — the _entered re-arm on lobby happens in _enter."""
+        if not self._entered:
+            return False
+        if self.detect_screen_yolo(screen) == "Lobby":
+            return False
+        return self.find_cls(
+            screen, UC.CLAIM_ACTIVE + UC.CLAIM_DONE, conf=0.20,
+        ) is not None
+
+    # ── state machine ─────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
-        self.ticks += 1
+        # Battle-active guard (orphan battle) — kept as OCR since AUTO/timer
+        # text isn't a ui_v1 cls; cheap + rare (same as mail).
+        if screen.find_any_text(["AUTO", "Auto", "戰鬥時間", "战斗时间"], min_conf=0.6):
+            return action_wait(800, "daily_tasks: battle in progress, waiting")
 
+        self.ticks += 1
         if self.ticks >= self.max_ticks:
-            self.log("timeout")
+            self.log(f"timeout (claimed={self._claimed_count})")
             return action_done("daily_tasks timeout")
 
-        # Reward result popup — tap to dismiss
-        reward = screen.find_any_text(
-            ["獲得道具", "获得道具", "獲得獎勵", "获得奖励"],
-            region=screen.CENTER, min_conf=0.6
-        )
-        if reward:
-            return action_click(0.5, 0.9, "dismiss reward popup")
-
-        # Activity chest reward popup (活躍度寶箱 / 活跃度宝箱)
-        chest_reward = screen.find_any_text(
-            ["活躍度", "活跃度", "Activity"],
-            region=screen.CENTER, min_conf=0.6
-        )
-        if chest_reward:
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確", "确", "OK"],
-                region=screen.CENTER, min_conf=0.6
-            )
-            if confirm:
-                self._chests_claimed += 1
-                return action_click_box(confirm, "confirm chest reward")
-            return action_click(0.5, 0.9, "dismiss chest reward")
+        # Reward result popup (獲得獎勵) — dismiss via YOLO X, else tap center.
+        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        if reward is not None:
+            close_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.40)
+            if close_x is not None:
+                self._post_claim_wait = 2
+                return action_click_box(close_x, "dismiss reward popup (YOLO X)")
+            self._post_claim_wait = 2
+            return action_click(0.5, 0.9, "dismiss reward popup (獲得獎勵, tap center)")
 
         popup = self._handle_common_popups(screen)
         if popup:
@@ -89,194 +113,109 @@ class DailyTasksSkill(BaseSkill):
 
         if self.sub_state == "enter":
             return self._enter(screen)
-        if self.sub_state == "claim_all":
-            return self._claim_all(screen)
-        if self.sub_state == "claim_chests":
-            return self._claim_chests(screen)
+        if self.sub_state == "claim":
+            return self._claim(screen)
         if self.sub_state == "exit":
             return self._exit(screen)
 
         return action_wait(300, "daily_tasks unknown state")
 
-    def _is_tasks_screen(self, screen: ScreenState) -> bool:
-        """Detect if we're on the daily tasks / work screen."""
-        # Header region check
-        if screen.find_any_text(
-            ["工作", "每日任務", "每日任务", "Daily", "任務總覽", "任务总览"],
-            region=(0.0, 0.0, 0.40, 0.12), min_conf=0.5
-        ):
-            return True
-        return False
-
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        current = self.detect_current_screen(screen)
+        # Re-arm the entry gate only on a CONFIRMED return to lobby and only
+        # when not mid-entry (cooldown==0), so a still-visible lobby nav bar
+        # during the page transition doesn't clear _entered prematurely.
+        if self._enter_click_cooldown == 0 and self.detect_screen_yolo(screen) == "Lobby":
+            self._entered = False
 
-        if self._is_tasks_screen(screen) or current == "DailyTasks":
+        if self._on_tasks_page(screen):
             self.log("inside daily tasks")
-            self.sub_state = "claim_all"
+            self.sub_state = "claim"
+            self._post_claim_wait = 2
             return action_wait(500, "entered daily tasks")
 
-        if current == "Lobby":
-            # Try to find tasks/work button on lobby
-            # Usually accessed via a sidebar icon or bottom nav
-            tasks_btn = screen.find_any_text(
-                ["工作", "每日", "Daily"],
-                min_conf=0.6
-            )
-            if tasks_btn:
-                return action_click_box(tasks_btn, "click tasks from lobby")
+        # Cooldown so we don't re-tap the 任務大廳 entry icon.
+        if self._enter_click_cooldown > 0:
+            self._enter_click_cooldown -= 1
+            return action_wait(500, f"daily_tasks: enter cooldown ({self._enter_click_cooldown})")
 
-            # Fallback: tasks button is often in bottom-left area or sidebar
-            # Try nav bar
-            nav = self._nav_to(screen, ["工作", "任務", "任务"])
-            if nav:
-                return nav
+        # YOLO 任務大廳入口 cls (sidebar tasks icon).
+        tasks_btn = self.find_cls(screen, UC.NAV_TASKS, conf=0.30)
+        if tasks_btn is not None:
+            self._enter_click_cooldown = 4
+            self._entered = True  # entry-clicked gate: now in-page is trusted
+            return action_click_box(tasks_btn, "open daily tasks (YOLO 任務大廳入口)")
 
-            # Last resort: some servers have it accessible via mission menu
-            mission = screen.find_any_text(
-                ["任務", "任务"],
-                region=screen.LEFT_SIDE, min_conf=0.5
-            )
-            if mission:
-                return action_click_box(mission, "click mission sidebar")
+        # Not lobby + not tasks → back out toward lobby.
+        if self.detect_screen_yolo(screen) not in (None, "Lobby"):
+            return action_back("daily_tasks: backing toward lobby")
+        self.log("no 任務大廳入口 visible — YOLO gap; waiting")
+        return action_wait(400, "daily_tasks: waiting for 任務大廳入口 detection")
 
-            # Detect "2/8" or similar task counter on lobby left sidebar
-            # The 任務 icon OCR often fails but shows the counter badge
-            task_counter = screen.find_text_one(
-                r"^\d/\d$",
-                region=(0.0, 0.20, 0.15, 0.40), min_conf=0.5
-            )
-            if task_counter:
-                return action_click(task_counter.cx, task_counter.cy,
-                                    f"click task counter badge ({task_counter.text})")
-
-            # Hardcoded fallback: lobby 任務 sidebar icon position
-            if self.ticks > 10:
-                return action_click(0.04, 0.30, "click tasks sidebar (hardcoded)")
-
-            return action_wait(300, "looking for tasks button")
-
-        if current and current != "Lobby":
-            return action_back(f"back from {current}")
-
-        return action_wait(500, "entering daily tasks")
-
-    def _claim_all(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click claim-all button repeatedly until no more rewards.
-
-        Two-phase strategy:
-        - Phase A (first ~5 attempts): use 一鍵領取 which sweeps the
-          whole task list in one click.
-        - Phase B (after Phase A or when 一鍵領取 stops being effective):
-          fall through to per-row 領取 buttons.  In BA the tier-bonus
-          rows ("完成每日任務8次以上 [領取]") have their OWN 領取 button
-          that 一鍵領取 doesn't always catch — explicit per-row clicks
-          are required.
-
-        The legacy "click 一鍵領取 forever until it disappears" approach
-        wasted 25 attempts when the button stayed visible but stopped
-        doing anything (run 2026-05-13 ~21:20: 25 throttled attempts on
-        the same 一鍵領取 button, tier-bonus never reached).
-        """
+    def _claim(self, screen: ScreenState) -> Dict[str, Any]:
         self._claim_attempts += 1
 
-        if self._claim_attempts > 25:
+        if self._post_claim_wait > 0:
+            self._post_claim_wait -= 1
+            return action_wait(500, f"daily_tasks: settling ({self._post_claim_wait})")
+
+        # Lowered 25→12: claim-all keeps rendering yellow for a frame or two
+        # after the queue drains, so the old cap burned ~100 ticks re-clicking
+        # an already-empty list. With _post_claim_wait settling each claim, 12
+        # real claim attempts is plenty.
+        if self._claim_attempts > 12:
             self.log(f"claim loop done ({self._claimed_count} claimed)")
-            self.sub_state = "claim_chests"
-            self._chest_phase = True
-            return action_wait(300, "claim attempts exhausted, checking chests")
+            self.sub_state = "exit"
+            return action_wait(300, "claim attempts exhausted")
 
-        # Wider region than the default (0.6,0.1,1.0,0.9) — daily-tasks
-        # page also has a TIER BONUS bar at the top (e.g. "完成每日任務
-        # 8次以上 8/8 [領取]") whose 領取 button sits at y≈0.05-0.10,
-        # below the default 0.1 floor.  Pull the top edge to 0.02.
-        single_region = (0.55, 0.02, 1.0, 0.95)
-
-        # Phase A: try 一鍵領取 for the first 5 attempts.  If that button
-        # is still visible after 5 attempts we assume it's "stuck" (most
-        # rewards already gone, button persists for UI reasons) and
-        # switch to per-row mode.  Skip grey (already-claimed) buttons.
-        if self._claim_attempts <= 5:
-            claim = self.find_claim_all_button(screen)
-            if claim and not screen.is_button_grey(claim.cx, claim.cy):
-                self.log(f"claiming all tasks (attempt {self._claim_attempts})")
-                self._claimed_count += 1
-                return action_click_box(claim, "claim all tasks")
-            if claim:
-                # 一鍵領取 button is grey — already swept.  Don't spin on
-                # Phase A; jump to Phase B to look for any per-row 領取
-                # that 一鍵領取 didn't catch (tier-bonus, milestone).
-                self._claim_attempts = max(self._claim_attempts, 6)
-
-        # Phase B: per-row 領取 (catches tier-bonus rows + anything
-        # 一鍵領取 skipped).  min_conf lowered to 0.55 — the tier-bonus
-        # 領取 button on Yellow-painted state has OCR conf ~0.66, below
-        # the default 0.7 threshold (validated on tick_0040 of
-        # run_20260513_212504 where 領取 at (0.76,0.93) conf=0.66).
-        single = self.find_single_claim_button(
-            screen, region=single_region, min_conf=0.55
+        # Claim-all (全部領取_黃). Only the YELLOW (active) state — grey means
+        # already swept. The tier-bonus bar sits high (y≈0.02-0.10), so allow
+        # the full vertical span on the right edge.
+        claim_all = self.find_cls(
+            screen, UC.CLAIM_ALL_YELLOW, conf=0.25, region=(0.55, 0.02, 1.0, 0.98),
         )
-        # Skip grey-painted 領取 (already claimed).  User feedback
-        # 2026-05-13: bot kept hitting the bottom-right 全部領取 grey
-        # button for 20 throttled ticks instead of exiting.
-        if single and screen.is_button_grey(single.cx, single.cy):
-            self.log(
-                f"per-row 領取 at ({single.cx:.2f},{single.cy:.2f}) is grey "
-                f"(already claimed), skipping"
-            )
-            single = None
-        if single:
-            self.log(
-                f"claiming individual task reward at "
-                f"({single.cx:.2f},{single.cy:.2f}) attempt {self._claim_attempts}"
-            )
+        if claim_all is not None:
+            self.log(f"claim all tasks (#{self._claim_attempts}, cls={claim_all.cls_name})")
             self._claimed_count += 1
-            return action_click_box(single, "claim single task")
+            self._post_claim_wait = 3
+            return action_click_box(claim_all, f"claim all tasks (YOLO {claim_all.cls_name})")
 
-        # Phase B found nothing — if Phase A was skipped, try it now as
-        # a last-ditch sweep before declaring done.
-        if self._claim_attempts > 5:
-            claim = self.find_claim_all_button(screen)
-            if claim:
-                self.log(f"claim-all fallback (attempt {self._claim_attempts})")
-                self._claimed_count += 1
-                return action_click_box(claim, "claim all tasks")
-
-        # No more claim buttons — move to chests
-        self.log(f"no more tasks to claim ({self._claimed_count} claimed)")
-        self.sub_state = "claim_chests"
-        self._chest_phase = True
-        return action_wait(300, "tasks done, checking chests")
-
-    def _claim_chests(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click activity milestone chests at the top of the tasks screen.
-
-        These are usually small chest icons along an activity progress bar.
-        They become claimable (glow/animate) when activity points reach thresholds.
-        """
-        # Look for activity progress text and click chest areas
-        # Activity bar is usually at top of tasks screen (y: 0.10-0.20)
-        activity = screen.find_any_text(
-            ["活躍度", "活跃度", "Activity"],
-            region=(0.0, 0.05, 1.0, 0.25), min_conf=0.5
+        # Per-row 領取_黃 / 領取獎勵_黃 — catches tier-bonus rows the sweep
+        # didn't get. Only yellow (active) variants; grey = already claimed.
+        single = self.find_cls(
+            screen, [UC.CLAIM_YELLOW, UC.CLAIM_REWARD_YELLOW],
+            conf=0.25, region=(0.55, 0.02, 1.0, 0.98),
         )
-        if activity and self._chests_claimed == 0:
-            # Click along the activity bar to try to hit chests
-            # Chests are typically at 25%, 50%, 75%, 100% of bar width
-            positions = [(0.35, 0.15), (0.50, 0.15), (0.65, 0.15), (0.80, 0.15)]
-            idx = self._chests_claimed % len(positions)
-            self._chests_claimed += 1
-            px, py = positions[idx]
-            self.log(f"clicking activity chest area ({px},{py})")
-            return action_click(px, py, f"click chest position {idx}")
+        if single is not None:
+            self.log(f"claim single task (#{self._claim_attempts}, cls={single.cls_name})")
+            self._claimed_count += 1
+            self._post_claim_wait = 3
+            return action_click_box(single, f"claim single task (YOLO {single.cls_name})")
 
-        # Done with chests
-        self.log(f"chests done ({self._chests_claimed} claimed)")
-        self.sub_state = "exit"
-        return action_wait(300, "chests complete")
+        # No active claim cls. If a grey claim-all is present, everything's
+        # swept → exit cleanly.
+        if self.find_cls(screen, UC.CLAIM_ALL_GREY, conf=0.25) is not None:
+            self.log(f"all claimed (全部領取_灰 present, {self._claimed_count} claimed)")
+            self.sub_state = "exit"
+            return action_wait(300, "all tasks claimed (grey claim-all)")
+
+        # Nothing to claim and no grey marker — give it a couple of ticks in
+        # case a popup/animation is settling, then conclude.
+        if self._claim_attempts > 6:
+            self.log(f"no more claim cls ({self._claimed_count} claimed)")
+            self.sub_state = "exit"
+            return action_wait(300, "no claim cls found")
+        return action_wait(400, "daily_tasks: waiting for claim cls (YOLO gap)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        if screen.is_lobby():
-            self.log(f"done ({self._claimed_count} tasks, {self._chests_claimed} chests)")
-            return action_done("daily_tasks complete")
-        return action_back("daily_tasks exit: back to lobby")
+        # On lobby iff we see >=2 nav icons.
+        if self.detect_screen_yolo(screen) == "Lobby":
+            self.log(f"done ({self._claimed_count} tasks claimed)")
+            return action_done(f"daily_tasks complete ({self._claimed_count} claimed)")
+        # Prefer YOLO home/back button over blind ESC.
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_box(home, "daily_tasks exit: home button")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_box(back, "daily_tasks exit: back button")
+        return action_back("daily_tasks exit: ESC toward lobby")

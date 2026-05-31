@@ -1,25 +1,24 @@
-"""ShopSkill: Buy daily items from the shop.
+"""ShopSkill: Buy daily free / low-price shop items. YOLO-only clicks.
+
+Design (2026-05-28 full YOLO rewrite — mirrors mail.py):
+- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
+- NO OCR. The daily free-buy loop needs no pure-digit read (no count/AP),
+  so there is zero OCR call in this skill — all state is inferred from YOLO.
+- Page state inferred from YOLO cls: seeing SHOP_SELECT_ALL / SHOP_BUY /
+  CURRENCY / FREE / COMBO_PACK = inside shop; NAV_SHOP or detect_screen_yolo
+  == "Lobby" = on lobby.
+- If YOLO can't see a needed cls, log + wait (surface the gap) — never fall
+  back to OCR or blind hardcoded coords.
 
 Flow:
-1. ENTER: From lobby, click 商店 in nav bar
-2. SELECT_TAB: Click 一般 (Normal) tab
-3. SELECT_ALL: Click 全部選擇 / select-all checkbox
-4. PURCHASE: Click 選擇購買 → confirm dialog → dismiss reward
-5. EXIT: Back to lobby
+1. enter:      from lobby, click NAV_SHOP (商店入口); cooldown to avoid re-tap
+2. select_all: click SHOP_SELECT_ALL (全部选择). Grey variant => nothing to
+               buy / already bought today => exit
+3. purchase:   click SHOP_BUY (购买) => BTN_CONFIRM (确认). Grey confirm =>
+               unavailable => exit. GOT_REWARD popup => dismiss => exit
+4. exit:       detect_screen_yolo()=="Lobby" => done; else BTN_HOME/BTN_BACK/ESC
 
-Completion detection (from reference shop_utils.get_purchase_state):
-- "purchase-available": 選擇購買 button active → proceed
-- "purchase-unavailable": button greyed / no items → done
-- "refresh-button-appear": refresh button visible → items already bought today
-
-Key patterns:
-- Header: "商店" (Shop)
-- Tabs: "一般" (Normal), "特殊" (Special), etc.
-- Select all: "全部選擇" / "全部选择"
-- Bulk purchase: "選擇購買" / "选择购买" (bottom bar after select-all)
-- Confirm dialog: "取消" + "確認"
-- Reward: "獲得道具" / "獲得獎勵"
-- Refresh: "更新" / "刷新" / "Refresh" (means already bought)
+States: enter → select_all → purchase → exit
 """
 from __future__ import annotations
 
@@ -27,74 +26,62 @@ from typing import Any, Dict
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box,
-    action_wait, action_back, action_done,
+    action_click_box, action_wait, action_back, action_done,
 )
+from brain.skills import ui_classes as UC
+
+
+# cls that prove we're inside the shop (any one is enough).
+_SHOP_PAGE_CLS = [
+    UC.SHOP_SELECT_ALL, UC.SHOP_SELECT_ALL_GREY, UC.SHOP_BUY,
+    UC.CURRENCY, UC.CURRENCY_SEL, UC.FREE,
+    UC.COMBO_PACK, UC.COMBO_PACK_SEL,
+]
 
 
 class ShopSkill(BaseSkill):
     def __init__(self):
         super().__init__("Shop")
         self.max_ticks = 50
-        self._tab_clicked: bool = False
-        self._selected_all: bool = False
-        self._purchase_confirmed: bool = False
-        self._purchase_ticks: int = 0
-        self._enter_ticks: int = 0
-        self._select_ticks: int = 0
+        self._enter_click_cooldown: int = 0
+        self._select_attempts: int = 0
+        self._purchase_attempts: int = 0
         self._confirm_clicks: int = 0
-        self._buy_btn_clicks: int = 0
+        self._buy_clicks: int = 0
+        self._purchased: bool = False
+        self._post_click_wait: int = 0
 
     def reset(self) -> None:
         super().reset()
-        self._tab_clicked = False
-        self._selected_all = False
-        self._purchase_confirmed = False
-        self._purchase_ticks = 0
-        self._enter_ticks = 0
-        self._select_ticks = 0
+        self._enter_click_cooldown = 0
+        self._select_attempts = 0
+        self._purchase_attempts = 0
         self._confirm_clicks = 0
-        self._buy_btn_clicks = 0
+        self._buy_clicks = 0
+        self._purchased = False
+        self._post_click_wait = 0
 
+    # ── page inference via YOLO cls (no OCR) ──────────────────────────
+    def _on_shop_page(self, screen: ScreenState) -> bool:
+        """Inside shop iff any shop-specific cls is visible."""
+        return self.find_cls(screen, _SHOP_PAGE_CLS, conf=0.25) is not None
+
+    # ── state machine ─────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
-
         if self.ticks >= self.max_ticks:
-            self.log("timeout")
-            return action_done("shop timeout")
+            self.log(f"timeout (purchased={self._purchased})")
+            return action_done(f"shop timeout (purchased={self._purchased})")
 
-        # Reward popup — dismiss and mark purchase done
-        reward = screen.find_any_text(
-            ["獲得道具", "获得道具", "獲得獎勵", "获得奖励"],
-            min_conf=0.6
-        )
-        if reward:
-            if not self._purchase_confirmed:
-                self._purchase_confirmed = True
-                self.log("purchase reward detected")
-            ok = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "OK"],
-                min_conf=0.55
-            )
-            if ok:
-                self.sub_state = "exit"
-                return action_click_box(ok, "dismiss reward popup")
-            return action_click(0.5, 0.9, "dismiss reward popup")
-
-        # Inventory full popup
-        inv_full = screen.find_any_text(
-            ["背包已满", "背包已滿", "空間不足", "空间不足"],
-            region=screen.CENTER, min_conf=0.6
-        )
-        if inv_full:
-            self.log("inventory full, exiting shop")
+        # Reward popup (獲得獎勵) — dismiss via YOLO cls, then exit.
+        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        if reward is not None:
+            if not self._purchased:
+                self._purchased = True
+                self.log("purchase reward detected (GOT_REWARD)")
             self.sub_state = "exit"
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確", "确"], region=screen.CENTER, min_conf=0.6
-            )
-            if confirm:
-                return action_click_box(confirm, "confirm inventory full")
-            return action_click(0.5, 0.73, "confirm inventory full (fallback)")
+            self._post_click_wait = 2
+            return action_click_box(reward, "dismiss reward popup (YOLO 获得奖励)")
 
         popup = self._handle_common_popups(screen)
         if popup:
@@ -103,255 +90,157 @@ class ShopSkill(BaseSkill):
         if screen.is_loading():
             return action_wait(800, "shop loading")
 
+        if self._post_click_wait > 0:
+            self._post_click_wait -= 1
+            return action_wait(500, f"shop: settling ({self._post_click_wait})")
+
         if self.sub_state == "":
             self.sub_state = "enter"
-
         if self.sub_state == "enter":
             return self._enter(screen)
-        if self.sub_state == "select_tab":
-            return self._select_tab(screen)
         if self.sub_state == "select_all":
             return self._select_all(screen)
         if self.sub_state == "purchase":
             return self._purchase(screen)
         if self.sub_state == "exit":
             return self._exit(screen)
-
         return action_wait(300, "shop unknown state")
 
-    def _is_shop(self, screen: ScreenState) -> bool:
-        if (screen.has_text("商店", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5) or
-                screen.has_text("Shop", region=(0.0, 0.0, 0.3, 0.10), min_conf=0.5)):
-            return True
-        if screen.find_any_text(["一般", "青輝石", "青辉石"], region=(0.0, 0.10, 0.20, 0.40), min_conf=0.6):
-            filter_toggle = screen.find_any_text(["濾器", "滤器", "OFF"], region=(0.68, 0.08, 0.86, 0.16), min_conf=0.6)
-            select_all = screen.find_any_text(["全部選擇", "全部选择", "全部擇", "全部摆"], region=(0.84, 0.08, 1.0, 0.16), min_conf=0.55)
-            if filter_toggle or select_all:
-                return True
-        return False
-
-    def _is_already_purchased(self, screen: ScreenState) -> bool:
-        """Detect if items are already purchased today.
-
-        reference checks for "refresh" button appearance as a signal that
-        today's items have already been bought.
-        """
-        refresh = screen.find_any_text(
-            ["更新", "刷新", "Refresh"],
-            region=(0.85, 0.88, 1.0, 0.98), min_conf=0.55
-        )
-        return refresh is not None
-
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        self._enter_ticks += 1
-        current = self.detect_current_screen(screen)
-
-        if current == "Shop" or self._is_shop(screen):
+        if self._on_shop_page(screen):
             self.log("inside shop")
-            self.sub_state = "select_tab"
+            self.sub_state = "select_all"
+            self._post_click_wait = 1
             return action_wait(400, "entered shop")
 
-        if current == "Lobby":
-            nav = self._nav_to(screen, ["商店"])
-            if nav:
-                return nav
-            return action_click(0.50, 0.95, "click shop nav area (hardcoded)")
+        # Cooldown so we don't re-tap the nav entry while it animates in.
+        if self._enter_click_cooldown > 0:
+            self._enter_click_cooldown -= 1
+            return action_wait(500, f"shop: enter cooldown ({self._enter_click_cooldown})")
 
-        if current and current != "Shop":
-            return action_back(f"back from {current}")
+        # YOLO 商店入口 cls.
+        shop_btn = self.find_cls(screen, UC.NAV_SHOP, conf=0.30)
+        if shop_btn is not None:
+            self._enter_click_cooldown = 4
+            return action_click_box(shop_btn, "open shop (YOLO 商店入口)")
 
-        if self._enter_ticks > 12:
-            self.log("can't reach shop, skipping")
-            return action_done("shop unavailable")
-
-        return action_wait(500, "entering shop")
-
-    def _select_tab(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click the 一般 (Normal) tab in the shop."""
-        if not self._is_shop(screen):
-            return action_wait(500, "waiting for shop UI")
-
-        # Check if items already purchased (refresh button visible)
-        if self._is_already_purchased(screen):
-            self.log("items already purchased today (refresh button visible)")
-            self.sub_state = "exit"
-            return action_wait(250, "shop already done")
-
-        tab = screen.find_any_text(
-            ["一般", "Normal"],
-            region=(0.0, 0.08, 0.5, 0.20), min_conf=0.6
-        )
-        if tab:
-            self.log(f"clicking '{tab.text}' tab")
-            self._tab_clicked = True
-            self.sub_state = "select_all"
-            return action_click_box(tab, f"click '{tab.text}' tab")
-
-        if self._tab_clicked or self.ticks > 6:
-            self.sub_state = "select_all"
-            return action_wait(300, "tab already selected or timeout")
-
-        return action_wait(400, "looking for 一般 tab")
+        # Not lobby + not shop → back out toward lobby.
+        if self.detect_screen_yolo(screen) not in (None, "Lobby"):
+            return action_back("shop: backing toward lobby")
+        self.log("no 商店入口 cls visible — YOLO gap; waiting")
+        return action_wait(400, "shop: waiting for 商店入口 detection")
 
     def _select_all(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click 全部選擇 (Select All) checkbox.
+        """Click 全部选择 (select-all). Grey variant => nothing to buy."""
+        self._select_attempts += 1
 
-        OCR often misreads "全部選擇" as "全部選選" — include fuzzy variants.
-        The checkbox is at top-right of the shop (x~0.90, y~0.10-0.14).
-        """
-        self._select_ticks += 1
+        if not self._on_shop_page(screen):
+            if self._select_attempts > 8:
+                self.log("not on shop page after select retries — exiting")
+                self.sub_state = "exit"
+                return action_wait(300, "shop: lost page during select")
+            return action_wait(500, "shop: waiting for shop UI")
 
-        if not self._is_shop(screen):
-            return action_wait(500, "waiting for shop UI")
-
-        # Check if items already purchased
-        if self._is_already_purchased(screen):
-            self.log("items already purchased today")
+        # Grey select-all = no daily items available / already bought.
+        grey = self.find_cls(screen, UC.SHOP_SELECT_ALL_GREY, conf=0.30)
+        if grey is not None:
+            self.log("select-all GREY (nothing to buy / already done)")
             self.sub_state = "exit"
-            return action_wait(250, "shop already done")
+            return action_wait(300, "shop nothing to select")
 
-        sel = screen.find_any_text(
-            ["全部選擇", "全部选择", "全部選選", "全部选选", "Select All"],
-            region=(0.80, 0.08, 1.0, 0.16), min_conf=0.55
-        )
-        if sel:
-            self.log(f"clicking '{sel.text}' (select all)")
-            self._selected_all = True
+        sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=0.30)
+        if sel is not None:
+            self.log("select all (YOLO 全部选择)")
             self.sub_state = "purchase"
-            self._purchase_ticks = 0
-            return action_click_box(sel, "select all items")
+            self._purchase_attempts = 0
+            self._post_click_wait = 2
+            return action_click_box(sel, "select all items (YOLO 全部选择)")
 
-        if self._select_ticks > 4:
-            self.log("select-all OCR miss, clicking hardcoded position")
-            self._selected_all = True
+        # No select-all cls at all. If a buy button is already showing
+        # (items pre-selected), jump straight to purchase.
+        if self.find_cls(screen, UC.SHOP_BUY, conf=0.30) is not None:
+            self.log("no select-all but 购买 visible → purchase")
             self.sub_state = "purchase"
-            self._purchase_ticks = 0
-            return action_click(0.93, 0.12, "select all (hardcoded)")
+            self._purchase_attempts = 0
+            return action_wait(300, "shop: proceeding to purchase")
 
-        return action_wait(400, "looking for select-all")
+        if self._select_attempts > 8:
+            self.log("no 全部选择 cls after retries — YOLO gap; exiting")
+            self.sub_state = "exit"
+            return action_wait(300, "shop: no select-all cls")
+        return action_wait(400, "shop: waiting for 全部选择 (YOLO gap)")
 
     def _purchase(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click 選擇購買 (bulk purchase) → confirm dialog → dismiss reward.
+        """Click 购买 (SHOP_BUY) → 确认 (BTN_CONFIRM). Grey confirm/buy =>
+        unavailable => exit. Reward popup handled at tick() level."""
+        self._purchase_attempts += 1
 
-        After clicking 全部選擇, a bottom bar appears:
-          "現在選擇的商品24個" | "取消選擇" | [選擇購買]
-        The 選擇購買 button is in the bottom-right (~0.91, 0.92).
-
-        Completion detection:
-        - Confirm dialog with 取消+確認 → click 確認 (mark purchase_confirmed)
-        - Reward popup → dismiss (mark exit)
-        - Bottom bar disappears → already bought or nothing selected
-        - Refresh button → already purchased
-        """
-        self._purchase_ticks += 1
-
-        if self._purchase_ticks > 15:
-            self.log("purchase timeout, exiting")
+        if self._purchase_attempts > 16:
+            self.log("purchase loop limit — exiting")
             self.sub_state = "exit"
-            return action_wait(300, "purchase timeout")
+            return action_wait(300, "shop: purchase timeout")
 
-        # 1. Confirm dialog (取消 + 確認) — after clicking 選擇購買
-        cancel_in_dialog = screen.find_any_text(
-            ["取消"],
-            region=(0.25, 0.58, 0.55, 0.82), min_conf=0.6
+        # 1. Confirm dialog (确认) — appears after clicking 购买.
+        confirm = self.find_cls(
+            screen, UC.BTN_CONFIRM, conf=0.30, region=(0.30, 0.50, 0.90, 0.90),
         )
-        confirm_in_dialog = screen.find_any_text(
-            ["確認", "确认", "確定", "确定"],
-            region=(0.50, 0.58, 0.80, 0.82), min_conf=0.5
-        )
-        if cancel_in_dialog and confirm_in_dialog:
-            self.log("confirming bulk purchase")
-            self._purchase_confirmed = True
+        if confirm is not None:
+            self.log(f"confirm purchase (#{self._confirm_clicks + 1})")
+            self._purchased = True
             self._confirm_clicks += 1
-            return action_click_box(confirm_in_dialog, "confirm purchase")
+            self._post_click_wait = 2
+            return action_click_box(confirm, "confirm purchase (YOLO 确认键)")
 
-        # Broader confirm dialog detection (OCR may only catch one button)
-        if not self._purchase_confirmed and self._buy_btn_clicks >= 1:
-            # After clicking buy, if a dialog-like area has confirm text, click it
-            dialog_confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定"],
-                region=(0.40, 0.55, 0.82, 0.85), min_conf=0.45
-            )
-            if dialog_confirm:
-                self.log("confirm dialog detected (broad match)")
-                self._purchase_confirmed = True
-                self._confirm_clicks += 1
-                return action_click_box(dialog_confirm, "confirm purchase (broad)")
-
-        # 2. Already purchased today (refresh button appeared)
-        if self._is_already_purchased(screen):
-            self.log("shop refresh visible, items purchased")
+        # Grey confirm = can't afford / nothing valid selected → exit.
+        if self.find_cls(
+            screen, UC.BTN_CONFIRM_GREY, conf=0.30, region=(0.30, 0.50, 0.90, 0.90),
+        ) is not None:
+            self.log("confirm GREY (insufficient) — exiting")
             self.sub_state = "exit"
-            return action_wait(250, "purchase complete (refresh visible)")
+            return action_wait(300, "shop: confirm unavailable")
 
-        # 3. If we already confirmed, wait for reward popup then exit
-        if self._purchase_confirmed:
-            # Reward popup is handled at tick() level; if we reach here, just wait/exit
-            if self._purchase_ticks > 3 + self._confirm_clicks:
-                self.sub_state = "exit"
-                return action_wait(250, "purchase confirmed, exiting")
-            return action_wait(500, "waiting for purchase result")
-
-        # 4. Click 選擇購買 in the bottom bar
-        bulk_buy = screen.find_any_text(
-            ["選擇購買", "选择购买", "選購買", "选购买", "擇購買", "择购买"],
-            region=(0.70, 0.85, 1.0, 0.99), min_conf=0.30
-        )
-        if bulk_buy:
-            # Color check: is the button yellow (active) or grey (unavailable)?
-            # Blue Archive yellow button HSV ~ H:20-35, S:100+, V:180+
-            if screen.is_button_grey(bulk_buy.cx, bulk_buy.cy, patch=8):
-                self.log(f"purchase button '{bulk_buy.text}' is GREY (unavailable)")
-                self.sub_state = "exit"
-                return action_wait(250, "purchase unavailable (grey button)")
-            self.log(f"clicking bulk purchase '{bulk_buy.text}'")
-            self._buy_btn_clicks += 1
-            return action_click_box(bulk_buy, "bulk purchase (選擇購買)")
-
-        # 5. Check if bottom selection bar is visible (items are selected)
-        selection_bar = screen.find_any_text(
-            ["現在選", "现在选", "取消選", "取消选", "商品"],
-            region=(0.20, 0.85, 0.85, 0.99), min_conf=0.45
-        )
-        if selection_bar:
-            # Bar visible — check if purchase button area is yellow or grey
-            if screen.is_button_yellow(0.91, 0.92, patch=8):
-                self.log("selection bar visible, clicking 選擇購買 hardcoded")
-                self._buy_btn_clicks += 1
-                return action_click(0.91, 0.92, "bulk purchase (hardcoded)")
-            elif screen.is_button_grey(0.91, 0.92, patch=8):
-                self.log("selection bar visible but purchase button grey")
-                self.sub_state = "exit"
-                return action_wait(250, "purchase unavailable (grey, bar visible)")
-            else:
-                # Color inconclusive, try clicking anyway
-                self.log("selection bar visible, color check inconclusive, trying click")
-                self._buy_btn_clicks += 1
-                return action_click(0.91, 0.92, "bulk purchase (hardcoded, color unknown)")
-
-        # 6. No bottom bar — check if items are even available
-        if self._purchase_ticks >= 4 and self._buy_btn_clicks == 0:
-            # We've waited and never found the purchase bar — nothing to buy
-            self.log("no purchase bar after select-all, nothing to buy")
+        # 2. Grey buy button = nothing purchasable → exit.
+        if self.find_cls(screen, UC.SHOP_BUY_PYROXENE, conf=0.30) is not None:
+            # 购买青辉石 is a paid-currency CTA — never auto-buy. Treat as done.
+            self.log("only 购买青辉石 (paid) visible — skipping, exiting")
             self.sub_state = "exit"
-            return action_wait(250, "nothing purchasable")
+            return action_wait(300, "shop: paid-only, nothing free to buy")
 
-        # 7. If we've clicked buy but loop back without confirm dialog
-        if self._buy_btn_clicks >= 3:
-            self.log("buy button clicked 3 times with no confirm, giving up")
+        # 3. Click 购买 (bulk buy of selected items).
+        buy = self.find_cls(screen, UC.SHOP_BUY, conf=0.30)
+        if buy is not None:
+            if self._buy_clicks >= 3:
+                self.log("购买 clicked 3x with no confirm — giving up")
+                self.sub_state = "exit"
+                return action_wait(300, "shop: buy stuck")
+            self.log(f"click 购买 (#{self._buy_clicks + 1})")
+            self._buy_clicks += 1
+            self._post_click_wait = 2
+            return action_click_box(buy, "buy selected items (YOLO 购买)")
+
+        # 4. No buy / confirm cls. If we already confirmed, wait for reward.
+        if self._purchased:
             self.sub_state = "exit"
-            return action_wait(250, "purchase stuck")
+            return action_wait(300, "shop: purchase done, exiting")
 
-        # Try hardcoded after a couple ticks
-        if self._purchase_ticks >= 3 and self._buy_btn_clicks == 0:
-            self._buy_btn_clicks += 1
-            return action_click(0.91, 0.92, "bulk purchase fallback click")
-
-        return action_wait(400, "looking for 選擇購買 button")
+        # Nothing to buy was ever found.
+        if self._purchase_attempts >= 4 and self._buy_clicks == 0:
+            self.log("no 购买/确认 cls — nothing purchasable (YOLO gap or empty)")
+            self.sub_state = "exit"
+            return action_wait(300, "shop: nothing purchasable")
+        return action_wait(400, "shop: waiting for 购买 cls (YOLO gap)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        if screen.is_lobby():
-            status = "purchased" if self._purchase_confirmed else "no purchase needed"
+        # On lobby iff >=2 nav icons (detect_screen_yolo).
+        if self.detect_screen_yolo(screen) == "Lobby":
+            status = "purchased" if self._purchased else "no purchase needed"
             self.log(f"done ({status})")
             return action_done(f"shop complete ({status})")
-        return action_back("shop exit: back to lobby")
+        # Prefer YOLO home/back button over blind ESC.
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_box(home, "shop exit: home button")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_box(back, "shop exit: back button")
+        return action_back("shop exit: ESC toward lobby")

@@ -1,12 +1,25 @@
-"""PassRewardSkill: Claim battle pass mission and track rewards.
+"""PassRewardSkill: Claim battle-pass (战令/通行证) mission + reward rewards.
 
-Adapted from reference collect_pass_reward flow:
-1. ENTER: open pass menu from lobby
-2. CLAIM_MISSION: switch to mission tab and claim available rewards
-3. CLAIM_REWARD: return to pass reward page and claim available rewards
-4. EXIT: back to lobby
+Design (2026-05-28 full YOLO rewrite — mail.py is the reference paradigm):
+- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
+  NO OCR button fallback, NO detect_current_screen (OCR), NO hardcoded blind
+  coords for buttons that have a cls.
+- Page state inferred from YOLO cls: seeing any CLAIM_* cls = inside pass;
+  seeing >=2 lobby nav icons (detect_screen_yolo=="Lobby") = back on lobby.
+- If YOLO can't see a needed cls, log + wait (surface the gap) — don't fake
+  progress or blind-click.
+- Pass has NO numeric counter (unlike mail's X/200), so this skill keeps ZERO
+  OCR. Progress is tracked by claim-click count + an idle-streak that flips to
+  the next tab/exit once no active claim cls remains.
 
-Pass can be unavailable on some servers/accounts; this skill exits quickly in that case.
+KNOWN cls GAP (see report): the pass mission/reward TAB-SWITCH buttons have no
+dedicated ui_classes cls. We fall back to action_click on the tab's fixed
+bottom-bar coords, clearly commented. Once a cls is trained, replace those.
+
+Pass can be unavailable on some servers/accounts; this skill exits quickly via
+the enter-timeout in that case.
+
+States: enter → claim_mission → claim_reward → exit
 """
 from __future__ import annotations
 
@@ -21,40 +34,69 @@ from brain.skills.base import (
     action_done,
     action_wait,
 )
+from brain.skills import ui_classes as UC
 
 
 class PassRewardSkill(BaseSkill):
+    # Pass rewards live behind the 招募/战令 entry; its lobby icon is 招募入口.
+    _LOBBY_DOT_ENTRIES = [UC.NAV_RECRUIT]
+
+    def should_run(self, screen: ScreenState) -> bool:
+        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+
     def __init__(self):
         super().__init__("PassReward")
         self.max_ticks = 60
         self._enter_ticks: int = 0
+        self._enter_click_cooldown: int = 0
         self._phase_ticks: int = 0
         self._idle_claim_ticks: int = 0
         self._claim_clicks: int = 0
         self._phase_initialized: bool = False
+        self._post_claim_wait: int = 0
+        # Entry-clicked gate (see daily_tasks): a claim cls only counts as
+        # "inside pass" once we've clicked our own 招募入口 entry. Stops串页
+        # off a leftover claim screen or a transient YOLO claim misfire.
+        self._entered: bool = False
 
     def reset(self) -> None:
         super().reset()
         self._enter_ticks = 0
+        self._enter_click_cooldown = 0
         self._phase_ticks = 0
         self._idle_claim_ticks = 0
         self._claim_clicks = 0
         self._phase_initialized = False
+        self._post_claim_wait = 0
+        self._entered = False
 
+    # ── page inference via YOLO cls (no OCR) ──────────────────────────
+    def _on_pass_page(self, screen: ScreenState) -> bool:
+        """Inside pass iff we've clicked our own entry (self._entered) AND
+        we're NOT on lobby AND a claim cls (active or grey) is visible. The
+        entry gate keeps a leftover/other-skill claim screen — or a transient
+        YOLO claim-cls misfire on lobby — from串页 into pass's in-page判定.
+        Pure predicate — the _entered re-arm on lobby happens in _enter."""
+        if not self._entered:
+            return False
+        if self.detect_screen_yolo(screen) == "Lobby":
+            return False
+        return self.find_cls(
+            screen, UC.CLAIM_ACTIVE + UC.CLAIM_DONE, conf=0.20,
+        ) is not None
+
+    # ── state machine ─────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
-
         if self.ticks >= self.max_ticks:
-            self.log("timeout")
+            self.log(f"timeout ({self._claim_clicks} claims)")
             return action_done("pass reward timeout")
 
-        reward_popup = screen.find_any_text(
-            ["獲得道具", "获得道具", "獲得獎勵", "获得奖励", "受取完了"],
-            region=screen.CENTER,
-            min_conf=0.6,
-        )
-        if reward_popup:
-            return action_click(0.5, 0.9, "dismiss pass reward popup")
+        # Result popup "獲得獎勵" — YOLO cls, tap to dismiss (no OCR).
+        reward_popup = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        if reward_popup is not None:
+            self._post_claim_wait = 1
+            return action_click(0.5, 0.9, "dismiss pass reward popup (YOLO 获得奖励)")
 
         popup = self._handle_common_popups(screen)
         if popup:
@@ -65,7 +107,6 @@ class PassRewardSkill(BaseSkill):
 
         if self.sub_state == "":
             self.sub_state = "enter"
-
         if self.sub_state == "enter":
             return self._enter(screen)
         if self.sub_state == "claim_mission":
@@ -74,96 +115,95 @@ class PassRewardSkill(BaseSkill):
             return self._claim_reward(screen)
         if self.sub_state == "exit":
             return self._exit(screen)
-
         return action_wait(300, "pass reward unknown state")
-
-    def _is_pass_screen(self, screen: ScreenState) -> bool:
-        header = screen.find_any_text(
-            ["通行證", "通行证", "PASS", "Pass"],
-            region=(0.0, 0.0, 0.45, 0.16),
-            min_conf=0.55,
-        )
-        if header:
-            return True
-
-        season = screen.find_any_text(
-            ["賽季結束", "赛季结束", "賽季", "赛季"],
-            region=(0.25, 0.12, 0.85, 0.35),
-            min_conf=0.55,
-        )
-        if season:
-            return True
-
-        claim_area = self.find_claim_all_button(
-            screen, region=(0.55, 0.55, 1.0, 0.95), min_conf=0.55,
-        )
-        return claim_area is not None
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_ticks += 1
-        current = self.detect_current_screen(screen)
 
-        if current == "Pass" or self._is_pass_screen(screen):
+        # Re-arm the entry gate only on a CONFIRMED return to lobby and only
+        # when not mid-entry (cooldown==0), so a still-visible lobby nav bar
+        # during the page transition doesn't clear _entered prematurely.
+        if self._enter_click_cooldown == 0 and self.detect_screen_yolo(screen) == "Lobby":
+            self._entered = False
+
+        if self._on_pass_page(screen):
             self.log("inside pass")
             self.sub_state = "claim_mission"
             self._phase_ticks = 0
             self._idle_claim_ticks = 0
             self._phase_initialized = False
+            self._post_claim_wait = 2
             return action_wait(300, "entered pass")
 
-        if current == "Lobby":
-            pass_btn = screen.find_any_text(
-                ["PASS", "Pass", "通行證", "通行证"],
-                min_conf=0.55,
-            )
-            if pass_btn:
-                return action_click_box(pass_btn, "open pass menu")
+        # Cooldown so we don't spam the entry icon while the page loads.
+        if self._enter_click_cooldown > 0:
+            self._enter_click_cooldown -= 1
+            return action_wait(500, f"pass: enter cooldown ({self._enter_click_cooldown})")
 
-            # reference JP fallback x/y: (341~451, 630~662) on 1280x720.
-            if self._enter_ticks == 4:
-                return action_click(0.31, 0.90, "open pass menu (hardcoded)")
+        # YOLO 招募入口 cls (战令/通行证 entry).
+        recruit = self.find_cls(screen, UC.NAV_RECRUIT, conf=0.30)
+        if recruit is not None:
+            self._enter_click_cooldown = 4
+            self._entered = True  # entry-clicked gate: now in-page is trusted
+            return action_click_box(recruit, "open pass (YOLO 招募入口)")
 
-            if self._enter_ticks > 8:
-                self.log("pass entry not found, skipping")
-                self.sub_state = "exit"
-                return action_wait(200, "pass unavailable")
+        # Not lobby + not pass → back out toward lobby.
+        if self.detect_screen_yolo(screen) not in (None, "Lobby"):
+            return action_back("pass: backing toward lobby")
 
-            return action_wait(350, "looking for pass entry")
-
-        if current and current not in ("Pass", "Lobby"):
-            return action_back(f"back from {current}")
-
-        if self._enter_ticks > 12:
+        # Entry icon not seen. On servers without a pass this never appears,
+        # so bail out instead of looping forever.
+        if self._enter_ticks > 10:
+            self.log("招募入口 not found — pass unavailable / YOLO gap; exiting")
             self.sub_state = "exit"
-            return action_wait(200, "pass enter timeout")
+            return action_wait(200, "pass unavailable")
+        return action_wait(400, "pass: waiting for 招募入口 detection")
 
-        return action_wait(400, "entering pass")
+    def _claim_current_tab(
+        self, screen: ScreenState, phase_name: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Claim whatever is claimable on the current tab. Returns an action
+        while there's work, or None once the tab is drained (idle streak)."""
+        if self._post_claim_wait > 0:
+            self._post_claim_wait -= 1
+            return action_wait(500, f"pass {phase_name}: settling ({self._post_claim_wait})")
 
-    def _claim_current_tab(self, screen: ScreenState, phase_name: str) -> Optional[Dict[str, Any]]:
-        claim = self.find_claim_all_button(
-            screen, region=(0.55, 0.55, 1.0, 0.95), min_conf=0.55,
+        # 一键领取/全部领取 (claim-all) — bottom-right CTA zone.
+        claim_all = self.find_cls(
+            screen, UC.CLAIM_ALL_YELLOW, conf=0.20,
+            region=(0.55, 0.78, 1.00, 1.00),
         )
-        if claim:
+        if claim_all is not None:
             self._claim_clicks += 1
             self._idle_claim_ticks = 0
-            self.log(f"{phase_name}: claim all ({self._claim_clicks})")
-            return action_click_box(claim, f"pass {phase_name}: claim all")
+            self._post_claim_wait = 3
+            self.log(f"{phase_name}: claim all ({self._claim_clicks}, cls={claim_all.cls_name})")
+            return action_click_box(claim_all, f"pass {phase_name}: claim all (YOLO {claim_all.cls_name})")
 
-        single = screen.find_any_text(
-            ["領取", "领取", "Claim"],
-            region=(0.55, 0.15, 1.0, 0.95),
-            min_conf=0.68,
+        # Per-row single claim (领取_黄 / 领取奖励_黄).
+        single = self.find_cls(
+            screen, [UC.CLAIM_YELLOW, UC.CLAIM_REWARD_YELLOW], conf=0.25,
+            region=(0.55, 0.15, 1.00, 0.95),
         )
-        if single:
+        if single is not None:
             self._claim_clicks += 1
             self._idle_claim_ticks = 0
-            self.log(f"{phase_name}: claim single ({self._claim_clicks})")
-            return action_click_box(single, f"pass {phase_name}: claim single")
+            self._post_claim_wait = 3
+            self.log(f"{phase_name}: claim single ({self._claim_clicks}, cls={single.cls_name})")
+            return action_click_box(single, f"pass {phase_name}: claim single (YOLO {single.cls_name})")
 
+        # No active claim cls. If we can positively see the done/grey state,
+        # the tab is finished — stop quickly instead of idling the full streak.
+        if self.find_cls(screen, UC.CLAIM_DONE, conf=0.25) is not None:
+            self.log(f"{phase_name}: only grey claim cls — tab done")
+            return None
+
+        # No claim cls at all: surface as a brief YOLO gap, then move on.
         self._idle_claim_ticks += 1
         if self._idle_claim_ticks > 4:
+            self.log(f"{phase_name}: no claim cls (YOLO gap) — moving on")
             return None
-        return action_wait(350, f"{phase_name}: waiting claim buttons")
+        return action_wait(400, f"pass {phase_name}: waiting for claim cls (YOLO gap)")
 
     def _claim_mission(self, screen: ScreenState) -> Dict[str, Any]:
         self._phase_ticks += 1
@@ -171,14 +211,11 @@ class PassRewardSkill(BaseSkill):
         if not self._phase_initialized:
             self._phase_initialized = True
             self._idle_claim_ticks = 0
-            mission_tab = screen.find_any_text(
-                ["任務", "任务", "Mission"],
-                region=(0.18, 0.80, 0.58, 0.98),
-                min_conf=0.5,
-            )
-            if mission_tab:
-                return action_click_box(mission_tab, "switch to pass mission tab")
-            return action_click(0.30, 0.90, "switch to pass mission tab (hardcoded)")
+            self._post_claim_wait = 1
+            # GAP: pass 任务 tab has no dedicated ui_classes cls. Fixed
+            # bottom-bar coord (任务 tab, left-of-center) is a documented
+            # blind click — replace with click_cls once a tab cls is trained.
+            return action_click(0.30, 0.93, "switch to pass 任务 tab (GAP: no cls, fixed coord)")
 
         claim_action = self._claim_current_tab(screen, "mission")
         if claim_action:
@@ -199,16 +236,11 @@ class PassRewardSkill(BaseSkill):
         if not self._phase_initialized:
             self._phase_initialized = True
             self._idle_claim_ticks = 0
-
-            reward_tab = screen.find_any_text(
-                ["獎勵", "奖励", "Reward"],
-                region=(0.10, 0.80, 0.60, 0.98),
-                min_conf=0.5,
-            )
-            if reward_tab:
-                return action_click_box(reward_tab, "switch to pass reward tab")
-
-            return action_back("return to pass reward page")
+            self._post_claim_wait = 1
+            # GAP: pass 奖励 tab has no dedicated ui_classes cls. Fixed
+            # bottom-bar coord (奖励 tab, right-of-center) is a documented
+            # blind click — replace with click_cls once a tab cls is trained.
+            return action_click(0.50, 0.93, "switch to pass 奖励 tab (GAP: no cls, fixed coord)")
 
         claim_action = self._claim_current_tab(screen, "reward")
         if claim_action:
@@ -221,7 +253,15 @@ class PassRewardSkill(BaseSkill):
         return action_wait(250, "pass reward claims complete")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        if screen.is_lobby():
+        # On lobby iff we see >=2 nav icons.
+        if self.detect_screen_yolo(screen) == "Lobby":
             self.log(f"done ({self._claim_clicks} claims)")
-            return action_done("pass reward complete")
-        return action_back("pass reward exit: back to lobby")
+            return action_done(f"pass reward complete ({self._claim_clicks} claims)")
+        # Prefer YOLO home/back button over blind ESC.
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_box(home, "pass exit: home button")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_box(back, "pass exit: back button")
+        return action_back("pass reward exit: ESC toward lobby")

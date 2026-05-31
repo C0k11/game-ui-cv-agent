@@ -2275,6 +2275,126 @@ def dataset_florence_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": str(e), "suggestions": [], "count": 0, "labels_used": labels}
 
 
+# ── UI YOLO model-assisted suggestions ─────────────────────────────────
+# Unlike florence_suggest (open-vocabulary, fuzzy), this runs the ACTIVE ui
+# detector (model_registry ui.active) so suggestions come back already tagged
+# with the exact trained cls_name. Used by the annotation UI to PRE-FILL boxes
+# on trajectory frames (which ARE training material): the model auto-labels the
+# reliable cls, the human then corrects mis-labels (select box → change class
+# → e.g. "X" → "邮件箱") and adds the boxes the model misses. conf is kept LOW
+# (default 0.15) so even weak detections (邮件箱-grade) surface for review.
+_UI_SUGGEST_MODEL = None
+_UI_SUGGEST_LOCK = threading.Lock()
+
+
+def _get_ui_suggest_model():
+    global _UI_SUGGEST_MODEL
+    with _UI_SUGGEST_LOCK:
+        if _UI_SUGGEST_MODEL is None:
+            from ultralytics import YOLO
+            reg = json.loads((REPO_ROOT / "data" / "model_registry.json").read_text("utf-8"))
+            ui = reg["ui"]
+            path = ui["versions"][ui["active"]]["path"]
+            _UI_SUGGEST_MODEL = YOLO(path)
+        return _UI_SUGGEST_MODEL
+
+
+def _iou_box(a, b) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    aa = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+    bb = max(0, bx2 - bx1) * max(0, by2 - by1)
+    return inter / (aa + bb - inter + 1e-9)
+
+
+@app.post("/api/v1/datasets/yolo_suggest")
+def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
+    dataset = str(payload.get("dataset") or "")
+    img_name = str(payload.get("img") or "")
+    conf = float(payload.get("conf") or 0.15)
+    imgsz = int(payload.get("imgsz") or 960)
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    img_path = img_dir / Path(os.path.basename(img_name))
+    if not img_path.exists() or not img_path.is_file():
+        raise HTTPException(status_code=404, detail="image not found")
+    try:
+        from vision.io_utils import imread_any  # noqa: PLC0415
+        img = imread_any(str(img_path))
+        if img is None:
+            raise HTTPException(status_code=400, detail="cannot read image")
+        h, w = img.shape[:2]
+        model = _get_ui_suggest_model()
+        r = model.predict(img, imgsz=imgsz, conf=conf, device=0, verbose=False)[0]
+        master = _load_master_classes()
+        master_idx = {n: i for i, n in enumerate(master)}
+        raw = []
+        for b in r.boxes:
+            cid = int(b.cls[0])
+            nm = model.names.get(cid, str(cid)) if isinstance(model.names, dict) else model.names[cid]
+            sc = float(b.conf[0])
+            x1, y1, x2, y2 = [float(v) for v in b.xyxy[0].tolist()]
+            if x2 <= x1 or y2 <= y1:
+                continue
+            raw.append((sc, nm, [x1, y1, x2, y2]))
+        raw.sort(key=lambda t: -t[0])  # high conf first
+        # Dedup: drop a box that overlaps an already-kept box (IoU>0.6),
+        # keeping the higher-conf one — enforces "no crowded bboxes on one
+        # thing" so the human gets ONE clean box per UI element.
+        kept = []
+        for sc, nm, box in raw:
+            if any(_iou_box(box, k[2]) > 0.6 for k in kept):
+                continue
+            kept.append((sc, nm, box))
+        suggestions = []
+        for sc, nm, (x1, y1, x2, y2) in kept:
+            if nm in master_idx:
+                mi = master_idx[nm]
+            else:
+                mi = _master_append(nm)
+                master = _load_master_classes()
+                master_idx = {n: i for i, n in enumerate(master)}
+            suggestions.append({
+                "label": nm, "cls": mi, "score": round(sc, 3),
+                "x1": x1 / w, "y1": y1 / h, "x2": x2 / w, "y2": y2 / h,
+                "xc": ((x1 + x2) / 2.0) / w, "yc": ((y1 + y2) / 2.0) / h,
+                "w": (x2 - x1) / w, "h": (y2 - y1) / h,
+            })
+        return {"ok": True, "suggestions": suggestions, "count": len(suggestions)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": False, "error": str(e), "suggestions": [], "count": 0}
+
+
+@app.post("/api/v1/datasets/yolo_prefill_run")
+def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Batch-prefill EVERY frame in a dataset/run with the active ui model
+    (writes YOLO label .txt per image). Skips frames that already have a
+    non-empty label so it won't clobber human edits (pass overwrite=true to
+    redo). Synchronous — a ~600-frame run takes ~1 min on GPU; the frontend
+    button shows a busy state and reloads the dataset afterward.
+    Reuses scripts/yolo_prefill_run.prefill_run (same dedup / cls mapping)."""
+    dataset = str(payload.get("dataset") or "")
+    conf = float(payload.get("conf") or 0.25)
+    overwrite = bool(payload.get("overwrite") or False)
+    d = _safe_dataset_path(dataset)
+    img_dir = d / "frames" if (d / "frames").is_dir() else d
+    if not img_dir.is_dir():
+        raise HTTPException(status_code=404, detail="dataset not found")
+    try:
+        from scripts.yolo_prefill_run import prefill_run  # noqa: PLC0415
+        res = prefill_run(img_dir, conf=conf, overwrite=overwrite)
+        return {"ok": True, **res}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── OCR API ───────────────────────────────────────────────────────────
 
 _OCR_ENGINE = None
@@ -2597,6 +2717,17 @@ def _synth_default_template(ctx: str) -> Dict[str, Any]:
             "brightness_jitter": [0.92, 1.08],
         },
         "synth_count": 200,
+        # ── UI-model synth (2026-05-29) ──
+        # target: "avatar" (default — slots labelled with student names for the
+        # avatar detector) OR "ui" (slots provide BACKGROUND diversity only;
+        # the ui_stamps below are the labelled boxes, with ui-cls indices).
+        "target": "avatar",
+        # ui_stamps: fixed UI elements labelled in EVERY synth frame (normalized
+        # rects + master cls index). Used when target=="ui" to teach rare UI cls
+        # (e.g. 学生momotalk信息未读=439, 前往羁绊剧情=441, 进入羁绊剧情=442) on
+        # the diverse backgrounds the avatar-swap produces. Place these in the
+        # dashboard synth editor's "UI 图章" tool.
+        "ui_stamps": [],
     }
 
 
@@ -2667,6 +2798,30 @@ def synth_template_save(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     payload["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     f.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "path": str(f)}
+
+
+@app.post("/api/v1/synth/build_ui/{ctx}")
+def synth_build_ui(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate UI-model synth frames for a context: avatar-swap into slots for
+    BACKGROUND diversity + label the template's ui_stamps with their ui-cls in
+    every frame → data/raw_images/_synth_<ctx>/ (add to build_ui_dataset
+    TRAIN_SOURCES). Reuses scripts/build_ui_synth.synth_context."""
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
+    count = int((payload or {}).get("count") or 300)
+    try:
+        from scripts.build_ui_synth import synth_context  # noqa: PLC0415
+        synth_context(safe, count=count, seed=0)
+        out = REPO_ROOT / "data" / "raw_images" / f"_synth_{safe}"
+        n = len(list(out.glob("frame_*.jpg"))) if out.is_dir() else 0
+        return {"ok": True, "out": str(out), "frames": n}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/v1/synth/ui_classes")
+def synth_ui_classes() -> Dict[str, Any]:
+    """Master UI class list (index → name) for the synth 'UI 图章' cls picker."""
+    return {"classes": _load_master_classes()}
 
 
 @app.delete("/api/v1/synth/template/{ctx}")

@@ -398,6 +398,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
         <select id="cap_purpose" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)">
           <option value="fused">Fused Avatar</option>
           <option value="static_ui">Static UI</option>
+          <option value="weak">UI Weak (羁绊/momotalk 弱类 gold val)</option>
         </select>
       </div>
       <button class="btn btn-success" id="btn_cap_start" style="align-self:flex-end">Start Capture</button>
@@ -440,6 +441,8 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
+    <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前 ui 模型(v3)预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
+    <button class="btn btn-sm" id="btn_yolo_run" onclick="annPrefillRun()" title="用 ui 模型批量预填整个 run 的所有帧标签 (跳过已标注的帧, ~1min/600帧)">YOLO预填(整run)</button>
     <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
     <button class="btn btn-sm" id="btn_ocr_batch" onclick="annBatchOCR()" title="Batch scan all images">Batch</button>
     <button class="btn btn-sm" id="btn_ocr_folder" onclick="annOpenOCRFolder()" title="Open OCR results folder">Open Folder</button>
@@ -527,6 +530,13 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <label style="font-size:11px;color:var(--muted)">Context</label>
         <select id="synth_context" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;min-width:180px"></select>
+        <label style="font-size:11px;color:var(--muted);margin-left:4px" title="avatar = 合成头像数据 (slots); ui = 合成 UI 图章数据 (ui_stamps)">目标</label>
+        <select id="synth_target" onchange="synthSetTarget(this.value)" title="模板目标类型: avatar = 头像合成 (用 slots) · ui = UI 图章合成 (用 ui_stamps)" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px">
+          <option value="avatar">avatar 头像</option>
+          <option value="ui">ui 图章</option>
+        </select>
+        <button onclick="synthToggleStampMode()" id="synth_stamp_btn" class="btn btn-sm" title="开启后: 在画布上拖出一个 UI 图章框, 松手选 class. 关闭时画布行为=画 slot (不变)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">🏷️ UI 图章: 关</button>
+        <button onclick="synthBuildUI()" id="synth_build_ui_btn" class="btn btn-sm" title="按当前模板的 ui_stamps 生成 UI 合成帧 (POST build_ui)" style="padding:5px 10px;background:#0e7490;border:1px solid #155e75;border-radius:4px;color:#fff;cursor:pointer;font-size:12px;font-weight:600">⚙ 生成UI合成</button>
         <button onclick="synthNewTemplate()" class="btn btn-sm" title="新建自定义模板 (任意命名, e.g. tactical_tight)" style="padding:5px 10px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">+ 新建</button>
         <button onclick="synthPickSample()" class="btn btn-sm" title="选本地图片文件 (也可以直接拖到画布上)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">📁 选样板图</button>
         <button onclick="synthPickSampleByPath()" class="btn btn-sm" title="输入文件路径 (相对 repo 根 / 绝对路径)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">路径...</button>
@@ -564,6 +574,13 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
         <button onclick="synthToggleQuad()" id="synth_toggle_quad_btn" title="选中 slot 后, 切换矩形 ⇄ 自由四边形 (拖 4 角变成平行四边形/梯形/任意四边形). 也可按 Q 键" style="margin-left:auto;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">◆ 矩形 ⇄ 四边形 (Q)</button>
       </div>
       <div id="synth_slot_list" style="max-height:140px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px"></div>
+
+      <!-- UI stamps (target=ui) -->
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;color:#e879f9;text-transform:uppercase" title="UI 图章框 (合成 UI 数据用), 与 slots 独立">UI 图章 (<span id="synth_stamp_count">0</span>)</span>
+        <button onclick="synthDeleteStamp()" id="synth_stamp_del_btn" title="删除选中的 UI 图章 (也可按 Del)" style="margin-left:auto;padding:3px 8px;background:#7f1d1d;border:1px solid #991b1b;border-radius:3px;color:#fff;cursor:pointer;font-size:11px">🗑️ 删图章</button>
+      </div>
+      <div id="synth_stamp_list" style="max-height:140px;overflow-y:auto;background:var(--bg2);border:1px solid #6b21a8;border-radius:4px;padding:4px"></div>
 
       <!-- Ref crop -->
       <details open style="border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--bg2)">
@@ -1673,7 +1690,23 @@ function annBuildClassList(){
     shown++;
     const d=document.createElement('div');d.className='class-item'+(i===ANN.drawClass?' sel':'');
     d.innerHTML=`<div class="class-dot" style="background:${COLORS[i%COLORS.length]}"></div>${i}: ${name}`;
-    d.onclick=()=>{ANN.drawClass=i;annBuildClassList();};el.appendChild(d);
+    // Click behaviour:
+    //  • boxes selected → REASSIGN their class to this one (the "select a
+    //    box → change its bbox class, e.g. X→邮件箱" workflow, works for ALL
+    //    157+ classes via the search filter — number keys only reach 0-9).
+    //  • nothing selected → set the draw-class for new boxes (old behaviour).
+    d.onclick=()=>{
+      const sel=_annSelected();
+      if(sel.length>0){
+        for(const bi of sel){ if(ANN.data[ANN.idx].labels[bi]) ANN.data[ANN.idx].labels[bi].cls=i; }
+        ANN.drawClass=i;
+        ANN.dirty=true;_annPushHistory();annDraw();
+        try{showToast(`改类 ${sel.length} 框 → ${i}:${name}`,'ok',1400);}catch(_){}
+      } else {
+        ANN.drawClass=i;
+      }
+      annBuildClassList();
+    };el.appendChild(d);
   });
   const cc=$('ann_classcount');
   if(cc)cc.textContent=q?`(${shown}/${ANN.classes.length})`:`(${ANN.classes.length})`;
@@ -2629,6 +2662,71 @@ async function annRunFlorence(){
   btn.disabled=false;
 }
 
+// Pre-fill boxes from the ACTIVE ui detector (v3). Suggestions come back
+// already tagged with the trained cls_name (+ master cls index). Low conf
+// (0.10) so weak detections (邮件箱-grade) still surface for review. Dedup
+// is ANY-cls IoU>0.6 → never stack a 2nd box where one already sits
+// (the "不能让 bbox 挤一个东西" rule). Correct mis-labels by selecting the
+// box then clicking the right class in the left list.
+async function annRunYolo(){
+  if(!ANN.data.length||!ANN.dataset)return;
+  const cur=annCurImg();
+  const btn=$('btn_yolo');const prev=btn.textContent;
+  btn.textContent='YOLO...';btn.disabled=true;
+  try{
+    const r=await api('/api/v1/datasets/yolo_suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,img:cur.img,conf:0.10})});
+    const suggestions=r.suggestions||[];
+    let added=0,newcls=false;
+    suggestions.forEach(s=>{
+      let cls=ANN.classes.indexOf(s.label);
+      if(cls<0){
+        // server appended this label to the master registry — mirror it
+        // locally at the SAME master index so cls numbering stays in sync.
+        cls=(typeof s.cls==='number'&&s.cls>=0)?s.cls:ANN.classes.length;
+        while(ANN.classes.length<=cls) ANN.classes.push('');
+        ANN.classes[cls]=s.label; newcls=true;
+      }
+      const cand={cls,xc:s.xc,yc:s.yc,w:s.w,h:s.h};
+      const dup=cur.labels.some(lb=>annIoU(lb,cand)>0.6);  // any-cls: no crowding
+      if(!dup){cur.labels.push(cand);added++;}
+    });
+    if(newcls)annBuildClassList();
+    if(added>0){ANN.dirty=true;_annPushHistory();annDraw();}
+    btn.textContent=added>0?`YOLO +${added}`:`YOLO 0`;
+    if(r.ok===false&&r.error){console.error('yolo_suggest:',r.error);btn.textContent='YOLO !';}
+    setTimeout(()=>{btn.textContent='YOLO预填';},1800);
+  }catch(e){
+    console.error(e);
+    btn.textContent='YOLO !';
+    setTimeout(()=>{btn.textContent='YOLO预填';},1800);
+  }
+  btn.disabled=false;
+}
+
+// Batch-prefill EVERY frame in the current run with the ui model (writes a
+// label .txt per image). Skips frames that already have labels so it won't
+// clobber edits. Synchronous server-side (~1min/600帧) — button shows busy,
+// then we reload the dataset to render the freshly-written boxes.
+async function annPrefillRun(){
+  if(!ANN.dataset){showToast('先选一个数据集','error',2000);return;}
+  if(!confirm(`用 YOLO 预填整个 run「${ANN.dataset}」的所有帧? (会跳过已标注的帧, 大约 1 分钟/600帧)`))return;
+  const btn=$('btn_yolo_run');const prev=btn.textContent;
+  btn.textContent='预填整run...';btn.disabled=true;
+  try{
+    const r=await api('/api/v1/datasets/yolo_prefill_run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,conf:0.25})});
+    if(r.ok){
+      showToast(`整run预填完成: 写入 ${r.written} 帧, 跳过 ${r.skipped} 已标注 / 共 ${r.total}`,'ok',4000);
+      await annLoadDataset();   // reload to show the new boxes
+    } else {
+      showToast('预填失败: '+(r.error||'unknown'),'error',6000);
+    }
+  }catch(e){
+    console.error(e);
+    showToast('预填失败 (可能超时, 后台仍在写, 稍后刷新): '+(e.message||e),'error',6000);
+  }
+  btn.textContent=prev;btn.disabled=false;
+}
+
 // save/delete
 // Serialize a labels array into the on-disk text format. Pulled out so
 // annSave can re-serialize after the POST returns and verify the user
@@ -3181,6 +3279,15 @@ const SYNTH = {
   panning: false,
   panStart: null,
   spaceHeld: false,      // Space key → drag-to-pan
+  // ── UI-stamp mode (additive; independent of slot editing) ──
+  target: 'avatar',      // 'avatar' (default) | 'ui'
+  uiStamps: [],          // [{cls,cls_name,x1,y1,x2,y2}] normalized to SAMPLE image (same space as slots)
+  stampMode: false,      // when true, dragging draws UI stamps instead of editing slots
+  selStampIdx: -1,       // selected stamp index (for delete)
+  stampDrawing: false,   // mid-drag drawing a new stamp box
+  stampDrawStart: null,  // {x,y} normalized start corner while drawing
+  stampDrawCur: null,    // {x,y} normalized current corner while drawing
+  _uiClasses: null,      // cached class-name list from /ui_classes (index = cls id)
 };
 
 /* ─── Quad helpers ────────────────────────────────────────────
@@ -3333,6 +3440,13 @@ async function synthLoadContext(ctx){
       }
       return c;
     });
+    // ── UI-stamp fields (additive) ──
+    SYNTH.target = (t.target === 'ui') ? 'ui' : 'avatar';
+    SYNTH.uiStamps = (t.ui_stamps || []).map(s => ({
+      cls: +s.cls, cls_name: s.cls_name || '',
+      x1: +s.x1, y1: +s.y1, x2: +s.x2, y2: +s.y2,
+    }));
+    SYNTH.selStampIdx = -1;
     SYNTH.imgW = (t.image_size||[1920,1080])[0];
     SYNTH.imgH = (t.image_size||[1920,1080])[1];
     SYNTH.bgImg = null;
@@ -3394,8 +3508,10 @@ async function synthLoadContext(ctx){
     $('synth_count').value = t.synth_count ?? 200;
     $('synth_bbox_mode').value = t.bbox_mode || 'full';
     $('synth_use_for').value = t.use_for || 'train';
+    if ($('synth_target')) $('synth_target').value = SYNTH.target;
     synthDraw();
     synthUpdateSlotList();
+    synthUpdateStampList();
   } catch(e){
     console.error(e);
     $('synth_status').textContent = '加载失败: ' + e.message;
@@ -3463,7 +3579,39 @@ function synthDraw(){
       ctx.fillText(`#${i+1}`, x1+3, y1-5);
     }
   });
-  $('synth_info').textContent = `${SYNTH.context} · ${SYNTH.slots.length} slots · ${SYNTH.imgW}×${SYNTH.imgH}`;
+  // ── Draw UI stamps (magenta, visually distinct from slots) ──
+  (SYNTH.uiStamps || []).forEach((s, i) => {
+    const sel = i === SYNTH.selStampIdx;
+    const x1 = ox + s.x1*w, y1 = oy + s.y1*h;
+    const x2 = ox + s.x2*w, y2 = oy + s.y2*h;
+    ctx.strokeStyle = sel ? '#f0abfc' : '#d946ef';   // magenta family
+    ctx.lineWidth = sel ? 3 : 2;
+    ctx.setLineDash(sel ? [] : [6, 3]);
+    ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+    ctx.setLineDash([]);
+    const label = `${s.cls}:${s.cls_name || ''}`;
+    ctx.font = '11px monospace';
+    const lw = Math.max(40, ctx.measureText(label).width + 8);
+    ctx.fillStyle = '#4a044e';
+    ctx.fillRect(x1, y1-18, lw, 16);
+    ctx.fillStyle = '#f5d0fe';
+    ctx.textAlign = 'left';
+    ctx.fillText(label, x1+3, y1-5);
+    if (sel) {
+      ctx.fillStyle = '#f0abfc';
+      ctx.fillRect(x1-3, y1-3, 6, 6); ctx.fillRect(x2-3, y2-3, 6, 6);
+    }
+  });
+  // ── In-progress stamp drag rubber-band ──
+  if (SYNTH.stampMode && SYNTH.stampDrawing && SYNTH.stampDrawStart && SYNTH.stampDrawCur) {
+    const a = SYNTH.stampDrawStart, b = SYNTH.stampDrawCur;
+    const rx1 = ox + Math.min(a.x,b.x)*w, ry1 = oy + Math.min(a.y,b.y)*h;
+    const rx2 = ox + Math.max(a.x,b.x)*w, ry2 = oy + Math.max(a.y,b.y)*h;
+    ctx.strokeStyle = '#f0abfc'; ctx.lineWidth = 2; ctx.setLineDash([4,3]);
+    ctx.strokeRect(rx1, ry1, rx2-rx1, ry2-ry1);
+    ctx.setLineDash([]);
+  }
+  $('synth_info').textContent = `${SYNTH.context} · ${SYNTH.slots.length} slots · ${(SYNTH.uiStamps||[]).length} stamps · ${SYNTH.imgW}×${SYNTH.imgH}`;
 }
 
 function synthUpdateSlotList(){
@@ -3552,6 +3700,25 @@ function synthAttachCanvasEvents(){
       return;
     }
     if (e.button !== 0) return;  // only left-button for slot interaction
+    // ── UI-stamp mode: left-drag draws a stamp box (additive) ──
+    if (SYNTH.stampMode) {
+      const r = c.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const n = synthCanvasToNorm(mx, my); if (!n) return;
+      // Click existing stamp to select it; otherwise start drawing a new one
+      const hi = synthStampHitTest(mx, my);
+      if (hi >= 0) {
+        SYNTH.selStampIdx = hi;
+        synthDraw(); synthUpdateStampList();
+        return;
+      }
+      SYNTH.selStampIdx = -1;
+      SYNTH.stampDrawing = true;
+      SYNTH.stampDrawStart = {x: n.x, y: n.y};
+      SYNTH.stampDrawCur = {x: n.x, y: n.y};
+      synthDraw();
+      return;
+    }
     const r = c.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     const hit = synthHitTest(mx, my);
@@ -3579,6 +3746,14 @@ function synthAttachCanvasEvents(){
       return;
     }
     if (SYNTH.spaceHeld) { c.style.cursor = 'grab'; } else { c.style.cursor = 'crosshair'; }
+    // ── UI-stamp drawing: update rubber-band ──
+    if (SYNTH.stampMode && SYNTH.stampDrawing) {
+      const nn = synthCanvasToNorm(mx, my);
+      if (nn) { SYNTH.stampDrawCur = {x: nn.x, y: nn.y}; }
+      synthDraw();
+      return;
+    }
+    if (SYNTH.stampMode) return;  // stamp mode never edits slots
     if (!SYNTH.dragMode || SYNTH.selIdx < 0) return;
     const fit = SYNTH._fit; if (!fit) return;
     const dx = (mx - SYNTH.dragStart.mx) / fit.w;
@@ -3655,6 +3830,22 @@ function synthAttachCanvasEvents(){
     synthDraw(); synthUpdateSlotList();
   };
   c.onmouseup = () => {
+    // ── Finalize a UI-stamp drag → open class picker (additive) ──
+    if (SYNTH.stampMode && SYNTH.stampDrawing) {
+      SYNTH.stampDrawing = false;
+      const a = SYNTH.stampDrawStart, b = SYNTH.stampDrawCur;
+      SYNTH.stampDrawStart = null; SYNTH.stampDrawCur = null;
+      if (a && b) {
+        const x1 = Math.max(0, Math.min(a.x, b.x)), y1 = Math.max(0, Math.min(a.y, b.y));
+        const x2 = Math.min(1, Math.max(a.x, b.x)), y2 = Math.min(1, Math.max(a.y, b.y));
+        // Ignore tiny accidental drags
+        if ((x2 - x1) > 0.003 && (y2 - y1) > 0.003) {
+          synthOpenClassPicker({x1, y1, x2, y2});
+        }
+      }
+      synthDraw();
+      return;
+    }
     SYNTH.dragMode = null; SYNTH.dragOrig = null;
     if (SYNTH.panning) { SYNTH.panning = false; c.style.cursor = SYNTH.spaceHeld ? 'grab' : 'crosshair'; }
     // After slot edit, refresh the ref-crop canvas so its representative slot stays in sync
@@ -3707,6 +3898,12 @@ function synthAttachCanvasEvents(){
   window.addEventListener('keydown', (e) => {
     if ($('page-synth') && !$('page-synth').classList.contains('active')) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    // ── UI-stamp delete takes priority when a stamp is selected (additive) ──
+    if ((e.key === 'Delete' || e.key === 'Backspace') && SYNTH.selStampIdx >= 0) {
+      synthDeleteStamp();
+      e.preventDefault();
+      return;
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && SYNTH.selIdx >= 0) {
       SYNTH.slots.splice(SYNTH.selIdx, 1);
       SYNTH.selIdx = -1;
@@ -3851,7 +4048,197 @@ function synthBuildPayload(){
     synth_count: parseInt($('synth_count').value, 10) || 200,
     bbox_mode: $('synth_bbox_mode').value || 'full',
     use_for: $('synth_use_for').value || 'train',
+    // ── UI-stamp fields (additive) ──
+    target: SYNTH.target || 'avatar',
+    ui_stamps: (SYNTH.uiStamps || []).map(s => ({
+      cls: s.cls, cls_name: s.cls_name || '',
+      x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
+    })),
   };
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * UI-STAMP MODE (additive — does not touch slot / ref-crop / aug)
+ * Stamps are normalized to the SAMPLE image, same coord space as slots.
+ * ════════════════════════════════════════════════════════════════ */
+
+// Hit-test an existing stamp by canvas px (returns index or -1)
+function synthStampHitTest(mx, my){
+  const fit = SYNTH._fit; if (!fit) return -1;
+  for (let i = (SYNTH.uiStamps||[]).length - 1; i >= 0; i--){
+    const s = SYNTH.uiStamps[i];
+    const x1 = fit.ox + s.x1*fit.w, y1 = fit.oy + s.y1*fit.h;
+    const x2 = fit.ox + s.x2*fit.w, y2 = fit.oy + s.y2*fit.h;
+    if (mx >= x1 && mx <= x2 && my >= y1 && my <= y2) return i;
+  }
+  return -1;
+}
+
+function synthUpdateStampList(){
+  const cnt = $('synth_stamp_count'); if (cnt) cnt.textContent = (SYNTH.uiStamps||[]).length;
+  const el = $('synth_stamp_list'); if (!el) return;
+  el.innerHTML = '';
+  (SYNTH.uiStamps||[]).forEach((s, i) => {
+    const d = document.createElement('div');
+    d.style.cssText = 'padding:3px 6px;margin:1px 0;background:'+(i===SYNTH.selStampIdx?'#6b21a8':'transparent')+';border-radius:3px;cursor:pointer;font-family:monospace;font-size:10px;color:#f5d0fe';
+    d.textContent = `${s.cls}:${s.cls_name||''}  ${s.x1.toFixed(3)},${s.y1.toFixed(3)} → ${s.x2.toFixed(3)},${s.y2.toFixed(3)}`;
+    d.onclick = () => { SYNTH.selStampIdx = i; synthDraw(); synthUpdateStampList(); };
+    el.appendChild(d);
+  });
+}
+
+function synthSetTarget(v){
+  SYNTH.target = (v === 'ui') ? 'ui' : 'avatar';
+  if ($('synth_status')) $('synth_status').textContent = `目标 = ${SYNTH.target}`;
+}
+
+function synthToggleStampMode(){
+  SYNTH.stampMode = !SYNTH.stampMode;
+  const btn = $('synth_stamp_btn');
+  if (btn){
+    btn.textContent = SYNTH.stampMode ? '🏷️ UI 图章: 开' : '🏷️ UI 图章: 关';
+    btn.style.background = SYNTH.stampMode ? '#d946ef' : 'var(--bg3)';
+    btn.style.color = SYNTH.stampMode ? '#fff' : 'var(--text)';
+    btn.style.borderColor = SYNTH.stampMode ? '#d946ef' : 'var(--border)';
+  }
+  // Leaving stamp mode clears any in-progress draw; entering auto-switches target to ui
+  SYNTH.stampDrawing = false; SYNTH.stampDrawStart = null; SYNTH.stampDrawCur = null;
+  if (SYNTH.stampMode && SYNTH.target !== 'ui'){
+    SYNTH.target = 'ui';
+    if ($('synth_target')) $('synth_target').value = 'ui';
+  }
+  if ($('synth_status')) $('synth_status').textContent = SYNTH.stampMode
+    ? 'UI 图章模式: 在画布拖框 → 选 class (画布不再编辑 slot)'
+    : 'UI 图章模式 关 (画布恢复 slot 编辑)';
+  synthDraw();
+}
+
+// Fetch + cache the 450 master UI class names (index = cls id)
+async function synthLoadUiClasses(){
+  if (SYNTH._uiClasses) return SYNTH._uiClasses;
+  const r = await api('/api/v1/synth/ui_classes');
+  SYNTH._uiClasses = r.classes || [];
+  return SYNTH._uiClasses;
+}
+
+// Open a searchable class picker overlay; on pick, push the stamp.
+async function synthOpenClassPicker(box){
+  let classes;
+  try { classes = await synthLoadUiClasses(); }
+  catch(e){ showToast('加载 UI class 失败: ' + e.message, 'error', 4000); return; }
+
+  // Remove any existing picker
+  const old = $('synth_class_picker'); if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'synth_class_picker';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:#000a';
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:var(--bg2,#1a1a22);border:1px solid #6b21a8;border-radius:8px;padding:14px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:8px;box-shadow:0 8px 40px #000c';
+  panel.innerHTML = '<div style="font-weight:700;color:#f5d0fe;font-size:13px">选 UI class (输入名字或编号过滤)</div>';
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.placeholder = '搜 class 名 或 编号 (e.g. 红点 / 12)...';
+  search.style.cssText = 'padding:6px 8px;background:var(--bg,#0d0d10);border:1px solid var(--border,#333);border-radius:4px;color:var(--text,#fff);font-size:12px';
+  const list = document.createElement('select');
+  list.size = 10;
+  list.style.cssText = 'background:var(--bg,#0d0d10);border:1px solid var(--border,#333);border-radius:4px;color:var(--text,#fff);font-size:12px;font-family:monospace';
+
+  const renderList = (q) => {
+    list.innerHTML = '';
+    const qq = (q||'').trim().toLowerCase();
+    classes.forEach((name, idx) => {
+      if (qq && !(String(idx) === qq || (name||'').toLowerCase().includes(qq))) return;
+      const o = document.createElement('option');
+      o.value = String(idx);
+      o.textContent = `${idx}: ${name}`;
+      list.appendChild(o);
+    });
+    if (list.options.length) list.selectedIndex = 0;
+  };
+  renderList('');
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+  const okBtn = document.createElement('button');
+  okBtn.textContent = '确定';
+  okBtn.style.cssText = 'padding:5px 14px;background:#d946ef;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700;font-size:12px';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = '取消';
+  cancelBtn.style.cssText = 'padding:5px 14px;background:var(--bg3,#333);color:var(--text,#fff);border:1px solid var(--border,#444);border-radius:4px;cursor:pointer;font-size:12px';
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+
+  panel.appendChild(search); panel.appendChild(list); panel.appendChild(btnRow);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  setTimeout(() => search.focus(), 0);
+
+  const close = () => overlay.remove();
+  const commit = () => {
+    if (!list.value && list.value !== '0') { close(); return; }
+    const cls = parseInt(list.value, 10);
+    synthAddStamp(cls, classes[cls] || '', box);
+    close();
+  };
+  search.oninput = () => renderList(search.value);
+  search.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowDown' && list.options.length) { list.focus(); list.selectedIndex = 0; }
+  };
+  list.ondblclick = commit;
+  list.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape'){ e.preventDefault(); close(); } };
+  okBtn.onclick = commit;
+  cancelBtn.onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+}
+
+function synthAddStamp(cls, cls_name, box){
+  if (!Number.isFinite(cls)) return;
+  SYNTH.uiStamps.push({
+    cls, cls_name: cls_name || '',
+    x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2,
+  });
+  SYNTH.selStampIdx = SYNTH.uiStamps.length - 1;
+  if ($('synth_status')) $('synth_status').textContent = `+ 图章 ${cls}:${cls_name||''} (共 ${SYNTH.uiStamps.length})`;
+  synthDraw(); synthUpdateStampList();
+}
+
+function synthDeleteStamp(){
+  if (SYNTH.selStampIdx < 0 || SYNTH.selStampIdx >= (SYNTH.uiStamps||[]).length){
+    if ($('synth_status')) $('synth_status').textContent = '先选中一个 UI 图章';
+    return;
+  }
+  const s = SYNTH.uiStamps[SYNTH.selStampIdx];
+  SYNTH.uiStamps.splice(SYNTH.selStampIdx, 1);
+  SYNTH.selStampIdx = -1;
+  if ($('synth_status')) $('synth_status').textContent = `删除图章 ${s.cls}:${s.cls_name||''} (剩 ${SYNTH.uiStamps.length})`;
+  synthDraw(); synthUpdateStampList();
+}
+
+// Generate UI-synth frames from the template's ui_stamps.
+async function synthBuildUI(){
+  if (!SYNTH.context){ showToast('先选 context', 'error', 2500); return; }
+  const btn = $('synth_build_ui_btn');
+  const count = parseInt($('synth_count').value, 10) || (SYNTH.template && SYNTH.template.synth_count) || 300;
+  let prevTxt;
+  if (btn){ prevTxt = btn.textContent; btn.textContent = '⏳ 生成中...'; btn.disabled = true; btn.style.opacity = '0.6'; }
+  if ($('synth_status')) $('synth_status').textContent = `生成 UI 合成中 (count=${count})...`;
+  try {
+    const r = await api(`/api/v1/synth/build_ui/${SYNTH.context}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({count})
+    });
+    const frames = (r && (r.frames ?? r.out)) ?? '?';
+    showToast(`✓ UI 合成完成: 写入 ${frames} 帧${r && r.out ? ' → ' + r.out : ''}`, 'success', 5000);
+    if ($('synth_status')) $('synth_status').textContent = `✓ UI 合成: ${frames} 帧`;
+  } catch(e){
+    showToast('UI 合成失败: ' + e.message, 'error', 6000);
+    if ($('synth_status')) $('synth_status').textContent = 'UI 合成失败: ' + e.message;
+  } finally {
+    if (btn){ btn.textContent = prevTxt || '⚙ 生成UI合成'; btn.disabled = false; btn.style.opacity = '1'; }
+  }
 }
 
 async function synthSave(){

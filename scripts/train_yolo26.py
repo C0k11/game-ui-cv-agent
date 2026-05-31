@@ -277,6 +277,154 @@ TRAIN_CONFIGS = {
         "scale": 0.5,             # ★ key for cross-aspect-ratio robustness
         "translate": 0.1,
     },
+    "ui_yolo26m_v2": {
+        # v2 retrain: user feedback (2026-05-28) that咖啡厅入口/邮件箱/确认键/
+        # 一次領取 等关键 UI 在 v1 上 conf 太低 (some 12-19 frames only).
+        # Re-oversampled to target=60 (script bumped 770 → 7400+ copies),
+        # AND set all per-frame augmentation to ZERO to let the model learn
+        # UI text glyphs + spatial context cleanly.  Mosaic destroys spatial
+        # context (4 frames cropped together) — user explicitly said
+        # "不要马赛克以及其他干扰, ui字体以及特征就是要学的干净也要有空间上下文理解".
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
+        "base": "yolo26m.pt",
+        "epochs": 150,
+        "patience": 40,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "ui_yolo26m_v2",
+        "lr0": 0.01,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        # AUG — ALL OFF (clean spatial context for UI text/icon learning)
+        "mosaic": 0.0,           # ✗ destroys spatial context
+        "close_mosaic": 0,
+        "mixup": 0.0,
+        "copy_paste": 0.0,
+        "fliplr": 0.0,
+        "flipud": 0.0,
+        "degrees": 0.0,
+        "perspective": 0.0,
+        "hsv_h": 0.0,            # ✗ UI palette is fixed
+        "hsv_s": 0.0,
+        "hsv_v": 0.0,
+        "scale": 0.0,            # ✗ UI sizes are fixed
+        "translate": 0.0,        # ✗ UI positions are fixed
+    },
+    "ui_yolo26m_v3": {
+        # v3: lobby 入口 cls 改标文字(底栏8+MomoTalk+每日领奖+任务大厅) + 邮件箱
+        # 保图标, 全部 oversample target=200 (入口16→200=12x曝光)。5 训练目录
+        # (加 run_20260529_000756 新capture)。
+        # from COCO 重训 (NOT warm-start — 续训会让大按钮退化, 已验证)。
+        # patience=30 合理早停 (val 噪声但够 stop 信号)。cache=ram(~22GB) +
+        # workers=0 (Windows cache+workers>0 崩)。batch=12 (24GB 极限, 别OOM)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
+        "base": "yolo26m.pt",
+        "epochs": 150,
+        "patience": 30,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v3",
+        # cache 决策史 (14562帧):
+        #  - cache=ram 需21GB, 空闲RAM仅13.7GB → 被跳过 → on-the-fly 1.1s/it
+        #  - cache=False+workers8 → 仍每ep decode 14562次, GPU 86%等数据, 16min/ep
+        #  - cache=disk: 21GB存D盘.npy(210GB free够), 避免重复decode, 读.npy快。
+        #    首次建~15min, 之后 ~5min/ep。workers=0 (disk读单进程够, 不引入崩溃)。
+        "cache": "disk",
+        # disk 读 .npy 有 IO 延迟, workers=0 单进程扛不住 → GPU 饿(18%util)。
+        # workers=8 多进程并行读盘喂满 GPU。(cache=disk+workers 不崩, 崩的是
+        # cache=ram+workers 的 pickle)。
+        "workers": 8,
+        "lr0": 0.01,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.0, "close_mosaic": 0, "mixup": 0.0, "copy_paste": 0.0,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
+    },
+    "ui_yolo26m_v4": {
+        # v4 修 v3 弱检测的全部根因:
+        #  ① 修 487 corrupt 标签(build sanitize 截5字段) ② 删 cls92(不可学大区域)
+        #  ③ 加 run_20260529_123209(581 YOLO预标, 含 momotalk) + synth 合成帧
+        #  ④ 开空间 aug 治"过度依赖位置/邻居"过拟合(侧栏图标随布局偏移就崩):
+        #     translate/scale=位置+尺度不变性, mosaic=换邻居/上下文,
+        #     copy_paste=治稀有 cls, close_mosaic 最后10ep关mosaic干净微调(保清晰)
+        #  ⑤ flip/rotate 保持 0 —— UI 有左右/朝向语义(左切换↔右切换), 翻转会搞反标签
+        # from COCO (非 warm-start)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
+        "base": "yolo26m.pt",
+        "epochs": 150,
+        "patience": 30,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v4",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.01,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        # ── 空间增强 ON (治过拟合 / 位置依赖, v3 的核心病) ──
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,   # hsv_v: 立绘背景明暗多样
+        # ── 几何翻转/旋转保持 0 (UI 左右/朝向语义不可翻) ──
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "ui_yolo26m_v5": {
+        # v5 = v4 成功后的正式版 (warm-start 微调):
+        #  ① 数据集 ui_v2: 旧 train 去重 (16157→2377 唯一, 砍 200x oversample 过拟合源)
+        #     + run_20260531_110516(1052 真实) + run_20260531_143201(37 商店) + bond synth
+        #  ② cls92 战术大赛对战选择区域 恢复 (v4 误删; v5 给 arena 用区域选对手)
+        #  ③ nc=451 (新增 450 选择购买); 薄类适度 oversample 到30 (450→50), 不再 200x
+        #  ④ warm-start from v4 best_real.pt: backbone/neck 特征继承, cls头因nc450→451重学;
+        #     lr0=0.005 (half) 保护 v4 特征不被大lr冲垮
+        #  ⑤ aug 照搬 v4 (修过拟合关键); val=_ui_val_pool 仅 early-stop 机制 (盲弱类, 真实
+        #     验收看 dashboard 目检). patience=60 = 不 early-stop (盲 val 不可信), 跑满60.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v4" / "weights" / "best_real.pt"),
+        "epochs": 60,
+        "patience": 60,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v5",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "ui_yolo26m_v2_cont": {
+        # Continue v2 from ep16 (best_real.pt) — warm-start, NOT --resume
+        # (resume deadlocked on 4472-img re-scan). User confirmed static UI
+        # doesn't overfit (train≈test), so aug stays 0 and we train hard
+        # with a large patience (don't trust the tiny 51-frame val mAP for
+        # early-stop — judge best by manual eval on real screenshots).
+        # Goal: push small-icon recall (lobby entries 咖啡厅入口 etc, 15
+        # original backgrounds) which ep16 was too early to learn.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v2" / "weights" / "best_real.pt"),
+        "epochs": 150,
+        "patience": 120,        # ~no early-stop; UI doesn't overfit
+        "imgsz": 960,
+        "batch": 12,            # 16 偶发 CUDA OOM (TaskAlignedAssigner 峰值); 12 留余量
+        "out_name": "ui_yolo26m_v2_cont",
+        # cache/workers 回最初稳定配置 (ep1-16 用这个没崩). cache=ram 没加速
+        # (瓶颈是 GPU 算力, ~20min/ep 固有, 不是数据IO), 还引入 Windows
+        # DataLoader spawn 崩溃 — 故删除.
+        "lr0": 0.005,           # warm-start: half default to protect ep16 features
+        # AUG ALL 0 (static UI, user spec — overfit is fine, train≈test)
+        "mosaic": 0.0, "close_mosaic": 0, "mixup": 0.0, "copy_paste": 0.0,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
+    },
     "avatar_cls_v2": {
         # Combined-source classifier: ~250-class BA student recognition.
         # Train sources (per class, when available):
@@ -373,7 +521,8 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         imgsz=cfg["imgsz"],
         batch=cfg["batch"],
         device=0,
-        workers=4,
+        workers=cfg.get("workers", 4),
+        cache=cfg.get("cache", False),   # True=ram (resize后~7GB), "disk"=.npy
         patience=cfg.get("patience", 30),
         project=str(YOLO_ROOT / "runs"),
         name=cfg["out_name"],

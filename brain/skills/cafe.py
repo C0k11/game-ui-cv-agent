@@ -65,6 +65,7 @@ from brain.skills.base import (
     action_click, action_click_box,
     action_wait, action_back, action_done, action_swipe, action_scroll,
 )
+from brain.skills import ui_classes as UC
 
 
 def _load_target_favorites() -> List[str]:
@@ -288,7 +289,8 @@ class CafeSkill(BaseSkill):
         return None
 
     def _find_close_button(self, screen: ScreenState, region=(0.62, 0.06, 0.94, 0.30)) -> Optional[Any]:
-        return screen.find_text_one(r"^[Xx×]$", region=region, min_conf=0.55)
+        """Find the popup close-X via YOLO cls (UC.BTN_CLOSE_X). No OCR."""
+        return self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30, region=region)
 
     def _invite_avatar_roi(self, img, w: int, h: int, invite_btn) -> Optional[Any]:
         cy = int(invite_btn.cy * h)
@@ -323,32 +325,20 @@ class CafeSkill(BaseSkill):
             self.log(f"Florence button-state unavailable: {e}")
             return default
 
-    def _invite_visible_signature(self, screen: ScreenState) -> str:
-        """Return a stable string signature of the student names currently
-        visible in the invite list — used to detect when scrolling has
-        stopped advancing (list bottom reached).
+    def _invite_visible_signature(self, invite_btns) -> str:
+        """Return a stable signature of the invite list's current scroll
+        position — used to detect when scrolling has stopped advancing
+        (list bottom reached).
 
-        Reads the same OCR region the favorite-finder uses, sorted by cy
-        for deterministic ordering.
+        Pure YOLO (OCR off): the per-row CAFE_INVITE_BTN y-positions move as
+        the list scrolls and stop moving at the bottom, so the rounded set of
+        button cy values is a reliable, name-free position fingerprint. (The
+        old version read OCR student names; that signal is gone with OCR off.)
         """
-        names = []
-        for box in screen.ocr_boxes:
-            if box.confidence < 0.55:
-                continue
-            if not (0.30 <= box.x1 <= 0.52 and 0.15 <= box.y1 <= 0.90):
-                continue
-            t = box.text.strip()
-            # Skip non-name boxes: tips banner, numbers, header, sentence
-            # punctuation (TIPS row uses 。 / ! / ?).
-            if not t or t.startswith("TIPS") or t.startswith("學生"):
-                continue
-            if t.isdigit() or len(t) < 2 or len(t) > 12:
-                continue
-            if any(c in t for c in "。！？!?"):
-                continue
-            names.append((round(box.cy, 2), t))
-        names.sort()
-        return "|".join(n for _, n in names)
+        if not invite_btns:
+            return ""
+        ys = sorted(round(b.cy, 2) for b in invite_btns)
+        return "|".join(f"{y:.2f}" for y in ys)
 
     def _find_favorite_in_invite(self, screen: ScreenState, invite_btns, floor: int = 1) -> Optional[Tuple[Any, str, bool]]:
         """Find a favorite student in the MomoTalk invite list.
@@ -395,35 +385,16 @@ class CafeSkill(BaseSkill):
         if excluded:
             self.log(f"excluding already-invited: {sorted(excluded)}")
 
-        # --- Strategy 1: OCR name matching (fast, reliable) ---
-        if _STUDENT_NAME_MAP:
-            priority_btn = None
-            any_fav_btn = None
-            any_fav_name = None
-            any_fav_info = None
-            for box in screen.ocr_boxes:
-                if box.confidence < 0.55:
-                    continue
-                if not (0.30 <= box.x1 <= 0.52 and 0.15 <= box.y1 <= 0.90):
-                    continue
-                text = box.text.replace("\uff08", "(").replace("\uff09", ")").strip()
-                en_name = _STUDENT_NAME_MAP.get(text)
-                if en_name and en_name in fav_set and en_name not in excluded:
-                    btn = self._find_nearest_invite_button(invite_btns, box.cy)
-                    if not btn:
-                        continue
-                    if priority_target and en_name == priority_target:
-                        self.log(f"OCR PRIORITY #{priority_idx+1} MATCH: '{text}'\u2192'{en_name}' floor={floor}")
-                        return btn, en_name, True
-                    if any_fav_btn is None:
-                        any_fav_btn = btn
-                        any_fav_name = en_name
-                        any_fav_info = f"'{text}'\u2192'{en_name}'"
-            if any_fav_btn:
-                self.log(f"OCR FALLBACK MATCH: {any_fav_info} (priority #{priority_idx+1} not found) floor={floor}")
-                return any_fav_btn, any_fav_name, False
+        # --- Strategy 1: OCR name matching \u2014 REMOVED (OCR off) ---
+        # This read student names from screen.ocr_boxes and mapped them via
+        # student_name_map.json. With OCR globally disabled the name read is
+        # impossible, so name matching is dropped and avatar template matching
+        # (Strategy 2, below) becomes the sole favorite-finder. Avatar matching
+        # is NOT OCR \u2014 it crops each row's avatar and compares against reference
+        # images \u2014 so it keeps working end-to-end. If a fast name-based match is
+        # wanted back, it returns when digit/text-OCR is re-enabled.
 
-        # --- Strategy 2: Avatar template matching (fallback) ---
+        # --- Strategy 2: Avatar template matching (primary, OCR-free) ---
         candidate_buttons = sorted(invite_btns, key=lambda b: b.cy)[:_INVITE_MATCH_BUTTON_LIMIT]
         target_names = [n for n in self._target_favorites[:_INVITE_MATCH_FAVORITE_LIMIT]
                         if (n[:-4] if n.lower().endswith(".png") else n) not in excluded]
@@ -452,57 +423,53 @@ class CafeSkill(BaseSkill):
         return None
 
     def _is_cafe(self, screen: ScreenState) -> bool:
-        """Detect cafe interior: header '咖啡廳' or '移動至' button visible."""
-        if screen.has_text("咖啡", region=(0.0, 0.0, 0.3, 0.08), min_conf=0.5):
-            return True
-        # Fallback: '移動至' switch button is unique to cafe
-        if screen.find_any_text(["移動至", "移动至"], min_conf=0.5):
-            return True
-        # Fallback: cafe bottom bar has unique text
-        if screen.find_any_text(["編輯模式", "编辑模式", "禮物", "家具資訊"], min_conf=0.5):
-            return True
-        return False
+        """Detect cafe interior via YOLO cls signature.
+
+        Cafe page = any of CAFE_EARNINGS / CAFE_INVITE_TICKET /
+        CAFE_MOVE_1F / CAFE_MOVE_2F (see ui_classes.PAGE_SIGNATURES["Cafe"]).
+        Resolved through detect_screen_yolo so there is one source of truth.
+        """
+        return self.detect_screen_yolo(screen) == "Cafe"
 
     def _looks_like_lobby(self, screen: ScreenState) -> bool:
-        """Fallback lobby detector when strict screen classification misses."""
-        nav_tokens = ["課程", "课程", "社交", "商店", "製造", "制造", "招募", "學生", "学生"]
-        hits = 0
-        for token in nav_tokens:
-            if screen.find_text_one(token, region=screen.NAV_BAR, min_conf=0.5):
-                hits += 1
-        return hits >= 2
+        """Lobby detector via YOLO nav-icon signature (>=2 nav icons)."""
+        return self.detect_screen_yolo(screen) == "Lobby"
 
     def _invite_confirm_visible(self, screen: ScreenState) -> bool:
-        """Detect if the invite confirmation popup is still on screen."""
-        if screen.find_text_one(r"邀.*咖啡", region=screen.CENTER, min_conf=0.5):
-            return True
-        if screen.find_any_text(["要把正在拜訪", "要把正在拜访"], region=screen.CENTER, min_conf=0.5):
-            return True
-        cancel_btn = screen.find_any_text(["取消"], region=(0.28, 0.60, 0.52, 0.80), min_conf=0.6)
-        target_store = screen.find_any_text(["1號店", "1号店", "2號店", "2号店"], region=screen.CENTER, min_conf=0.5)
-        return bool(cancel_btn and target_store)
+        """Detect the invite confirmation popup via YOLO cls.
+
+        The "邀請XXX到咖啡廳" dialog shows a blue BTN_CONFIRM (+ BTN_CANCEL)
+        in the center. Seeing the confirm button in the center region is the
+        signal. No OCR.
+        """
+        return self.find_cls(
+            screen, UC.BTN_CONFIRM, conf=0.30, region=(0.42, 0.55, 0.78, 0.85)
+        ) is not None
 
     def _invite_list_visible(self, screen: ScreenState) -> bool:
-        """Detect if the MomoTalk invite list overlay is still open."""
-        momo = screen.find_any_text(["MomoTalk"], region=(0.25, 0.08, 0.58, 0.18), min_conf=0.6)
-        if momo:
-            return True
-        invite_btn = screen.find_any_text(["邀請", "邀请", "邀睛"], region=(0.50, 0.20, 0.70, 0.90), min_conf=0.5)
-        student_label = screen.find_text_one(r"學生.{0,3}\d", region=(0.25, 0.16, 0.52, 0.28), min_conf=0.55)
-        return bool(invite_btn and student_label)
+        """Detect the MomoTalk invite list overlay via YOLO cls.
+
+        The list shows per-row CAFE_INVITE_BTN (邀請键). Seeing one in the
+        right-hand button column = list is open. No OCR.
+        """
+        return self.find_cls(
+            screen, UC.CAFE_INVITE_BTN, conf=0.30, region=(0.50, 0.20, 0.70, 0.90)
+        ) is not None
 
     def _recover_invite_overlay(self, screen: ScreenState, phase_name: str) -> Optional[Dict[str, Any]]:
         """If invite UI is still visible, dismiss it before proceeding."""
         if self._invite_confirm_visible(screen):
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确"],
-                region=(0.42, 0.60, 0.74, 0.82), min_conf=0.55
+            # YOLO '确认键' (BTN_CONFIRM) — direct cls hit; the blue confirm
+            # button has small text that OCR struggles with.
+            confirm = self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=0.30, region=(0.42, 0.55, 0.78, 0.85),
             )
             if confirm:
                 self.log(f"invite confirm still visible before {phase_name}, clicking confirm")
-                return action_click_box(confirm, f"confirm invite before {phase_name}")
-            self.log(f"invite confirm still visible before {phase_name}, fallback confirm")
-            return action_click(0.598, 0.701, f"confirm invite before {phase_name} (fallback)")
+                return action_click_box(confirm, f"confirm invite before {phase_name} (YOLO 确认键)")
+            # cls gap: confirm popup signalled but BTN_CONFIRM not resolved.
+            self.log(f"invite confirm visible but BTN_CONFIRM not found before {phase_name} — YOLO gap; waiting")
+            return action_wait(400, f"waiting for BTN_CONFIRM before {phase_name}")
         if self._invite_list_visible(screen):
             close_btn = self._find_close_button(screen, region=(0.56, 0.04, 0.90, 0.24))
             if close_btn:
@@ -521,154 +488,136 @@ class CafeSkill(BaseSkill):
 
         # ── Handle popups that can appear at any point ──
 
-        # Earnings popup: only triggers on popup-specific text
-        # (NOT '咖啡廳收益' which is a permanent label on cafe main screen)
+        # Earnings popup guard — pure YOLO. There is NO cls for the popup
+        # TITLE ("每小時收益/收益現況"), so detect the popup by a CLAIM button
+        # (active OR grey) sitting in the centered claim region, and/or the
+        # CAFE_EARNINGS label leaking through. Both the active-claim and
+        # grey-claim handling below still run as before.
         # Skip if we already claimed — prevents infinite loop when inventory is full.
-        if not self._earnings_claimed and screen.find_any_text(["每小時收益", "收益現况", "收益現況"], min_conf=0.6):
-            claim_btn = screen.find_any_text(["領取", "领取"], min_conf=0.7)
-            if claim_btn:
-                self.log("earnings popup detected, clicking claim")
-                self._earnings_claimed = True
-                return action_click_box(claim_btn, "claim earnings from popup")
-            enabled = self._florence_button_enabled(
+        _earnings_popup_claim = self.find_cls(
+            screen,
+            [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE,
+             UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
+            conf=0.30, region=(0.30, 0.58, 0.70, 0.86),
+        )
+        _earnings_popup_open = (
+            _earnings_popup_claim is not None
+            or self.find_cls(
+                screen, UC.CAFE_EARNINGS, conf=0.30, region=(0.30, 0.04, 0.70, 0.40)
+            ) is not None
+        )
+        if not self._earnings_claimed and _earnings_popup_open:
+            claim_btn = self.find_cls(
                 screen,
-                (0.35, 0.66, 0.66, 0.80),
-                hint="earnings claim button",
-                default=True,
+                [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE],
+                conf=0.30, region=(0.30, 0.58, 0.70, 0.86),
             )
-            if enabled:
-                self.log("earnings popup detected, claim text missing -> click claim fallback")
+            if claim_btn:
+                self.log(f"earnings popup detected, clicking claim (YOLO {claim_btn.cls_name})")
                 self._earnings_claimed = True
-                return action_click(0.5, 0.734, "claim earnings fallback")
-            self.log("earnings popup detected but Florence says button is disabled")
-            self._earnings_claimed = True
+                return action_click_box(claim_btn, f"claim earnings from popup (YOLO {claim_btn.cls_name})")
+            # No active claim cls — either already-claimed/greyed or YOLO gap.
+            # If a grey claim cls is visible, treat as nothing-to-claim and close.
+            done_btn = self.find_cls(
+                screen, [UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY], conf=0.30,
+                region=(0.30, 0.58, 0.70, 0.86),
+            )
+            if done_btn:
+                self.log("earnings popup claim greyed (already claimed/disabled), closing")
+                self._earnings_claimed = True
+                close_btn = self._find_close_button(screen)
+                if close_btn:
+                    return action_click_box(close_btn, "close earnings popup (greyed)")
+                return action_wait(300, "earnings popup greyed")
+            # Popup signalled only by CAFE_EARNINGS label leak but no claim cls
+            # resolved in the claim band — genuine YOLO gap; close it so we don't
+            # stall, then let the cafe-main flow re-open earnings cleanly.
+            self.log("earnings popup (label) but no claim cls in band — YOLO gap; closing")
             close_btn = self._find_close_button(screen)
             if close_btn:
-                return action_click_box(close_btn, "close earnings popup (disabled)")
-            return action_wait(300, "earnings popup disabled")
+                return action_click_box(close_btn, "close earnings popup (no claim cls)")
+            return action_wait(400, "earnings popup: waiting for claim cls")
 
-        # Tutorial/説明 popup (cafe 2F first visit).
-        # NEW (2026-05-13): use reference `cafe_students_arrived` template as
-        # PRIMARY signal — `訪問學生目錄` header is the unique tutorial
-        # signature.  Falls back to text OCR keywords only when template
-        # registry isn't loaded.  Avoids the single-char `明` trap that
-        # mis-fired on `返明` (OCR misreading 邀請 button) and closed the
-        # invite list (run_20260513_112359 t114/t165/t219 all wasted).
+        # Reward-result popup ("獲得獎勵") after claiming earnings/rewards —
+        # tap the GOT_REWARD cls to dismiss. (Replaces relying on OCR/blind
+        # taps for the settlement popup.)
+        got_reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        if got_reward is not None:
+            self.log("reward-result popup (獲得獎勵), tapping to dismiss (YOLO 获得奖励)")
+            return action_click_box(got_reward, "dismiss reward result (YOLO 获得奖励)")
+
+        # Tutorial/説明 popup (cafe 2F first visit, "訪問學生目錄" header).
+        # PRIMARY signal stays the reference `cafe_students_arrived` TEMPLATE
+        # (template/emoticon model, not OCR — left untouched per migration
+        # scope). The OCR keyword fallbacks ("說明"/"訪問學生目錄") are DEAD
+        # with OCR off, so they're removed; the template is the sole detector.
+        # Close via BTN_CONFIRM / BTN_CLOSE_X cls.
         tutorial = None
         if self.sub_state != "invite":
-            tmpl_hit = screen.find_template_one(
+            tutorial = screen.find_template_one(
                 "cafe_students_arrived", region=(0.20, 0.05, 0.80, 0.40),
             )
-            if tmpl_hit:
-                tutorial = tmpl_hit
-            else:
-                tutorial = screen.find_any_text(
-                    ["說明", "说明", "説明"],
-                    region=(0.3, 0.1, 0.7, 0.3), min_conf=0.55
-                )
-            if not tutorial:
-                tutorial = screen.find_any_text(
-                    ["訪問學生目錄", "訪問學生", "訪问学生目录", "訪间學生", "訪周學生目緣", "訪周學生", "學生目緣"],
-                    region=screen.CENTER, min_conf=0.5
-                )
         if tutorial:
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確", "确"],
-                region=screen.CENTER, min_conf=0.7
+            confirm = self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=0.30, region=screen.CENTER,
             )
             if confirm:
-                self.log("dismissing tutorial popup")
-                return action_click_box(confirm, "dismiss tutorial")
+                self.log("dismissing tutorial popup (YOLO 确认键)")
+                return action_click_box(confirm, "dismiss tutorial (YOLO 确认键)")
             close_btn = self._find_close_button(screen)
             if close_btn:
                 return action_click_box(close_btn, "close tutorial X")
 
-        # Notification popup (通知) — e.g. invite cooldown, generic alerts
-        # Has "通知" title + "確" button, no cancel; always safe to dismiss.
-        notif = screen.find_text_one("通知", region=(0.35, 0.15, 0.65, 0.30), min_conf=0.8)
-        if notif:
-            # Detect invite cooldown notification ("冷時間過後即可邀請。")
-            # If we're in invite phase and see cooldown text, skip invite entirely.
-            if self.sub_state == "invite" and not self._invite_attempted:
-                cd_hint = screen.find_any_text(
-                    ["冷時間", "冷却", "冷印", "即可邀請", "即可邀请"],
-                    region=(0.25, 0.35, 0.75, 0.60), min_conf=0.5
-                )
-                if cd_hint:
-                    self.log(f"invite cooldown notification detected: '{cd_hint.text}', skipping invite")
-                    self._invite_attempted = True
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定"],
-                region=(0.45, 0.68, 0.75, 0.82), min_conf=0.5
+        # Notification / invite-confirm popup — pure YOLO. There is NO cls for
+        # the generic 通知 TITLE, so we detect the only popup we MUST act on —
+        # the invite-confirm dialog ("邀請XXX到咖啡廳") — by its blue BTN_CONFIRM
+        # in the center-bottom band. The invite confirm REQUIRES that button
+        # (clicking X/取消 cancels the invite and the student never spawns).
+        #
+        # DIGIT-DEFERRED: the old invite-cooldown skip read the OCR cooldown
+        # text ("冷時間過後即可邀請。") to bail out of invite early. With OCR off
+        # that read is impossible (and the HH:MM:SS ticket-timer skip in stage 0
+        # is likewise deferred). A stuck/empty invite list self-recovers via its
+        # own tick budget, so we no longer block on a cooldown string we can't read.
+        if self.sub_state == "invite":
+            confirm = self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=0.30, region=(0.42, 0.55, 0.78, 0.85),
             )
-            if not confirm:
-                confirm = screen.find_text_one(
-                    r"^[確确]$",
-                    region=(0.45, 0.68, 0.75, 0.82), min_conf=0.6
-                )
-            if confirm:
-                self.log(f"notification popup, clicking confirm (sub={self.sub_state})")
-                return action_click_box(confirm, "dismiss notification")
-            # Invite confirm popup ("邀請XXX到咖啡廳") REQUIRES clicking 確認
-            # (right button at ~0.60, 0.75) — clicking X/取消 cancels the invite
-            # and the student never spawns in the cafe.
-            if self.sub_state == "invite":
-                self.log("invite 通知 popup, clicking 確認 (hardcoded)")
-                return action_click(0.60, 0.75, "confirm invite (hardcoded)")
-            close_btn = self._find_close_button(screen)
-            if close_btn:
-                return action_click_box(close_btn, "close notification X")
-            return action_click(0.5, 0.70, "dismiss notification fallback")
+            if confirm is not None:
+                self.log("invite-confirm popup, clicking confirm (YOLO 确认键)")
+                return action_click_box(confirm, "confirm invite (YOLO 确认键)")
+        # Generic 通知 popups (cooldown / system alerts) have no title cls.
+        # YOLO-GAP: leave them to the (OCR-disabled) common-popup interceptor /
+        # let the state machine continue — do NOT blind-tap. If one ever blocks
+        # the flow, the fix is a 通知-title cls, not an OCR guard.
 
-        # Rank-up / bond level up popup (好感度升級 / 羈絆升級)
-        # OCR often misreads 羈絆升級 as 鲜升級 due to stylized font.
-        if screen.find_any_text(["好感度", "Rank Up"], min_conf=0.6):
-            self.log("rank-up popup, tapping to dismiss")
-            return action_click(0.5, 0.5, "dismiss rankup popup")
+        # Rank-up / bond level up full-screen overlay (羈絆升級 / 地區升級).
+        # Use YOLO cls — NOT OCR "好感度": that label is a BA-permanent tag
+        # (student cards / invite list / bond bars all show it), so matching
+        # it blind-tapped the screen center on normal cafe screens.
+        levelup = self.find_cls(
+            screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=0.30,
+        )
+        if levelup is not None:
+            self.log(f"level-up overlay ({levelup.cls_name}), tapping to dismiss")
+            return action_click(0.5, 0.5, "dismiss level-up overlay")
 
-        # Bond level up screen (羈絆升級！) — full-screen animation
-        # Detected via stat text at bottom (治愈力/最大體力) which OCR reads reliably.
-        # GUARD: exclude student profile screen which also shows 最大體力 but has
-        # unique markers like 基本情報, EX技能, Tip!, 神秘解放.
-        # NOTE: Do NOT include "Tip!" — it also appears on loading tip screens.
-        student_profile = screen.find_any_text(
-            ["基本情報", "EX技能", "神秘解放"],
-            min_conf=0.6
-        )
-        if student_profile:
-            self.log("on student profile, pressing back to return to cafe")
-            return action_back("back from student profile")
-        bond_stat = screen.find_any_text(
-            ["治愈力", "治癒力", "最大體力", "最大体力"],
-            min_conf=0.6
-        )
-        if bond_stat:
-            self.log("bond level up screen (stat text), tapping to dismiss")
-            return action_click(0.5, 0.5, "dismiss bond level up")
-        # Pre-level-up blank screen: "在咖啡廳獲得學生的羈絆點數" at top center
-        if not self._is_cafe(screen):
-            bond_notif = screen.find_any_text(
-                ["羈絆升級", "鲜升級", "羈絆點數", "羈絆"],
-                min_conf=0.6
-            )
-            if not bond_notif:
-                bond_notif = screen.find_any_text(
-                    ["在咖啡"],
-                    region=(0.25, 0.0, 0.75, 0.12),
-                    min_conf=0.6
-                )
-            if bond_notif:
-                self.log("bond notification screen, tapping to dismiss")
-                return action_click(0.5, 0.5, "dismiss bond notification")
-
-        # Furniture edit mode recovery: click "結束編輯模式" to escape
-        edit_btn = screen.find_any_text(
-            ["結束編輯模式", "结束编辑模式", "結束編輯"],
-            region=(0.80, 0.05, 1.0, 0.18), min_conf=0.5
-        )
-        if edit_btn:
-            self.log("EDIT MODE detected, clicking exit button")
-            return action_click_box(edit_btn, "exit furniture edit mode")
+        # Bond level-up screen + stat-text variant: the PRIMARY detector is the
+        # BOND_LEVELUP / REGION_LEVELUP cls handled just above. The old OCR
+        # stat-text reads (治愈力/最大體力) and the "在咖啡廳…羈絆點數" pre-level-up
+        # banner were SECONDARY fallbacks for the same overlay — dead with OCR
+        # off and now covered by the cls. No replacement guard needed; if the
+        # cls misses a level-up frame, the not-_is_cafe waits below let it settle
+        # and the cls catches the next frame.
+        # YOLO-GAP: student-profile screen (基本情報/EX技能/神秘解放) had no cls,
+        # so the explicit "back out of accidentally-opened profile" recovery is
+        # dropped. It does NOT block the main flow — detect_screen_yolo returns
+        # non-Cafe for the profile, so the sub-state handlers' not-_is_cafe
+        # branches wait/recover (and _enter/_headpat back out after their
+        # attempt budgets). Needs a profile-screen cls to restore fast recovery.
+        # YOLO-GAP: furniture edit-mode recovery (結束編輯模式) had no cls. Dropped
+        # to a no-op; cafe never enters edit mode on its own, so this is only a
+        # rare external-state recovery. Needs an edit-mode-exit cls to restore.
 
         # Generic popups (confirm/cancel dialogs)
         # SKIP when the MomoTalk sort dropdown is open (invite stage 1) —
@@ -713,9 +662,9 @@ class CafeSkill(BaseSkill):
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         """Navigate from lobby to cafe."""
         self._enter_attempts += 1
-        current = self.detect_current_screen(screen)
+        current = self.detect_screen_yolo(screen)
 
-        if current == "Cafe" or self._is_cafe(screen):
+        if current == "Cafe":
             self._enter_attempts = 0
             # If 1F headpat was already done (kicked to lobby by bond level-up),
             # skip earnings/invite and go straight to switch to 2F.
@@ -736,25 +685,28 @@ class CafeSkill(BaseSkill):
             self.sub_state = "earnings"
             return action_wait(500, "entered cafe")
 
-        if current == "Lobby" or self._looks_like_lobby(screen):
-            nav = self._nav_to(screen, ["咖啡廳", "咖啡厅", "咖啡"])
-            if nav:
-                return nav
-            if self._enter_attempts >= 3:
-                # Bottom nav first slot is cafe in BA lobby.
-                return action_click(0.08, 0.95, "click cafe nav (hardcoded fallback)")
-            return action_wait(300, "waiting for cafe button")
+        if current == "Lobby":
+            # YOLO 咖啡厅入口 cls (lobby nav cafe icon).
+            cafe_nav = self.click_cls(
+                screen, UC.NAV_CAFE, "click cafe nav", conf=0.30,
+            )
+            if cafe_nav:
+                return cafe_nav
+            self.log("on lobby but no 咖啡厅入口 cls — YOLO gap; waiting")
+            return action_wait(400, "waiting for 咖啡厅入口 cls")
 
-        if current and current != "Cafe":
+        if current is not None and current != "Cafe":
             self.log(f"wrong screen '{current}', backing out")
             return action_back(f"back from {current}")
 
+        # current is None — unknown/transition screen.
         if self._enter_attempts > 8:
-            if self._looks_like_lobby(screen):
-                return action_click(0.08, 0.95, "force click cafe nav from lobby-like screen")
-            # Don't send back on loading/transition screens (low OCR) — wait instead
-            if len(screen.ocr_boxes) < 5:
-                return action_wait(800, "low OCR, likely loading — waiting")
+            # Don't send back on loading/transition screens — wait instead.
+            # YOLO signal (OCR off): an explicit loading spinner, or a frame
+            # with almost no detected UI (full-screen art / fade) means we're
+            # mid-transition; otherwise YOLO sees UI but no known page → back out.
+            if screen.is_loading() or len(screen.yolo_boxes or []) < 2:
+                return action_wait(800, "no UI detected, likely loading — waiting")
             return action_back("recover from unknown screen before entering cafe")
 
         return action_wait(500, "entering cafe")
@@ -762,11 +714,16 @@ class CafeSkill(BaseSkill):
     def _earnings(self, screen: ScreenState) -> Dict[str, Any]:
         """Claim cafe earnings.
 
-        Flow from raw data (frame_000083 → frame_000136):
-        1. On cafe main screen, click '咖啡廳收益' label at bottom-right (0.913, 0.893)
-        2. Earnings popup opens showing '每小時收益', '收益現況'
-        3. Click '領取' button at center-bottom (0.5, 0.734) to claim
-        4. Popup closes automatically or via X
+        Flow:
+        1. On cafe main screen, click CAFE_EARNINGS (咖啡厅收益) to open popup.
+        2. Earnings popup opens showing '每小時收益', '收益現況'.
+        3. Click the active CLAIM cls (領取) to claim.
+        4. Popup closes via X.
+
+        Pure YOLO: the popup is detected by its CLAIM button (active OR grey)
+        in the centered claim band; claiming and the disabled/empty case are
+        driven by the button STATE (yellow/blue = claim, grey = nothing to
+        claim → close). All clicks are cls.
         """
         if self._earnings_claimed:
             self.sub_state = "invite"
@@ -784,127 +741,81 @@ class CafeSkill(BaseSkill):
                 return action_wait(300, "earnings: back on lobby, re-entering cafe")
             return action_wait(500, "waiting for cafe UI")
 
-        def _read_earnings_pct() -> float:
-            pct_hits = screen.find_text(
-                r"(\d{1,3}(?:\.\d+)?)\s*%",
-                region=(0.83, 0.86, 0.99, 0.99),
-                min_conf=0.5,
-            )
-            best = -1.0
-            for hit in pct_hits:
-                m = re.search(r"(\d{1,3}(?:\.\d+)?)", hit.text)
-                if not m:
-                    continue
-                try:
-                    best = max(best, float(m.group(1)))
-                except Exception:
-                    continue
-            return best
-
-        # Check for 0% earnings — skip claim entirely
-        # OCR reads "0.0%" or "0.0 %" at bottom-right; regex ^0\.0 avoids matching "100.0%"
-        zero_pct = screen.find_text_one(
-            r"^0\.0", region=(0.85, 0.88, 0.98, 0.98), min_conf=0.7
+        # Earnings popup detection — pure YOLO. NO cls for the popup TITLE
+        # ("每小時收益/收益現況"), so detect it by a CLAIM button (active OR
+        # grey) sitting in the centered claim band, and/or the CAFE_EARNINGS
+        # label leaking through near the top of the popup.
+        _CLAIM_BAND = (0.30, 0.58, 0.70, 0.86)
+        _popup_claim = self.find_cls(
+            screen,
+            [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE,
+             UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
+            conf=0.30, region=_CLAIM_BAND,
         )
-        if zero_pct:
-            self.log(f"earnings 0% ({zero_pct.text}), skipping")
-            self._earnings_claimed = True
-            # Only close popup if earnings popup is actually open (收益 text visible)
-            if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
-                close_btn = self._find_close_button(screen)
-                if close_btn:
-                    return action_click_box(close_btn, "close earnings popup (0%)")
-            self.sub_state = "invite"
-            self._invite_next_state = "headpat"
-            self._invite_ticks = 0
-            return action_wait(300, "earnings 0%, skipping to invite")
+        _earnings_popup_open = (
+            _popup_claim is not None
+            or self.find_cls(
+                screen, UC.CAFE_EARNINGS, conf=0.30, region=(0.30, 0.04, 0.70, 0.40)
+            ) is not None
+        )
 
-        # If earnings popup is already open (領取 button visible)
-        claim_btn = screen.find_any_text(["領取", "领取"], min_conf=0.8)
-        if claim_btn:
-            self.log("earnings popup open, clicking '領取' to claim")
-            self._earnings_claimed = True
-            return action_click_box(claim_btn, "claim earnings")
+        # DIGIT-DEFERRED: the old flow read the earnings % (bottom-right, and
+        # the in-popup 0% / 0/N balance rows) to decide whether claiming was
+        # worthwhile and to skip a 0% claim. With OCR off those digits are
+        # unreadable, so we no longer gate on % — instead we drive purely by
+        # the claim-button STATE: an ACTIVE (yellow/blue) claim → claim it; a
+        # GREY claim → nothing to collect → just close. Re-enable the %-aware
+        # "skip 0% to save the cap" optimization once digit-OCR returns.
 
-        # If earnings popup is open but no claim button (already claimed?)
-        if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
-            # Check for zero-balance rows "0 / NNN" anywhere in popup
-            zero_rows = screen.find_text(
-                r"^0\s*/\s*\d",
-                region=(0.20, 0.40, 0.80, 0.75), min_conf=0.60
-            )
-            # Also check for "0.0 %" indicating no earnings
-            zero_pct_in_popup = screen.find_text(
-                r"^0\.0",
-                region=(0.20, 0.40, 0.80, 0.75), min_conf=0.60
-            )
-            if len(zero_rows) >= 2 or len(zero_pct_in_popup) >= 2:
-                self.log(f"earnings popup all zero ({len(zero_rows)} zero rows, {len(zero_pct_in_popup)} zero pcts), closing")
-                self._earnings_claimed = True
-                close_btn = self._find_close_button(screen)
-                if close_btn:
-                    return action_click_box(close_btn, "close empty earnings popup")
-                self.sub_state = "invite"
-                self._invite_next_state = "headpat"
-                self._invite_ticks = 0
-                return action_wait(300, "empty earnings popup, skipping")
-            # Florence check whether the claim button is enabled.
-            # DEFAULT=FALSE: if Florence can't tell, assume disabled (safer than clicking blindly)
-            enabled = self._florence_button_enabled(
+        # Earnings popup open → resolve the CLAIM button via YOLO cls.
+        if _earnings_popup_open:
+            # Active (yellow/blue) claim cls → claim.
+            claim_btn = self.find_cls(
                 screen,
-                (0.35, 0.66, 0.66, 0.80),
-                hint="earnings claim button",
-                default=False,
+                [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE],
+                conf=0.30, region=_CLAIM_BAND,
             )
-            if not enabled:
-                self.log("earnings popup button appears disabled, skipping claim")
+            if claim_btn:
+                self.log(f"earnings popup open, claiming (YOLO {claim_btn.cls_name})")
+                self._earnings_claimed = True
+                return action_click_box(claim_btn, f"claim earnings (YOLO {claim_btn.cls_name})")
+
+            # Grey claim cls → button disabled (state read from cls colour).
+            # DIGIT-DEFERRED: this grey state now stands in for the old
+            # "all-zero balance / 0%" close path — nothing to claim → close.
+            done_btn = self.find_cls(
+                screen, [UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY], conf=0.30,
+                region=_CLAIM_BAND,
+            )
+            if done_btn:
+                self.log("earnings claim greyed (disabled / nothing to claim), skipping")
                 self._earnings_claimed = True
                 close_btn = self._find_close_button(screen)
                 if close_btn:
-                    return action_click_box(close_btn, "close earnings popup (disabled)")
+                    return action_click_box(close_btn, "close earnings popup (greyed)")
                 self.sub_state = "invite"
                 self._invite_next_state = "headpat"
                 self._invite_ticks = 0
-                return action_wait(300, "earnings button disabled, skipping")
-            self.log("earnings popup open, claim enabled, clicking")
-            self._earnings_claimed = True
-            return action_click(0.5, 0.734, "claim earnings fallback")
+                return action_wait(300, "earnings button greyed, skipping")
 
-        # Cafe main screen: click '咖啡廳收益' label to open earnings popup
-        # Only open if FULL! is visible (earnings at max capacity)
-        full = screen.find_text_one("FULL", min_conf=0.6)
-        if full:
-            self.log("FULL detected, clicking earnings area")
-            return action_click(0.913, 0.893, "open earnings via FULL")
+            self.log("earnings popup open but no claim cls — YOLO gap; waiting")
+            return action_wait(400, "earnings popup: waiting for claim cls")
 
-        # OCR on this label is noisy (e.g. 咖啡魔收益). Match broader regex.
-        earn_label_regex = screen.find_text_one(
-            r"咖啡.*收益",
-            region=(0.82, 0.84, 0.99, 0.98),
-            min_conf=0.45,
-        )
-        if earn_label_regex:
-            self._earnings_attempts += 1
-            self.log(f"clicking earnings area via regex label '{earn_label_regex.text}'")
-            return action_click_box(earn_label_regex, "open earnings popup (regex label)")
-
-        # Also try earnings label if percentage is not 0
-        earn_label = screen.find_any_text(
-            ["咖啡廳收益", "咖啡收益", "咖啡厅收益"],
-            min_conf=0.5
-        )
+        # Cafe main screen: open the earnings popup via CAFE_EARNINGS cls.
+        earn_label = self.find_cls(screen, UC.CAFE_EARNINGS, conf=0.30)
         if earn_label:
             self._earnings_attempts += 1
-            self.log("clicking '咖啡廳收益' to open earnings popup")
-            return action_click_box(earn_label, "open earnings popup")
+            self.log("clicking 咖啡厅收益 to open earnings popup (YOLO)")
+            return action_click_box(earn_label, "open earnings popup (YOLO 咖啡厅收益)")
 
-        # Last fallback: if visible percentage is >0, try opening earnings by fixed spot.
-        # template-based fixed click is much more stable than OCR-only in this corner.
-        pct_val = _read_earnings_pct()
-        if pct_val > 0.0 and self._earnings_attempts < 3:
+        # CAFE_EARNINGS cls not seen yet. DIGIT-DEFERRED: we used to read the
+        # bottom-right % to know earnings existed even when the label cls was
+        # missed; without that we give the cls a few ticks to appear, then skip
+        # so we never stall the daily loop on a missing label.
+        if self._earnings_attempts < 3:
             self._earnings_attempts += 1
-            self.log(f"earnings percent {pct_val:.1f}% detected, opening earnings by fixed spot")
-            return action_click(0.913, 0.893, f"open earnings via percent {pct_val:.1f}%")
+            self.log("CAFE_EARNINGS cls not found yet — YOLO gap; waiting")
+            return action_wait(400, "earnings: waiting for CAFE_EARNINGS cls")
 
         # No earnings indicators — skip
         self._earnings_claimed = True
@@ -942,145 +853,75 @@ class CafeSkill(BaseSkill):
 
         self._invite_ticks += 1
 
-        # Stage 3: Confirm the invite in the confirmation popup
+        # Stage 3: Confirm the invite in the confirmation popup.
+        # The "邀請XXX到咖啡廳" dialog REQUIRES the blue 確認 button — clicking
+        # 取消/X cancels the invite. Resolve it via YOLO BTN_CONFIRM cls.
         if self._invite_stage == 3:
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "確", "确"],
-                region=screen.CENTER, min_conf=0.7
+            confirm = self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=0.30, region=(0.42, 0.55, 0.78, 0.85),
             )
             if confirm:
-                self.log("confirming student invite")
+                self.log("confirming student invite (YOLO 确认键)")
                 self._invite_stage = 4
                 self._invite_attempted = True
-                return action_click_box(confirm, "confirm invite")
+                return action_click_box(confirm, "confirm invite (YOLO 确认键)")
 
-            # Invite popup often uses single-char confirm ('確'). If OCR misses it,
-            # use popup-body + cancel as a safe signal and click known confirm spot.
-            invite_popup = screen.find_text_one(r"邀請.*咖啡廳", region=screen.CENTER, min_conf=0.7)
-            cancel_btn = screen.find_any_text(["取消"], region=(0.30, 0.62, 0.50, 0.78), min_conf=0.8)
-            if invite_popup and cancel_btn:
-                self.log("invite popup detected without confirm OCR, clicking confirm fallback")
-                self._invite_stage = 4
-                self._invite_attempted = True
-                return action_click(0.598, 0.701, "confirm invite fallback")
-
-            # If popup is gone (global interceptor already confirmed it), detect
-            # by seeing normal cafe view with no popup after a few ticks.
+            # No BTN_CONFIRM visible. Either the popup is already gone (global
+            # 通知 handler confirmed it) or it hasn't rendered yet. We infer
+            # "popup gone" from being back on a clean cafe view with no
+            # confirm button after a few ticks — no OCR needed.
             if self._invite_ticks >= 3 and self._is_cafe(screen):
-                notif = screen.find_text_one("通知", region=(0.35, 0.15, 0.65, 0.30), min_conf=0.7)
-                if not notif:
-                    self.log("invite confirm popup gone (interceptor handled it)")
-                    self._invite_attempted = True
-                    return action_wait(300, "invite done (popup dismissed)")
-
-            # If no confirm button yet, wait for popup
-            if self._invite_ticks >= 15:
-                self.log("invite confirm timeout, skipping")
+                self.log("invite confirm popup gone (BTN_CONFIRM absent, back on cafe)")
                 self._invite_attempted = True
-            return action_wait(400, "waiting for invite confirm popup")
+                return action_wait(300, "invite done (popup dismissed)")
 
-        # Stage 1: Sort invite list by affinity (so high-affinity = favorites first)
-        # MomoTalk header sort controls are at approximately:
-        #   sort label ("名字"/"羈絆"): cx ~0.55, cy ~0.21
-        #   sort arrows ("≡↑"): cx ~0.64, cy ~0.21
-        _SORT_LABEL_REGION = (0.49, 0.17, 0.60, 0.25)
-        # When opened, dropdown menu spans ~x=0.29-0.68, y=0.27-0.62
-        # containing 排列 header, 名字/學園/羈絆等級/精選 options, 確認 button
-        _SORT_MENU_REGION = (0.29, 0.27, 0.68, 0.62)
-        # Hardcoded positions inside the sort dropdown (verified from screenshots):
-        #   排列 header: y ~0.29
-        #   2x2 option grid:
-        #     名字 (0.42, 0.37)   學園 (0.58, 0.37)
-        #     羈絆等級 (0.42, 0.44)   精選 (0.58, 0.44)
-        #   確認 button: (0.50, 0.55)
-        _FEATURED_POS = (0.58, 0.44)   # 精選 — starred students first
-        _CONFIRM_POS = (0.50, 0.55)    # 確認 button inside sort popup
+            # Still waiting for the confirm popup to render.
+            if self._invite_ticks >= 15:
+                self.log("invite confirm timeout (no BTN_CONFIRM cls), skipping")
+                self._invite_attempted = True
+            return action_wait(400, "waiting for invite confirm popup (BTN_CONFIRM cls)")
+
+        # Stage 1: (was) sort invite list by 精選 so favorites surface first.
+        #
+        # YOLO-GAP: the MomoTalk sort UI has NO trained cls — not the sort
+        # LABEL (名字/學園/羈絆等級/精選), the 排列 dropdown header, the option
+        # grid, nor the dropdown's 確認 button. Every detector here was OCR and
+        # is now dead. Per the no-blind-click rule we DON'T fire the old
+        # hardcoded dropdown taps blind; sorting is only an optimization
+        # (stage 2 scrolls the whole list via CAFE_INVITE_BTN + avatar matching
+        # and falls back to the first invite button), so we SKIP sorting and go
+        # straight to stage 2. To restore featured-first ordering, train cls for
+        # the sort label + 精選 option + sort-confirm button.
         if self._invite_stage == 1:
             if not self._invite_sorted and self._target_favorites:
-                # First, wait for the MomoTalk list to actually be open.
-                list_open = screen.find_any_text(
-                    ["MomoTalk", "學生"],
-                    region=(0.28, 0.10, 0.50, 0.25), min_conf=0.50
-                )
-                if not list_open:
+                # Wait for the list to actually open (per-row CAFE_INVITE_BTN).
+                if not self._invite_list_visible(screen):
                     if self._invite_ticks >= 8:
-                        self.log("invite list didn't open for sort, proceeding")
+                        self.log("invite list didn't open (no CAFE_INVITE_BTN cls), proceeding")
                         self._invite_sorted = True
                         self._invite_stage = 2
                         self._invite_ticks = 0
                         return action_wait(200, "skip sort (list not open)")
-                    return action_wait(300, "waiting for invite list to open for sort")
+                    return action_wait(300, "waiting for invite list (CAFE_INVITE_BTN cls)")
+                # List is open. No sort cls → skip sorting (logged gap once).
+                self.log("invite sort skipped — no cls for sort UI (YOLO-GAP); "
+                         "proceeding unsorted, stage 2 scans full list")
+            self._invite_sorted = True
+            self._invite_stage = 2
+            self._invite_ticks = 0
+            return action_wait(200, "sort skipped/not needed, proceed to invite")
 
-                # Is the sort dropdown popup currently open? (排列 header visible)
-                sort_menu_open = screen.find_any_text(
-                    ["排列"],
-                    region=(0.30, 0.25, 0.60, 0.35), min_conf=0.50
-                )
-
-                # If we've already clicked 精選 and popup still open, click 確認 to apply
-                if sort_menu_open and self._sort_option_clicked:
-                    self.log("clicking 確認 to apply sort (hardcoded)")
-                    self._invite_sorted = True
-                    self._invite_stage = 2
-                    self._invite_ticks = 0
-                    self._sort_option_clicked = False
-                    return action_click(*_CONFIRM_POS, "confirm sort selection")
-
-                # Popup open but option not yet clicked → click 精選 (hardcoded)
-                if sort_menu_open:
-                    self.log("sort popup open, clicking 精選 (hardcoded)")
-                    self._sort_option_clicked = True
-                    self._invite_ticks = 0
-                    return action_click(*_FEATURED_POS, "select sort by 精選")
-
-                # Popup not open — check if already sorted (label says 精選)
-                featured_label = screen.find_any_text(
-                    ["精選", "精选"],
-                    region=_SORT_LABEL_REGION, min_conf=0.50
-                )
-                if featured_label:
-                    self.log("invite list already sorted by 精選")
-                    self._invite_sorted = True
-                    self._invite_stage = 2
-                    self._invite_ticks = 0
-                    self._sort_option_clicked = False
-                    return action_wait(200, "sort confirmed, proceeding")
-
-                # Popup not open and not sorted → click sort label to open dropdown
-                sort_label = screen.find_any_text(
-                    ["名字", "名宇", "學園", "学园", "羈絆", "羁绊"],
-                    region=_SORT_LABEL_REGION, min_conf=0.50
-                )
-                if sort_label and self._invite_ticks <= 6:
-                    self.log(f"current sort '{sort_label.text}', opening sort dropdown")
-                    self._sort_option_clicked = False
-                    return action_click_box(sort_label, "open sort dropdown")
-
-                # After enough ticks, give up sorting and proceed
-                if self._invite_ticks >= 8:
-                    self.log("sort switch timeout, proceeding with current sort")
-                    self._invite_sorted = True
-                    self._invite_stage = 2
-                    self._invite_ticks = 0
-                    return action_wait(200, "skip sort, find invite btn")
-
-                return action_wait(300, "waiting for sort switch")
-            else:
-                # Already sorted or no favorites configured
-                self._invite_sorted = True
-                self._invite_stage = 2
-                self._invite_ticks = 0
-                return action_wait(200, "sort not needed, proceed to invite")
-
-        # Stage 2: Invite list is open + sorted, find favorite student or click first.
+        # Stage 2: Invite list is open, find favorite student or click first.
         #
-        # CRITICAL FLOW (rewritten 2026-05-04 per user's spec): OCR scan
-        # finishes BEFORE any swipe.  After every swipe we cooldown 2-3
-        # ticks for the animation to settle, then OCR fresh, then decide.
-        # Old code fired one swipe per tick → 15 burned swipes in 15
-        # ticks (run_20260504_221729) → list overshooting target rows.
+        # CRITICAL FLOW (rewritten 2026-05-04 per user's spec): the avatar scan
+        # finishes BEFORE any swipe.  After every swipe we cooldown 2-3 ticks for
+        # the animation to settle, then scan fresh, then decide.  Old code fired
+        # one swipe per tick → 15 burned swipes in 15 ticks
+        # (run_20260504_221729) → list overshooting target rows.
+        # NOTE: favorite matching is now avatar-template-based only (OCR name
+        # matching removed with OCR off — see _find_favorite_in_invite).
         if self._invite_stage == 2:
-            # Post-swipe settle gate — block OCR/decisions while animation runs.
+            # Post-swipe settle gate — block scans/decisions while animation runs.
             if self._invite_swipe_cooldown > 0:
                 self._invite_swipe_cooldown -= 1
                 return action_wait(
@@ -1088,18 +929,13 @@ class CafeSkill(BaseSkill):
                     f"post-swipe settle ({self._invite_swipe_cooldown} ticks left)"
                 )
 
-            # OCR frequently misreads 邀請 as 邀睛
-            invite_btns = screen.find_text(
-                "邀請", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
+            # Per-row 邀請 buttons via YOLO CAFE_INVITE_BTN cls (right column).
+            # The favorite-matcher below pairs each button row with the
+            # student avatar/name on its left (avatar matching preserved).
+            invite_btns = self.find_all_cls(
+                screen, UC.CAFE_INVITE_BTN, conf=0.30,
+                region=(0.50, 0.20, 0.70, 0.90),
             )
-            if not invite_btns:
-                invite_btns = screen.find_text(
-                    "邀请", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
-                )
-            if not invite_btns:
-                invite_btns = screen.find_text(
-                    "邀睛", region=(0.50, 0.20, 0.70, 0.90), min_conf=0.50
-                )
             if invite_btns:
                 # Try to find a favorite student via OCR name matching + avatar fallback.
                 # Floor detection (robust to retry resets):
@@ -1117,10 +953,9 @@ class CafeSkill(BaseSkill):
                 # scrolled through the entire list never inviting her.
                 _on_2f = (
                     self._invite_next_state == "headpat2"
-                    or screen.find_any_text(
-                        ["移動至1號店", "移动至1号店", "移動至1号店", "移动至1號店",
-                         "1號店", "1号店"],
-                        region=(0.0, 0.03, 0.25, 0.18), min_conf=0.5
+                    or self.find_cls(
+                        screen, UC.CAFE_MOVE_1F, conf=0.30,
+                        region=(0.0, 0.03, 0.30, 0.20),
                     ) is not None
                     or len(self._invited_names) >= 1
                 )
@@ -1132,10 +967,11 @@ class CafeSkill(BaseSkill):
                 _SWIPE_COOLDOWN = 3  # ticks of wait after each swipe (~750ms)
                 fav_result = self._find_favorite_in_invite(screen, invite_btns, floor=_floor)
 
-                # Build a signature of currently visible student names — if
-                # two consecutive post-swipe scans return the same set,
-                # we've hit the list bottom (or list isn't scrolling).
-                visible_sig = self._invite_visible_signature(screen)
+                # Build a signature of the current scroll position from the
+                # invite-button row y-coords (YOLO) — if two consecutive
+                # post-swipe scans return the same set, we've hit the list
+                # bottom (or the list isn't scrolling).
+                visible_sig = self._invite_visible_signature(invite_btns)
 
                 if fav_result:
                     fav_btn, fav_name, is_priority = fav_result
@@ -1215,98 +1051,75 @@ class CafeSkill(BaseSkill):
                          f"({self._invite_scroll_count}/{_MAX_SCROLLS})")
                 return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll invite list")
             if self._invite_ticks in (8, 16):
-                self.log("invite list missing after wait, retry opening ticket")
+                self.log("invite list missing after wait, back to stage 0 to re-find ticket cls")
                 self._invite_stage = 0
-                return action_click(0.69, 0.93, "re-open invite ticket (list missing)")
+                return action_wait(300, "re-open invite ticket via cls (list missing)")
             if self._invite_ticks >= 20:
                 self.log("invite list not found, skipping")
                 self._invite_attempted = True
             return action_wait(400, "waiting for invite list")
 
-        # Close any leftover earnings popup before invite (first tick only)
+        # Close any leftover earnings popup before invite (first tick only).
+        # Pure YOLO: detect the popup by a CLAIM button (active/grey) in the
+        # centered claim band, or the CAFE_EARNINGS label near the popup title.
         if self._invite_ticks == 1:
-            if screen.find_any_text(["每小時收益", "收益現況", "收益現況"], min_conf=0.6):
+            _leftover_earnings = (
+                self.find_cls(
+                    screen,
+                    [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE,
+                     UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
+                    conf=0.30, region=(0.30, 0.58, 0.70, 0.86),
+                ) is not None
+                or self.find_cls(
+                    screen, UC.CAFE_EARNINGS, conf=0.30, region=(0.30, 0.04, 0.70, 0.40)
+                ) is not None
+            )
+            if _leftover_earnings:
                 close_btn = self._find_close_button(screen)
                 if close_btn:
                     return action_click_box(close_btn, "close earnings popup before invite")
 
-        # Stage 0: Open the invite ticket panel from cafe main screen
+        # Stage 0: Open the invite ticket panel from cafe main screen.
 
-        # FIRST: check if invite list is already open (e.g. from previous
-        # attempt or toggle race).  Must run BEFORE ticket check — the
-        # 邀請券 ticket is still visible behind the MomoTalk overlay, so
-        # clicking it would CLOSE the already-open list.
-        invite_btn = screen.find_any_text(
-            ["邀請", "邀请", "邀睛"],
-            region=(0.50, 0.20, 0.70, 0.90), min_conf=0.55
-        )
-        if invite_btn:
+        # FIRST: check if the invite list is already open (e.g. from a
+        # previous attempt or toggle race). Must run BEFORE the ticket
+        # check — the 邀請券 ticket is still visible behind the MomoTalk
+        # overlay, so clicking it would CLOSE the already-open list.
+        # List-open = a per-row CAFE_INVITE_BTN is visible.
+        if self.find_cls(
+            screen, UC.CAFE_INVITE_BTN, conf=0.30, region=(0.50, 0.20, 0.70, 0.90)
+        ) is not None:
             self._invite_stage = 1
             self._invite_ticks = 0
             return action_wait(200, "invite list already open")
 
-        # Skip if cooldown timer (HH:MM:SS) visible near the REGULAR ticket area.
-        # NOTE: "可購買" at cy≈0.83 is the EXTRA ticket purchase label — ignore it.
-        # The regular ticket cooldown timer appears above the regular ticket (cy≈0.88-0.96).
-        cooldown = screen.find_text_one(
-            r"\d+[\uff1a:]\d+[\uff1a:]\d+", region=(0.55, 0.78, 0.78, 0.98), min_conf=0.7
-        )
-        if cooldown:
-            self.log(f"invite cooldown ({cooldown.text}), skipping")
-            self._invite_attempted = True
-            return action_wait(200, f"invite unavailable: {cooldown.text}")
+        # DIGIT-DEFERRED: the regular-ticket cooldown skip read the HH:MM:SS
+        # timer above the ticket to bail out of invite when no ticket was ready.
+        # That timer is digits-only and unreadable with OCR off, so we no longer
+        # pre-skip on it. Instead we attempt the ticket via cls below; if it's on
+        # cooldown the opened list yields no CAFE_INVITE_BTN rows and stage 2
+        # self-skips on its tick budget (_invite_ticks >= 20). Re-add the
+        # cooldown short-circuit when digit-OCR returns to save the wasted ticks.
 
-        # Find the REGULAR invite ticket (not the paid 額外邀請券).
-        # OCR reads 額外 as "额外", "客外", or "額外" — exclude all variants.
-        # Ticket char-glyph varies by OCR: 券 ↔ 劵, 請 ↔ 请 ↔ 睛 (mis-OCR).
-        # We need all four combinations or we miss the 2F OCR output
-        # (observed: '外邀请券', '邀请劵' — neither contains traditional 邀請券).
-        _EXTRA_PREFIXES = ("客外", "额外", "額外", "客", "外")
-        _TICKET_REGION = (0.55, 0.78, 0.78, 0.98)
-        _TICKET_PATTERNS = (
-            "邀請券", "邀请券",   # trad / simp
-            "邀請劵", "邀请劵",   # mis-OCR 券→劵
-            "邀睛券", "邀睛劵",   # mis-OCR 請→睛
+        # Open the invite ticket via YOLO CAFE_INVITE_TICKET cls. Region is
+        # the bottom-right regular-ticket zone — the paid 額外邀請券 lives
+        # elsewhere, so a region-constrained hit picks the regular ticket.
+        ticket = self.find_cls(
+            screen, UC.CAFE_INVITE_TICKET, conf=0.30, region=(0.55, 0.78, 0.82, 0.99),
         )
-        ticket_hits: List[OcrBox] = []
-        for pat in _TICKET_PATTERNS:
-            ticket_hits = screen.find_text(pat, region=_TICKET_REGION, min_conf=0.50)
-            if ticket_hits:
-                break
-        ticket = None
-        for hit in ticket_hits:
-            if not any(p in hit.text for p in _EXTRA_PREFIXES):
-                ticket = hit
-                break
         if ticket:
-            self.log(f"clicking invite ticket '{ticket.text}' at ({ticket.cx:.2f},{ticket.cy:.2f})")
+            self.log(f"opening invite ticket at ({ticket.cx:.2f},{ticket.cy:.2f}) (YOLO 咖啡厅邀请卷)")
             self._invite_stage = 1
             self._invite_ticks = 0
-            return action_click_box(ticket, "open invite ticket")
-        # OCR missed the ticket label entirely (or only saw the 可使用/可購買
-        # tooltips at cy≈0.83). Tooltips are above the button, so clicking
-        # them closes the hover instead of opening the list. Use the
-        # hardcoded button center directly — same position used by the
-        # retry path below.
-        if screen.find_any_text(
-            ["可使用", "可购买", "可購買"], region=_TICKET_REGION, min_conf=0.50
-        ):
-            self.log("invite ticket OCR missed, clicking hardcoded button pos")
-            self._invite_stage = 1
-            self._invite_ticks = 0
-            return action_click(0.69, 0.94, "open invite ticket (hardcoded)")
-
-        if self._invite_ticks in (3, 6):
-            self.log("invite UI unresolved, retry fixed click on regular ticket")
-            return action_click(0.69, 0.93, "open invite ticket (hardcoded retry)")
+            return action_click_box(ticket, "open invite ticket (YOLO 咖啡厅邀请卷)")
 
         if self._invite_ticks >= 10:
-            self.log("invite UI not found, skipping invite")
+            self.log("CAFE_INVITE_TICKET cls not found after 10 ticks (YOLO gap), skipping invite")
             self._invite_attempted = True
             self.sub_state = self._invite_next_state
-            return action_wait(300, "invite skipped")
+            return action_wait(300, "invite skipped (no CAFE_INVITE_TICKET cls)")
 
-        return action_wait(400, "waiting for invite UI")
+        return action_wait(400, "waiting for CAFE_INVITE_TICKET cls (YOLO gap)")
 
     # Top-left cafe overlay contains 指定訪問/隨機訪問 buttons which stack on
     # students standing in the bottom-left corner. Clicking a headpat marker
@@ -1507,15 +1320,13 @@ class CafeSkill(BaseSkill):
             self.log(f"headpat #{self._headpat_count}: conf={mark.confidence:.2f} marker=({mark.cx:.2f},{mark.cy:.2f}) click=({click_x:.2f},{click_y:.2f})")
             return action_click(click_x, click_y, f"headpat student #{self._headpat_count}")
 
-        # Bond progress bar overlay ("在咖啡獲得學生的羈絆點數 X/Y") reduces
-        # YOLO confidence for headpat marks. Don't count empty scans while visible.
-        bond_bar = screen.find_any_text(
-            ["在咖啡"],
-            region=(0.25, 0.0, 0.75, 0.12),
-            min_conf=0.6
-        )
-        if bond_bar:
-            return action_wait(800, "bond progress bar visible, waiting")
+        # YOLO-GAP: the bond-progress banner ("在咖啡廳獲得學生的羈絆點數 X/Y") at
+        # the top reduces YOLO confidence for headpat marks, so we used to OCR it
+        # and pause empty-scan counting while it showed. It has no cls and the
+        # read is dead with OCR off, so the guard is dropped. Low risk: the
+        # post-headpat _headpat_cooldown already skips scans right after a pat
+        # (when this banner appears), and _MAX_EMPTY_SCANS tolerates a stray
+        # empty tick. Train a cls for the banner to restore the pause.
 
         # No marks found this tick
         self._empty_scans += 1
@@ -1548,15 +1359,10 @@ class CafeSkill(BaseSkill):
 
     def _switch_floor(self, screen: ScreenState) -> Dict[str, Any]:
         """Switch from cafe 1F to 2F."""
-        # Already on 2F? (button says "移動至1號店" = we're on 2F)
-        # OCR mixes trad/simp glyphs (動↔动, 號↔号), so we match each
-        # glyph independently rather than full strings.  Region extended
-        # to y=0.18 because the button OCR box centers at cy≈0.145, not
-        # ≤0.12 as the original bounds assumed.
-        already_2f = screen.find_any_text(
-            ["移動至1號店", "移动至1号店", "移動至1号店", "移动至1號店",
-             "1號店", "1号店"],
-            region=(0.0, 0.03, 0.25, 0.18), min_conf=0.5
+        # Already on 2F? The switch button reads "移動至一號店" (CAFE_MOVE_1F)
+        # when we're standing on 2F (it takes us back to 1F).
+        already_2f = self.find_cls(
+            screen, UC.CAFE_MOVE_1F, conf=0.30, region=(0.0, 0.03, 0.30, 0.20)
         )
         if already_2f:
             # If this skill instance already ran a headpat cycle AND we're
@@ -1581,12 +1387,9 @@ class CafeSkill(BaseSkill):
             self._empty_scans = 0
             return action_wait(300, "already on 2F, starting invite")
 
-        switch = screen.find_any_text(
-            ["移動至2號店", "移动至2号店", "2號店", "2号店"],
-            min_conf=0.5
-        )
+        switch = self.find_cls(screen, UC.CAFE_MOVE_2F, conf=0.30)
         if switch:
-            self.log("switching to cafe 2F")
+            self.log("switching to cafe 2F (YOLO 移动至2号点)")
             # Reset invite state for cafe 2F invite
             self._invite_attempted = False
             self._invite_ticks = 0
@@ -1597,12 +1400,7 @@ class CafeSkill(BaseSkill):
             self._invite_next_state = "headpat2"
             self.sub_state = "invite"
             self._empty_scans = 0
-            return action_click_box(switch, "switch to cafe 2F")
-
-        # TAP TO START during transition
-        tap = screen.find_text_one("TAP.*START", min_conf=0.8)
-        if tap:
-            return action_click(0.5, 0.85, "tap to start during cafe switch")
+            return action_click_box(switch, "switch to cafe 2F (YOLO 移动至2号点)")
 
         # Use a dedicated counter instead of self.ticks (which counts total skill ticks)
         if not hasattr(self, '_switch_wait_ticks'):
@@ -1614,12 +1412,33 @@ class CafeSkill(BaseSkill):
             self.sub_state = "exit"
             return action_wait(200, "switch timeout")
 
+        # YOLO-GAP: the floor-transition "TAP TO START" prompt is a full-screen
+        # tap-anywhere overlay with NO cls (its text read is dead with OCR off).
+        # If we see an explicit loading spinner, just wait it out. Otherwise,
+        # when neither cls page nor switch button is resolving, give a single
+        # gated center-bottom nudge (not every frame) to advance a possible
+        # TAP-TO-START prompt; the wait-tick timeout above bounds this. Train a
+        # cls for the prompt to replace the blind nudge.
+        if screen.is_loading():
+            return action_wait(800, "cafe switch loading")
+        if (self._switch_wait_ticks in (3, 6)
+                and self.detect_screen_yolo(screen) is None):
+            self.log("switch: possible TAP-TO-START (no cls) — gated nudge (YOLO-GAP)")
+            return action_click(0.5, 0.85, "nudge tap-to-start during cafe switch (YOLO-GAP)")
+
         return action_wait(500, "waiting for switch button")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         """Return to lobby from cafe."""
-        if screen.is_lobby():
+        if self.detect_screen_yolo(screen) == "Lobby":
             self.log("back in lobby, cafe done")
             return action_done("cafe complete")
 
-        return action_back("cafe exit: press ESC")
+        # Prefer YOLO home/back button over a blind ESC.
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_box(home, "cafe exit: home button (YOLO 回大厅按钮)")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_box(back, "cafe exit: back button (YOLO 返回键)")
+        return action_back("cafe exit: ESC toward lobby")

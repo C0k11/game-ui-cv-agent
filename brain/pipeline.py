@@ -232,6 +232,29 @@ def get_yolo_context() -> str:
     with _yolo_context_lock:
         return _yolo_context
 
+# Per-skill YOLO detector loadout (module-level = single source of truth).
+# base = "ui" ONLY (FPS: avatar=fused yolo26X / battle are heavy nets, added
+# only where a skill needs them). _start_skill sets context from this at skill
+# start; CampaignSweep imports it (lazily, to avoid an import cycle) to set the
+# right context for each DELEGATED sub-skill — without this, arena run via the
+# sweep gets no avatar boxes and selects 0 opponents (H2).
+BASE_DETECTORS = "ui"
+SKILL_YOLO_MAP = {
+    "Cafe": f"{BASE_DETECTORS}+cafe",          # +emoticon bubbles
+    "Bounty": f"{BASE_DETECTORS}+battle",      # +battle_heads
+    # Arena needs avatar to locate OPPONENT HEADS (right panel) for opponent
+    # selection — no hardcoded position (universal).
+    "Arena": f"{BASE_DETECTORS}+battle+avatar",
+    "EventFarming": f"{BASE_DETECTORS}+battle",
+    "TotalAssault": f"{BASE_DETECTORS}+battle",
+    "JointFiringDrill": f"{BASE_DETECTORS}+battle",
+    "CampaignPush": f"{BASE_DETECTORS}+battle",
+    "EventActivity": f"{BASE_DETECTORS}+battle",
+    # DailyRoutine wraps cafe (emoticon headpat) + would need battle for event
+    # quests (event currently disabled). No avatar — student-id isn't needed.
+    "DailyRoutine": f"{BASE_DETECTORS}+cafe+battle",
+}
+
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
 _yolo_status = "not_attempted"
@@ -300,6 +323,29 @@ def _get_yolo():
 
 _OCR_WORK_W = 1280  # Downscale wide frames for faster OCR
 
+# ── PURE-YOLO MODE (user spec 2026-05-29) ────────────────────────────────
+# OCR is fully disabled to force every skill's navigation + click logic
+# through YOLO cls — NO OCR fallback. This surfaces every place still
+# secretly relying on OCR (they go blind → log+wait → we migrate them).
+# Once the YOLO pipeline is verified end-to-end, flip this back on and
+# scope OCR to DIGIT-ONLY scanning (AP / ticket / mail counts).
+_OCR_ENABLED = False
+
+# ── BRING-UP EXPOSE MODE (user spec 2026-05-29) ──────────────────────────
+# While bringing up pure-YOLO navigation we want every stuck point to be a
+# VISIBLE hole, not papered over by blind recovery. With this True the
+# stuck-recovery FALLBACKS are disabled:
+#   - blind-tap escalation (clicks dismiss positions when stuck)
+#   - ESC-burst (presses back when stuck)
+# A stuck skill instead FREEZES in place + logs loudly (skill, sub_state,
+# wait reason, tick, screenshot path) so we can open that exact tick's
+# trajectory frame and see why YOLO couldn't find its target. KEPT (these
+# are real game-popup handling / safety, NOT navigation fallbacks): the
+# interceptor's reward/level-up/exit-cancel dismissals, and the popup
+# 取消/X dismiss (never ESC the exit dialog). Flip False to restore the
+# recovery nets for unattended production runs.
+_BRINGUP_EXPOSE = True
+
 
 def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     """Run OCR on a BGR numpy array and return normalized OcrBox list.
@@ -307,6 +353,8 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     Downscales frames wider than _OCR_WORK_W for speed (4K→1280px ≈ 9x faster).
     Coordinates are normalized 0-1 so the caller is resolution-independent.
     """
+    if not _OCR_ENABLED:
+        return []  # pure-YOLO mode — see _OCR_ENABLED note above
     import cv2
     ocr = _get_ocr()
     # Downscale for speed if frame is very wide (e.g. 3840px 4K)
@@ -379,7 +427,12 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     # on lobby tick 1). 1920 brings detection back to expected mAP. Other
     # detectors were trained at smaller native frame sizes — 960 is fine.
     _IMGSZ_BY_TAG = {
-        "ui": 1920,        # critical fix for 4K production frames
+        # ui_v2 trained at imgsz=960 on 2475×1392 frames. MUST infer at 960:
+        # verified 2026-05-28 that v2 @ imgsz=1920 → 0 detections, but @ 960 →
+        # 一次领取黄色 conf 0.936 etc. (The earlier 1920 "4K fix" was wrong —
+        # production frames are 2475×1392, not 4K; the occasional 4K frame was
+        # a capture-path glitch, not the norm.)
+        "ui": 960,
         "avatar": 960,     # fused_avatar trained at 960
         "battle": 960,
         "cafe": 640,       # emoticon — 1 class, simple, default ok
@@ -415,6 +468,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                         y1=ny1,
                         x2=nx2,
                         y2=ny2,
+                        model_tag=model_tag,
                     ))
         except Exception as e:
             print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
@@ -949,26 +1003,17 @@ class DailyPipeline:
         self._last_sub_state = ""
         self._last_wait_reason = ""
         self._stuck_counter = 0
-        # Set YOLO context based on skill — only run relevant model(s)
-        # Each skill gets ui+avatar by default (almost every skill needs to
-        # click buttons + see students), plus skill-specific extras.
-        # Use 'ui+avatar+cafe' '+'-joined syntax to load multiple detectors.
-        _BASE_DETECTORS = "ui+avatar"
-        _SKILL_YOLO_MAP = {
-            "Cafe": f"{_BASE_DETECTORS}+cafe",         # +emoticon bubbles
-            "Bounty": f"{_BASE_DETECTORS}+battle",     # +battle_heads
-            "Arena": f"{_BASE_DETECTORS}+battle",
-            "EventFarming": f"{_BASE_DETECTORS}+battle",
-            "TotalAssault": f"{_BASE_DETECTORS}+battle",
-            "JointFiringDrill": f"{_BASE_DETECTORS}+battle",
-            "CampaignPush": f"{_BASE_DETECTORS}+battle",
-            "EventActivity": f"{_BASE_DETECTORS}+battle",
-            # DailyRoutine wraps cafe + event_activity etc, needs every
-            # daily-flow detector (cafe emoticon, battle for event_activity
-            # quest battles, plus base ui+avatar).
-            "DailyRoutine": f"{_BASE_DETECTORS}+cafe+battle",
-        }
-        yolo_ctx = _SKILL_YOLO_MAP.get(skill.name, _BASE_DETECTORS)
+        # Set YOLO context based on skill — only run relevant model(s).
+        # FPS FIX (2026-05-29): base is now "ui" ONLY. The avatar model is
+        # fused_avatar yolo26X (the heaviest net) — running it every tick just
+        # to click buttons was the main inference cost. Nothing on the daily
+        # nav/sweep path needs per-student identification, so avatar is dropped
+        # from the base and only added back where a skill genuinely needs to
+        # know WHICH student (none in the current run path). Add 'avatar' to a
+        # skill's context here if/when student-id is required.
+        # Loadout map lives at module level (SKILL_YOLO_MAP) so CampaignSweep
+        # can reuse it for its delegated sub-skills. See note there.
+        yolo_ctx = SKILL_YOLO_MAP.get(skill.name, BASE_DETECTORS)
         set_yolo_context(yolo_ctx)
         print(f"[Pipeline] Starting skill '{skill.name}'")
 
@@ -1073,6 +1118,30 @@ class DailyPipeline:
         P1: Stale sign-in / activity popups that leaked through
         P2: Account / student Level Up full-screen effects
         """
+        # ════════════════════════════════════════════════════════════════
+        # PURE-YOLO prelude (2026-05-29). Handle the safe, unambiguous
+        # global popups via YOLO cls. EVERYTHING below this block is OCR and
+        # therefore DEAD while pipeline._OCR_ENABLED is False — kept for the
+        # digit-OCR re-enable phase. Only cls-backed popups are auto-handled
+        # here; ambiguous confirm/cancel dialogs are left to the owning skill
+        # (it knows the context) so we don't blind-confirm a 'visit friend
+        # cafe' / 'exit game' prompt.
+        # ════════════════════════════════════════════════════════════════
+        # Reward-result popup (获得奖励) — dismiss via 确认键, else tap.
+        reward_y = find_yolo_box(screen, ["获得奖励"], min_conf=0.35)
+        if reward_y:
+            confirm_y = find_yolo_box(screen, ["确认键"], min_conf=0.30)
+            if confirm_y:
+                print("[Interceptor] YOLO reward popup → 确认键")
+                return action_click_box(confirm_y, "interceptor: confirm reward (YOLO)")
+            print("[Interceptor] YOLO reward popup → tap dismiss")
+            return action_click(0.5, 0.92, "interceptor: dismiss reward (YOLO)")
+        # Full-screen bond / region level-up — tap anywhere to advance.
+        levelup_y = find_yolo_box(screen, ["羁绊升级", "地区升级"], min_conf=0.35)
+        if levelup_y:
+            print(f"[Interceptor] YOLO level-up ({levelup_y.cls_name}) → tap dismiss")
+            return action_click(0.5, 0.5, "interceptor: dismiss level-up (YOLO)")
+
         # ── P-1: Title screen ("TOUCH TO START") ──
         # Game may restart / disconnect and land on title. All skills need this.
         tap_start = screen.find_text_one("(?:TOUCH|TAP).*START", min_conf=0.8)
@@ -1274,11 +1343,19 @@ class DailyPipeline:
 
         # ── P1: Generic popup with X close button ──
         # Popups like 全體課程表, 通知, 課程表資訊 etc. have an X button.
+        # Exempt Schedule (legacy direct skill) AND DailyRoutine's Schedule
+        # sub-state (current default — Schedule runs as DailyRoutine's sub).
+        # Without this, Schedule opens 全體課程表 and immediately interceptor
+        # closes it → infinite reopen/close loop. (bug 2026-05-28)
         popup_titles = screen.find_any_text(
             ["全體課程表", "全体课程表", "課程表資訊", "课程表资讯", "課程表報告", "课程表报告"],
             region=(0.20, 0.05, 0.80, 0.25), min_conf=0.6
         )
-        if popup_titles and skill.name != "Schedule":
+        _in_schedule = (
+            skill.name == "Schedule"
+            or (skill.name == "DailyRoutine" and getattr(skill, "sub_state", "") == "Schedule")
+        )
+        if popup_titles and not _in_schedule:
             x_btn = screen.find_text_one("X", region=(0.85, 0.05, 0.95, 0.20), min_conf=0.4)
             if x_btn:
                 print(f"[Interceptor] P1 stale popup '{popup_titles.text}', clicking X")
@@ -1622,7 +1699,14 @@ class DailyPipeline:
             # Battle skip / cutscene
             "Skip", "SKIP", "MENU", "Menu",
         ]
-        has_ba_ui = any(
+        # PURE-YOLO: BA is visible if the UI/avatar YOLO model detected
+        # anything this tick. The ui model fires on virtually every BA
+        # screen (nav bar, buttons, dots, currency widgets); foreign
+        # captures (desktop/browser) produce ~none. The OCR-marker list
+        # above is dead while _OCR_ENABLED is False (kept for the digit-OCR
+        # re-enable phase) — without this YOLO primary, the pipeline would
+        # mis-detect "no BA" every tick and self-abort at 30 ticks.
+        has_ba_ui = bool(screen.yolo_boxes) or any(
             screen.find_any_text([m], min_conf=0.50) is not None
             for m in ba_markers
         )
@@ -1636,7 +1720,9 @@ class DailyPipeline:
             # left an empty run dir with no evidence.
             wait_action = action_wait(
                 800,
-                f"waiting for BA / MuMu window ({self._no_ba_ticks}/30)"
+                f"no YOLO boxes detected — waiting ({self._no_ba_ticks}/30) "
+                f"[black screen / loading, or a full-screen overlay with no "
+                f"trained cls — 有框才操作: we do NOT blind-tap]"
             )
             self._save_trajectory(screenshot_path, screen, None, wait_action)
             if self._no_ba_ticks >= 30:
@@ -1651,6 +1737,28 @@ class DailyPipeline:
                 )
                 self._running = False
                 return action_done("pipeline aborted: no BA window detected")
+            # PURE-YOLO: a full-screen "TOUCH TO CONTINUE" overlay (account
+            # level-up etc.) carries NO YOLO cls, so it lands here. Blind-tap
+            # to dismiss it (harmless on real loading / foreign frames, which
+            # ignore taps) — alternate center / bottom-corner so we hit the
+            # prompt without landing on a reward card that absorbs the tap.
+            # Without this the overlay would sit until the 30-tick abort.
+            # BRING-UP (有框才操作): with _BRINGUP_EXPOSE we do NOT blind-tap on
+            # a 0-box screen — a black screen/loading should just wait, and an
+            # undetected overlay is a HOLE to fix (train a cls), not paper over.
+            # It then waits → 30-tick abort saves frames for inspection.
+            if self._no_ba_ticks >= 2 and not _BRINGUP_EXPOSE:
+                # Reward popups (獲得獎勵 + TOUCH TO CONTINUE) that the ui model
+                # doesn't detect at all land here. Target the actual dismiss
+                # zones FIRST: TOUCH-TO-CONTINUE text (~0.5,0.88) and the X
+                # close (~0.88,0.15); a center tap hits the reward CARD which
+                # absorbs the tap without dismissing. Then fall back to corners.
+                pts = [(0.5, 0.88), (0.88, 0.15), (0.5, 0.95), (0.08, 0.92)]
+                px, py = pts[self._no_ba_ticks % len(pts)]
+                blind = action_click(px, py,
+                    f"interceptor: blind-tap dismiss overlay ({self._no_ba_ticks}/30)")
+                self._save_trajectory(screenshot_path, screen, None, blind)
+                return blind
             return wait_action
 
         # First lobby-visit of the run → snapshot all 8 nav-icon badges.
@@ -1773,18 +1881,68 @@ class DailyPipeline:
         # which is exactly the "经常点进一个地方然后就喜欢退回主界面"
         # the user complained about.  Popups have their own handler
         # (see _handle_common_popups).
-        _popup_on_screen = bool(screen.find_any_text(
-            ["通知", "是否結束", "是否结束", "提示", "簽到獎勵",
-             "签到奖励", "獲得", "获得"],
-            region=(0.20, 0.10, 0.80, 0.40), min_conf=0.55,
-        ))
+        # Pure-YOLO popup detection (OCR is disabled). A "backout-able" modal
+        # = a 取消/X button is detected. We must NEVER ESC such a popup: ESC on
+        # the exit prompt ("是否結束?") CONFIRMS exit → drops to lobby (the
+        # "点进一个地方就退回主界面" bug). 确认键 alone is NOT treated as a
+        # popup here — a stuck confirm-only screen should still ESC-recover.
+        _cancel_btn = find_yolo_box(screen, ["取消键"], min_conf=0.40)
+        _x_btn = find_yolo_box(screen, ["弹窗叉叉"], min_conf=0.40)
+        _popup_on_screen = bool(_cancel_btn or _x_btn)
+        # ── EARLIER escalation: blind-TAP to dismiss full-screen overlays ──
+        # A repeated wait often means an undismissed "TOUCH TO CONTINUE" /
+        # 獲得獎勵 reward overlay (e.g. arena ranking reward) or an account
+        # level-up — full-screen prompts that carry NO reliable YOLO cls, so
+        # neither the interceptor's GOT_REWARD handler nor the no-BA blind-tap
+        # (a few background boxes keep has_ba_ui True) fires. A blind TAP
+        # dismisses these WITHOUT backing out of the screen (unlike the ESC
+        # burst below). Fire at 9/12/15/18 stuck ticks, alternating
+        # center / corners so we hit the prompt, not a reward card. Skip
+        # during battles (legit long waits with changing/known reasons).
+        if (action_type == "wait" and not _is_battle_wait and not _popup_on_screen
+                and not _BRINGUP_EXPOSE
+                and self._stuck_counter >= 9 and self._stuck_counter % 3 == 0):
+            self._blind_tap_count = getattr(self, "_blind_tap_count", 0) + 1
+            # Target real dismiss zones first (TOUCH-TO-CONTINUE / X), then
+            # corners — center hits reward cards that absorb the tap.
+            _tap_pts = [(0.5, 0.88), (0.88, 0.15), (0.08, 0.92), (0.92, 0.92)]
+            px, py = _tap_pts[self._blind_tap_count % len(_tap_pts)]
+            print(f"[Pipeline] Skill '{skill.name}' stuck {self._stuck_counter} "
+                  f"ticks on '{action_reason}', blind-tap dismiss overlay "
+                  f"#{self._blind_tap_count} at ({px},{py})")
+            action = action_click(px, py,
+                f"blind-tap dismiss overlay (stuck {self._stuck_counter})")
+            action_type = "click"
+            action_reason = str(action.get("reason", "") or "")
+
         if action_type == "wait" and self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
             if screen.is_lobby():
                 print(f"[Pipeline] Skill '{skill.name}' repeating wait on lobby for {self._stuck_counter} ticks, skipping ESC (unsafe on lobby)")
             elif _is_battle_wait:
                 print(f"[Pipeline] Skill '{skill.name}' battle in progress for {self._stuck_counter} ticks, skipping ESC (active battle)")
             elif _popup_on_screen:
-                print(f"[Pipeline] Skill '{skill.name}' popup on screen for {self._stuck_counter} ticks, skipping ESC (use popup handler)")
+                # Backout-able modal stuck (exit prompt / friend-cafe-visit /
+                # unhandled dialog). Dismiss via 取消/X — SAFE. Never ESC: ESC
+                # can CONFIRM the exit dialog → quits to lobby.
+                _btn = _cancel_btn or _x_btn
+                _which = "取消键" if _cancel_btn else "弹窗叉叉"
+                action = action_click_box(
+                    _btn, f"stuck {self._stuck_counter}: dismiss popup ({_which}, not ESC)")
+                action_type = action.get("action", "")
+                action_reason = str(action.get("reason", "") or "")
+                print(f"[Pipeline] Skill '{skill.name}' stuck {self._stuck_counter} "
+                      f"ticks on popup, clicking {_which} (safe dismiss, not ESC)")
+            elif _BRINGUP_EXPOSE:
+                # BRING-UP: no ESC-burst fallback. Freeze in place + log loudly
+                # so the exact stuck tick + its trajectory screenshot can be
+                # inspected — being stuck here MEANS this stage has a YOLO
+                # navigation/detection hole to fix (not paper over).
+                print(
+                    f"[Pipeline] *** BRINGUP FREEZE *** Skill '{skill.name}' STUCK "
+                    f"{self._stuck_counter} ticks  sub_state='{skill.sub_state}'  "
+                    f"waiting='{action_reason}'  tick={skill.ticks}  frame={screenshot_path}"
+                )
+                # action stays the original wait → bot freezes here for inspection.
             else:
                 print(
                     f"[Pipeline] Skill '{skill.name}' repeating wait '{action_reason}' "

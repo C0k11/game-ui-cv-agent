@@ -59,10 +59,12 @@ class DailyRoutineSkill(BaseSkill):
 
         # Order matters — runs top to bottom.
         # `force_run` = True means skip the dot check entirely (always enter).
+        # NOTE 2026-05-28: EventActivity 临时跳过 —— 周年庆活动页面反常，
+        # 先把其他日常都跑通再回头处理活动。跑完恢复这一行。
         self._plan: List[Tuple[BaseSkill, bool]] = [
             # (skill_instance, force_run)
             (MailSkill(), False),            # 邮件 — 红点才进
-            (EventActivitySkill(), False),   # 活动 — 活动入口红/黄点才进
+            # (EventActivitySkill(), False),   # 活动 — 周年庆反常临时跳过
             (CafeSkill(), False),            # cafe — 收益/邀请/摸头 dot
             (ScheduleSkill(), False),        # 课程表 — 黄点才进
             (ClubSkill(), False),            # 社交 — 红点才进 (AP)

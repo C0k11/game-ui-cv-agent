@@ -53,6 +53,7 @@ def main() -> int:
             ROOT / "run_20260527_094158",
             ROOT / "run_20260527_101545",
             ROOT / "run_20260518_002646",
+            ROOT / "run_20260529_000756",
         ]
 
     dirs = [d for d in args.dir if d.is_dir()]

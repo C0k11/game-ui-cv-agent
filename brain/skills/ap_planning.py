@@ -1,24 +1,43 @@
-"""ApPlanningSkill: collect free AP and optionally buy AP by policy.
+"""ApPlanningSkill: claim the daily FREE AP, never buy paid AP. YOLO-only clicks.
 
-Purpose:
-- Claim daily free AP from the AP purchase panel.
-- Optionally buy extra AP if policy allows it.
-- Keep premium-currency safety as default (forbid by default).
+Design (2026-05-28 full YOLO rewrite — mirrors mail.py / shop.py):
+- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
+- The ONLY OCR is _read_ap() reading the top-bar "X/240" digits — used for
+  logging / the completion report, NOT for any click decision.
+- Page state inferred from YOLO cls: seeing FREE / BTN_CONFIRM(_GREY) /
+  BTN_CANCEL / TOPBAR_PYROXENE inside the dialog = AP purchase panel open;
+  detect_screen_yolo()=="Lobby" = back on lobby.
+- If YOLO can't see a needed cls, log + wait (surface the gap) — never fall
+  back to OCR-for-clicking or blind hardcoded coords.
+
+SAFETY (unchanged contract): only ever claim the FREE daily AP. Never click a
+paid-currency (青辉石) purchase. forbid_premium_currency / paid_purchase_limit
+are kept for API compatibility, but see the gap note in _plan(): ui_classes has
+NO cls to identify the *paid* AP tiers (only UC.FREE for the free one), so the
+paid path can't target a row via YOLO and is conservatively skipped.
+
+States: enter → open_purchase → plan → exit
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional
 
 from brain.skills.base import (
     BaseSkill,
     ScreenState,
-    OcrBox,
     action_back,
-    action_click,
     action_click_box,
     action_done,
     action_wait,
 )
+from brain.skills import ui_classes as UC
+
+
+# cls that prove the AP purchase dialog is open (any one is enough).
+_AP_PANEL_CLS = [
+    UC.FREE, UC.BTN_CONFIRM, UC.BTN_CONFIRM_GREY, UC.BTN_CANCEL,
+]
 
 
 class ApPlanningSkill(BaseSkill):
@@ -33,7 +52,9 @@ class ApPlanningSkill(BaseSkill):
         self._free_collected: bool = False
         self._paid_done: int = 0
         self._pending_free_confirm: bool = False
-        self._pending_paid_confirm: bool = False
+        self._enter_click_cooldown: int = 0
+        self._post_click_wait: int = 0
+        self._last_ap: Optional[int] = None
 
     def reset(self) -> None:
         super().reset()
@@ -42,24 +63,52 @@ class ApPlanningSkill(BaseSkill):
         self._free_collected = False
         self._paid_done = 0
         self._pending_free_confirm = False
-        self._pending_paid_confirm = False
+        self._enter_click_cooldown = 0
+        self._post_click_wait = 0
+        self._last_ap = None
 
+    # ── OCR: digits only (the one allowed OCR use) ────────────────────
+    def _read_ap(self, screen: ScreenState) -> Optional[int]:
+        """Read current AP from the top-bar 'X/240' counter. ONLY OCR call.
+
+        Used purely for logging + the completion report (e.g. to confirm AP
+        rose after a free claim). Never drives a click decision.
+        """
+        for box in screen.find_text(r"\d+\s*/\s*\d+", region=screen.TOP_BAR, min_conf=0.4):
+            m = re.search(r"(\d+)\s*[/|]\s*(\d+)", box.text or "")
+            if m:
+                try:
+                    cur, cap = int(m.group(1)), int(m.group(2))
+                except ValueError:
+                    continue
+                # Sanity: BA AP cap is ~200-240+; reject stray digit pairs.
+                if cap >= 100:
+                    return cur
+        return None
+
+    # ── page inference via YOLO cls (no OCR) ──────────────────────────
+    def _on_ap_panel(self, screen: ScreenState) -> bool:
+        """Inside the AP purchase dialog iff any panel cls is visible."""
+        return self.find_cls(screen, _AP_PANEL_CLS, conf=0.25) is not None
+
+    # ── state machine ─────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
-
         if self.ticks >= self.max_ticks:
+            self.log(f"timeout (free={int(self._free_collected)}, paid={self._paid_done})")
             return action_done("ap planning timeout")
 
-        reward_popup = screen.find_any_text(
-            ["獲得道具", "获得道具", "獲得獎勵", "获得奖励", "購買完成", "购买完成"],
-            min_conf=0.6,
-        )
-        if reward_popup:
-            confirm = screen.find_any_text(["確認", "确认", "確定", "确定", "確", "确", "OK"], min_conf=0.55)
-            if confirm:
-                return action_click_box(confirm, "dismiss AP reward popup")
-            return action_click(0.5, 0.9, "dismiss AP reward popup fallback")
+        # Reward popup (獲得獎勵 / 購買完成) — dismiss via YOLO cls.
+        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        if reward is not None:
+            self._free_collected = True
+            self._post_click_wait = 2
+            return action_click_box(reward, "dismiss AP reward popup (YOLO 获得奖励)")
 
+        # Common popups (notifications / bond level-up / etc). The AP panel
+        # itself uses BTN_CANCEL/BTN_CONFIRM cls which we drive in _plan(),
+        # so only run the shared OCR popup handler outside the plan state to
+        # avoid it stealing the dialog's confirm button.
         if self.sub_state != "plan":
             popup = self._handle_common_popups(screen)
             if popup:
@@ -68,9 +117,12 @@ class ApPlanningSkill(BaseSkill):
         if screen.is_loading():
             return action_wait(700, "ap planning loading")
 
+        if self._post_click_wait > 0:
+            self._post_click_wait -= 1
+            return action_wait(500, f"ap planning: settling ({self._post_click_wait})")
+
         if self.sub_state == "":
             self.sub_state = "enter"
-
         if self.sub_state == "enter":
             return self._enter(screen)
         if self.sub_state == "open_purchase":
@@ -79,34 +131,21 @@ class ApPlanningSkill(BaseSkill):
             return self._plan(screen)
         if self.sub_state == "exit":
             return self._exit(screen)
-
         return action_wait(300, "ap planning unknown state")
 
-    def _is_ap_purchase_dialog(self, screen: ScreenState) -> bool:
-        title = screen.find_any_text(
-            ["購買AP", "购买AP", "體力恢復", "体力恢复", "AP恢復", "AP恢复"],
-            region=(0.12, 0.05, 0.90, 0.30),
-            min_conf=0.5,
-        )
-        controls = screen.find_any_text(
-            ["取消", "確認", "确认", "購買", "购买", "每日免費", "每日免费", "青輝石", "青辉石"],
-            region=(0.08, 0.18, 0.98, 0.95),
-            min_conf=0.5,
-        )
-        return bool(title and controls)
-
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._is_ap_purchase_dialog(screen):
+        if self._on_ap_panel(screen):
             self.sub_state = "plan"
+            self._dialog_attempts = 0
             return action_wait(250, "AP purchase panel ready")
 
-        current = self.detect_current_screen(screen)
-        if current == "Lobby":
+        scr = self.detect_screen_yolo(screen)
+        if scr == "Lobby":
             self.sub_state = "open_purchase"
+            self._enter_attempts = 0
             return action_wait(200, "on lobby, opening AP purchase")
-
-        if current and current != "Lobby":
-            return action_back(f"ap planning: back from {current}")
+        if scr not in (None, "Lobby"):
+            return action_back(f"ap planning: back from {scr}")
 
         self._enter_attempts += 1
         if self._enter_attempts > 8:
@@ -114,11 +153,19 @@ class ApPlanningSkill(BaseSkill):
         return action_wait(400, "ap planning waiting for lobby")
 
     def _open_purchase(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._is_ap_purchase_dialog(screen):
+        """Open the AP buy dialog by clicking the '+' (TOPBAR_PLUS) next to
+        the AP/stamina widget. Grey-only plus => AP not buyable now => exit."""
+        if self._on_ap_panel(screen):
             self.sub_state = "plan"
+            self._dialog_attempts = 0
             return action_wait(250, "entered AP purchase panel")
 
-        if not screen.is_lobby():
+        # Cooldown so we don't re-tap the plus while the dialog animates in.
+        if self._enter_click_cooldown > 0:
+            self._enter_click_cooldown -= 1
+            return action_wait(500, f"ap planning: open cooldown ({self._enter_click_cooldown})")
+
+        if self.detect_screen_yolo(screen) not in (None, "Lobby"):
             self.sub_state = "enter"
             return action_wait(300, "lost lobby while opening AP panel")
 
@@ -127,124 +174,122 @@ class ApPlanningSkill(BaseSkill):
             self.sub_state = "exit"
             return action_wait(200, "AP purchase panel unavailable, exiting")
 
-        ap_box = screen.find_text_one(r"\d+\s*[/|]\s*\d+", region=screen.TOP_BAR, min_conf=0.4)
-        if ap_box:
-            x = min(0.96, ap_box.x2 + 0.04)
-            y = min(0.12, max(0.02, ap_box.cy))
-            return action_click(x, y, "open AP purchase from AP bar")
-
-        plus = screen.find_any_text(["+", "＋", "AP"], region=(0.45, 0.0, 0.90, 0.12), min_conf=0.35)
-        if plus:
-            return action_click_box(plus, "open AP purchase via plus button")
-
-        return action_click(0.70, 0.05, "open AP purchase fallback")
-
-    def _confirm_dialog_buttons(self, screen: ScreenState) -> Optional[tuple[OcrBox, OcrBox]]:
-        cancel = screen.find_any_text(["取消"], region=(0.18, 0.55, 0.60, 0.90), min_conf=0.55)
-        confirm = screen.find_any_text(
-            ["確認", "确认", "確定", "确定", "購買", "购买", "確", "确"],
-            region=(0.42, 0.55, 0.90, 0.90),
-            min_conf=0.55,
+        # The AP '+' sits at the top-bar, left half (AP is the leftmost
+        # currency). Constrain the region so we grab the AP plus, not the
+        # credit/pyroxene one further right.
+        ap_plus = self.find_cls(
+            screen, UC.TOPBAR_PLUS, conf=0.30, region=(0.0, 0.0, 0.55, 0.12),
         )
-        if cancel and confirm:
-            return cancel, confirm
-        return None
+        if ap_plus is not None:
+            self._enter_click_cooldown = 4
+            return action_click_box(ap_plus, "open AP purchase (YOLO 加号)")
+
+        # Grey plus = AP not purchasable (already maxed / no eligibility).
+        grey_plus = self.find_cls(
+            screen, UC.TOPBAR_PLUS_GREY, conf=0.30, region=(0.0, 0.0, 0.55, 0.12),
+        )
+        if grey_plus is not None:
+            self.log("AP plus is GREY (not buyable now) — exiting")
+            self.sub_state = "exit"
+            return action_wait(300, "ap planning: plus greyed")
+
+        self.log("no 加号 cls near AP widget — YOLO gap; waiting")
+        return action_wait(400, "ap planning: waiting for 加号 detection")
 
     def _plan(self, screen: ScreenState) -> Dict[str, Any]:
-        if not self._is_ap_purchase_dialog(screen):
-            if screen.is_lobby():
+        if not self._on_ap_panel(screen):
+            if self.detect_screen_yolo(screen) == "Lobby":
                 self.sub_state = "exit"
                 return action_wait(250, "AP plan complete on lobby")
             self.sub_state = "open_purchase"
+            self._enter_attempts = 0
             return action_wait(300, "AP panel closed, reopening")
 
         self._dialog_attempts += 1
+        if self._dialog_attempts > 20:
+            self.log("plan loop limit — cancelling out")
+            return self._cancel_panel(screen, "ap planning: plan timeout")
 
-        pair = self._confirm_dialog_buttons(screen)
-        if pair:
-            cancel_btn, confirm_btn = pair
-            should_confirm_free = self._pending_free_confirm and (not self._free_collected)
-            if should_confirm_free:
+        ap_now = self._read_ap(screen)
+        if ap_now is not None:
+            self._last_ap = ap_now
+
+        # 1. Confirm pending (we just clicked FREE / a buy → confirm dialog up).
+        if self._pending_free_confirm:
+            confirm = self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=0.30, region=(0.30, 0.50, 0.90, 0.92),
+            )
+            if confirm is not None:
                 self._pending_free_confirm = False
                 self._free_collected = True
-                return action_click_box(confirm_btn, "confirm daily free AP claim")
+                self._post_click_wait = 2
+                self.log(f"confirm free AP claim (ap={ap_now})")
+                return action_click_box(confirm, "confirm daily free AP claim (YOLO 确认键)")
+            # Grey confirm = can't claim (already taken / ineligible) → cancel.
+            if self.find_cls(
+                screen, UC.BTN_CONFIRM_GREY, conf=0.30, region=(0.30, 0.50, 0.90, 0.92),
+            ) is not None:
+                self._pending_free_confirm = False
+                self._free_collected = True  # nothing left to take
+                self.log("confirm GREY (free already claimed / ineligible) — cancelling")
+                return self._cancel_panel(screen, "ap planning: free unavailable")
+            # Confirm dialog not up yet — wait a tick.
+            return action_wait(400, "ap planning: waiting for confirm dialog")
 
-            should_confirm_paid = (
-                self._pending_paid_confirm
-                and (not self._forbid_premium_currency)
-                and self._paid_done < self._paid_purchase_limit
-            )
-            if should_confirm_paid:
-                self._pending_paid_confirm = False
-                self._paid_done += 1
-                self.log(f"paid AP purchase confirmed {self._paid_done}/{self._paid_purchase_limit}")
-                return action_click_box(confirm_btn, "confirm paid AP purchase")
-
-            self._pending_free_confirm = False
-            self._pending_paid_confirm = False
-            return action_click_box(cancel_btn, "cancel AP purchase dialog")
-
-        blocked = screen.find_any_text(
-            ["不足", "不夠", "不够", "無法購買", "无法购买", "已達上限", "已达上限"],
-            region=screen.CENTER,
-            min_conf=0.6,
-        )
-        if blocked:
-            ok = screen.find_any_text(["確認", "确认", "確定", "确定", "OK"], region=screen.CENTER, min_conf=0.55)
-            if ok:
-                self.sub_state = "exit"
-                return action_click_box(ok, "ack AP purchase notice")
-            self.sub_state = "exit"
-            return action_back("close AP purchase notice")
-
-        free_tag = screen.find_any_text(
-            ["每日免費", "每日免费", "免費", "免费"],
-            region=(0.08, 0.20, 0.80, 0.95),
-            min_conf=0.55,
-        )
-        if free_tag and not self._free_collected:
-            used = screen.find_any_text(
-                ["已購買", "已购买", "已領取", "已领取"],
-                region=(max(0.0, free_tag.x1), max(0.0, free_tag.y1 - 0.08), 1.0, min(1.0, free_tag.y2 + 0.10)),
-                min_conf=0.55,
-            )
-            if used:
-                self._free_collected = True
-            else:
-                btn = screen.find_any_text(
-                    ["購買", "购买", "領取", "领取", "確認", "确认"],
-                    region=(0.55, max(0.0, free_tag.y1 - 0.10), 1.0, min(1.0, free_tag.y2 + 0.12)),
-                    min_conf=0.5,
-                )
+        # 2. Claim the FREE tier (UC.FREE cls). This is the only auto-buy.
+        if not self._free_collected:
+            free = self.find_cls(screen, UC.FREE, conf=0.30)
+            if free is not None:
                 self._pending_free_confirm = True
-                self._pending_paid_confirm = False
-                if btn:
-                    return action_click_box(btn, "claim daily free AP")
-                return action_click(0.88, free_tag.cy, "claim daily free AP (row tap)")
+                self._post_click_wait = 1
+                self.log(f"select free AP (YOLO 免费, ap={ap_now})")
+                return action_click_box(free, "claim daily free AP (YOLO 免费)")
+            # No FREE cls visible — either already claimed today, or YOLO
+            # gap. We cannot tell paid rows apart without OCR (no paid cls),
+            # so do NOT guess — treat free as done and exit cleanly.
+            self.log("no 免费 cls in AP panel — free already taken or YOLO gap")
+            self._free_collected = True
 
+        # 3. Paid AP purchase path.
+        #    GAP: ui_classes has NO cls for paid AP tiers (only UC.FREE for
+        #    the free one). Identifying a paid row would require OCR-driven
+        #    clicking, which is forbidden. So even when policy ALLOWS paid
+        #    buys we cannot safely target one via YOLO — skip & surface gap.
         if (not self._forbid_premium_currency) and self._paid_done < self._paid_purchase_limit:
-            buy_buttons = screen.find_text(r"購買|购买", region=(0.55, 0.30, 1.0, 0.95), min_conf=0.55)
-            if buy_buttons:
-                buy_buttons = sorted(buy_buttons, key=lambda b: (b.cy, b.cx))
-                target = buy_buttons[0]
-                if self._free_collected and len(buy_buttons) > 1:
-                    target = buy_buttons[1]
-                self._pending_paid_confirm = True
-                return action_click_box(
-                    target,
-                    f"attempt paid AP purchase {self._paid_done + 1}/{self._paid_purchase_limit}",
-                )
+            self.log(
+                "paid AP requested but no paid-tier cls exists "
+                "(YOLO gap) — refusing to OCR-click paid currency; skipping"
+            )
 
-            self._pending_paid_confirm = True
-            return action_click(0.88, 0.56, "attempt paid AP purchase fallback")
+        # 4. Done with the free claim — close the panel safely (never leave
+        #    a paid purchase armed).
+        return self._cancel_panel(screen, "ap planning complete")
 
+    def _cancel_panel(self, screen: ScreenState, reason: str) -> Dict[str, Any]:
+        """Close the AP dialog without buying — prefer 取消, then 叉叉."""
+        self._pending_free_confirm = False
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.30)
+        if cancel is not None:
+            self.sub_state = "exit"
+            return action_click_box(cancel, "cancel AP purchase dialog (YOLO 取消键)")
+        close_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+        if close_x is not None:
+            self.sub_state = "exit"
+            return action_click_box(close_x, "close AP dialog (YOLO 弹窗叉叉)")
         self.sub_state = "exit"
-        return action_wait(250, "AP planning complete")
+        return action_back(reason)
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        if screen.is_lobby():
+        if self.detect_screen_yolo(screen) == "Lobby":
+            self.log(f"done (free={int(self._free_collected)}, paid={self._paid_done}, ap={self._last_ap})")
             return action_done(
                 f"ap planning complete (free={int(self._free_collected)}, paid={self._paid_done})"
             )
-
+        # Prefer YOLO home/back over blind ESC.
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_box(home, "ap planning exit: home button")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_box(back, "ap planning exit: back button")
         return action_back("ap planning exit to lobby")
