@@ -161,8 +161,8 @@ flowchart LR
     S --> D
     N --> D
     V --> D
-    D --> Y[YOLO26x training<br/>200 epoch<br/>RTX 4090, batch 8, imgsz 960]
-    Y --> B[best.pt<br/>nominal mAP50 0.68<br/>real ~0.74-0.78]
+    D --> Y[YOLO26x training<br/>warm-start v3→v4<br/>RTX 4090, batch 8, imgsz 960]
+    Y --> B[best_manual.pt<br/>manual-val mAP50 0.966<br/>R 0.957]
 ```
 
 ### Synth template parameters per context
@@ -205,8 +205,8 @@ flowchart LR
 |---|---|---|---|---|---|
 | v1 | YOLO26m | 168 (early stop) | static_ui-detected slots, no UI overlay | 113-class ref coverage | 0.597 |
 | v2 | YOLO26x | 134 (early stop) | Same as v1, larger model | Capacity probe | 0.617 |
-| **v3** | YOLO26x | 200 (patience=0) | **Template-driven 6 contexts**, UI overlay aug, mosaic 0.7 + mixup 0.10 + copy_paste 0.10, dropout 0.1 | **First template-editor run.** Overfit signature in epoch 130+ (val cls_loss climbed while train kept dropping). | **0.6803** (best ep124) |
-| **v4** | YOLO26x | 100 (patience 30) | Warm-start from v3 best, mosaic 0.3, **mixup 0**, **copy_paste 0**, dropout 0, lr0 0.003, +tight-face variants, +synth val | Targeted at battle / tactical contexts where v3 plateaued | In training |
+| **v3** | YOLO26x | 200 (patience=0) | **Template-driven 6 contexts**, UI overlay aug, mosaic 0.7 + mixup 0.10 + copy_paste 0.10, dropout 0.1 | **First template-editor run.** Overfit signature in epoch 130+ (val cls_loss climbed while train kept dropping). | 0.6803 (best ep124) |
+| **v4** *(active)* | YOLO26x | 100 (patience 30) | Warm-start from v3 best, mosaic 0.3, **mixup 0**, **copy_paste 0**, dropout 0, lr0 0.003, +tight-face variants, +synth val | Shipped from `best_manual.pt` (ep11, picked by manual-val watcher over the synth-fitness-biased ep15 nominal best) | **0.966** manual-val / 0.957 R |
 
 ### v3 → v4 lessons baked into config
 
@@ -320,7 +320,7 @@ flowchart LR
 
 - **Home (Agent)** — profile switching, skill ordering, AP / event budgets, favorite-character selection, dry-run toggle.
 - **HUD** — live pipeline state (current skill, sub-state, tick count, AP, last action reason).
-- **Capture** — DXcam screen capture with split routing (`Train (new run_*)` vs `Val (held-out pool)`) and a Purpose selector (`Fused Avatar` → `_val_fused/frames/`, `Static UI` → `_val_static_ui/frames/`). Live destination hint.
+- **Capture** — DXcam screen capture with split routing (`Train (new run_*)` vs `Val (held-out pool)`) and a Purpose selector that routes val frames to the matching pool (`Fused Avatar` → `_val_fused/`, `Static UI` → `_val_static_ui/`, `UI Weak` → `_val_weak/` for the bond/momotalk weak-class gold val). Live destination hint.
 - **Annotate** — YOLO / OCR labeling workspace, hardened for long sessions:
   - Shapes: rectangles, ellipses, polygons; right-drag to draw on Windows pointer events.
   - **Undo / Redo**: `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) with per-frame independent 50-step history. Snapshots at every atomic op (resize / move / rotate / vertex drag / class change / paste / Florence-add).
@@ -384,26 +384,42 @@ py mumu_runner.py
 ### Battle-lock demo
 
 ```powershell
-py scripts/battle_overlay_demo.py --fps 240 --conf 0.05
+# --lead-ms ≈ end-to-end latency to predict ahead (0 = off, default 40)
+py scripts/battle_overlay_demo.py --fps 240 --conf 0.05 --lead-ms 40
 ```
 
-### Train a fused avatar model from scratch
+### Train the UI detector (the daily-navigation model)
+
+This is the primary model — the daily pipeline navigates off it. Iteration loop:
+
+```powershell
+# 1. Capture frames (dashboard → Capture) or reuse trajectories; label in Annotate.
+#    "YOLO预填(整run)" pre-labels a whole run with the active model — hand-correct
+#    + add the boxes it misses (this is how weak classes get their first samples).
+# 2. (optional) synth rare classes onto diverse real backgrounds
+py scripts/build_ui_synth.py --overlay <cls> --src <run> --out <name>
+# 3. Build the dataset: dedup + moderate oversample (no 200x duplication)
+py scripts/build_ui_v2.py --clean
+# 4. Train (warm-start from the current best_real.pt)
+py scripts/train_yolo26.py ui_yolo26m_v5
+# 5. Eval per-class recall on REAL held-out captures — NOT the blind 51-frame val
+py scripts/eval_weak_val.py --src <labeled_run> --weights <run>/weights/last.pt
+# 6. Ship: freeze last.pt -> best_real.pt, bump ui.active in data/model_registry.json
+```
+
+### Train a fused avatar model
 
 ```powershell
 # 1. Configure synth templates (dashboard → S tab)
 # 2. Build dataset
 py scripts/build_fused_avatar_dataset.py 2>&1 | tee build.log
 
-# 3. Train
+# 3. Train (warm-start from v3 best)
 py scripts/train_yolo26.py fused_avatar_26x_v4 2>&1 | tee train.log
 
-# 4. Eval
+# 4. Eval (per-frame HTML, confidence-aware GT↔pred matching)
 py scripts/eval_fused_avatar_report.py
 # Open data/yolo_datasets/fused_avatar_eval.html
-
-# 5. Optional: review noisy val labels
-py scripts/val_label_cleanup.py
-# Open _val_cleanup.html
 ```
 
 ---
@@ -430,13 +446,18 @@ ai-game-secretary/
 │   ├── app.py
 │   └── dashboard.html
 ├── scripts/
+│   ├── train_yolo26.py                 # per-config training entry (UI / avatar / battle)
+│   ├── build_ui_v2.py                  # UI dataset: dedup + moderate oversample
+│   ├── build_ui_synth.py               # synth rare UI cls onto diverse backgrounds
+│   ├── eval_weak_val.py                # per-class recall on real captures
+│   ├── yolo_prefill_run.py             # batch model-assisted pre-labeling
+│   ├── audit_ui_recall_gt.py           # ground-truth recall audit
+│   ├── box_tracker.py                  # battle lock tracker (Kalman predict/correct)
+│   ├── kalman_box.py                   # textbook Kalman reference filter
+│   ├── yolo_overlay.py                 # Win32 transparent lock overlay
+│   ├── battle_overlay_demo.py          # battle lock entry point
 │   ├── build_fused_avatar_dataset.py   # template-driven synth + manual + neg
-│   ├── train_yolo26.py                 # per-config training entry
 │   ├── eval_fused_avatar_report.py     # HTML eval report
-│   ├── val_label_cleanup.py            # find noisy GT
-│   ├── verify_class_alignment.py       # ref ↔ master audit
-│   ├── fix_class_alignment.py          # one-shot master cleanup
-│   ├── mine_hard_examples.py           # data-flywheel candidate picker
 │   └── ocr_training/                   # PP-OCRv4 fine-tune pipeline
 ├── data/
 │   ├── synth_templates/                # per-context JSON (slot rects, aug, bbox_mode, use_for)
@@ -452,9 +473,10 @@ External (gitignored) — under `D:/Project/ml_cache/`:
 ```
 ml_cache/
 ├── models/yolo/
-│   ├── runs/fused_avatar_yolo26x/      # v3 best.pt + plots
-│   ├── runs/fused_avatar_yolo26x_v4/   # v4 in progress
-│   └── dataset/fused_avatar_v1/        # train/val frames + labels + data.yaml
+│   ├── runs/ui_yolo26m_v5/             # active UI detector (best_real.pt)
+│   ├── runs/fused_avatar_yolo26x_v4/   # active avatar detector (best_manual.pt)
+│   ├── dataset/ui_v2/                  # UI train/val frames + labels + data.yaml
+│   └── dataset/fused_avatar_v1/        # avatar dataset
 └── huggingface/                        # HF cache
 ```
 
