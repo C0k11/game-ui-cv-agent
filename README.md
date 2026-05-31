@@ -12,7 +12,7 @@ The automation is built on a vision-first stack. **UI navigation and clicks are 
 |---|---|
 | **Platform** | Windows 10 / 11, NVIDIA GPU recommended (RTX 3060+) |
 | **Game runtime** | MuMu Player 12 (60 FPS cap) |
-| **Daily skills** | 22 composable, ordered, dry-runnable |
+| **Daily skills** | 2 meta-skills orchestrating ~15 sub-skills, ordered, dry-runnable |
 | **Vision tier** | YOLO26m (451-class UI) + YOLO26x (252-class avatar) + YOLO26n (emoticon) + YOLOv8n (battle head) |
 | **UI detection** | `ui_yolo26m_v5` — pure-YOLO navigation, no hardcoded click positions; ≈99.5% real-frame hit rate |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs (+20 pp vocab); scoped to numeric fields |
