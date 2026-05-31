@@ -23,6 +23,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fps", type=float, default=240, help="Target detection FPS")
     parser.add_argument("--conf", type=float, default=0.05, help="YOLO confidence threshold")
+    parser.add_argument("--lead-ms", type=float, default=40.0, dest="lead_ms",
+                        help="Predictive lead-aim ms (~= end-to-end latency). 0=off")
     args = parser.parse_args()
 
     import dxcam
@@ -66,7 +68,9 @@ def main():
     print(f"[Info] YOLO battle_heads loaded: {BATTLE_MODEL.name}")
 
     # ── 4. Start overlay ──
-    overlay = YoloOverlay(render_hwnd)
+    # Battle = moving targets → enable predictive lead-aim (lead_ms ≈ measured
+    # end-to-end latency; 40ms starting estimate, see latency-chain task).
+    overlay = YoloOverlay(render_hwnd, lead_ms=args.lead_ms)
     overlay.start()
     print(f"[Info] Overlay started (250Hz render, {args.fps} FPS detection)")
     print("[Info] Press Ctrl+C to stop\n")

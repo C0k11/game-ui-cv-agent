@@ -164,7 +164,13 @@ class YoloOverlay:
     simple reference swap (no contention with the render thread).
     """
 
-    def __init__(self, target_hwnd: int):
+    def __init__(self, target_hwnd: int, *, lead_ms: float = 0.0,
+                 max_age_frames: int = 30, min_cutoff: float = 1.2,
+                 beta: float = 0.6):
+        # lead_ms: predictive lead-aim. Default 0 (safe for STATIC overlays —
+        # cafe/schedule, where leading would drift the box off a stationary
+        # button). Battle overlay passes lead_ms≈end-to-end latency for the
+        # aimbot-feel forward prediction on moving targets.
         self._target_hwnd = int(target_hwnd)
         self._overlay_hwnd: Optional[int] = None
         self._thread: Optional[threading.Thread] = None
@@ -174,12 +180,18 @@ class YoloOverlay:
         self._wndproc_ref = None          # prevent GC of callback
         self._tx = self._ty = 0
         self._tw = self._th = 0
-        # ByteTrack tracker: same config everywhere (battle, cafe, schedule)
-        # max_age=5, alpha=0.85, freeze-coast, same-class NMS
+        self._tracker_update_ts = None    # perf_counter of last update (→ real dt)
+        # Industrial lock tracker: ByteTrack assoc + One-Euro smoothing +
+        # velocity coast + predictive lead-aim.  (see scripts/box_tracker.py)
         try:
             from scripts.box_tracker import BoxTracker
-            self._tracker = BoxTracker(max_age=5, min_hits=1, max_center_dist=1.5, alpha=0.85, high_conf=0.25)
-        except Exception:
+            self._tracker = BoxTracker(
+                max_age=max_age_frames, min_hits=1, max_center_dist=1.5,
+                high_conf=0.25, lead_ms=lead_ms,
+                min_cutoff=min_cutoff, beta=beta,
+            )
+        except Exception as e:
+            print(f"[Overlay] BoxTracker init failed: {e}")
             self._tracker = None
         self._cls_name = f"YoloOverlay_{id(self)}"
         self._dirty = True                # force first paint
@@ -222,9 +234,17 @@ class YoloOverlay:
                     b.get("x1", 0), b.get("y1", 0),
                     b.get("x2", 0), b.get("y2", 0),
                 ))
-        # Apply tracker for smooth lock-on effect
+        # Apply tracker for smooth lock-on effect. Pass real dt (seconds since
+        # last detection) so velocity / smoothing / lead-aim are frame-rate
+        # independent — detection FPS varies, so a fixed-dt assumption would
+        # make lead/coast wrong when the detector hitches.
         if self._tracker is not None:
-            parsed = self._tracker.update(parsed)
+            import time as _t
+            now = _t.perf_counter()
+            prev = self._tracker_update_ts
+            dt = (now - prev) if prev is not None else None
+            self._tracker_update_ts = now
+            parsed = self._tracker.update(parsed, dt=dt)
         with self._lock:
             self._boxes = parsed
             self._dirty = True

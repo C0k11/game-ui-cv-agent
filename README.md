@@ -16,7 +16,7 @@ The automation is built on a vision-first stack. **UI navigation and clicks are 
 | **Vision tier** | YOLO26m (451-class UI) + YOLO26x (252-class avatar) + YOLO26n (emoticon) + YOLOv8n (battle head) |
 | **UI detection** | `ui_yolo26m_v5` — pure-YOLO navigation, no hardcoded click positions; ≈99.5% real-frame hit rate |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs (+20 pp vocab); scoped to numeric fields |
-| **Battle lock** | 60-240 Hz DXcam + ByteTrack with freeze-and-predict rescue |
+| **Battle lock** | 60-240 Hz DXcam + ByteTrack + Kalman predict-correct (lead-aim + One-Euro) |
 | **Annotation** | Dashboard with synth template editor, val cleanup tool, eval HTML report |
 
 ---
@@ -54,7 +54,7 @@ flowchart LR
 - **Dashboard synthetic template editor** — a full visual tool to configure synth data per UI context: draw axis-aligned rect or free 4-point quad slots, interactive ref crop with slot-overlay preview, four draggable colored markers for augmentation anchor positions (Lv / star / weapon / heart), tight-face vs full bbox modes, per-context augmentation probabilities, one-click sample image swap (drag-drop or path), and live preview render with zoom + pan modal.
 - **Round-robin synthesis** — the build script draws characters from a per-context shuffled pool, so every character appears in every context the configured number of times (no rare-class starvation).
 - **OCR fine-tuned for BA** — PP-OCRv4 base re-trained on game crops + augmented synthetic text, delivering a 20-point absolute vocabulary-accuracy gain. The output `ba_rec.onnx` loads automatically at server boot.
-- **Real-time battle head lock** — DXcam capture, YOLOv8n single-class head detection, ByteTrack with freeze-and-predict tracking, rendered to a Win32 layered overlay. Tuned for the 60 FPS MuMu cap.
+- **Real-time battle head lock** — DXcam capture, YOLOv8n single-class head detection, ByteTrack association + Kalman-style predict/correct tracking (One-Euro smoothing + predictive lead-aim), rendered to a Win32 layered overlay. Tuned for the 60 FPS MuMu cap.
 - **Asynchronous trajectory writer** — each tick's screenshot and metadata are enqueued and flushed on a background thread, removing 10–50 ms of per-tick disk I/O from the perception loop.
 - **Dedicated validation pools** — Capture page routes frames to `train` runs or to held-out `_val_<purpose>/frames/`; build scripts honor these so rare-class samples are never stolen from training. Synthetic val data is generated alongside manual val for stable mAP measurement.
 - **Eval feedback loop** — per-frame HTML report with bbox overlays, wrong-class / extra-pred / miss buckets, and a `val_label_cleanup.py` helper that finds noisy GT labels by disagreement with the trained model.
@@ -72,7 +72,7 @@ flowchart TD
     R -->|"Numeric fields"| O[PP-OCRv4<br/>BA fine-tuned<br/>~50 ms]
     R -->|"Cafe bubble"| EM[YOLO26n emoticon<br/>1 class<br/>~2 ms]
     R -->|"Battle heads"| BH[YOLOv8n battle_heads<br/>1 class<br/>~2 ms]
-    BH --> BT[ByteTrack + EMA<br/>freeze-and-predict<br/>&lt;0.1 ms]
+    BH --> BT[ByteTrack + Kalman<br/>predict/correct + lead-aim<br/>&lt;0.1 ms]
     FA --> ID[Per-slot character ID]
     SU --> AN[OCR region anchors]
     O --> TX[Text values]
@@ -85,7 +85,7 @@ flowchart TD
 | Numeric OCR | PP-OCRv4 BA-tuned | AP / ticket / count digits only (text nav handed to YOLO) | ~50 ms |
 | Cafe fallback | YOLO26n `emoticon_yolo26n` | Head-pat bubble when templates miss | ~2 ms |
 | Battle lock | YOLOv8n `battle_heads.pt` | Single-class head detection at 60+ FPS | ~2 ms |
-| Tracking | ByteTrack + EMA | Track association with freeze-and-predict rescue | <0.1 ms |
+| Tracking | ByteTrack + Kalman | Predict/correct lock: One-Euro smoothing, velocity coast, predictive lead-aim | <0.1 ms |
 
 UI navigation runs purely off the `ui_yolo26m_v5` detector: a skill finds its target button/tab/region by trained class and clicks the returned box — **no hardcoded screen coordinates**, so the same logic survives window-size and desktop-scaling changes. OCR is deliberately scoped to numeric fields; the avatar detector handles open-set character ID. `cv2.matchTemplate` / HSV remain as cheap fallbacks for a few stable glyphs. Battle lock stays on the smaller YOLOv8n for headroom. Active model versions are resolved at runtime from `data/model_registry.json`, so shipping a new model is a one-line `active` bump (with older versions kept for instant rollback).
 
@@ -251,26 +251,47 @@ A typical v3 review cycle on the 49 manual val frames surfaced ~14 cases where t
 | Mail / DailyTasks / PassReward | One-click claim | OCR | |
 | ApPlanning | Free-AP + purchase strategy | OCR + numeric | Configurable purchase cap |
 | HardFarming / CampaignPush | Stage-specific / fallback sweeps | OCR + state machine | |
-| BattleOverlay | Live head-box lock | YOLOv8n + ByteTrack | DXcam + Win32 transparent overlay, tuned for 60 FPS source |
+| BattleOverlay | Live head-box lock | YOLOv8n + ByteTrack + Kalman | DXcam + Win32 transparent overlay, lead-aim prediction, tuned for 60 FPS source |
 
 ---
 
-## Battle Lock: ByteTrack with Freeze-and-Predict
+## Battle Lock: ByteTrack + Kalman Predict-Correct
+
+The lock tracker follows the Kalman **predict → correct** paradigm: each track
+carries a constant-velocity motion state that is *predicted* forward every frame,
+then *corrected* by the matched detection. Three things make the lock look
+external-grade — smooth, latency-hiding, and occlusion-proof.
 
 ```mermaid
 flowchart TD
     Y[YOLO detections<br/>conf ≥ 0.05] --> S{conf split}
     S -->|≥ 0.25| H[Stage 1<br/>associate with existing tracks]
     S -->|< 0.25| L[Stage 2<br/>rescue unmatched tracks via low-conf]
-    H -->|matched| EMA[EMA update alpha=0.85]
+    H -->|matched| K[Kalman correct<br/>One-Euro smooth + velocity update]
     H -->|unmatched| NEW[create new track]
-    L -->|rescued| EMA
-    L -->|still unmatched| FREEZE[freeze in place<br/>conf *= 0.92 / frame]
-    FREEZE -->|5 frames cold| KILL[delete]
-    EMA --> NMS[Intra-class NMS<br/>merge center_dist &lt; 1.0]
+    L -->|rescued| K
+    L -->|still unmatched| COAST[Kalman predict / coast<br/>vel decay 0.85, conf *= 0.92]
+    COAST -->|max_age cold| KILL[delete]
+    K --> LEAD[Lead-aim<br/>pos + velocity × latency]
+    LEAD --> NMS[Intra-class NMS<br/>merge center_dist &lt; 1.0]
 ```
 
-The freeze-and-predict step is the difference between “loses lock the moment a VFX flash hides the head” and “rides through the flash with a frozen anchor and re-acquires the moment the head reappears”.
+- **Kalman-style predict/correct** — a constant-velocity state per track, advanced
+  by `predict()` and nudged by the matched detection. Velocity is tracked in
+  units/**second** (time-aware via real `dt`), so prediction stays correct when
+  detection FPS fluctuates.
+- **One-Euro smoothing** (replaces fixed-alpha EMA) — the AR/VR-industry answer to
+  the jitter-vs-lag tradeoff: heavy smoothing when the target is slow (no jitter),
+  light smoothing when fast (no lag).
+- **Predictive lead-aim** — the displayed box is drawn where the target *will* be
+  (`position + velocity × end-to-end latency`), not where it was N ms ago. The lead
+  is clamped so a noisy velocity spike can't fling the box. This is what hides the
+  ~30–50 ms capture→infer→render→display latency and gives the lock its aimbot feel.
+- **Velocity coast through occlusion** — an unmatched track keeps gliding along its
+  (decayed, capped) velocity instead of freezing, so a VFX flash that tanks YOLO
+  confidence is ridden through; the ByteTrack low-conf second stage re-acquires the
+  moment the head reappears. Lead-aim defaults OFF for static UI overlays
+  (cafe / schedule) where a stationary button must not drift.
 
 ---
 
