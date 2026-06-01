@@ -506,9 +506,18 @@ class BountySkill(BaseSkill):
         # Arena/other campaign skills enter via the same hub. Exiting to
         # lobby just to re-enter wastes 10-20 ticks per round-trip
         # (user 2026-05-13). Detect the hub via YOLO signature.
-        # (OCR hub-tile probe → detect_current_screen == "Mission")
         current = self.detect_current_screen(screen)
         if current == "Mission":
             self.log("done (left on campaign hub for next skill)")
             return action_done("bounty complete (on hub)")
+        # A leftover "掃蕩完成" result dialog blocks the way out — ESC does NOT
+        # dismiss it (verified t22-27: 6× back stuck on 确认键). Click its
+        # confirm / X button FIRST, then continue exiting. (bug 2026-06-01)
+        confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
+                                region=(0.30, 0.55, 0.70, 0.85))
+        if confirm:
+            return action_click_box(confirm, "bounty exit: dismiss result dialog (确认键)")
+        x_btn = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+        if x_btn:
+            return action_click_box(x_btn, "bounty exit: close result dialog (X)")
         return action_back("bounty exit: back to lobby")
