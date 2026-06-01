@@ -37,6 +37,14 @@ try:
 except Exception:
     pass
 
+try:
+    # PrintWindow(hwnd, hdcBlt, nFlags) — explicit signature so 64-bit handles
+    # aren't truncated to int (HANDLE/HDC are pointer-width).
+    user32.PrintWindow.argtypes = (wintypes.HWND, wintypes.HDC, wintypes.UINT)
+    user32.PrintWindow.restype = wintypes.BOOL
+except Exception:
+    pass
+
 
 def _ensure_dpi_awareness() -> None:
     try:
@@ -493,6 +501,66 @@ def capture_client(hwnd: int) -> Image.Image:
 
         return img
 
+    def _capture_printwindow() -> Image.Image:
+        """PrintWindow + PW_RENDERFULLCONTENT(2): asks the window to redraw
+        itself into a memory DC. Works for GPU/DirectX-accelerated windows
+        (MuMu) and is independent of WHICH monitor the window is on or whether
+        it's occluded — unlike BitBlt(hwnd) [black on GPU surfaces] and
+        GetDC(0)+BitBlt [only the primary monitor]. This is the multi-monitor
+        fix: capture by window handle, not by screen region."""
+        with _dpi_aware_context():
+            rect = wintypes.RECT()
+            if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+                raise OSError(ctypes.get_last_error())
+        w = int(rect.right - rect.left)
+        h = int(rect.bottom - rect.top)
+        if w <= 0 or h <= 0:
+            raise ValueError("window client rect is empty")
+        hdc_screen = user32.GetDC(0)
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
+        hbmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
+        old = gdi32.SelectObject(hdc_mem, hbmp)
+        try:
+            # PW_RENDERFULLCONTENT=2 — required for DirectComposition / GPU
+            # surfaces (MuMu). 0 alone returns black for them.
+            ok = user32.PrintWindow(hwnd, hdc_mem, 2)
+            if not ok:
+                raise OSError("PrintWindow failed")
+            bmi = ctypes.create_string_buffer(40)
+            ctypes.memset(bmi, 0, 40)
+            ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint32))[0] = 40
+            ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[1] = w
+            ctypes.cast(bmi, ctypes.POINTER(ctypes.c_int32))[2] = -h
+            ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[6] = 1
+            ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint16))[7] = 32
+            buf = ctypes.create_string_buffer(w * h * 4)
+            if gdi32.GetDIBits(hdc_mem, hbmp, 0, h, buf, bmi, 0) == 0:
+                raise OSError("GetDIBits failed")
+            return Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1).convert("RGB")
+        finally:
+            gdi32.SelectObject(hdc_mem, old)
+            gdi32.DeleteObject(hbmp)
+            gdi32.DeleteDC(hdc_mem)
+            user32.ReleaseDC(0, hdc_screen)
+
+    def _is_blank(im: Image.Image) -> bool:
+        """Frame carries no game content: near-black OR near-uniform (MuMu's
+        empty render surface is a flat dark grey ~#1a1f29, avg≈33 — NOT caught
+        by a black-only test, which is why the old fallback never fired)."""
+        try:
+            sim = im.resize((32, 32), resample=Image.BILINEAR).convert("RGB")
+            px = list(sim.getdata())
+            n = len(px)
+            if n <= 0:
+                return True
+            flat = [v for p in px for v in p]
+            mean = sum(flat) / len(flat)
+            var = sum((v - mean) ** 2 for v in flat) / len(flat)
+            # near-black, or extremely low variance (flat fill = no UI)
+            return mean <= 8.0 or var <= 6.0
+        except Exception:
+            return False
+
     def _is_nearly_black(im: Image.Image) -> bool:
         try:
             sim = im.resize((32, 32), resample=Image.BILINEAR).convert("RGB")
@@ -525,12 +593,23 @@ def capture_client(hwnd: int) -> Image.Image:
             return _capture_desktop_dc()
         if mode == "window":
             return _capture_window_dc()
+        if mode == "printwindow":
+            return _capture_printwindow()
 
-        img0 = _capture_window_dc()
-        try:
-            img1 = _capture_desktop_dc()
-            if _is_nearly_black(img0) and not _is_nearly_black(img1):
-                return img1
-        except Exception:
-            pass
-        return img0
+        # AUTO: try methods in order of multi-monitor robustness, return the
+        # first NON-blank frame. PrintWindow first (GPU + any monitor + occluded
+        # all OK); then BitBlt(hwnd); then desktop-region BitBlt (primary only).
+        candidates = (_capture_printwindow, _capture_window_dc, _capture_desktop_dc)
+        first_img = None
+        for fn in candidates:
+            try:
+                img = fn()
+            except Exception:
+                continue
+            if first_img is None:
+                first_img = img
+            if not _is_blank(img):
+                return img
+        # all methods blank (game genuinely not rendering) — return whatever we
+        # got so the no-BA-UI detector can do its 30-tick wait/abort.
+        return first_img if first_img is not None else _capture_window_dc()
