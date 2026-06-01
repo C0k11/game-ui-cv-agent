@@ -379,6 +379,12 @@ def get_client_rect_on_screen(hwnd: int) -> Rect:
     return Rect(left=left, top=top, right=right, bottom=bottom)
 
 
+# Per-hwnd locked capture method ("printwindow"/"window"/"desktop") — set once
+# AUTO probing finds a non-blank method, so subsequent frames skip the 3-way
+# probe (perf). Cleared/re-probed if the locked method later returns blank.
+_CAPTURE_LOCK: dict = {}
+
+
 def capture_client(hwnd: int) -> Image.Image:
     def _capture_window_dc() -> Image.Image:
         with _dpi_aware_context():
@@ -596,12 +602,29 @@ def capture_client(hwnd: int) -> Image.Image:
         if mode == "printwindow":
             return _capture_printwindow()
 
-        # AUTO: try methods in order of multi-monitor robustness, return the
-        # first NON-blank frame. PrintWindow first (GPU + any monitor + occluded
-        # all OK); then BitBlt(hwnd); then desktop-region BitBlt (primary only).
-        candidates = (_capture_printwindow, _capture_window_dc, _capture_desktop_dc)
+        # AUTO: probe methods ONCE, then LOCK the first one that yields a
+        # non-blank frame and reuse it every call. Probing all 3 every frame
+        # (3× GetDIBits of a 2364×1331×4 buffer) was a major FPS sink — that's
+        # what dropped capture below 60fps after the multi-monitor fix. We
+        # re-probe only if the locked method starts returning blank (e.g. game
+        # switched to a black loading screen and PrintWindow degraded).
+        named = (("printwindow", _capture_printwindow),
+                 ("window", _capture_window_dc),
+                 ("desktop", _capture_desktop_dc))
+        locked = _CAPTURE_LOCK.get(hwnd)
+        if locked is not None:
+            fn = dict(named)[locked]
+            try:
+                img = fn()
+                if not _is_blank(img):
+                    return img
+            except Exception:
+                pass
+            # locked method failed/blank → fall through to re-probe
+            _CAPTURE_LOCK.pop(hwnd, None)
+
         first_img = None
-        for fn in candidates:
+        for name, fn in named:
             try:
                 img = fn()
             except Exception:
@@ -609,6 +632,7 @@ def capture_client(hwnd: int) -> Image.Image:
             if first_img is None:
                 first_img = img
             if not _is_blank(img):
+                _CAPTURE_LOCK[hwnd] = name   # lock the winner for next frames
                 return img
         # all methods blank (game genuinely not rendering) — return whatever we
         # got so the no-BA-UI detector can do its 30-tick wait/abort.

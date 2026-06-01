@@ -404,7 +404,12 @@ def main() -> None:
     parser.add_argument("--adb-port", type=int, default=7555, help="ADB port (MuMu12=7555)")
     parser.add_argument("--fps", type=int, default=240, help="Target capture FPS")
     parser.add_argument("--dry-run", action="store_true", help="Overlay only, no clicks")
-    parser.add_argument("--no-overlay", action="store_true", help="Disable overlay window")
+    parser.add_argument("--no-overlay", action="store_true", help="Disable the bot HUD window (cv2.imshow with boxes)")
+    parser.add_argument("--game-overlay", action="store_true",
+                        help="ALSO draw the transparent lock overlay ON the MuMu window. "
+                             "Default OFF: it's debug-only, costs FPS, and mis-positions "
+                             "on a secondary monitor (boxes fly around). The bot HUD window "
+                             "shows the boxes you actually need.")
     parser.add_argument("--overlay-scale", type=float, default=0.5, help="Overlay window scale (default 0.5)")
     parser.add_argument("--capture-mode", choices=["auto", "bitblt", "adb"], default="auto",
                         help="Screen capture mode: auto (BitBlt+ADB fallback), bitblt (fast, needs visible window), adb (works minimized)")
@@ -440,14 +445,17 @@ def main() -> None:
 
     # 3b. Start YOLO overlay on game window (only if we have a window handle)
     yolo_overlay = None
-    if not args.no_overlay and cap.render_hwnd is not None:
+    if args.game_overlay and cap.render_hwnd is not None:
         try:
             from scripts.yolo_overlay import YoloOverlay
             yolo_overlay = YoloOverlay(cap.render_hwnd)
             yolo_overlay.start()
-            print(f"[Info] YOLO overlay started on render_hwnd={cap.render_hwnd}")
+            print(f"[Info] Game-window overlay started on render_hwnd={cap.render_hwnd}")
         except Exception as e:
             print(f"[WARN] YOLO overlay failed: {e}")
+    else:
+        print("[Info] Game-window overlay OFF (use --game-overlay to enable). "
+              "Boxes shown in the bot HUD window instead.")
 
     using_adb_capture = (args.capture_mode == "adb" or cap._switched_to_adb)
     if using_adb_capture:
