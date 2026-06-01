@@ -44,15 +44,17 @@ from brain.skills import ui_classes as UC
 # stylized tile labels directly, so this is more robust than the old
 # chopped-OCR variants.
 #
-# gate_on_dot semantics (per user 2026-05-17):
-#   - Bounty / Arena: ALWAYS queue. Tile dot doesn't reflect ticket
-#     availability — tickets reset daily and the bot should always try to
-#     spend them. Sub-skill exits quickly when 0 tickets so cost is bounded.
-#   - Event: gate on a red/yellow dot near the tile (DOT_RED/DOT_YELLOW).
+# gate_on_dot semantics (user 2026-06-01, REVISED):
+#   ALL campaign tiles now GATE ON a red/yellow dot (DOT_RED/DOT_YELLOW) on the
+#   tile. No dot = nothing to claim / no tickets to spend → SKIP, don't enter.
+#   This is the source-level fix for "entered bounty with 0 tickets → game
+#   popped the 購買票券 dialog → bot almost bought tickets with pyroxene".
+#   Per-skill OCR ticket-count re-checks inside the sub-skill remain as a
+#   second safety net (digit-only OCR), but the dot gate avoids even entering.
 _TILE_TO_SUBSKILL: List[Tuple[str, str, str, bool]] = [
     # (tile cls_name, sub-skill registry key, display label, gate_on_dot)
-    (UC.HUB_BOUNTY, "bounty", "Bounty 悬赏通缉", False),
-    (UC.HUB_ARENA,  "arena",  "Arena 战术对抗", False),
+    (UC.HUB_BOUNTY, "bounty", "Bounty 悬赏通缉", True),
+    (UC.HUB_ARENA,  "arena",  "Arena 战术对抗", True),
     # NOTE 2026-05-28: 周年庆活动页面反常，临时禁用 event_activity sub。
     # 跑完恢复这一项。
     # (UC.HUB_SCHOOL_EXCHANGE, "event_activity", "Event 活动", True),
