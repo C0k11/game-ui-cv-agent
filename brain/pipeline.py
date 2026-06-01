@@ -240,7 +240,10 @@ def get_yolo_context() -> str:
 # sweep gets no avatar boxes and selects 0 opponents (H2).
 BASE_DETECTORS = "ui"
 SKILL_YOLO_MAP = {
-    "Cafe": f"{BASE_DETECTORS}+cafe",          # +emoticon bubbles
+    # Cafe needs avatar too: the invite list identifies each row's student via
+    # the fused_avatar head model (model_tag=="avatar", 中文角色名) so it can
+    # invite the configured cafe_invite_targets. +cafe = emoticon headpat marks.
+    "Cafe": f"{BASE_DETECTORS}+cafe+avatar",    # +emoticon bubbles +student heads
     "Bounty": f"{BASE_DETECTORS}+battle",      # +battle_heads
     # Arena selects opponents via cls92 (ARENA_OPPONENT_ROW) in the UI model —
     # no avatar model needed (dropped 2026-05-31, v5 added cls92). +battle for

@@ -210,6 +210,10 @@ def _default_profile_settings() -> Dict[str, Any]:
         "target_favorites": [],
         "skill_order": list(_DEFAULT_SKILL_ORDER),
         "bounty_branches": ["高架公路", "沙漠鐵道", "教室"],
+        # Cafe invite targets — [1F, 2F] 中文角色名 matching the fused_avatar
+        # model cls names (e.g. "莉央(战斗)"). cafe.py reads index 0 for 1F,
+        # index 1 for 2F. Empty list = invite the first visible rows.
+        "cafe_invite_targets": [],
         # ── Extended profile config (schema-only; skills consume incrementally) ──
         # Daily scheduler (opt-in). When enabled, server auto-fires pipeline
         # at `reset_time` (HH:MM, local) and re-fires every `interval_hours`.
@@ -311,6 +315,14 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
                 norm.append(name)
                 seen_b.add(name)
         data["bounty_branches"] = norm if norm else list(_VALID_BRANCHES)
+
+    # Cafe invite targets — ordered list of 中文角色名 ([1F, 2F]); trim blanks
+    # but PRESERVE order/position (index drives which floor invites whom).
+    raw_cafe = raw.get("cafe_invite_targets")
+    if isinstance(raw_cafe, list):
+        data["cafe_invite_targets"] = [
+            str(x or "").strip() for x in raw_cafe if str(x or "").strip()
+        ]
 
     # Extended config blocks: shallow-merge dict-valued keys and
     # pass through list/scalar keys as-is. Skills ignore unknown fields,

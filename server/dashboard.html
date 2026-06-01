@@ -306,6 +306,17 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
           </div>
         </div>
         <div class="form-row" style="gap:18px;flex-wrap:wrap">
+          <div class="check-row" style="gap:8px" title="咖啡厅每层邀请的目标角色（中文名，需与头像模型一致，如 莉央(战斗)）。留空=邀请列表前几位。">
+            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">咖啡厅邀请</span>
+            <label style="font-size:12px;color:var(--muted)">1楼
+              <input id="cafe_invite_1f" type="text" style="width:120px" placeholder="例: 莉央(战斗)"/>
+            </label>
+            <label style="font-size:12px;color:var(--muted)">2楼
+              <input id="cafe_invite_2f" type="text" style="width:120px" placeholder="例: 白子(骑行)"/>
+            </label>
+          </div>
+        </div>
+        <div class="form-row" style="gap:18px;flex-wrap:wrap">
           <div class="check-row" style="gap:8px" title="每日定时自动触发 pipeline">
             <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">定时</span>
             <label><input id="sched_enabled" type="checkbox"/> 每日自动跑</label>
@@ -928,6 +939,10 @@ function fillAgentFromProfile(profile){
   if($('bounty_branch_overpass'))$('bounty_branch_overpass').checked=_branches.includes('高架公路');
   if($('bounty_branch_railway'))$('bounty_branch_railway').checked=_branches.includes('沙漠鐵道');
   if($('bounty_branch_classroom'))$('bounty_branch_classroom').checked=_branches.includes('教室');
+  // Cafe invite targets — [1F, 2F] 中文角色名 (matches fused_avatar cls)
+  const _cafeInv = Array.isArray(p.cafe_invite_targets) ? p.cafe_invite_targets : [];
+  if($('cafe_invite_1f'))$('cafe_invite_1f').value=_cafeInv[0]||'';
+  if($('cafe_invite_2f'))$('cafe_invite_2f').value=_cafeInv[1]||'';
   // Scheduler block (optional, missing on legacy profiles)
   const _sched = (p.scheduler && typeof p.scheduler === 'object') ? p.scheduler : {};
   if($('sched_enabled'))$('sched_enabled').checked=Boolean(_sched.enabled);
@@ -940,6 +955,12 @@ function collectBountyBranches(){
   if($('bounty_branch_overpass')?.checked)out.push('高架公路');
   if($('bounty_branch_railway')?.checked)out.push('沙漠鐵道');
   if($('bounty_branch_classroom')?.checked)out.push('教室');
+  return out;
+}
+function collectCafeInviteTargets(){
+  // [1F, 2F] 中文角色名; trailing empties trimmed. cafe.py reads index 0/1.
+  const out=[($('cafe_invite_1f')?.value||'').trim(), ($('cafe_invite_2f')?.value||'').trim()];
+  while(out.length && !out[out.length-1])out.pop();
   return out;
 }
 async function loadServerConfig(){
@@ -981,6 +1002,7 @@ async function saveProfileConfig(showText='已保存档案'){
       target_favorites:[...favoritesOrder],
       skill_order:getSelectedSkillOrder(),
       bounty_branches:collectBountyBranches(),
+      cafe_invite_targets:collectCafeInviteTargets(),
       scheduler:{
         enabled:$('sched_enabled').checked,
         reset_time:($('sched_reset_time').value||'04:00').trim(),
@@ -1022,6 +1044,7 @@ function agentPayload() {
     notify_webhook_url:$('notify_webhook_url').value.trim(),
     skill_order:getSelectedSkillOrder(),
     bounty_branches:collectBountyBranches(),
+    cafe_invite_targets:collectCafeInviteTargets(),
     scheduler:{
       enabled:$('sched_enabled').checked,
       reset_time:($('sched_reset_time').value||'04:00').trim(),
