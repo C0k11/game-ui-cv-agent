@@ -11,7 +11,7 @@ Flow:
 1. ENTER: lobby → 任务大厅入口(NAV_TASKS) → hub → 战术大赛(HUB_ARENA) tile
 2. CLAIM_REWARDS: claim daily ranking rewards (领取奖励_黄)
 3. CHECK_TICKETS: (DIGIT-DEFERRED) gate by fight cap + button state
-4. SELECT_OPPONENT: click top opponent row (no cls for rows → fixed pos)
+4. SELECT_OPPONENT: click top opponent row via cls92 (ARENA_OPPONENT_ROW)
 5. FIGHT: 攻击编制(ATTACK_FORMATION) → 跳过战斗 + 出击(SORTIE) → result
 6. Loop until cap / no tickets, then EXIT to lobby
 """
@@ -247,32 +247,31 @@ class ArenaSkill(BaseSkill):
         return action_wait(400, "waiting for arena main screen")
 
     def _select_opponent(self, screen: ScreenState) -> Dict[str, Any]:
-        """Pick an opponent by clicking its AVATAR HEAD (detected by the
-        avatar model on the right panel) — NO hardcoded position, so it works
-        at any window size / desktop scaling / layout (per the no-hardcode
-        rule). Opponent heads are avatar-tagged boxes with cx > 0.6 (left side
-        is the player's own info). Click the TOP-most opponent.
+        """Pick an opponent by clicking the TOP-most opponent-row region
+        (cls92 ARENA_OPPONENT_ROW, detected by the UI model). v5 bounds each
+        of the 3 opponent rows cleanly (cy≈0.34/0.57/0.79 on the right panel),
+        so this needs NO avatar model and NO hardcoded position — works at any
+        window size / scaling. Click the top row (lowest cy).
         DIGIT-DEFERRED: rank-based 'easiest opponent' pick returns with OCR."""
         self._select_attempts = getattr(self, "_select_attempts", 0) + 1
         if self._select_attempts > 8:
-            self.log("opponent select kept failing (no opponent head / popup), exiting")
+            self.log("opponent select kept failing (no opponent row / popup), exiting")
             self.sub_state = "exit"
             return action_wait(300, "arena: opponent select failed")
-        # avatar-model boxes on the RIGHT = opponent heads
-        heads = [b for b in (screen.yolo_boxes or [])
-                 if getattr(b, "model_tag", "") == "avatar"
-                 and b.cx > 0.6 and 0.12 <= b.cy <= 0.95 and b.confidence >= 0.30]
-        if not heads:
-            # No opponent head detected yet — surface the gap, don't blind-click.
-            self.log(f"no opponent head detected (avatar) #{self._select_attempts}, waiting")
-            return action_wait(400, "waiting for opponent heads (avatar)")
-        top = min(heads, key=lambda b: b.cy)   # top-most opponent
-        self.log(f"selecting opponent at head ({top.cx:.2f},{top.cy:.2f}) [{top.cls_name}]")
+        # cls92 opponent-row regions (UI model). Right panel, cx>0.5.
+        rows = self.find_all_cls(screen, UC.ARENA_OPPONENT_ROW, conf=0.25)
+        rows = [b for b in rows if b.cx > 0.5]
+        if not rows:
+            # No opponent row detected yet — surface the gap, don't blind-click.
+            self.log(f"no opponent row (cls92) #{self._select_attempts}, waiting")
+            return action_wait(400, "waiting for opponent rows (cls92)")
+        top = min(rows, key=lambda b: b.cy)   # top-most opponent row
+        self.log(f"selecting opponent row ({top.cx:.2f},{top.cy:.2f}) of {len(rows)}")
         self.sub_state = "fight"
         self._fight_stage = 0
         self._fight_ticks = 0
         self._skip_clicked = False
-        return action_click_box(top, "select opponent (avatar head)")
+        return action_click_box(top, "select opponent (cls92 row)")
 
     def _fight(self, screen: ScreenState) -> Dict[str, Any]:
         """Stage 0: 對戰對象 popup → 攻击编制. Stage 1: formation →

@@ -242,9 +242,10 @@ BASE_DETECTORS = "ui"
 SKILL_YOLO_MAP = {
     "Cafe": f"{BASE_DETECTORS}+cafe",          # +emoticon bubbles
     "Bounty": f"{BASE_DETECTORS}+battle",      # +battle_heads
-    # Arena needs avatar to locate OPPONENT HEADS (right panel) for opponent
-    # selection — no hardcoded position (universal).
-    "Arena": f"{BASE_DETECTORS}+battle+avatar",
+    # Arena selects opponents via cls92 (ARENA_OPPONENT_ROW) in the UI model —
+    # no avatar model needed (dropped 2026-05-31, v5 added cls92). +battle for
+    # the in-fight skip/heads.
+    "Arena": f"{BASE_DETECTORS}+battle",
     "EventFarming": f"{BASE_DETECTORS}+battle",
     "TotalAssault": f"{BASE_DETECTORS}+battle",
     "JointFiringDrill": f"{BASE_DETECTORS}+battle",

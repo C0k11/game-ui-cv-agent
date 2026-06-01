@@ -130,6 +130,9 @@ SORTIE = "出击"                     # 124 (44f)
 # ── 票券 ─────────────────────────────────────────────────────────────
 TICKET_BOUNTY = "悬赏通缉票"          # 85  (20f)
 TICKET_ARENA = "战术大赛票"           # 91  (41f)
+ARENA_OPPONENT_ROW = "战术大赛对战选择区域"  # 92 (v5): bounds each opponent row; cy~0.34/0.57/0.79 right panel.
+#   Arena selects opponent by clicking the TOP-most row box center —
+#   no avatar model, no hardcoded position.
 TICKET_SCHOOL_EXCHANGE = "学院交流会票"  # 406 (22f)
 
 # ── 编队 / 部队 ─────────────────────────────────────────────────────
