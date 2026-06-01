@@ -335,12 +335,24 @@ class ArenaSkill(BaseSkill):
                 # 出击 can't be cls-detected (count is DIGIT-DEFERRED). Per the
                 # no-HSV spec we don't pixel-check; the fight-cap + opponent-
                 # select cap bound the loop. (TRAIN: 出击_灰 cls.)
-                # Toggle 跳过战斗 once (instant resolve, faster) before sortie.
+                # Toggle 跳过战斗 (instant resolve — skips the ~3min real-time
+                # battle) before sortie. cls437 跳过战斗未选 is UNDER-TRAINED
+                # (7 samples) so it's often missed on the first formation frame
+                # (live t49: skip checkbox visible but undetected). Retry the
+                # detection for a few ticks (lower conf) before giving up —
+                # per no-hardcode we do NOT blind-click its position; if the
+                # model just can't see it we sortie anyway (battle runs live,
+                # the 320-tick stage2 cap covers it). v6 TODO: train cls437.
                 if not self._skip_clicked:
-                    skip = self.find_cls(screen, UC.BATTLE_SKIP_TOGGLE, conf=0.30)
+                    skip = self.find_cls(screen, UC.BATTLE_SKIP_TOGGLE, conf=0.20)
                     if skip:
                         self._skip_clicked = True
-                        return action_click_box(skip, "toggle 跳过战斗")
+                        return action_click_box(skip, "toggle 跳过战斗 (skip battle)")
+                    # give the under-trained cls a few more frames to surface
+                    if self._fight_ticks <= 6:
+                        return action_wait(400, "retry-detect 跳过战斗 toggle")
+                    self.log("跳过战斗 toggle not detected (cls437 under-trained) "
+                             "— sortie LIVE (no blind-click)")
                 self.log("clicking 出击")
                 self._fight_stage = 2
                 return action_click_box(sortie, "click 出击")
