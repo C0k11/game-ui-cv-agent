@@ -277,7 +277,11 @@ class ArenaSkill(BaseSkill):
         """Stage 0: 對戰對象 popup → 攻击编制. Stage 1: formation →
         (跳过战斗) + 出击. Stage 2: battle (result handled in tick)."""
         self._fight_ticks += 1
-        max_ticks = 80 if self._fight_stage >= 2 else 40
+        # Stage2 = the actual PVP battle: up to ~4 min real-time when 跳过战斗
+        # didn't toggle. @ ~0.8-1s/tick that's ~300 ticks — the old 80 cap timed
+        # out mid-fight (live t93-134: battle still had 0:53 left). Stages 0/1
+        # (popup/formation nav) stay short. (bug 2026-06-01)
+        max_ticks = 320 if self._fight_stage >= 2 else 40
         if self._fight_ticks > max_ticks:
             self.log(f"fight timeout (stage={self._fight_stage})")
             self._fight_ticks = 0
@@ -355,4 +359,14 @@ class ArenaSkill(BaseSkill):
         if self.detect_current_screen(screen) == "Mission":
             self.log(f"done on hub ({self._fights_done} fights)")
             return action_done("arena complete (on hub)")
+        # A leftover 戰鬥結果 / reward dialog blocks the way out — ESC can't
+        # dismiss it (live t151-257: ~100 ticks looping back on 确认键). Click
+        # its confirm / X first. (bug 2026-06-01, same as bounty._exit)
+        confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
+                                region=(0.30, 0.55, 0.70, 0.85))
+        if confirm:
+            return action_click_box(confirm, "arena exit: dismiss result dialog (确认键)")
+        x_btn = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+        if x_btn:
+            return action_click_box(x_btn, "arena exit: close result dialog (X)")
         return action_back("arena exit: back to lobby")
