@@ -195,7 +195,8 @@ class MuMuCapture:
         self.render_hwnd: Optional[int] = None
         self._client_w = 0
         self._client_h = 0
-        self._capture_mode = capture_mode.lower().strip()  # auto, bitblt, adb
+        self._capture_mode = capture_mode.lower().strip()  # auto, bitblt, adb, wgc
+        self._wgc = None  # lazily-constructed WgcCapture (mode == 'wgc')
         self._adb: Optional['AdbInput'] = adb_input
         self._adb_fallback_count = 0
         self._switched_to_adb = False  # auto mode switched permanently to adb
@@ -257,6 +258,33 @@ class MuMuCapture:
         except Exception:
             return None
 
+    def _grab_wgc(self) -> Optional[np.ndarray]:
+        """Capture via Windows.Graphics.Capture (~55fps, works occluded/background).
+        NOTE: a MINIMIZED window still freezes (WGC platform limit) — use adb then."""
+        if self.render_hwnd is None:
+            return None
+        if self._wgc is None:
+            try:
+                from scripts.wgc_capture import WgcCapture
+                self._wgc = WgcCapture(
+                    self.render_hwnd,
+                    capture_hwnd=self.hwnd,
+                    client_size=(self._client_w, self._client_h) if self._client_w else None,
+                )
+                self._wgc.wait_first_frame(3.0)
+                print(f"[Capture] WGC backend started (mode={self._wgc.mode})")
+            except Exception as e:
+                print(f"[Capture] WGC init failed: {e}")
+                self._wgc = None
+                return None
+        frame = self._wgc.grab()
+        if frame is not None:
+            h, w = frame.shape[:2]
+            if w and h:
+                self._client_w = w
+                self._client_h = h
+        return frame
+
     def _grab_adb(self) -> Optional[np.ndarray]:
         """Capture via ADB screencap (works minimized/off-screen)."""
         if self._adb is None:
@@ -270,6 +298,8 @@ class MuMuCapture:
 
     def grab(self) -> Optional[np.ndarray]:
         """Capture one frame as BGR numpy array."""
+        if self._capture_mode == "wgc":
+            return self._grab_wgc()
         if self._capture_mode == "adb" or self._switched_to_adb:
             return self._grab_adb()
 
@@ -411,7 +441,7 @@ def main() -> None:
                              "on a secondary monitor (boxes fly around). The bot HUD window "
                              "shows the boxes you actually need.")
     parser.add_argument("--overlay-scale", type=float, default=0.5, help="Overlay window scale (default 0.5)")
-    parser.add_argument("--capture-mode", choices=["auto", "bitblt", "adb"], default="auto",
+    parser.add_argument("--capture-mode", choices=["auto", "bitblt", "adb", "wgc"], default="auto",
                         help="Screen capture mode: auto (BitBlt+ADB fallback), bitblt (fast, needs visible window), adb (works minimized)")
     args = parser.parse_args()
 
