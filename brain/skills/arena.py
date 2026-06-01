@@ -91,6 +91,24 @@ class ArenaSkill(BaseSkill):
         # stage-2 TICKET_ARENA check matched the dialog's background and falsely
         # declared the fight done). _result_pending dedups so one dialog counts
         # as one fight even if it persists a few ticks.
+        # ⚠️ CRITICAL (bug 2026-06-01): out of arena tickets → 出击 opens a
+        # 購買戰術大賽券 dialog (spend 青辉石 to buy). Its confirm is a 确认键 —
+        # blindly confirming SPENDS PREMIUM CURRENCY. Detect the 青辉石 price
+        # icon in the dialog body (cy 0.18-0.45, NOT the top-bar balance) and
+        # CANCEL + exit. Checked from any in-fight state, before any confirm.
+        if self.sub_state in ("fight", "check_tickets", "select_opponent"):
+            buy_pyx = self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.30,
+                                    region=(0.30, 0.18, 0.75, 0.45))
+            if buy_pyx:
+                self.log("⚠️ ticket-PURCHASE dialog (青辉石) — CANCEL, never buy")
+                self.sub_state = "exit"
+                cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.30)
+                if cancel:
+                    return action_click_box(cancel, "cancel ticket purchase (取消键)")
+                x_btn = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+                if x_btn:
+                    return action_click_box(x_btn, "close ticket purchase (X)")
+                return action_back("dismiss ticket purchase dialog")
         if self.sub_state in ("fight", "check_tickets", "select_opponent"):
             res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
                                         region=(0.34, 0.55, 0.66, 0.80))

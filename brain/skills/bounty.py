@@ -446,8 +446,26 @@ class BountySkill(BaseSkill):
             return action_wait(400, "looking for 扫荡开始 (SWEEP_START)")
 
         # Stage 2: confirm sweep dialog → 确认键 (BTN_CONFIRM).
-        # (OCR "確認/确认/確定..." → BTN_CONFIRM cls)
+        # ⚠️ CRITICAL (bug 2026-06-01): when tickets run out, clicking sweep
+        # opens a 購買懸賞通緝票券 dialog (spend 青辉石/pyroxene to buy tickets)
+        # whose confirm button is ALSO a 确认键 — blindly confirming = SPENDING
+        # PREMIUM CURRENCY. Detect the purchase dialog by a 青辉石 icon inside
+        # the dialog body (the price row, cy≈0.28-0.42 — NOT the top-bar balance
+        # at cy<0.10) and CANCEL out instead. We never buy tickets.
         if self._sweep_stage == 2:
+            buy_pyx = self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.30,
+                                    region=(0.30, 0.18, 0.75, 0.45))
+            if buy_pyx:
+                self.log("⚠️ ticket-PURCHASE dialog (青辉石) — CANCEL, never buy")
+                cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.30)
+                self._sweep_stage = 3
+                self._all_done = True   # out of tickets → stop sweeping this run
+                if cancel:
+                    return action_click_box(cancel, "cancel ticket purchase (取消键)")
+                x_btn = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+                if x_btn:
+                    return action_click_box(x_btn, "close ticket purchase (X)")
+                return action_back("dismiss ticket purchase dialog")
             confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
                                     region=(0.30, 0.30, 0.95, 0.95))
             if confirm:
