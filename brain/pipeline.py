@@ -387,6 +387,73 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     return boxes
 
 
+def run_digit_ocr(frame, region_norm) -> Optional[str]:
+    """DIGIT-ONLY OCR on a normalized sub-region of a BGR frame.
+
+    The pure-YOLO design (user spec): YOLO locates an icon/region, OCR reads
+    ONLY the digits inside a crop next to it. This is INDEPENDENT of the global
+    `_OCR_ENABLED` flag (that gates full-screen text OCR for navigation, which
+    stays off) — digit reads are always allowed because that's OCR's one job.
+
+    Args:
+        frame: BGR numpy array (ScreenState.frame).
+        region_norm: (x1, y1, x2, y2) normalized 0-1 crop to read.
+    Returns:
+        The raw recognized string filtered to digits/separators ("240/240",
+        "25117", "7/8"), or None if nothing digit-like was read. Caller parses.
+    """
+    if frame is None:
+        return None
+    import cv2
+    import re as _re
+    try:
+        h, w = frame.shape[:2]
+        x1 = max(0, int(region_norm[0] * w)); y1 = max(0, int(region_norm[1] * h))
+        x2 = min(w, int(region_norm[2] * w)); y2 = min(h, int(region_norm[3] * h))
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            return None
+        crop = frame[y1:y2, x1:x2]
+        # upscale small crops — OCR is far more accurate on larger glyphs
+        ch, cw = crop.shape[:2]
+        if ch < 40:
+            sc = 40.0 / ch
+            crop = cv2.resize(crop, (int(cw * sc), 40), interpolation=cv2.INTER_CUBIC)
+        ocr = _get_ocr()
+        result, _ = ocr(crop)
+        if not result:
+            return None
+        # concat all recognized text on the strip, keep only digits + / and ,
+        raw = "".join(line[1] for line in result)
+        kept = _re.sub(r"[^0-9/]", "", raw.replace(",", "").replace("，", ""))
+        return kept or None
+    except Exception as e:
+        print(f"[digit-OCR] error: {e}")
+        return None
+
+
+def parse_count(s: Optional[str]):
+    """Parse a digit-OCR string into useful numbers.
+
+    "7/8" → (7, 8); "25117" → (25117, None); "240/240" → (240, 240).
+    Returns (current, total) where total may be None. None on unparseable.
+    """
+    if not s:
+        return None
+    try:
+        if "/" in s:
+            a, _, b = s.partition("/")
+            cur = int(a) if a.isdigit() else None
+            tot = int(b) if b.isdigit() else None
+            if cur is None:
+                return None
+            return (cur, tot)
+        if s.isdigit():
+            return (int(s), None)
+    except Exception:
+        pass
+    return None
+
+
 def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     """Run YOLO on a BGR numpy array and return normalized YoloBox list.
 
@@ -634,6 +701,7 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
         image_w=w,
         image_h=h,
         screenshot_path=screenshot_path,
+        frame=frame_bgr,   # kept for on-demand digit-OCR cropping
     )
 
 

@@ -103,6 +103,10 @@ class ScreenState:
     image_h: int = 0
     screenshot_path: str = ""
     timestamp: float = field(default_factory=time.time)
+    # Raw BGR frame (numpy) kept for on-demand digit-OCR cropping. Not always
+    # populated (e.g. read_screen from a path skips it); digit-OCR helpers must
+    # null-check. Excluded from any serialization (it's a big array).
+    frame: Any = field(default=None, repr=False, compare=False)
 
     def add_florence_boxes(self, boxes: List[OcrBox]) -> None:
         """Append Florence detection boxes."""
@@ -1065,6 +1069,48 @@ class BaseSkill(ABC):
             if best is None or b.confidence > best.confidence:
                 best = b
         return best
+
+    def read_count(self, screen: ScreenState, icon_cls, *, conf: float = 0.30,
+                   side: str = "right", span: float = 0.10, pad: float = 0.005):
+        """DIGIT-ONLY read of the number next to a currency/count icon.
+
+        YOLO locates the icon (e.g. TICKET_BOUNTY, TOPBAR_AP); we crop the
+        digit strip beside it and OCR only the digits. This is the ONLY place
+        OCR is used (per spec: YOLO for everything, OCR for digits) and works
+        regardless of the global _OCR_ENABLED nav-OCR switch.
+
+        Args:
+            icon_cls: cls name(s) of the icon box to anchor on.
+            side: which side the number sits — "right" (top-bar currencies,
+                  tickets) or "left".
+            span: width of the digit strip as a fraction of screen width.
+            pad: gap between icon edge and strip start (fraction of width).
+        Returns:
+            (current, total) from pipeline.parse_count — total may be None;
+            or None if the icon isn't found / nothing read. Caller decides.
+        """
+        box = self.find_cls(screen, icon_cls, conf=conf)
+        if box is None or screen.frame is None:
+            return None
+        # vertical band aligned to the icon (a touch taller for glyph margin)
+        bh = box.y2 - box.y1
+        y1 = max(0.0, box.y1 - bh * 0.25)
+        y2 = min(1.0, box.y2 + bh * 0.25)
+        if side == "right":
+            x1 = min(1.0, box.x2 + pad)
+            x2 = min(1.0, x1 + span)
+        else:  # left
+            x2 = max(0.0, box.x1 - pad)
+            x1 = max(0.0, x2 - span)
+        try:
+            from brain.pipeline import run_digit_ocr, parse_count
+        except Exception:
+            return None
+        raw = run_digit_ocr(screen.frame, (x1, y1, x2, y2))
+        result = parse_count(raw)
+        if result is not None:
+            self.log(f"read_count({icon_cls})={result} (raw {raw!r})")
+        return result
 
     def find_all_cls(
         self,
