@@ -843,7 +843,14 @@ class CafeSkill(BaseSkill):
                 self._1f_headpat_started = True
             return action_wait(300, f"invite done/skip, starting {self._invite_next_state}")
 
-        if not self._is_cafe(screen):
+        # NOTE: the MomoTalk invite LIST is a full-screen overlay that hides the
+        # cafe signature cls — so _is_cafe() is False while the list (or its
+        # confirm popup) is open. That's still mid-invite, NOT "lost the cafe".
+        # Treat list/confirm-visible as a valid in-invite state so we proceed to
+        # the stage machine instead of looping "waiting for cafe UI". (live bug
+        # 2026-06-01: t16-76 stuck because the open invite list failed _is_cafe.)
+        _in_invite_ui = self._invite_list_visible(screen) or self._invite_confirm_visible(screen)
+        if not self._is_cafe(screen) and not _in_invite_ui:
             if self._looks_like_lobby(screen):
                 self.log("invite: on lobby, resetting to enter")
                 self.sub_state = "enter"

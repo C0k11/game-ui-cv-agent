@@ -441,6 +441,12 @@ def main() -> None:
                              "on a secondary monitor (boxes fly around). The bot HUD window "
                              "shows the boxes you actually need.")
     parser.add_argument("--overlay-scale", type=float, default=0.5, help="Overlay window scale (default 0.5)")
+    parser.add_argument("--force-skills", action="store_true",
+                        help="Bypass the red/yellow-dot should_run gate — every "
+                             "skill enters (for testing a skill with no dot today)")
+    parser.add_argument("--skills", default="",
+                        help="Comma-separated skill names to run (override default order). "
+                             "e.g. --skills daily_routine  (mail→cafe→schedule→... harvest only)")
     parser.add_argument("--capture-mode", choices=["auto", "bitblt", "adb", "wgc"], default="auto",
                         help="Screen capture mode: auto (BitBlt+ADB fallback), bitblt (fast, needs visible window), adb (works minimized)")
     args = parser.parse_args()
@@ -468,8 +474,10 @@ def main() -> None:
     print(f"[Info] Android resolution: {android_w}x{android_h}")
 
     # 3. Start pipeline
-    from brain.pipeline import DailyPipeline
-    pipe = DailyPipeline()
+    from brain.pipeline import DailyPipeline, set_force_all_skills
+    set_force_all_skills(args.force_skills)
+    skill_names = [s.strip() for s in args.skills.split(",") if s.strip()] if args.skills else None
+    pipe = DailyPipeline(skill_names=skill_names)
     pipe.start()
     print(f"[Info] Pipeline started with {len(pipe._skill_order)} skills")
 

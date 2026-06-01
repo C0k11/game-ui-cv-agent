@@ -347,6 +347,16 @@ _OCR_ENABLED = False
 # recovery nets for unattended production runs.
 _BRINGUP_EXPOSE = True
 
+# Debug: force EVERY skill to run, bypassing the red/yellow-dot should_run gate.
+# Set via mumu_runner --force-skills. For testing a skill's internals when the
+# account has no dot on it today (e.g. cafe with nothing to collect).
+_FORCE_ALL_SKILLS = False
+
+
+def set_force_all_skills(v: bool) -> None:
+    global _FORCE_ALL_SKILLS
+    _FORCE_ALL_SKILLS = bool(v)
+
 
 def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     """Run OCR on a BGR numpy array and return normalized OcrBox list.
@@ -1888,7 +1898,9 @@ class DailyPipeline:
         # Battle / sweep skills don't override should_run so always pass.
         if skill.ticks == 0:
             try:
-                if not skill.should_run(screen):
+                if _FORCE_ALL_SKILLS:
+                    print(f"[Pipeline] '{skill.name}' FORCE-RUN (--force-skills, dot gate bypassed)")
+                elif not skill.should_run(screen):
                     print(f"[Pipeline] '{skill.name}' should_run=False (no dot) → skip")
                     self._results.append(
                         SkillResult(
