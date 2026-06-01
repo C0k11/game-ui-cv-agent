@@ -249,6 +249,10 @@ SKILL_YOLO_MAP = {
     # no avatar model needed (dropped 2026-05-31, v5 added cls92). +battle for
     # the in-fight skip/heads.
     "Arena": f"{BASE_DETECTORS}+battle",
+    # Schedule needs avatar to identify which student sits in each room / 全体
+    # 课程表 list (fused_avatar 中文角色名) so it can place the dashboard-chosen
+    # targets. NO emoticon — headpat is cafe-only. (probe-derived 2026-06-01)
+    "Schedule": f"{BASE_DETECTORS}+avatar",
     "EventFarming": f"{BASE_DETECTORS}+battle",
     "TotalAssault": f"{BASE_DETECTORS}+battle",
     "JointFiringDrill": f"{BASE_DETECTORS}+battle",
