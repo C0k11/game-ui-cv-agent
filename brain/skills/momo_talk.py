@@ -1,31 +1,30 @@
-"""MomoTalkSkill: Auto-complete all unread MomoTalk conversations.
+"""MomoTalkSkill — mine all unread MomoTalk conversations (pure-YOLO rewrite).
 
-Design (2026-05-28 full YOLO rewrite — mirrors mail.py):
-- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
-- NO OCR anywhere. MomoTalk has no digit counters worth reading, so this
-  skill is 100% YOLO. Page state is inferred from YOLO cls signatures.
-- If YOLO can't see a needed cls, log + wait (surface the gap) rather than
-  fall back to OCR or blind hardcoded clicks.
+Verified flow (interactive probe 2026-06-01, data/_mining_probe_log.md). Mining
+MomoTalk = reading unread conversations to unlock 羁绊剧情 (each story ≈ 80
+pyroxene — a top free-pyroxene source).
 
-Flow:
-1. enter  : from lobby click NAV_MOMOTALK (cls 8). Inside iff
-             detect_screen_yolo()=="MomoTalk" (MOMO_UNREAD/REPLY_OPT/SENDING).
-2. scan   : find an MOMO_UNREAD badge → click that conversation. The badge
-             sits at the right edge of a conversation row; clicking the row
-             body (left of the badge, same y) opens it. No sort menu needed —
-             we locate unread directly by its YOLO cls.
-3. dialogue: pick a reply via MOMO_REPLY_OPT (cls 440). MOMO_SENDING means a
-             message is mid-send — wait for the next reply prompt. When the
-             bond-story buttons appear (GOTO_BOND_STORY / ENTER_BOND_STORY)
-             switch to story.
-4. story  : skip the bond-story cutscene — STORY_SKIP → confirm → GOT_REWARD
-             tap-through. STORY_TAP_CONTINUE advances stuck narration.
-5. exit   : detect_screen_yolo()=="Lobby" → done. Prefer BTN_HOME/BTN_BACK.
+Probe refinements over the old skill:
+- After entering MomoTalk, click the 对话区域 tab (MOMO_CHAT_TAB) to reach the
+  未讀訊息 list (the default name-sorted view doesn't show unread directly).
+- Open a student by tapping the row's LEFT (avatar, x≈0.22), NOT the unread
+  badge (x≈0.505) — tapping the badge is unreliable (probe: 莉 didn't open).
+- 学生发送信息中 (MOMO_SENDING) is a TRANSIENT "student is typing" cls — it only
+  flickers. WGC polls ~55fps so we catch it; we only declare a student done
+  after STABLE_N consecutive frames with NO sending / reply / goto-bond.
+- 前往羁绊剧情 does NOT retrigger consecutively — post-bond chatter is just
+  more reply options to clear.
 
-KNOWN cls gaps (need more training data — see report):
-- Several momo cls are weak: GOTO_BOND_STORY (12f), ENTER_BOND_STORY (12f).
-- "select unread sort" menu has NO cls. We sidestep it via MOMO_UNREAD.
-- Bond-story skip-confirm dialog uses generic BTN_CONFIRM (82f, solid).
+State machine
+-------------
+enter     lobby → NAV_MOMOTALK → MomoTalk → click MOMO_CHAT_TAB → unread list.
+scan      tap the top 学生momotalk信息未读 row (via avatar-x). None → done.
+dialogue  metronome: 发送信息中→wait; 回复选项→tap; 前往羁绊剧情→story. STABLE_N
+          empty frames → student done → scan next.
+story     进入羁绊剧情 → 剧情menu→跳过故事键→确认键→获得奖励→点击继续字样 → list.
+exit      BTN_HOME / BTN_BACK → lobby → done.
+
+Detectors: base "ui" only (SKILL_YOLO_MAP MomoTalk = base).
 """
 from __future__ import annotations
 
@@ -33,326 +32,283 @@ from typing import Any, Dict
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click, action_click_box,
-    action_wait, action_back, action_done,
+    action_click, action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
+_CLS_CONF = 0.30
+_UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
+_AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
+_STABLE_EMPTY = 4          # consecutive empty frames ⇒ student conversation done
+
+_ENTER_MAX = 22
+_TAB_MAX = 12
+_DIALOGUE_MAX = 60
+_STORY_MAX = 70
+_EXIT_MAX = 14
+
 
 class MomoTalkSkill(BaseSkill):
-    _LOBBY_DOT_ENTRIES = [UC.NAV_MOMOTALK]
-
-    def should_run(self, screen):
-        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+    def should_run(self, screen: ScreenState) -> bool:
+        return self.dot_on_entry(screen, [UC.NAV_MOMOTALK])
 
     def __init__(self):
         super().__init__("MomoTalk")
-        self.max_ticks = 120
-        self._conversations_completed: int = 0
-        self._scan_ticks: int = 0
-        self._dialogue_ticks: int = 0
-        self._story_ticks: int = 0
+        self.max_ticks = 200
+        self._init_state()
+
+    def _init_state(self) -> None:
+        self._phase_ticks: int = 0
         self._enter_ticks: int = 0
-        self._enter_click_cooldown: int = 0
+        self._tab_opened: bool = False
+        self._students_done: int = 0
+        self._empty_streak: int = 0
         self._scan_misses: int = 0
         self._story_taps: int = 0
-        # De-dup guard for the completion counter. MOMO_SENDING (28f) flickers,
-        # so _in_conversation toggles True/False and the dialogue↔scan/story
-        # transitions can fire repeatedly for ONE conversation. We count a
-        # completion at most once per opened conversation: set this True when
-        # we tally, clear it only when a NEW unread conversation is opened.
-        self._counted_current: bool = False
+        self._story_cut: int = 0
 
     def reset(self) -> None:
         super().reset()
-        self._conversations_completed = 0
-        self._scan_ticks = 0
-        self._dialogue_ticks = 0
-        self._story_ticks = 0
-        self._enter_ticks = 0
-        self._enter_click_cooldown = 0
-        self._scan_misses = 0
-        self._story_taps = 0
-        self._counted_current = False
+        self._init_state()
 
-    # ── completion counter (de-duplicated) ────────────────────────────
-    def _count_completion(self, where: str) -> None:
-        """Tally one completed conversation, but only once per opened
-        conversation (guards against MOMO_SENDING flicker double-counting)."""
-        if self._counted_current:
-            return
-        self._counted_current = True
-        self._conversations_completed += 1
-        self.log(f"conversation #{self._conversations_completed} completed ({where})")
+    def _goto(self, sub_state: str) -> None:
+        self.sub_state = sub_state
+        self._phase_ticks = 0
 
-    # ── page inference via YOLO cls (no OCR) ──────────────────────────
+    # ── page predicates ──────────────────────────────────────────────────
     def _on_momotalk(self, screen: ScreenState) -> bool:
-        """Inside MomoTalk iff any momo cls is visible (== detect_screen_yolo
-        MomoTalk signature: MOMO_UNREAD / MOMO_REPLY_OPT / MOMO_SENDING)."""
         return self.find_cls(
-            screen, [UC.MOMO_UNREAD, UC.MOMO_REPLY_OPT, UC.MOMO_SENDING],
+            screen, [UC.MOMO_CHAT_TAB, UC.MOMO_CHAT_TAB_SEL, UC.MOMO_UNREAD,
+                     UC.MOMO_REPLY_OPT, UC.MOMO_SENDING, UC.FAVORITE_ICON],
             conf=0.25,
         ) is not None
 
+    def _on_unread_list(self, screen: ScreenState) -> bool:
+        return (self.find_cls(screen, UC.MOMO_CHAT_TAB_SEL, conf=_CLS_CONF) is not None
+                or self.find_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF, region=_UNREAD_LIST_REGION) is not None)
+
     def _in_conversation(self, screen: ScreenState) -> bool:
-        """Right panel shows a live conversation: a reply option, a sending
-        bubble, or a bond-story CTA."""
         return self.find_cls(
-            screen,
-            [UC.MOMO_REPLY_OPT, UC.MOMO_SENDING,
-             UC.GOTO_BOND_STORY, UC.ENTER_BOND_STORY],
-            conf=0.25,
+            screen, [UC.MOMO_REPLY_OPT, UC.MOMO_SENDING,
+                     UC.GOTO_BOND_STORY, UC.ENTER_BOND_STORY], conf=0.25,
         ) is not None
 
     def _in_story(self, screen: ScreenState) -> bool:
-        """Inside a bond-story cutscene (skip key visible, or reward splash)."""
         return self.find_cls(
-            screen,
-            [UC.STORY_SKIP, UC.STORY_SKIP_DISABLED,
-             UC.STORY_TAP_CONTINUE, UC.GOT_REWARD],
-            conf=0.30,
+            screen, [UC.STORY_MENU, UC.STORY_SKIP, UC.STORY_SKIP_DISABLED,
+                     UC.STORY_TAP_CONTINUE, UC.ENTER_BOND_STORY], conf=0.30,
         ) is not None
 
-    # ── state machine ─────────────────────────────────────────────────
+    # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
-        if self.ticks >= self.max_ticks:
-            self.log(f"timeout ({self._conversations_completed} conversations completed)")
-            return action_done(f"momotalk timeout ({self._conversations_completed} done)")
+        self._phase_ticks += 1
 
-        # Bond level-up full-screen splash (羁绊升级) — YOLO cls, tap to dismiss.
-        levelup = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=0.30)
+        if self.ticks >= self.max_ticks:
+            self.log(f"timeout ({self._students_done} students)")
+            return action_done(f"momotalk timeout ({self._students_done})")
+
+        # Global: bond level-up splash + reward popup.
+        levelup = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=_CLS_CONF)
         if levelup is not None:
             return action_click(0.5, 0.5, f"dismiss level-up ({levelup.cls_name})")
 
-        # Reward splash (獲得獎勵) — tap to dismiss.
-        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
-        if reward is not None:
-            return action_click_box(reward, "dismiss reward popup (YOLO 获得奖励)")
-
-        popup = self._handle_common_popups(screen)
-        if popup:
-            return popup
-
         if screen.is_loading():
-            return action_wait(800, "momotalk loading")
+            return action_wait(700, "momotalk loading")
 
         if self.sub_state == "":
-            self.sub_state = "enter"
-        if self.sub_state == "enter":
-            return self._enter(screen)
-        if self.sub_state == "scan":
-            return self._scan(screen)
-        if self.sub_state == "dialogue":
-            return self._dialogue(screen)
-        if self.sub_state == "story":
-            return self._story(screen)
-        if self.sub_state == "exit":
-            return self._exit(screen)
-        return action_wait(300, "momotalk unknown state")
+            self._goto("enter")
+
+        handler = {
+            "enter": self._enter,
+            "open_tab": self._open_tab,
+            "scan": self._scan,
+            "dialogue": self._dialogue,
+            "story": self._story,
+            "exit": self._exit,
+        }.get(self.sub_state)
+        if handler is None:
+            return action_wait(300, "momotalk unknown state")
+        return handler(screen)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_ticks += 1
-
         if self._on_momotalk(screen):
-            self.log("inside MomoTalk")
-            self.sub_state = "scan"
-            self._scan_ticks = 0
-            self._scan_misses = 0
-            return action_wait(400, "entered MomoTalk")
+            self.log("inside MomoTalk → open 对话区域 tab")
+            self._goto("open_tab")
+            return action_wait(350, "entered MomoTalk")
 
-        # Cooldown so we don't re-tap the entry icon while it transitions.
-        if self._enter_click_cooldown > 0:
-            self._enter_click_cooldown -= 1
-            return action_wait(500, f"momotalk: enter cooldown ({self._enter_click_cooldown})")
+        if screen.is_lobby():
+            act = self.click_cls(screen, UC.NAV_MOMOTALK, "open MomoTalk", conf=_CLS_CONF)
+            if act is not None:
+                return act
+            return action_wait(400, "waiting for MomoTalk entry cls")
 
-        # YOLO MomoTalk entry icon (cls 8) on the lobby sidebar.
-        momo_btn = self.find_cls(screen, UC.NAV_MOMOTALK, conf=0.30)
-        if momo_btn is not None:
-            self._enter_click_cooldown = 4
-            return action_click_box(momo_btn, "open MomoTalk (YOLO NAV_MOMOTALK)")
-
-        # Not lobby + not momotalk → back out toward lobby.
+        if self._enter_ticks > _ENTER_MAX:
+            return action_done("momotalk unreachable")
         if self.detect_screen_yolo(screen) not in (None, "Lobby"):
-            return action_back("momotalk: backing toward lobby")
+            return action_back("momotalk: recover toward lobby")
+        return action_wait(400, "entering MomoTalk")
 
-        if self._enter_ticks > 20:
-            self.log("can't reach MomoTalk (no NAV_MOMOTALK cls) — YOLO gap; giving up")
-            return action_done("momotalk unavailable")
-        self.log("no MomoTalk entry cls — YOLO gap; waiting")
-        return action_wait(400, "momotalk: waiting for NAV_MOMOTALK detection")
+    def _open_tab(self, screen: ScreenState) -> Dict[str, Any]:
+        """Switch to the 对话区域 (未讀) tab so the unread list shows."""
+        if self._on_unread_list(screen) or self._in_conversation(screen):
+            self._goto("scan")
+            return action_wait(250, "unread list ready → scan")
+
+        if not self._tab_opened:
+            tab = self.find_cls(screen, UC.MOMO_CHAT_TAB, conf=_CLS_CONF)
+            if tab is not None:
+                self._tab_opened = True
+                self.log("clicking 对话区域 tab (MOMO_CHAT_TAB)")
+                return action_click_box(tab, "open 对话区域 tab")
+
+        if self._phase_ticks > _TAB_MAX:
+            # Tab cls missed but maybe already on the list — proceed.
+            self._goto("scan")
+            return action_wait(300, "tab timeout → scan")
+        return action_wait(350, "waiting for 对话区域 tab")
 
     def _scan(self, screen: ScreenState) -> Dict[str, Any]:
-        """Find an unread conversation badge and open it."""
-        self._scan_ticks += 1
-
-        # Already inside a conversation (auto-opened) → handle it.
+        # Conversation auto-opened?
         if self._in_conversation(screen):
-            self.sub_state = "dialogue"
-            self._dialogue_ticks = 0
-            return action_wait(300, "conversation already open")
+            self._empty_streak = 0
+            self._goto("dialogue")
+            return action_wait(250, "conversation open → dialogue")
+        if self._in_story(screen):
+            self._goto("story")
+            return action_wait(250, "story detected → story")
 
-        # Left MomoTalk entirely (e.g. into a story) → re-route.
         if not self._on_momotalk(screen):
-            if self._in_story(screen):
-                self.sub_state = "story"
-                self._story_ticks = 0
-                self._story_taps = 0
-                return action_wait(300, "story detected during scan")
-            if self._scan_ticks > 4:
-                self.sub_state = "enter"
+            if self._phase_ticks > 6:
+                self._goto("enter")
                 self._enter_ticks = 0
-                return action_wait(400, "lost MomoTalk, re-entering")
+                return action_wait(400, "lost MomoTalk → re-enter")
             return action_wait(400, "waiting for MomoTalk UI")
 
-        # Locate an unread badge. It sits at the right edge of a conversation
-        # row in the LEFT list panel; click the row body (left of badge, same
-        # y) to open the conversation.
-        unread = self.find_cls(
-            screen, UC.MOMO_UNREAD, conf=0.30, region=(0.0, 0.15, 0.55, 0.95),
-        )
+        # Top-most unread row → open via the avatar (LEFT of the badge).
+        unread = self.find_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF, region=_UNREAD_LIST_REGION)
+        if unread is None:
+            # Some lists nest the badge slightly right; widen once.
+            unread = self.find_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF, region=(0.0, 0.15, 0.62, 0.95))
         if unread is not None:
             self._scan_misses = 0
-            # Opening a NEW conversation → re-arm the completion de-dup flag.
-            self._counted_current = False
-            self.log(f"unread conversation at y={unread.cy:.3f} → opening")
-            self.sub_state = "dialogue"
-            self._dialogue_ticks = 0
-            # Click the conversation ROW body, not a blind x=0.30. The unread
-            # badge sits at the right edge of the row; the row body is to its
-            # left, so tap a bit left of the badge cx (clamped to the panel).
-            row_x = max(0.06, unread.cx - 0.15)
-            return action_click(row_x, unread.cy, "open unread conversation (YOLO MOMO_UNREAD row)")
+            self._empty_streak = 0
+            row_x = min(0.30, max(0.12, unread.cx - _AVATAR_DX))
+            self.log(f"open unread student at row y={unread.cy:.3f} (avatar x={row_x:.2f})")
+            self._goto("dialogue")
+            return action_click(row_x, unread.cy, "open unread student (avatar, not badge)")
 
-        # No unread badge anywhere — done (give it a couple ticks to settle
-        # in case the list is still loading after a completed conversation).
+        # No unread badge → settle a couple ticks then done.
         self._scan_misses += 1
         if self._scan_misses < 3:
-            return action_wait(400, f"no unread badge (settle {self._scan_misses})")
-        self.log(f"no more unread conversations ({self._conversations_completed} completed)")
-        self.sub_state = "exit"
-        return action_wait(300, "scan complete")
+            return action_wait(400, f"no unread (settle {self._scan_misses})")
+        self.log(f"no more unread ({self._students_done} students mined)")
+        self._goto("exit")
+        return action_wait(300, "scan complete → exit")
 
     def _dialogue(self, screen: ScreenState) -> Dict[str, Any]:
-        """Drive one conversation: pick replies until the bond-story CTA or
-        the conversation ends and we drop back to the list."""
-        self._dialogue_ticks += 1
-        if self._dialogue_ticks > 50:
-            self.log("dialogue timeout, back to scan")
-            self.sub_state = "scan"
-            self._scan_ticks = 0
+        if self._phase_ticks > _DIALOGUE_MAX:
+            self.log("dialogue timeout → scan")
+            self._goto("scan")
+            self._scan_misses = 0
             return action_back("dialogue timeout")
 
-        # Bond-story flow has priority: 前往羁绊剧情 → 进入羁绊剧情.
-        goto_bond = self.find_cls(screen, UC.GOTO_BOND_STORY, conf=0.30)
+        # Bond-story CTA (priority — the 80-pyroxene payoff).
+        goto_bond = self.find_cls(screen, UC.GOTO_BOND_STORY, conf=_CLS_CONF)
         if goto_bond is not None:
-            self._dialogue_ticks = 0
-            self.log("bond story available → 前往羁绊剧情")
-            return action_click_box(goto_bond, "goto bond story (YOLO GOTO_BOND_STORY)")
-        enter_bond = self.find_cls(screen, UC.ENTER_BOND_STORY, conf=0.30)
+            self._empty_streak = 0
+            self.log("前往羁绊剧情")
+            return action_click_box(goto_bond, "goto bond story")
+        enter_bond = self.find_cls(screen, UC.ENTER_BOND_STORY, conf=_CLS_CONF)
         if enter_bond is not None:
-            self.log("entering bond story → 进入羁绊剧情")
-            self.sub_state = "story"
-            self._story_ticks = 0
+            self._empty_streak = 0
+            self.log("进入羁绊剧情 → story")
             self._story_taps = 0
-            return action_click_box(enter_bond, "enter bond story (YOLO ENTER_BOND_STORY)")
+            self._story_cut = 0
+            self._goto("story")
+            return action_click_box(enter_bond, "enter bond story")
 
-        # If a story cutscene already started, switch.
-        if self._in_story(screen):
-            self.sub_state = "story"
-            self._story_ticks = 0
-            self._story_taps = 0
-            return action_wait(300, "story started during dialogue")
-
-        # Reply option — the core interaction. Pick the highest-conf choice.
-        reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=0.30)
-        if reply is not None:
-            self._dialogue_ticks = 0  # reset timeout on each interaction
-            return action_click_box(reply, "pick reply (YOLO MOMO_REPLY_OPT)")
-
-        # Message mid-send → wait for the next reply prompt.
+        # ★ Metronome: student typing → wait (do NOT judge done).
         if self.find_cls(screen, UC.MOMO_SENDING, conf=0.25) is not None:
-            return action_wait(500, "message sending, waiting for next reply")
+            self._empty_streak = 0
+            return action_wait(450, "学生发送信息中 — waiting (typing)")
 
-        # Back on the conversation list with no reply/story CTA → this
-        # conversation is done; rescan for the next unread.
-        if self._on_momotalk(screen) and not self._in_conversation(screen):
-            self._count_completion("back to list")
-            self.sub_state = "scan"
-            self._scan_ticks = 0
+        # Reply option → tap to advance the conversation.
+        reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=_CLS_CONF)
+        if reply is not None:
+            self._empty_streak = 0
+            return action_click_box(reply, "pick reply option")
+
+        # None of sending/reply/goto present → maybe a typing gap. Only after
+        # STABLE_N consecutive empty frames do we declare the student done.
+        self._empty_streak += 1
+        if self._empty_streak >= _STABLE_EMPTY:
+            self._students_done += 1
+            self.log(f"student done (stable-empty, #{self._students_done}) → scan")
+            self._goto("scan")
             self._scan_misses = 0
-            return action_wait(300, "conversation done, scanning for more")
-
-        # On MomoTalk but no actionable cls yet — wait (YOLO gap / loading).
-        if self._on_momotalk(screen):
-            return action_wait(400, "momotalk: waiting for reply cls (YOLO gap)")
-        return action_wait(400, "dialogue: waiting for UI")
+            return action_wait(300, "student conversation done → scan")
+        return action_wait(350, f"dialogue settle (empty {self._empty_streak}/{_STABLE_EMPTY})")
 
     def _story(self, screen: ScreenState) -> Dict[str, Any]:
-        """Skip the bond-story cutscene: STORY_SKIP → confirm → reward."""
-        self._story_ticks += 1
-        if self._story_ticks > 60:
-            self.log("story timeout, back to scan")
-            self.sub_state = "scan"
-            self._scan_ticks = 0
+        """Skip the bond-story cutscene → claim the ~80-pyroxene reward."""
+        if self._phase_ticks > _STORY_MAX:
+            self.log("story timeout → scan")
+            self._goto("scan")
+            self._scan_misses = 0
             return action_back("story timeout")
 
-        # Reward splash → conversation+story complete (also handled in tick,
-        # but counts the completion here).
-        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
-        if reward is not None:
-            self._count_completion("story reward")
-            self.sub_state = "scan"
-            self._scan_ticks = 0
+        # Reward splash → claim + back to list (this student's story mined).
+        cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
+        got = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
+        if got is not None or cont is not None:
+            self._goto("scan")
             self._scan_misses = 0
-            return action_click_box(reward, "dismiss story reward (YOLO 获得奖励)")
+            self._empty_streak = 0
+            if cont is not None:
+                return action_click_box(cont, "dismiss bond reward (continue)")
+            return action_click_box(got, "dismiss bond reward (header)")
 
-        # Skip-confirm dialog (是否略過此劇情) uses the generic blue 确认.
-        confirm = self.find_cls(
-            screen, UC.BTN_CONFIRM, conf=0.40, region=(0.30, 0.55, 0.85, 0.88),
-        )
-        if confirm is not None:
-            self.log("confirming story skip (YOLO 确认)")
-            return action_click_box(confirm, "confirm story skip (YOLO BTN_CONFIRM)")
+        # Skip-confirm dialog (是否略過) → 确认键.
+        if self._story_cut > 0:
+            confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=(0.30, 0.55, 0.85, 0.85))
+            if confirm is not None:
+                self._story_cut = 0
+                return action_click_box(confirm, "confirm story skip")
 
-        # Skip key (跳過故事键). If disabled, the cutscene must advance first.
-        skip = self.find_cls(screen, UC.STORY_SKIP, conf=0.30)
+        # MENU → 跳过故事键 (skip ASAP — story auto-plays).
+        menu = self.find_cls(screen, UC.STORY_MENU, conf=_CLS_CONF)
+        skip = self.find_cls(screen, UC.STORY_SKIP, conf=_CLS_CONF)
         if skip is not None:
-            self._story_taps = 0
-            return action_click_box(skip, "skip story (YOLO STORY_SKIP)")
+            self._story_cut += 1
+            return action_click_box(skip, "跳过故事键")
+        if menu is not None:
+            self._story_cut += 1
+            return action_click_box(menu, "open 剧情menu")
 
-        # Skip disabled → tap-to-continue to roll the scene until skip enables.
-        tap = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=0.30)
-        if tap is not None:
-            return action_click_box(tap, "advance story (YOLO STORY_TAP_CONTINUE)")
-        if self.find_cls(screen, UC.STORY_SKIP_DISABLED, conf=0.30) is not None:
+        # Skip greyed → advance narration via tap-continue.
+        if self.find_cls(screen, UC.STORY_SKIP_DISABLED, conf=_CLS_CONF) is not None:
             self._story_taps += 1
-            return action_click(0.5, 0.5, "advance story (skip disabled, tap center)")
+            return action_click(0.5, 0.5, "advance story (skip disabled)")
 
-        # Back on the conversation list → story ended.
-        if self._on_momotalk(screen) and not self._in_conversation(screen):
-            self._count_completion("story back to list")
-            self.sub_state = "scan"
-            self._scan_ticks = 0
+        # Dropped back to the list mid-handling.
+        if self._on_unread_list(screen):
+            self._goto("scan")
             self._scan_misses = 0
-            return action_wait(300, "story done, scanning for more")
-        if self._in_conversation(screen):
-            self.sub_state = "dialogue"
-            self._dialogue_ticks = 0
-            return action_wait(300, "back in conversation after story")
-
-        # No story cls visible — wait (YOLO gap / transition).
-        return action_wait(400, "story: waiting for skip cls (YOLO gap)")
+            return action_wait(300, "back on list after story → scan")
+        return action_wait(400, "story: waiting for menu/skip cls")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":
-            self.log(f"done ({self._conversations_completed} conversations)")
-            return action_done(f"momotalk complete ({self._conversations_completed} done)")
-        # Prefer YOLO home/back button over blind ESC.
-        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+            self.log(f"done ({self._students_done} students)")
+            return action_done(f"momotalk complete ({self._students_done})")
+        if self._phase_ticks > _EXIT_MAX:
+            return action_done("momotalk exit timeout")
+        home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
-            return action_click_box(home, "momotalk exit: home button")
-        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+            return action_click_box(home, "momotalk exit: home")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
-            return action_click_box(back, "momotalk exit: back button")
+            return action_click_box(back, "momotalk exit: back")
         return action_back("momotalk exit: ESC toward lobby")

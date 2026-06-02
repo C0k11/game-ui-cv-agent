@@ -217,13 +217,16 @@ STORY_ICON_UNDONE = "剧情图标未完成"   # 430 (16f)  uncleared chapter nod
 STORY_QUIT = "剧情中断退出"          # 433 (12f)
 STORY_WATCH = "剧情观看"             # 434 (12f)
 STORY_EASY_GUIDE = "简易攻略"        # 422 (12f)
-NEW_MARK = "new"                    # 429 (17f)  NEW! badge
+NEW_MARK = "new"                    # 429 (17f)  NEW! badge (篇/卡片)
+STORY_NEW = "剧情new"               # 428  剧情节点 new badge (节点级,区别于429)
 NODE_DONE = "完成"                  # 426 (18f)
 SCENE_DONE = "战斗图标已完成"         # 447 (12f)
 
 # ── momotalk ─────────────────────────────────────────────────────────
+MOMO_CHAT_TAB = "momotalk学生聊天区域按钮"     # 448  对话区域 tab (未读列表入口)
+MOMO_CHAT_TAB_SEL = "momotalk学生聊天区域已进入"  # 449  对话区域 tab 选中态
 MOMO_UNREAD = "学生momotalk信息未读"  # 439 (121f) unread conversation badge
-MOMO_SENDING = "学生发送信息中"       # 438 (28f)
+MOMO_SENDING = "学生发送信息中"       # 438 (28f)  ★瞬时:学生打字中→连续轮询,见即等
 MOMO_REPLY_OPT = "学生信息回复选项"    # 440 (32f)  reply choice
 GOTO_BOND_STORY = "前往羁绊剧情"      # 441 (12f)
 ENTER_BOND_STORY = "进入羁绊剧情"     # 442 (12f)

@@ -1,31 +1,25 @@
-"""StoryMiningSkill v6 — pure-YOLO. Find & clear unplayed story chapters.
+"""StoryMiningSkill — mine unplayed story chapters for pyroxene (pure-YOLO).
 
-Full rewrite (2026-05-28): the v5 design used hardcoded 2x3 grid cell
-coords + OCR "new"/"入場"/"進入章節" text + fixed cutscene-skip anchors.
-That capped the skill to a fixed layout and OCR reliability. The ui model
-now has direct cls for everything story-related:
+Verified flow (interactive probe 2026-06-01, data/_mining_probe_log.md). Each
+cleared story node ≈ 80 pyroxene — alongside MomoTalk, the top free-pyroxene
+source. Mines 主线 / 短篇 / 支线 (重播 = replay, no reward, skipped).
 
-  NEW_MARK (429)          NEW! badge on a card/chapter
-  STORY_ICON_UNDONE (430) uncleared chapter node      ← user's "没打过"
-  STORY_ICON_DONE  (427)  cleared chapter node
-  DOT_YELLOW (6)          unfinished/new badge        ← user's "有黄点"
-  STORY_SHORT/SIDE/MAIN   hub category cards
-  STAGE_ENTER (79)        入場 button (chapter list)
-  STORY_ENTER_CHAPTER(139) 進入章節 button (chapter info modal)
-  STORY_MENU (431)        cutscene MENU
-  STORY_SKIP (141)        跳過 (STORY_SKIP_DISABLED 432 = greyed)
-  STORY_TAP_CONTINUE(142) 點擊繼續
-  GOT_REWARD (397)        post-chapter reward splash
-  HUB_STORY (68)          劇情 tile in mission hub
+Three-level drill (main; short/side are flatter), all via reactive YOLO
+clicking — YOLO gives exact coords, no grid math:
+  篇 (main 卷 list): swipe LEFT to reveal newer 卷 → click a `new`/`剧情new`
+       badge (vs `完成`) to SELECT it (chapters appear on the right).
+  章 (chapter list): click the row with a 黄点 (DOT_YELLOW) = unplayed chapter.
+  节点 (node list):  click the 入场键 paired (same row) with a 剧情图标未完成 /
+       剧情new node (skip 入场键没解锁 = locked). → 进入章节 → scene.
+  短篇/支线 grids: find a `new` card; none on this page → 右切换 to the next.
 
-Strategy: reactive priority chain (template-based, no nested sub_state). Each
-tick, resolve the highest-priority actionable cls. To "mine" we click the
-first NEW_MARK / STORY_ICON_UNDONE / yellow-dot node we see — YOLO gives us
-its exact coords, so NO grid math. When a category shows no unplayed node
-for N ticks, back out and try the next category; when all categories are
-exhausted, done.
+Skip flow (story auto-PLAYS — menu→skip ASAP): 剧情menu → 跳过故事键 → 确认键 →
+获得奖励 (≈80💎) → 点击继续字样 → 剧情中断退出 (中断) to leave the node.
 
-NO OCR anywhere. If a needed cls isn't visible, log the gap + wait.
+NO OCR. ⚠️ Main MAY contain battle nodes (no 剧情menu) — the cutscene timeout
+backs out of those (user to verify; v6 may add battle-node handling).
+
+Detectors: base "ui" only (SKILL_YOLO_MAP Story = base).
 """
 from __future__ import annotations
 
@@ -34,236 +28,254 @@ from typing import Any, Dict, List, Optional
 from brain.skills.base import (
     BaseSkill, ScreenState, YoloBox,
     action_click, action_click_box, action_back, action_done, action_wait,
+    action_swipe,
 )
 from brain.skills import ui_classes as UC
+
+_CLS_CONF = 0.30
+_CONTENT_REGION = (0.05, 0.12, 0.99, 0.92)   # exclude top HUD + bottom nav
+_NODE_PANEL = (0.30, 0.12, 1.0, 0.95)        # node/chapter list (right side)
+_ROW_DY = 0.06                               # node-icon ↔ 入场键 same-row gap
+
+_MAX_PAGE_TURNS = 6      # 右切换 paging cap per category (short/side grids)
+_MAX_MAIN_SWIPES = 5     # 卷-list swipe-left cap (main)
+_BARREN_LIMIT = 5        # empty scans before exhausting a category
 
 
 class StoryMiningSkill(BaseSkill):
     def __init__(self) -> None:
         super().__init__("StoryMining")
-        self.max_ticks = 1200
-        # Category rotation: short → side. (main = not auto-mined.)
-        self._categories = [UC.STORY_SHORT, UC.STORY_SIDE]
+        self.max_ticks = 1500
+        # 主线 first (user: 先去主线), then 短篇 = 支线.
+        self._categories = [UC.STORY_MAIN, UC.STORY_SHORT, UC.STORY_SIDE]
+        self._init_state()
+
+    def _init_state(self) -> None:
         self._cat_idx = 0
+        self._current_cat: Optional[str] = None
         self._exhausted: List[str] = []
-        # Per-category "no unplayed node" streak → advance/exhaust.
-        self._barren_ticks = 0
-        self._barren_limit = 6
-        # nav caps
+        self._barren = 0
+        self._page_turns = 0
+        self._main_swipes = 0
         self._nav_ticks = 0
-        self._nav_limit = 40
-        # cutscene anti-spam
         self._cut_ticks = 0
-        # entered-node cooldown (after clicking a node, wait for transition)
-        self._click_cooldown = 0
+        self._cooldown = 0
 
     def reset(self) -> None:
         super().reset()
-        self._cat_idx = 0
-        self._exhausted = []
-        self._barren_ticks = 0
-        self._nav_ticks = 0
-        self._cut_ticks = 0
-        self._click_cooldown = 0
+        self._init_state()
 
-    # ── tick: reactive priority chain ─────────────────────────────────
+    # ── tick: reactive priority chain ─────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         if self.ticks >= self.max_ticks:
             self.log("timeout")
             return action_done("story mining timeout")
 
-        if self._click_cooldown > 0:
-            self._click_cooldown -= 1
-            return action_wait(400, f"story: settle ({self._click_cooldown})")
+        if self._cooldown > 0:
+            self._cooldown -= 1
+            return action_wait(400, f"story settle ({self._cooldown})")
 
-        # P0: full-screen splashes (level-up / reward) — tap to dismiss.
-        splash = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=0.30)
+        # P0: splashes / reward.
+        splash = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=_CLS_CONF)
         if splash is not None:
             return action_click(0.5, 0.5, f"dismiss splash ({splash.cls_name})")
-        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
+        reward = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
         if reward is not None:
             self._cut_ticks = 0
-            return action_click_box(reward, "dismiss reward (YOLO 获得奖励)")
+            return action_click_box(reward, "dismiss reward (≈80💎)")
 
-        # P1: cutscene skip chain. STORY_MENU → STORY_SKIP → confirm.
+        # P0.5: after reward, 中断 (剧情中断退出) leaves the node cleanly
+        # (观看 = keep watching — ignore). Mining wants out.
+        quit_node = self.find_cls(screen, UC.STORY_QUIT, conf=_CLS_CONF)
+        if quit_node is not None:
+            self._cut_ticks = 0
+            self._cooldown = 2
+            self._barren = 0
+            return action_click_box(quit_node, "中断 — leave node after mining")
+
+        # P1: cutscene skip chain (story auto-plays → skip ASAP).
         cut = self._handle_cutscene(screen)
         if cut is not None:
             return cut
 
-        # P2: chapter-info modal — 進入章節.
-        play = self.find_cls(screen, UC.STORY_ENTER_CHAPTER, conf=0.30,
-                             region=(0.25, 0.50, 0.80, 0.90))
+        # P2: chapter-info modal → 进入章节.
+        play = self.find_cls(screen, UC.STORY_ENTER_CHAPTER, conf=_CLS_CONF, region=(0.25, 0.50, 0.80, 0.92))
         if play is not None:
-            self._barren_ticks = 0
-            self._click_cooldown = 3
-            return action_click_box(play, "enter chapter (YOLO 进入章节)")
+            self._barren = 0
+            self._cooldown = 3
+            return action_click_box(play, "enter chapter (进入章节)")
 
-        # P3: MINE — click first unplayed node (NEW / undone-icon / yellow
-        # dot) or an active 入場 button. THIS is the core "find 没打过/
-        # 黄点/new" logic the user asked for — YOLO gives coords directly.
-        node = self._find_unplayed_node(screen)
-        if node is not None:
-            self._barren_ticks = 0
-            self._click_cooldown = 3
-            return action_click_box(node, f"mine unplayed (YOLO {node.cls_name})")
-        enter_btn = self.find_cls(screen, UC.STAGE_ENTER, conf=0.30,
-                                  region=(0.55, 0.15, 0.99, 0.70))
-        if enter_btn is not None:
-            self._barren_ticks = 0
-            self._click_cooldown = 3
-            return action_click_box(enter_btn, "enter chapter (YOLO 入场键)")
+        # P3: MINE — drill deepest-first (node 入场键 > 黄点章 > new 篇/卡).
+        mine = self._mine_action(screen)
+        if mine is not None:
+            self._barren = 0
+            self._cooldown = 3
+            return mine
 
-        # P4: on a story page but no unplayed node visible → barren.
+        # P4: on a story page but nothing unplayed visible → reveal more, then
+        # (if truly barren) exhaust the category and advance.
         page = self.detect_screen_yolo(screen)
         on_story = (page == "Story") or self._on_any_story_page(screen)
         if on_story:
-            self._barren_ticks += 1
-            if self._barren_ticks <= self._barren_limit:
-                return action_wait(350, f"story: scanning for unplayed ({self._barren_ticks})")
-            # No unplayed node for this whole category — exhaust + advance.
-            cur_cat = self._categories[self._cat_idx] if self._cat_idx < len(self._categories) else None
-            if cur_cat and cur_cat not in self._exhausted:
-                self._exhausted.append(cur_cat)
-                self.log(f"category {cur_cat} exhausted (no unplayed node)")
-            self._barren_ticks = 0
-            self._cat_idx += 1
-            if self._cat_idx >= len(self._categories):
-                return action_done("story mining finished (all categories cleared)")
-            # back out to hub to pick next category
-            back = self.find_cls(screen, [UC.BTN_BACK, UC.BTN_HOME], conf=0.30)
-            return (action_click_box(back, "back to hub for next category")
-                    if back else action_back("back to hub for next category"))
+            reveal = self._reveal_more(screen)
+            if reveal is not None:
+                return reveal
+            self._barren += 1
+            if self._barren <= _BARREN_LIMIT:
+                return action_wait(350, f"scanning for unplayed ({self._barren})")
+            return self._exhaust_and_advance(screen)
 
-        # P5: story hub — pick the current (non-exhausted) category card.
+        # P5: story hub — open the current (non-exhausted) category card.
         hub_card = self._pick_hub_card(screen)
         if hub_card is not None:
-            self._barren_ticks = 0
-            self._click_cooldown = 2
-            return action_click_box(hub_card, f"open category (YOLO {hub_card.cls_name})")
+            self._barren = 0
+            self._page_turns = 0
+            self._main_swipes = 0
+            self._cooldown = 2
+            return action_click_box(hub_card, f"open category ({hub_card.cls_name})")
 
         # P6: mission hub — 劇情 tile.
-        story_tile = self.find_cls(screen, UC.HUB_STORY, conf=0.30)
+        story_tile = self.find_cls(screen, UC.HUB_STORY, conf=_CLS_CONF)
         if story_tile is not None:
             self._nav_ticks = 0
-            self._click_cooldown = 2
-            return action_click_box(story_tile, "enter 剧情 hub (YOLO 剧情)")
+            self._cooldown = 2
+            return action_click_box(story_tile, "enter 剧情 hub")
 
-        # P7: navigation gaps — lobby → mission hub.
+        # P7: navigation (lobby → mission hub).
         return self._navigate(screen)
 
-    # ── cutscene ──────────────────────────────────────────────────────
+    # ── cutscene skip ──────────────────────────────────────────────────────
     def _handle_cutscene(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
-        # FIX (review 高危2): once we've clicked Skip/MENU (_cut_ticks>0),
-        # the 跳過 icon often stays visible IN the skip-confirm dialog
-        # frame. The old order checked Skip first → re-clicked Skip every
-        # tick → never reached confirm → stuck to max_ticks=1200. So when
-        # _cut_ticks>0, look for the confirm dialog FIRST.
+        # After clicking skip/menu, the skip-confirm dialog appears → confirm.
         if self._cut_ticks > 0:
-            confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.30,
-                                    region=(0.30, 0.55, 0.80, 0.85))
+            confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=(0.30, 0.55, 0.85, 0.85))
             if confirm is not None:
                 self._cut_ticks = 0
-                self._click_cooldown = 2
-                return action_click_box(confirm, "confirm story skip (YOLO 确认键)")
-            # narration scrolling again (skip took effect) → reset + continue
-            cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=0.30)
+                self._cooldown = 2
+                return action_click_box(confirm, "confirm story skip (确认键)")
+            cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
             if cont is not None:
                 self._cut_ticks = 0
-                return action_click_box(cont, "tap continue (YOLO 点击继续)")
+                return action_click_box(cont, "tap continue")
 
-        # Click Skip — but cap retries so a persistent skip icon (with no
-        # confirm appearing) can't loop forever.
         if self._cut_ticks < 3:
-            skip = self.find_cls(screen, UC.STORY_SKIP, conf=0.40,
-                                 region=(0.82, 0.05, 1.0, 0.30))
+            skip = self.find_cls(screen, UC.STORY_SKIP, conf=0.40, region=(0.82, 0.05, 1.0, 0.30))
             if skip is not None:
                 self._cut_ticks += 1
-                return action_click_box(skip, "click Skip (YOLO 跳过故事键)")
-            menu = self.find_cls(screen, UC.STORY_MENU, conf=0.40,
-                                 region=(0.82, 0.0, 1.0, 0.15))
+                return action_click_box(skip, "跳过故事键")
+            menu = self.find_cls(screen, UC.STORY_MENU, conf=0.40, region=(0.82, 0.0, 1.0, 0.16))
             if menu is not None:
                 self._cut_ticks += 1
-                return action_click_box(menu, "open cutscene MENU (YOLO 剧情menu)")
-        # stuck narration (not yet in skip flow) → tap continue
-        cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=0.30)
+                return action_click_box(menu, "open 剧情menu")
+        cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
-            return action_click_box(cont, "tap continue (YOLO 点击继续)")
-        # Skip retries exhausted with no confirm/continue → decay so we
-        # don't stay wedged in cutscene-handling forever; let P2-P7 run.
+            return action_click_box(cont, "tap continue")
         if self._cut_ticks > 0:
             self._cut_ticks = max(0, self._cut_ticks - 1)
         return None
 
-    # ── node finding (the "mine 没打过/黄点/new" core) ─────────────────
-    def _find_unplayed_node(self, screen: ScreenState) -> Optional[YoloBox]:
-        """Return the top-most unplayed chapter node, or None.
+    # ── mining (drill deepest-first) ───────────────────────────────────────
+    def _mine_action(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
+        # 1) NODE level: enter the 入场键 paired (same row) with an unplayed
+        #    node (剧情图标未完成 / 剧情new). Skip 入场键没解锁 (locked).
+        undone = self.find_all_cls(screen, [UC.STORY_ICON_UNDONE, UC.STORY_NEW],
+                                   conf=_CLS_CONF, region=_NODE_PANEL)
+        enters = self.find_all_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF, region=_NODE_PANEL)
+        if undone and enters:
+            for nd in sorted(undone, key=lambda b: b.cy):
+                row_enter = min(enters, key=lambda e: abs(e.cy - nd.cy))
+                if abs(row_enter.cy - nd.cy) < _ROW_DY:
+                    return action_click_box(row_enter, "enter unplayed node (入场键)")
 
-        Priority: NEW badge > undone icon > yellow dot (in the node area,
-        not the top-bar). All give exact coords — click directly, no grid.
-        """
-        # NEW! badge — strongest "未玩过" signal.
-        news = self.find_all_cls(screen, UC.NEW_MARK, conf=0.30)
-        if news:
-            return min(news, key=lambda b: b.cy)  # top-most first
-        # uncleared chapter-node icon.
-        undone = self.find_all_cls(screen, UC.STORY_ICON_UNDONE, conf=0.30)
-        if undone:
-            return min(undone, key=lambda b: b.cy)
-        # yellow dot inside the content area (exclude top HUD y<0.12 and
-        # bottom nav y>0.92 where dots are nav badges, not story nodes).
-        dots = self.find_all_cls(screen, UC.DOT_YELLOW, conf=0.40,
-                                 region=(0.05, 0.12, 0.99, 0.92))
-        if dots:
-            return min(dots, key=lambda b: b.cy)
+        # 2) CHAPTER level: a 黄点 in the content area = unplayed chapter → click
+        #    its row (use the dot's y; click toward the row center-left).
+        dot = self._content_yellow_dot(screen)
+        if dot is not None:
+            row_x = min(0.88, max(0.55, dot.cx - 0.05))
+            return action_click(row_x, dot.cy, "open unplayed chapter (黄点 row)")
+
+        # 3) 篇/CARD level: a `new` / `剧情new` badge → click to select/enter.
+        new = self.find_cls(screen, [UC.NEW_MARK, UC.STORY_NEW], conf=_CLS_CONF, region=_CONTENT_REGION)
+        if new is not None:
+            return action_click_box(new, "select new 篇 / enter new card")
         return None
 
+    def _content_yellow_dot(self, screen: ScreenState) -> Optional[YoloBox]:
+        dots = self.find_all_cls(screen, UC.DOT_YELLOW, conf=0.40, region=_CONTENT_REGION)
+        # exclude dots that sit on a category/nav tile (very top) — keep node area.
+        dots = [d for d in dots if d.cy > 0.18]
+        return min(dots, key=lambda b: b.cy) if dots else None
+
+    # ── reveal more (page-turn grids / swipe-left main 卷 list) ─────────────
+    def _reveal_more(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
+        # Short/side grids paginate with 右切换.
+        arrow = self.find_cls(screen, UC.ARROW_RIGHT, conf=_CLS_CONF, region=(0.85, 0.30, 1.0, 0.70))
+        if arrow is not None and self._page_turns < _MAX_PAGE_TURNS:
+            self._page_turns += 1
+            self._barren = 0
+            self._cooldown = 2
+            self.log(f"右切换 next page ({self._page_turns}/{_MAX_PAGE_TURNS})")
+            return action_click_box(arrow, "next page (find new card)")
+        # Main 卷 list scrolls horizontally — swipe LEFT to reveal newer 卷.
+        if self._current_cat == UC.STORY_MAIN and self._main_swipes < _MAX_MAIN_SWIPES:
+            self._main_swipes += 1
+            self._barren = 0
+            self._cooldown = 2
+            self.log(f"swipe-left 卷 list ({self._main_swipes}/{_MAX_MAIN_SWIPES})")
+            return action_swipe(0.65, 0.42, 0.30, 0.42, 500, "reveal newer 卷")
+        return None
+
+    def _exhaust_and_advance(self, screen: ScreenState) -> Dict[str, Any]:
+        cur = self._categories[self._cat_idx] if self._cat_idx < len(self._categories) else None
+        if cur and cur not in self._exhausted:
+            self._exhausted.append(cur)
+            self.log(f"category {cur} exhausted")
+        self._barren = 0
+        self._page_turns = 0
+        self._main_swipes = 0
+        self._cat_idx += 1
+        if self._cat_idx >= len(self._categories):
+            return action_done("story mining finished (all categories)")
+        back = self.find_cls(screen, [UC.BTN_BACK, UC.BTN_HOME], conf=_CLS_CONF)
+        self._cooldown = 2
+        return (action_click_box(back, "back to hub for next category")
+                if back else action_back("back to hub for next category"))
+
+    # ── helpers ──────────────────────────────────────────────────────────
     def _on_any_story_page(self, screen: ScreenState) -> bool:
-        """True if any story-context cls visible (hub card, node, enter btn,
-        chapter info, cutscene)."""
         return self.find_cls(
             screen,
             [UC.STORY_SHORT, UC.STORY_SIDE, UC.STORY_MAIN,
              UC.STORY_ICON_DONE, UC.STORY_ICON_UNDONE, UC.STORY_ENTER_CHAPTER,
-             UC.STORY_MENU, UC.STAGE_ENTER],
-            conf=0.30,
+             UC.STORY_MENU, UC.STAGE_ENTER, UC.NEW_MARK, UC.STORY_NEW, UC.NODE_DONE],
+            conf=_CLS_CONF,
         ) is not None
 
     def _pick_hub_card(self, screen: ScreenState) -> Optional[YoloBox]:
-        """On the story hub, return the card cls for the current category
-        (skipping exhausted ones)."""
-        if not self.find_cls(screen, [UC.STORY_SHORT, UC.STORY_SIDE, UC.STORY_MAIN], conf=0.30):
-            return None  # not on hub
+        if not self.find_cls(screen, [UC.STORY_SHORT, UC.STORY_SIDE, UC.STORY_MAIN], conf=_CLS_CONF):
+            return None
         while self._cat_idx < len(self._categories):
             cat = self._categories[self._cat_idx]
             if cat in self._exhausted:
                 self._cat_idx += 1
                 continue
-            card = self.find_cls(screen, cat, conf=0.30)
+            card = self.find_cls(screen, cat, conf=_CLS_CONF)
             if card is not None:
+                self._current_cat = cat
                 return card
-            # card cls not seen — try next category rather than stall
             self._cat_idx += 1
         return None
 
-    # ── navigation (lobby → mission hub) ──────────────────────────────
     def _navigate(self, screen: ScreenState) -> Dict[str, Any]:
         self._nav_ticks += 1
-        if self._nav_ticks > self._nav_limit:
-            self.log("nav: can't reach story hub — giving up")
+        if self._nav_ticks > 40:
+            self.log("nav: can't reach story hub")
             return action_done("story mining unreachable")
-        page = self.detect_screen_yolo(screen)
-        if page == "Lobby":
-            # Open the mission hub via the right-side 任务大厅入口 tile (YOLO
-            # cls) — same entry arena/bounty/campaign_sweep use. NO hardcoded
-            # position (universal across window size / desktop scaling).
-            act = self.click_cls(
-                screen, UC.NAV_TASKS,
-                "story mining: open hub from lobby", conf=0.30,
-            )
-            if act:
-                self._click_cooldown = 2
+        if self.detect_screen_yolo(screen) == "Lobby":
+            act = self.click_cls(screen, UC.NAV_TASKS, "open hub from lobby", conf=_CLS_CONF)
+            if act is not None:
+                self._cooldown = 2
                 return act
-            return action_wait(400, "nav: 任务大厅入口 cls not seen yet")
-        # Unknown / transitional — wait.
-        return action_wait(400, "nav: waiting (no known page cls)")
+            return action_wait(400, "nav: 任务大厅入口 not seen")
+        return action_wait(400, "nav: waiting (no known page)")
