@@ -117,17 +117,32 @@ class ShopSkill(BaseSkill):
         return None
 
     def _capture_balance(self, screen: ScreenState) -> None:
-        """Read + cache the credit balance — MUST be called on the GRID view
-        (top bar visible). The confirm DIALOG dims the top bar and BA renders
-        the dialog's 持有數量/總購買價格 with NO YOLO cls (verified 2026-06-02:
-        re-infer @conf0.12 found zero 信用点/货币/货币数量显示区域 in the dialog),
-        so balance can ONLY be read here, not at confirm time."""
-        if self._balance is not None:
+        """Read + cache the credit balance from the TOP-BAR — must be on the GRID
+        view (top bar visible; the confirm dialog dims it + has no currency cls).
+
+        ★ The shop screen has MANY 信用点 (TOPBAR_CREDIT) boxes — every item's
+        price label is one (cy≈0.44/0.79) PLUS the top-bar balance (cy≈0.03).
+        read_count anchors on the highest-conf box → a GRID PRICE, not the
+        balance (live 2026-06-02: read 40000 instead of ~141M → wrongly
+        cancelled). So we anchor on the TOP-BAR 信用点 only (cy<0.10) and OCR the
+        digit strip to its right (verified: span 0.11 → 141,602,561)."""
+        if self._balance is not None or screen.frame is None:
             return
-        res = self.read_count(screen, UC.TOPBAR_CREDIT, side="right", span=0.12)
-        if res is not None:
+        icon = self.find_cls(screen, UC.TOPBAR_CREDIT, conf=_CLS_CONF,
+                             region=(0.0, 0.0, 1.0, 0.10))
+        if icon is None:
+            return
+        try:
+            from brain.pipeline import run_digit_ocr, parse_count
+        except Exception:
+            return
+        x1 = min(1.0, icon.x2 + 0.003)
+        x2 = min(1.0, x1 + 0.115)
+        raw = run_digit_ocr(screen.frame, (x1, icon.y1 - 0.012, x2, icon.y2 + 0.012))
+        res = parse_count(raw)
+        if res is not None and res[0] is not None:
             self._balance = res[0]
-            self.log(f"shop credit balance (grid) = {self._balance}")
+            self.log(f"shop credit balance (top-bar) = {self._balance:,} (raw {raw!r})")
 
     def _affordable(self) -> bool:
         """Buy only when the grid-read balance stays above reserve even after a
