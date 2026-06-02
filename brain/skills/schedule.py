@@ -81,10 +81,16 @@ _ARROW_LEFT_POS = (0.023, 0.500)
 # Per-sub-state tick budgets — every phase is bounded, never dead-waits.
 _ENTER_MAX = 25
 _NAVIGATE_MAX = 14
-_ROSTER_MAX = 14
+_ROSTER_MAX = 18
 _OPEN_ROOM_MAX = 12
 _SWITCH_MAX = 12
 _EXIT_MAX = 14
+# Reaction time: before concluding a region has "no room/target", re-scan this
+# many frames so fused_avatar (flickery per-frame on the small popout heads) and
+# the layout have time to settle (user: 给点击和模型识别一些反应时间). Each
+# re-scan waits ~0.5s, so ~3s of detection budget per region before leaving.
+_BARREN_SCAN_MAX = 6
+_HEAD_RENDER_SETTLE = 3     # ticks to let popout heads render before first pick
 
 # Traverse at most this many regions before giving up the full circle. BA has
 # ~10 schedule regions; 14 leaves margin for re-detect retries.
@@ -149,6 +155,8 @@ class ScheduleSkill(BaseSkill):
         self._region_locked: Optional[bool] = None   # case A (True) / B (False)
         self._clicked_heads: List[Tuple[float, float]] = []  # heads dispatched here
         self._ticket_read_pending: bool = False  # re-read ticket after a dispatch
+        self._barren_scans: int = 0          # consecutive no-room scans this region
+        self._head_settle: int = 0           # ticks left for popout heads to render
 
     def reset(self) -> None:
         super().reset()
@@ -170,6 +178,8 @@ class ScheduleSkill(BaseSkill):
         self._region_locked = None
         self._clicked_heads = []
         self._ticket_read_pending = False
+        self._barren_scans = 0          # consecutive no-room scans this region
+        self._head_settle = _HEAD_RENDER_SETTLE  # let heads render before 1st pick
 
     # ── ticket digit-OCR ──────────────────────────────────────────────────
 
@@ -320,20 +330,36 @@ class ScheduleSkill(BaseSkill):
                 return h.cls_name
         return None
 
-    def _pick_room(self, rooms: List[List[YoloBox]]) -> Tuple[
-            Optional[List[YoloBox]], str]:
-        """Choose the next room to dispatch given the case (A/B) and what's
-        already been clicked. Returns (room, reason) or (None, reason)."""
-        candidates = [r for r in rooms if not self._room_already_clicked(r)]
-        if not candidates:
-            return None, "all rooms clicked"
+    def _room_done(self, room: List[YoloBox], greens: List[YoloBox]) -> bool:
+        """True if this room's lesson was already run = a 绿勾 (GREEN_CHECK)
+        overlays any head in the room (probe: 绿勾=已上课, skip the room). This
+        is the PERSISTENT done signal — survives across runs same-day, unlike
+        the session-only _room_already_clicked proximity dedup."""
+        for h in room:
+            for g in greens:
+                if h.x1 <= g.cx <= h.x2 and h.y1 <= g.cy <= h.y2:
+                    return True
+        return False
 
-        # Case A (region has locks → level it up): dispatch every room.
+    def _pick_room(self, screen: ScreenState, rooms: List[List[YoloBox]]) -> Tuple[
+            Optional[List[YoloBox]], str]:
+        """Choose the next room to dispatch. Skips rooms already done (绿勾) or
+        clicked this session. Case A (locks) = fill every remaining room to
+        upgrade the region; Case B (no locks) = only rooms with a target."""
+        greens = self.find_all_cls(screen, UC.GREEN_CHECK, conf=_CLS_CONF)
+        candidates = [
+            r for r in rooms
+            if not self._room_done(r, greens) and not self._room_already_clicked(r)
+        ]
+        if not candidates:
+            return None, "no un-done room (all 绿勾 / clicked)"
+
+        # Case A (region has locks → level it up): fill EVERY remaining room.
         if self._region_locked:
             # top-to-bottom, left-to-right for determinism
             candidates.sort(key=lambda r: (round(self._room_center(r)[1], 2),
                                            self._room_center(r)[0]))
-            return candidates[0], "case-A spend-on-this-region"
+            return candidates[0], "case-A fill-room (upgrade locked region)"
 
         # Case B (no locks): only rooms containing a configured target.
         for r in candidates:
@@ -573,11 +599,18 @@ class ScheduleSkill(BaseSkill):
                 self._goto("exit")
                 return action_wait(300, "tickets exhausted")
 
+        # Reaction time #1: let the popout heads finish rendering before the
+        # first pick — fused_avatar is flickery on frame 1 of a fresh popout.
+        if self._head_settle > 0:
+            self._head_settle -= 1
+            return action_wait(400, f"letting popout heads render ({self._head_settle})")
+
         heads = self._roster_heads(screen)
         rooms = self._cluster_rooms(heads)
-        room, reason = self._pick_room(rooms)
+        room, reason = self._pick_room(screen, rooms)
 
         if room is not None:
+            self._barren_scans = 0
             cx, cy = self._room_center(room)
             names = [h.cls_name for h in room]
             self.log(f"dispatch room @({cx:.3f},{cy:.3f}) {names} — {reason}")
@@ -589,8 +622,15 @@ class ScheduleSkill(BaseSkill):
             self._goto("open_room")
             return action_click_box(head, "click room head → 課程表資訊")
 
-        # No room to dispatch in this region → close popout, next region.
-        self.log(f"no room to dispatch ({reason}) → close popout, next region")
+        # Reaction time #2: no room THIS scan. Re-scan a few frames before
+        # leaving — gives fused_avatar time to surface heads/targets that
+        # flickered out this frame (user: 给模型识别反应时间). Only switch region
+        # after consistent empties.
+        self._barren_scans += 1
+        if self._barren_scans < _BARREN_SCAN_MAX:
+            return action_wait(500, f"re-scan roster {self._barren_scans}/{_BARREN_SCAN_MAX} ({reason})")
+
+        self.log(f"no room after {self._barren_scans} scans ({reason}) → close popout, next region")
         close = self._popout_close(screen)
         if close is not None:
             self._goto("switch")
