@@ -3024,6 +3024,28 @@ def synth_characters() -> Dict[str, Any]:
     return {"characters": chars_cn}
 
 
+@app.get("/api/v1/avatar_classes")
+def avatar_classes() -> Dict[str, Any]:
+    """fused_avatar model's ACTUAL cls names — what the detector outputs and
+    schedule.py Case B matches on (the trained 252-class subset, NOT master's
+    308). Read from data/fused_avatar_classes.json (dumped from the .pt
+    model.names; re-dump if the avatar model is retrained). Falls back to
+    master _classes.txt[143:] if the dump is missing."""
+    f = REPO_ROOT / "data" / "fused_avatar_classes.json"
+    if f.exists():
+        try:
+            names = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(names, list) and names:
+                return {"characters": sorted(names)}
+        except Exception:
+            pass
+    master = REPO_ROOT / "data" / "raw_images" / "_classes.txt"
+    if master.exists():
+        lines = [l.strip() for l in master.read_text(encoding="utf-8").splitlines() if l.strip()]
+        return {"characters": sorted(lines[143:])}
+    return {"characters": []}
+
+
 def _synth_apply_ui_overlay(ref_img, ui_components, aug_positions=None):
     """Apply UI overlay aug with optional anchor positions (normalized within
     slot, default to BA-game-like corners).  `aug_positions` is dict like

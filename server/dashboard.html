@@ -315,11 +315,13 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
               <input id="cafe_invite_2f" type="text" style="width:120px" placeholder="例: 白子(骑行)"/>
             </label>
           </div>
-          <div class="check-row" style="gap:8px" title="课程表目标角色（中文名，需与头像模型一致，如 莉央(战斗)）。逗号分隔多个。所有地区满级时只给这些角色排课；留空=用剩余票随机排课。">
-            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">课程表目标</span>
-            <label style="font-size:12px;color:var(--muted)">角色
-              <input id="schedule_target_students" type="text" style="width:240px" placeholder="例: 莉央(战斗), 白子(骑行)"/>
-            </label>
+          <div class="check-row" style="gap:8px;align-items:flex-start" title="课程表目标角色（搜索点选，存的就是头像模型 cls，绝不打错）。所有地区满级时只给这些角色排课；留空=用剩余票随机排课。">
+            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600;margin-top:4px">课程表目标</span>
+            <div style="position:relative;width:280px">
+              <div id="sched_chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:3px"></div>
+              <input id="sched_search" type="text" autocomplete="off" style="width:100%" placeholder="搜索角色名 (如 一花泳装) — 可点选多个" oninput="schedSearch()" onfocus="schedSearch()"/>
+              <div id="sched_dd" style="display:none;position:absolute;z-index:50;left:0;right:0;max-height:180px;overflow:auto;background:#1b1f27;border:1px solid var(--accent);border-radius:4px"></div>
+            </div>
           </div>
         </div>
         <div class="form-row" style="gap:18px;flex-wrap:wrap">
@@ -950,8 +952,8 @@ function fillAgentFromProfile(profile){
   if($('cafe_invite_1f'))$('cafe_invite_1f').value=_cafeInv[0]||'';
   if($('cafe_invite_2f'))$('cafe_invite_2f').value=_cafeInv[1]||'';
   // Schedule target students — 中文角色名 list (matches fused_avatar cls)
-  const _schedTgt = Array.isArray(p.schedule_target_students) ? p.schedule_target_students : [];
-  if($('schedule_target_students'))$('schedule_target_students').value=_schedTgt.join(', ');
+  _schedSel = Array.isArray(p.schedule_target_students) ? p.schedule_target_students.slice() : [];
+  renderSchedChips();
   // Scheduler block (optional, missing on legacy profiles)
   const _sched = (p.scheduler && typeof p.scheduler === 'object') ? p.scheduler : {};
   if($('sched_enabled'))$('sched_enabled').checked=Boolean(_sched.enabled);
@@ -972,14 +974,46 @@ function collectCafeInviteTargets(){
   while(out.length && !out[out.length-1])out.pop();
   return out;
 }
+// Schedule target picker — searchable multi-select over fused_avatar cls (中文
+// cls from /api/v1/synth/characters = master _classes.txt[143:]). Stores the
+// exact cls strings schedule.py Case B matches on — no free-text typos.
+let _SCHED_ALL=[]; let _schedSel=[];
+async function loadSchedChars(){
+  try{ const r=await api('/api/v1/avatar_classes'); _SCHED_ALL=Array.isArray(r&&r.characters)?r.characters:[]; }
+  catch(e){ _SCHED_ALL=[]; }
+}
+function renderSchedChips(){
+  const box=$('sched_chips'); if(!box)return; box.innerHTML='';
+  _schedSel.forEach((name,i)=>{
+    const c=document.createElement('span');
+    c.style.cssText='display:inline-flex;align-items:center;gap:3px;background:var(--accent);color:#000;font-size:11px;padding:1px 6px;border-radius:10px';
+    c.textContent=name;
+    const x=document.createElement('span'); x.textContent='×'; x.title='移除';
+    x.style.cssText='cursor:pointer;font-weight:700;margin-left:2px';
+    x.onclick=()=>{ _schedSel.splice(i,1); renderSchedChips(); };
+    c.appendChild(x); box.appendChild(c);
+  });
+}
+async function schedSearch(){
+  const inp=$('sched_search'), dd=$('sched_dd'); if(!inp||!dd)return;
+  if(!_SCHED_ALL.length) await loadSchedChars();
+  const q=inp.value.trim();
+  const hits=_SCHED_ALL.filter(n=>!_schedSel.includes(n)&&(q===''||n.includes(q))).slice(0,40);
+  if(!hits.length){ dd.style.display='none'; return; }
+  dd.innerHTML='';
+  hits.forEach(n=>{
+    const o=document.createElement('div'); o.textContent=n;
+    o.style.cssText='padding:3px 8px;cursor:pointer;font-size:12px;color:#ddd';
+    o.onmouseenter=()=>o.style.background='var(--accent)'; o.onmouseleave=()=>o.style.background='';
+    o.onclick=()=>{ if(!_schedSel.includes(n))_schedSel.push(n); inp.value=''; renderSchedChips(); schedSearch(); inp.focus(); };
+    dd.appendChild(o);
+  });
+  dd.style.display='block';
+}
+document.addEventListener('click',e=>{ const b=$('sched_dd'),s=$('sched_search'); if(b&&s&&!b.contains(e.target)&&e.target!==s)b.style.display='none'; });
 function collectScheduleTargets(){
-  // Comma-separated 中文角色名; trim blanks + dedup. schedule.py Case B match.
-  const seen=new Set(); const out=[];
-  for(const part of ($('schedule_target_students')?.value||'').split(',')){
-    const name=part.trim();
-    if(name && !seen.has(name)){ seen.add(name); out.push(name); }
-  }
-  return out;
+  // Selected fused_avatar cls (exact strings). schedule.py Case B match.
+  return Array.isArray(_schedSel)?_schedSel.slice():[];
 }
 async function loadServerConfig(){
   const cfg=await api('/api/v1/config');
