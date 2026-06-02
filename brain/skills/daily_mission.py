@@ -37,7 +37,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.30
+_CLS_CONF = 0.20
 # 每日领奖 entry + its red dot live in the lobby's left panel.
 _ENTRY_DOT_REGION = (0.00, 0.30, 0.13, 0.40)
 

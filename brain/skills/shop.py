@@ -40,7 +40,7 @@ from brain.skills import ui_classes as UC
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
-_CLS_CONF = 0.30
+_CLS_CONF = 0.20
 # Center-bottom band where the purchase-confirm 确认键/取消键 sit (probe ~0.79).
 _DIALOG_BAND = (0.28, 0.72, 0.72, 0.90)
 # Default credits to keep in reserve when the dialog total can't be read.
@@ -91,6 +91,7 @@ class ShopSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._select_clicks: int = 0
         self._buy_clicks: int = 0
+        self._balance: Optional[int] = None   # credit balance read on the GRID
         self._purchased: bool = False
         self._budget_logged: bool = False
 
@@ -115,43 +116,26 @@ class ShopSkill(BaseSkill):
             return confirm
         return None
 
-    def _read_budget(self, screen: ScreenState) -> Tuple[Optional[int], Optional[int]]:
-        """(balance, total). Balance from the reliable top-bar credit; total is
-        a best-effort read of the dialog's 總購買價格 via 货币数量显示区域."""
-        balance = None
-        bres = self.read_count(screen, UC.TOPBAR_CREDIT, side="right", span=0.12)
-        if bres is not None:
-            balance = bres[0]
+    def _capture_balance(self, screen: ScreenState) -> None:
+        """Read + cache the credit balance — MUST be called on the GRID view
+        (top bar visible). The confirm DIALOG dims the top bar and BA renders
+        the dialog's 持有數量/總購買價格 with NO YOLO cls (verified 2026-06-02:
+        re-infer @conf0.12 found zero 信用点/货币/货币数量显示区域 in the dialog),
+        so balance can ONLY be read here, not at confirm time."""
+        if self._balance is not None:
+            return
+        res = self.read_count(screen, UC.TOPBAR_CREDIT, side="right", span=0.12)
+        if res is not None:
+            self._balance = res[0]
+            self.log(f"shop credit balance (grid) = {self._balance}")
 
-        total = None
-        if screen.frame is not None:
-            try:
-                from brain.pipeline import run_digit_ocr, parse_count
-                # 货币数量显示区域 boxes inside the dialog (exclude the top bar).
-                areas = self.find_all_cls(
-                    screen, UC.CURRENCY_QTY_AREA, conf=_CLS_CONF,
-                    region=(0.30, 0.30, 0.95, 0.78),
-                )
-                if areas:
-                    # held above, total below → the lowest box is 總購買價格.
-                    tbox = max(areas, key=lambda b: b.cy)
-                    raw = run_digit_ocr(
-                        screen.frame, (tbox.x1, tbox.y1, tbox.x2, tbox.y2)
-                    )
-                    res = parse_count(raw)
-                    if res is not None:
-                        total = res[0]
-            except Exception:
-                pass
-        return balance, total
-
-    def _affordable(self, balance: Optional[int], total: Optional[int]) -> bool:
-        if balance is None:
-            return False  # can't verify → fail safe (never blind-buy)
-        if total is not None:
-            return (balance - total) >= self._reserve
-        # Total unreadable → only buy when balance is comfortably above reserve.
-        return balance >= (self._reserve + _ASSUMED_MAX_TOTAL)
+    def _affordable(self) -> bool:
+        """Buy only when the grid-read balance stays above reserve even after a
+        worst-case purchase (一般-tab totals observed ~3M; 20M ceiling is safe).
+        Balance unread → fail-safe cancel (never blind-buy)."""
+        if self._balance is None:
+            return False
+        return self._balance >= (self._reserve + _ASSUMED_MAX_TOTAL)
 
     # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
@@ -226,6 +210,10 @@ class ShopSkill(BaseSkill):
                 return action_wait(300, "select lost shop → exit")
             return action_wait(400, "waiting for shop UI (select)")
 
+        # Read the credit balance HERE (grid view, top bar visible) — the
+        # confirm dialog dims the top bar so it can't be read there.
+        self._capture_balance(screen)
+
         # Nothing to buy / already bought today.
         if self.find_cls(screen, UC.SHOP_SELECT_ALL_GREY, conf=_CLS_CONF) is not None:
             self.log("全部选择灰 → nothing to buy / done, exiting")
@@ -293,13 +281,16 @@ class ShopSkill(BaseSkill):
                 return action_wait(300, "confirm dialog gone → exit")
             return action_wait(300, "waiting for confirm dialog")
 
-        balance, total = self._read_budget(screen)
+        # Try one more balance read in case the dialog left the top bar visible
+        # (mostly it won't — the grid-view read in _select is the real source).
+        self._capture_balance(screen)
         if not self._budget_logged:
-            self.log(f"budget: balance={balance} total={total} reserve={self._reserve:,}")
+            self.log(f"budget: balance={self._balance} reserve={self._reserve:,} "
+                     f"ceiling={_ASSUMED_MAX_TOTAL:,}")
             self._budget_logged = True
 
-        if self._affordable(balance, total):
-            self.log("affordable (≥reserve) → confirm purchase (credits)")
+        if self._affordable():
+            self.log("affordable (balance ≥ reserve+ceiling) → confirm (credits)")
             self._purchased = True
             self._goto("exit")
             return action_click_box(confirm, "confirm shop purchase (within budget)")

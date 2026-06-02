@@ -37,7 +37,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.30
+_CLS_CONF = 0.20
 # A 青辉石 icon in this body band = buy dialog (NOT top-bar balance at cy<0.10).
 _PYROXENE_BODY_REGION = (0.30, 0.16, 0.75, 0.48)
 # Centered result 确认键 band (戰鬥結果 / 達成賽季最高紀錄).

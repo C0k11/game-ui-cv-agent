@@ -37,7 +37,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.30
+_CLS_CONF = 0.20
 # Center-bottom band where craft confirm / 立即完成 dialogs put 确认键/取消键
 # (probe: y≈0.70 for both the start-confirm and the券-rush dialog).
 _DIALOG_BAND = (0.28, 0.60, 0.72, 0.82)
@@ -142,7 +142,25 @@ class CraftSkill(BaseSkill):
             if act is not None:
                 self._entered = True
                 return act
-            self.log("on lobby but no 制造入口 — YOLO gap; waiting")
+            # NAV_CRAFT (制造入口) is weak (16f) and flickers below threshold on
+            # live frames (verified 2026-06-02: missed all 90 ticks while shop/
+            # social detected fine). Fall back to its FIXED bottom-nav slot:
+            # order is …社交·制造·商店·招募, evenly spaced ~0.092. Anchor on the
+            # reliably-detected 商店入口 (craft = one slot LEFT) or 社交入口.
+            shop = self.find_cls(screen, UC.NAV_SHOP, conf=_CLS_CONF)
+            if shop is not None:
+                self._entered = True
+                self.log("制造入口 missed → adjacent fallback (shop − 1 slot)")
+                return action_click(max(0.05, shop.cx - 0.092), shop.cy, "open craft (adjacent to shop)")
+            social = self.find_cls(screen, UC.NAV_SOCIAL, conf=_CLS_CONF)
+            if social is not None:
+                self._entered = True
+                self.log("制造入口 missed → adjacent fallback (social + 1 slot)")
+                return action_click(min(0.95, social.cx + 0.094), social.cy, "open craft (adjacent to social)")
+            if self._phase_ticks > _ENTER_MAX:
+                self.log("制造入口 + adjacency unavailable → give up")
+                return action_done("craft entry unreachable")
+            self.log("on lobby but no 制造入口/邻位 — waiting")
             return action_wait(400, "waiting for 制造入口 cls")
 
         if self._phase_ticks > _ENTER_MAX:

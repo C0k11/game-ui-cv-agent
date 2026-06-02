@@ -1010,11 +1010,16 @@ class BaseSkill(ABC):
                 dots.append(b)
         if not entries:
             return True  # not on lobby (entry not visible) → defer
+        # Margin: red/yellow badges sit at the entry's TOP-RIGHT corner, often
+        # a hair OUTSIDE the icon bbox. A strict inside-bbox test false-skips
+        # (live 2026-06-02: cafe/schedule yellow dots present but skipped). Allow
+        # a small expansion so a badge near the entry counts.
+        mx, my = 0.03, 0.06
         for d in dots:
             dcx = (d.x1 + d.x2) / 2
             dcy = (d.y1 + d.y2) / 2
             for e in entries:
-                if e.x1 <= dcx <= e.x2 and e.y1 <= dcy <= e.y2:
+                if (e.x1 - mx) <= dcx <= (e.x2 + mx) and (e.y1 - my) <= dcy <= (e.y2 + my):
                     return True
         return False  # entry visible, no dot → no work
 

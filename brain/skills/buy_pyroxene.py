@@ -40,7 +40,7 @@ from brain.skills.base import (
 from brain.skills import ui_classes as UC
 
 # ── tuning knobs ─────────────────────────────────────────────────────────
-_CLS_CONF = 0.30              # default UI cls confidence floor
+_CLS_CONF = 0.20              # default UI cls confidence floor
 
 # Purchase-confirm dialog button band (确认键 / 取消键 sit center-bottom ~y0.82).
 _DIALOG_BAND = (0.28, 0.74, 0.72, 0.92)

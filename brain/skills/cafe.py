@@ -51,7 +51,7 @@ _CAFE_STATE_FILE = _DATA_DIR / "cafe_state.json"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
 # ── tuning knobs ─────────────────────────────────────────────────────────
-_CLS_CONF = 0.30            # default UI cls confidence floor
+_CLS_CONF = 0.20            # default UI cls confidence floor
 _EMOTICON_CONF = 0.55       # headpat marker (emoticon model) — probe-confirmed
 _AVATAR_CONF = 0.25         # fused_avatar row-head confidence (registry default)
 _HEADPAT_DX = 0.025         # click this much right of the bubble = student body

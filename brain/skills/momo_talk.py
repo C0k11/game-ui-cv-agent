@@ -36,7 +36,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.30
+_CLS_CONF = 0.20
 _UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
 _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
 _STABLE_EMPTY = 4          # consecutive empty frames ⇒ student conversation done

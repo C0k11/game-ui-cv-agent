@@ -297,7 +297,14 @@ def _get_yolo():
         # conf 0.30 = lower threshold since UI bbox quality is high but some
         # minority classes need slack.  Tagged "ui" — most skills will need this.
         if _YOLO_UI_V1.is_file():
-            candidates.append((_YOLO_UI_V1, 0.30, "ui"))
+            # 0.15 floor (was 0.30): probe ran at conf 0.20 and the skills were
+            # designed against THAT detection sensitivity. Live @0.30 dropped
+            # weak/flickery cls (免费 0.13-0.34, 制造入口 0.43→<0.30 on noisier
+            # live frames, 货币), so skills fell through to their bail branches
+            # ("already claimed"/"no entry"/"can't read budget"). 0.15 surfaces
+            # them; per-skill find_cls(conf=0.20) re-filters. Money paths stay
+            # safe via structural gates (2-button confirm + 免费/币种 checks).
+            candidates.append((_YOLO_UI_V1, 0.15, "ui"))
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
