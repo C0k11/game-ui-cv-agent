@@ -333,6 +333,36 @@ class CafeSkill(BaseSkill):
             self._begin_invite(floor_2=False)
             return action_wait(300, "earnings done → invite")
 
+        # ★ FIRST, regardless of _is_cafe: the earnings POPUP covers the cafe
+        # page signature (detect_screen_yolo!="Cafe" while it's open), so the
+        # claim MUST be checked before any _is_cafe gate — otherwise the bot
+        # opens the popup then freezes "waiting for cafe UI" (live 2026-06-02:
+        # 领取_黄 @0.5,0.732 sat unclaimed for 17 ticks). The active-claim cls in
+        # the centered band = the popup is open.
+        _CLAIM_BAND = (0.28, 0.50, 0.74, 0.90)
+        claim_active = self.find_cls(
+            screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE],
+            conf=_CLS_CONF, region=_CLAIM_BAND,
+        )
+        if claim_active is not None:
+            self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
+            self._earnings_done = True
+            return action_click_box(claim_active, "claim earnings")
+        claim_grey = self.find_cls(
+            screen, [UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
+            conf=_CLS_CONF, region=_CLAIM_BAND,
+        )
+        if claim_grey is not None:
+            # Popup open, nothing to collect (0% / already claimed) → close.
+            self.log("earnings claim greyed → nothing to claim, closing popup")
+            self._earnings_done = True
+            close = self._close_x(screen)
+            if close is not None:
+                return action_click_box(close, "close earnings popup (nothing)")
+            self._begin_invite(floor_2=False)
+            return action_wait(300, "earnings nothing → invite")
+
+        # No claim button visible → we're not in the popup. Need cafe main.
         if not self._is_cafe(screen):
             if screen.is_lobby():
                 self.log("earnings: on lobby, re-entering")
@@ -344,34 +374,6 @@ class CafeSkill(BaseSkill):
                 self._earnings_done = True
                 return action_wait(300, "earnings skip (no cafe)")
             return action_wait(500, "waiting for cafe UI (earnings)")
-
-        _CLAIM_BAND = (0.30, 0.58, 0.70, 0.86)
-        claim_active = self.find_cls(
-            screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE],
-            conf=_CLS_CONF, region=_CLAIM_BAND,
-        )
-        claim_grey = self.find_cls(
-            screen, [UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
-            conf=_CLS_CONF, region=_CLAIM_BAND,
-        )
-        label_leak = self.find_cls(
-            screen, UC.CAFE_EARNINGS, conf=_CLS_CONF, region=(0.30, 0.04, 0.70, 0.40)
-        )
-        popup_open = claim_active is not None or claim_grey is not None or label_leak is not None
-
-        if popup_open:
-            if claim_active is not None:
-                self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
-                self._earnings_done = True
-                return action_click_box(claim_active, "claim earnings")
-            # Grey / no claim cls ⇒ nothing to collect (0% or done) → close.
-            self.log("earnings claim greyed / absent → nothing to claim, closing")
-            self._earnings_done = True
-            close = self._close_x(screen)
-            if close is not None:
-                return action_click_box(close, "close earnings popup (nothing to claim)")
-            self._begin_invite(floor_2=False)
-            return action_wait(300, "earnings nothing to claim → invite")
 
         # Cafe main screen: open the earnings popup via CAFE_EARNINGS cls.
         earn = self.find_cls(screen, UC.CAFE_EARNINGS, conf=_CLS_CONF)
