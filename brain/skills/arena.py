@@ -43,8 +43,12 @@ _PYROXENE_BODY_REGION = (0.30, 0.16, 0.75, 0.48)
 # Centered result 确认键 band (戰鬥結果 / 達成賽季最高紀錄).
 _RESULT_BAND = (0.32, 0.55, 0.68, 0.85)
 
-_MAX_FIGHTS = 5            # daily arena ticket cap (safety bound)
-_COOLDOWN_TICKS = 34       # ~25-30s 等待時間 between fights (blind; v6: OCR mm:ss)
+_MAX_FIGHTS = 5            # daily arena ticket cap (must complete all 5)
+# ~25s 等待時間 between fights. Blind wait @1s/tick (+~0.15s capture/infer) so the
+# cooldown bar clears before re-selecting (else the opponent row is greyed /
+# unclickable → select spins → false exit). If it still spins, _select re-enters
+# cooldown for one more round. v6 could OCR the mm:ss countdown.
+_COOLDOWN_TICKS = 22
 
 _ENTER_MAX = 24
 _CLAIM_MAX = 12
@@ -68,7 +72,9 @@ class ArenaSkill(BaseSkill):
         self._cooldown: int = 0
         self._fight_stage: int = 0          # 0=對戰對象 1=编队 2=battle
         self._fight_ticks: int = 0
+        self._stage_settle: int = 0         # blind wait after each click (page transition)
         self._select_attempts: int = 0
+        self._select_rounds: int = 0        # extra-cooldown retries when select spins
         self._result_pending: bool = False
         self._tickets: Optional[int] = None
 
@@ -248,10 +254,11 @@ class ArenaSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "fight cap → exit")
 
-        # Cooldown between fights (~25s 等待時間).
+        # Cooldown between fights (~25s 等待時間). Wait it out fully — selecting an
+        # opponent mid-cooldown does nothing (greyed row) and burns select attempts.
         if self._fights_done > 0 and self._cooldown < _COOLDOWN_TICKS:
             self._cooldown += 1
-            return action_wait(800, f"arena cooldown {self._cooldown}/{_COOLDOWN_TICKS}")
+            return action_wait(1000, f"arena cooldown {self._cooldown}/{_COOLDOWN_TICKS} (~25s)")
 
         if self._on_arena(screen):
             self._goto("select")
@@ -269,6 +276,16 @@ class ArenaSkill(BaseSkill):
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
         self._select_attempts += 1
         if self._select_attempts > 8:
+            # Between fights a spin usually means the cooldown bar hadn't fully
+            # cleared (greyed opponent row). Re-enter cooldown for one more round
+            # rather than falsely ending arena early (we must finish all 5).
+            if self._fights_done < _MAX_FIGHTS and self._select_rounds < 2:
+                self._select_rounds += 1
+                self._select_attempts = 0
+                self._cooldown = 0
+                self.log(f"select spun → extra cooldown (round {self._select_rounds})")
+                self._goto("fight_check")
+                return action_wait(400, "select spun → re-cooldown")
             self.log("opponent select failed → exit")
             self._goto("exit")
             return action_wait(300, "select failed → exit")
@@ -282,10 +299,18 @@ class ArenaSkill(BaseSkill):
         self.log(f"select top opponent ({top.cx:.2f},{top.cy:.2f}) of {len(rows)}")
         self._fight_stage = 0
         self._fight_ticks = 0
+        self._stage_settle = 3          # let 對戰對象 popup finish opening
         self._goto("fight")
         return action_click_box(top, "select top opponent")
 
     def _fight(self, screen: ScreenState) -> Dict[str, Any]:
+        # ★ Blind settle after every click — give the page time to transition
+        # before reading it. Without this we act on a stale/animating frame and
+        # the click looks like it "did nothing" (点了没反应 → 误判重选/空点).
+        if self._stage_settle > 0:
+            self._stage_settle -= 1
+            return action_wait(700, f"stage {self._fight_stage} 转场 ({self._stage_settle} left)")
+
         self._fight_ticks += 1
         # Battle (stage2) can run a while; nav stages are short.
         max_t = 60 if self._fight_stage >= 2 else 30
@@ -294,17 +319,21 @@ class ArenaSkill(BaseSkill):
             self._goto("fight_check")
             return action_back("fight timeout")
 
-        # Stage 0: 對戰對象 popup → 攻击编制.
+        # Stage 0: 對戰對象 popup → 攻击编制. The popup needs real transition
+        # time; be patient (don't re-select early and interrupt it opening).
         if self._fight_stage == 0:
             af = self.find_cls(screen, UC.ATTACK_FORMATION, conf=_CLS_CONF)
             if af is not None:
+                self.log("對戰對象 open → click 攻击编制")
                 self._fight_stage = 1
                 self._select_attempts = 0
+                self._select_rounds = 0     # select succeeded → reset retry budget
+                self._stage_settle = 4      # 编队屏 loads characters → slowest screen
                 return action_click_box(af, "click 攻击编制")
-            if self._fight_ticks > 4 and self._on_arena(screen):
+            if self._fight_ticks > 10 and self._on_arena(screen):
                 self._goto("select")
-                return action_wait(300, "對戰對象 didn't open → re-select")
-            return action_wait(450, "waiting for 對戰對象 popup")
+                return action_wait(400, "對戰對象 didn't open after 10t → re-select")
+            return action_wait(650, "waiting for 對戰對象 popup (transition)")
 
         # Stage 1: 编队屏 → 出击 (no skip toggle; arena auto-resolves).
         if self._fight_stage == 1:
@@ -312,8 +341,10 @@ class ArenaSkill(BaseSkill):
             if sortie is not None:
                 self.log("click 出击 (auto-battle)")
                 self._fight_stage = 2
+                self._fight_ticks = 0       # time the battle itself, not the nav
+                self._stage_settle = 2      # battle intro transition
                 return action_click_box(sortie, "sortie (出击)")
-            return action_wait(450, "waiting for 出击")
+            return action_wait(650, "waiting for 出击 (编队屏 loading)")
 
         # Stage 2: auto-battle. Result dialogs handled in tick(). If we're back
         # on a clean arena main (result auto-dismissed), count + continue.
