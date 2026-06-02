@@ -29,6 +29,7 @@ from brain.skills.cafe import CafeSkill
 from brain.skills.schedule import ScheduleSkill
 from brain.skills.club import ClubSkill
 from brain.skills.bounty import BountySkill
+from brain.skills.jfd import JointFiringDrillSkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
 # event_farming + event_shop merged into event_activity (刷活动).
@@ -818,6 +819,7 @@ class DailyPipeline:
         # ── Battle / sweep skills (explicit user control) ──
         "campaign_sweep",   # 1.  One-tap sweep of tickets (bounty/arena/event)
         "bounty",           # 2.  Sweep bounty tickets (if not covered by sweep)
+        "jfd",              # 2b. 学院交流会 ticket sweep (tickets + AP)
         "arena",            # 3.  PvP fights + claim rewards
         # ── Daily harvest (all bundled) ──
         # Cycles through mail / event_activity / cafe / schedule / club /
@@ -862,6 +864,7 @@ class DailyPipeline:
             "story_mining": StoryMiningSkill(),
             "event_activity": self._make_event_activity(opts),
             "bounty": BountySkill(),
+            "jfd": JointFiringDrillSkill(),
             "arena": ArenaSkill(),
             "ap_planning": ApPlanningSkill(
                 forbid_premium_currency=forbid_premium_currency,
@@ -1004,6 +1007,7 @@ class DailyPipeline:
         "Mail":       "mail",
         "DailyTasks": "daily_tasks_nav",
         "Bounty":     "campaign_nav",
+        "JointFiringDrill": "campaign_nav",
         "Arena":      "campaign_nav",
     }
 
