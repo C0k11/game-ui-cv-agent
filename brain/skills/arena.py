@@ -88,8 +88,29 @@ class ArenaSkill(BaseSkill):
         ) is not None
 
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
-        res = self.read_count(screen, UC.TICKET_ARENA, side="right", span=0.10)
-        return res[0] if res is not None else None
+        """digit-OCR 持有票券 X/5 next to the arena ticket icon (LEFT panel,
+        ~0.055,0.678 — NOT the top bar). ★ money defense #1 (0 → stop, never the
+        buy-ticket-pyroxene trap). read_count's generic strip clipped the first
+        digit → None (live 2026-06-02: ticket unread → kept retrying fights at
+        0 tickets). Anchor on the icon + OCR a tighter-left strip."""
+        if screen.frame is None:
+            return None
+        icon = self.find_cls(screen, UC.TICKET_ARENA, conf=_CLS_CONF,
+                             region=(0.0, 0.58, 0.22, 0.78))
+        if icon is None:
+            return None
+        try:
+            from brain.pipeline import run_digit_ocr, parse_count
+        except Exception:
+            return None
+        bh = icon.y2 - icon.y1
+        x1 = max(0.0, icon.x2 + 0.002)
+        x2 = min(1.0, x1 + 0.11)
+        raw = run_digit_ocr(screen.frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
+        res = parse_count(raw)
+        if res is None or res[0] is None:
+            return None
+        return res[0]
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
         """A 青辉石 icon in the body AND a 取消键 = a buy-ticket cost dialog
