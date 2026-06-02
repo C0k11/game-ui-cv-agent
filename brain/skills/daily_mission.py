@@ -43,6 +43,7 @@ _ENTRY_DOT_REGION = (0.00, 0.30, 0.13, 0.40)
 
 _ENTER_MAX = 20
 _CLAIM_ALL_MAX = 26
+_NO_YELLOW_DONE = 5     # consecutive ticks w/ no 全部领取_黄 (no grey/popup) = batch drained
 _CLAIM_SINGLE_MAX = 20
 _EXIT_MAX = 14
 
@@ -76,6 +77,7 @@ class DailyMissionSkill(BaseSkill):
         self._entered: bool = False
         self._all_claims: int = 0
         self._single_claims: int = 0
+        self._no_yellow: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -161,15 +163,30 @@ class DailyMissionSkill(BaseSkill):
         claim_all = self.find_cls(screen, UC.CLAIM_ALL_YELLOW, conf=_CLS_CONF)
         if claim_all is not None:
             self._all_claims += 1
+            self._no_yellow = 0
             self.log(f"全部领取_黄 (#{self._all_claims})")
             return action_click_box(claim_all, "claim all daily-mission rewards")
 
-        # Claim-all greyed → batch rewards done; sweep remaining single claims.
-        if self.find_cls(screen, [UC.CLAIM_ALL_GREY, UC.CLAIM_ONEKEY_GREY], conf=_CLS_CONF) is not None \
-                or self._phase_ticks > _CLAIM_ALL_MAX:
-            self.log("全部领取 greyed (or budget) → claim_single")
+        # Claim-all greyed → batch done. (全部领取_灰 cls is weak/may be absent.)
+        if self.find_cls(screen, [UC.CLAIM_ALL_GREY, UC.CLAIM_ONEKEY_GREY], conf=_CLS_CONF) is not None:
+            self.log("全部领取_灰 → claim_single")
             self._goto("claim_single")
-            return action_wait(250, "claim-all done → single")
+            return action_wait(250, "claim-all greyed → single")
+
+        # Claimed ≥1 batch and now several ticks with no 黄 (reward popups return
+        # earlier in tick(), so these are real empty frames) = batch drained.
+        # Don't sit in a 20+ tick STUCK freeze waiting for a yellow that's gone.
+        self._no_yellow += 1
+        if self._no_yellow >= _NO_YELLOW_DONE:
+            self.log(f"连续{self._no_yellow}拍无全部领取_黄(领空/无可领) → claim_single")
+            self._goto("claim_single")
+            return action_wait(250, "no more 全部领取_黄 → single")
+
+        # Total budget backstop.
+        if self._phase_ticks > _CLAIM_ALL_MAX:
+            self.log("claim_all budget → claim_single")
+            self._goto("claim_single")
+            return action_wait(250, "claim-all budget → single")
         return action_wait(400, "waiting for 全部领取_黄")
 
     def _claim_single(self, screen: ScreenState) -> Dict[str, Any]:
