@@ -38,6 +38,7 @@ from brain.skills.daily_tasks import DailyTasksSkill
 from brain.skills.shop import ShopSkill
 from brain.skills.craft import CraftSkill
 from brain.skills.buy_pyroxene import BuyPyroxeneSkill
+from brain.skills.daily_mission import DailyMissionSkill
 from brain.skills.momo_talk import MomoTalkSkill
 from brain.skills.event_activity import EventActivitySkill
 from brain.skills.pass_reward import PassRewardSkill
@@ -872,6 +873,7 @@ class DailyPipeline:
             ),
             "mail": MailSkill(),
             "daily_tasks": DailyTasksSkill(),
+            "daily_mission": DailyMissionSkill(),   # rewrite of daily_tasks (probe-driven)
             "pass_reward": PassRewardSkill(),
             "campaign_sweep": CampaignSweepSkill(),
             # Single dispatcher for all daily-harvest sub-flows

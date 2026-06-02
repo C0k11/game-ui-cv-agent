@@ -57,6 +57,7 @@ class DailyRoutineSkill(BaseSkill):
         from brain.skills.story_mining import StoryMiningSkill
         from brain.skills.shop import ShopSkill
         from brain.skills.ap_planning import ApPlanningSkill
+        from brain.skills.daily_mission import DailyMissionSkill
 
         # Order matters — runs top to bottom.
         # `force_run` = True means skip the dot check entirely (always enter).
@@ -77,6 +78,9 @@ class DailyRoutineSkill(BaseSkill):
             (StoryMiningSkill(), False),     # 主线挖矿
             (ShopSkill(), False),            # 普通商店日购
             (ApPlanningSkill(), True),       # 补给/免费AP — 总是 check
+            # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。probe重写,
+            # 取代旧 DailyTasksSkill(mid-list)；老的待用户验证后删。
+            (DailyMissionSkill(), False),    # 每日任务领奖(收口,最后)
         ]
         self._cur_idx: int = 0
         self._cur_started: bool = False
