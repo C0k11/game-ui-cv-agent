@@ -56,6 +56,11 @@ _FREE_COL_DX = 0.10
 # the free pack is NOT yet claimed today (probe: clears after claiming). Used to
 # tell "FREE flickering, keep polling" from "genuinely claimed".
 _COMBO_DOT_REGION = (0.74, 0.14, 0.90, 0.30)
+# CONTENT-area red dot = the badge that sits ON the free (unclaimed) pack
+# (probe: 红点 ~0.39,0.32 over the free pack). Excludes the tab dot (cx>0.78),
+# top bar (cy<0.10) and the page-arrow dot (cx>0.95). 红点 is a strong cls
+# (0.9+) → robust free-pack locator when the weak 免费(14f) cls flickers out.
+_CONTENT_DOT_REGION = (0.20, 0.25, 0.76, 0.50)
 _BUY_FREE_POLL = 14          # poll this many ticks for the flickery 免费 cls
 
 # Per-sub-state tick budgets — every phase is bounded, never dead-waits.
@@ -135,14 +140,26 @@ class BuyPyroxeneSkill(BaseSkill):
         when no FREE label is on screen (pack already claimed today) OR no 购买
         sits under it. This is the SOLE purchase path — a 购买 with no FREE
         above it is a CAD pack and is never returned."""
-        free = self.find_cls(screen, UC.FREE, conf=_FREE_CONF)
-        if free is None:
-            return None
         buys = self.find_all_cls(screen, UC.SHOP_BUY, conf=_CLS_CONF)
-        cands = [b for b in buys if b.cy > free.cy and abs(b.cx - free.cx) < _FREE_COL_DX]
-        if not cands:
+        if not buys:
             return None
-        return min(cands, key=lambda b: abs(b.cx - free.cx))
+        # Primary: pair the 免费 label with the 购买 directly below it (same col).
+        free = self.find_cls(screen, UC.FREE, conf=_FREE_CONF)
+        if free is not None:
+            cands = [b for b in buys if b.cy > free.cy and abs(b.cx - free.cx) < _FREE_COL_DX]
+            if cands:
+                return min(cands, key=lambda b: abs(b.cx - free.cx))
+        # Fallback (免费 14f flickers out): the free/unclaimed pack carries a
+        # CONTENT red-dot badge (strong cls). Pick the 购买 nearest-below it.
+        # SAFE: the confirm dialog still REQUIRES 免费 → a CAD pack can never be
+        # bought even if this mis-selects.
+        cdot = self.find_cls(screen, UC.DOT_RED, conf=0.40, region=_CONTENT_DOT_REGION)
+        if cdot is not None:
+            cands = [b for b in buys if b.cy > cdot.cy and abs(b.cx - cdot.cx) < 0.14]
+            if cands:
+                self.log("免费 not detected → free-pack via content 红点 badge")
+                return min(cands, key=lambda b: abs(b.cx - cdot.cx))
+        return None
 
     def _close_x(self, screen: ScreenState) -> Optional[YoloBox]:
         return self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF,

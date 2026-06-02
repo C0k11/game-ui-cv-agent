@@ -297,12 +297,13 @@ def _get_yolo():
         # conf 0.30 = lower threshold since UI bbox quality is high but some
         # minority classes need slack.  Tagged "ui" — most skills will need this.
         if _YOLO_UI_V1.is_file():
-            # 0.30: v5 detects the vast majority of cls at 0.9+ @imgsz960 on a
-            # SETTLED frame. The earlier 0.15 experiment was the wrong fix — the
-            # live misses were from reading TRANSITION/animation frames (weak cls
-            # 免费 14f / 制造入口 16f flicker there) + clicks hammered without
-            # letting the UI open. Fix is pacing (settle after click), not conf.
-            candidates.append((_YOLO_UI_V1, 0.30, "ui"))
+            # 0.20 — within the dashboard's own prefill range (server/app.py:
+            # single-frame suggest 0.15, batch prefill 0.25), the settings the
+            # user verifies cls against. Live at 0.30 dropped weak cls the
+            # dashboard catches (免费 14f live ~0.18-0.30). Strong cls (0.9+)
+            # unaffected. Skills still gate money paths structurally (2-button
+            # confirm + 免费/币种 checks), so a lower floor doesn't risk spend.
+            candidates.append((_YOLO_UI_V1, 0.20, "ui"))
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
