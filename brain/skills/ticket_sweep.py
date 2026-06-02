@@ -129,8 +129,29 @@ class TicketSweepSkill(BaseSkill):
         return False
 
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
-        res = self.read_count(screen, self._TICKET_CLS, side="right", span=0.10)
-        if res is None:
+        """digit-OCR the 持有票券 X/Y next to the ticket icon. ★ money defense #1
+        (0 tickets ⇒ never sortie → never the buy-pyroxene trap), so the read
+        must be robust. read_count's generic strip (x-start = icon.x2 + 0.005)
+        clipped the first digit on live frames → None (live 2026-06-02: bounty
+        read None 8× then fell through to the guarded path). Anchor on the
+        top-left ticket badge + OCR a tighter-left, wider strip (verified: span
+        0.11 from icon.x2+0.002 → '6/6')."""
+        if screen.frame is None:
+            return None
+        icon = self.find_cls(screen, self._TICKET_CLS, conf=_CLS_CONF,
+                             region=(0.0, 0.04, 0.26, 0.36))
+        if icon is None:
+            return None
+        try:
+            from brain.pipeline import run_digit_ocr, parse_count
+        except Exception:
+            return None
+        bh = icon.y2 - icon.y1
+        x1 = max(0.0, icon.x2 + 0.002)
+        x2 = min(1.0, x1 + 0.11)
+        raw = run_digit_ocr(screen.frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
+        res = parse_count(raw)
+        if res is None or res[0] is None:
             return None
         return res[0]
 
