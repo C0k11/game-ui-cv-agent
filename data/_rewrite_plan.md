@@ -4,6 +4,27 @@
 > 本 doc = 总纲；每个 skill 的**点击 spec 看对应 `data/_*_probe_log.md`**。
 > compact 后直接照此 + 各 MD 实现。
 
+## ✅ 实现进度 (2026-06-02, commit 3b0a176→c1dfbbc)
+全部 11 个新 skill 已**写完+编译+接 pipeline+整管线实例化通过**：
+1. ✅ buy_pyroxene(新) 2. ✅ mail(重写) 3. ✅ craft(重写) 4. ✅ club(重写)
+5. ✅ shop(重写,动态OCR预算) 6. ✅ bounty(重写→TicketSweepSkill基类)
+7. ✅ jfd(新→TicketSweepSkill) 8. ✅ arena(重写,全自动PVP) 9. ✅ daily_mission(新,取代daily_tasks)
+10. ✅ momo_talk(重写) 11. ✅ story_mining(重写,含主线3级钻取)
++ ticket_sweep.py(基类) + ui_classes 补 v5 缺的 cls(选择购买450/信用点商店54/青辉石商店61/
+  货币数量显示区域104/已全部选择402/一键领取灰415/MomoTalk聊天tab 448·449/剧情new 428)。
+daily_routine plan 重排: BuyPyroxene→Club→Craft→Shop→Cafe→Schedule→(DailyTasks旧)→
+  PassReward→MomoTalk→StoryMining→ApPlanning→Mail(收口)→DailyMission(末)。
+
+### ⏳ 待用户 probe 验证 → 然后做的收尾
+- **逐个 live 验证**(用户带跑/probe)：尤其 club红点偏移开卡 / shop动态预算OCR读数 /
+  bounty·jfd分支选择(jfd位置点击) / arena冷却+結果轮询 / momo发送信息中节拍 / story主线3级钻取+翻页。
+- **删旧文件**(验证后)：daily_tasks.py(→daily_mission) · ap_planning.py · event_activity.py ·
+  event_progress.py · pass_reward.py · story_progress.py · campaign_sweep.py(若bounty/arena独立入口够用)。
+  删时同步清 pipeline registry/DEFAULT_SKILLS/daily_routine plan 引用。
+- **dashboard 配置接线**：shop_credit_reserve · jfd_academy(三一/格黑娜/千年) — 仿 schedule_target_students。
+- **训练 v6**：见下"待补 cls"(jfd学院tile/活動進行中/制造空槽/arena等待時間/社團卡 等)。
+- ⚠️ story 主线可能含**战斗节点**(无剧情menu)→现靠cutscene timeout退出,v6 加战斗节点处理。
+
 ## 目标
 删旧 OCR 时代 skill + 据 probe MD 写**全新纯-YOLO「状态→点击」skill**。
 模板 = 已重写干净的 `brain/skills/cafe.py` + `schedule.py`（照它们的风格）。

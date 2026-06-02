@@ -66,18 +66,20 @@ class DailyRoutineSkill(BaseSkill):
         self._plan: List[Tuple[BaseSkill, bool]] = [
             # (skill_instance, force_run)
             (BuyPyroxeneSkill(), False),     # 购买青辉石 免费组合包 — 红点才进 (第1)
-            (MailSkill(), False),            # 邮件 — 红点才进
             # (EventActivitySkill(), False),   # 活动 — 周年庆反常临时跳过
+            (ClubSkill(), False),            # 社交 — 红点才进 (10AP→信箱)
+            (CraftSkill(), True),            # 制造 — ALWAYS enter (user spec)
+            (ShopSkill(), False),            # 普通商店日购(动态预算)
             (CafeSkill(), False),            # cafe — 收益/邀请/摸头 dot
             (ScheduleSkill(), False),        # 课程表 — 黄点才进
-            (ClubSkill(), False),            # 社交 — 红点才进 (AP)
-            (DailyTasksSkill(), False),      # 任务大厅 — 红点
-            (CraftSkill(), True),            # 制造 — ALWAYS enter (user spec)
+            (DailyTasksSkill(), False),      # 任务大厅 — 红点(旧;待删,daily_mission取代)
             (PassRewardSkill(), False),      # 战令 — 红点
-            (MomoTalkSkill(), False),        # MomoTalk — 红/黄点
-            (StoryMiningSkill(), False),     # 主线挖矿
-            (ShopSkill(), False),            # 普通商店日购
+            (MomoTalkSkill(), False),        # MomoTalk 挖矿 — 红/黄点
+            (StoryMiningSkill(), False),     # 剧情挖矿(主线/短篇/支线)
             (ApPlanningSkill(), True),       # 补给/免费AP — 总是 check
+            # mail 是收口：bounty/jfd/arena/club 奖励都汇入信箱 → 放挖矿后、
+            # daily_mission前,确保本轮所有奖励都领到(probe: mail最后跑)。
+            (MailSkill(), False),            # 邮件收口 — 红点才进
             # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。probe重写,
             # 取代旧 DailyTasksSkill(mid-list)；老的待用户验证后删。
             (DailyMissionSkill(), False),    # 每日任务领奖(收口,最后)
