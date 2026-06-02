@@ -613,6 +613,14 @@ def main() -> None:
 
             # Auto-exit a few seconds after the pipeline completes (so single-
             # skill test runs don't leave an idle overlay window behind).
+            # ROBUST completion = no current skill. The pipeline does NOT clear
+            # is_running when a finite skill list finishes (current_skill just
+            # goes None as _current_idx passes the last skill), so the earlier
+            # `not pipe.is_running` check never fired → 3-4 orphan windows piled
+            # up (live 2026-06-02).
+            if pipe_done_at is None and pipe.current_skill is None:
+                print("[Info] Pipeline complete (no current skill) — auto-exit soon.")
+                pipe_done_at = time.perf_counter()
             if pipe_done_at is not None and (time.perf_counter() - pipe_done_at) > 4.0:
                 print("[Info] Auto-exit after completion.")
                 break
