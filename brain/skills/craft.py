@@ -33,7 +33,7 @@ from typing import Any, Dict, Optional
 
 from brain.skills.base import (
     BaseSkill, ScreenState, YoloBox,
-    action_click_box, action_wait, action_back, action_done,
+    action_click, action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
