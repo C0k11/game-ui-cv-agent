@@ -83,6 +83,10 @@ _ENTER_MAX = 25
 _NAVIGATE_MAX = 14
 _ROSTER_MAX = 18
 _OPEN_ROOM_MAX = 12
+# Reaction time: after clicking a room head, the 課程表資訊 info popup takes
+# ~1-2s to open. Wait this many ticks for it (tick() PRIORITY 2 catches
+# SCHED_START) before concluding the click failed (user: 给点击反应时间).
+_OPEN_ROOM_SETTLE = 4
 _SWITCH_MAX = 12
 _EXIT_MAX = 14
 # Reaction time: before concluding a region has "no room/target", re-scan this
@@ -330,29 +334,17 @@ class ScheduleSkill(BaseSkill):
                 return h.cls_name
         return None
 
-    def _room_done(self, room: List[YoloBox], greens: List[YoloBox]) -> bool:
-        """True if this room's lesson was already run = a 绿勾 (GREEN_CHECK)
-        overlays any head in the room (probe: 绿勾=已上课, skip the room). This
-        is the PERSISTENT done signal — survives across runs same-day, unlike
-        the session-only _room_already_clicked proximity dedup."""
-        for h in room:
-            for g in greens:
-                if h.x1 <= g.cx <= h.x2 and h.y1 <= g.cy <= h.y2:
-                    return True
-        return False
-
     def _pick_room(self, screen: ScreenState, rooms: List[List[YoloBox]]) -> Tuple[
             Optional[List[YoloBox]], str]:
-        """Choose the next room to dispatch. Skips rooms already done (绿勾) or
-        clicked this session. Case A (locks) = fill every remaining room to
-        upgrade the region; Case B (no locks) = only rooms with a target."""
-        greens = self.find_all_cls(screen, UC.GREEN_CHECK, conf=_CLS_CONF)
-        candidates = [
-            r for r in rooms
-            if not self._room_done(r, greens) and not self._room_already_clicked(r)
-        ]
+        """Choose the next room to dispatch. Skips rooms clicked this session
+        (proximity dedup — NOT a 绿勾 detection; user will re-label 绿勾 for v6,
+        until then we don't depend on it). Case A (locks) = fill every remaining
+        room to upgrade the region; Case B (no locks) = only rooms with a target.
+        Re-clicking an already-done room across runs is harmless (its 課程表開始
+        is a no-op) — we just avoid building fragile green-check logic now."""
+        candidates = [r for r in rooms if not self._room_already_clicked(r)]
         if not candidates:
-            return None, "no un-done room (all 绿勾 / clicked)"
+            return None, "all rooms clicked this session"
 
         # Case A (region has locks → level it up): fill EVERY remaining room.
         if self._region_locked:
@@ -648,9 +640,16 @@ class ScheduleSkill(BaseSkill):
         popups are handled by the PRIORITY guards in tick(); here we only handle
         the gaps: popup didn't appear, drifted off-screen, or we're back on the
         popout already."""
-        # Back on the popout (report confirmed, or info dismissed) → re-scan.
+        # Back on the popout? The 課程表資訊 info popup takes ~1-2s to open after
+        # the head click — give it time (tick() PRIORITY 2 grabs SCHED_START the
+        # moment it renders). Only conclude "click failed / back to roster" if
+        # the popout is STILL the top surface after the settle. Without this, the
+        # bot deduped 6 rooms but only 1 actually opened its info popup (live
+        # 2026-06-02: clicked 6 heads, 1 start). (user: 给点击反应时间)
         if self._roster_open(screen):
-            self.log("back on popout after dispatch → roster")
+            if self._phase_ticks < _OPEN_ROOM_SETTLE:
+                return action_wait(450, f"waiting for 課程表資訊 popup ({self._phase_ticks}/{_OPEN_ROOM_SETTLE})")
+            self.log("info popup never opened after head click → back to roster")
             self._goto("roster")
             return action_wait(300, "back to roster")
 
