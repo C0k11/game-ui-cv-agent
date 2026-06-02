@@ -2964,6 +2964,30 @@ def synth_ref_image(cn_name: str):
     return FileResponse(str(p), media_type="image/png")
 
 
+@app.get("/api/v1/synth/portrait/{cn}")
+def synth_portrait(cn: str):
+    """Small portrait for a fused_avatar cls — schedule-target picker thumbnails.
+    Resolves the paren-less 简体 cls → EN via avatar_thumb_map.json (built by
+    scripts/build_avatar_thumb_map.py), then serves the 54×59 crop (角色头像_crop/)
+    or the large portrait as fallback."""
+    from fastapi.responses import FileResponse
+    en = None
+    tm = REPO_ROOT / "data" / "avatar_thumb_map.json"
+    if tm.exists():
+        try:
+            en = json.loads(tm.read_text(encoding="utf-8")).get(cn)
+        except Exception:
+            pass
+    if not en:
+        raise HTTPException(status_code=404, detail=f"no thumb map for {cn}")
+    crop = REPO_ROOT / "data" / "captures" / "角色头像_crop" / f"{en}.png"
+    big = REPO_ROOT / "data" / "captures" / "角色头像" / f"{en}.png"
+    p = crop if crop.exists() else (big if big.exists() else None)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"no portrait for {en}")
+    return FileResponse(str(p), media_type="image/png")
+
+
 @app.get("/api/v1/synth/sample_image/{ctx}")
 def synth_sample_image(ctx: str):
     """Stream the sample image bytes for a given context."""

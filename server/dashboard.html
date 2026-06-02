@@ -986,12 +986,16 @@ function renderSchedChips(){
   const box=$('sched_chips'); if(!box)return; box.innerHTML='';
   _schedSel.forEach((name,i)=>{
     const c=document.createElement('span');
-    c.style.cssText='display:inline-flex;align-items:center;gap:3px;background:var(--accent);color:#000;font-size:11px;padding:1px 6px;border-radius:10px';
-    c.textContent=name;
+    c.style.cssText='display:inline-flex;align-items:center;gap:3px;background:var(--accent);color:#000;font-size:11px;padding:1px 6px 1px 2px;border-radius:10px';
+    const im=document.createElement('img'); im.src='/api/v1/synth/portrait/'+encodeURIComponent(name);
+    im.width=18; im.height=20; im.loading='lazy';
+    im.style.cssText='border-radius:50%;object-fit:cover;background:#0003';
+    im.onerror=()=>{ im.style.display='none'; };
+    const t=document.createElement('span'); t.textContent=name;
     const x=document.createElement('span'); x.textContent='×'; x.title='移除';
     x.style.cssText='cursor:pointer;font-weight:700;margin-left:2px';
     x.onclick=()=>{ _schedSel.splice(i,1); renderSchedChips(); };
-    c.appendChild(x); box.appendChild(c);
+    c.appendChild(im); c.appendChild(t); c.appendChild(x); box.appendChild(c);
   });
 }
 async function schedSearch(){
@@ -1002,8 +1006,14 @@ async function schedSearch(){
   if(!hits.length){ dd.style.display='none'; return; }
   dd.innerHTML='';
   hits.forEach(n=>{
-    const o=document.createElement('div'); o.textContent=n;
-    o.style.cssText='padding:3px 8px;cursor:pointer;font-size:12px;color:#ddd';
+    const o=document.createElement('div');
+    o.style.cssText='display:flex;align-items:center;gap:7px;padding:2px 8px;cursor:pointer;font-size:12px;color:#ddd';
+    const im=document.createElement('img'); im.src='/api/v1/synth/portrait/'+encodeURIComponent(n);
+    im.width=30; im.height=33; im.loading='lazy';
+    im.style.cssText='border-radius:4px;object-fit:cover;background:#0003;flex:none';
+    im.onerror=()=>{ im.style.visibility='hidden'; };
+    const sp=document.createElement('span'); sp.textContent=n;
+    o.appendChild(im); o.appendChild(sp);
     o.onmouseenter=()=>o.style.background='var(--accent)'; o.onmouseleave=()=>o.style.background='';
     o.onclick=()=>{ if(!_schedSel.includes(n))_schedSel.push(n); inp.value=''; renderSchedChips(); schedSearch(); inp.focus(); };
     dd.appendChild(o);
