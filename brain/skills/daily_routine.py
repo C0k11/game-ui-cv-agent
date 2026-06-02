@@ -44,6 +44,7 @@ class DailyRoutineSkill(BaseSkill):
 
         # Lazy import to avoid circular dependency at module load time
         # (pipeline.py imports DailyRoutineSkill, this imports the others)
+        from brain.skills.buy_pyroxene import BuyPyroxeneSkill
         from brain.skills.mail import MailSkill
         from brain.skills.event_activity import EventActivitySkill
         from brain.skills.cafe import CafeSkill
@@ -63,6 +64,7 @@ class DailyRoutineSkill(BaseSkill):
         # 先把其他日常都跑通再回头处理活动。跑完恢复这一行。
         self._plan: List[Tuple[BaseSkill, bool]] = [
             # (skill_instance, force_run)
+            (BuyPyroxeneSkill(), False),     # 购买青辉石 免费组合包 — 红点才进 (第1)
             (MailSkill(), False),            # 邮件 — 红点才进
             # (EventActivitySkill(), False),   # 活动 — 周年庆反常临时跳过
             (CafeSkill(), False),            # cafe — 收益/邀请/摸头 dot

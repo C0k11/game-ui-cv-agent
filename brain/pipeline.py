@@ -36,6 +36,7 @@ from brain.skills.arena import ArenaSkill
 from brain.skills.daily_tasks import DailyTasksSkill
 from brain.skills.shop import ShopSkill
 from brain.skills.craft import CraftSkill
+from brain.skills.buy_pyroxene import BuyPyroxeneSkill
 from brain.skills.momo_talk import MomoTalkSkill
 from brain.skills.event_activity import EventActivitySkill
 from brain.skills.pass_reward import PassRewardSkill
@@ -851,6 +852,7 @@ class DailyPipeline:
             event_ap_reserve = 0
 
         self._skill_registry: Dict[str, BaseSkill] = {
+            "buy_pyroxene": BuyPyroxeneSkill(),
             "cafe": CafeSkill(),
             "schedule": ScheduleSkill(),
             "club": ClubSkill(),
