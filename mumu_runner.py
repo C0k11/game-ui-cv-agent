@@ -504,6 +504,7 @@ def main() -> None:
     frame_interval = 1.0 / max(1, args.fps)
     # ADB capture is ~200ms; no need to tick faster than capture allows
     tick_interval = 0.8 if using_adb_capture else 0.5
+    pipe_done_at: Optional[float] = None   # set when pipeline completes → auto-exit
     last_tick_time = 0.0
     last_action: Dict[str, Any] = {"action": "wait", "reason": "starting"}
     cached_yolo_boxes: list = []  # cached from last pipeline tick
@@ -577,7 +578,10 @@ def main() -> None:
                 elif action_type == "done":
                     if not pipe.is_running:
                         print("[Info] Pipeline complete!")
-                        # Keep overlay running so user can see final state
+                        # Auto-exit ~4s after completion so test runs don't leave
+                        # an idle overlay window behind (caused 3 orphan bots).
+                        if pipe_done_at is None:
+                            pipe_done_at = time.perf_counter()
                 else:
                     # After a CLICK: give the game time to open/animate the next
                     # screen before we read+act again. 0.5s was too short — the
@@ -606,6 +610,12 @@ def main() -> None:
                     drawn = cv2.resize(drawn, (dw, dh), interpolation=cv2.INTER_AREA)
 
                 cv2.imshow(window_name, drawn)
+
+            # Auto-exit a few seconds after the pipeline completes (so single-
+            # skill test runs don't leave an idle overlay window behind).
+            if pipe_done_at is not None and (time.perf_counter() - pipe_done_at) > 4.0:
+                print("[Info] Auto-exit after completion.")
+                break
 
             # Handle keyboard
             key = cv2.waitKey(1) & 0xFF
