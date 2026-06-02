@@ -85,9 +85,15 @@ class CraftSkill(BaseSkill):
             return False
         if page == "Craft":
             return True
-        # All-slots-cooling: CTA still renders (快速制造 persists), but trust the
-        # entry gate if a transient frame drops the signature.
-        return self._entered and page is None
+        # Direct craft markers (快速制造 / 开始制造 are craft-only).
+        if self.find_cls(screen, [UC.CRAFT_QUICK, UC.CRAFT_START], conf=_CLS_CONF) is not None:
+            return True
+        # ★ Mis-ID guard: the craft main row shows 一次领取黄/灰, which is ALSO
+        # Mail's PAGE_SIGNATURE → detect_screen_yolo wrongly returns "Mail" on the
+        # craft page (live 2026-06-02: craft entered fine but bounced back to
+        # lobby forever). Once we've clicked our own craft entry (_entered),
+        # trust ANY non-lobby screen as craft rather than the false Mail ID.
+        return self._entered
 
     def _confirm_dialog(self, screen: ScreenState) -> Optional[YoloBox]:
         """A 2-button confirm dialog (确认键 AND 取消键 in the button band)."""
