@@ -46,42 +46,31 @@ class DailyRoutineSkill(BaseSkill):
         # (pipeline.py imports DailyRoutineSkill, this imports the others)
         from brain.skills.buy_pyroxene import BuyPyroxeneSkill
         from brain.skills.mail import MailSkill
-        from brain.skills.event_activity import EventActivitySkill
         from brain.skills.cafe import CafeSkill
         from brain.skills.schedule import ScheduleSkill
         from brain.skills.club import ClubSkill
-        from brain.skills.daily_tasks import DailyTasksSkill
         from brain.skills.craft import CraftSkill
-        from brain.skills.pass_reward import PassRewardSkill
         from brain.skills.momo_talk import MomoTalkSkill
         from brain.skills.story_mining import StoryMiningSkill
         from brain.skills.shop import ShopSkill
-        from brain.skills.ap_planning import ApPlanningSkill
         from brain.skills.daily_mission import DailyMissionSkill
 
-        # Order matters — runs top to bottom.
+        # Order matters — runs top to bottom (user-defined daily order, probe).
         # `force_run` = True means skip the dot check entirely (always enter).
-        # NOTE 2026-05-28: EventActivity 临时跳过 —— 周年庆活动页面反常，
-        # 先把其他日常都跑通再回头处理活动。跑完恢复这一行。
         self._plan: List[Tuple[BaseSkill, bool]] = [
             # (skill_instance, force_run)
             (BuyPyroxeneSkill(), False),     # 购买青辉石 免费组合包 — 红点才进 (第1)
-            # (EventActivitySkill(), False),   # 活动 — 周年庆反常临时跳过
             (ClubSkill(), False),            # 社交 — 红点才进 (10AP→信箱)
             (CraftSkill(), True),            # 制造 — ALWAYS enter (user spec)
             (ShopSkill(), False),            # 普通商店日购(动态预算)
             (CafeSkill(), False),            # cafe — 收益/邀请/摸头 dot
             (ScheduleSkill(), False),        # 课程表 — 黄点才进
-            (DailyTasksSkill(), False),      # 任务大厅 — 红点(旧;待删,daily_mission取代)
-            (PassRewardSkill(), False),      # 战令 — 红点
             (MomoTalkSkill(), False),        # MomoTalk 挖矿 — 红/黄点
             (StoryMiningSkill(), False),     # 剧情挖矿(主线/短篇/支线)
-            (ApPlanningSkill(), True),       # 补给/免费AP — 总是 check
             # mail 是收口：bounty/jfd/arena/club 奖励都汇入信箱 → 放挖矿后、
             # daily_mission前,确保本轮所有奖励都领到(probe: mail最后跑)。
             (MailSkill(), False),            # 邮件收口 — 红点才进
-            # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。probe重写,
-            # 取代旧 DailyTasksSkill(mid-list)；老的待用户验证后删。
+            # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。
             (DailyMissionSkill(), False),    # 每日任务领奖(收口,最后)
         ]
         self._cur_idx: int = 0

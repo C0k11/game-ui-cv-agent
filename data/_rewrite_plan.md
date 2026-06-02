@@ -15,15 +15,20 @@
 daily_routine plan 重排: BuyPyroxene→Club→Craft→Shop→Cafe→Schedule→(DailyTasks旧)→
   PassReward→MomoTalk→StoryMining→ApPlanning→Mail(收口)→DailyMission(末)。
 
-### ⏳ 待用户 probe 验证 → 然后做的收尾
-- **逐个 live 验证**(用户带跑/probe)：尤其 club红点偏移开卡 / shop动态预算OCR读数 /
+### ✅ 旧管线已删 (2026-06-02)
+**已删 7 个旧 skill 文件 + 5 个废测试脚本**，pipeline/daily_routine 引用全清，整管线实例化通过：
+daily_tasks·ap_planning·event_activity·event_progress·pass_reward·story_progress·campaign_sweep。
+- registry 现仅 14 个新 skill；DEFAULT_SKILLS = bounty→jfd→arena→daily_routine。
+- daily_routine plan = BuyPyroxene→Club→Craft→Shop→Cafe→Schedule→MomoTalk→StoryMining→Mail(收口)→DailyMission(末)。
+- SKILL_YOLO_MAP 清掉 EventActivity/EventFarming/TotalAssault/CampaignPush；DailyRoutine 改 ui+cafe+avatar。
+
+### ⏳ 待收尾
+- **逐个 live 验证**(用户带跑/probe)：club红点偏移开卡 / shop动态预算OCR读数 /
   bounty·jfd分支选择(jfd位置点击) / arena冷却+結果轮询 / momo发送信息中节拍 / story主线3级钻取+翻页。
-- **删旧文件**(验证后)：daily_tasks.py(→daily_mission) · ap_planning.py · event_activity.py ·
-  event_progress.py · pass_reward.py · story_progress.py · campaign_sweep.py(若bounty/arena独立入口够用)。
-  删时同步清 pipeline registry/DEFAULT_SKILLS/daily_routine plan 引用。
 - **dashboard 配置接线**：shop_credit_reserve · jfd_academy(三一/格黑娜/千年) — 仿 schedule_target_students。
 - **训练 v6**：见下"待补 cls"(jfd学院tile/活動進行中/制造空槽/arena等待時間/社團卡 等)。
 - ⚠️ story 主线可能含**战斗节点**(无剧情menu)→现靠cutscene timeout退出,v6 加战斗节点处理。
+- ⚠️ 刷体力(AP farming)+活动(event) 整块**已移除**,未来需要再据新 probe 重写(非复活旧代码)。
 
 ## 目标
 删旧 OCR 时代 skill + 据 probe MD 写**全新纯-YOLO「状态→点击」skill**。

@@ -32,19 +32,12 @@ from brain.skills.bounty import BountySkill
 from brain.skills.jfd import JointFiringDrillSkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
-# event_farming + event_shop merged into event_activity (刷活动).
-# The standalone skill classes still exist but aren't registered.
-from brain.skills.daily_tasks import DailyTasksSkill
 from brain.skills.shop import ShopSkill
 from brain.skills.craft import CraftSkill
 from brain.skills.buy_pyroxene import BuyPyroxeneSkill
 from brain.skills.daily_mission import DailyMissionSkill
 from brain.skills.momo_talk import MomoTalkSkill
-from brain.skills.event_activity import EventActivitySkill
-from brain.skills.pass_reward import PassRewardSkill
 from brain.skills.story_mining import StoryMiningSkill
-from brain.skills.ap_planning import ApPlanningSkill
-from brain.skills.campaign_sweep import CampaignSweepSkill
 from brain.skills.daily_routine import DailyRoutineSkill
 
 
@@ -256,14 +249,11 @@ SKILL_YOLO_MAP = {
     # 课程表 list (fused_avatar 中文角色名) so it can place the dashboard-chosen
     # targets. NO emoticon — headpat is cafe-only. (probe-derived 2026-06-01)
     "Schedule": f"{BASE_DETECTORS}+avatar",
-    "EventFarming": f"{BASE_DETECTORS}+battle",
-    "TotalAssault": f"{BASE_DETECTORS}+battle",
     "JointFiringDrill": f"{BASE_DETECTORS}+battle",
-    "CampaignPush": f"{BASE_DETECTORS}+battle",
-    "EventActivity": f"{BASE_DETECTORS}+battle",
-    # DailyRoutine wraps cafe (emoticon headpat) + would need battle for event
-    # quests (event currently disabled). No avatar — student-id isn't needed.
-    "DailyRoutine": f"{BASE_DETECTORS}+cafe+battle",
+    # DailyRoutine wraps cafe (emoticon headpat + fused_avatar invite targets)
+    # and schedule (fused_avatar room placement) → needs cafe + avatar. No
+    # battle: bounty/jfd/arena are separate top-level skills now.
+    "DailyRoutine": f"{BASE_DETECTORS}+cafe+avatar",
 }
 
 _yolo_load_attempts = 0
@@ -772,87 +762,26 @@ class DailyPipeline:
     6. If skill times out, retry or skip
     """
 
-    # Default skill sequence for daily routine.
-    #
-    # Phase 0: AP overflow protection — if AP≥900, farm first or cafe earnings block.
-    # Phase 1: Daily skills (cafe, schedule, club, bounty, arena).
-    # Phase 2: Event-aware farming — detect 活動進行中 double-drop events,
-    #          prioritize credit stages, scroll to bottom for highest stage.
-    # Phase 3: Mail + tasks → collect AP rewards.
-    # Phase 4: 回马枪 (boomerang) — second farming pass with collected AP.
-    @staticmethod
-    def _make_event_activity(opts):
-        skill = EventActivitySkill()
-        # Profile-driven toggles for EventActivity.
-        skill._enable_bonus_team = bool(opts.get("enable_bonus_team", False))
-        # Farming auto-setup battle (one quick-edit battle to populate the
-        # saved sweep team with rate-up students).  Defaults False per
-        # user — they don't want a surprise second battle after quest
-        # finishes.  Enable via profile option `enable_bonus_setup_battle`.
-        # Default True (per skill's own __init__ default).  Was False
-        # here for a while, which silently disabled the FSM the user
-        # explicitly wants ("活动还是没有把加成打满").  Profile may
-        # still explicitly disable by setting the option to False.
-        skill._enable_bonus_setup_battle = bool(opts.get("enable_bonus_setup_battle", True))
-        # Farming + shop settings (formerly separate skills, now merged in)
-        try:
-            skill._preferred_stage = max(0, int(opts.get("event_farming_stage") or 0))
-        except Exception:
-            skill._preferred_stage = 0
-        try:
-            skill._farming_ap_budget = max(0, int(opts.get("event_farming_ap_budget") or 0))
-        except Exception:
-            skill._farming_ap_budget = 0
-        try:
-            skill._min_ap_for_sweep = max(1, int(opts.get("event_min_ap_for_sweep") or 20))
-        except Exception:
-            skill._min_ap_for_sweep = 20
-        try:
-            skill._farm_max_rounds = max(0, int(opts.get("event_max_rounds") or 0))
-        except Exception:
-            skill._farm_max_rounds = 0
-        skill._shop_auto_buy = bool(opts.get("event_shop_auto_buy", False))
-        skill._shop_spend_currencies = tuple(opts.get("event_shop_currencies") or ())
-        skill._shop_furniture_first = bool(opts.get("event_shop_furniture_first", False))
-        return skill
-
+    # Default skill sequence. Battle skills (bounty / jfd / arena) run first as
+    # explicit top-level entries; daily_routine bundles the dot-gated harvest
+    # sub-flows. (Old event-farming / campaign_sweep removed 2026-06-02 —
+    # probe-driven rewrite; events不测,刷体力未就绪。)
     DEFAULT_SKILLS = [
-        # ── Battle / sweep skills (explicit user control) ──
-        "campaign_sweep",   # 1.  One-tap sweep of tickets (bounty/arena/event)
-        "bounty",           # 2.  Sweep bounty tickets (if not covered by sweep)
-        "jfd",              # 2b. 学院交流会 ticket sweep (tickets + AP)
+        # ── Battle / ticket-sweep skills (explicit user control) ──
+        "bounty",           # 1.  悬赏通缉 ticket sweep
+        "jfd",              # 2.  学院交流会 ticket sweep (tickets + AP)
         "arena",            # 3.  PvP fights + claim rewards
-        # ── Daily harvest (all bundled) ──
-        # Cycles through mail / event_activity / cafe / schedule / club /
-        # daily_tasks / craft / pass_reward / momo_talk / story_mining /
-        # shop / ap_planning. Each sub uses its own dot check (craft skips
-        # the dot check per user spec — always enters).
-        "daily_routine",    # 4.  All daily harvest in one go (dot-driven)
+        # ── Daily harvest (dot-gated sub-flows) ──
+        # buy_pyroxene → club → craft → shop → cafe → schedule → momo_talk →
+        # story_mining → mail(收口) → daily_mission(last). See DailyRoutineSkill.
+        "daily_routine",    # 4.  All daily harvest in one go
     ]
-    # 回马枪 (post-loop second event sweep): handled inline at pipeline level
-    # after all skills finish — see _maybe_huimaqiang().
 
     TRAJECTORIES_DIR = Path(__file__).resolve().parents[1] / "data" / "trajectories"
 
     def __init__(self, skill_names: Optional[List[str]] = None,
                  profile_options: Optional[Dict[str, Any]] = None):
-        opts = dict(profile_options or {})
-        try:
-            ap_purchase_limit = max(0, int(opts.get("ap_purchase_limit") or 0))
-        except Exception:
-            ap_purchase_limit = 0
-        forbid_premium_currency = bool(opts.get("forbid_premium_currency", True))
-        # Event-farming budget (adapted from reference activity_sweep_times).
-        # max_rounds: how many sweep cycles per run (1 = legacy, >1 = loop).
-        # ap_reserve: don't loop when current AP ≤ this floor.
-        try:
-            event_max_rounds = max(1, int(opts.get("event_max_rounds") or 1))
-        except Exception:
-            event_max_rounds = 1
-        try:
-            event_ap_reserve = max(0, int(opts.get("event_ap_reserve") or 0))
-        except Exception:
-            event_ap_reserve = 0
+        opts = dict(profile_options or {})  # reserved for future per-skill config
 
         self._skill_registry: Dict[str, BaseSkill] = {
             "buy_pyroxene": BuyPyroxeneSkill(),
@@ -863,30 +792,17 @@ class DailyPipeline:
             "craft": CraftSkill(),
             "momo_talk": MomoTalkSkill(),
             "story_mining": StoryMiningSkill(),
-            "event_activity": self._make_event_activity(opts),
             "bounty": BountySkill(),
             "jfd": JointFiringDrillSkill(),
             "arena": ArenaSkill(),
-            "ap_planning": ApPlanningSkill(
-                forbid_premium_currency=forbid_premium_currency,
-                paid_purchase_limit=ap_purchase_limit,
-            ),
             "mail": MailSkill(),
-            "daily_tasks": DailyTasksSkill(),
-            "daily_mission": DailyMissionSkill(),   # rewrite of daily_tasks (probe-driven)
-            "pass_reward": PassRewardSkill(),
-            "campaign_sweep": CampaignSweepSkill(),
-            # Single dispatcher for all daily-harvest sub-flows
-            # (mail / cafe / schedule / club / daily_tasks / event_activity
-            #  / craft / pass_reward / momo_talk / story_mining / shop /
-            #  ap_planning). Battle skills (bounty / arena / campaign_sweep)
-            # stay as separate skill_order entries.
+            "daily_mission": DailyMissionSkill(),
+            # Single dispatcher for all dot-gated daily-harvest sub-flows
+            # (buy_pyroxene / club / craft / shop / cafe / schedule / momo_talk
+            #  / story_mining / mail / daily_mission). Battle skills
+            # (bounty / jfd / arena) stay as separate skill_order entries.
             "daily_routine": DailyRoutineSkill(),
         }
-        # CampaignSweep needs a reference to the registry so it can
-        # delegate to Bounty / Arena / EventActivity without creating
-        # an import cycle.  Wire after the dict is built.
-        self._skill_registry["campaign_sweep"].set_registry(self._skill_registry)
 
         names = skill_names or self.DEFAULT_SKILLS
         self._skill_order: List[str] = [n for n in names if n in self._skill_registry]
@@ -1005,9 +921,7 @@ class DailyPipeline:
         "Club":       "social",
         "Craft":      "craft",
         "Shop":       "shop",
-        "PassReward": "recruit",
         "Mail":       "mail",
-        "DailyTasks": "daily_tasks_nav",
         "Bounty":     "campaign_nav",
         "JointFiringDrill": "campaign_nav",
         "Arena":      "campaign_nav",
