@@ -1,310 +1,252 @@
-"""CraftSkill: Quick-craft items and claim finished crafts. YOLO-only clicks.
+"""CraftSkill — start quick-crafts + collect finished ones (pure-YOLO rewrite).
 
-Design (2026-05-28 full YOLO rewrite):
-- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
-  No OCR button fallback, no detect_current_screen (OCR). Page state is
-  inferred from YOLO cls via detect_screen_yolo() == "Craft".
-- If YOLO can't see a needed cls, log + wait (surface the gap) — don't
-  fall back to OCR or blind hardcoded clicks.
-- should_run always returns True: 制造 doesn't gate on a 黄点 — we always
-  enter, quick-craft, and claim (user spec 2026-05-28).
+Verified flow (interactive probe 2026-06-01, data/_craft_probe_log.md). The old
+skill had a "进制造就退" bug (it never started crafts) AND a SAFETY hole: it
+looked for the wrong claim cls and could trigger the 立即完成 rush dialog.
 
-Flow / states:
-1. enter:        From lobby, click 制造入口 (NAV_CRAFT) → wait for Craft page.
-2. claim:        Claim finished crafts via CLAIM_ALL_YELLOW / CLAIM_YELLOW /
-                 CLAIM_REWARD_YELLOW.
-3. quick_craft:  快速制造 (CRAFT_QUICK) → 开始制造 (CRAFT_START) → 确认键.
-4. claim_after:  Claim newly finished crafts; loop more cycles up to _max_crafts.
-5. exit:         Back to lobby (BTN_HOME / BTN_BACK).
+★★ HARD RULES (probe-derived) ★★
+- The craft-main 一次領取 (CLAIM_ONCE_YELLOW) is AMBIGUOUS:
+    • crafts FINISHED → tapping it collects them FREE (direct GOT_REWARD).
+    • crafts RUNNING  → tapping it pops 「是否立即完成?」 which spends 製造券
+      (a consumable). We NEVER spend券 → if a confirm dialog appears after the
+      tap, CANCEL it. (製造券 isn't pyroxene, but user spec: 让制造自然跑完.)
+- per-slot 立即完成 (blue, no cls) is NEVER clicked (we have no cls → never
+  blind-click there).
+- START is safe: 快速制造 costs 信用点 only (probe: 19,000/unit). 快速制造 →
+  MAX → 开始制造 → 确认键(確定製造N次) spends credits (abundant) — fine.
+
+State machine
+-------------
+enter    lobby → NAV_CRAFT → Craft page (CRAFT_QUICK/CRAFT_START signature).
+collect  一次领取黄色 → tap. If a confirm dialog (确认键+取消键) appears = the
+         券-rush 立即完成 → CANCEL (never spend券). GOT_REWARD = free collect
+         (dismissed globally). 一次领取灰色 / none = nothing to collect.
+start    快速制造 → MAX_可点击 → 开始制造 → 确认键(确定製造N次, credits, safe).
+         Nothing startable (slots busy) → exit.
+exit     BTN_HOME / BTN_BACK → lobby → done.
+
+Detectors: base "ui" only.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from brain.skills.base import (
-    BaseSkill, ScreenState,
+    BaseSkill, ScreenState, YoloBox,
     action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
+_CLS_CONF = 0.30
+# Center-bottom band where craft confirm / 立即完成 dialogs put 确认键/取消键
+# (probe: y≈0.70 for both the start-confirm and the券-rush dialog).
+_DIALOG_BAND = (0.28, 0.60, 0.72, 0.82)
 
-# Any yellow claim variant seen on the craft page = something to collect.
-_CRAFT_CLAIM_ACTIVE = [
-    UC.CLAIM_ALL_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_REWARD_YELLOW,
-]
-# Either start-craft CTA = a craft slot is ready to (re)start.
-_CRAFT_CTA = [UC.CRAFT_QUICK, UC.CRAFT_START]
+_ENTER_MAX = 20
+_COLLECT_MAX = 16
+_START_MAX = 18
+_EXIT_MAX = 14
 
 
 class CraftSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
-        # Craft is NOT dot-gated — always enter to quick-craft + claim.
+        # Craft is NOT dot-gated — always enter to collect finished + start new
+        # (user spec: 制造不需要靠黄点识别). Self-limiting: busy slots can't
+        # restart, so re-runs the same day spend nothing.
         return True
 
     def __init__(self):
         super().__init__("Craft")
-        self.max_ticks = 80
-        self._claim_count: int = 0
-        self._craft_started: bool = False
-        self._craft_ticks: int = 0
-        self._craft_cycles: int = 0
-        self._max_crafts: int = 3
-        self._pending_cycle_started: bool = False
-        self._enter_click_cooldown: int = 0
-        # Entry-clicked gate: PAGE_SIGNATURES["Craft"] is just the two CTAs
-        # (快速制造/开始制造). When all 3 slots are mid-cooldown neither CTA
-        # renders, so detect_screen_yolo() never returns "Craft" and _enter
-        # would spam NAV_CRAFT to max_ticks. Once we've clicked our own entry
-        # and we're off-lobby, treat that as on-page even with no CTA visible.
+        self.max_ticks = 90
+        self._init_state()
+
+    def _init_state(self) -> None:
+        self._phase_ticks: int = 0
         self._entered: bool = False
+        self._collect_done: bool = False
+        self._collect_settle: int = 0
+        self._maxed_clicks: int = 0
+        self._started: bool = False
+        self._claims: int = 0
 
     def reset(self) -> None:
         super().reset()
-        self._claim_count = 0
-        self._craft_started = False
-        self._craft_ticks = 0
-        self._craft_cycles = 0
-        self._pending_cycle_started = False
-        self._enter_click_cooldown = 0
-        self._entered = False
+        self._init_state()
 
-    # ── page inference via YOLO cls (no OCR) ──────────────────────────
-    def _is_craft_screen(self, screen: ScreenState) -> bool:
-        """On the craft page when EITHER the YOLO page signature matches
-        (a CTA / claim cls is visible) OR we've clicked our own entry and
-        we're off-lobby (covers the all-slots-cooling case where neither
-        快速制造 nor 开始制造 renders → signature alone never fires)."""
+    def _goto(self, sub_state: str) -> None:
+        self.sub_state = sub_state
+        self._phase_ticks = 0
+
+    # ── helpers ──────────────────────────────────────────────────────────
+    def _is_craft(self, screen: ScreenState) -> bool:
         page = self.detect_screen_yolo(screen)
         if page == "Lobby":
-            # Back on lobby → re-arm the entry gate.
             self._entered = False
             return False
         if page == "Craft":
             return True
-        # A claim cls is a positive craft-page marker on its own.
-        if self.find_cls(screen, _CRAFT_CLAIM_ACTIVE, conf=0.25) is not None:
-            return True
-        # No CTA signature (all slots cooling, or YOLO gap). Trust the entry
-        # gate: we clicked 制造入口 and we're not on lobby → we're on craft.
-        # Only once the post-click cooldown has elapsed, so we don't latch
-        # "on-page" during the load transition (page momentarily None).
-        if self._entered and page is None and self._enter_click_cooldown == 0:
-            return True
-        return False
+        # All-slots-cooling: CTA still renders (快速制造 persists), but trust the
+        # entry gate if a transient frame drops the signature.
+        return self._entered and page is None
 
-    # ── state machine ─────────────────────────────────────────────────
+    def _confirm_dialog(self, screen: ScreenState) -> Optional[YoloBox]:
+        """A 2-button confirm dialog (确认键 AND 取消键 in the button band)."""
+        confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DIALOG_BAND)
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+        if confirm is not None and cancel is not None:
+            return confirm
+        return None
+
+    # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
+        self._phase_ticks += 1
 
         if self.ticks >= self.max_ticks:
-            self.log("timeout")
+            self.log(f"timeout (claims={self._claims}, started={self._started})")
             return action_done("craft timeout")
 
-        # Reward result popup ("獲得獎勵") — tap to dismiss (YOLO cls).
-        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
-        if reward is not None:
-            return action_click_box(reward, "dismiss reward popup (YOLO 获得奖励)")
-
-        popup = self._handle_common_popups(screen)
-        if popup:
-            return popup
+        # Global: free-collect reward popup → dismiss via continue / header.
+        cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
+        if cont is not None:
+            return action_click_box(cont, "dismiss reward via continue")
+        got = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
+        if got is not None:
+            self._claims += 1
+            return action_click_box(got, "dismiss reward (got crafts)")
 
         if screen.is_loading():
-            return action_wait(800, "craft loading")
+            return action_wait(700, "craft loading")
 
         if self.sub_state == "":
-            self.sub_state = "enter"
+            self._goto("enter")
 
-        if self.sub_state == "enter":
-            return self._enter(screen)
-        if self.sub_state == "claim":
-            return self._claim(screen)
-        if self.sub_state == "quick_craft":
-            return self._quick_craft(screen)
-        if self.sub_state == "claim_after":
-            return self._claim_after(screen)
-        if self.sub_state == "exit":
-            return self._exit(screen)
-
-        return action_wait(300, "craft unknown state")
+        handler = {
+            "enter": self._enter,
+            "collect": self._collect,
+            "start": self._start,
+            "exit": self._exit,
+        }.get(self.sub_state)
+        if handler is None:
+            return action_wait(300, "craft unknown state")
+        return handler(screen)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._is_craft_screen(screen):
-            self.log("inside craft")
-            self.sub_state = "claim"
-            return action_wait(500, "entered craft")
+        if self._is_craft(screen):
+            self.log("inside craft → collect")
+            self._goto("collect")
+            return action_wait(400, "entered craft")
 
-        # Cooldown so we don't spam-tap the entry icon between frames.
-        if self._enter_click_cooldown > 0:
-            self._enter_click_cooldown -= 1
-            return action_wait(500, f"craft: enter cooldown ({self._enter_click_cooldown})")
-
-        page = self.detect_screen_yolo(screen)
-        if page == "Lobby":
-            # 制造入口 in the bottom nav bar.
-            act = self.click_cls(screen, UC.NAV_CRAFT, "open craft", conf=0.30)
+        if screen.is_lobby():
+            act = self.click_cls(screen, UC.NAV_CRAFT, "open craft", conf=_CLS_CONF)
             if act is not None:
-                self._enter_click_cooldown = 3
-                self._entered = True  # entry-clicked gate: now on-page is trusted
+                self._entered = True
                 return act
-            self.log("no 制造入口 on lobby — YOLO gap; waiting")
-            return action_wait(400, "craft: waiting for 制造入口 detection")
+            self.log("on lobby but no 制造入口 — YOLO gap; waiting")
+            return action_wait(400, "waiting for 制造入口 cls")
 
-        # On some other page → back out toward lobby.
-        if page is not None and page != "Craft":
-            return action_back(f"craft: backing from {page}")
+        if self._phase_ticks > _ENTER_MAX:
+            return action_done("could not reach craft")
+        if len(screen.yolo_boxes or []) < 2:
+            return action_wait(700, "no UI detected, likely loading")
+        return action_back("craft: recover toward lobby")
 
-        self.log("unknown screen — backing toward lobby")
-        return action_back("craft: backing toward lobby")
+    def _collect(self, screen: ScreenState) -> Dict[str, Any]:
+        if not self._is_craft(screen) and not self._confirm_dialog(screen):
+            if screen.is_lobby():
+                self._goto("enter")
+                return action_wait(300, "collect: back on lobby, re-enter")
+            if self._phase_ticks > _COLLECT_MAX:
+                self._goto("exit")
+                return action_wait(300, "collect lost craft → exit")
+            return action_wait(400, "waiting for craft UI (collect)")
 
-    def _claim(self, screen: ScreenState) -> Dict[str, Any]:
-        """Claim all finished craft items via CLAIM_* yellow cls."""
-        self._craft_ticks += 1
+        # ★ A confirm dialog here = the 立即完成(券) rush from tapping 一次領取
+        # while crafts are RUNNING → CANCEL, never spend券.
+        dlg = self._confirm_dialog(screen)
+        if dlg is not None:
+            self.log("⛔ 一次领取 → 立即完成(券) dialog → cancel, never spend券")
+            self._collect_done = True
+            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+            if cancel is not None:
+                return action_click_box(cancel, "cancel 立即完成 (keep券)")
+            return action_back("cancel 立即完成 (ESC)")
 
-        if self._craft_ticks > 8:
-            self.log("claim phase done, moving to quick craft")
-            self.sub_state = "quick_craft"
-            self._craft_ticks = 0
-            return action_wait(300, "claim done")
+        if self._collect_settle > 0:
+            self._collect_settle -= 1
+            return action_wait(400, f"collect settle ({self._collect_settle})")
 
-        claim = self.find_cls(screen, _CRAFT_CLAIM_ACTIVE, conf=0.25)
-        if claim is not None:
-            self._claim_count += 1
-            self.log(f"claiming finished crafts (#{self._claim_count}, cls={claim.cls_name})")
-            return action_click_box(claim, f"claim finished crafts (YOLO {claim.cls_name})")
+        if self._collect_done:
+            self._goto("start")
+            return action_wait(250, "collect done → start")
 
-        # No claim cls — nothing to collect, proceed to quick craft.
-        self.log("no finished crafts to claim")
-        self.sub_state = "quick_craft"
-        self._craft_ticks = 0
-        return action_wait(300, "no crafts to claim, moving to quick craft")
+        # 一次领取黄色: finished crafts collect FREE; running ones pop the券
+        # dialog (caught above). Tap it, then settle to see which happens.
+        yellow = self.find_cls(screen, UC.CLAIM_ONCE_YELLOW, conf=_CLS_CONF)
+        if yellow is not None:
+            self.log("tapping 一次领取黄色 (collect finished crafts)")
+            self._collect_settle = 2
+            return action_click_box(yellow, "collect finished crafts")
 
-    def _quick_craft(self, screen: ScreenState) -> Dict[str, Any]:
-        """快速制造 (CRAFT_QUICK) → 开始制造 (CRAFT_START) → 确认键."""
-        self._craft_ticks += 1
+        # Grey claim-all or nothing → nothing (free) to collect.
+        self.log("no 一次领取黄色 → nothing to collect, start phase")
+        self._goto("start")
+        return action_wait(250, "no free collect → start")
 
-        if self._craft_ticks > 12:
-            self.log("quick craft phase timeout")
-            self.sub_state = "claim_after"
-            self._craft_ticks = 0
-            return action_wait(300, "quick craft timeout")
+    def _start(self, screen: ScreenState) -> Dict[str, Any]:
+        if not self._is_craft(screen) and not self._confirm_dialog(screen):
+            if screen.is_lobby():
+                self._goto("exit")
+                return action_wait(300, "start: on lobby → exit")
+            if self._phase_ticks > _START_MAX:
+                self._goto("exit")
+                return action_wait(300, "start lost craft → exit")
+            return action_wait(400, "waiting for craft UI (start)")
 
-        if self._craft_started:
-            # After 开始制造, look for the confirm popup OR a claim cls.
-            confirm = self.find_cls(
-                screen, UC.BTN_CONFIRM, conf=0.30, region=screen.CENTER,
-            )
-            if confirm is not None:
-                self.log("confirming craft")
-                if self._pending_cycle_started:
-                    self._craft_cycles += 1
-                    self._pending_cycle_started = False
-                self.sub_state = "claim_after"
-                self._craft_ticks = 0
-                return action_click_box(confirm, "confirm craft (YOLO 确认键)")
+        # craft-start confirm (確定製造N次) — reached via 开始制造 → safe credits.
+        dlg = self._confirm_dialog(screen)
+        if dlg is not None:
+            self.log("confirming craft start (確定製造N次, 耗信用点 — safe)")
+            self._started = True
+            self._goto("exit")
+            return action_click_box(dlg, "confirm craft start (credits)")
 
-            # Grey confirm = can't craft (insufficient mats) — bail to claim.
-            grey = self.find_cls(
-                screen, UC.BTN_CONFIRM_GREY, conf=0.30, region=screen.CENTER,
-            )
-            if grey is not None:
-                self.log("confirm is grey (insufficient) — skipping craft")
-                self._pending_cycle_started = False
-                self.sub_state = "claim_after"
-                self._craft_ticks = 0
-                return action_wait(300, "craft confirm greyed out")
-
-            # Craft may complete without a confirm popup — claim directly.
-            claim = self.find_cls(screen, _CRAFT_CLAIM_ACTIVE, conf=0.25)
-            if claim is not None:
-                self.log("craft completed, claiming")
-                if self._pending_cycle_started:
-                    self._craft_cycles += 1
-                    self._pending_cycle_started = False
-                self.sub_state = "claim_after"
-                self._craft_ticks = 0
-                return action_click_box(claim, f"claim after quick craft (YOLO {claim.cls_name})")
-
-            # Back on the main craft screen (craft started silently).
-            if self._craft_ticks >= 5 and self._is_craft_screen(screen):
-                self.log("craft done, back on main screen")
-                if self._pending_cycle_started:
-                    self._craft_cycles += 1
-                    self._pending_cycle_started = False
-                self.sub_state = "claim_after"
-                self._craft_ticks = 0
-                return action_wait(300, "craft completed, claiming")
-
-            return action_wait(500, "waiting for craft confirm popup")
-
-        # 开始制造 button.
-        start = self.find_cls(screen, UC.CRAFT_START, conf=0.30)
-        if start is not None:
+        # In the 快速制造 dialog? MAX_可点击 / 开始制造 present.
+        max_btn = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
+        if max_btn is not None and self._maxed_clicks < 3:
+            self._maxed_clicks += 1
+            self.log("set MAX quantity (YOLO MAX_可点击)")
+            return action_click_box(max_btn, "set craft quantity MAX")
+        start_btn = self.find_cls(screen, UC.CRAFT_START, conf=_CLS_CONF)
+        if start_btn is not None:
             self.log("clicking 开始制造")
-            self._craft_started = True
-            self._pending_cycle_started = True
-            return action_click_box(start, "start craft (YOLO 开始制造)")
+            return action_click_box(start_btn, "start craft (开始制造)")
 
-        # 快速制造 button.
-        quick = self.find_cls(screen, UC.CRAFT_QUICK, conf=0.30)
-        if quick is not None:
-            self.log("clicking 快速制造")
-            return action_click_box(quick, "click quick craft (YOLO 快速制造)")
+        # Not in dialog → open it via 快速制造.
+        quick = self.find_cls(screen, UC.CRAFT_QUICK, conf=_CLS_CONF)
+        if quick is not None and self._phase_ticks <= _START_MAX:
+            self.log("opening 快速制造 dialog")
+            return action_click_box(quick, "open quick-craft")
 
-        # No craft CTA cls — slots in use / unavailable, or YOLO gap.
-        self.log("no craft CTA cls (快速制造/开始制造) — done or YOLO gap")
-        self.sub_state = "exit"
-        return action_wait(300, "no quick craft available")
-
-    def _claim_after(self, screen: ScreenState) -> Dict[str, Any]:
-        """Claim items after quick craft, then loop more cycles if possible."""
-        self._craft_ticks += 1
-
-        if self._craft_ticks > 8:
-            self.log("post-craft claim phase timeout")
-            # Continue crafting more slots if a craft CTA is still present.
-            if self._craft_cycles < self._max_crafts and \
-                    self.find_cls(screen, _CRAFT_CTA, conf=0.30) is not None:
-                self.log(f"continuing craft cycle {self._craft_cycles + 1}/{self._max_crafts}")
-                self.sub_state = "quick_craft"
-                self._craft_started = False
-                self._pending_cycle_started = False
-                self._craft_ticks = 0
-                return action_wait(250, "continue next craft cycle")
-            self.sub_state = "exit"
-            return action_wait(300, "post-craft claim done")
-
-        # Claim newly finished crafts.
-        claim = self.find_cls(screen, _CRAFT_CLAIM_ACTIVE, conf=0.25)
-        if claim is not None:
-            self._claim_count += 1
-            self.log(f"claiming post-craft items (#{self._claim_count}, cls={claim.cls_name})")
-            return action_click_box(claim, f"claim post-craft items (YOLO {claim.cls_name})")
-
-        # No claim cls — loop another craft cycle if a CTA is available.
-        if self._craft_cycles < self._max_crafts and \
-                self.find_cls(screen, _CRAFT_CTA, conf=0.30) is not None:
-            self.log(f"starting next craft cycle {self._craft_cycles + 1}/{self._max_crafts}")
-            self.sub_state = "quick_craft"
-            self._craft_started = False
-            self._pending_cycle_started = False
-            self._craft_ticks = 0
-            return action_wait(250, "continue crafting")
-
-        self.log(f"craft complete ({self._claim_count} claims, {self._craft_cycles} cycles)")
-        self.sub_state = "exit"
-        return action_wait(300, "post-craft claim complete")
+        # Nothing startable (slots busy / no free slot) or budget out → exit.
+        self.log("nothing startable (busy slots / YOLO gap) → exit")
+        self._goto("exit")
+        return action_wait(300, "no startable craft → exit")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        # On lobby iff detect_screen_yolo sees >=2 nav icons.
         if self.detect_screen_yolo(screen) == "Lobby":
-            self.log(f"done ({self._claim_count} claims, {self._craft_cycles} cycles)")
-            return action_done("craft complete")
-        # Prefer YOLO home/back button over blind ESC.
-        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+            self.log(f"done (claims={self._claims}, started={self._started})")
+            return action_done(f"craft complete (claims={self._claims}, started={self._started})")
+        if self._phase_ticks > _EXIT_MAX:
+            return action_done("craft exit timeout")
+        # Close any leftover dialog first, then home/back.
+        close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF, region=(0.55, 0.08, 0.97, 0.30))
+        if close is not None:
+            return action_click_box(close, "close leftover craft dialog")
+        home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "craft exit: home button")
-        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "craft exit: back button")
         return action_back("craft exit: ESC toward lobby")

@@ -62,6 +62,7 @@ LOADING = "加载中"             # 22  (45f)
 # ── 领取按钮 (多状态: 黄=可领, 灰=已领/不可) ─────────────────────────
 CLAIM_ALL_YELLOW = "全部领取_黄"     # 107 (12f)  claim-all active
 CLAIM_ALL_GREY = "全部领取_灰色"     # 413 (12f)  claim-all done
+CLAIM_ONEKEY_GREY = "一键领取灰色"   # 415  一键领取 done (daily-mission)
 CLAIM_ONCE_YELLOW = "一次领取黄色"   # 417 (32f)  一次領取 active (mail)
 CLAIM_ONCE_GREY = "一次领取灰色"     # 416 (12f)
 CLAIM_YELLOW = "领取_黄"            # 106 (28f)  single claim active
@@ -173,13 +174,20 @@ QTY_MINUS_GREY = "减号灰色"          # 113 (49f)
 # ── 商店 ─────────────────────────────────────────────────────────────
 SHOP_SELECT_ALL = "全部选择"         # 55  (18f)
 SHOP_SELECT_ALL_GREY = "全部选择灰"   # 404 (12f)
-SHOP_BUY = "购买"                   # 103 (30f)
+SHOP_ALL_SELECTED = "已全部选择"      # 402  全选完成态（区别于 全部选择/灰）
+SHOP_BUY = "购买"                   # 103 (30f)  per-item buy
+SHOP_BUY_SELECTED = "选择购买"        # 450  全选后批量购买按钮
 SHOP_BUY_PYROXENE = "购买青辉石"      # 395 (16f)
 CURRENCY = "货币"                   # 102 (18f)
 CURRENCY_SEL = "货币_已选择"         # 101 (18f)
+CURRENCY_QTY_AREA = "货币数量显示区域"  # 104  数字显示区 → digit-OCR 锚点(余额/总价)
 COMBO_PACK = "组合包未选择"          # 414 (12f)
 COMBO_PACK_SEL = "组合包已选择"      # 445 (14f)
 FREE = "免费"                       # 446 (14f)
+# 商店左侧 tab 指示器 —— ⛔ 切勿进 青辉石 tab 购买（花青辉石）
+SHOP_TAB_CREDIT = "信用点商店"        # 62   一般(信用点)tab
+SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"  # 54  一般 tab 选中 = 安全
+SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"  # 61  ⛔ 花青辉石 tab 选中
 
 # ── 制造 / craft ────────────────────────────────────────────────────
 CRAFT_QUICK = "快速制造"             # 443 (28f)

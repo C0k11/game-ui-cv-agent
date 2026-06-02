@@ -1,246 +1,328 @@
-"""ShopSkill: Buy daily free / low-price shop items. YOLO-only clicks.
+"""ShopSkill — daily 一般(信用点) shop bulk-buy with dynamic budget (rewrite).
 
-Design (2026-05-28 full YOLO rewrite — mirrors mail.py):
-- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
-- NO OCR. The daily free-buy loop needs no pure-digit read (no count/AP),
-  so there is zero OCR call in this skill — all state is inferred from YOLO.
-- Page state inferred from YOLO cls: seeing SHOP_SELECT_ALL / SHOP_BUY /
-  CURRENCY / FREE / COMBO_PACK = inside shop; NAV_SHOP or detect_screen_yolo
-  == "Lobby" = on lobby.
-- If YOLO can't see a needed cls, log + wait (surface the gap) — never fall
-  back to OCR or blind hardcoded coords.
+Verified flow (interactive probe 2026-06-01, data/_shop_probe_log.md). The old
+skill blindly confirmed ANY purchase. The user requires DYNAMIC budget planning:
+read the credit balance and only buy when we stay above a configured reserve.
 
-Flow:
-1. enter:      from lobby, click NAV_SHOP (商店入口); cooldown to avoid re-tap
-2. select_all: click SHOP_SELECT_ALL (全部选择). Grey variant => nothing to
-               buy / already bought today => exit
-3. purchase:   click SHOP_BUY (购买) => BTN_CONFIRM (确认). Grey confirm =>
-               unavailable => exit. GOT_REWARD popup => dismiss => exit
-4. exit:       detect_screen_yolo()=="Lobby" => done; else BTN_HOME/BTN_BACK/ESC
+★★ HARD RULES ★★
+- NEVER touch the 青辉石商店 tab (SHOP_TAB_PYROXENE_SEL) — that spends pyroxene.
+  We stay on the default 一般(信用点) tab; if we ever detect the pyroxene tab
+  selected, abort. The 一般 tab is 100% credits, so this skill cannot spend
+  pyroxene/real money by construction.
+- Dynamic budget: read top-bar credit balance (reliable anchor) + best-effort
+  the dialog 總購買價格. Buy only if balance − total ≥ reserve (or, when the
+  total can't be read, only when balance is comfortably above reserve+ceiling).
+  Reserve is configurable (app_config profile `shop_credit_reserve`).
 
-States: enter → select_all → purchase → exit
+State machine
+-------------
+enter    lobby → NAV_SHOP → shop page (默认 一般 tab). Pyroxene-tab guard.
+select   全部选择 (SHOP_SELECT_ALL) → all items green-checked. 全部选择灰 = nothing
+         to buy / already bought today → exit.
+buy      选择购买 (SHOP_BUY_SELECTED) → purchase-confirm dialog.
+confirm  read budget → balance−total ≥ reserve → 确认键; else 取消键 → exit.
+exit     GOT_REWARD dismissed globally → lobby → done.
+
+Detectors: base "ui" only. OCR: DIGITS ONLY (credit balance / total).
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+import json
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 from brain.skills.base import (
-    BaseSkill, ScreenState,
+    BaseSkill, ScreenState, YoloBox,
     action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
+_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+_APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
-# cls that prove we're inside the shop (any one is enough).
-_SHOP_PAGE_CLS = [
-    UC.SHOP_SELECT_ALL, UC.SHOP_SELECT_ALL_GREY, UC.SHOP_BUY,
-    UC.CURRENCY, UC.CURRENCY_SEL, UC.FREE,
-    UC.COMBO_PACK, UC.COMBO_PACK_SEL,
-]
+_CLS_CONF = 0.30
+# Center-bottom band where the purchase-confirm 确认键/取消键 sit (probe ~0.79).
+_DIALOG_BAND = (0.28, 0.72, 0.72, 0.90)
+# Default credits to keep in reserve when the dialog total can't be read.
+_DEFAULT_RESERVE = 5_000_000
+# Conservative ceiling for an unread 一般-tab total (observed ~3.1M; 20M is a
+# safe upper bound). Only used when the precise total OCR fails.
+_ASSUMED_MAX_TOTAL = 20_000_000
+
+_ENTER_MAX = 20
+_SELECT_MAX = 16
+_BUY_MAX = 14
+_CONFIRM_MAX = 12
+_EXIT_MAX = 14
+
+
+def _load_shop_reserve() -> int:
+    """Read shop_credit_reserve from the active app_config profile (credits to
+    keep). Mirrors cafe._load_invite_targets. Default _DEFAULT_RESERVE."""
+    try:
+        if not _APP_CONFIG_FILE.exists():
+            return _DEFAULT_RESERVE
+        data = json.loads(_APP_CONFIG_FILE.read_text("utf-8"))
+        active = data.get("active_profile", "default")
+        profile = (data.get("profiles") or {}).get(active, {})
+        raw = profile.get("shop_credit_reserve")
+        if raw is None:
+            return _DEFAULT_RESERVE
+        return max(0, int(raw))
+    except Exception:
+        return _DEFAULT_RESERVE
 
 
 class ShopSkill(BaseSkill):
+    # Any of these cls prove we're inside the shop.
+    _SHOP_PAGE_CLS = [
+        UC.SHOP_SELECT_ALL, UC.SHOP_SELECT_ALL_GREY, UC.SHOP_ALL_SELECTED,
+        UC.SHOP_BUY, UC.SHOP_BUY_SELECTED, UC.CURRENCY, UC.CURRENCY_SEL,
+        UC.SHOP_TAB_CREDIT, UC.SHOP_TAB_CREDIT_SEL,
+    ]
+
     def __init__(self):
         super().__init__("Shop")
-        self.max_ticks = 50
-        self._enter_click_cooldown: int = 0
-        self._select_attempts: int = 0
-        self._purchase_attempts: int = 0
-        self._confirm_clicks: int = 0
+        self.max_ticks = 60
+        self._reserve = _DEFAULT_RESERVE
+        self._init_state()
+
+    def _init_state(self) -> None:
+        self._phase_ticks: int = 0
+        self._select_clicks: int = 0
         self._buy_clicks: int = 0
         self._purchased: bool = False
-        self._post_click_wait: int = 0
+        self._budget_logged: bool = False
 
     def reset(self) -> None:
         super().reset()
-        self._enter_click_cooldown = 0
-        self._select_attempts = 0
-        self._purchase_attempts = 0
-        self._confirm_clicks = 0
-        self._buy_clicks = 0
-        self._purchased = False
-        self._post_click_wait = 0
+        self._init_state()
+        self._reserve = _load_shop_reserve()
+        self.log(f"shop credit reserve = {self._reserve:,}")
 
-    # ── page inference via YOLO cls (no OCR) ──────────────────────────
-    def _on_shop_page(self, screen: ScreenState) -> bool:
-        """Inside shop iff any shop-specific cls is visible."""
-        return self.find_cls(screen, _SHOP_PAGE_CLS, conf=0.25) is not None
+    def _goto(self, sub_state: str) -> None:
+        self.sub_state = sub_state
+        self._phase_ticks = 0
 
-    # ── state machine ─────────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────────────
+    def _on_shop(self, screen: ScreenState) -> bool:
+        return self.find_cls(screen, self._SHOP_PAGE_CLS, conf=0.25) is not None
+
+    def _confirm_dialog(self, screen: ScreenState) -> Optional[YoloBox]:
+        confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DIALOG_BAND)
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+        if confirm is not None and cancel is not None:
+            return confirm
+        return None
+
+    def _read_budget(self, screen: ScreenState) -> Tuple[Optional[int], Optional[int]]:
+        """(balance, total). Balance from the reliable top-bar credit; total is
+        a best-effort read of the dialog's 總購買價格 via 货币数量显示区域."""
+        balance = None
+        bres = self.read_count(screen, UC.TOPBAR_CREDIT, side="right", span=0.12)
+        if bres is not None:
+            balance = bres[0]
+
+        total = None
+        if screen.frame is not None:
+            try:
+                from brain.pipeline import run_digit_ocr, parse_count
+                # 货币数量显示区域 boxes inside the dialog (exclude the top bar).
+                areas = self.find_all_cls(
+                    screen, UC.CURRENCY_QTY_AREA, conf=_CLS_CONF,
+                    region=(0.30, 0.30, 0.95, 0.78),
+                )
+                if areas:
+                    # held above, total below → the lowest box is 總購買價格.
+                    tbox = max(areas, key=lambda b: b.cy)
+                    raw = run_digit_ocr(
+                        screen.frame, (tbox.x1, tbox.y1, tbox.x2, tbox.y2)
+                    )
+                    res = parse_count(raw)
+                    if res is not None:
+                        total = res[0]
+            except Exception:
+                pass
+        return balance, total
+
+    def _affordable(self, balance: Optional[int], total: Optional[int]) -> bool:
+        if balance is None:
+            return False  # can't verify → fail safe (never blind-buy)
+        if total is not None:
+            return (balance - total) >= self._reserve
+        # Total unreadable → only buy when balance is comfortably above reserve.
+        return balance >= (self._reserve + _ASSUMED_MAX_TOTAL)
+
+    # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
+        self._phase_ticks += 1
+
         if self.ticks >= self.max_ticks:
             self.log(f"timeout (purchased={self._purchased})")
             return action_done(f"shop timeout (purchased={self._purchased})")
 
-        # Reward popup (獲得獎勵) — dismiss via YOLO cls, then exit.
-        reward = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
-        if reward is not None:
-            if not self._purchased:
-                self._purchased = True
-                self.log("purchase reward detected (GOT_REWARD)")
-            self.sub_state = "exit"
-            self._post_click_wait = 2
-            return action_click_box(reward, "dismiss reward popup (YOLO 获得奖励)")
-
-        popup = self._handle_common_popups(screen)
-        if popup:
-            return popup
+        # Global: purchase reward popup → dismiss via continue / header.
+        cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
+        if cont is not None:
+            return action_click_box(cont, "dismiss reward via continue")
+        got = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
+        if got is not None:
+            return action_click_box(got, "dismiss purchase reward")
 
         if screen.is_loading():
-            return action_wait(800, "shop loading")
-
-        if self._post_click_wait > 0:
-            self._post_click_wait -= 1
-            return action_wait(500, f"shop: settling ({self._post_click_wait})")
+            return action_wait(700, "shop loading")
 
         if self.sub_state == "":
-            self.sub_state = "enter"
-        if self.sub_state == "enter":
-            return self._enter(screen)
-        if self.sub_state == "select_all":
-            return self._select_all(screen)
-        if self.sub_state == "purchase":
-            return self._purchase(screen)
-        if self.sub_state == "exit":
-            return self._exit(screen)
-        return action_wait(300, "shop unknown state")
+            self._goto("enter")
+
+        handler = {
+            "enter": self._enter,
+            "select": self._select,
+            "buy": self._buy,
+            "confirm": self._confirm,
+            "exit": self._exit,
+        }.get(self.sub_state)
+        if handler is None:
+            return action_wait(300, "shop unknown state")
+        return handler(screen)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._on_shop_page(screen):
-            self.log("inside shop")
-            self.sub_state = "select_all"
-            self._post_click_wait = 1
+        # ⛔ pyroxene-tab guard: never operate on the 青辉石 shop.
+        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
+            self.log("⛔ on 青辉石商店 tab — never buy pyroxene, exiting")
+            self._goto("exit")
+            return action_wait(300, "pyroxene tab → exit")
+
+        if self._on_shop(screen):
+            self.log("inside shop (一般 tab) → select")
+            self._goto("select")
             return action_wait(400, "entered shop")
 
-        # Cooldown so we don't re-tap the nav entry while it animates in.
-        if self._enter_click_cooldown > 0:
-            self._enter_click_cooldown -= 1
-            return action_wait(500, f"shop: enter cooldown ({self._enter_click_cooldown})")
+        if screen.is_lobby():
+            act = self.click_cls(screen, UC.NAV_SHOP, "open shop", conf=_CLS_CONF)
+            if act is not None:
+                return act
+            self.log("on lobby but no 商店入口 — YOLO gap; waiting")
+            return action_wait(400, "waiting for 商店入口 cls")
 
-        # YOLO 商店入口 cls.
-        shop_btn = self.find_cls(screen, UC.NAV_SHOP, conf=0.30)
-        if shop_btn is not None:
-            self._enter_click_cooldown = 4
-            return action_click_box(shop_btn, "open shop (YOLO 商店入口)")
+        if self._phase_ticks > _ENTER_MAX:
+            return action_done("could not reach shop")
+        if len(screen.yolo_boxes or []) < 2:
+            return action_wait(700, "no UI detected, likely loading")
+        return action_back("shop: recover toward lobby")
 
-        # Not lobby + not shop → back out toward lobby.
-        if self.detect_screen_yolo(screen) not in (None, "Lobby"):
-            return action_back("shop: backing toward lobby")
-        self.log("no 商店入口 cls visible — YOLO gap; waiting")
-        return action_wait(400, "shop: waiting for 商店入口 detection")
+    def _select(self, screen: ScreenState) -> Dict[str, Any]:
+        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
+            self._goto("exit")
+            return action_wait(300, "pyroxene tab → exit")
 
-    def _select_all(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click 全部选择 (select-all). Grey variant => nothing to buy."""
-        self._select_attempts += 1
+        if not self._on_shop(screen):
+            if screen.is_lobby():
+                self._goto("enter")
+                return action_wait(300, "select: back on lobby")
+            if self._phase_ticks > _SELECT_MAX:
+                self._goto("exit")
+                return action_wait(300, "select lost shop → exit")
+            return action_wait(400, "waiting for shop UI (select)")
 
-        if not self._on_shop_page(screen):
-            if self._select_attempts > 8:
-                self.log("not on shop page after select retries — exiting")
-                self.sub_state = "exit"
-                return action_wait(300, "shop: lost page during select")
-            return action_wait(500, "shop: waiting for shop UI")
-
-        # Grey select-all = no daily items available / already bought.
-        grey = self.find_cls(screen, UC.SHOP_SELECT_ALL_GREY, conf=0.30)
-        if grey is not None:
-            self.log("select-all GREY (nothing to buy / already done)")
-            self.sub_state = "exit"
+        # Nothing to buy / already bought today.
+        if self.find_cls(screen, UC.SHOP_SELECT_ALL_GREY, conf=_CLS_CONF) is not None:
+            self.log("全部选择灰 → nothing to buy / done, exiting")
+            self._goto("exit")
             return action_wait(300, "shop nothing to select")
 
-        sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=0.30)
+        # Already selected → go buy.
+        if (self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF) is not None
+                or self.find_cls(screen, UC.SHOP_ALL_SELECTED, conf=_CLS_CONF) is not None):
+            self._goto("buy")
+            return action_wait(250, "items selected → buy")
+
+        sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF)
         if sel is not None:
+            self._select_clicks += 1
             self.log("select all (YOLO 全部选择)")
-            self.sub_state = "purchase"
-            self._purchase_attempts = 0
-            self._post_click_wait = 2
-            return action_click_box(sel, "select all items (YOLO 全部选择)")
+            return action_click_box(sel, "select all items")
 
-        # No select-all cls at all. If a buy button is already showing
-        # (items pre-selected), jump straight to purchase.
-        if self.find_cls(screen, UC.SHOP_BUY, conf=0.30) is not None:
-            self.log("no select-all but 购买 visible → purchase")
-            self.sub_state = "purchase"
-            self._purchase_attempts = 0
-            return action_wait(300, "shop: proceeding to purchase")
+        if self._phase_ticks > _SELECT_MAX:
+            self.log("no 全部选择 cls — YOLO gap; exiting")
+            self._goto("exit")
+            return action_wait(300, "no select-all cls")
+        return action_wait(400, "waiting for 全部选择 cls")
 
-        if self._select_attempts > 8:
-            self.log("no 全部选择 cls after retries — YOLO gap; exiting")
-            self.sub_state = "exit"
-            return action_wait(300, "shop: no select-all cls")
-        return action_wait(400, "shop: waiting for 全部选择 (YOLO gap)")
+    def _buy(self, screen: ScreenState) -> Dict[str, Any]:
+        # Confirm dialog already up → budget decision.
+        if self._confirm_dialog(screen) is not None:
+            self._goto("confirm")
+            return action_wait(200, "confirm dialog up → budget check")
 
-    def _purchase(self, screen: ScreenState) -> Dict[str, Any]:
-        """Click 购买 (SHOP_BUY) → 确认 (BTN_CONFIRM). Grey confirm/buy =>
-        unavailable => exit. Reward popup handled at tick() level."""
-        self._purchase_attempts += 1
+        if not self._on_shop(screen):
+            if screen.is_lobby():
+                self._goto("enter")
+                return action_wait(300, "buy: back on lobby")
+            if self._phase_ticks > _BUY_MAX:
+                self._goto("exit")
+                return action_wait(300, "buy lost shop → exit")
+            return action_wait(400, "waiting for shop UI (buy)")
 
-        if self._purchase_attempts > 16:
-            self.log("purchase loop limit — exiting")
-            self.sub_state = "exit"
-            return action_wait(300, "shop: purchase timeout")
-
-        # 1. Confirm dialog (确认) — appears after clicking 购买.
-        confirm = self.find_cls(
-            screen, UC.BTN_CONFIRM, conf=0.30, region=(0.30, 0.50, 0.90, 0.90),
-        )
-        if confirm is not None:
-            self.log(f"confirm purchase (#{self._confirm_clicks + 1})")
-            self._purchased = True
-            self._confirm_clicks += 1
-            self._post_click_wait = 2
-            return action_click_box(confirm, "confirm purchase (YOLO 确认键)")
-
-        # Grey confirm = can't afford / nothing valid selected → exit.
-        if self.find_cls(
-            screen, UC.BTN_CONFIRM_GREY, conf=0.30, region=(0.30, 0.50, 0.90, 0.90),
-        ) is not None:
-            self.log("confirm GREY (insufficient) — exiting")
-            self.sub_state = "exit"
-            return action_wait(300, "shop: confirm unavailable")
-
-        # 2. Grey buy button = nothing purchasable → exit.
-        if self.find_cls(screen, UC.SHOP_BUY_PYROXENE, conf=0.30) is not None:
-            # 购买青辉石 is a paid-currency CTA — never auto-buy. Treat as done.
-            self.log("only 购买青辉石 (paid) visible — skipping, exiting")
-            self.sub_state = "exit"
-            return action_wait(300, "shop: paid-only, nothing free to buy")
-
-        # 3. Click 购买 (bulk buy of selected items).
-        buy = self.find_cls(screen, UC.SHOP_BUY, conf=0.30)
+        buy = self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF)
         if buy is not None:
-            if self._buy_clicks >= 3:
-                self.log("购买 clicked 3x with no confirm — giving up")
-                self.sub_state = "exit"
-                return action_wait(300, "shop: buy stuck")
-            self.log(f"click 购买 (#{self._buy_clicks + 1})")
+            if self._buy_clicks >= 4:
+                self.log("选择购买 clicked 4x, no dialog — exiting")
+                self._goto("exit")
+                return action_wait(300, "buy stuck → exit")
             self._buy_clicks += 1
-            self._post_click_wait = 2
-            return action_click_box(buy, "buy selected items (YOLO 购买)")
+            self.log(f"click 选择购买 (#{self._buy_clicks})")
+            return action_click_box(buy, "buy selected items")
 
-        # 4. No buy / confirm cls. If we already confirmed, wait for reward.
-        if self._purchased:
-            self.sub_state = "exit"
-            return action_wait(300, "shop: purchase done, exiting")
+        # No batch-buy button — re-select or bail.
+        if self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF) is not None:
+            self._goto("select")
+            return action_wait(250, "no 选择购买 → back to select")
+        if self._phase_ticks > _BUY_MAX:
+            self._goto("exit")
+            return action_wait(300, "no buy cls → exit")
+        return action_wait(400, "waiting for 选择购买 cls")
 
-        # Nothing to buy was ever found.
-        if self._purchase_attempts >= 4 and self._buy_clicks == 0:
-            self.log("no 购买/确认 cls — nothing purchasable (YOLO gap or empty)")
-            self.sub_state = "exit"
-            return action_wait(300, "shop: nothing purchasable")
-        return action_wait(400, "shop: waiting for 购买 cls (YOLO gap)")
+    def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
+        confirm = self._confirm_dialog(screen)
+        if confirm is None:
+            # Dialog gone — purchased (reward) or dismissed → exit.
+            if self._phase_ticks > _CONFIRM_MAX:
+                self._goto("exit")
+                return action_wait(300, "confirm dialog gone → exit")
+            return action_wait(300, "waiting for confirm dialog")
+
+        balance, total = self._read_budget(screen)
+        if not self._budget_logged:
+            self.log(f"budget: balance={balance} total={total} reserve={self._reserve:,}")
+            self._budget_logged = True
+
+        if self._affordable(balance, total):
+            self.log("affordable (≥reserve) → confirm purchase (credits)")
+            self._purchased = True
+            self._goto("exit")
+            return action_click_box(confirm, "confirm shop purchase (within budget)")
+
+        # Not affordable / can't verify → cancel (never overspend / blind-buy).
+        self.log("⛔ not within budget / unverifiable → cancel")
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+        self._goto("exit")
+        if cancel is not None:
+            return action_click_box(cancel, "cancel purchase (budget)")
+        return action_back("cancel purchase (budget, ESC)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        # On lobby iff >=2 nav icons (detect_screen_yolo).
         if self.detect_screen_yolo(screen) == "Lobby":
-            status = "purchased" if self._purchased else "no purchase needed"
+            status = "purchased" if self._purchased else "no purchase"
             self.log(f"done ({status})")
             return action_done(f"shop complete ({status})")
-        # Prefer YOLO home/back button over blind ESC.
-        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if self._phase_ticks > _EXIT_MAX:
+            return action_done("shop exit timeout")
+        home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "shop exit: home button")
-        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "shop exit: back button")
         return action_back("shop exit: ESC toward lobby")

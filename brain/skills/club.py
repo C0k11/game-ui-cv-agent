@@ -1,194 +1,193 @@
-"""ClubSkill: Claim daily AP from club (社團/社交). YOLO-only clicks.
+"""ClubSkill — daily 社團 sign-in for free 10 AP (pure-YOLO rewrite).
 
-Design (2026-05-28 full YOLO rewrite — see docs/yolo_migration_spec.md):
-- Every click target resolved via self.find_cls/click_cls (ui_classes cls).
-- NO OCR at all: club has no digit counter to read (unlike mail's X/200),
-  and all buttons (社交入口 / 社團 / 領取_黃 / 綠勾) have YOLO cls. So this
-  skill is purely cls-driven.
-- No detect_current_screen (OCR). detect_screen_yolo() has no dedicated
-  "Club" page, so we infer club state heuristically: after clicking
-  NAV_SOCIAL we're off-lobby AND can see CLUB or a CLAIM cls.
-- If YOLO can't see a needed cls, log + wait (surface the gap) — never
-  OCR-fallback, never blind hardcoded clicks.
-- The club daily sign-in popup (社團簽到獎勵) + bond level-up are handled
-  globally by _handle_common_popups.
+Verified flow (interactive probe 2026-06-01, data/_social_probe_log.md). The
+old skill was WRONG: it looked for a 領取 claim cls and relied on the OCR popup
+handler (dead in pure-YOLO mode). The probe found the real flow:
 
-States: enter → claim → exit
+  社交入口 → 社團 card → auto-pops 「社團簽到獎勵」 → tap 确认键 (centered, no
+  cancel) → sign-in done. The 10 AP goes to the MAILBOX (mail skill claims it),
+  not immediately to the balance.
+
+Two YOLO gaps the skill works around (documented, fix in v6 — task #22):
+- The 3 social cards (社團/好友/幫手) have no reliable cls (社團/CLUB cls 51
+  recall-missed at conf<0.20). We click the 社團 card via CLUB cls when seen,
+  else via a normalized offset DOWN-LEFT of its red dot (probe: card body
+  ~(0.235,0.52), dot ~(0.364,0.415) ⇒ Δ(-0.13,+0.105)). Tapping the dot itself
+  is too high → lands above the card → the overlay collapses back to lobby.
+
+State machine
+-------------
+enter    checkin dialog up → checkin. social overlay (社團 dot / CLUB cls) →
+         tap the card. lobby → tap NAV_SOCIAL. (cooldown to avoid spam.)
+checkin  「社團簽到獎勵」 = 确认键 present with NO 取消键 → tap it → done.
+exit     BTN_HOME / BTN_BACK → lobby → done.
+
+Detectors: base "ui" only.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
-    action_click_box, action_wait, action_back, action_done,
+    action_click, action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
+_CLS_CONF = 0.30
+# 社團 card red dot lives here on the social overlay (probe: ~0.364,0.415).
+_CARD_DOT_REGION = (0.28, 0.34, 0.46, 0.50)
+# Normalized offset from the 社團 red dot to the card BODY center (probe).
+_DOT_TO_CARD = (-0.129, 0.105)
+# Centered confirm button band for the 社團簽到獎勵 dialog (probe: ~0.499,0.676).
+_CHECKIN_REGION = (0.34, 0.58, 0.66, 0.78)
+
+_ENTER_MAX = 26
+_CHECKIN_MAX = 12
+_EXIT_MAX = 14
+
 
 class ClubSkill(BaseSkill):
-    _LOBBY_DOT_ENTRIES = [UC.NAV_SOCIAL]
-
-    def should_run(self, screen):
-        return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
+    def should_run(self, screen: ScreenState) -> bool:
+        return self.dot_on_entry(screen, [UC.NAV_SOCIAL])
 
     def __init__(self):
         super().__init__("Club")
-        self.max_ticks = 30
-        self._claim_attempts: int = 0
-        self._claimed: bool = False
-        self._enter_click_cooldown: int = 0
-        self._post_claim_wait: int = 0
-        # Entry-clicked gate (see daily_tasks): a claim cls only counts as
-        # "inside club" once we've clicked our own social/club entry. Stops
-        #串页 off a leftover claim screen or a transient YOLO claim misfire.
-        self._entered: bool = False
+        self.max_ticks = 50
+        self._init_state()
+
+    def _init_state(self) -> None:
+        self._phase_ticks: int = 0
+        self._nav_cooldown: int = 0      # ticks to wait after a navigation tap
+        self._card_taps: int = 0
+        self._checked_in: bool = False
 
     def reset(self) -> None:
         super().reset()
-        self._claim_attempts = 0
-        self._claimed = False
-        self._enter_click_cooldown = 0
-        self._post_claim_wait = 0
-        self._entered = False
+        self._init_state()
 
-    # ── page inference via YOLO cls (no OCR) ──────────────────────────
-    def _on_club_page(self, screen: ScreenState) -> bool:
-        """Inside club iff we've clicked our own entry (self._entered) AND
-        (off-lobby) AND we can see the 社團 tile or any claim cls
-        (active/grey/green-check). The entry gate keeps a leftover/other-skill
-        claim screen from串页 into club's in-page判定. Pure predicate — the
-        _entered re-arm on lobby happens in _enter (cooldown-guarded) so the
-        social overlay (lobby icons still showing underneath) doesn't reset it
-        mid-entry."""
-        if not self._entered:
-            return False
-        if self.detect_screen_yolo(screen) == "Lobby":
-            return False
-        return self.find_cls(
-            screen,
-            [UC.CLUB] + UC.CLAIM_ACTIVE + UC.CLAIM_DONE
-            + [UC.GREEN_CHECK, UC.CLAIM_REWARD_GREY],
-            conf=0.20,
-        ) is not None
+    def _goto(self, sub_state: str) -> None:
+        self.sub_state = sub_state
+        self._phase_ticks = 0
 
-    # ── state machine ─────────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────────────
+    def _checkin_dialog(self, screen: ScreenState):
+        """社團簽到獎勵 = a centered 确认键 with NO 取消键 (single-button)."""
+        confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_CHECKIN_REGION)
+        if confirm is None:
+            return None
+        if self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None:
+            return None  # 2-button dialog = not the checkin (don't mishandle)
+        return confirm
+
+    def _card_dot(self, screen: ScreenState):
+        return self.find_cls(screen, UC.DOT_RED, conf=0.35, region=_CARD_DOT_REGION)
+
+    def _on_social_overlay(self, screen: ScreenState) -> bool:
+        """Social overlay marker: the 社團 card dot (or CLUB cls) is present and
+        we're not on a deeper page."""
+        return (self._card_dot(screen) is not None
+                or self.find_cls(screen, UC.CLUB, conf=_CLS_CONF) is not None)
+
+    # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
+        self._phase_ticks += 1
+
         if self.ticks >= self.max_ticks:
-            self.log(f"timeout (claimed={self._claimed})")
+            self.log(f"timeout (checked_in={self._checked_in})")
             return action_done("club timeout")
 
-        popup = self._handle_common_popups(screen)
-        if popup:
-            return popup
-
         if screen.is_loading():
-            return action_wait(800, "club loading")
+            return action_wait(700, "club loading")
 
         if self.sub_state == "":
-            self.sub_state = "enter"
-        if self.sub_state == "enter":
-            return self._enter(screen)
-        if self.sub_state == "claim":
-            return self._claim(screen)
-        if self.sub_state == "exit":
-            return self._exit(screen)
-        return action_wait(300, "club unknown state")
+            self._goto("enter")
+
+        handler = {
+            "enter": self._enter,
+            "checkin": self._checkin,
+            "exit": self._exit,
+        }.get(self.sub_state)
+        if handler is None:
+            return action_wait(300, "club unknown state")
+        return handler(screen)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        # Re-arm the entry gate only on a CONFIRMED return to lobby, and only
-        # when not mid-entry (cooldown==0). Guarding on cooldown stops the
-        # social overlay — which still shows lobby nav icons underneath — from
-        # clearing _entered the tick after we click 社交入口.
-        if self._enter_click_cooldown == 0 and self.detect_screen_yolo(screen) == "Lobby":
-            self._entered = False
+        # Sign-in dialog already up (card auto-pops it) → checkin.
+        if self._checkin_dialog(screen) is not None:
+            self._goto("checkin")
+            return action_wait(200, "checkin dialog up → checkin")
 
-        if self._on_club_page(screen):
-            self.log("inside club")
-            self.sub_state = "claim"
-            self._post_claim_wait = 2
-            return action_wait(500, "entered club")
+        if self._nav_cooldown > 0:
+            self._nav_cooldown -= 1
+            return action_wait(450, f"club: nav cooldown ({self._nav_cooldown})")
 
-        # Cooldown so we don't spam the social/club entry while the overlay
-        # is animating in.
-        if self._enter_click_cooldown > 0:
-            self._enter_click_cooldown -= 1
-            return action_wait(500, f"club: enter cooldown ({self._enter_click_cooldown})")
+        # Social overlay open → tap the 社團 card.
+        if self._on_social_overlay(screen):
+            club = self.find_cls(screen, UC.CLUB, conf=_CLS_CONF)
+            if club is not None:
+                self._card_taps += 1
+                self._nav_cooldown = 3
+                self.log("tapping 社團 card (YOLO 社团)")
+                return action_click_box(club, "open 社團 (cls)")
+            dot = self._card_dot(screen)
+            if dot is not None and self._card_taps < 5:
+                # Card body is DOWN-LEFT of the dot (dot alone is too high →
+                # overlay collapses). Documented under-trained-cls fallback.
+                cx = max(0.05, min(0.95, dot.cx + _DOT_TO_CARD[0]))
+                cy = max(0.05, min(0.95, dot.cy + _DOT_TO_CARD[1]))
+                self._card_taps += 1
+                self._nav_cooldown = 3
+                self.log(f"tapping 社團 card body via dot offset ({cx:.2f},{cy:.2f})")
+                return action_click(cx, cy, "open 社團 (dot-relative card body)")
+            if self._card_taps >= 5:
+                self.log("社團 card taps exhausted, exiting")
+                self._goto("exit")
+                return action_wait(300, "card taps exhausted → exit")
+            return action_wait(350, "waiting for 社團 card cls/dot")
 
-        # Step 2: social overlay open (社團 tile visible) → click it.
-        club_btn = self.find_cls(screen, UC.CLUB, conf=0.30)
-        if club_btn is not None:
-            self._enter_click_cooldown = 3
-            self._entered = True  # entry-clicked gate: now in-page is trusted
-            return action_click_box(club_btn, f"open club (YOLO {UC.CLUB} {club_btn.confidence:.2f})")
+        # On lobby → open the social overlay.
+        if screen.is_lobby():
+            social = self.find_cls(screen, UC.NAV_SOCIAL, conf=_CLS_CONF)
+            if social is not None:
+                self._nav_cooldown = 3
+                self.log("opening social overlay (YOLO 社交入口)")
+                return action_click_box(social, "open social")
+            self.log("on lobby but no 社交入口 — YOLO gap; waiting")
+            return action_wait(400, "waiting for 社交入口 cls")
 
-        # Step 1: on lobby → click 社交入口 to open the social overlay.
-        social_btn = self.find_cls(screen, UC.NAV_SOCIAL, conf=0.30)
-        if social_btn is not None:
-            self._enter_click_cooldown = 3
-            self._entered = True  # entry-clicked gate: now in-page is trusted
-            return action_click_box(social_btn, f"open social (YOLO {UC.NAV_SOCIAL} {social_btn.confidence:.2f})")
+        if self._phase_ticks > _ENTER_MAX:
+            self.log("enter budget exhausted, exiting")
+            self._goto("exit")
+            return action_wait(300, "enter timeout → exit")
+        return action_back("club: recover toward lobby")
 
-        # Not lobby + not club + no social entry → back out toward lobby.
-        if self.detect_screen_yolo(screen) not in (None, "Lobby"):
-            return action_back("club: backing toward lobby")
-        self.log("no 社交入口/社團 cls — YOLO gap; waiting")
-        return action_wait(400, "club: waiting for 社交入口/社團 detection")
+    def _checkin(self, screen: ScreenState) -> Dict[str, Any]:
+        confirm = self._checkin_dialog(screen)
+        if confirm is not None:
+            self._checked_in = True
+            self.log("社團簽到 → 确认键 (10AP to mailbox)")
+            self._goto("exit")
+            return action_click_box(confirm, "confirm club sign-in")
 
-    def _claim(self, screen: ScreenState) -> Dict[str, Any]:
-        self._claim_attempts += 1
-
-        if self._post_claim_wait > 0:
-            self._post_claim_wait -= 1
-            return action_wait(500, f"club: settling ({self._post_claim_wait})")
-
-        # Already claimed: green check or greyed claim button → done.
-        if self.find_cls(
-            screen, [UC.GREEN_CHECK] + UC.CLAIM_DONE, conf=0.25,
-        ) is not None:
-            self.log("club AP already claimed (绿勾/灰色领取)")
-            self.sub_state = "exit"
-            return action_wait(300, "already claimed")
-
-        # Result popup "獲得獎勵" — tap to dismiss, then we're done.
-        got = self.find_cls(screen, UC.GOT_REWARD, conf=0.30)
-        if got is not None:
-            self._claimed = True
-            self.sub_state = "exit"
-            return action_click_box(got, f"dismiss reward popup (YOLO {UC.GOT_REWARD})")
-
-        # Claim the AP reward. Club uses the yellow single/reward claim cls.
-        claim = self.find_cls(
-            screen,
-            [UC.CLAIM_YELLOW, UC.CLAIM_REWARD_YELLOW,
-             UC.CLAIM_ALL_YELLOW, UC.CLAIM_BLUE],
-            conf=0.25,
-        )
-        if claim is not None:
-            self._claimed = True
-            self.log(f"claiming club AP (#{self._claim_attempts}, cls={claim.cls_name})")
-            self._post_claim_wait = 3
-            return action_click_box(claim, f"claim club AP (YOLO {claim.cls_name})")
-
-        # No claim cls visible. Give it a few ticks (page may still load),
-        # then exit — surfaces a gap if claim cls truly never appears.
-        if self._claim_attempts > 8:
-            self.log(f"no claim cls after {self._claim_attempts} attempts (claimed={self._claimed}) — YOLO gap")
-            self.sub_state = "exit"
-            return action_wait(300, "no club claim cls found")
-        return action_wait(400, "club: waiting for claim cls (YOLO gap)")
+        # Dialog gone already (confirm registered) → exit.
+        if self._phase_ticks > _CHECKIN_MAX:
+            self.log("checkin dialog gone → exit")
+            self._goto("exit")
+            return action_wait(300, "checkin done → exit")
+        return action_wait(300, "waiting for 社團簽到 dialog")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        # On lobby iff we see >=2 nav icons.
         if self.detect_screen_yolo(screen) == "Lobby":
-            self.log(f"done (claimed={self._claimed})")
-            return action_done(f"club complete (claimed={self._claimed})")
-        # Prefer YOLO home/back button over blind ESC.
-        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+            self.log(f"done (checked_in={self._checked_in})")
+            return action_done(f"club complete (checked_in={self._checked_in})")
+        if self._phase_ticks > _EXIT_MAX:
+            return action_done("club exit timeout")
+        home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "club exit: home button")
-        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "club exit: back button")
         return action_back("club exit: ESC toward lobby")
