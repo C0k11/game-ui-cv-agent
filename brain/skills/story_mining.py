@@ -32,7 +32,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.20
+_CLS_CONF = 0.30
 _CONTENT_REGION = (0.05, 0.12, 0.99, 0.92)   # exclude top HUD + bottom nav
 _NODE_PANEL = (0.30, 0.12, 1.0, 0.95)        # node/chapter list (right side)
 _ROW_DY = 0.06                               # node-icon ↔ 入场键 same-row gap

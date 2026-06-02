@@ -44,7 +44,7 @@ from brain.skills.base import (
 from brain.skills import ui_classes as UC
 
 _APP_CONFIG_FILE = Path(__file__).resolve().parents[2] / "data" / "app_config.json"
-_CLS_CONF = 0.20
+_CLS_CONF = 0.30
 # Sweep-confirm 确认键/取消键 band (probe: y≈0.70).
 _CONFIRM_BAND = (0.28, 0.60, 0.72, 0.82)
 # 掃蕩完成 reward popup 确认键 sits LOWER (probe: ~0.5, 0.81).

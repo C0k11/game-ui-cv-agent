@@ -37,7 +37,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.20
+_CLS_CONF = 0.30
 # Center-bottom band where craft confirm / 立即完成 dialogs put 确认键/取消键
 # (probe: y≈0.70 for both the start-confirm and the券-rush dialog).
 _DIALOG_BAND = (0.28, 0.60, 0.72, 0.82)

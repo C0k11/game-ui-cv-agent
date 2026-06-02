@@ -40,7 +40,11 @@ from brain.skills.base import (
 from brain.skills import ui_classes as UC
 
 # ── tuning knobs ─────────────────────────────────────────────────────────
-_CLS_CONF = 0.20              # default UI cls confidence floor
+_CLS_CONF = 0.30              # default UI cls confidence floor
+# 免费(FREE) is a genuinely weak/flickery cls (14f) — on a settled frame it's
+# 0.9 but it dips to 0.13-0.34 on transition frames. Use a TARGETED low floor
+# for it only (NOT a global conf drop). v6: oversample 免费 (task #32).
+_FREE_CONF = 0.20
 
 # Purchase-confirm dialog button band (确认键 / 取消键 sit center-bottom ~y0.82).
 _DIALOG_BAND = (0.28, 0.74, 0.72, 0.92)
@@ -48,6 +52,11 @@ _DIALOG_BAND = (0.28, 0.74, 0.72, 0.92)
 _DIALOG_PRICE_REGION = (0.48, 0.48, 0.88, 0.74)
 # Same-column tolerance when pairing a FREE label with its 购买 button.
 _FREE_COL_DX = 0.10
+# 組合包 TAB red-dot region (top-right of the tab, ~0.80,0.21). Dot present =
+# the free pack is NOT yet claimed today (probe: clears after claiming). Used to
+# tell "FREE flickering, keep polling" from "genuinely claimed".
+_COMBO_DOT_REGION = (0.74, 0.14, 0.90, 0.30)
+_BUY_FREE_POLL = 14          # poll this many ticks for the flickery 免费 cls
 
 # Per-sub-state tick budgets — every phase is bounded, never dead-waits.
 _ENTER_MAX = 22
@@ -126,7 +135,7 @@ class BuyPyroxeneSkill(BaseSkill):
         when no FREE label is on screen (pack already claimed today) OR no 购买
         sits under it. This is the SOLE purchase path — a 购买 with no FREE
         above it is a CAD pack and is never returned."""
-        free = self.find_cls(screen, UC.FREE, conf=_CLS_CONF)
+        free = self.find_cls(screen, UC.FREE, conf=_FREE_CONF)
         if free is None:
             return None
         buys = self.find_all_cls(screen, UC.SHOP_BUY, conf=_CLS_CONF)
@@ -245,13 +254,25 @@ class BuyPyroxeneSkill(BaseSkill):
             self._goto("confirm")
             return action_click_box(free_buy, "buy FREE daily combo pack")
 
-        # No FREE label → pack already claimed today (or already bought now).
-        if self._phase_ticks > 4:  # let the tab settle before concluding
-            why = "claimed just now" if self._bought else "already claimed today"
-            self.log(f"no FREE pack 购买 visible → done ({why})")
+        # No FREE this frame. Distinguish "已领" from "免费 just flickering" via
+        # the 組合包 TAB red dot (probe: dot present ⇒ NOT claimed yet).
+        combo_dot = self.find_cls(screen, UC.DOT_RED, conf=0.30, region=_COMBO_DOT_REGION)
+        if combo_dot is not None and not self._bought:
+            # Unclaimed (dot present) but 免费 not detected → it's flickering
+            # (weak 14f cls). Keep polling many ticks before giving up.
+            if self._phase_ticks > _BUY_FREE_POLL:
+                self.log("⚠️ 组合包红点在但免费cls始终未检出(弱cls欠训) → 退出不盲买, 待v6补样本")
+                self._goto("exit")
+                return action_wait(250, "FREE undetected despite dot → safe exit")
+            return action_wait(350, f"免费 flickering (红点在), polling ({self._phase_ticks})")
+
+        # No FREE AND no combo red dot (or we already bought) → genuinely done.
+        if self._phase_ticks > 4:
+            why = "claimed just now" if self._bought else "no 红点 → already claimed today"
+            self.log(f"no FREE + no combo红点 → done ({why})")
             self._goto("exit")
             return action_wait(250, f"no free pack → exit ({why})")
-        return action_wait(300, "waiting for FREE pack to render")
+        return action_wait(300, "settling combo tab before concluding")
 
     # ── confirm ──────────────────────────────────────────────────────────────
 

@@ -40,7 +40,7 @@ from brain.skills import ui_classes as UC
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
-_CLS_CONF = 0.20
+_CLS_CONF = 0.30
 # Center-bottom band where the purchase-confirm 确认键/取消键 sit (probe ~0.79).
 _DIALOG_BAND = (0.28, 0.72, 0.72, 0.90)
 # Default credits to keep in reserve when the dialog total can't be read.

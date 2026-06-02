@@ -34,7 +34,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.20
+_CLS_CONF = 0.30
 # 社團 card red dot lives here on the social overlay (probe: ~0.364,0.415).
 _CARD_DOT_REGION = (0.28, 0.34, 0.46, 0.50)
 # Normalized offset from the 社團 red dot to the card BODY center (probe).

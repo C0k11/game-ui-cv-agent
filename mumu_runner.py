@@ -579,7 +579,13 @@ def main() -> None:
                         print("[Info] Pipeline complete!")
                         # Keep overlay running so user can see final state
                 else:
-                    tick_interval = 0.5
+                    # After a CLICK: give the game time to open/animate the next
+                    # screen before we read+act again. 0.5s was too short — the
+                    # next read landed on a transition/animation frame where weak
+                    # cls (免费/制造入口) flicker low, so skills misread + re-clicked
+                    # (user: "点一下得等一下，等游戏把界面打开"). 1.0s + the skills'
+                    # own is_loading waits cover most transitions.
+                    tick_interval = 1.0
 
             # Draw overlay using CACHED YOLO boxes (no re-inference!)
             if not args.no_overlay:

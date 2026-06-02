@@ -59,7 +59,7 @@ _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
 # ── tuning knobs ──────────────────────────────────────────────────────────
-_CLS_CONF = 0.20            # default UI cls confidence floor
+_CLS_CONF = 0.30            # default UI cls confidence floor
 _AVATAR_CONF = 0.30         # fused_avatar head confidence (probe used 0.30)
 
 _MAX_TICKETS = 7            # 持有票券 X/7 — total ticket capacity

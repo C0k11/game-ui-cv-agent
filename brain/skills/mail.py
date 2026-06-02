@@ -32,7 +32,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-_CLS_CONF = 0.20
+_CLS_CONF = 0.30
 _MAIL_ZONE = (0.86, 0.0, 0.97, 0.09)   # top-right envelope + its red dot
 
 _ENTER_MAX = 20
