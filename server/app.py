@@ -214,6 +214,11 @@ def _default_profile_settings() -> Dict[str, Any]:
         # model cls names (e.g. "莉央(战斗)"). cafe.py reads index 0 for 1F,
         # index 1 for 2F. Empty list = invite the first visible rows.
         "cafe_invite_targets": [],
+        # Schedule (課程表) target students — 中文角色名 matching the
+        # fused_avatar cls (e.g. "莉央(战斗)"). schedule.py Case B (all regions
+        # max-level) only dispatches a room when one of these students sits in
+        # it. Empty list = spend leftover tickets on any room (fallback).
+        "schedule_target_students": [],
         # ── Extended profile config (schema-only; skills consume incrementally) ──
         # Daily scheduler (opt-in). When enabled, server auto-fires pipeline
         # at `reset_time` (HH:MM, local) and re-fires every `interval_hours`.
@@ -323,6 +328,20 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
         data["cafe_invite_targets"] = [
             str(x or "").strip() for x in raw_cafe if str(x or "").strip()
         ]
+
+    # Schedule target students — list of 中文角色名 (order irrelevant; dedup +
+    # trim blanks). schedule.py Case B dispatches only rooms holding one of
+    # these; empty = spend leftover tickets on any room.
+    raw_sched = raw.get("schedule_target_students")
+    if isinstance(raw_sched, list):
+        sched_out: List[str] = []
+        seen_sched: Set[str] = set()
+        for x in raw_sched:
+            name = str(x or "").strip()
+            if name and name not in seen_sched:
+                sched_out.append(name)
+                seen_sched.add(name)
+        data["schedule_target_students"] = sched_out
 
     # Extended config blocks: shallow-merge dict-valued keys and
     # pass through list/scalar keys as-is. Skills ignore unknown fields,

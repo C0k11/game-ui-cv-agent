@@ -315,6 +315,12 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
               <input id="cafe_invite_2f" type="text" style="width:120px" placeholder="例: 白子(骑行)"/>
             </label>
           </div>
+          <div class="check-row" style="gap:8px" title="课程表目标角色（中文名，需与头像模型一致，如 莉央(战斗)）。逗号分隔多个。所有地区满级时只给这些角色排课；留空=用剩余票随机排课。">
+            <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">课程表目标</span>
+            <label style="font-size:12px;color:var(--muted)">角色
+              <input id="schedule_target_students" type="text" style="width:240px" placeholder="例: 莉央(战斗), 白子(骑行)"/>
+            </label>
+          </div>
         </div>
         <div class="form-row" style="gap:18px;flex-wrap:wrap">
           <div class="check-row" style="gap:8px" title="每日定时自动触发 pipeline">
@@ -943,6 +949,9 @@ function fillAgentFromProfile(profile){
   const _cafeInv = Array.isArray(p.cafe_invite_targets) ? p.cafe_invite_targets : [];
   if($('cafe_invite_1f'))$('cafe_invite_1f').value=_cafeInv[0]||'';
   if($('cafe_invite_2f'))$('cafe_invite_2f').value=_cafeInv[1]||'';
+  // Schedule target students — 中文角色名 list (matches fused_avatar cls)
+  const _schedTgt = Array.isArray(p.schedule_target_students) ? p.schedule_target_students : [];
+  if($('schedule_target_students'))$('schedule_target_students').value=_schedTgt.join(', ');
   // Scheduler block (optional, missing on legacy profiles)
   const _sched = (p.scheduler && typeof p.scheduler === 'object') ? p.scheduler : {};
   if($('sched_enabled'))$('sched_enabled').checked=Boolean(_sched.enabled);
@@ -961,6 +970,15 @@ function collectCafeInviteTargets(){
   // [1F, 2F] 中文角色名; trailing empties trimmed. cafe.py reads index 0/1.
   const out=[($('cafe_invite_1f')?.value||'').trim(), ($('cafe_invite_2f')?.value||'').trim()];
   while(out.length && !out[out.length-1])out.pop();
+  return out;
+}
+function collectScheduleTargets(){
+  // Comma-separated 中文角色名; trim blanks + dedup. schedule.py Case B match.
+  const seen=new Set(); const out=[];
+  for(const part of ($('schedule_target_students')?.value||'').split(',')){
+    const name=part.trim();
+    if(name && !seen.has(name)){ seen.add(name); out.push(name); }
+  }
   return out;
 }
 async function loadServerConfig(){
@@ -1003,6 +1021,7 @@ async function saveProfileConfig(showText='已保存档案'){
       skill_order:getSelectedSkillOrder(),
       bounty_branches:collectBountyBranches(),
       cafe_invite_targets:collectCafeInviteTargets(),
+      schedule_target_students:collectScheduleTargets(),
       scheduler:{
         enabled:$('sched_enabled').checked,
         reset_time:($('sched_reset_time').value||'04:00').trim(),
@@ -1045,6 +1064,7 @@ function agentPayload() {
     skill_order:getSelectedSkillOrder(),
     bounty_branches:collectBountyBranches(),
     cafe_invite_targets:collectCafeInviteTargets(),
+    schedule_target_students:collectScheduleTargets(),
     scheduler:{
       enabled:$('sched_enabled').checked,
       reset_time:($('sched_reset_time').value||'04:00').trim(),
