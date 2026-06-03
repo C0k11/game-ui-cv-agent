@@ -62,6 +62,11 @@ class StoryMiningSkill(BaseSkill):
         self._cooldown = 0
         self._tried_enters: List[tuple] = []   # node 入场键 positions already entered
                                                # (battle nodes we back out of → skip next)
+        self._tried_chapters: List[float] = [] # chapter 黄点 cy already opened (a
+                                               # battle-only chapter keeps its dot →
+                                               # don't reopen it forever)
+        self._back_streak: int = 0             # consecutive back-outs with nothing
+                                               # mined (→ next category when high)
 
     def reset(self) -> None:
         super().reset()
@@ -123,6 +128,7 @@ class StoryMiningSkill(BaseSkill):
         mine = self._mine_action(screen)
         if mine is not None:
             self._barren = 0
+            self._back_streak = 0
             self._cooldown = 3
             return mine
 
@@ -149,7 +155,19 @@ class StoryMiningSkill(BaseSkill):
             self._barren += 1
             if self._barren <= _BARREN_LIMIT:
                 return action_wait(350, f"scanning for unplayed ({self._barren})")
-            return self._exhaust_and_advance(screen)
+            # Nothing minable here (e.g. a chapter with only battle/locked/done
+            # nodes). Back OUT one level to find the next unplayed chapter/篇 —
+            # NOT exhaust the whole category. Only give up to the next category
+            # after backing out many times with nothing mined.
+            self._barren = 0
+            self._back_streak += 1
+            if self._back_streak > 8:
+                self._back_streak = 0
+                return self._exhaust_and_advance(screen)
+            self._cooldown = 2
+            back = self.find_cls(screen, [UC.BTN_BACK], conf=_CLS_CONF)
+            return (action_click_box(back, "back out → next unplayed chapter/篇")
+                    if back else action_back("back out → next unplayed chapter/篇"))
 
         # P6: mission hub — 劇情 tile.
         story_tile = self.find_cls(screen, UC.HUB_STORY, conf=_CLS_CONF)
@@ -224,6 +242,7 @@ class StoryMiningSkill(BaseSkill):
         #    its row (use the dot's y; click toward the row center-left).
         dot = self._content_yellow_dot(screen)
         if dot is not None:
+            self._tried_chapters.append(dot.cy)   # opened → don't reopen (battle-only)
             self._tried_enters = []   # new chapter → reset node-dedup
             # The 黄点 sits at the LEFT edge of the chapter row; the clickable
             # chapter TITLE is to its RIGHT (e.g. 第2章 與往日訣別). Clicking
@@ -245,8 +264,10 @@ class StoryMiningSkill(BaseSkill):
 
     def _content_yellow_dot(self, screen: ScreenState) -> Optional[YoloBox]:
         dots = self.find_all_cls(screen, UC.DOT_YELLOW, conf=0.40, region=_CONTENT_REGION)
-        # exclude dots that sit on a category/nav tile (very top) — keep node area.
-        dots = [d for d in dots if d.cy > 0.18]
+        # exclude top tiles (cy<0.18) AND chapters already opened (a battle-only
+        # chapter keeps showing its 黄点 → skip so we don't reopen it forever).
+        dots = [d for d in dots if d.cy > 0.18
+                and not any(abs(c - d.cy) < 0.05 for c in self._tried_chapters)]
         return min(dots, key=lambda b: b.cy) if dots else None
 
     # ── reveal more (page-turn grids / swipe-left main 卷 list) ─────────────
