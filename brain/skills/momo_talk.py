@@ -40,12 +40,14 @@ from brain.skills import ui_classes as UC
 _CLS_CONF = 0.30
 _UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
 _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
-_STABLE_EMPTY = 15         # consecutive empty frames ⇒ student FULLY done. Big on
-                           # purpose: post-bond chatter takes a few seconds to
-                           # surface (student "types") — only switch after a long
-                           # quiet gap, never mid-conversation.
-_MAX_SENDING = 30          # consecutive 发送信息中 frames ⇒ mis-detect → treat as empty
-                           # (a real long message types in <13s; this is stuck-cap)
+# Switch students ONLY when the screen has NO 学生信息回复选项 (reply) AND NO 学生发
+# 送信息中 (sending) AND NO bond CTA — driven purely by cls detection, NOT a timer.
+# This tiny window only bridges a 1-2 frame render gap (sending vanishes before
+# the reply renders) and the weak cls flickering (sending 28f / reply 32f → an
+# occasional missed frame). It is NOT a per-student cooldown — any reply/sending
+# frame instantly resets it, so a still-talking student is never abandoned.
+_STABLE_EMPTY = 6
+_MAX_SENDING = 30          # sending stuck this long = mis-detect (a real msg types <13s)
 _MAX_SCROLLS = 6           # list swipes before giving up (mine visible, then scroll down)
 
 _ENTER_MAX = 22
