@@ -60,6 +60,8 @@ class StoryMiningSkill(BaseSkill):
         self._nav_ticks = 0
         self._cut_ticks = 0
         self._cooldown = 0
+        self._tried_enters: List[tuple] = []   # node 入场键 positions already entered
+                                               # (battle nodes we back out of → skip next)
 
     def reset(self) -> None:
         super().reset()
@@ -93,6 +95,17 @@ class StoryMiningSkill(BaseSkill):
             self._cooldown = 2
             self._barren = 0
             return action_click_box(quit_node, "中断 — leave node after mining")
+
+        # P0.7: ⚠️ BATTLE node — a 出击/部队 squad screen (a story node can be a
+        # battle node). Story mining does NOT fight (costs AP/stamina). Back out
+        # immediately — NEVER press 出击. Count it so a battle-only chapter
+        # eventually exhausts instead of looping.
+        if self.find_cls(screen, [UC.SORTIE, UC.SQUAD_1, UC.SQUAD_1_HI],
+                         conf=_CLS_CONF) is not None:
+            self._cut_ticks = 0
+            self._cooldown = 2
+            self._barren += 1
+            return action_back("⚠️ battle node (部队出击) — back out, NEVER 出击 (no AP)")
 
         # P1: cutscene skip chain (story auto-plays → skip ASAP).
         cut = self._handle_cutscene(screen)
@@ -197,12 +210,21 @@ class StoryMiningSkill(BaseSkill):
             for nd in sorted(undone, key=lambda b: b.cy):
                 row_enter = min(enters, key=lambda e: abs(e.cy - nd.cy))
                 if abs(row_enter.cy - nd.cy) < _ROW_DY:
+                    epos = (round(row_enter.cx, 2), round(row_enter.cy, 2))
+                    # Skip nodes we already entered: a battle node we backed out
+                    # of stays "unplayed", so without this we'd re-enter it
+                    # forever (battle → back → battle …).
+                    if any(abs(px - epos[0]) < 0.04 and abs(py - epos[1]) < 0.04
+                           for px, py in self._tried_enters):
+                        continue
+                    self._tried_enters.append(epos)
                     return action_click_box(row_enter, "enter unplayed node (入场键)")
 
         # 2) CHAPTER level: a 黄点 in the content area = unplayed chapter → click
         #    its row (use the dot's y; click toward the row center-left).
         dot = self._content_yellow_dot(screen)
         if dot is not None:
+            self._tried_enters = []   # new chapter → reset node-dedup
             # The 黄点 sits at the LEFT edge of the chapter row; the clickable
             # chapter TITLE is to its RIGHT (e.g. 第2章 與往日訣別). Clicking
             # dot.cx-0.05 landed LEFT of the chapter panel (on the 篇 area) and
