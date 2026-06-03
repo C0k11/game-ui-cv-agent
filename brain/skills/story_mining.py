@@ -203,8 +203,13 @@ class StoryMiningSkill(BaseSkill):
         #    its row (use the dot's y; click toward the row center-left).
         dot = self._content_yellow_dot(screen)
         if dot is not None:
-            row_x = min(0.88, max(0.55, dot.cx - 0.05))
-            return action_click(row_x, dot.cy, "open unplayed chapter (黄点 row)")
+            # The 黄点 sits at the LEFT edge of the chapter row; the clickable
+            # chapter TITLE is to its RIGHT (e.g. 第2章 與往日訣別). Clicking
+            # dot.cx-0.05 landed LEFT of the chapter panel (on the 篇 area) and
+            # never opened it (live: clicked 0.685 forever). Click into the title
+            # to the right of the dot.
+            row_x = min(0.93, dot.cx + 0.10)
+            return action_click(row_x, dot.cy, "open unplayed chapter (right of 黄点)")
 
         # 3) 篇/CARD level: a `new` / `剧情new` badge → click to select/enter.
         new = self.find_cls(screen, [UC.NEW_MARK, UC.STORY_NEW], conf=_CLS_CONF, region=_CONTENT_REGION)
