@@ -33,15 +33,17 @@ from typing import Any, Dict, List
 from brain.skills.base import (
     BaseSkill, ScreenState,
     action_click, action_click_box, action_wait, action_back, action_done,
+    action_swipe,
 )
 from brain.skills import ui_classes as UC
 
 _CLS_CONF = 0.30
 _UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
 _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
-_STABLE_EMPTY = 4          # consecutive empty frames ⇒ student conversation done
-_EMPTY_TOTAL_DONE = 14     # cumulative empty frames ⇒ done even if sending/reply
-                           # flicker keeps resetting the consecutive streak
+_STABLE_EMPTY = 5          # consecutive empty frames ⇒ student FULLY done (give
+                           # post-bond chatter + typing pauses room before switching)
+_MAX_SENDING = 15          # consecutive 发送信息中 frames ⇒ mis-detect → treat as empty
+_MAX_SCROLLS = 6           # list swipes before giving up (mine visible, then scroll down)
 
 _ENTER_MAX = 22
 _TAB_MAX = 12
@@ -65,9 +67,10 @@ class MomoTalkSkill(BaseSkill):
         self._tab_opened: bool = False
         self._students_done: int = 0
         self._empty_streak: int = 0
-        self._empty_total: int = 0           # cumulative empties this student (survives flicker)
+        self._sending_streak: int = 0        # consecutive sending frames (mis-detect cap)
         self._scan_misses: int = 0
-        self._clicked_rows: List[float] = []   # opened student row-cy (dedup re-open)
+        self._scrolls: int = 0               # list swipes done
+        self._clicked_rows: List[float] = []   # opened student row-cy (dedup within a view)
         self._reply_positions: set = set()     # tapped reply spots this student (skip mis-detect repeats)
         self._story_taps: int = 0
         self._story_cut: int = 0
@@ -213,18 +216,28 @@ class MomoTalkSkill(BaseSkill):
             self._clicked_rows.append(unread.cy)
             self._scan_misses = 0
             self._empty_streak = 0
-            self._empty_total = 0
+            self._sending_streak = 0
             self._reply_positions = set()
             row_x = min(0.30, max(0.12, unread.cx - _AVATAR_DX))
             self.log(f"open unread student y={unread.cy:.3f} (avatar x={row_x:.2f})")
             self._goto("dialogue")
             return action_click(row_x, unread.cy, "open unread student (avatar, not badge)")
 
-        # No FRESH unread (all opened or list empty) → settle then done.
+        # No FRESH unread in the visible list. Settle (badges may still render),
+        # then SCROLL DOWN to reveal more unread further down. Rows shift after a
+        # swipe, so clear row-dedup. Exit only after scrolling the cap with still
+        # nothing new (mine visible → scroll → repeat).
         self._scan_misses += 1
         if self._scan_misses < 3:
             return action_wait(400, f"no fresh unread (settle {self._scan_misses})")
-        self.log(f"no more fresh unread ({self._students_done} students mined)")
+        if self._scrolls < _MAX_SCROLLS:
+            self._scrolls += 1
+            self._scan_misses = 0
+            self._clicked_rows = []   # rows shifted by the swipe
+            self.log(f"visible list mined → scroll down ({self._scrolls}/{_MAX_SCROLLS})")
+            return action_swipe(0.25, 0.72, 0.25, 0.42, 700,
+                                f"scroll unread list down ({self._scrolls})")
+        self.log(f"no more unread after {self._scrolls} scrolls ({self._students_done} mined)")
         self._goto("exit")
         return action_wait(300, "scan complete → exit")
 
@@ -250,37 +263,43 @@ class MomoTalkSkill(BaseSkill):
             self._goto("story")
             return action_click_box(enter_bond, "enter bond story")
 
-        # ★ Metronome: student typing → wait (do NOT judge done).
+        # ★ Metronome: student typing → wait. Cap consecutive sending: a real
+        # "typing" lasts a few frames; if it sticks (mis-detect) treat it as empty
+        # so the student can finish instead of waiting forever.
         if self.find_cls(screen, UC.MOMO_SENDING, conf=0.25) is not None:
-            self._empty_streak = 0
-            return action_wait(450, "学生发送信息中 — waiting (typing)")
+            self._sending_streak += 1
+            if self._sending_streak <= _MAX_SENDING:
+                self._empty_streak = 0
+                return action_wait(450, f"学生发送信息中 — waiting ({self._sending_streak}/{_MAX_SENDING})")
+            # sending stuck → mis-detect; fall through to empty handling.
+        else:
+            self._sending_streak = 0
 
-        # Reply option → tap, but DEDUP by position. A real option vanishes after
+        # Reply option → tap, DEDUP by position. A real option vanishes after
         # tapping (the next renders elsewhere); a mis-detected chat-history bubble
-        # keeps firing at the SAME spot (live: 一花 bottomed out but the user's
-        # reply bubble read as an option → infinite "pick reply"). Only tap fresh
-        # spots; a repeat falls through to the empty handling so the student ends.
+        # keeps firing at the SAME spot (一花 bottomed out → infinite pick-reply).
+        # Only tap fresh spots; a repeat falls through to the empty handling.
         reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=_CLS_CONF)
         if reply is not None:
             rpos = (round(reply.cx, 2), round(reply.cy, 2))
             if rpos not in self._reply_positions:
                 self._reply_positions.add(rpos)
                 self._empty_streak = 0
+                self._sending_streak = 0
                 return action_click_box(reply, "pick reply option")
             # same spot already tapped → mis-detect; fall through to empty.
 
-        # Nothing fresh → empty. Two counters: _empty_streak (consecutive, normal
-        # done) and _empty_total (cumulative, survives sending/reply flicker so a
-        # chatter-bottomed student still finishes instead of looping to timeout).
+        # Nothing fresh to do → empty. The student is FULLY done only after
+        # STABLE_EMPTY *consecutive* empties (post-bond chatter + typing pauses all
+        # cleared). No cumulative shortcut — we never switch students early.
         self._empty_streak += 1
-        self._empty_total += 1
-        if self._empty_streak >= _STABLE_EMPTY or self._empty_total >= _EMPTY_TOTAL_DONE:
+        if self._empty_streak >= _STABLE_EMPTY:
             self._students_done += 1
-            self.log(f"student done (streak={self._empty_streak} total={self._empty_total}, #{self._students_done}) → scan")
+            self.log(f"student fully done (#{self._students_done}) → scan next")
             self._goto("scan")
             self._scan_misses = 0
-            return action_wait(300, "student conversation done → scan")
-        return action_wait(350, f"dialogue settle (empty {self._empty_streak}/{_STABLE_EMPTY} total {self._empty_total})")
+            return action_wait(300, "student done → scan")
+        return action_wait(350, f"dialogue settle (empty {self._empty_streak}/{_STABLE_EMPTY})")
 
     def _story(self, screen: ScreenState) -> Dict[str, Any]:
         """Skip the bond-story cutscene → claim the ~80-pyroxene reward."""
@@ -290,16 +309,21 @@ class MomoTalkSkill(BaseSkill):
             self._scan_misses = 0
             return action_back("story timeout")
 
-        # Reward splash → claim + back to list (this student's story mined).
+        # Reward splash → claim, then RETURN TO DIALOGUE (not scan): the bond
+        # story is mined but the student still has post-bond chatter to clear.
+        # Jumping to scan here (+ row-dedup) skipped it and switched students —
+        # the "剧情打完没打后续就换人" bug. dialogue clears the post-bond replies,
+        # THEN scans the next student.
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         got = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
         if got is not None or cont is not None:
-            self._goto("scan")
-            self._scan_misses = 0
+            self._goto("dialogue")
             self._empty_streak = 0
+            self._sending_streak = 0
+            self._reply_positions = set()   # post-bond replies are fresh options
             if cont is not None:
-                return action_click_box(cont, "dismiss bond reward (continue)")
-            return action_click_box(got, "dismiss bond reward (header)")
+                return action_click_box(cont, "dismiss bond reward → post-bond chatter")
+            return action_click_box(got, "dismiss bond reward (header) → post-bond")
 
         # Skip-confirm dialog (是否略過) → 确认键.
         if self._story_cut > 0:
