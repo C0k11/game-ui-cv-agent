@@ -194,11 +194,13 @@ class ScheduleSkill(BaseSkill):
 
     # ── ticket digit-OCR ──────────────────────────────────────────────────
 
-    # 「持有票券 X/7」 sits centered just under the popout title. The probe log
-    # gives the title band region ~0.42,0.115,0.60,0.17 as the starting guess;
-    # we read a slightly wider strip and take the first X/Y match. screen.frame
-    # is the raw full-res BGR array (run_digit_ocr crops + upscales).
-    _TICKET_REGION = (0.40, 0.105, 0.62, 0.175)
+    # 「持有票券 X/7」 sits BELOW the popout title at cy≈0.215 — the probe's
+    # initial guess (cy≈0.10-0.17) was ~0.1 too HIGH, so digit-OCR read EMPTY
+    # the entire run → tickets=-1 → the ==0 money-gates never fired → 青辉石 buy
+    # bug. Calibrated on run_20260602_200900 tick_0064: this band reads "1/7"
+    # cleanly. screen.frame is the raw full-res BGR array (run_digit_ocr crops +
+    # upscales).
+    _TICKET_REGION = (0.48, 0.185, 0.67, 0.25)
 
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """Read 持有票券 X/7 via digit-OCR. Returns current count, or None.
