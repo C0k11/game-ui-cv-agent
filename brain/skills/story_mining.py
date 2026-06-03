@@ -177,6 +177,14 @@ class StoryMiningSkill(BaseSkill):
 
     # ── mining (drill deepest-first) ───────────────────────────────────────
     def _mine_action(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
+        # ★ Mine ONLY on a real story page. A 黄点 (DOT_YELLOW) on the LOBBY / 任务
+        # 大厅 is a nav badge (student / campaign_nav / cafe), NOT an unplayed
+        # chapter — mining off the lobby clicked the campaign-nav badge and landed
+        # on 任务关卡 instead of 剧情. No story cls on screen ⇒ defer to navigation
+        # (P5/P6/P7) instead of clicking a stray dot.
+        if not self._on_any_story_page(screen):
+            return None
+
         # 1) NODE level: enter the 入场键 paired (same row) with an unplayed
         #    node (剧情图标未完成 / 剧情new). Skip 入场键没解锁 (locked).
         undone = self.find_all_cls(screen, [UC.STORY_ICON_UNDONE, UC.STORY_NEW],
