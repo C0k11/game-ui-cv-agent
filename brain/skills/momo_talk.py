@@ -28,7 +28,7 @@ Detectors: base "ui" only (SKILL_YOLO_MAP MomoTalk = base).
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from brain.skills.base import (
     BaseSkill, ScreenState,
@@ -40,6 +40,8 @@ _CLS_CONF = 0.30
 _UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
 _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
 _STABLE_EMPTY = 4          # consecutive empty frames ⇒ student conversation done
+_EMPTY_TOTAL_DONE = 14     # cumulative empty frames ⇒ done even if sending/reply
+                           # flicker keeps resetting the consecutive streak
 
 _ENTER_MAX = 22
 _TAB_MAX = 12
@@ -63,7 +65,10 @@ class MomoTalkSkill(BaseSkill):
         self._tab_opened: bool = False
         self._students_done: int = 0
         self._empty_streak: int = 0
+        self._empty_total: int = 0           # cumulative empties this student (survives flicker)
         self._scan_misses: int = 0
+        self._clicked_rows: List[float] = []   # opened student row-cy (dedup re-open)
+        self._reply_positions: set = set()     # tapped reply spots this student (skip mis-detect repeats)
         self._story_taps: int = 0
         self._story_cut: int = 0
 
@@ -74,6 +79,10 @@ class MomoTalkSkill(BaseSkill):
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
         self._phase_ticks = 0
+
+    def _row_clicked(self, cy: float) -> bool:
+        """True if we've already opened a student at ~this row-cy this run."""
+        return any(abs(py - cy) < 0.05 for py in self._clicked_rows)
 
     # ── page predicates ──────────────────────────────────────────────────
     def _on_momotalk(self, screen: ScreenState) -> bool:
@@ -186,24 +195,32 @@ class MomoTalkSkill(BaseSkill):
                 return action_wait(400, "lost MomoTalk → re-enter")
             return action_wait(400, "waiting for MomoTalk UI")
 
-        # Top-most unread row → open via the avatar (LEFT of the badge).
-        unread = self.find_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF, region=_UNREAD_LIST_REGION)
-        if unread is None:
-            # Some lists nest the badge slightly right; widen once.
-            unread = self.find_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF, region=(0.0, 0.15, 0.62, 0.95))
-        if unread is not None:
+        # ALL unread badges → open the TOP-MOST one not yet opened. find_cls
+        # returns highest-conf (not top-most) so it jumped to a mid-list student
+        # and, with no dedup, a lingering badge re-opened the same student
+        # forever (live: 一花 bottomed out but its badge stayed → loop). find_all
+        # + min-cy + row-dedup fixes both.
+        all_unread = self.find_all_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF)
+        fresh = [u for u in all_unread
+                 if 0.0 <= u.cx <= 0.62 and 0.15 <= u.cy <= 0.95
+                 and not self._row_clicked(u.cy)]
+        if fresh:
+            unread = min(fresh, key=lambda b: b.cy)  # top-most fresh
+            self._clicked_rows.append(unread.cy)
             self._scan_misses = 0
             self._empty_streak = 0
+            self._empty_total = 0
+            self._reply_positions = set()
             row_x = min(0.30, max(0.12, unread.cx - _AVATAR_DX))
-            self.log(f"open unread student at row y={unread.cy:.3f} (avatar x={row_x:.2f})")
+            self.log(f"open unread student y={unread.cy:.3f} (avatar x={row_x:.2f})")
             self._goto("dialogue")
             return action_click(row_x, unread.cy, "open unread student (avatar, not badge)")
 
-        # No unread badge → settle a couple ticks then done.
+        # No FRESH unread (all opened or list empty) → settle then done.
         self._scan_misses += 1
         if self._scan_misses < 3:
-            return action_wait(400, f"no unread (settle {self._scan_misses})")
-        self.log(f"no more unread ({self._students_done} students mined)")
+            return action_wait(400, f"no fresh unread (settle {self._scan_misses})")
+        self.log(f"no more fresh unread ({self._students_done} students mined)")
         self._goto("exit")
         return action_wait(300, "scan complete → exit")
 
@@ -234,22 +251,32 @@ class MomoTalkSkill(BaseSkill):
             self._empty_streak = 0
             return action_wait(450, "学生发送信息中 — waiting (typing)")
 
-        # Reply option → tap to advance the conversation.
+        # Reply option → tap, but DEDUP by position. A real option vanishes after
+        # tapping (the next renders elsewhere); a mis-detected chat-history bubble
+        # keeps firing at the SAME spot (live: 一花 bottomed out but the user's
+        # reply bubble read as an option → infinite "pick reply"). Only tap fresh
+        # spots; a repeat falls through to the empty handling so the student ends.
         reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=_CLS_CONF)
         if reply is not None:
-            self._empty_streak = 0
-            return action_click_box(reply, "pick reply option")
+            rpos = (round(reply.cx, 2), round(reply.cy, 2))
+            if rpos not in self._reply_positions:
+                self._reply_positions.add(rpos)
+                self._empty_streak = 0
+                return action_click_box(reply, "pick reply option")
+            # same spot already tapped → mis-detect; fall through to empty.
 
-        # None of sending/reply/goto present → maybe a typing gap. Only after
-        # STABLE_N consecutive empty frames do we declare the student done.
+        # Nothing fresh → empty. Two counters: _empty_streak (consecutive, normal
+        # done) and _empty_total (cumulative, survives sending/reply flicker so a
+        # chatter-bottomed student still finishes instead of looping to timeout).
         self._empty_streak += 1
-        if self._empty_streak >= _STABLE_EMPTY:
+        self._empty_total += 1
+        if self._empty_streak >= _STABLE_EMPTY or self._empty_total >= _EMPTY_TOTAL_DONE:
             self._students_done += 1
-            self.log(f"student done (stable-empty, #{self._students_done}) → scan")
+            self.log(f"student done (streak={self._empty_streak} total={self._empty_total}, #{self._students_done}) → scan")
             self._goto("scan")
             self._scan_misses = 0
             return action_wait(300, "student conversation done → scan")
-        return action_wait(350, f"dialogue settle (empty {self._empty_streak}/{_STABLE_EMPTY})")
+        return action_wait(350, f"dialogue settle (empty {self._empty_streak}/{_STABLE_EMPTY} total {self._empty_total})")
 
     def _story(self, screen: ScreenState) -> Dict[str, Any]:
         """Skip the bond-story cutscene → claim the ~80-pyroxene reward."""
