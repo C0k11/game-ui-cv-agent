@@ -40,9 +40,12 @@ from brain.skills import ui_classes as UC
 _CLS_CONF = 0.30
 _UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
 _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
-_STABLE_EMPTY = 5          # consecutive empty frames ⇒ student FULLY done (give
-                           # post-bond chatter + typing pauses room before switching)
-_MAX_SENDING = 15          # consecutive 发送信息中 frames ⇒ mis-detect → treat as empty
+_STABLE_EMPTY = 15         # consecutive empty frames ⇒ student FULLY done. Big on
+                           # purpose: post-bond chatter takes a few seconds to
+                           # surface (student "types") — only switch after a long
+                           # quiet gap, never mid-conversation.
+_MAX_SENDING = 30          # consecutive 发送信息中 frames ⇒ mis-detect → treat as empty
+                           # (a real long message types in <13s; this is stuck-cap)
 _MAX_SCROLLS = 6           # list swipes before giving up (mine visible, then scroll down)
 
 _ENTER_MAX = 22
@@ -347,11 +350,18 @@ class MomoTalkSkill(BaseSkill):
             self._story_taps += 1
             return action_click(0.5, 0.5, "advance story (skip disabled)")
 
-        # Dropped back to the list mid-handling.
+        # Bond story done — the game returns to the student's chat. The left list
+        # tab is still visible so _on_unread_list trips, but the RIGHT pane is the
+        # student's POST-BOND chatter. Go to DIALOGUE to clear it, NOT scan. The
+        # reward popup is usually eaten by the global interceptor before our
+        # reward branch above fires, so THIS is the real "story done" exit — and
+        # it must return to the SAME student, else we jump to the next (横跳 bug).
         if self._on_unread_list(screen):
-            self._goto("scan")
-            self._scan_misses = 0
-            return action_wait(300, "back on list after story → scan")
+            self._goto("dialogue")
+            self._empty_streak = 0
+            self._sending_streak = 0
+            self._reply_positions = set()   # post-bond replies are fresh options
+            return action_wait(300, "story done → post-bond chatter (same student)")
         return action_wait(400, "story: waiting for menu/skip cls")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
