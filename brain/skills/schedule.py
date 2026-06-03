@@ -69,6 +69,12 @@ _ROOM_MAX_HEADS = 3         # a room holds at most 3 students
 # Dispatch popups (info / report) live in a center-bottom band. Both
 # SCHED_START and the report's BTN_CONFIRM sit at cx≈0.499, cy≈0.76-0.77.
 _DIALOG_BAND = (0.30, 0.66, 0.70, 0.90)
+# ★ MONEY DEFENSE: a 青辉石 icon in the dialog BODY (NOT the top-bar balance at
+# cy<0.10) = a spend-pyroxene 购买课程表券 dialog. VERIFIED on run_20260602_200900:
+# the buy-dialog pyroxene sits at cx≈0.59/0.33, cy≈0.577 (conf 0.43-0.88). This
+# band covers it with margin and stays clear of the report's _DIALOG_BAND (cy
+# 0.66+), so it never false-fires on a normal 课程表报告.
+_PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
 
 # ── GAP fallbacks (under-trained cls — documented in probe log) ───────────
 # Region tiles (SCHOOL_*) are ~3-12 frames each and routinely missed (v6 gap
@@ -150,6 +156,7 @@ class ScheduleSkill(BaseSkill):
         self._enter_attempts: int = 0
         self._targets: List[str] = []
         self._tickets: int = -1             # -1 = unknown; 0 = exhausted
+        self._dispatch_count: int = 0       # confirmed reports = tickets spent (hard cap)
         # traversal bookkeeping
         self._office_clicked: bool = False  # clicked 夏莱办公室 yet?
         self._jumped_to_last: bool = False  # done the initial ARROW_LEFT jump?
@@ -220,6 +227,15 @@ class ScheduleSkill(BaseSkill):
         return cur
 
     # ── screen-state helpers (pure YOLO) ──────────────────────────────────
+
+    def _buy_dialog(self, screen: ScreenState) -> bool:
+        """青辉石 in the dialog body = a buy-ticket (青辉石) cost dialog. ★ HARD
+        money stop. The ticket digit-OCR is unreliable (region miscalib →
+        tickets=-1 the whole run, so the ==0 gates never fire); this catches the
+        0-ticket 购买课程表券 popup regardless of the count. The top-bar pyroxene
+        balance (cy<0.10) is excluded by the body region."""
+        return self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=_CLS_CONF,
+                             region=_PYROXENE_BODY_REGION) is not None
 
     def _is_schedule(self, screen: ScreenState) -> bool:
         """Any schedule surface: detect_screen_yolo()=='Schedule' OR a region
@@ -377,6 +393,19 @@ class ScheduleSkill(BaseSkill):
             self.log("timeout, exiting")
             return action_done("schedule timeout")
 
+        # ⛔⛔ HARD MONEY STOP (highest priority — above every other handler):
+        # 青辉石 in the dialog body = a 购买课程表券 buy-ticket dialog. Ticket
+        # digit-OCR was unreliable (tickets=-1 the whole run → the ==0 gates
+        # never fired → it排课 past 0 tickets → the buy popup, whose 确认 got
+        # mis-clicked by PRIORITY 1). NEVER let any confirm-handler reach it.
+        if self._buy_dialog(screen):
+            self.log("⛔ 青辉石买票对话框 — 取消并退出,绝不买")
+            self._goto("exit")
+            cancel = self.find_cls(screen, [UC.BTN_CANCEL, UC.BTN_CLOSE_X], conf=_CLS_CONF)
+            if cancel is not None:
+                return action_click_box(cancel, "cancel 买票 dialog (青辉石)")
+            return action_back("ESC 买票 dialog (青辉石)")
+
         # ── popups that can appear in any sub_state (pure YOLO) ──
 
         # Reward-result popup ("獲得獎勵") — tap to dismiss.
@@ -407,7 +436,16 @@ class ScheduleSkill(BaseSkill):
         )
         if report_confirm is not None and self.find_cls(
                 screen, UC.SCHED_START, conf=_CLS_CONF, region=_DIALOG_BAND) is None:
-            self.log("schedule report → confirm (YOLO 确认键)")
+            # ★ Defense ③ (hard cap): each confirmed report = one ticket spent. A
+            # day caps at _MAX_TICKETS; exceeding it means tickets ran out and the
+            # game is charging 青辉石 to continue — STOP (backstop if defense ②
+            # somehow misses the buy dialog).
+            self._dispatch_count += 1
+            if self._dispatch_count > _MAX_TICKETS:
+                self.log(f"⛔ 已排课{self._dispatch_count}次 > 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票")
+                self._goto("exit")
+                return action_click_box(report_confirm, "confirm last report → EXIT (ticket cap)")
+            self.log(f"schedule report → confirm (#{self._dispatch_count}, YOLO 确认键)")
             self._ticket_read_pending = True  # re-read count back on the popout
             self._goto("roster")
             return action_click_box(report_confirm, "confirm schedule report")
