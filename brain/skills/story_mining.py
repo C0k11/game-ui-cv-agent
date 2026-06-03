@@ -113,7 +113,19 @@ class StoryMiningSkill(BaseSkill):
             self._cooldown = 3
             return mine
 
-        # P4: on a story page but nothing unplayed visible → reveal more, then
+        # P3.5: on the 剧情 hub CATEGORY page → open the current category card to
+        # drill IN. MUST run before the barren scan: the category page carries
+        # category cls but NO chapters, so scanning it just exhausts the whole
+        # category without ever entering it (the bug that "exhausted" all three).
+        hub_card = self._pick_hub_card(screen)
+        if hub_card is not None:
+            self._barren = 0
+            self._page_turns = 0
+            self._main_swipes = 0
+            self._cooldown = 2
+            return action_click_box(hub_card, f"open category ({hub_card.cls_name})")
+
+        # P4: INSIDE a category but nothing unplayed visible → reveal more, then
         # (if truly barren) exhaust the category and advance.
         page = self.detect_screen_yolo(screen)
         on_story = (page == "Story") or self._on_any_story_page(screen)
@@ -125,15 +137,6 @@ class StoryMiningSkill(BaseSkill):
             if self._barren <= _BARREN_LIMIT:
                 return action_wait(350, f"scanning for unplayed ({self._barren})")
             return self._exhaust_and_advance(screen)
-
-        # P5: story hub — open the current (non-exhausted) category card.
-        hub_card = self._pick_hub_card(screen)
-        if hub_card is not None:
-            self._barren = 0
-            self._page_turns = 0
-            self._main_swipes = 0
-            self._cooldown = 2
-            return action_click_box(hub_card, f"open category ({hub_card.cls_name})")
 
         # P6: mission hub — 劇情 tile.
         story_tile = self.find_cls(screen, UC.HUB_STORY, conf=_CLS_CONF)
@@ -268,6 +271,10 @@ class StoryMiningSkill(BaseSkill):
             if cat in self._exhausted:
                 self._cat_idx += 1
                 continue
+            if cat == self._current_cat:
+                # Already drilled into this category — its card cls may still show
+                # (a tab/header) but we're INSIDE it. Don't re-open; let P4 scan.
+                return None
             card = self.find_cls(screen, cat, conf=_CLS_CONF)
             if card is not None:
                 self._current_cat = cat
