@@ -179,14 +179,18 @@ class MomoTalkSkill(BaseSkill):
         return action_wait(350, "waiting for 对话区域 tab")
 
     def _scan(self, screen: ScreenState) -> Dict[str, Any]:
-        # Conversation auto-opened?
-        if self._in_conversation(screen):
-            self._empty_streak = 0
-            self._goto("dialogue")
-            return action_wait(250, "conversation open → dialogue")
+        # Story splash surfaced mid-scan?
         if self._in_story(screen):
             self._goto("story")
             return action_wait(250, "story detected → story")
+
+        # ★ Do NOT treat a lingering right-pane conversation as work. After a
+        # student finishes, the right pane keeps showing its last messages
+        # (reply/bond cls stay detected) — the old `_in_conversation → dialogue`
+        # branch re-entered dialogue forever (total ran 14→47, instant-done loop,
+        # only 3 students actually mined before max_ticks). The open student's own
+        # multi-turn dialogue is fully handled INSIDE _dialogue; scan only ever
+        # opens a FRESH unread badge (below). No residual-conversation shortcut.
 
         if not self._on_momotalk(screen):
             if self._phase_ticks > 6:
