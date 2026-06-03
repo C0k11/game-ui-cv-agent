@@ -46,8 +46,14 @@ _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
 # the reply renders) and the weak cls flickering (sending 28f / reply 32f → an
 # occasional missed frame). It is NOT a per-student cooldown — any reply/sending
 # frame instantly resets it, so a still-talking student is never abandoned.
-_STABLE_EMPTY = 6
+_STABLE_EMPTY = 8          # weak cls (sending 28f / reply 32f) misses a few frames +
+                           # students pause between consecutive messages — bridge it.
+                           # Still cls-driven: ANY reply/sending frame resets it.
 _MAX_SENDING = 30          # sending stuck this long = mis-detect (a real msg types <13s)
+# Lowered detection floors for the two weak chat cls so a faint reply/sending
+# frame still registers (was missing → false "done"). v6 should add samples.
+_SENDING_CONF = 0.15
+_REPLY_CONF = 0.18
 _MAX_SCROLLS = 6           # list swipes before giving up (mine visible, then scroll down)
 
 _ENTER_MAX = 22
@@ -271,7 +277,7 @@ class MomoTalkSkill(BaseSkill):
         # ★ Metronome: student typing → wait. Cap consecutive sending: a real
         # "typing" lasts a few frames; if it sticks (mis-detect) treat it as empty
         # so the student can finish instead of waiting forever.
-        if self.find_cls(screen, UC.MOMO_SENDING, conf=0.25) is not None:
+        if self.find_cls(screen, UC.MOMO_SENDING, conf=_SENDING_CONF) is not None:
             self._sending_streak += 1
             if self._sending_streak <= _MAX_SENDING:
                 self._empty_streak = 0
@@ -284,7 +290,7 @@ class MomoTalkSkill(BaseSkill):
         # tapping (the next renders elsewhere); a mis-detected chat-history bubble
         # keeps firing at the SAME spot (一花 bottomed out → infinite pick-reply).
         # Only tap fresh spots; a repeat falls through to the empty handling.
-        reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=_CLS_CONF)
+        reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=_REPLY_CONF)
         if reply is not None:
             rpos = (round(reply.cx, 2), round(reply.cy, 2))
             if rpos not in self._reply_positions:
