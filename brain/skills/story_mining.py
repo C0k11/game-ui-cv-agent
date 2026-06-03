@@ -233,10 +233,14 @@ class StoryMiningSkill(BaseSkill):
             row_x = min(0.93, dot.cx + 0.10)
             return action_click(row_x, dot.cy, "open unplayed chapter (right of 黄点)")
 
-        # 3) 篇/CARD level: a `new` / `剧情new` badge → click to select/enter.
-        new = self.find_cls(screen, [UC.NEW_MARK, UC.STORY_NEW], conf=_CLS_CONF, region=_CONTENT_REGION)
-        if new is not None:
-            return action_click_box(new, "select new 篇 / enter new card")
+        # 3) 篇/CARD level: a `new` badge → select/enter. ONLY when NO node-level
+        #    入场键 is present. A New badge on a NODE (新节点, e.g. 巢穴 New) is
+        #    NOT a 篇/卡 entry — clicking it does nothing and loops forever. New
+        #    means "open this 篇/card" only on the 篇/grid screens (no 入场键 there).
+        if self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF, region=_NODE_PANEL) is None:
+            new = self.find_cls(screen, [UC.NEW_MARK, UC.STORY_NEW], conf=_CLS_CONF, region=_CONTENT_REGION)
+            if new is not None:
+                return action_click_box(new, "select new 篇 / enter new card")
         return None
 
     def _content_yellow_dot(self, screen: ScreenState) -> Optional[YoloBox]:
