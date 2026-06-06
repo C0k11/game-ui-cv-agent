@@ -51,9 +51,33 @@ REAL_SOURCES = [
     "run_20260529_123209",
     "run_20260531_110516",           # NEW 1052
     "run_20260531_143201",           # NEW 37 shop
+    "run_20260518_163513",           # +335 daily-skill UI (06-03 清理后加白名单)
+    "run_20260531_173326",           # +706
+    "run_20260531_174456",           # +285
+    "run_20260531_175038",           # +36
+    "run_20260603_134626",           # +27 (06-03 补录批, 进 train)
+    "run_20260603_134649",           # +31
+    "run_20260603_140153",           # +31
+    "run_20260603_170116",           # +31
+    "run_20260603_175151",           # +30
+    "run_20260603_175217",           # +30
+    "run_20260603_175238",           # +30
+    "run_20260603_175257",           # +24
+    "run_v6weak_20260603",           # +1130 飞轮弱cls (⚠ 开训前补头像/摸头 + 确认烧录帧已清)
+    # emoticon merge (v6): 200 cafe frames, 592 Emoticon_Action(451) bubbles +
+    # teacher-relabeled cafe UI (咖啡厅收益/邀请卷 etc) via build_emoticon_ui_source.py.
+    # Folds the standalone emoticon_yolo26n into the ui model — pipeline then runs
+    # one fewer YOLO per cafe tick. 2026-03 captures, md5-disjoint from above.
+    "_emoticon_v2",
 ]
-SYNTH_SOURCES = ["_synth_bond", "_synth_bond_goto", "_synth_bond_enter"]
-VAL_SOURCE = "_ui_val_pool"
+SYNTH_SOURCES = ["_synth_ui_swap",       # UI bbox-swap: 真实帧UI box换大小相近别cls→真实位置+泛化 (~6000帧, 替代乱飞_synth_overlay)
+                 "_fused_synth_remap"]   # 复用fused旧synth(0.966) remap按名→master + ui v5 teacher补UI = rehearsal防遗忘 (4644帧, 替代脏_synth_avatar_md)
+                 # 删: _synth_bond/goto/enter — 真实momotalk底图只标441/442/449, 弹窗内可见头像+货币全漏标=假阴性毒; 441/442/449真实帧已515/623/2395足量, 净收益为负 (2026-06-04)
+VAL_SOURCES = [
+    "run_20260603_171121",  # 多域 held-out val (ui+头像+摸头), 主 val
+    "run_20260603_183022",  # 头像密集补充 (605 头像框/52帧, 全标无空)
+    "_ui_val_pool",         # 旧 51帧 UI-only (单域; 若含 momo/cafe 头像帧未标会算 FP)
+]
 
 TARGET = 30            # moderate oversample floor (was 200 — the overfit driver)
 TARGET_OVERRIDE = {450: 50}   # 选择购买: ~x3 its 17 real frames
@@ -83,7 +107,7 @@ def main() -> int:
     print(f"[schema] master = {nc} classes (last: {master[-1]!r})")
 
     # Verify each source's classes.txt is a PREFIX of master (no reorder drift).
-    for s in REAL_SOURCES + SYNTH_SOURCES + [VAL_SOURCE]:
+    for s in REAL_SOURCES + SYNTH_SOURCES + VAL_SOURCES:
         cf = RAW / s / "classes.txt"
         if not cf.exists():
             continue
@@ -197,27 +221,29 @@ def main() -> int:
     print(f"[train] {n_train} frames ({len(base)} unique+synth, {len(dup_entries)} dups, "
           f"{neg} negatives)")
 
-    # ── val from _ui_val_pool ──
-    vd = RAW / VAL_SOURCE
+    # ── val from VAL_SOURCES (held-out 多域: ui+头像+摸头, 跨多个 run) ──
     n_val = 0
-    for jpg in sorted(vd.glob("*.jpg")):
-        txt = vd / (jpg.stem + ".txt")
-        if not txt.exists():
-            continue
-        cleaned = sanitize_label_text(txt.read_text(encoding="utf-8"))
-        keep = [ln for ln in cleaned.splitlines()
-                if ln.strip() and int(ln.split()[0]) < nc]
-        cleaned = ("\n".join(keep) + "\n") if keep else ""
-        dj = img_va / f"{jpg.stem}.jpg"
-        if dj.exists():
-            dj.unlink()
-        try:
-            dj.symlink_to(jpg.resolve())
-        except OSError:
-            shutil.copy2(jpg, dj)
-        (lbl_va / f"{jpg.stem}.txt").write_text(cleaned, encoding="utf-8")
-        n_val += 1
-    print(f"[val] {n_val} frames (_ui_val_pool)")
+    for vsrc in VAL_SOURCES:
+        vd = RAW / vsrc
+        for jpg in sorted(vd.glob("*.jpg")):
+            txt = vd / (jpg.stem + ".txt")
+            if not txt.exists():
+                continue
+            cleaned = sanitize_label_text(txt.read_text(encoding="utf-8"))
+            keep = [ln for ln in cleaned.splitlines()
+                    if ln.strip() and int(ln.split()[0]) < nc]
+            cleaned = ("\n".join(keep) + "\n") if keep else ""
+            stem = f"{vsrc}__{jpg.stem}"   # source-prefix → 防跨 run 同名(frame_000000)互相覆盖
+            dj = img_va / f"{stem}.jpg"
+            if dj.exists():
+                dj.unlink()
+            try:
+                dj.symlink_to(jpg.resolve())
+            except OSError:
+                shutil.copy2(jpg, dj)
+            (lbl_va / f"{stem}.txt").write_text(cleaned, encoding="utf-8")
+            n_val += 1
+    print(f"[val] {n_val} frames from {len(VAL_SOURCES)} sources: {VAL_SOURCES}")
 
     # ── data.yaml ──
     yaml = [f"path: {OUT_ROOT.as_posix()}", "train: images/train", "val: images/val",

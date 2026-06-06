@@ -400,6 +400,109 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v6": {
+        # v6 = v5 + emoticon 折叠 (+ 飞轮补弱 cls, 当其 source 入库后一并重训):
+        #  ① 数据集 ui_v2 重建 (nc 451→452): 新增 cls451 Emoticon_Action — 把独立的
+        #     emoticon_yolo26n 并进 ui 模型, pipeline 每个 cafe tick 少跑一次 YOLO。
+        #     emoticon 帧经 build_emoticon_ui_source.py teacher 重标 (现役 ui_v5 当老师
+        #     补回 cafe UI chrome 框, 避免 200 帧把 收益/邀请卷 等弱 cls 训成负样本)。
+        #  ② warm-start from v5 best_real.pt: backbone/neck 继承, cls 头因 nc451→452
+        #     重学新增行 (同 v4→v5 的 450→451, registry 已验证可行)。lr0=0.005 护特征。
+        #  ③ aug/epochs/val 照搬 v5 (修过拟合关键)。patience=60=跑满不 early-stop
+        #     (盲 _ui_val_pool 不含 emoticon, mAP 不可信); emoticon 真实验收 =
+        #     dashboard / live cafe 帧目检 (见 money_safety: 上线前飞轮帧实测)。
+        #  ④ 飞轮: 补弱 cls 时把新 source 加进 build_ui_v2.py REAL_SOURCES → 重建 → 训。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v5" / "weights" / "best_real.pt"),
+        "epochs": 60,
+        "patience": 60,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v6",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "unified_yolo26x_v6": {
+        # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
+        #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
+        #  压住"头像退化"风险); cls 头 251→455 重学(角色行继承, UI/emoticon 行新增).
+        #  UI 比角色脸简单, 26x 容量足 + avatar_md 把每角色填到 min31/avg70, 都学得动.
+        #  ⚠ fliplr=0: 通用模型混了 UI(左/右切换/返回键 有方向) — 翻转会破坏 UI 方向语义.
+        #  copy_paste/mixup=0: 角色细粒度毒药(fused v4 教训). 数据 synth:real=1.5:1.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
+        "epochs": 70,            # warm-start: backbone 已强, cls头(252→455)重学 ~60-70 足
+        "patience": 30,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "unified_yolo26x_v6",
+        "cache": "disk", "workers": 8,
+        "optimizer": "SGD",      # 锁死! 否则 auto 覆盖 lr0、用 0.01 冲掉 fused 角色特征
+        "lr0": 0.003,            # 低 LR 护 fused v4 的 251 角色特征(防头像退化)
+        "momentum": 0.937,
+        "weight_decay": 0.0005, "dropout": 0.0,
+        "mosaic": 0.3, "close_mosaic": 5,
+        "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "unified_yolo26x_v6b": {
+        # v6 重训 (2026-06-04): v6 ep12 见顶 mAP50-95 0.748 后 ep13-18 退化到 0.63-0.66
+        # (lr0=0.003 对 warm-start 偏高, 早期冲顶后持续扰动). 验收: UI 域 0.87 强,
+        # 头像域仅 0.77 (fused v4 专门干是 0.966, 整合退化 ~0.2). 改 lr0→0.0015 更护
+        # fused 头像特征 + patience→40 够到 close_mosaic. 其余同 v6. 目标 UI 保 0.87 + 头像拉回 0.9+.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
+        "epochs": 70,
+        "patience": 40,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "unified_yolo26x_v6b",
+        "cache": "disk", "workers": 8,
+        "optimizer": "SGD",
+        "lr0": 0.0015,
+        "momentum": 0.937,
+        "weight_decay": 0.0005, "dropout": 0.0,
+        "mosaic": 0.3, "close_mosaic": 5,
+        "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "unified_yolo26x_v6b_ft": {
+        # v6b ep10 见顶 0.864 后退化(ep23 跌 0.747, R 0.773→0.656 = 过拟合非震荡).
+        # 关 mosaic 微调救一波(v4 同款思路): from ep10 best warm-start + mosaic 全关(去拼图伪分布) +
+        # 极低 lr(防扰动已收敛特征) + 短训 + 小 patience(防再退化). scale/translate 留(空间aug无害).
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "unified_yolo26x_v6b" / "weights" / "best.pt"),
+        "epochs": 15,
+        "patience": 8,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "unified_yolo26x_v6b_ft",
+        "cache": "disk", "workers": 8,
+        "optimizer": "SGD",
+        "lr0": 0.0003,
+        "momentum": 0.937,
+        "weight_decay": 0.0005, "dropout": 0.0,
+        "mosaic": 0.0, "close_mosaic": 0,
+        "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "ui_yolo26m_v2_cont": {
         # Continue v2 from ep16 (best_real.pt) — warm-start, NOT --resume
         # (resume deadlocked on 4472-img re-scan). User confirmed static UI
@@ -547,7 +650,7 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         for k in ("mosaic", "mixup", "copy_paste", "close_mosaic",
                   "weight_decay", "dropout", "hsv_h", "hsv_s", "hsv_v",
                   "degrees", "fliplr", "flipud", "scale", "translate", "lr0",
-                  "perspective"):
+                  "perspective", "optimizer", "momentum", "lrf", "cos_lr"):
             if k in cfg:
                 train_kwargs[k] = cfg[k]
     elif kind == "classify":

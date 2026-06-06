@@ -86,6 +86,10 @@ CAFE_EARNINGS = "咖啡厅收益"          # 25  (20f)
 CAFE_INVITE_BTN = "邀请键"            # 32  (12f, 60b)
 CAFE_MOVE_1F = "移动至一号店"          # 34  (12f)
 CAFE_MOVE_2F = "移动至2号点"          # 27  (16f)
+EMOTICON_ACTION = "Emoticon_Action"  # 451 cafe headpat bubble — folded in from
+#   the standalone emoticon_yolo26n at ui v6. cafe._emoticon_mark matches by the
+#   "emoticon" substring so it works whether the box comes from ui or the legacy
+#   standalone model; this constant is the canonical name for find_cls callers.
 
 # ── schedule / 课程表 ────────────────────────────────────────────────
 SCHED_TICKET = "课程表票"             # 35  (96f)

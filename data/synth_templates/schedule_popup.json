@@ -462,5 +462,7 @@
   "synth_count": 297,
   "bbox_mode": "full",
   "use_for": "train",
-  "saved_at": "2026-05-20T20:49:56"
+  "target": "avatar",
+  "ui_stamps": [],
+  "saved_at": "2026-06-04T15:48:22"
 }

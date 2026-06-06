@@ -53,8 +53,8 @@
         "Toki_(Bunny_Girl).png"
       ],
       "skill_order": [
-        "mail",
-        "event_activity"
+        "daily_routine",
+        "campaign_sweep"
       ],
       "bounty_branches": [
         "教室"
@@ -96,7 +96,37 @@
       "drill": {
         "difficulty_list": [],
         "choose_team_method": "preset"
-      }
+      },
+      "schedule_target_students": [
+        "莉央",
+        "若藻",
+        "亚子",
+        "亚子礼服",
+        "爱丽丝",
+        "爱丽丝女仆",
+        "亚留",
+        "明日奈兔女郎",
+        "明日奈制服",
+        "风华正月",
+        "花子泳装",
+        "莲实泳装",
+        "光",
+        "环奈泳装",
+        "花凛制服",
+        "佳世子礼服",
+        "佳世子正月",
+        "桔梗",
+        "妃姬",
+        "玛丽偶像",
+        "渚泳装",
+        "宁留制服",
+        "希望",
+        "樱子偶像",
+        "沙织礼服",
+        "圣亚泳装",
+        "季",
+        "季兔女郎"
+      ]
     }
   },
   "active_profile": "default",

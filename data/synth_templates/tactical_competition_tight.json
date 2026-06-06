@@ -93,10 +93,10 @@
   ],
   "ref_transform": {
     "crop_n": {
-      "x1": 0.248,
-      "y1": 0.188,
-      "x2": 0.748,
-      "y2": 0.684
+      "x1": 0.25,
+      "y1": 0.255,
+      "x2": 0.685,
+      "y2": 0.686
     },
     "shape": "square",
     "radius_px": 4,
@@ -138,5 +138,7 @@
   "synth_count": 200,
   "bbox_mode": "full",
   "use_for": "train",
-  "saved_at": "2026-05-20T20:44:14"
+  "target": "avatar",
+  "ui_stamps": [],
+  "saved_at": "2026-06-04T15:47:48"
 }

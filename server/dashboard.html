@@ -309,11 +309,12 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
           <div class="check-row" style="gap:8px" title="咖啡厅每层邀请的目标角色（中文名，需与头像模型一致，如 莉央(战斗)）。留空=邀请列表前几位。">
             <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600">咖啡厅邀请</span>
             <label style="font-size:12px;color:var(--muted)">1楼
-              <input id="cafe_invite_1f" type="text" style="width:120px" placeholder="例: 莉央(战斗)"/>
+              <input id="cafe_invite_1f" type="text" list="cafe_char_list" style="width:120px" placeholder="搜角色 例: 莉央(战斗)"/>
             </label>
             <label style="font-size:12px;color:var(--muted)">2楼
-              <input id="cafe_invite_2f" type="text" style="width:120px" placeholder="例: 白子(骑行)"/>
+              <input id="cafe_invite_2f" type="text" list="cafe_char_list" style="width:120px" placeholder="搜角色 例: 白子(骑行)"/>
             </label>
+            <datalist id="cafe_char_list"></datalist>
           </div>
           <div class="check-row" style="gap:8px;align-items:flex-start" title="课程表目标角色（搜索点选，存的就是头像模型 cls，绝不打错）。所有地区满级时只给这些角色排课；留空=用剩余票随机排课。">
             <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600;margin-top:4px">课程表目标</span>
@@ -438,6 +439,7 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     <div class="form-group" style="margin:0">
       <select id="ann_dataset" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"><option value="">Select dataset...</option></select>
     </div>
+    <span id="ann_generation" class="info" title="当前各域 live 模型代数 (各域最强: UI / 头像 / 摸头)" style="font-family:var(--mono);font-size:11px;color:#06b6d4;white-space:nowrap;padding:0 6px">代数 -</span>
     <button class="btn btn-sm" onclick="annPrev()">◀ Prev</button>
     <span class="info" id="ann_counter">-</span>
     <button class="btn btn-sm" onclick="annNext()">Next ▶</button>
@@ -461,7 +463,11 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
     <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前 ui 模型(v3)预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
-    <button class="btn btn-sm" id="btn_yolo_run" onclick="annPrefillRun()" title="用 ui 模型批量预填整个 run 的所有帧标签 (跳过已标注的帧, ~1min/600帧)">YOLO预填(整run)</button>
+    <select id="ann_prefill_model" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option></select>
+    <select id="ann_prefill_mode" title="累加=追加到其他模型已标的框上不覆盖(首次叠标用) / 覆盖=只替换本模型自己段的框、删旧写新、其他模型框(ui/头像)保留(重跑某模型修错用,如调高摸头conf去课程表乱标) / 跳过已标=不碰已标帧" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="merge">累加</option><option value="overwrite">覆盖(仅本模型)</option><option value="skip">跳过已标</option></select>
+    <input id="ann_prefill_conf" type="number" min="0.05" max="0.95" step="0.05" value="0.25" title="预填 conf 阈值。摸头/头像在非主场景(如课程表)易假阳性,调高到 0.4-0.6 滤掉乱标" style="width:56px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
+    <input id="ann_prefill_targets" type="text" placeholder="只标cls(逗号,空=全)" title="只预填这些 cls(master 中文名或 idx, 逗号分隔; 空=标该模型全 span)。补单个弱类(如 咖啡厅入口)时填它 → 不用一个个标全部, 大幅提效。" style="width:140px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
+    <button class="btn btn-sm" id="btn_yolo_run" onclick="annPrefillRun()" title="按上面选的模型+模式批量预填整个 run。累加模式可让 ui/头像/摸头 逐次预填同一批帧而不互相覆盖 (~1min/600帧)">YOLO预填(整run)</button>
     <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
     <button class="btn btn-sm" id="btn_ocr_batch" onclick="annBatchOCR()" title="Batch scan all images">Batch</button>
     <button class="btn btn-sm" id="btn_ocr_folder" onclick="annOpenOCRFolder()" title="Open OCR results folder">Open Folder</button>
@@ -981,6 +987,10 @@ let _SCHED_ALL=[]; let _schedSel=[];
 async function loadSchedChars(){
   try{ const r=await api('/api/v1/avatar_classes'); _SCHED_ALL=Array.isArray(r&&r.characters)?r.characters:[]; }
   catch(e){ _SCHED_ALL=[]; }
+  // 填 cafe 1F/2F 角色 datalist (复用 fused 角色列表 → 输入时自动补全正确格式名,
+  // 避免手打错 cls 格式如 "季(战斗)")。
+  const dl=document.getElementById('cafe_char_list');
+  if(dl) dl.innerHTML=_SCHED_ALL.map(n=>`<option value="${String(n).replace(/"/g,'&quot;')}">`).join('');
 }
 function renderSchedChips(){
   const box=$('sched_chips'); if(!box)return; box.innerHTML='';
@@ -1710,29 +1720,45 @@ annCanvas.addEventListener('dblclick',e=>{
 async function annLoadDatasets(){
   try{
     const ds=await api('/api/v1/datasets');
+    const gen=ds.generation||{};
+    // 代数 badge: 当前各域 live 模型 (各域最强策略)
+    const genEl=$('ann_generation');
+    if(genEl){
+      genEl.textContent=`代号 ${gen.label||'?'} ┃ UI:${gen.ui_live||'?'}(unified ${gen.unified||'—'}) ┃ 头像:${gen.avatar||'?'} ┃ 摸头:${gen.emoticon||'?'}`;
+    }
     const sel=$('ann_dataset');const cur=sel.value;
     sel.innerHTML='<option value="">Select dataset...</option>';
-    // 3 groups in priority order:
-    //   1. Validation pools (kind="val", _val_* dirs)  — most important for ML quality
-    //   2. Recordings (kind="raw")                     — training data
-    //   3. Trajectories (kind="traj")                  — live ticks for in-the-wild labels
+    // label 队列分组 (trajectory 已退役 — overlay 烧录风险; 飞轮改用 capture 干净帧):
+    //   1. Val (held-out)        — ML 质量
+    //   2. Train (进 build)       — 已纳入下代训练
+    //   3. 🆕 飞轮待标注 (run_*)   — capture 新录干净帧, 标完加进 build_sources 训下代
+    //   4. 🗃️ 其他未纳入          — 合成/废弃目录 (_synth_* 等)
     const items=(ds.datasets||[]);
     const val=items.filter(d=>d.kind==='val');
     const raw=items.filter(d=>d.kind==='raw');
-    const traj=items.filter(d=>d.kind==='traj');
+    const flywheel=items.filter(d=>d.kind==='flywheel');
+    const unused=items.filter(d=>d.kind==='unused');
+    const lbl=gen.label||'下代';
     if(val.length){
-      const og=document.createElement('optgroup');og.label='⚖️ Validation Pools (held-out)';
+      const og=document.createElement('optgroup');og.label=`⚖️ Val (held-out, 进 ${lbl} val)`;
       val.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
       sel.appendChild(og);
     }
     if(raw.length){
-      const og=document.createElement('optgroup');og.label='📦 Recordings (training data)';
+      const og=document.createElement('optgroup');og.label=`📦 Train (进 ${lbl} build)`;
       raw.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
       sel.appendChild(og);
     }
-    if(traj.length){
-      const og=document.createElement('optgroup');og.label='🎬 Trajectories (live ticks)';
-      traj.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name.replace(/^traj\//,'')} (${d.image_count})`;og.appendChild(o);});
+    if(flywheel.length){
+      // capture/start 录的干净 run_* (无 pipeline overlay), 未纳入 build = 飞轮待标注
+      const og=document.createElement('optgroup');og.label='🆕 飞轮待标注 (capture 新录, 标完加 sources 训下代)';
+      // 时间倒序: run_<timestamp> 名字逆排, 新采集置顶
+      flywheel.slice().sort((a,b)=>b.name.localeCompare(a.name)).forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
+      sel.appendChild(og);
+    }
+    if(unused.length){
+      const og=document.createElement('optgroup');og.label='🗃️ 其他未纳入 (合成/废弃, 标了也不进 build)';
+      unused.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
       sel.appendChild(og);
     }
     if(cur)sel.value=cur;
@@ -2760,8 +2786,9 @@ async function annRunYolo(){
   const cur=annCurImg();
   const btn=$('btn_yolo');const prev=btn.textContent;
   btn.textContent='YOLO...';btn.disabled=true;
+  const model=($('ann_prefill_model')||{}).value||'ui';
   try{
-    const r=await api('/api/v1/datasets/yolo_suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,img:cur.img,conf:0.10})});
+    const r=await api('/api/v1/datasets/yolo_suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,img:cur.img,conf:0.10,model,target_classes:($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)})});
     const suggestions=r.suggestions||[];
     let added=0,newcls=false;
     suggestions.forEach(s=>{
@@ -2774,7 +2801,7 @@ async function annRunYolo(){
         ANN.classes[cls]=s.label; newcls=true;
       }
       const cand={cls,xc:s.xc,yc:s.yc,w:s.w,h:s.h};
-      const dup=cur.labels.some(lb=>annIoU(lb,cand)>0.6);  // any-cls: no crowding
+      const dup=cur.labels.some(lb=>lb.cls===cand.cls&&annIoU(lb,cand)>0.6);  // same-cls: 不同域(UI/头像/摸头)框可共存于一帧
       if(!dup){cur.labels.push(cand);added++;}
     });
     if(newcls)annBuildClassList();
@@ -2796,13 +2823,18 @@ async function annRunYolo(){
 // then we reload the dataset to render the freshly-written boxes.
 async function annPrefillRun(){
   if(!ANN.dataset){showToast('先选一个数据集','error',2000);return;}
-  if(!confirm(`用 YOLO 预填整个 run「${ANN.dataset}」的所有帧? (会跳过已标注的帧, 大约 1 分钟/600帧)`))return;
+  const model=($('ann_prefill_model')||{}).value||'ui';
+  const mode=($('ann_prefill_mode')||{}).value||'merge';
+  const conf=parseFloat(($('ann_prefill_conf')||{}).value)||0.25;
+  const modelLabel={ui:'ui',fused_avatar:'头像',emoticon:'摸头'}[model]||model;
+  const modeLabel={merge:'累加(不动其他模型框)',overwrite:'覆盖(只换本模型自己的框,留其他)',skip:'跳过已标帧'}[mode]||mode;
+  if(!confirm(`用「${modelLabel}」模型 ${modeLabel} 预填整个 run「${ANN.dataset}」? conf=${conf} (~1分钟/600帧)`))return;
   const btn=$('btn_yolo_run');const prev=btn.textContent;
   btn.textContent='预填整run...';btn.disabled=true;
   try{
-    const r=await api('/api/v1/datasets/yolo_prefill_run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,conf:0.25})});
+    const r=await api('/api/v1/datasets/yolo_prefill_run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,conf,model,mode,target_classes:($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)})});
     if(r.ok){
-      showToast(`整run预填完成: 写入 ${r.written} 帧, 跳过 ${r.skipped} 已标注 / 共 ${r.total}`,'ok',4000);
+      showToast(`整run预填完成[${modelLabel}/${mode}]: 写入 ${r.written} 帧, 跳过 ${r.skipped} / 共 ${r.total}`,'ok',4000);
       await annLoadDataset();   // reload to show the new boxes
     } else {
       showToast('预填失败: '+(r.error||'unknown'),'error',6000);

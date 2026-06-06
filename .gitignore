@@ -50,8 +50,9 @@ data/_check_frame.png
 # Archive (moved: Il2CppDumper, RE scripts, debug images, old modules)
 archive/
 
-# reference study reference (local only)
-study/ref/
+# reference 参考 + 我们的分析 (local only, 不入仓库, 不招眼)
+study/
+brain/reference_SKILL_MAP.md
 
 # YOLO/ML models (large binaries)
 data/models/
@@ -120,3 +121,23 @@ _ref_stride50_vis/
 _train_context_audit.md
 _train_val_audit.md
 _ui_v1_class_breakdown.md
+
+# 2026-06-06 cleanup: 数据/产物/诊断脚本 (per-machine, 不入仓库)
+/data/hard_examples/
+/data/_sched_ticks/
+/runs/
+scripts/verify_*.py
+scripts/cmp_*.py
+scripts/live_*.py
+scripts/v6b_ui_weak.py
+scripts/acceptance_*.py
+scripts/count_dataset.py
+scripts/analyze_*.py
+scripts/dump_*.py
+scripts/crop_swap_currency.py
+data/_*.png
+data/_*.jpg
+data/_*.md
+_ui_v1_final_metrics.json
+_ui_v1_per_class_ap.md
+cost_preview.jpg

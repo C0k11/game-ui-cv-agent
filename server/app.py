@@ -2054,6 +2054,44 @@ def _ensure_dataset_migrated(img_dir: Path) -> None:
     cf.write_text("\n".join(master) + "\n", encoding="utf-8")
 
 
+def _read_registry() -> Dict[str, Any]:
+    """轻量读 data/model_registry.json (不依赖 pipeline import)。"""
+    try:
+        p = REPO_ROOT / "data" / "model_registry.json"
+        if p.is_file():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _current_generation() -> Dict[str, Any]:
+    """当前各域 live 模型代数 + 迭代代号 — dashboard label 区顶部显示。
+    各域最强策略: UI 域 unified v6b(待 live 通电)否则 ui v5; 头像 fused v4;
+    摸头 emoticon v26n。unified.active 含 PENDING = 未通电, 当前 live 仍 ui.active。"""
+    reg = _read_registry()
+    ui = reg.get("ui", {})
+    uni = reg.get("unified", {})
+    fav = reg.get("fused_avatar", {})
+    emo = reg.get("emoticon", {})
+    uni_active = str(uni.get("active", ""))
+    uni_ver = next(iter(uni.get("versions", {}).keys()), None)
+    uni_pending = ("PENDING" in uni_active) or (uni_active not in uni.get("versions", {}))
+    if uni_pending:
+        ui_live = ui.get("active", "?")
+        unified_note = f"{uni_ver}·接线完成待live" if uni_ver else "—"
+    else:
+        ui_live = uni_active
+        unified_note = f"{uni_active}·已上线"
+    return {
+        "label": uni_ver or ui.get("active", "?"),  # 当前迭代代号 (v6b)
+        "ui_live": ui_live,                          # UI 域当前 live (v5 / v6b)
+        "unified": unified_note,                     # v6b 上线状态
+        "avatar": fav.get("active", "?"),            # 头像 fused v4
+        "emoticon": emo.get("active", "?"),          # 摸头 v26n
+    }
+
+
 @app.get("/api/v1/datasets")
 def list_datasets() -> Dict[str, Any]:
     datasets = []
@@ -2062,6 +2100,14 @@ def list_datasets() -> Dict[str, Any]:
     #   run_<timestamp>/   → training data (kind="raw")
     #   _val_<purpose>/    → dedicated validation pool (kind="val")
     #                        Build scripts route these 100% to dataset val/.
+    # Authoritative grouping from build_ui_v2's lists (don't guess by name):
+    # VAL_SOURCES → val, REAL/SYNTH → train(raw), 其余 run_* → unused(未纳入).
+    try:
+        from scripts.build_ui_v2 import REAL_SOURCES, SYNTH_SOURCES, VAL_SOURCES  # noqa: PLC0415
+        _train_set = set(REAL_SOURCES) | set(SYNTH_SOURCES)
+        _val_set = set(VAL_SOURCES)
+    except Exception:
+        _train_set, _val_set = set(), set()
     for d in sorted(RAW_IMAGES_DIR.iterdir()):
         if not d.is_dir():
             continue
@@ -2071,28 +2117,29 @@ def list_datasets() -> Dict[str, Any]:
             jpg_count += len(list(frames_dir.glob("*.jpg")))
         if jpg_count == 0:
             continue
-        kind = "val" if d.name.startswith("_val_") else "raw"
+        if d.name in _val_set or d.name.startswith("_val_"):
+            kind = "val"
+        elif d.name in _train_set:
+            kind = "raw"
+        elif d.name.startswith("run_"):
+            # capture/start 录的干净帧 (run_<timestamp>), 未纳入 build_ui_v2
+            # sources = 飞轮待标注素材 (标完加进 sources 训下代)。
+            kind = "flywheel"
+        else:
+            kind = "unused"  # 合成/废弃目录 (_synth_* 等), 标了也不进 build
         datasets.append({
             "name": d.name,
             "image_count": jpg_count,
             "kind": kind,
         })
-    # ── trajectory runs (live-captured BA frames; great for in-the-wild
-    # state labeling).  Prefix `traj/` distinguishes from raw_images
-    # entries and routes _safe_dataset_path() to TRAJECTORIES_DIR.
-    if TRAJECTORIES_DIR.is_dir():
-        for d in sorted(TRAJECTORIES_DIR.iterdir(), reverse=True):
-            if not d.is_dir() or not d.name.startswith("run_"):
-                continue
-            jpg_count = len(list(d.glob("tick_*.jpg")))
-            if jpg_count == 0:
-                continue
-            datasets.append({
-                "name": f"traj/{d.name}",
-                "image_count": jpg_count,
-                "kind": "traj",
-            })
-    return {"datasets": datasets}
+    # ── trajectory 退役 (2026-06-05) ──────────────────────────────────────
+    # pipeline 实战 tick 帧 (data/trajectories/) 有 overlay 烧录风险: 跑 pipeline
+    # 时 YoloOverlay 透明置顶, DXcam 抓的是合成画面 → 检测框烧进像素 = 训练垃圾
+    # (2026-05-28 删过 11 个烧录 run)。故不再进 label 队列。飞轮采集改用
+    # capture/start 录的干净 raw_images/run_* (采集时无 pipeline overlay)。
+    # TRAJECTORIES_DIR 仍保留 — schedule roster tuner (roster_samples/roster_image)
+    # 仍按需读它, 但那是 schedule 专用区, 不混入通用 label dataset 列表。
+    return {"datasets": datasets, "generation": _current_generation()}
 
 
 @app.get("/api/v1/datasets/images")
@@ -2314,20 +2361,9 @@ def dataset_florence_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
 # reliable cls, the human then corrects mis-labels (select box → change class
 # → e.g. "X" → "邮件箱") and adds the boxes the model misses. conf is kept LOW
 # (default 0.15) so even weak detections (邮件箱-grade) surface for review.
-_UI_SUGGEST_MODEL = None
-_UI_SUGGEST_LOCK = threading.Lock()
-
-
-def _get_ui_suggest_model():
-    global _UI_SUGGEST_MODEL
-    with _UI_SUGGEST_LOCK:
-        if _UI_SUGGEST_MODEL is None:
-            from ultralytics import YOLO
-            reg = json.loads((REPO_ROOT / "data" / "model_registry.json").read_text("utf-8"))
-            ui = reg["ui"]
-            path = ui["versions"][ui["active"]]["path"]
-            _UI_SUGGEST_MODEL = YOLO(path)
-        return _UI_SUGGEST_MODEL
+# 模型加载已并入 scripts.yolo_prefill_run.get_model(model_key) — single-frame
+# suggest 与整run prefill 共用一套,支持 ui/fused_avatar/emoticon 多 teacher 选择
+# + name→master remap + 权威类段过滤。
 
 
 def _iou_box(a, b) -> float:
@@ -2343,12 +2379,32 @@ def _iou_box(a, b) -> float:
     return inter / (aa + bb - inter + 1e-9)
 
 
+def _parse_target_classes(raw):
+    """target_classes payload (master cls name 或 idx 的 list) → set of master
+    idx。None/空 = 不过滤 (标该模型全 span)。用于 label "只标目标 cls" — 飞轮补
+    单个/几个弱类时只预填它们, 不用标全部。"""
+    if not isinstance(raw, list) or not raw:
+        return None
+    master = _load_master_classes()
+    name2idx = {n: i for i, n in enumerate(master)}
+    out = set()
+    for t in raw:
+        ts = str(t or "").strip()
+        if not ts:
+            continue
+        if ts.isdigit():
+            out.add(int(ts))
+        elif ts in name2idx:
+            out.add(name2idx[ts])
+    return out or None
+
+
 @app.post("/api/v1/datasets/yolo_suggest")
 def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
     dataset = str(payload.get("dataset") or "")
     img_name = str(payload.get("img") or "")
     conf = float(payload.get("conf") or 0.15)
-    imgsz = int(payload.get("imgsz") or 960)
+    model_key = str(payload.get("model") or "ui")
     d = _safe_dataset_path(dataset)
     img_dir = d / "frames" if (d / "frames").is_dir() else d
     img_path = img_dir / Path(os.path.basename(img_name))
@@ -2360,36 +2416,42 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         if img is None:
             raise HTTPException(status_code=400, detail="cannot read image")
         h, w = img.shape[:2]
-        model = _get_ui_suggest_model()
-        r = model.predict(img, imgsz=imgsz, conf=conf, device=0, verbose=False)[0]
+        # Pick the requested teacher (ui|fused_avatar|emoticon|battle_heads),
+        # remap its LOCAL class ids → master BY NAME, and keep only boxes inside
+        # that model's authoritative span — so an avatar pass won't suggest a
+        # spurious UI class on a sprite (and vice-versa). Shared with the 整run
+        # prefill so single-frame and batch behave identically.
+        from scripts.yolo_prefill_run import get_model, _OWNS, _IMGSZ_BY_TAG  # noqa: PLC0415
+        model, remap, tag = get_model(model_key)
+        owns = _OWNS.get(tag, lambda i: True)
+        tgt = _parse_target_classes(payload.get("target_classes"))  # 只标目标 cls
+        use_imgsz = int(payload.get("imgsz") or _IMGSZ_BY_TAG.get(tag, 960))
         master = _load_master_classes()
-        master_idx = {n: i for i, n in enumerate(master)}
+        r = model.predict(img, imgsz=use_imgsz, conf=conf, device=0, verbose=False)[0]
         raw = []
         for b in r.boxes:
-            cid = int(b.cls[0])
-            nm = model.names.get(cid, str(cid)) if isinstance(model.names, dict) else model.names[cid]
+            mi = remap.get(int(b.cls[0]))
+            if mi is None or not owns(mi):
+                continue
+            if tgt is not None and mi not in tgt:
+                continue
             sc = float(b.conf[0])
             x1, y1, x2, y2 = [float(v) for v in b.xyxy[0].tolist()]
             if x2 <= x1 or y2 <= y1:
                 continue
-            raw.append((sc, nm, [x1, y1, x2, y2]))
+            raw.append((sc, mi, [x1, y1, x2, y2]))
         raw.sort(key=lambda t: -t[0])  # high conf first
-        # Dedup: drop a box that overlaps an already-kept box (IoU>0.6),
-        # keeping the higher-conf one — enforces "no crowded bboxes on one
-        # thing" so the human gets ONE clean box per UI element.
+        # Dedup within this single model's output (any-cls IoU>0.6, keep higher
+        # conf) — one clean box per element. Cross-pass accumulation (a head box
+        # sitting next to a UI box) is handled client-side by same-class dedup.
         kept = []
-        for sc, nm, box in raw:
+        for sc, mi, box in raw:
             if any(_iou_box(box, k[2]) > 0.6 for k in kept):
                 continue
-            kept.append((sc, nm, box))
+            kept.append((sc, mi, box))
         suggestions = []
-        for sc, nm, (x1, y1, x2, y2) in kept:
-            if nm in master_idx:
-                mi = master_idx[nm]
-            else:
-                mi = _master_append(nm)
-                master = _load_master_classes()
-                master_idx = {n: i for i, n in enumerate(master)}
+        for sc, mi, (x1, y1, x2, y2) in kept:
+            nm = master[mi] if 0 <= mi < len(master) else str(mi)
             suggestions.append({
                 "label": nm, "cls": mi, "score": round(sc, 3),
                 "x1": x1 / w, "y1": y1 / h, "x2": x2 / w, "y2": y2 / h,
@@ -2405,22 +2467,29 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.post("/api/v1/datasets/yolo_prefill_run")
 def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Batch-prefill EVERY frame in a dataset/run with the active ui model
-    (writes YOLO label .txt per image). Skips frames that already have a
-    non-empty label so it won't clobber human edits (pass overwrite=true to
-    redo). Synchronous — a ~600-frame run takes ~1 min on GPU; the frontend
-    button shows a busy state and reloads the dataset afterward.
-    Reuses scripts/yolo_prefill_run.prefill_run (same dedup / cls mapping)."""
+    """Batch-prefill every frame in a dataset/run with ONE detector
+    (model: ui|fused_avatar|emoticon|battle_heads). mode: 'merge' accumulates
+    this model's boxes onto whatever other passes already wrote (shared-frame
+    cross-teacher labeling for the unified model — never erases other classes),
+    'overwrite' keeps only this model's boxes, 'skip' leaves already-labeled
+    frames. Synchronous — ~600 frames ≈ 1 min on GPU. Reuses
+    scripts/yolo_prefill_run.prefill_run (name→master remap + span filter +
+    dedup). Default mode='skip' preserves the legacy single-pass button."""
     dataset = str(payload.get("dataset") or "")
     conf = float(payload.get("conf") or 0.25)
-    overwrite = bool(payload.get("overwrite") or False)
+    model_key = str(payload.get("model") or "ui")
+    mode = str(payload.get("mode") or "skip")
+    if payload.get("overwrite"):
+        mode = "overwrite"
+    target_classes = _parse_target_classes(payload.get("target_classes"))
     d = _safe_dataset_path(dataset)
     img_dir = d / "frames" if (d / "frames").is_dir() else d
     if not img_dir.is_dir():
         raise HTTPException(status_code=404, detail="dataset not found")
     try:
         from scripts.yolo_prefill_run import prefill_run  # noqa: PLC0415
-        res = prefill_run(img_dir, conf=conf, overwrite=overwrite)
+        res = prefill_run(img_dir, model_key=model_key, conf=conf, mode=mode,
+                          target_classes=target_classes)
         return {"ok": True, **res}
     except Exception as e:
         return {"ok": False, "error": str(e)}

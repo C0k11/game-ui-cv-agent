@@ -198,6 +198,35 @@ _YOLO_UI_V1 = _resolve_path("ui", Path(
     r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v1\weights\best.pt"
 ))
 
+# ── Unified v6b (nc=455: UI + 头像 + emoticon 三域合一) ──────────────────
+# 上线策略 = 各域最强。registry unified.active 非 PENDING 且文件存在时, "ui" tag
+# 改用 v6b: 一张 455 类网的 UI-域输出替代独立 ui 模型 (v6b UI mAP50 0.892 > v5)。
+# 但 v6b 的头像域 (idx143-394) + emoticon (idx451) 输出会被 _run_yolo_on_image
+# 丢弃 —— 那两域仍由 fused_avatar v4 (0.966) / emoticon v26n (0.995) 各自专用
+# 模型提供, 它们 in-domain 远胜 v6b。active=PENDING 或文件缺失 → 回落独立 ui
+# 模型 (v5), 零影响 (秒级可回滚: 改 registry active 回 PENDING 即可)。
+def _resolve_unified() -> Optional[Path]:
+    reg = _load_model_registry()
+    section = reg.get("unified")
+    if not section:
+        return None
+    active = section.get("active", "")
+    if not active or "PENDING" in str(active):
+        return None
+    info = section.get("versions", {}).get(active, {})
+    p = info.get("path")
+    if p and Path(p).is_file():
+        return Path(p)
+    return None
+
+_YOLO_UNIFIED = _resolve_unified()            # Path 或 None
+_UI_IS_UNIFIED = _YOLO_UNIFIED is not None
+# v6b 头像域 idx 区间 + emoticon idx (实测 verify_v6b_classnames 2026-06-05:
+# idx143=佳澄 .. idx394=柚子战斗 为头像; idx451=Emoticon_Action; 与 acceptance
+# domain() 同定义)。ui tag 用 unified 时, 落在这两域的 box 丢弃。
+_UNIFIED_AVATAR_LO, _UNIFIED_AVATAR_HI = 143, 394
+_UNIFIED_EMOTICON_IDX = 451
+
 # Context-aware YOLO: controls which models run each tick.
 # Value semantics:
 #   'none'                   skip YOLO entirely (default)
@@ -239,7 +268,10 @@ SKILL_YOLO_MAP = {
     # Cafe needs avatar too: the invite list identifies each row's student via
     # the fused_avatar head model (model_tag=="avatar", 中文角色名) so it can
     # invite the configured cafe_invite_targets. +cafe = emoticon headpat marks.
-    "Cafe": f"{BASE_DETECTORS}+cafe+avatar",    # +emoticon bubbles +student heads
+    # +emoticon bubbles +student heads. The "cafe" tag loads the standalone
+    # emoticon model; from ui v6 (which carries Emoticon_Action) _get_yolo drops
+    # that model, so "cafe" becomes a harmless no-op and emoticon comes from ui.
+    "Cafe": f"{BASE_DETECTORS}+cafe+avatar",
     "Bounty": f"{BASE_DETECTORS}+battle",      # +battle_heads
     # Arena selects opponents via cls92 (ARENA_OPPONENT_ROW) in the UI model —
     # no avatar model needed (dropped 2026-05-31, v5 added cls92). +battle for
@@ -296,14 +328,22 @@ def _get_yolo():
         # UI v1 (~145 static UI classes — buttons, dots, banners, etc).
         # conf 0.30 = lower threshold since UI bbox quality is high but some
         # minority classes need slack.  Tagged "ui" — most skills will need this.
-        if _YOLO_UI_V1.is_file():
+        # "ui" tag detector: unified v6b when live (UI-域输出 only — 见
+        # _resolve_unified / 域过滤 in _run_yolo_on_image), else standalone ui
+        # model (v5). 同 tag="ui", 下游 context/skill 零改 (都按 cls_name 匹配,
+        # 实测 v6b UI 域类名 ⊇ v5)。
+        _ui_path = _YOLO_UNIFIED if _UI_IS_UNIFIED else _YOLO_UI_V1
+        if _ui_path is not None and _ui_path.is_file():
             # 0.20 — within the dashboard's own prefill range (server/app.py:
             # single-frame suggest 0.15, batch prefill 0.25), the settings the
             # user verifies cls against. Live at 0.30 dropped weak cls the
             # dashboard catches (免费 14f live ~0.18-0.30). Strong cls (0.9+)
             # unaffected. Skills still gate money paths structurally (2-button
             # confirm + 免费/币种 checks), so a lower floor doesn't risk spend.
-            candidates.append((_YOLO_UI_V1, 0.20, "ui"))
+            candidates.append((_ui_path, 0.20, "ui"))
+            if _UI_IS_UNIFIED:
+                print(f"[Pipeline] ui tag → unified {_ui_path.name} "
+                      "(头像/emoticon 域过滤; 各域最强 fused v4 / v26n 仍独立加载)")
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
@@ -321,6 +361,30 @@ def _get_yolo():
             except Exception as e:
                 print(f"[Pipeline] YOLO load failed for {model_path}: {e}")
                 continue
+        # ── emoticon fold-in (ui v6+) ──────────────────────────────────────
+        # Once the active ui model carries the Emoticon_Action class, its single
+        # cafe-bubble class is served by the ui forward pass — so drop the
+        # standalone emoticon model and save one YOLO inference per cafe tick.
+        # Pre-v6 (ui lacks the class) the standalone model stays loaded so cafe
+        # headpat keeps working through the migration. Auto-switches at the next
+        # registry bump (active→v6) with no code change at cutover. cafe.py +
+        # the headpat filter below already match by cls_name ("emoticon"), so
+        # they pick the box up from whichever model carries it.
+        # ⚠️ unified(v6b) 模式下 ui 模型虽含 Emoticon_Action(idx451), 但其 emoticon
+        # 输出被域过滤丢弃 (emoticon 走 v26n 专用 0.995 >> v6b 0.764) → 绝不能
+        # fold-in 掉 v26n。仅独立 ui 模型 (非 unified) 自带 emoticon 类时才折叠。
+        ui_has_emoticon = (not _UI_IS_UNIFIED) and any(
+            "emoticon" in str(n).lower()
+            for m, _c, t in _yolo_models if t == "ui"
+            for n in m.names.values()
+        )
+        if ui_has_emoticon:
+            kept = [(m, c, t) for (m, c, t) in _yolo_models if t != "cafe"]
+            if len(kept) != len(_yolo_models):
+                print("[Pipeline] ui model carries Emoticon_Action → dropped "
+                      "standalone emoticon model (one fewer inference per cafe tick)")
+                loaded_names = [n for n in loaded_names if "emoticon" not in n.lower()]
+            _yolo_models = kept
         if _yolo_models:
             _yolo_status = f"loaded_ok: {', '.join(loaded_names)}"
             return _yolo_models[0][0]
@@ -531,6 +595,13 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                 for box in r.boxes:
                     bx1, by1, bx2, by2 = box.xyxy[0].tolist()
                     cls_id = int(box.cls[0])
+                    # Unified(v6b) as "ui": 只留 UI-域。头像 (143-394) + emoticon
+                    # (451) 交给 fused v4 / v26n 专用模型 (各域最强), 丢弃 v6b 在
+                    # 那两域的 box (否则与专用模型重复检测 + 拉低质量)。
+                    if (model_tag == "ui" and _UI_IS_UNIFIED
+                            and (_UNIFIED_AVATAR_LO <= cls_id <= _UNIFIED_AVATAR_HI
+                                 or cls_id == _UNIFIED_EMOTICON_IDX)):
+                        continue
                     cls_name = yolo.names.get(cls_id, str(cls_id))
                     cls_low = str(cls_name).lower()
                     nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h

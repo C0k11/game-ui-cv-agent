@@ -31,6 +31,15 @@
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v6": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v6/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "PENDING",
+        "n_classes": 452,
+        "status": "NOT-YET-TRAINED — active 维持 v5, 训练+验证后再切到 v6",
+        "notes": "v5 + emoticon 折叠: 新增 cls451 Emoticon_Action, 把独立 emoticon_yolo26n 并进 ui 模型 (pipeline 每个 cafe tick 少跑一次 YOLO 推理)。数据集 ui_v2 已重建 nc=452 (198帧/588框 emoticon; teacher=ui_v5 重标 cafe UI chrome 防 200 帧把 收益/邀请卷 等弱cls 训成负样本)。训练: py scripts/train_yolo26.py ui_yolo26m_v6。训完 eval→冻结 last.pt 为 best_real.pt→把本节点 active 改 v6 (pipeline 检测到 ui 含 Emoticon_Action 会自动丢弃独立 emoticon 模型, 无需改码)。配合飞轮: 补弱cls 的新 source 加进 build_ui_v2.py REAL_SOURCES, 重建后与 emoticon 一并训。",
+        "merge_tooling": "scripts/build_emoticon_ui_source.py (teacher 自动标注) + build_ui_v2.py REAL_SOURCES 末加 _emoticon_v2"
+      },
       "v5": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v5/weights/best_real.pt",
         "model_arch": "yolo26m",
@@ -91,6 +100,7 @@
   },
   "emoticon": {
     "active": "v26n",
+    "_merge_note": "被折叠进 ui v6 (新增 cls451 Emoticon_Action)。ui active 切到 v6 后, pipeline._get_yolo 检测到 ui 模型含该类即自动停止加载本独立模型 (省每 cafe tick 一次推理)。在此之前 (v5 active) 仍由 pipeline 以 tag=cafe / conf 0.15 单独加载, 维持 cafe headpat。",
     "task": "detect",
     "n_classes": 1,
     "versions": {
@@ -114,6 +124,24 @@
         "trained_on": "early-2026",
         "mAP50": 0.995,
         "notes": "old v8n, to be retrained with yolo26 + VFX augmentation"
+      }
+    }
+  },
+  "unified": {
+    "_doc": "v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
+    "active": "v6b",
+    "task": "detect",
+    "n_classes": 455,
+    "versions": {
+      "v6b": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6b/weights/best.pt",
+        "model_arch": "yolo26x",
+        "trained_on": "2026-06-04",
+        "epoch_best": 10,
+        "mAP50": 0.864,
+        "mAP50_95": 0.814,
+        "domain_mAP50": {"ui_130cls": 0.892, "avatar_246cls": 0.850, "emoticon": 0.764},
+        "notes": "ep10 best (ep11+ 退化, 根因 synth:real 2.03 过拟合; 关 mosaic 微调无效). 超 v6 峰 0.805. 替代 ui v5 + fused v4(0.966) + emoticon v26n. 头像 0.85 弱类全在泳装/造型变体(BA 迭代靶子: 飞轮补样本 + 下版降 synth 追 0.9). 接线: unified active 时 pipeline._get_yolo 所有 tag 返回此模型, class 按 _classes.txt nc455 划分(143-394 头像 / 451 emoticon / 其余 UI). MUST infer @imgsz=960. 待 live 验证日常跑通才正式切 active=v6b."
       }
     }
   }

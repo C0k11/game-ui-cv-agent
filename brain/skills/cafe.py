@@ -28,8 +28,13 @@ switch    CAFE_MOVE_2F → 2F (may pop a 訪問學生目錄 tutorial → BTN_CON
 exit      is_lobby → done; else BTN_HOME / BTN_BACK.
 
 Detectors (set by pipeline.SKILL_YOLO_MAP["Cafe"] = "ui+cafe+avatar"):
-  ui      — all the UC.* button classes (find_cls / find_all_cls).
-  cafe    — emoticon model, single class 'Emoticon_Action' (headpat marker).
+  ui      — all the UC.* button classes (find_cls / find_all_cls). From ui v6
+            this ALSO carries 'Emoticon_Action' (cls451) — the headpat bubble,
+            folded in from the old standalone emoticon model.
+  cafe    — legacy standalone emoticon model (single class 'Emoticon_Action').
+            Auto-dropped by pipeline once ui v6 is active; until then it serves
+            the headpat marker. _emoticon_mark matches by the "emoticon"
+            substring, so it works regardless of which model produced the box.
   avatar  — fused_avatar (251 student heads), model_tag=="avatar".
 """
 from __future__ import annotations
@@ -300,7 +305,32 @@ class CafeSkill(BaseSkill):
             nav = self.click_cls(screen, UC.NAV_CAFE, "click cafe nav", conf=_CLS_CONF)
             if nav:
                 return nav
-            self.log("on lobby but no 咖啡厅入口 cls — YOLO gap; waiting")
+            # 兜底1: 降 conf 找弱检 (v6b 偶尔出 ~0.25 弱框)。
+            nav_weak = self.click_cls(screen, UC.NAV_CAFE, "click cafe nav (弱检兜底)", conf=0.12)
+            if nav_weak:
+                return nav_weak
+            # 兜底2: v6b 咖啡厅入口实时常失效 (even@0.12 漏, live 2026-06-05 实测)
+            # 但其他底栏入口检出 OK。底栏 8 入口等距 (LOBBY_NAV_ICONS, 咖啡厅=index0),
+            # 用 ≥2 个检出的入口线性回归外推咖啡厅 cx (不硬编码绝对位置, 随检出自适应)。
+            # 根治靠飞轮补咖啡厅入口样本 → v6c。
+            pts = []
+            for i, cn in enumerate(UC.LOBBY_NAV_ICONS):
+                b = self.find_cls(screen, cn, conf=0.30)
+                if b is not None:
+                    pts.append((i, b.cx, b.cy))
+            if len(pts) >= 2:
+                n = len(pts)
+                sx = sum(p[0] for p in pts); sy = sum(p[1] for p in pts)
+                sxx = sum(p[0] ** 2 for p in pts); sxy = sum(p[0] * p[1] for p in pts)
+                denom = n * sxx - sx * sx
+                if denom != 0:
+                    a = (n * sxy - sx * sy) / denom        # slope
+                    cafe_cx = (sy - a * sx) / n             # intercept = index0 = 咖啡厅
+                    cafe_cy = sum(p[2] for p in pts) / n
+                    if 0.0 < cafe_cx < 0.5:                 # sanity: 咖啡厅在左侧
+                        self.log(f"咖啡厅入口外推 cx={cafe_cx:.3f} cy={cafe_cy:.3f} (从 {n} 个底栏入口)")
+                        return action_click(cafe_cx, cafe_cy, "cafe nav (底栏外推兜底)")
+            self.log("on lobby but no 咖啡厅入口 cls (even @0.12 + 外推失败) — YOLO gap; waiting")
             return action_wait(400, "waiting for 咖啡厅入口 cls")
 
         if page is not None:
@@ -569,17 +599,28 @@ class CafeSkill(BaseSkill):
 
             # No configured target on screen.
             if bottom or budget_out or not self._invite_targets:
-                # Give up hunting → invite the first (top) row as a fallback,
-                # unless that student was already invited this run.
-                top = sorted(invite_btns, key=lambda b: b.cy)[0]
+                # Fallback: invite a row, but STRICTLY skip anyone already
+                # invited this run (1F/2F 绝不能重复邀请同一角色 — 用户要求
+                # "一个角色只能出现在一个 cafe")。遍历所有可见 invite 行 (按 cy),
+                # 选第一个 avatar 名可识别且未邀请的。(旧逻辑只在 len>1 时换第二行,
+                # 2F invite list 常只渲染 1 个按钮 → len>1 False → 又邀请季战斗。)
                 why = ("no targets configured" if not self._invite_targets
                        else ("list bottom" if bottom else "scroll budget"))
-                # try to name the top row from an avatar on its line
+                ranked = sorted(invite_btns, key=lambda b: b.cy)
+                for cand in ranked:
+                    cand_name = self._row_name(screen, cand.cy) or "?"
+                    if cand_name != "?" and cand_name not in self._invited:
+                        return self._fire_invite(cand, cand_name, floor, f"first-row/{why}")
+                # 所有可见行已邀请/识别不出 → scroll 找未邀请的 (2F 防重复关键);
+                # 预算内继续翻, 实在耗尽才邀请 top (接受可能重复, 最后兜底)。
+                if not (bottom or budget_out) and self._invite_scrolls < _INVITE_MAX_SCROLLS:
+                    self._invite_scrolls += 1
+                    self._invite_settle = _INVITE_SWIPE_SETTLE
+                    self.log("first-row all invited/unknown → scroll for fresh")
+                    return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll for uninvited row")
+                top = ranked[0]
                 top_name = self._row_name(screen, top.cy) or "?"
-                if top_name in self._invited and len(invite_btns) > 1:
-                    top = sorted(invite_btns, key=lambda b: b.cy)[1]
-                    top_name = self._row_name(screen, top.cy) or "?"
-                return self._fire_invite(top, top_name, floor, f"first-row/{why}")
+                return self._fire_invite(top, top_name, floor, "first-row/exhausted")
 
             self._invite_scrolls += 1
             self._invite_settle = _INVITE_SWIPE_SETTLE
