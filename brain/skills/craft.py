@@ -66,6 +66,7 @@ class CraftSkill(BaseSkill):
         self._collect_done: bool = False
         self._collect_settle: int = 0
         self._maxed_clicks: int = 0
+        self._quick_settle: int = 0
         self._started: bool = False
         self._claims: int = 0
 
@@ -236,8 +237,10 @@ class CraftSkill(BaseSkill):
             return action_click_box(dlg, "confirm craft start (credits)")
 
         # In the 快速制造 dialog? MAX_可点击 / 开始制造 present.
-        max_btn = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
-        if max_btn is not None and self._maxed_clicks < 3:
+        # max_btn 找 可点击 或 灰色(已到顶) — 后者也是"在 dialog 里"的锚点。
+        max_btn = self.find_cls(screen, [UC.QTY_MAX, UC.QTY_MAX_GREY], conf=_CLS_CONF)
+        if (max_btn is not None and max_btn.cls_name == UC.QTY_MAX
+                and self._maxed_clicks < 3):
             self._maxed_clicks += 1
             self.log("set MAX quantity (YOLO MAX_可点击)")
             return action_click_box(max_btn, "set craft quantity MAX")
@@ -245,12 +248,29 @@ class CraftSkill(BaseSkill):
         if start_btn is not None:
             self.log("clicking 开始制造")
             return action_click_box(start_btn, "start craft (开始制造)")
+        # 兜底: 开始制造(idx444) 是 v6b 漏检的 missing cls (probe 旧模型 0.93,
+        # v6b 退步漏检 → craft 卡死, live 2026-06-06)。已点过 MAX (= 在 dialog 里)
+        # 且 MAX/MAX灰 检出 → 用它外推开始制造位置 (probe: MAX(0.926,0.713) →
+        # 开始制造(0.870,0.812), 偏移 cx-0.056/cy+0.10; dialog 布局固定, 归一化
+        # 跨分辨率)。点中 → 弹「確定製造N次」确认框 → _confirm_dialog 收口(信用点,
+        # 安全)。根治靠飞轮补 开始制造 样本 → v6c。
+        if self._maxed_clicks > 0 and max_btn is not None:
+            sx = max(0.0, max_btn.cx - 0.056)
+            sy = min(1.0, max_btn.cy + 0.10)
+            self.log(f"开始制造漏检 → MAX 外推点击 ({sx:.3f},{sy:.3f})")
+            return action_click(sx, sy, "start craft (MAX 外推开始制造)")
 
         # Not in dialog → open it via 快速制造.
         quick = self.find_cls(screen, UC.CRAFT_QUICK, conf=_CLS_CONF)
         if quick is not None and self._phase_ticks <= _START_MAX:
             self.log("opening 快速制造 dialog")
+            self._quick_settle = 3
             return action_click_box(quick, "open quick-craft")
+        # 刚点过快速制造 → 等 dialog 渲染再判 (防点后下一 tick dialog 没好就误判
+        # nothing startable 立即 exit, live 2026-06-06 t0011→t0012 就是这样挂的)。
+        if self._quick_settle > 0:
+            self._quick_settle -= 1
+            return action_wait(350, f"quick-craft dialog settle ({self._quick_settle})")
 
         # Nothing startable (slots busy / no free slot) or budget out → exit.
         self.log("nothing startable (busy slots / YOLO gap) → exit")

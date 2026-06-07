@@ -55,7 +55,7 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 # master layout: [0,142]=UI-A, [143,393]=avatars(251), [394,450]=UI-B,
 # 451=Emoticon_Action. A pass keeps ONLY boxes inside its span so the ui model
 # can't stamp a spurious avatar class onto a cafe sprite (and vice-versa).
-def _ui_span(i: int) -> bool:       return (0 <= i <= 142) or (395 <= i <= 450)
+def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i != 451  # UI=非头像非emoticon(自动含 452-454 双倍三倍/据点防御/信用回收, 与 pipeline 域过滤一致)
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
 _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
@@ -77,17 +77,28 @@ def master_idx() -> dict:
 
 
 _MODELS: dict = {}
-def get_model(model_key: str = "ui"):
+def get_model(model_key: str = "ui", version: "str | None" = None):
     """Return (YOLO, remap{local->master}, tag). remap goes BY NAME so a model
     trained with its own local ordering (fused_avatar, emoticon) lands on the
-    correct master index; names absent from master are simply dropped."""
-    if model_key not in _MODELS:
+    correct master index; names absent from master are simply dropped.
+
+    version=None → registry active 版本。指定 version → 用该版本权重, 但 span/tag
+    仍由 model_key 决定 (只换权重、不换域)。关键用法: model_key='ui' + version='v6c'
+    → 借 unified v6c(nc455) 当 teacher, 经 _ui_span 过滤只吐 UI 域框 (头像/emoticon
+    丢弃); model_key='ui' + version='v5' → 旧特化补 cafe 弱类(咖啡厅收益/邀请卷)。"""
+    cache_key = (model_key, version)
+    if cache_key not in _MODELS:
         from ultralytics import YOLO
         reg = json.loads((REPO / "data" / "model_registry.json").read_text(encoding="utf-8"))
         if model_key not in reg:
             raise SystemExit(f"unknown model {model_key!r}; choices: {list(reg)}")
         node = reg[model_key]
-        m = YOLO(node["versions"][node["active"]]["path"])
+        ver = version or node["active"]
+        versions = node.get("versions", {})
+        if ver not in versions:
+            raise SystemExit(f"unknown version {ver!r} for {model_key!r}; "
+                             f"choices: {list(versions)}")
+        m = YOLO(versions[ver]["path"])
         midx = master_idx()
         remap = {}
         for li, nm in m.names.items():
@@ -95,8 +106,8 @@ def get_model(model_key: str = "ui"):
             if mi is not None:
                 remap[int(li)] = mi
         tag = _KEY_TO_TAG.get(model_key, "ui")
-        _MODELS[model_key] = (m, remap, tag)
-    return _MODELS[model_key]
+        _MODELS[cache_key] = (m, remap, tag)
+    return _MODELS[cache_key]
 
 
 def _iou(a, b) -> float:
@@ -129,16 +140,17 @@ def _read_existing(lp: Path, w: float, h: float):
     return out
 
 
-def prefill_run(img_dir, *, model_key: str = "ui", conf: float = 0.25,
-                imgsz: "int | None" = None, mode: str = "merge",
+def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
+                conf: float = 0.25, imgsz: "int | None" = None, mode: str = "merge",
                 overwrite: bool = False, target_classes=None, progress=None) -> dict:
     """Prefill every *.jpg under img_dir with ONE model. See module docstring
     for modes. `overwrite=True` is a back-compat alias for mode='overwrite'.
-    Returns {written, skipped, total, model, mode}."""
+    version=None → registry active; 指定版本可选不同 teacher 权重 (见 get_model)。
+    Returns {written, skipped, total, model, version, mode}."""
     if overwrite:
         mode = "overwrite"
     img_dir = Path(img_dir)
-    m, remap, tag = get_model(model_key)
+    m, remap, tag = get_model(model_key, version)
     owns = _OWNS.get(tag, lambda i: True)
     # 只标目标 cls (飞轮补单个/几个弱类时, 不用标全部, 大幅提效)。空=标该模型全 span。
     tgt = set(int(t) for t in target_classes) if target_classes else None
@@ -188,8 +200,10 @@ def prefill_run(img_dir, *, model_key: str = "ui", conf: float = 0.25,
             else:
                 kept = existing  # merge: keep all, append new (same-cls dedup)
             for _sc, mi, box in new:
-                if any(k[0] == mi and _iou(box, k[1]) > 0.6 for k in kept):
-                    continue  # same-class dup (re-run / overlap) — keep first
+                if any(_iou(box, k[1]) > 0.6 for k in kept):
+                    continue  # 任意类高 IoU 去重(与 suggest 一致): 防同目标类歧义双标
+                              # (红点/黄点·MIN灰色/可点击·确认键/灰色确认)。跨域框(UI 按钮
+                              # vs 头像/摸头)位置不同 IoU 低, 不会误删, 共存设计不破。
                 kept.append((mi, box))
             lines = []
             for mid, (x1, y1, x2, y2) in kept:
@@ -201,7 +215,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", conf: float = 0.25,
             if progress and written % 50 == 0:
                 progress(written, len(imgs))
     return {"written": written, "skipped": skipped, "total": len(imgs),
-            "model": model_key, "mode": mode}
+            "model": model_key, "version": version, "mode": mode}
 
 
 def main():
@@ -212,12 +226,14 @@ def main():
               "[--conf 0.25] [--mode merge|overwrite|skip]")
         return
     dataset = argv[0]
-    model_key = "ui"; conf = 0.25; mode = "merge"
+    model_key = "ui"; conf = 0.25; mode = "merge"; version = None
     i = 1
     while i < len(argv):
         a = argv[i]
         if a == "--model":
             model_key = argv[i + 1]; i += 2; continue
+        if a == "--version":
+            version = argv[i + 1]; i += 2; continue
         if a == "--conf":
             conf = float(argv[i + 1]); i += 2; continue
         if a == "--mode":
@@ -229,9 +245,10 @@ def main():
     if not img_dir.is_dir():
         print(f"dataset dir not found: {img_dir}")
         return
-    print(f"prefill {img_dir}  model={model_key}  conf={conf}  mode={mode}")
-    res = prefill_run(img_dir, model_key=model_key, conf=conf, mode=mode,
-                      progress=lambda w, t: print(f"  ...{w}/{t}"))
+    print(f"prefill {img_dir}  model={model_key}  version={version or 'active'}  "
+          f"conf={conf}  mode={mode}")
+    res = prefill_run(img_dir, model_key=model_key, version=version, conf=conf,
+                      mode=mode, progress=lambda w, t: print(f"  ...{w}/{t}"))
     print(res)
 
 

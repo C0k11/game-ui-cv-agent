@@ -70,9 +70,12 @@ REAL_SOURCES = [
     # one fewer YOLO per cafe tick. 2026-03 captures, md5-disjoint from above.
     "_emoticon_v2",
 ]
-SYNTH_SOURCES = ["_synth_ui_swap",       # UI bbox-swap: 真实帧UI box换大小相近别cls→真实位置+泛化 (~6000帧, 替代乱飞_synth_overlay)
-                 "_fused_synth_remap"]   # 复用fused旧synth(0.966) remap按名→master + ui v5 teacher补UI = rehearsal防遗忘 (4644帧, 替代脏_synth_avatar_md)
-                 # 删: _synth_bond/goto/enter — 真实momotalk底图只标441/442/449, 弹窗内可见头像+货币全漏标=假阴性毒; 441/442/449真实帧已515/623/2395足量, 净收益为负 (2026-06-04)
+SYNTH_SOURCES = ["_fused_synth_remap"]   # 头像 synth: 复用 fused 旧 synth(0.966) remap按名→master + ui v5 teacher补UI = rehearsal防遗忘 (4644帧)
+                 # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合
+                 #    (v6b 实锤: UI val 0.892 高 / live 崩, 咖啡厅入口 val>0.9 / live 仅 0.25)。头像 synth
+                 #    影响小保留。UI 弱类(咖啡厅入口/开始制造/CAFE_EARNINGS)暂靠 skill 兜底(cafe/craft 外推),
+                 #    v7 再上飞轮真实帧(run_20260606_flywheel 519帧, 标注后)补。
+                 # 删: _synth_bond/goto/enter — 假阴性毒 (2026-06-04)
 VAL_SOURCES = [
     "run_20260603_171121",  # 多域 held-out val (ui+头像+摸头), 主 val
     "run_20260603_183022",  # 头像密集补充 (605 头像框/52帧, 全标无空)

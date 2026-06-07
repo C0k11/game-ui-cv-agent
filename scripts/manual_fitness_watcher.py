@@ -30,7 +30,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 RUNS_ROOT = Path("D:/Project/ml_cache/models/yolo/runs")
-DATASET = Path("D:/Project/ml_cache/models/yolo/dataset/fused_avatar_v1")
+DATASET = Path("D:/Project/ml_cache/models/yolo/dataset/fused_avatar_v2")
 
 
 def make_manual_yaml() -> Path:

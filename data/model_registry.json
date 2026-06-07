@@ -31,6 +31,15 @@
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v6c": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
+        "model_arch": "yolo26x",
+        "trained_on": "2026-06-06",
+        "n_classes": 455,
+        "epoch_best": 12,
+        "status": "TEACHER-ONLY (不是 ui 独立模型, 是 unified v6c nc455 借来当纯 UI teacher; live UI 入口域 conf 远胜 v5)。",
+        "_teacher_note": "prefill/suggest 选 model=ui + version=v6c → get_model 走 ui span(_ui_span: 只留 UI 域 0-142/395-450, 头像143-394+emoticon451 丢弃), remap by name 自动对齐 master。当 v7 val 标注主 UI teacher。但 cafe 内部弱类(咖啡厅收益/邀请卷) v6c 退步 → 那几个改 version=v5 + target_classes 单独补。NOT for pipeline live (pipeline 读 unified.active, 与此无关)。"
+      },
       "v6": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v6/weights/best_real.pt",
         "model_arch": "yolo26m",
@@ -129,7 +138,8 @@
   },
   "unified": {
     "_doc": "v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
-    "active": "v6b",
+    "active": "PENDING-LIVE-VERIFY",
+    "_active_note": "用户决策(2026-06-06): 分域跑(UI=ui v5 / 头像=fused v4 / 摸头=emoticon v26n 三独立模型), unified 等 v7 全域无敌再上线。PENDING = pipeline._resolve_unified 返 None → _UI_IS_UNIFIED=False → 日常 UI 用 ui v5(零影响)。v6c 仅借作 prefill teacher(见 ui.versions.v6c), 不影响 live。改成具体版本号(如 'v6c')即通电, 秒级回滚。",
     "task": "detect",
     "n_classes": 455,
     "versions": {
@@ -142,6 +152,15 @@
         "mAP50_95": 0.814,
         "domain_mAP50": {"ui_130cls": 0.892, "avatar_246cls": 0.850, "emoticon": 0.764},
         "notes": "ep10 best (ep11+ 退化, 根因 synth:real 2.03 过拟合; 关 mosaic 微调无效). 超 v6 峰 0.805. 替代 ui v5 + fused v4(0.966) + emoticon v26n. 头像 0.85 弱类全在泳装/造型变体(BA 迭代靶子: 飞轮补样本 + 下版降 synth 追 0.9). 接线: unified active 时 pipeline._get_yolo 所有 tag 返回此模型, class 按 _classes.txt nc455 划分(143-394 头像 / 451 emoticon / 其余 UI). MUST infer @imgsz=960. 待 live 验证日常跑通才正式切 active=v6b."
+      },
+      "v6c": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
+        "model_arch": "yolo26x",
+        "trained_on": "2026-06-06",
+        "epoch_best": 12,
+        "mAP50_95": 0.787,
+        "status": "训练已停(ep12 best 冻结)。砍 UI synth(build_ui_v2 只留 _fused_synth_remap, 去 _synth_ui_swap 伪背景)版。不全域上线(用户决策分域)。",
+        "notes": "live 飞轮帧(519, 06-06)实测: UI 入口域大胜 v6b(咖啡厅入口 conf 0.27→0.89, 底栏入口更高)→ 借作 ui.versions.v6c teacher 给 v7 val 标注。代价: cafe 内部 cls(咖啡厅收益/邀请卷)反而退步漏检 → 那几个弱类标注改用 ui v5(旧特化)单独补。cls 过拟合根因仍未根治(train_cls↓/val_cls↑ ep10-12 峰)。⛔ v6c 训练集含 06-03; 06-06 飞轮帧专做 val, train 永不碰。"
       }
     }
   }

@@ -1,6 +1,7 @@
 {
   "context": "battle_cards",
   "sample_image": "samples/battle_cards.jpg",
+  "bg_runs": ["run_20260606_173604", "run_20260606_173504", "run_20260606_173340", "run_20260606_173252"],
   "image_size": [
     2973,
     1673
@@ -121,9 +122,10 @@
     "brightness_jitter": [
       0.92,
       1.08
-    ]
+    ],
+    "gray_prob": 0.55
   },
-  "synth_count": 200,
+  "synth_count": 400,
   "bbox_mode": "full",
   "use_for": "train",
   "target": "avatar",

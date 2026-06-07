@@ -20,7 +20,7 @@ import tempfile
 import yaml
 from ultralytics import YOLO
 
-DATASET = Path("D:/Project/ml_cache/models/yolo/dataset/fused_avatar_v1")
+DATASET = Path("D:/Project/ml_cache/models/yolo/dataset/fused_avatar_v2")
 RUNS = Path("D:/Project/ml_cache/models/yolo/runs")
 
 
@@ -60,12 +60,14 @@ def main() -> int:
     ap.add_argument("--name", default="manual_val_eval")
     args = ap.parse_args()
 
+    # 先生成 yaml (watcher 用假 weights 仅为触发此 side-effect; 必须在 weights 检查前,
+    # 否则假 weights 直接 return 2, yaml 永远生不出来)
+    yaml_path = make_manual_yaml()
+
     weights_path = Path(args.weights)
     if not weights_path.exists():
         print(f"[!] weights not found: {weights_path}", file=sys.stderr)
         return 2
-
-    yaml_path = make_manual_yaml()
 
     print(f"[+] loading {weights_path}")
     model = YOLO(str(weights_path))

@@ -463,10 +463,13 @@ body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
     <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前 ui 模型(v3)预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
-    <select id="ann_prefill_model" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option></select>
+    <select id="ann_prefill_model" onchange="annFillVersions()" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option></select>
+    <select id="ann_prefill_ver" title="模型版本: ★=prefill推荐teacher, ·live=pipeline在用。UI 默认 v6c(借unified权重当纯UI teacher, live入口conf最高); 但cafe弱类(咖啡厅收益/邀请卷)v6c反而退步→切 v5 旧特化 + 右边'只标cls'单独补" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"></select>
     <select id="ann_prefill_mode" title="累加=追加到其他模型已标的框上不覆盖(首次叠标用) / 覆盖=只替换本模型自己段的框、删旧写新、其他模型框(ui/头像)保留(重跑某模型修错用,如调高摸头conf去课程表乱标) / 跳过已标=不碰已标帧" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="merge">累加</option><option value="overwrite">覆盖(仅本模型)</option><option value="skip">跳过已标</option></select>
     <input id="ann_prefill_conf" type="number" min="0.05" max="0.95" step="0.05" value="0.25" title="预填 conf 阈值。摸头/头像在非主场景(如课程表)易假阳性,调高到 0.4-0.6 滤掉乱标" style="width:56px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
-    <input id="ann_prefill_targets" type="text" placeholder="只标cls(逗号,空=全)" title="只预填这些 cls(master 中文名或 idx, 逗号分隔; 空=标该模型全 span)。补单个弱类(如 咖啡厅入口)时填它 → 不用一个个标全部, 大幅提效。" style="width:140px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
+    <input id="ann_prefill_targets" type="text" list="ann_cls_datalist" oninput="annValidateTargets()" placeholder="只标cls(选/逗号,空=全)" title="只预填这些 cls。聚焦弹下拉自动补全(只列当前模型能标的 cls, 选了必合法), 输入即校验。逗号分隔多个; 空=标该模型全 span。补单弱类(如 咖啡厅收益)填它 → 不用标全部, 大幅提效。" style="width:150px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
+    <datalist id="ann_cls_datalist"></datalist>
+    <span id="ann_targets_hint" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
     <button class="btn btn-sm" id="btn_yolo_run" onclick="annPrefillRun()" title="按上面选的模型+模式批量预填整个 run。累加模式可让 ui/头像/摸头 逐次预填同一批帧而不互相覆盖 (~1min/600帧)">YOLO预填(整run)</button>
     <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
     <button class="btn btn-sm" id="btn_ocr_batch" onclick="annBatchOCR()" title="Batch scan all images">Batch</button>
@@ -1717,14 +1720,55 @@ annCanvas.addEventListener('dblclick',e=>{
 });
 
 // ── data loading ──
+// prefill teacher 模型 + 版本下拉 (各域最强标注: UI=v6c teacher / cafe弱类=v5 / 头像v4 / 摸头v26n)
+let ANN_MODELS=[];
+async function annLoadModels(){
+  try{
+    const r=await api('/api/v1/datasets/yolo_models');
+    ANN_MODELS=(r&&r.models)||[];
+  }catch(e){console.error('yolo_models:',e);ANN_MODELS=[];}
+  annFillVersions();
+}
+function annFillVersions(){
+  const mk=($('ann_prefill_model')||{}).value||'ui';
+  const m=ANN_MODELS.find(x=>x.key===mk);
+  annFillTargetDatalist(m);  // 按当前模型 span 填"只标cls"下拉 + 校验
+  const sel=$('ann_prefill_ver');if(!sel)return;
+  sel.innerHTML='';
+  if(!m||!(m.versions||[]).length){const o=document.createElement('option');o.value='';o.textContent='active';sel.appendChild(o);return;}
+  m.versions.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+(v===m.active?'·live':'')+(v===m.teacher?' ★':'');sel.appendChild(o);});
+  sel.value=m.teacher||m.active||m.versions[0]||'';  // 默认选推荐 teacher
+}
+// "只标cls" 下拉 = 当前模型 owns-span 内的 master 类名 (选 ui 只列 UI 域 cls)。
+function annFillTargetDatalist(m){
+  const dl=$('ann_cls_datalist');if(!dl)return;
+  const cls=(m&&m.span_classes)||[];
+  dl.innerHTML='';
+  cls.forEach(nm=>{const o=document.createElement('option');o.value=nm;dl.appendChild(o);});
+  annValidateTargets();
+}
+// 实时校验输入的 cls 是否在当前模型可标范围 (纯数字 idx 也放行)。
+function annValidateTargets(){
+  const hint=$('ann_targets_hint');if(!hint)return;
+  const mk=($('ann_prefill_model')||{}).value||'ui';
+  const m=ANN_MODELS.find(x=>x.key===mk);
+  const valid=new Set((m&&m.span_classes)||[]);
+  const raw=($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(!raw.length){hint.textContent='= 标全部';hint.style.color='var(--muted)';return;}
+  const bad=raw.filter(t=>!valid.has(t)&&!/^\d+$/.test(t));
+  if(bad.length){hint.textContent='⚠ 不在「'+mk+'」可标范围: '+bad.join(',');hint.style.color='#f59e0b';}
+  else{hint.textContent='✓ '+raw.length+' 类已识别';hint.style.color='#10b981';}
+}
+
 async function annLoadDatasets(){
+  annLoadModels();  // 并行拉取 prefill 模型/版本下拉 (不阻塞 dataset 列表)
   try{
     const ds=await api('/api/v1/datasets');
     const gen=ds.generation||{};
     // 代数 badge: 当前各域 live 模型 (各域最强策略)
     const genEl=$('ann_generation');
     if(genEl){
-      genEl.textContent=`代号 ${gen.label||'?'} ┃ UI:${gen.ui_live||'?'}(unified ${gen.unified||'—'}) ┃ 头像:${gen.avatar||'?'} ┃ 摸头:${gen.emoticon||'?'}`;
+      genEl.textContent=`代号 ${gen.label||'?'} ┃ live分域: UI ${gen.ui_live||'?'} · 头像 ${gen.avatar||'?'} · 摸头 ${gen.emoticon||'?'} ┃ unified ${gen.unified||'—'}`;
     }
     const sel=$('ann_dataset');const cur=sel.value;
     sel.innerHTML='<option value="">Select dataset...</option>';
@@ -2787,8 +2831,9 @@ async function annRunYolo(){
   const btn=$('btn_yolo');const prev=btn.textContent;
   btn.textContent='YOLO...';btn.disabled=true;
   const model=($('ann_prefill_model')||{}).value||'ui';
+  const version=($('ann_prefill_ver')||{}).value||'';
   try{
-    const r=await api('/api/v1/datasets/yolo_suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,img:cur.img,conf:0.10,model,target_classes:($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)})});
+    const r=await api('/api/v1/datasets/yolo_suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,img:cur.img,conf:0.10,model,version,target_classes:($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)})});
     const suggestions=r.suggestions||[];
     let added=0,newcls=false;
     suggestions.forEach(s=>{
@@ -2824,17 +2869,19 @@ async function annRunYolo(){
 async function annPrefillRun(){
   if(!ANN.dataset){showToast('先选一个数据集','error',2000);return;}
   const model=($('ann_prefill_model')||{}).value||'ui';
+  const version=($('ann_prefill_ver')||{}).value||'';
   const mode=($('ann_prefill_mode')||{}).value||'merge';
   const conf=parseFloat(($('ann_prefill_conf')||{}).value)||0.25;
   const modelLabel={ui:'ui',fused_avatar:'头像',emoticon:'摸头'}[model]||model;
+  const verLabel=version?`/${version}`:'';
   const modeLabel={merge:'累加(不动其他模型框)',overwrite:'覆盖(只换本模型自己的框,留其他)',skip:'跳过已标帧'}[mode]||mode;
-  if(!confirm(`用「${modelLabel}」模型 ${modeLabel} 预填整个 run「${ANN.dataset}」? conf=${conf} (~1分钟/600帧)`))return;
+  if(!confirm(`用「${modelLabel}${verLabel}」模型 ${modeLabel} 预填整个 run「${ANN.dataset}」? conf=${conf} (~1分钟/600帧)`))return;
   const btn=$('btn_yolo_run');const prev=btn.textContent;
   btn.textContent='预填整run...';btn.disabled=true;
   try{
-    const r=await api('/api/v1/datasets/yolo_prefill_run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,conf,model,mode,target_classes:($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)})});
+    const r=await api('/api/v1/datasets/yolo_prefill_run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset:ANN.dataset,conf,model,version,mode,target_classes:($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean)})});
     if(r.ok){
-      showToast(`整run预填完成[${modelLabel}/${mode}]: 写入 ${r.written} 帧, 跳过 ${r.skipped} / 共 ${r.total}`,'ok',4000);
+      showToast(`整run预填完成[${modelLabel}${verLabel}/${mode}]: 写入 ${r.written} 帧, 跳过 ${r.skipped} / 共 ${r.total}`,'ok',4000);
       await annLoadDataset();   // reload to show the new boxes
     } else {
       showToast('预填失败: '+(r.error||'unknown'),'error',6000);

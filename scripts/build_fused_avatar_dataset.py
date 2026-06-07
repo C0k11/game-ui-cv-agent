@@ -49,7 +49,7 @@ NAME_MAP_JSON = REPO / "data" / "student_name_map.json"
 HARVEST_NAME_MAP_JSON = REPO / "data" / "captures" / "harvest_name_map.json"  # additional 205 CN→EN mappings
 EXTENSION_NAME_MAP_JSON = REPO / "data" / "student_name_map_extension.json"  # manual BA char extensions
 MASTER_FILE = RAW_IMAGES / "_classes.txt"
-OUT_ROOT = Path(r"D:\Project\ml_cache\models\yolo\dataset\fused_avatar_v1")
+OUT_ROOT = Path(r"D:\Project\ml_cache\models\yolo\dataset\fused_avatar_v2")  # v2: +battle_cards 技能牌 synth(多底图+灰白aug); v1 保留作 v4 数据快照
 
 SYNTH_TEMPLATES_DIR = REPO / "data" / "synth_templates"
 
@@ -67,10 +67,16 @@ COSTUME_SUFFIXES = (
 )
 
 # Master class layout (per 2026-05-18 trim):
-#   indices  0..142 : UI classes from 5/18 trim (房间区域, 弹窗叉叉, etc.)
-#   indices  143..  : characters added by user during fused-avatar labeling
-# This boundary is fixed at trim time — UI never grows, character does.
+#   indices  0..142   : UI-A classes from 5/18 trim (房间区域, 弹窗叉叉, etc.)
+#   indices  143..394 : 252 character avatars (佳澄 .. 柚子战斗)
+#   indices  395..454 : UI-B — 后期为 ui/unified 训练追加的 60 个 UI 类
+#                       (购买青辉石 / 领取_灰 / 获得奖励 / 选择购买 /
+#                        Emoticon_Action / 学院名 三一·千年·格黑娜 / ...)
+# ⚠️ 早期假设 "143.. 全是角色" → load_character_names 用 master[143:] 把 UI-B
+#    误吸成角色, fused_avatar_v2(v5) 因此混学 60 个 UI cls (nc 252→312)。
+#    现在精确取 143..394 (排除 UI-B), fused 回归纯头像 + 技能牌(复用头像名)。
 MASTER_UI_BOUNDARY = 143
+MASTER_UIB_RANGE = (395, 455)   # idx 395..454 = 追加 UI 类, 非角色; 若未来加真角色到 455+, 它们仍会被收进
 
 VAL_RATIO = 0.20
 SEED = 42
@@ -324,7 +330,9 @@ def load_character_names() -> List[str]:
     master = load_master()
     if len(master) <= MASTER_UI_BOUNDARY:
         return []
-    return master[MASTER_UI_BOUNDARY:]
+    lo, hi = MASTER_UIB_RANGE   # 排除 idx 395..454 的追加 UI 类(否则 fused 混学 UI, 见上方说明)
+    return [master[i] for i in range(MASTER_UI_BOUNDARY, len(master))
+            if not (lo <= i < hi)]
 
 
 # ── manual label extraction ─────────────────────────────────────────────
@@ -788,6 +796,8 @@ def build_template_driven_synth(
     fused_idx_map,
     ref_bundle,
     available_chars,
+    only_context=None,        # 只跑指定 context (单独迭代某模板, 如 battle_cards)
+    count_override=None,      # 覆盖 synth_count (preview 小批验证用)
 ):
     """Generate synth using user-configured dashboard templates.
 
@@ -812,6 +822,8 @@ def build_template_driven_synth(
         return out
 
     for tpl_path in tpl_files:
+        if only_context and tpl_path.stem != only_context:
+            continue  # 单独迭代某 context (battle_cards 等) 时跳过其他模板
         try:
             template = json.loads(tpl_path.read_text(encoding="utf-8"))
         except Exception as e:
@@ -822,16 +834,28 @@ def build_template_driven_synth(
         if not slots_norm:
             print(f"[tpl-synth] {ctx_name}: no slots configured, skipping")
             continue
-        sample_rel = template.get("sample_image") or ""
-        sample_path = SYNTH_TEMPLATES_DIR / sample_rel
-        if not sample_path.exists():
-            print(f"[tpl-synth] {ctx_name}: sample image missing ({sample_path}), skipping")
-            continue
-        bg = imread_u(sample_path)
-        if bg is None:
+        # ── 底图来源: bg_runs(多张真实帧轮换当背景, 根治单底图背景过拟合)优先;
+        #    否则回落 sample_image(单底图, 兼容其他 context 模板)。──
+        bg_paths = []
+        for rn in (template.get("bg_runs") or []):
+            rd = RAW_IMAGES / rn
+            rd = rd / "frames" if (rd / "frames").is_dir() else rd
+            bg_paths += sorted(rd.glob("*.jpg"))
+        if not bg_paths:
+            sample_rel = template.get("sample_image") or ""
+            sample_path = SYNTH_TEMPLATES_DIR / sample_rel
+            if not sample_path.exists():
+                print(f"[tpl-synth] {ctx_name}: no bg_runs & sample missing ({sample_path}), skipping")
+                continue
+            bg_paths = [sample_path]
+        bg0 = imread_u(bg_paths[0])
+        if bg0 is None:
             print(f"[tpl-synth] {ctx_name}: bg decode failed, skipping")
             continue
-        H, W = bg.shape[:2]
+        H, W = bg0.shape[:2]
+        single_bg = bg0 if len(bg_paths) == 1 else None  # 单底图缓存; 多底图循环内轮换读
+        if len(bg_paths) > 1:
+            print(f"[tpl-synth] {ctx_name}: {len(bg_paths)} 张多底图轮换当背景")
 
         rt = template.get("ref_transform") or {}
         crop_n = rt.get("crop_n") or {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0}
@@ -846,8 +870,9 @@ def build_template_driven_synth(
         ui_comp = aug.get("ui_components") or {}
         border_prob = float(aug.get("border_ablation_prob", 0.4))
         bri_jit = aug.get("brightness_jitter") or [0.92, 1.08]
+        gray_prob = float(aug.get("gray_prob", 0.0))   # 技能牌 COST 不够变灰显, 实战占比高, 必须覆盖否则灰牌全漏
 
-        target_count = int(template.get("synth_count", 200) or 200)
+        target_count = int(count_override or template.get("synth_count", 200) or 200)
         bbox_mode = template.get("bbox_mode", "full")  # full | tight_face | both
         use_for = template.get("use_for", "train")  # train | val | both
         n_emitted = 0
@@ -875,6 +900,11 @@ def build_template_driven_synth(
             return None
 
         for variant_i in range(target_count):
+            # 多底图: 轮换读真实战斗帧当背景 (W/H 每帧重算, 兼容不同分辨率)
+            bg = single_bg if single_bg is not None else imread_u(random.choice(bg_paths))
+            if bg is None:
+                continue
+            H, W = bg.shape[:2]
             composite = bg.copy()
             label_lines = []
             for slot in slots_norm:
@@ -950,6 +980,13 @@ def build_template_driven_synth(
                     continue
                 bri = random.uniform(float(bri_jit[0]), float(bri_jit[1]))
                 resized = np.clip(resized.astype(np.float32) * bri, 0, 255).astype(np.uint8)
+                # 灰度 aug: 技能牌 COST 不够 = **灰白褪色照片**(NOT 简单压暗)。
+                # 实测真实灰牌: 去色 + 降对比 + 提亮泛白(像蒙白的黑白照)。实战 COST 常不够
+                # →大量灰牌, 不覆盖则 v5 只认彩牌、灰牌全漏(实测 v4 灰牌 0 检出)。
+                if random.random() < gray_prob:
+                    g = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                    g = g * 0.5 + 110   # 对比×0.5 + 提亮+110 → 中高灰泛白(灰白褪色感)
+                    resized = cv2.cvtColor(np.clip(g, 0, 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
 
                 # ── Apply aug AFTER resize at slot pixel resolution ──
                 aug_positions = rt.get("aug_positions") or {}

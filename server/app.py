@@ -2075,18 +2075,21 @@ def _current_generation() -> Dict[str, Any]:
     fav = reg.get("fused_avatar", {})
     emo = reg.get("emoticon", {})
     uni_active = str(uni.get("active", ""))
-    uni_ver = next(iter(uni.get("versions", {}).keys()), None)
+    uni_vers = list(uni.get("versions", {}).keys())
+    uni_latest = uni_vers[-1] if uni_vers else None  # 最新版本(v6c), 不是第一个(旧 bug 取 v6b)
     uni_pending = ("PENDING" in uni_active) or (uni_active not in uni.get("versions", {}))
     if uni_pending:
+        # 分域: pipeline live = 三独立模型 (UI=ui.active=v5). unified 暂不全域上线,
+        # 最新版仅借作 prefill 标注 teacher (见 ui.versions.v6c)。
         ui_live = ui.get("active", "?")
-        unified_note = f"{uni_ver}·接线完成待live" if uni_ver else "—"
+        unified_note = f"暂不上(分域); {uni_latest}→标注teacher,等v7" if uni_latest else "—"
     else:
         ui_live = uni_active
-        unified_note = f"{uni_active}·已上线"
+        unified_note = f"{uni_active}·已全域上线"
     return {
-        "label": uni_ver or ui.get("active", "?"),  # 当前迭代代号 (v6b)
-        "ui_live": ui_live,                          # UI 域当前 live (v5 / v6b)
-        "unified": unified_note,                     # v6b 上线状态
+        "label": uni_latest or ui.get("active", "?"),  # 当前迭代代号 (v6c)
+        "ui_live": ui_live,                          # UI 域当前 live (分域=v5 / 全域上线=v6x)
+        "unified": unified_note,                     # unified 上线状态
         "avatar": fav.get("active", "?"),            # 头像 fused v4
         "emoticon": emo.get("active", "?"),          # 摸头 v26n
     }
@@ -2405,6 +2408,7 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
     img_name = str(payload.get("img") or "")
     conf = float(payload.get("conf") or 0.15)
     model_key = str(payload.get("model") or "ui")
+    version = str(payload.get("version") or "").strip() or None  # None=registry active
     d = _safe_dataset_path(dataset)
     img_dir = d / "frames" if (d / "frames").is_dir() else d
     img_path = img_dir / Path(os.path.basename(img_name))
@@ -2422,7 +2426,7 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         # spurious UI class on a sprite (and vice-versa). Shared with the 整run
         # prefill so single-frame and batch behave identically.
         from scripts.yolo_prefill_run import get_model, _OWNS, _IMGSZ_BY_TAG  # noqa: PLC0415
-        model, remap, tag = get_model(model_key)
+        model, remap, tag = get_model(model_key, version)
         owns = _OWNS.get(tag, lambda i: True)
         tgt = _parse_target_classes(payload.get("target_classes"))  # 只标目标 cls
         use_imgsz = int(payload.get("imgsz") or _IMGSZ_BY_TAG.get(tag, 960))
@@ -2478,6 +2482,7 @@ def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
     dataset = str(payload.get("dataset") or "")
     conf = float(payload.get("conf") or 0.25)
     model_key = str(payload.get("model") or "ui")
+    version = str(payload.get("version") or "").strip() or None  # None=registry active
     mode = str(payload.get("mode") or "skip")
     if payload.get("overwrite"):
         mode = "overwrite"
@@ -2488,11 +2493,47 @@ def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="dataset not found")
     try:
         from scripts.yolo_prefill_run import prefill_run  # noqa: PLC0415
-        res = prefill_run(img_dir, model_key=model_key, conf=conf, mode=mode,
-                          target_classes=target_classes)
+        res = prefill_run(img_dir, model_key=model_key, version=version, conf=conf,
+                          mode=mode, target_classes=target_classes)
         return {"ok": True, **res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/v1/datasets/yolo_models")
+def dataset_yolo_models() -> Dict[str, Any]:
+    """列各 prefill teacher 模型 + 可选版本 (dashboard 模型/版本下拉数据源)。
+    每个 key 给 active(pipeline live 版) + teacher(prefill 推荐版, ≠ active) +
+    versions[](active 置顶, 其余按 registry 序) + 中文标签。
+    各域最强标注策略: UI 默认 teacher=v6c(借 unified, live UI 入口 conf 远胜 v5),
+    但 cafe 内部弱类(咖啡厅收益/邀请卷) v6c 退步 → 手动切 version=v5 + 只标目标 cls;
+    头像=v4; 摸头=v26n。"""
+    from scripts.yolo_prefill_run import _OWNS, _KEY_TO_TAG  # noqa: PLC0415
+    reg = _read_registry()
+    master = _load_master_classes()
+    label = {"ui": "ui", "fused_avatar": "头像", "emoticon": "摸头",
+             "battle_heads": "战斗头"}
+    teacher_default = {"ui": "v6c"}  # prefill 推荐 teacher (≠ pipeline live active)
+    out = []
+    for key in ("ui", "fused_avatar", "emoticon", "battle_heads"):
+        node = reg.get(key)
+        if not isinstance(node, dict):
+            continue
+        active = str(node.get("active", ""))
+        vers = list((node.get("versions") or {}).keys())
+        ordered = ([active] if active in vers else []) + [v for v in vers if v != active]
+        td = teacher_default.get(key, active)
+        if td not in vers:
+            td = active if active in vers else (vers[0] if vers else "")
+        # 该模型 owns-span 内的 master 类名 → 喂前端"只标cls" datalist: 选 ui 只列
+        # UI 域 cls(选头像只列头像), 用户输入即自动补全 + 实时校验该 teacher 能否标。
+        tag = _KEY_TO_TAG.get(key, "ui")
+        owns = _OWNS.get(tag, lambda i: True)
+        span_classes = [nm for i, nm in enumerate(master) if owns(i)]
+        out.append({"key": key, "label": label.get(key, key),
+                    "active": active, "teacher": td, "versions": ordered,
+                    "span_classes": span_classes})
+    return {"models": out}
 
 
 # ── OCR API ───────────────────────────────────────────────────────────

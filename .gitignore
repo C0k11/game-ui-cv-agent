@@ -141,3 +141,16 @@ data/_*.md
 _ui_v1_final_metrics.json
 _ui_v1_per_class_ap.md
 cost_preview.jpg
+
+# 2026-06-07: fused v5 / battle-card 诊断 + 临时产物 (per-machine, 不入仓库)
+data/_*
+_baas_*_vis/
+_cmp_*.py
+synth_preview*.jpg
+ui_swap_preview.jpg
+scripts/eval_v5_*.py
+scripts/eval_card_*.py
+scripts/viz_*.py
+scripts/make_battle_*.py
+scripts/prepare_battle_*.py
+scripts/dedup_*.py

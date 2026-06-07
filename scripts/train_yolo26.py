@@ -234,6 +234,28 @@ TRAIN_CONFIGS = {
         # 翻转 (BA 角色无方向区别, 加倍数据)
         "fliplr": 0.5,
     },
+    "fused_avatar_26x_v5": {
+        # v5: warm-start from v4 best_manual + battle_cards 技能牌 synth(多底图+灰白aug).
+        # 目标: 维持 252 角色(cafe/编成 ~0.99) + 新增战斗技能牌灰彩识别.
+        # ⛔ 训练时并行 `py scripts/manual_fitness_watcher.py --run fused_avatar_yolo26x_v5`,
+        #    最终取 best_manual.pt — synth 主导(synth:real~12:1), best.pt 会被 synth val 带偏.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "fused_avatar_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
+        "epochs": 100,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "fused_avatar_yolo26x_v5",
+        "patience": 30,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.3,
+        "close_mosaic": 5,
+        "mixup": 0.0,
+        "copy_paste": 0.0,
+        "lr0": 0.002,            # v4 的 2/3, 保护已学 252 角色不被技能牌数据冲垮
+        "fliplr": 0.5,
+    },
     "ui_yolo26m_v1": {
         # Static UI detector — first proper train.
         # Schema: 447 classes (145 in actual use after audit), 4 themes:
@@ -469,6 +491,31 @@ TRAIN_CONFIGS = {
         "imgsz": 960,
         "batch": 8,
         "out_name": "unified_yolo26x_v6b",
+        "cache": "disk", "workers": 8,
+        "optimizer": "SGD",
+        "lr0": 0.0015,
+        "momentum": 0.937,
+        "weight_decay": 0.0005, "dropout": 0.0,
+        "mosaic": 0.3, "close_mosaic": 5,
+        "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "unified_yolo26x_v6c": {
+        # v6c (2026-06-06 用户决策): 砍 UI synth (_synth_ui_swap), UI 只真实帧根治 synth
+        # 过拟合 (v6b 实锤: UI val 0.892 高 / live 崩, 咖啡厅入口 val>0.9 live 仅 0.25)。头像
+        # synth (_fused_synth_remap) 保留 (影响小)。synth:real 2.03→~0.89。同 v6b 参数
+        # (lr0 0.0015 护头像 / mosaic 0.3 / close_mosaic 5 / patience 40 / from fused v4 重来)。
+        # ⚠️ 训前必须重建 ui_v2 (build_ui_v2 已砍 _synth_ui_swap)。UI 弱类暂靠 skill 兜底, v7 飞轮补。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
+        "epochs": 70,
+        "patience": 40,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "unified_yolo26x_v6c",
         "cache": "disk", "workers": 8,
         "optimizer": "SGD",
         "lr0": 0.0015,
