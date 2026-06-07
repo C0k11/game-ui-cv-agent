@@ -1,10 +1,22 @@
 {
   "_doc": "Single source of truth for active model versions. brain/pipeline.py reads this to find weights paths.  When training a new version, add a new entry under versions{} and bump active.  Old versions stay listed for rollback.",
   "fused_avatar": {
-    "active": "v4",
+    "active": "v6",
     "task": "detect",
-    "n_classes": 251,
+    "n_classes": 252,
     "versions": {
+      "v6": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v6/weights/best_real.pt",
+        "model_arch": "yolo26x",
+        "trained_on": "2026-06-07",
+        "n_classes": 252,
+        "epoch_best": 5,
+        "card_recall": 0.854,
+        "manual_mAP50": 0.989,
+        "manual_R": 0.995,
+        "notes": "纯252头像 + 战斗技能牌(复用头像名,无新类) + 灰牌识别(扇形充能/暗灰/低饱和 synth)。冻结 epoch5=真实峰(GPU选峰 vs last 0.805/best 0.810: ep6+ 过拟合 synth、真实灰牌反降)。数据集 build 四修: load_character_names 纯252(排 UI-B 395-454)/灰牌明度暗灰/扇形12点顺时针扩张/val泄漏排除。技能牌 recall 0.557(v5)→0.854。names=v4 完全一致, pipeline 按 cls_name 零改兼容。MUST infer @imgsz960。⚠️技能牌检测能力 ready 但战斗目前 auto 无读牌 skill 消费(combat AI 2.0 地基)。",
+        "warning": "训练后期(ep6+)过拟合 synth 致真实灰牌降 → 必须 save_period 存中间 ckpt + 真实 val(eval_v6_pick.py)选峰, 不能用 nominal best.pt"
+      },
       "v4": {
         "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v4/weights/best_manual.pt",
         "model_arch": "yolo26x",

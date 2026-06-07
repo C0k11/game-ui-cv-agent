@@ -145,7 +145,7 @@ cost_preview.jpg
 # 2026-06-07: fused v5 / battle-card 诊断 + 临时产物 (per-machine, 不入仓库)
 data/_*
 _baas_*_vis/
-_cmp_*.py
+/_*.py
 synth_preview*.jpg
 ui_swap_preview.jpg
 scripts/eval_v5_*.py

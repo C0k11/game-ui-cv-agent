@@ -256,6 +256,31 @@ TRAIN_CONFIGS = {
         "lr0": 0.002,            # v4 的 2/3, 保护已学 252 角色不被技能牌数据冲垮
         "fliplr": 0.5,
     },
+    "fused_avatar_26x_v6": {
+        # v6: v5 同配方, 数据集 build 三处根治(2026-06-07): ①load_character_names 排 UI-B
+        #     → 纯 252 头像(不再混 60 UI cls, nc 312→252, 与 v4 base 完全对齐) ②灰牌明度修正
+        #     (实测真实灰牌是暗灰 dim0.45-0.80, 旧 v5 用 g*0.5+110 提亮成亮灰白→真实暗灰牌漏35%)
+        #     ③val 泄漏根治(VAL_SOURCE_RUNS 排除 173604, 防同帧既 train 又 val).
+        # 目标: 252 角色不退(cafe/编成 ~0.96) + 彩牌稳 + 灰牌 recall 从 v5 的 0.557 大升.
+        # ⛔ 用 best.pt 即可: v2 val 85% 真实主导, watcher 非必须(memory 踩坑6); 独占 GPU 防 OOM.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "fused_avatar_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
+        "epochs": 100,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "fused_avatar_yolo26x_v6",
+        "patience": 30,
+        "save_period": 5,        # 存中间 epoch: v6 val synth占63%(manual去虚高后180)→best.pt偏synth拟合, 训完用 manual val(cafe/编成+battle)选真实峰
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.3,
+        "close_mosaic": 5,
+        "mixup": 0.0,
+        "copy_paste": 0.0,
+        "lr0": 0.002,
+        "fliplr": 0.5,
+    },
     "ui_yolo26m_v1": {
         # Static UI detector — first proper train.
         # Schema: 447 classes (145 in actual use after audit), 4 themes:
@@ -678,7 +703,7 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         name=cfg["out_name"],
         exist_ok=True,
         save=True,
-        save_period=-1,
+        save_period=cfg.get("save_period", -1),
         verbose=True,
     )
     if kind == "detect":

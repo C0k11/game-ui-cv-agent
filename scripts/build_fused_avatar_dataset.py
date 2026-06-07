@@ -78,6 +78,10 @@ COSTUME_SUFFIXES = (
 MASTER_UI_BOUNDARY = 143
 MASTER_UIB_RANGE = (395, 455)   # idx 395..454 = 追加 UI 类, 非角色; 若未来加真角色到 455+, 它们仍会被收进
 
+# Battle-card val 源 run (prepare_battle_val.py SRCS 中非 _-前缀者): 原始标注帧当 val
+# (技能牌真实角色), 必须从 train manual 提取里排除, 否则 val 泄漏(同帧既 train 又 val
+# → watcher/best 虚高, memory 踩坑3)。synth 仍可用它们当 bg_runs 背景(贴合成角色, 不泄漏)。
+VAL_SOURCE_RUNS = {"run_20260606_173604"}
 VAL_RATIO = 0.20
 SEED = 42
 PER_CLASS_CAP = 200    # cap synthetic samples per character (raised from 80 → 200
@@ -406,8 +410,8 @@ def extract_manual_samples(
     a dedicated val pool exists; otherwise stratified split is applied."""
     samples: List[Tuple[Path, List[str]]] = []
     for ds in sorted(RAW_IMAGES.iterdir()):
-        if not ds.is_dir() or ds.name.startswith("_"):
-            continue
+        if not ds.is_dir() or ds.name.startswith("_") or ds.name in VAL_SOURCE_RUNS:
+            continue  # _-前缀=val_pool/neg; VAL_SOURCE_RUNS=battle val 源(防 train/val 泄漏)
         sub = ds / "frames" if (ds / "frames").is_dir() else ds
         for txt in sub.glob("*.txt"):
             if txt.name == "classes.txt":
@@ -980,13 +984,38 @@ def build_template_driven_synth(
                     continue
                 bri = random.uniform(float(bri_jit[0]), float(bri_jit[1]))
                 resized = np.clip(resized.astype(np.float32) * bri, 0, 255).astype(np.uint8)
-                # 灰度 aug: 技能牌 COST 不够 = **灰白褪色照片**(NOT 简单压暗)。
-                # 实测真实灰牌: 去色 + 降对比 + 提亮泛白(像蒙白的黑白照)。实战 COST 常不够
-                # →大量灰牌, 不覆盖则 v5 只认彩牌、灰牌全漏(实测 v4 灰牌 0 检出)。
+                # 灰度 aug: 技能牌 COST 不够 = 低饱和 + **压暗**的暗灰牌(NOT 提亮泛白)。
+                # ⚠️ 实测铁证(_gray_measure.py 量 _v5_card_viz 真实牌 vs synth):
+                #   真实灰牌 饱和均值仅 12-13(近灰), 明度比同帧彩牌暗 ×0.76~0.90,
+                #   暗部 p10=21~72(保留暗部)。v5 旧版 `g*0.5+110` 把灰牌做成"亮灰白"
+                #   (明度中位162/暗部p10被抬到137=暗部全丢) → 真实暗灰牌 v5 检测漏35%
+                #   (card_00 灰牌直接漏框 / card_09 灰牌 conf 仅0.28)。
+                # 修: 降饱和(非全0)+ 压暗(随场景浮动)+ 不抬黑位(保暗部), 贴合真实。
                 if random.random() < gray_prob:
-                    g = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY).astype(np.float32)
-                    g = g * 0.5 + 110   # 对比×0.5 + 提亮+110 → 中高灰泛白(灰白褪色感)
-                    resized = cv2.cvtColor(np.clip(g, 0, 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+                    # ⚠️ 实测铁证(_cardzoom 放大 card_03/09 牌1): 真实灰牌(COST不够)= 去色灰白
+                    # + COST 充能**扇形进度**造成的**对角强对比明暗分界**(暗侧深灰三角 ×~0.5 +
+                    # 亮侧亮灰 ×1.0, 分界位置=充能进度)。这是费用不够期间的**常态**(用户实战确认),
+                    # 非稀少瞬间。旧版均匀灰/弱柔渐变没覆盖此分界 → v5 真实灰牌漏35%。
+                    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV).astype(np.float32)
+                    hsv[:, :, 1] *= 0.12                        # 去色到极低饱和(真实 S~12)
+                    desat = cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8),
+                                         cv2.COLOR_HSV2BGR).astype(np.float32)
+                    desat *= random.uniform(0.72, 0.95)         # 灰白基调(轻压暗)
+                    if random.random() < 0.85:                  # 85% 灰牌带充能扇形(费用不够常态)
+                        # 充能扇形(用户实测确认其语义): COST 从 0 涨, 高亮扇区从 **12 点顺时针扩张**,
+                        # 张角 = 充能进度 → 扇区内=已充能高亮灰白, 扇区外=未充能暗灰。COST=0 几乎全暗,
+                        # 接近满几乎全亮。prog 全范围(0.05~0.95)→ 每角色覆盖各顺时针充能阶段。
+                        gh, gw = desat.shape[:2]
+                        yy, xx = np.mgrid[0:gh, 0:gw].astype(np.float32)
+                        cy, cx = gh * 0.5, gw * 0.5
+                        ang = np.arctan2(yy - cy, xx - cx)             # -pi..pi
+                        a = (ang + np.pi / 2.0) % (2.0 * np.pi)        # 0=12点, 顺时针 0..2pi
+                        prog = random.uniform(0.05, 0.95) * 2.0 * np.pi  # 高亮扇区张角=充能进度
+                        dark = random.uniform(0.45, 0.60)             # 未充能暗区(深灰)
+                        bright = random.uniform(0.85, 1.0)            # 已充能高亮(仍灰白未变彩)
+                        inside = (a <= prog).astype(np.float32)       # 高亮扇区=已充能(从12点顺时针)
+                        desat *= (dark + (bright - dark) * inside)[..., None]
+                    resized = np.clip(desat, 0, 255).astype(np.uint8)
 
                 # ── Apply aug AFTER resize at slot pixel resolution ──
                 aug_positions = rt.get("aug_positions") or {}

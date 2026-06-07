@@ -41,7 +41,7 @@ flowchart LR
 | Tier | Model | Job | Latency |
 |---|---|---|---|
 | **UI** (primary) | YOLO26m `ui_v5` (451-cls) | every button / tab / popup / badge → drives all nav + clicks | ~6 ms |
-| Avatar ID | YOLO26x `fused_avatar_v4` (252-cls) | bbox + character ID in one pass, across 6 UI contexts | ~10 ms |
+| Avatar ID | YOLO26x `fused_avatar_v6` (252-cls) | bbox + character ID in one pass + in-battle skill-card recognition (incl. grayed-out / charging) | ~10 ms |
 | Numeric OCR | PP-OCRv4 BA-tuned | AP / ticket / count digits only | ~50 ms |
 | Head-pat | YOLO26n `emoticon` | cafe head-pat bubble | ~2 ms |
 | Battle lock | YOLOv8n `battle_heads` | single-class head at 60+ FPS | ~2 ms |
@@ -98,12 +98,14 @@ What actually moved the needle, learned across UI v1→v5 and avatar v1→v4:
 - **The small held-out val lies** — it carried zero instances of the weak classes it was meant to measure, and picked the wrong checkpoint. Models ship from a frozen `last.pt` after a real-frame check, not from val-mAP alone.
 - **Warm-start** from the previous best preserves learned identity features and roughly halves wall-clock.
 
-**Active:** UI `ui_yolo26m_v5` · avatar `fused_avatar_yolo26x_v4` · emoticon `v26n` · battle `battle_heads`.
+**Active:** UI `ui_yolo26m_v5` · avatar `fused_avatar_yolo26x_v6` · emoticon `v26n` · battle `battle_heads`.
+
+**Avatar v6** (shipped) extends the 252-head detector to in-battle **EX skill cards** — the bottom-row character cards, including the grayed-out *insufficient-cost* state with its clock-wipe charge sweep — built from a template-synth pipeline with multi-background backgrounds and domain-accurate gray/sector augmentation. On held-out real frames: skill-card recall **0.85** (vs the prior cards-capable run's 0.56) while non-battle recognition (cafe / formation) holds at mAP50 **0.99**. The shipped checkpoint is the *real-val peak*, picked on a manual val set rather than the synth-inflated nominal best (later epochs overfit the synthetic cards).
 
 **In progress:**
 
-- **Avatar v6** — extends the detector to in-battle **EX skill cards** (the bottom-row character cards, including the grayed-out *insufficient-cost* state) while keeping the 252 head classes — the perception base for future combat automation. Built from a template-synth pipeline with multi-background + grayscale augmentation.
 - **Unified detector** — one YOLO26x covering UI + avatar + emoticon + skill cards, to retire the multi-model split once it beats each domain specialist.
+- **Battle skill-card AI** — the detector now *sees* the cards (incl. gray/charging); a combat policy that *reads* them (cost-aware skill rotation) is the next layer.
 
 ## Quick Start
 

@@ -123,9 +123,9 @@
       0.92,
       1.08
     ],
-    "gray_prob": 0.55
+    "gray_prob": 0.65
   },
-  "synth_count": 400,
+  "synth_count": 800,
   "bbox_mode": "full",
   "use_for": "train",
   "target": "avatar",
