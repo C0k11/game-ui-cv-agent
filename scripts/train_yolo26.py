@@ -477,6 +477,32 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v7": {
+        # v7 = 纯 UI+emoticon (头像归 fused v6, build_ui_v2 _keep_ui_lines drop 143-394).
+        #  补真实弱类: 制造入口(v5 flywheel 0!)/活动类452-454/灰色领取 + 折叠 emoticon451.
+        #  warm v5 (m 同arch 全继承; cls头 451→455 重学新增4类). 数据: 新2run(193003+140123
+        #  两背景真实)+旧真实+_emoticon_v2, 砍全部synth(伪背景毒, v6c实锤污染lobby入口).
+        #  ⭐val=flywheel 477 纯真实(头像已过滤) → best.pt 可信(不像 fused synth-bias);
+        #  save_period 保险, 训完仍 eval flywheel by-cls 核弱类不退. patience30 早停(真实val).
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v5" / "weights" / "best_real.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v7",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

@@ -36,13 +36,23 @@
     }
   },
   "ui": {
-    "active": "v5",
+    "active": "v7",
     "task": "detect",
-    "n_classes": 451,
+    "n_classes": 455,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v7": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v7/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-06-08",
+        "n_classes": 455,
+        "epoch_best": "70满 (mAP50 0.953 flywheel纯真实val)",
+        "flywheel_recall_mean": 0.921,
+        "notes": "纯 UI+emoticon (头像143-394 build _keep_ui_lines drop, 归 fused v6)。warm-start v5(m)。真实飞轮帧补弱类: 新2run(193003女仆+140123银发两背景)+旧真实+_emoticon_v2, 砍全部synth(伪背景毒)。val=flywheel 477纯真实→best.pt可信。**验收 v5→v7 by-cls 整体均值 0.830→0.921**: 制造入口0→0.97(v5头号弱项!)/emoticon0→0.71/距离结束0.02→0.94/灰色领取0→0.62/加载0.58→1.0; 强类不退(cafe收益0.98/邀请卷1.0/红点0.85/黄点0.99/底栏入口0.97-1.0)。MUST infer @imgsz960。按 cls_name 匹配, pipeline 零改兼容。",
+        "known_gap": "①左切换 1.0→0.72(-0.27, 右切换不退0.98, 不对称待查) ②双倍三倍活动452 0.03(678GT仍漏, train731框没学会)。下版专项补。③emoticon v7 0.71 << 独立 v26n 0.995 → pipeline `_FOLD_IN_EMOTICON=False` 保独立 v26n(不折叠, 等 ui emoticon 训>0.99 再开)。"
+      },
       "v6c": {
         "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
         "model_arch": "yolo26x",

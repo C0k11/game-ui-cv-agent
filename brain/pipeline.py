@@ -373,7 +373,11 @@ def _get_yolo():
         # ⚠️ unified(v6b) 模式下 ui 模型虽含 Emoticon_Action(idx451), 但其 emoticon
         # 输出被域过滤丢弃 (emoticon 走 v26n 专用 0.995 >> v6b 0.764) → 绝不能
         # fold-in 掉 v26n。仅独立 ui 模型 (非 unified) 自带 emoticon 类时才折叠。
-        ui_has_emoticon = (not _UI_IS_UNIFIED) and any(
+        # ⚠️ (2026-06-08) ui v7 实测: emoticon recall 0.71 << 独立 v26n 0.995 →
+        # 折叠会让 cafe headpat 退步~29%(省一次推理 vs 摸头质量, 不值得)。**保 v26n,
+        # 暂不 fold-in**, 直到 ui 的 emoticon 训到 >0.99 再把开关打开。
+        _FOLD_IN_EMOTICON = False
+        ui_has_emoticon = _FOLD_IN_EMOTICON and (not _UI_IS_UNIFIED) and any(
             "emoticon" in str(n).lower()
             for m, _c, t in _yolo_models if t == "ui"
             for n in m.names.values()

@@ -69,17 +69,17 @@ REAL_SOURCES = [
     # Folds the standalone emoticon_yolo26n into the ui model — pipeline then runs
     # one fewer YOLO per cafe tick. 2026-03 captures, md5-disjoint from above.
     "_emoticon_v2",
+    "run_20260607_193003",           # v7 飞轮: 女仆背景 lobby/cafe 弱类(制造入口等) 783标
+    "run_20260607_140123",           # v7 飞轮: 银发背景 lobby/cafe 弱类 1409标
 ]
-SYNTH_SOURCES = ["_fused_synth_remap"]   # 头像 synth: 复用 fused 旧 synth(0.966) remap按名→master + ui v5 teacher补UI = rehearsal防遗忘 (4644帧)
+SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合
                  #    (v6b 实锤: UI val 0.892 高 / live 崩, 咖啡厅入口 val>0.9 / live 仅 0.25)。头像 synth
                  #    影响小保留。UI 弱类(咖啡厅入口/开始制造/CAFE_EARNINGS)暂靠 skill 兜底(cafe/craft 外推),
                  #    v7 再上飞轮真实帧(run_20260606_flywheel 519帧, 标注后)补。
                  # 删: _synth_bond/goto/enter — 假阴性毒 (2026-06-04)
 VAL_SOURCES = [
-    "run_20260603_171121",  # 多域 held-out val (ui+头像+摸头), 主 val
-    "run_20260603_183022",  # 头像密集补充 (605 头像框/52帧, 全标无空)
-    "_ui_val_pool",         # 旧 51帧 UI-only (单域; 若含 momo/cafe 头像帧未标会算 FP)
+    "run_20260606_flywheel",  # v7 主 val: 06-06 飞轮 477帧(独立 session 防泄漏, 含 UI 弱类靶子). 旧 06-03 val 弃用(171121 与 v6c train 同 session 泄漏 / 183022 头像 / _ui_val_pool 旧盲)
 ]
 
 TARGET = 30            # moderate oversample floor (was 200 — the overfit driver)
@@ -89,6 +89,22 @@ MIN_UNIQUE = 8         # don't oversample classes thinner than this (overfit tra
 
 def md5(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
+
+
+# v7: ui = 纯 UI+emoticon — drop 头像段(143-394, 归 fused v6 专精)。flywheel / cafe / momo
+# 真实帧由 v6c(nc455)预填含头像框, 对 ui v7 多余(否则 val 被头像 GT 干扰 + train 学多余头像)。
+# ⚠️ 原始 raw_images 标注不动(保留头像给未来 unified), 仅 build 输出 ui_v2 时过滤。
+HEAD_LO, HEAD_HI = 143, 394
+def _keep_ui_lines(cleaned: str, nc: int):
+    out = []
+    for ln in cleaned.splitlines():
+        if not ln.strip():
+            continue
+        c = int(ln.split()[0])
+        if c >= nc or HEAD_LO <= c <= HEAD_HI:   # 越界 或 头像段 → drop
+            continue
+        out.append(ln)
+    return out
 
 
 def label_classes(cleaned: str):
@@ -152,8 +168,7 @@ def main() -> int:
             seen_md5[h] = True
             cleaned = sanitize_label_text(txt.read_text(encoding="utf-8"))
             # drop any out-of-range cls (>= nc)
-            keep = [ln for ln in cleaned.splitlines()
-                    if ln.strip() and int(ln.split()[0]) < nc]
+            keep = _keep_ui_lines(cleaned, nc)
             dropped_overflow += len(cleaned.splitlines()) - len(keep)
             cleaned = ("\n".join(keep) + "\n") if keep else ""
             uniques.append((s, jpg.stem, jpg, cleaned, label_classes(cleaned)))
@@ -171,8 +186,7 @@ def main() -> int:
             if not txt.exists():
                 continue
             cleaned = sanitize_label_text(txt.read_text(encoding="utf-8"))
-            keep = [ln for ln in cleaned.splitlines()
-                    if ln.strip() and int(ln.split()[0]) < nc]
+            keep = _keep_ui_lines(cleaned, nc)
             cleaned = ("\n".join(keep) + "\n") if keep else ""
             synth.append((s, jpg.stem, jpg, cleaned, label_classes(cleaned)))
     print(f"[synth] {len(synth)} frames")
@@ -233,8 +247,7 @@ def main() -> int:
             if not txt.exists():
                 continue
             cleaned = sanitize_label_text(txt.read_text(encoding="utf-8"))
-            keep = [ln for ln in cleaned.splitlines()
-                    if ln.strip() and int(ln.split()[0]) < nc]
+            keep = _keep_ui_lines(cleaned, nc)
             cleaned = ("\n".join(keep) + "\n") if keep else ""
             stem = f"{vsrc}__{jpg.stem}"   # source-prefix → 防跨 run 同名(frame_000000)互相覆盖
             dj = img_va / f"{stem}.jpg"

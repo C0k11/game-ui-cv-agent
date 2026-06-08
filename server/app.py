@@ -2513,7 +2513,7 @@ def dataset_yolo_models() -> Dict[str, Any]:
     master = _load_master_classes()
     label = {"ui": "ui", "fused_avatar": "头像", "emoticon": "摸头",
              "battle_heads": "战斗头"}
-    teacher_default = {"ui": "v6c"}  # prefill 推荐 teacher (≠ pipeline live active)
+    teacher_default = {}  # (2026-06-08) ui v7 上线=active 即最强 UI(by-cls 0.921 全面超 v6c) → teacher=active(v7); fused v6 / emoticon v26n 同理 active=最强。旧 v6c teacher 弃用
     out = []
     for key in ("ui", "fused_avatar", "emoticon", "battle_heads"):
         node = reg.get(key)
