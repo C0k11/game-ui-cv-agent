@@ -944,6 +944,20 @@ class CafeSkill(BaseSkill):
             self.log(f"1F re-sweep done ({reason}, {self._pat_count} pats) → exit")
             self._goto("exit")
             return action_wait(300, "1F re-sweep done → exit")
+        # IN-CAFE SIGNAL both ways (user 2026-06-09): NO 黄点 on 移動至2號店 ⇒
+        # 2F has nothing to do — skip the whole trip. 2-frame confirmation so a
+        # single dot-flicker frame can't wrongly cancel the 2F visit; button
+        # not detected ⇒ can't judge ⇒ go as before.
+        mv2 = self.find_cls(screen, UC.CAFE_MOVE_2F, conf=_CLS_CONF)
+        if mv2 is not None and not self.dot_in_region(
+                screen, (mv2.x1 - 0.01, mv2.y1 - 0.05, mv2.x2 + 0.04, mv2.y2 + 0.01)):
+            self._no2f_frames = getattr(self, "_no2f_frames", 0) + 1
+            if self._no2f_frames < 2:
+                return action_wait(300, "confirm no-2F-dot (1/2)")
+            self.log("移動至2號店 无点 ×2帧 → 2F 没活, 跳过直接退出")
+            self._goto("exit")
+            return action_wait(300, "no 2F dot → skip 2F, exit")
+        self._no2f_frames = 0
         self.log(f"1F headpat done ({reason}, {self._pat_count} pats) → switch")
         self._goto("switch")
         return action_wait(300, "1F headpat done → switch")
