@@ -50,7 +50,9 @@ _CONFIRM_BAND = (0.28, 0.60, 0.72, 0.82)
 # 掃蕩完成 reward popup 确认键 sits LOWER (probe: ~0.5, 0.81).
 _DONE_CONFIRM_BAND = (0.30, 0.74, 0.70, 0.90)
 # A 青辉石 icon inside THIS band = a buy dialog (NOT the top-bar balance at cy<0.10).
-_PYROXENE_BODY_REGION = (0.30, 0.16, 0.75, 0.48)
+# Deep-dive C5 (2026-06-09): aligned to schedule's LIVE-VERIFIED region (icon
+# at cy≈0.577 > old 0.48 bound — same miss risk as arena C4).
+_PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
 # Stage list lives in the right panel.
 _STAGE_PANEL = (0.58, 0.12, 1.0, 0.98)
 
@@ -237,12 +239,14 @@ class TicketSweepSkill(BaseSkill):
             self._goto("branch")
             return action_wait(250, "tickets ok → branch")
 
-        # Unreadable ticket count: defenses ②③ still protect (the confirm-dialog
-        # pyroxene/grey guard), so proceed but log it.
+        # Deep-dive C7 (2026-06-09): unreadable ticket count must FAIL CLOSED.
+        # The old "proceed, confirm-dialog guard backstops" relied on a guard
+        # whose region was mis-sized (C5) — 票数读不出 ⇒ 不出击, period
+        # (money rule #3: 0/unknown tickets → never sortie).
         if self._phase_ticks > 8:
-            self.log("ticket count unreadable — proceeding (confirm-dialog guard backstops)")
-            self._goto("branch")
-            return action_wait(300, "ticket unread → branch (guarded)")
+            self.log("ticket count unreadable after retries → exit (money fail-closed)")
+            self._goto("exit")
+            return action_wait(300, "ticket unread → exit")
         return action_wait(350, "reading ticket count")
 
     def _branch(self, screen: ScreenState) -> Dict[str, Any]:

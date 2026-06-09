@@ -39,7 +39,10 @@ from brain.skills import ui_classes as UC
 
 _CLS_CONF = 0.30
 # A 青辉石 icon in this body band = buy dialog (NOT top-bar balance at cy<0.10).
-_PYROXENE_BODY_REGION = (0.30, 0.16, 0.75, 0.48)
+# Deep-dive C4 (2026-06-09): aligned to schedule's LIVE-VERIFIED region — the
+# buy-dialog pyroxene icon sits at cy≈0.577 (> the old 0.48 upper bound, which
+# would have MISSED it = bought a ticket).
+_PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
 # Centered result 确认键 band (戰鬥結果 / 達成賽季最高紀錄).
 _RESULT_BAND = (0.32, 0.55, 0.68, 0.85)
 
@@ -247,6 +250,13 @@ class ArenaSkill(BaseSkill):
                 self.log("tickets 0/5 → arena done")
                 self._goto("exit")
                 return action_wait(300, "0 tickets → exit")
+        elif self._phase_ticks > 12:
+            # Deep-dive C6 (2026-06-09): unreadable count must FAIL CLOSED —
+            # the old code carried _tickets=None into select/fight with only
+            # the (previously mis-regioned) confirm-dialog guard backstopping.
+            self.log("tickets unreadable after retries → exit (money fail-closed)")
+            self._goto("exit")
+            return action_wait(300, "ticket unreadable → exit")
 
         # Safety cap.
         if self._fights_done >= _MAX_FIGHTS:

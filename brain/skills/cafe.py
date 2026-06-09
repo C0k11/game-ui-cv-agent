@@ -40,6 +40,7 @@ Detectors (set by pipeline.SKILL_YOLO_MAP["Cafe"] = "ui+cafe+avatar"):
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -134,6 +135,21 @@ def _load_invite_targets() -> List[str]:
         return []
 
 
+def _load_skip_invite() -> bool:
+    """app_config profile `cafe_skip_invite` — True ⇒ headpat-only cafe run
+    (invite ticket on CD / user choice). Same profile-read pattern as
+    _load_invite_targets."""
+    try:
+        if not _APP_CONFIG_FILE.exists():
+            return False
+        data = json.loads(_APP_CONFIG_FILE.read_text("utf-8"))
+        active = data.get("active_profile", "default")
+        profile = (data.get("profiles") or {}).get(active, {})
+        return bool(profile.get("cafe_skip_invite", False))
+    except Exception:
+        return False
+
+
 class CafeSkill(BaseSkill):
     # Lobby cafe entries that carry a red/yellow dot when there's something
     # to do (earnings ready / invite slot open). Drives should_run gating.
@@ -156,6 +172,7 @@ class CafeSkill(BaseSkill):
         self._enter_attempts: int = 0
         # earnings
         self._earnings_done: bool = False
+        self._earnings_claimed: bool = False  # set after claim → close popup proactively
         # invite
         self._invite_targets: List[str] = []
         self._invited: Set[str] = set()      # cls_names invited this run
@@ -175,12 +192,17 @@ class CafeSkill(BaseSkill):
         self._recent_pats: List[Tuple[float, float]] = []
         # floor bookkeeping
         self._on_2f: bool = False
+        # one-shot badge-verified re-entry (exit sees lobby dot → missed work)
+        self._verify_reentered: bool = False
 
     def reset(self) -> None:
         super().reset()
         self._init_state()
         self._invite_targets = _load_invite_targets()
-        if self._invite_targets:
+        self._skip_invite = _load_skip_invite()
+        if self._skip_invite:
+            self.log("cafe_skip_invite=true — invite disabled (券CD), headpat only")
+        elif self._invite_targets:
             self.log(f"cafe invite targets: {self._invite_targets}")
         else:
             self.log("no cafe_invite_targets configured — will invite first rows")
@@ -201,6 +223,26 @@ class CafeSkill(BaseSkill):
     def _close_x(self, screen: ScreenState,
                  region=(0.56, 0.04, 0.94, 0.30)) -> Optional[YoloBox]:
         return self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF, region=region)
+
+    def _read_earnings_pct(self, screen: ScreenState, earn_box: YoloBox) -> Optional[float]:
+        """DIGIT-ONLY read of the X.X% shown on the 咖啡厅收益 button.
+
+        Signal gate for the earnings popup: 0.0% ⇒ nothing to claim ⇒ never
+        open it. Returns None when unreadable — caller opens the popup as
+        before (safe fallback, identical to pre-gate behaviour)."""
+        try:
+            from brain.pipeline import run_digit_ocr
+            x1 = max(0.0, earn_box.x1 - 0.005)
+            y1 = max(0.0, earn_box.y1 - 0.005)
+            x2 = min(1.0, earn_box.x2 + 0.005)
+            y2 = min(1.0, earn_box.y2 + 0.005)
+            raw = run_digit_ocr(screen.frame, (x1, y1, x2, y2)) or ""
+            m = re.search(r"(\d+(?:\.\d+)?)", str(raw))
+            if not m:
+                return None
+            return float(m.group(1))
+        except Exception:
+            return None
 
     def _confirm_btn(self, screen: ScreenState,
                      region=(0.42, 0.55, 0.78, 0.85)) -> Optional[YoloBox]:
@@ -375,8 +417,14 @@ class CafeSkill(BaseSkill):
             conf=_CLS_CONF, region=_CLAIM_BAND,
         )
         if claim_active is not None:
+            # Claim it, but DON'T mark earnings done yet — next tick the button
+            # greys out and the claim_grey path below CLOSES the popup. Marking
+            # done here advances to invite while the popup is STILL OPEN, which
+            # covers the cafe signature → _is_cafe False → invite freezes
+            # "waiting for cafe UI" (live 2026-06-09: earnings popup stayed open,
+            # invite dead-waited 14 ticks until the stuck-20 fallback).
             self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
-            self._earnings_done = True
+            self._earnings_claimed = True
             return action_click_box(claim_active, "claim earnings")
         claim_grey = self.find_cls(
             screen, [UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
@@ -389,11 +437,26 @@ class CafeSkill(BaseSkill):
             close = self._close_x(screen)
             if close is not None:
                 return action_click_box(close, "close earnings popup (nothing)")
-            self._begin_invite(floor_2=False)
-            return action_wait(300, "earnings nothing → invite")
+            # X not detected THIS frame (one-frame miss) — ESC closes the popup
+            # just as well. NEVER advance with the popup still covering the
+            # students (live 2026-06-09 2nd run: advancing here left it open →
+            # 1F headpat saw nothing again). _earnings_done is already True so
+            # the next tick moves on to invite with a clean screen.
+            return action_back("close earnings popup (ESC, X miss)")
 
         # No claim button visible → we're not in the popup. Need cafe main.
         if not self._is_cafe(screen):
+            # Just claimed but the popup still covers the cafe signature (the
+            # claim_grey detection flickered out during the post-claim
+            # transition): actively CLOSE it instead of dead-waiting → the
+            # _EARNINGS_MAX skip would leave the popup OPEN → headpat sees no
+            # students (live 2026-06-09: 咖啡1 没摸头).
+            if self._earnings_claimed:
+                close = self._close_x(screen)
+                if close is not None:
+                    self._earnings_claimed = False
+                    self._earnings_done = True
+                    return action_click_box(close, "close earnings popup (post-claim)")
             if screen.is_lobby():
                 self.log("earnings: on lobby, re-entering")
                 self._enter_attempts = 0
@@ -405,10 +468,20 @@ class CafeSkill(BaseSkill):
                 return action_wait(300, "earnings skip (no cafe)")
             return action_wait(500, "waiting for cafe UI (earnings)")
 
-        # Cafe main screen: open the earnings popup via CAFE_EARNINGS cls.
+        # Cafe main screen: SIGNAL-DRIVEN earnings (user rule 2026-06-09:
+        # "收益明明是0为什么还要点一次" — don't walk the flow blindly). The
+        # button itself shows the live percentage; digit-OCR it and only open
+        # the popup when there's actually something (>0%). Unreadable → open
+        # popup as before (safe fallback).
         earn = self.find_cls(screen, UC.CAFE_EARNINGS, conf=_CLS_CONF)
         if earn is not None:
-            self.log("opening earnings popup (YOLO 咖啡厅收益)")
+            pct = self._read_earnings_pct(screen, earn)
+            if pct is not None and pct <= 0.0:
+                self.log("咖啡厅收益 0.0% (digit-OCR) → nothing to claim, skip popup")
+                self._earnings_done = True
+                self._begin_invite(floor_2=False)
+                return action_wait(250, "earnings 0% → skip popup")
+            self.log(f"opening earnings popup (YOLO 咖啡厅收益, pct={pct})")
             return action_click_box(earn, "open earnings popup")
 
         # CAFE_EARNINGS not seen — give the cls a few ticks, then skip.
@@ -424,7 +497,10 @@ class CafeSkill(BaseSkill):
     def _begin_invite(self, *, floor_2: bool) -> None:
         """Enter the invite sub_state for the given floor."""
         self._on_2f = floor_2
-        self._invite_floor_done = False
+        # cafe_skip_invite (app_config profile): invite ticket on CD / user wants
+        # headpat-only → mark the floor's invite already done; _invite()'s first
+        # tick routes straight to headpat. No ticket click, no list, no dead-wait.
+        self._invite_floor_done = bool(getattr(self, "_skip_invite", False))
         self._invite_stage = 0
         self._invite_scrolls = 0
         self._invite_settle = 0
@@ -873,6 +949,24 @@ class CafeSkill(BaseSkill):
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":
+            # BADGE-VERIFIED completeness (user rule 2026-06-09: 少摸一个角色 —
+            # trust the lobby dot, not the dry-scan): if the cafe entry STILL
+            # carries a red/yellow dot, work remains (a bubble the pan-sweep
+            # missed / earnings that re-accrued) → re-enter ONCE and re-sweep.
+            # Region = entry bbox expanded up-right (dots sit top-right of the
+            # icon; +0.02 right stays well clear of the 课程表 neighbour).
+            if not getattr(self, "_verify_reentered", False):
+                entry = self.find_cls(screen, UC.NAV_CAFE, conf=0.40)
+                if entry is not None and self.dot_in_region(
+                        screen,
+                        (entry.x1 - 0.005, entry.y1 - 0.05, entry.x2 + 0.02, entry.y2)):
+                    self.log("⚠ lobby cafe entry STILL has dot → missed work, re-entering once")
+                    keep_inv, keep_skip = self._invite_targets, self._skip_invite
+                    self._init_state()
+                    self._invite_targets, self._skip_invite = keep_inv, keep_skip
+                    self._verify_reentered = True
+                    self._goto("enter")
+                    return action_wait(300, "cafe dot persists → re-enter sweep")
             self.log("back in lobby, cafe done")
             return action_done("cafe complete")
         if self._phase_ticks > _EXIT_MAX:

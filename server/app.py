@@ -106,6 +106,23 @@ _CAPTURE_THREAD = None
 _CAPTURE_RUNNING = False
 _CAPTURE_STATUS = {"running": False, "frames": 0, "dataset": "", "error": ""}
 
+# Single-step approval mode: when on, the pipeline PAUSES before each
+# click/back/swipe, exposes the pending action via status/_STEP_PENDING, and
+# blocks until POST /api/v1/step/go. Used for human-in-the-loop walk-throughs.
+_STEP_MODE = False
+_STEP_PENDING: Optional[Dict[str, Any]] = None
+_STEP_GO = threading.Event()
+
+
+def _box_iou_n(a, b) -> float:
+    """IoU of two YoloBox-like objects with normalized x1/y1/x2/y2 coords."""
+    ix1, iy1 = max(a.x1, b.x1), max(a.y1, b.y1)
+    ix2, iy2 = min(a.x2, b.x2), min(a.y2, b.y2)
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    ua = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter
+    return inter / ua if ua > 0 else 0.0
+
 OCR_CACHE_VERSION = 2
 
 # ── Pipeline state ─────────────────────────────────────────────────────
@@ -320,6 +337,9 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
                 norm.append(name)
                 seen_b.add(name)
         data["bounty_branches"] = norm if norm else list(_VALID_BRANCHES)
+
+    # Cafe: skip the invite sub-flow entirely (ticket on CD / headpat-only).
+    data["cafe_skip_invite"] = bool(raw.get("cafe_skip_invite", False))
 
     # Cafe invite targets — ordered list of 中文角色名 ([1F, 2F]); trim blanks
     # but PRESERVE order/position (index drives which floor invites whom).
@@ -689,6 +709,9 @@ def _start_pipeline(*, payload: Dict[str, Any]) -> None:
         window_title = str(payload.get("window_title") or profile_settings.get("window_title") or "Blue Archive")
         step_sleep = float(payload.get("step_sleep_s") or profile_settings.get("step_sleep_s") or 0.6)
         dry_run = bool(payload.get("dry_run") if payload.get("dry_run") is not None else profile_settings.get("dry_run", True))
+        globals()["_STEP_MODE"] = bool(payload.get("step_mode", False))
+        globals()["_STEP_PENDING"] = None
+        _STEP_GO.clear()
         account_label = str(payload.get("account_label") or profile_settings.get("account_label") or active_profile).strip()
         _PIPELINE_RUN_META = {
             "profile_name": active_profile,
@@ -724,6 +747,7 @@ def _stop_pipeline() -> None:
     global _PIPELINE, _PIPELINE_RUNNING
     with _PIPELINE_LOCK:
         _PIPELINE_RUNNING = False
+        _STEP_GO.set()  # wake a worker blocked on step-approval so it can exit
         if _PIPELINE is not None:
             try:
                 _PIPELINE.stop()
@@ -934,6 +958,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _interval = 1.0 / _yolo_fps_target
             _frame_count = 0
             _errors = 0
+            # Static-mode anti-flicker: a box that drops out for 1-2 detection
+            # frames (conf flutter at the floor) is HELD for up to 2 frames
+            # (~66ms) so the overlay doesn't blink. Cleared on page switch
+            # fast enough to be imperceptible; disabled in tracker mode.
+            _hold_boxes: Dict[Any, Any] = {}
             while _yolo_thread_running and _PIPELINE_RUNNING:
                 try:
                     t0 = time.perf_counter()
@@ -999,13 +1028,36 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         # Moving targets ⇒ tracker ON only for cafe 摸头 (students
                         # walk). Everything else = static UI → raw boxes, no coast,
                         # no leftover box when the page switches.
-                        _overlay.set_track(in_cafe and active_sub == "headpat")
+                        _track_on = in_cafe and active_sub == "headpat"
+                        _overlay.set_track(_track_on)
                         overlay_out = []
                         for yb in yolo_boxes:
                             if hasattr(yb, "cls_name") and "headpat" in yb.cls_name.lower() and not in_cafe:
                                 continue
                             overlay_out.append(yb)
-                        _overlay.update(overlay_out)
+                        # (cross-class/model dedup now lives in _run_yolo_on_image)
+                        if _track_on:
+                            _hold_boxes.clear()
+                            _overlay.update(overlay_out)
+                        else:
+                            # Anti-flicker hold: bridge 1-2 frame dropouts.
+                            out = list(overlay_out)
+                            for k2 in list(_hold_boxes.keys()):
+                                exp, hb = _hold_boxes[k2]
+                                if exp < _frame_count:
+                                    del _hold_boxes[k2]
+                                    continue
+                                # re-detected nearby this frame? then no hold copy
+                                if any(getattr(c, "cls_name", "") == k2[0]
+                                       and abs(c.cx - hb.cx) < 0.03
+                                       and abs(c.cy - hb.cy) < 0.03
+                                       for c in overlay_out):
+                                    continue
+                                out.append(hb)
+                            for yb in overlay_out:
+                                _hold_boxes[(yb.cls_name, int(yb.cx * 50), int(yb.cy * 50))] = (
+                                    _frame_count + 2, yb)
+                            _overlay.update(out)
                     _frame_count += 1
                     _errors = 0
                     elapsed = time.perf_counter() - t0
@@ -1142,6 +1194,35 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         with _yolo_latest_lock:
                             merged = list(_yolo_latest_boxes) + extra_boxes
                         _overlay.update(merged)
+
+            # 3a. Single-step approval gate — pause before each click/back/swipe,
+            # expose the pending action, block until POST /api/v1/step/go.
+            if _STEP_MODE and not dry_run and action_type in ("click", "back", "swipe"):
+                _cur = pipe.current_skill
+                _aname = getattr(_cur, "name", "") if _cur else ""
+                _asub = getattr(_cur, "sub_state", "") if _cur else ""
+                if _cur is not None and hasattr(_cur, "_plan") and hasattr(_cur, "_cur_idx"):
+                    try:
+                        _ss = _cur._plan[_cur._cur_idx][0]
+                        _aname = getattr(_ss, "name", _aname)
+                        _asub = getattr(_ss, "sub_state", "")
+                    except Exception:
+                        pass
+                globals()["_STEP_PENDING"] = {
+                    "action": action_type, "reason": reason,
+                    "skill": _aname, "sub_state": _asub,
+                    "target": action.get("target") or action.get("from"),
+                    "tick": pipe._total_ticks,
+                }
+                _PIPELINE_STATUS["step_pending"] = _STEP_PENDING
+                _log_pipeline(f"STEP PAUSE [{_aname}/{_asub}] {action_type} @ {action.get('target') or action.get('from')} — {reason}")
+                _STEP_GO.clear()
+                if not _STEP_GO.wait(timeout=900):
+                    continue  # approval timeout: stay paused, re-pend next loop
+                if not _PIPELINE_RUNNING:
+                    break  # stopped while paused → exit without executing
+                globals()["_STEP_PENDING"] = None
+                _PIPELINE_STATUS["step_pending"] = None
 
             # 3. Execute action (unless dry_run)
             if not dry_run and action_type != "done":
@@ -2844,6 +2925,21 @@ def capture_stop() -> Dict[str, Any]:
 @app.get("/api/v1/capture/status")
 def capture_status_api() -> Dict[str, Any]:
     return {"status": _CAPTURE_STATUS}
+
+
+# ── Single-step approval ───────────────────────────────────────────────
+@app.get("/api/v1/step/pending")
+def step_pending_api() -> Dict[str, Any]:
+    """Current pending action awaiting approval (None if not paused)."""
+    return {"step_mode": _STEP_MODE, "pending": _STEP_PENDING}
+
+
+@app.post("/api/v1/step/go")
+def step_go_api() -> Dict[str, Any]:
+    """Approve the pending action → pipeline executes it and advances."""
+    approved = _STEP_PENDING
+    _STEP_GO.set()
+    return {"ok": True, "approved": approved}
 
 
 # ── Synth Template Editor ────────────────────────────────────────────

@@ -378,7 +378,10 @@ class ScheduleSkill(BaseSkill):
                 return r, f"case-B target '{name}'"
 
         # Fallback: full circle done + tickets remain → spend on any room.
-        if self._full_circle and (self._tickets is None or self._tickets > 0):
+        # Deep-dive C3 (2026-06-09): require a POSITIVE read — the old
+        # `is None or > 0` treated "unknown" as "has budget" (and -1 slipped
+        # past both '==0' gates). Unknown tickets ⇒ no fallback spending.
+        if self._full_circle and (self._tickets is not None and self._tickets > 0):
             candidates.sort(key=lambda r: (round(self._room_center(r)[1], 2),
                                            self._room_center(r)[0]))
             return candidates[0], "fallback spend-leftover"
@@ -442,11 +445,16 @@ class ScheduleSkill(BaseSkill):
             # day caps at _MAX_TICKETS; exceeding it means tickets ran out and the
             # game is charging 青辉石 to continue — STOP (backstop if defense ②
             # somehow misses the buy dialog).
-            self._dispatch_count += 1
-            if self._dispatch_count > _MAX_TICKETS:
-                self.log(f"⛔ 已排课{self._dispatch_count}次 > 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票")
+            # Cap check BEFORE increment and WITHOUT clicking (deep-dive C1,
+            # 2026-06-09): the old `+=1 then > cap` let the 8th dispatch through
+            # (7>7 False), and the cap-hit path还 action_click_box(confirm) —
+            # 第8次那个"确认"可能正是买票框的确认键 = 亲手买票. Cap hit ⇒ wait
+            # out, click NOTHING.
+            if self._dispatch_count >= _MAX_TICKETS:
+                self.log(f"⛔ 已排课{self._dispatch_count}次 >= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
                 self._goto("exit")
-                return action_click_box(report_confirm, "confirm last report → EXIT (ticket cap)")
+                return action_wait(300, "at ticket cap → EXIT, do NOT confirm")
+            self._dispatch_count += 1
             self.log(f"schedule report → confirm (#{self._dispatch_count}, YOLO 确认键)")
             self._ticket_read_pending = True  # re-read count back on the popout
             self._goto("roster")

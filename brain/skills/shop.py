@@ -254,6 +254,13 @@ class ShopSkill(BaseSkill):
         return action_wait(400, "waiting for 全部选择 cls")
 
     def _buy(self, screen: ScreenState) -> Dict[str, Any]:
+        # ⛔ Pyroxene-tab guard (deep-dive C8, 2026-06-09): the tab was only
+        # checked in _enter/_select — if the view drifted onto the 青辉石 tab
+        # by the time we're buying, a confirm here would spend pyroxene.
+        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
+            self.log("⛔ pyroxene tab selected at buy stage — abort shop")
+            self._goto("exit")
+            return action_wait(300, "pyroxene tab at buy → exit")
         # Confirm dialog already up → budget decision.
         if self._confirm_dialog(screen) is not None:
             self._goto("confirm")

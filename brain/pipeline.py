@@ -320,7 +320,13 @@ def _get_yolo():
         if _YOLO_BATTLE_HEADS.is_file():
             candidates.append((_YOLO_BATTLE_HEADS, 0.45, "battle"))
         if _YOLO_EMOTICON.is_file():
-            candidates.append((_YOLO_EMOTICON, 0.15, "cafe"))
+            # 0.50 (was 0.15→0.30 same day): live 2026-06-09 credit-card icons
+            # kept firing as Emoticon_Action (0.36-0.75) even after the domain-
+            # authority dedup (when ui misses the icon there's nothing to win
+            # against it). Business gate is 0.55 (cafe.py _EMOTICON_CONF) and
+            # real v26n bubbles score 0.9+, so 0.50 costs nothing and kills the
+            # remaining mid-conf FPs. Root fix = retrain v26n with icon negatives.
+            candidates.append((_YOLO_EMOTICON, 0.50, "cafe"))
         # Fused avatar (251 BA student heads).  conf 0.35 = balanced
         # precision/recall on manual val.  Tagged "avatar" — opt-in per skill.
         if _YOLO_FUSED_AVATAR_V4.is_file():
@@ -608,6 +614,15 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                         continue
                     cls_name = yolo.names.get(cls_id, str(cls_id))
                     cls_low = str(cls_name).lower()
+                    # ui v7 carries a folded Emoticon_Action (cls451, ~0.71
+                    # quality). The standalone v26n (tag "cafe", 0.995) is the
+                    # emoticon AUTHORITY — drop the ui copy whenever v26n is in
+                    # this context, else the two models double-box every bubble
+                    # (offset boxes, IoU<0.6 → dedup can't catch) = ghosting +
+                    # "emoticon 和 ui 抢信用点" (live 2026-06-09).
+                    if (model_tag == "ui" and "emoticon" in cls_low
+                            and (wanted_tags is None or "cafe" in wanted_tags)):
+                        continue
                     nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h
                     # Filter headpat/emoticon: only accept in cafe play area
                     if "headpat" in cls_low or "emoticon" in cls_low:
@@ -632,6 +647,58 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
         except Exception as e:
             print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
             import traceback; traceback.print_exc()
+    # ── Cross-class / cross-model region dedup (user rule 2026-06-09:
+    # "一个框的区域不能重复然后检测出另外的东西"). One screen region = ONE
+    # detection: when boxes from different classes/models overlap heavily
+    # (IoU>0.6), keep only the highest-confidence one. Kills e.g. the
+    # earnings-popup 信用点 icon (ui 0.9+) ALSO firing as Emoticon_Action
+    # (cafe model 0.38-0.58) = ghosted double box. Small-on-big overlaps
+    # (红点 on an entry icon) have tiny IoU and are never deduped.
+    if len(yolo_boxes) > 1:
+        # Pre-pass — DOMAIN AUTHORITY, not confidence: the emoticon model's
+        # (tag "cafe") only legit target is a headpat bubble, which never
+        # overlaps a UI element. Any emoticon box overlapping (IoU>0.3) a box
+        # from another model is an FP on that element → drop it EVEN IF its
+        # conf is higher (live 2026-06-09: emoticon 0.75 on the 2號店 credit
+        # icon outranked ui and "won" the conf-desc dedup — wrong winner).
+        _others = [b for b in yolo_boxes if b.model_tag != "cafe"]
+        if _others:
+            def _emo_on_ui(e: YoloBox) -> bool:
+                ea = max((e.x2 - e.x1) * (e.y2 - e.y1), 1e-9)
+                for o in _others:
+                    ix1, iy1 = max(e.x1, o.x1), max(e.y1, o.y1)
+                    ix2, iy2 = min(e.x2, o.x2), min(e.y2, o.y2)
+                    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                    oa = max((o.x2 - o.x1) * (o.y2 - o.y1), 1e-9)
+                    if inter / (ea + oa - inter) > 0.3:
+                        return True
+                return False
+            yolo_boxes = [b for b in yolo_boxes
+                          if b.model_tag != "cafe" or not _emo_on_ui(b)]
+        kept: List[YoloBox] = []
+        for b in sorted(yolo_boxes, key=lambda x: -x.confidence):
+            bw, bh = b.x2 - b.x1, b.y2 - b.y1
+            area_b = max(bw * bh, 1e-9)
+            dup = False
+            for k in kept:
+                ix1, iy1 = max(b.x1, k.x1), max(b.y1, k.y1)
+                ix2, iy2 = min(b.x2, k.x2), min(b.y2, k.y2)
+                iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+                inter = iw * ih
+                area_k = max((k.x2 - k.x1) * (k.y2 - k.y1), 1e-9)
+                iou = inter / (area_b + area_k - inter)
+                # emoticon (tag "cafe") vs a higher-conf box from another
+                # model: suppress at the LOOSER 0.3 — its FPs sit ON ui icons
+                # (信用点 card 0.9 ui vs 0.38-0.58 emoticon) but with offset
+                # boxes that rarely clear 0.6. Real bubbles overlap nothing.
+                thr = 0.3 if ("cafe" in (b.model_tag, k.model_tag)
+                              and b.model_tag != k.model_tag) else 0.6
+                if iou > thr:
+                    dup = True
+                    break
+            if not dup:
+                kept.append(b)
+        yolo_boxes = kept
     return yolo_boxes
 
 
@@ -1755,6 +1822,32 @@ class DailyPipeline:
             )
         except Exception:
             pass  # mining is best-effort, never break the tick loop
+
+        # 专注模型 loadout per sub-state (user 2026-06-09: "emoticon 只在要开始
+        # 摸头的时候才识别, 摸完/换楼就关"): refine the skill-level
+        # SKILL_YOLO_MAP context by the ACTIVE sub-skill + sub_state each tick.
+        # Only Cafe has state-dependent needs today; everything else keeps the
+        # skill-level loadout set at skill start.
+        try:
+            _cur = self.current_skill
+            _sname = getattr(_cur, "name", "")
+            _sstate = getattr(_cur, "sub_state", "")
+            if _cur is not None and hasattr(_cur, "_plan") and hasattr(_cur, "_cur_idx"):
+                try:
+                    _sub = _cur._plan[_cur._cur_idx][0]
+                    _sname = getattr(_sub, "name", _sname)
+                    _sstate = getattr(_sub, "sub_state", "")
+                except Exception:
+                    pass
+            if _sname == "Cafe":
+                if _sstate in ("headpat", "headpat2"):
+                    set_yolo_context("ui+cafe")    # emoticon ON only while patting
+                elif _sstate == "invite":
+                    set_yolo_context("ui+avatar")  # row avatars; no emoticon
+                else:
+                    set_yolo_context("ui")         # enter/earnings/switch/exit
+        except Exception:
+            pass
 
         # Early bail-out: BA / MuMu not actually visible.  Wide set of
         # markers so legitimate BA states (title screen, loading, login,
