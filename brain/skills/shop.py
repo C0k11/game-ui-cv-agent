@@ -295,6 +295,16 @@ class ShopSkill(BaseSkill):
         return action_wait(400, "waiting for 选择购买 cls")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
+        # ⛔ Pyroxene-tab guard (deep-dive r2 C4): _affordable() only checks the
+        # CREDIT balance — on the 青辉石 tab it would happily "afford" a
+        # pyroxene purchase. Never confirm while that tab is selected.
+        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
+            self.log("⛔ pyroxene tab at confirm — cancelling, never buy")
+            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+            self._goto("exit")
+            if cancel is not None:
+                return action_click_box(cancel, "cancel (pyroxene tab)")
+            return action_back("cancel (pyroxene tab, ESC)")
         confirm = self._confirm_dialog(screen)
         if confirm is None:
             # Dialog gone — purchased (reward) or dismissed → exit.

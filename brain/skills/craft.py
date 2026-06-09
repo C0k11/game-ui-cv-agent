@@ -68,6 +68,7 @@ class CraftSkill(BaseSkill):
         self._maxed_clicks: int = 0
         self._quick_settle: int = 0
         self._started: bool = False
+        self._start_clicked: bool = False  # we pressed 开始制造 → confirm is ours
         self._claims: int = 0
 
     def reset(self) -> None:
@@ -228,13 +229,22 @@ class CraftSkill(BaseSkill):
                 return action_wait(300, "start lost craft → exit")
             return action_wait(400, "waiting for craft UI (start)")
 
-        # craft-start confirm (確定製造N次) — reached via 开始制造 → safe credits.
+        # craft-start confirm (確定製造N次) — ONLY trust it after WE clicked
+        # 开始制造 (deep-dive r2 C5): an unconditional confirm here would also
+        # confirm a leaked 立即完成 dialog = spends 製造券. Unexpected dialog
+        # in start state ⇒ cancel, never confirm.
         dlg = self._confirm_dialog(screen)
         if dlg is not None:
-            self.log("confirming craft start (確定製造N次, 耗信用点 — safe)")
-            self._started = True
-            self._goto("exit")
-            return action_click_box(dlg, "confirm craft start (credits)")
+            if self._start_clicked:
+                self.log("confirming craft start (確定製造N次, 耗信用点 — safe)")
+                self._started = True
+                self._goto("exit")
+                return action_click_box(dlg, "confirm craft start (credits)")
+            self.log("⛔ unexpected confirm dialog in start state (开始制造 not clicked) → cancel (券-safe)")
+            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
+            if cancel is not None:
+                return action_click_box(cancel, "cancel unexpected dialog (券-safe)")
+            return action_back("dismiss unexpected dialog (券-safe)")
 
         # In the 快速制造 dialog? MAX_可点击 / 开始制造 present.
         # max_btn 找 可点击 或 灰色(已到顶) — 后者也是"在 dialog 里"的锚点。
@@ -247,6 +257,7 @@ class CraftSkill(BaseSkill):
         start_btn = self.find_cls(screen, UC.CRAFT_START, conf=_CLS_CONF)
         if start_btn is not None:
             self.log("clicking 开始制造")
+            self._start_clicked = True
             return action_click_box(start_btn, "start craft (开始制造)")
         # 兜底: 开始制造(idx444) 是 v6b 漏检的 missing cls (probe 旧模型 0.93,
         # v6b 退步漏检 → craft 卡死, live 2026-06-06)。已点过 MAX (= 在 dialog 里)
@@ -258,6 +269,7 @@ class CraftSkill(BaseSkill):
             sx = max(0.0, max_btn.cx - 0.056)
             sy = min(1.0, max_btn.cy + 0.10)
             self.log(f"开始制造漏检 → MAX 外推点击 ({sx:.3f},{sy:.3f})")
+            self._start_clicked = True
             return action_click(sx, sy, "start craft (MAX 外推开始制造)")
 
         # Not in dialog → open it via 快速制造.

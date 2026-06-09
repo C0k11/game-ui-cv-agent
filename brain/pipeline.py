@@ -514,7 +514,11 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
             return None
         # concat all recognized text on the strip, keep only digits + / and ,
         raw = "".join(line[1] for line in result)
-        kept = _re.sub(r"[^0-9/]", "", raw.replace(",", "").replace("，", ""))
+        # Keep the decimal point too (deep-dive r2 C1, 2026-06-09): stripping it
+        # turned "0.0%" into "00" and "58.3" into "583" — consumers that parse
+        # floats (cafe earnings % gate) need the dot. parse_count() is dot-free
+        # by domain (counts/AP/tickets never render decimals) so this is safe.
+        kept = _re.sub(r"[^0-9/.]", "", raw.replace(",", "").replace("，", ""))
         return kept or None
     except Exception as e:
         print(f"[digit-OCR] error: {e}")

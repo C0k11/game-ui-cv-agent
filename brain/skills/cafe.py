@@ -63,7 +63,10 @@ _AVATAR_CONF = 0.25         # fused_avatar row-head confidence (registry default
 _HEADPAT_DX = 0.025         # click this much right of the bubble = student body
 _HEADPAT_DEDUP_DIST = 0.06  # skip clicks within this of a recent headpat
 _HEADPAT_DEDUP_KEEP = 4     # remember the last N headpat coords for dedup
-_HEADPAT_DRY_FRAMES = 3     # consecutive empty frames ⇒ current view cleared
+_HEADPAT_DRY_FRAMES = 5     # consecutive empty frames ⇒ current view cleared
+#   3 (840ms) was too eager — emoticon bubbles render 400-600ms late after a
+#   pan/pat settle, so a slow bubble got declared "dry" and a student was
+#   missed (deep-dive r2 H3; live 2026-06-09 1F漏摸一个).
 _MAX_HEADPATS_PER_FLOOR = 12  # safety helmet (probe: ~12 students/floor)
 _MAX_PANS_PER_FLOOR = 6       # safety helmet on camera sweeps
 _INVITES_PER_FLOOR = 1        # invite 1 student per floor (2 total per cafe)
@@ -194,6 +197,7 @@ class CafeSkill(BaseSkill):
         self._on_2f: bool = False
         # one-shot badge-verified re-entry (exit sees lobby dot → missed work)
         self._verify_reentered: bool = False
+        self._exit_lobby_ticks: int = 0   # dwell counter for the badge check
 
     def reset(self) -> None:
         super().reset()
@@ -232,10 +236,13 @@ class CafeSkill(BaseSkill):
         before (safe fallback, identical to pre-gate behaviour)."""
         try:
             from brain.pipeline import run_digit_ocr
-            x1 = max(0.0, earn_box.x1 - 0.005)
-            y1 = max(0.0, earn_box.y1 - 0.005)
-            x2 = min(1.0, earn_box.x2 + 0.005)
-            y2 = min(1.0, earn_box.y2 + 0.005)
+            # The 咖啡厅收益 cls box covers ONLY the title text (h≈0.025);
+            # the X.X% value renders BELOW it (offline-verified 2026-06-09:
+            # in-box crops → None, below-box crop → '0' on a 0.0% frame).
+            x1 = max(0.0, earn_box.x1 - 0.01)
+            y1 = earn_box.y2
+            x2 = min(1.0, earn_box.x2 + 0.01)
+            y2 = min(1.0, earn_box.y2 + 0.05)
             raw = run_digit_ocr(screen.frame, (x1, y1, x2, y2)) or ""
             m = re.search(r"(\d+(?:\.\d+)?)", str(raw))
             if not m:
@@ -875,21 +882,24 @@ class CafeSkill(BaseSkill):
 
         floor_tag = "2F" if is_2f else "1F"
         if self._pan_dir == 0:
-            # sweep LEFT (0.75→0.25) to reveal the right-side overflow
+            # sweep LEFT full-span (0.80→0.10) to reveal the right-side overflow.
+            # Deep-dive r2 H4: the old 0.75→0.25 / 0.25→0.80 pair was asymmetric
+            # and left a mid-floor blind strip — a student standing there was
+            # never on screen during either dwell (live 2026-06-09 1F漏摸).
             self._pan_dir = 1
             self._pan_count += 1
             self._empty_frames = 0
             self._pat_settle = 2
-            self.log(f"{floor_tag} sweep LEFT (reveal right overflow)")
-            return action_swipe(0.75, 0.45, 0.25, 0.45, 600, f"pan left ({floor_tag})")
+            self.log(f"{floor_tag} sweep LEFT full-span (reveal right overflow)")
+            return action_swipe(0.80, 0.45, 0.10, 0.45, 600, f"pan left ({floor_tag})")
         if self._pan_dir == 1:
-            # sweep RIGHT twice the distance (0.25→0.80) to reveal the left
+            # sweep RIGHT full-span (0.10→0.90) to reveal the left overflow.
             self._pan_dir = 2
             self._pan_count += 1
             self._empty_frames = 0
             self._pat_settle = 2
-            self.log(f"{floor_tag} sweep RIGHT (reveal left overflow)")
-            return action_swipe(0.25, 0.45, 0.80, 0.45, 600, f"pan right ({floor_tag})")
+            self.log(f"{floor_tag} sweep RIGHT full-span (reveal left overflow)")
+            return action_swipe(0.10, 0.45, 0.90, 0.45, 600, f"pan right ({floor_tag})")
 
         # Both directions swept and dry → floor done.
         return self._finish_headpat(is_2f, "all views dry")
@@ -967,6 +977,13 @@ class CafeSkill(BaseSkill):
                     self._verify_reentered = True
                     self._goto("enter")
                     return action_wait(300, "cafe dot persists → re-enter sweep")
+                # DWELL: badges fade in AFTER the loading transition — a single
+                # clean frame proves nothing (live 2026-06-09: dot was offline-
+                # detectable at 0.58 on the very frame the one-shot check ran
+                # empty on). Require 3 consecutive dot-free lobby ticks.
+                self._exit_lobby_ticks += 1
+                if self._exit_lobby_ticks < 3:
+                    return action_wait(350, f"lobby badge dwell ({self._exit_lobby_ticks}/3)")
             self.log("back in lobby, cafe done")
             return action_done("cafe complete")
         if self._phase_ticks > _EXIT_MAX:

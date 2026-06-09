@@ -201,17 +201,21 @@ class DailyMissionSkill(BaseSkill):
         # touch 立即前往 — we only match the exact claim cls.
         single = self.find_cls(screen, UC.CLAIM_YELLOW, conf=_CLS_CONF)
         if single is not None:
+            self._dry_singles = 0
             self._single_claims += 1
             self.log(f"领取_黄 single (#{self._single_claims})")
             return action_click_box(single, "claim single daily-mission reward")
 
-        # No 黄 claim cls left → all done.
-        if self._phase_ticks > _CLAIM_SINGLE_MAX or \
-                self.find_cls(screen, UC.CLAIM_ALL_YELLOW, conf=_CLS_CONF) is None:
-            self.log(f"no 黄 claim cls → done (all={self._all_claims}, single={self._single_claims})")
+        # No 黄 this frame — require 3 CONSECUTIVE dry frames before done
+        # (deep-dive r2 C6): the old "claim_all gone ⇒ done" shortcut exited on
+        # a single flicker frame and left remaining 单项黄 unclaimed.
+        self._dry_singles = getattr(self, "_dry_singles", 0) + 1
+        if self._phase_ticks > _CLAIM_SINGLE_MAX or self._dry_singles >= 3:
+            self.log(f"no 黄 claim cls ({self._dry_singles} dry frames) → done "
+                     f"(all={self._all_claims}, single={self._single_claims})")
             self._goto("exit")
             return action_wait(250, "no more claims → exit")
-        return action_wait(400, "waiting (claim_single)")
+        return action_wait(400, f"waiting (claim_single, dry {self._dry_singles}/3)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":
