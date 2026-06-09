@@ -143,6 +143,13 @@ class ScheduleSkill(BaseSkill):
     _LOBBY_DOT_ENTRIES = [UC.NAV_SCHEDULE, UC.SCHED_TICKET]
 
     def should_run(self, screen: ScreenState) -> bool:
+        # Badge-gating is a LOBBY decision only: mid-flow screens (e.g. the
+        # 全體課程表 popout we may be resumed on) show 课程表票 WITHOUT a dot
+        # and would wrongly skip the whole skill (live 2026-06-09: resumed on
+        # the popout → "skip Schedule (no dot)" with 3 tickets left). Off-lobby
+        # ⇒ run; enter/recover handles navigation from wherever we are.
+        if not screen.is_lobby():
+            return True
         return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
 
     def __init__(self):
