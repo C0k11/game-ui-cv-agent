@@ -65,6 +65,10 @@ _AVATAR_CONF = 0.30         # fused_avatar head confidence (probe used 0.30)
 _MAX_TICKETS = 7            # 持有票券 X/7 — total ticket capacity
 _ROOM_X_GAP = 0.085         # heads within this x-gap belong to the same room
 _ROOM_MAX_HEADS = 3         # a room holds at most 3 students
+# Dispatched rooms render DIMMED (live calib 2026-06-09: dispatched rooms mean
+# head brightness 101-110 vs fresh 174-210 — clean bimodal split). Below this
+# ⇒ already dispatched, never re-click. Model-free, works across sessions.
+_DIM_DISPATCHED_MAX = 140.0
 
 # Dispatch popups (info / report) live in a center-bottom band. Both
 # SCHED_START and the report's BTN_CONFIRM sit at cx≈0.499, cy≈0.76-0.77.
@@ -199,6 +203,8 @@ class ScheduleSkill(BaseSkill):
         self._region_locked = None
         self._clicked_heads = []
         self._green_marks = []   # accumulated 绿勾 sightings (positions repeat across regions)
+        self._lock_seen = False
+        self._lock_scan_frames = 0
         self._ticket_read_pending = False
         self._barren_scans = 0          # consecutive no-room scans this region
         self._head_settle = _HEAD_RENDER_SETTLE  # let heads render before 1st pick
@@ -380,6 +386,23 @@ class ScheduleSkill(BaseSkill):
             if not any(abs(b.cx - mx) < 0.03 and abs(b.cy - my) < 0.03 for mx, my in marks):
                 marks.append((b.cx, b.cy))
 
+    def _room_brightness(self, screen: ScreenState, room: List[YoloBox]) -> Optional[float]:
+        """Mean pixel brightness over this room's head crops (dim ⇒ dispatched)."""
+        try:
+            if screen.frame is None:
+                return None
+            h, w = screen.frame.shape[:2]
+            vs = []
+            for hd in room:
+                x1, y1 = max(0, int(hd.x1 * w)), max(0, int(hd.y1 * h))
+                x2, y2 = int(hd.x2 * w), int(hd.y2 * h)
+                crop = screen.frame[y1:y2, x1:x2]
+                if crop.size:
+                    vs.append(float(crop.mean()))
+            return (sum(vs) / len(vs)) if vs else None
+        except Exception:
+            return None
+
     def _room_dispatched_visual(self, screen: ScreenState, room: List[YoloBox]) -> bool:
         """User mechanic (2026-06-09): after a room is dispatched, OWNED heads
         get a 绿勾 overlay and un-owned heads dim out. Any ACCUMULATED green
@@ -443,6 +466,11 @@ class ScheduleSkill(BaseSkill):
             if self._room_dispatched_visual(screen, r):
                 cx, cy = self._room_center(r)
                 self.log(f"room@({cx:.2f},{cy:.2f}) 绿勾 → already dispatched, skip")
+                continue
+            br = self._room_brightness(screen, r)
+            if br is not None and br < _DIM_DISPATCHED_MAX:
+                cx, cy = self._room_center(r)
+                self.log(f"room@({cx:.2f},{cy:.2f}) dim {br:.0f}<{_DIM_DISPATCHED_MAX:.0f} → dispatched, skip")
                 continue
             candidates.append(r)
         if not candidates:
@@ -702,15 +730,25 @@ class ScheduleSkill(BaseSkill):
                 return action_wait(300, "popout gone, switching region")
             return action_wait(400, "waiting for popout to render")
 
-        # First tick on a fresh popout: count this region + read tickets.
+        # First ticks on a fresh popout: count this region + read tickets.
+        # Lock judgment is MULTI-FRAME (live 2026-06-09: ROOM_LOCKED flickered
+        # out on the single judgment frame → a LOCKED region was judged case B
+        # and only target rooms got dispatched). One sighting ⇒ locked; only
+        # 3 consecutive lock-free frames ⇒ case B.
         if self._region_locked is None:
+            locked_now = self.find_cls(screen, UC.ROOM_LOCKED, conf=_CLS_CONF) is not None
+            self._lock_seen = getattr(self, "_lock_seen", False) or locked_now
+            self._lock_scan_frames = getattr(self, "_lock_scan_frames", 0) + 1
+            if not self._lock_seen and self._lock_scan_frames < 3:
+                return action_wait(300, f"lock scan ({self._lock_scan_frames}/3)")
             self._regions_seen += 1
             self._tickets = -1  # force a fresh read on this popout
             self._read_tickets(screen)
-            locked = self.find_cls(screen, UC.ROOM_LOCKED, conf=_CLS_CONF) is not None
-            self._region_locked = locked
+            self._region_locked = self._lock_seen
+            self._lock_seen = False
+            self._lock_scan_frames = 0
             self.log(f"region #{self._regions_seen}: "
-                     f"{'LOCKED (case A — level it)' if locked else 'no locks (case B — targets only)'}"
+                     f"{'LOCKED (case A — level it)' if self._region_locked else 'no locks (case B — targets only)'}"
                      f", tickets={self._tickets}")
             return action_wait(300, "scanned popout")
 
