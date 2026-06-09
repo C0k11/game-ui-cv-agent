@@ -273,11 +273,24 @@ class ScheduleSkill(BaseSkill):
         internal screen's SCHED_ALL is a bottom-right BUTTON, not a popout, so
         the close-X is the disambiguator that never appears on the plain
         region screen."""
-        return self._popout_close(screen) is not None and (
+        if self._popout_close(screen) is not None and (
             len(self._roster_heads(screen)) > 0
             or self.find_cls(screen, UC.SCHED_ALL, conf=_CLS_CONF,
                              region=(0.10, 0.0, 0.90, 0.25)) is not None
-        )
+        ):
+            return True
+        # The close-X flickers (live 2026-06-09: popout clearly open, X cls
+        # missed one frame → "popout closed" re-click loop). Backup signatures
+        # that exist ONLY on the popout:
+        #   • a ROOM_LOCKED tile (locked rooms render only inside the popout)
+        #   • 课程表票 in the TOP-CENTER header band — the region screen's
+        #     ticket counter sits top-LEFT (cx≈0.06), the popout's at cx≈0.5.
+        if self.find_cls(screen, UC.ROOM_LOCKED, conf=_CLS_CONF) is not None:
+            return True
+        if self.find_cls(screen, UC.SCHED_TICKET, conf=_CLS_CONF,
+                         region=(0.30, 0.04, 0.70, 0.16)) is not None:
+            return True
+        return False
 
     def _popout_close(self, screen: ScreenState) -> Optional[YoloBox]:
         """The 弹窗叉叉 at the popout's top-right (@~0.888,0.138)."""
