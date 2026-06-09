@@ -75,8 +75,12 @@ _INVITE_SWIPE_SETTLE = 3      # ticks to wait after a list swipe (anim settle)
 _ROW_PAIR_DY = 0.06           # avatar.cy ↔ invite-button.cy max gap = same row
 
 # Top-left false-positive zone: 指定訪問/隨機訪問 buttons get mis-detected as
-# Emoticon_Action (fixed assault per probe). Anything here is NOT a student.
-_FP_ZONE = (0.27, 0.34)       # cx < 0.27 AND cy < 0.34 ⇒ reject
+# Emoticon_Action. The buttons hug the LEFT EDGE (cx≈0.04-0.08, cy≈0.25-0.40) —
+# the old (0.27, 0.34) zone was 3× too wide and KILLED a real student bubble
+# at upper-left (live 2026-06-09: Emoticon_Action 0.97 on a student, rejected,
+# never patted — user caught it on screen). Domain-authority dedup in
+# _run_yolo_on_image is the main FP layer now; this zone is just a backstop.
+_FP_ZONE = (0.10, 0.45)       # cx < 0.10 AND cy < 0.45 ⇒ reject
 
 # Per-sub-state tick budgets — every phase is bounded, never dead-waits.
 _ENTER_MAX = 25
@@ -198,6 +202,8 @@ class CafeSkill(BaseSkill):
         # one-shot badge-verified re-entry (exit sees lobby dot → missed work)
         self._verify_reentered: bool = False
         self._exit_lobby_ticks: int = 0   # dwell counter for the badge check
+        self._floor_back_done: bool = False  # one-shot 2F→1F dot-driven re-sweep
+        self._pct_retries: int = 0           # earnings % OCR retry counter
 
     def reset(self) -> None:
         super().reset()
@@ -483,7 +489,16 @@ class CafeSkill(BaseSkill):
         earn = self.find_cls(screen, UC.CAFE_EARNINGS, conf=_CLS_CONF)
         if earn is not None:
             pct = self._read_earnings_pct(screen, earn)
-            if pct is not None and pct <= 0.0:
+            if pct is None:
+                # Unreadable THIS frame ≠ "open the popup" — retry a few frames
+                # first (live 2026-06-09 round-2: a single None re-opened the
+                # popup on a 0.0% cafe). Only after retries fail do we fall
+                # open (free-harvest skill must never silently skip real money).
+                self._pct_retries = getattr(self, "_pct_retries", 0) + 1
+                if self._pct_retries <= 3:
+                    return action_wait(300, f"earnings % unreadable, retry ({self._pct_retries}/3)")
+                self.log("earnings % unreadable ×3 → opening popup to check (fail-open)")
+            elif pct <= 0.0:
                 self.log("咖啡厅收益 0.0% (digit-OCR) → nothing to claim, skip popup")
                 self._earnings_done = True
                 self._begin_invite(floor_2=False)
@@ -878,7 +893,7 @@ class CafeSkill(BaseSkill):
 
         # Current view is dry → pan to the next region.
         if self._pan_count >= _MAX_PANS_PER_FLOOR:
-            return self._finish_headpat(is_2f, "pan helmet")
+            return self._finish_headpat(screen, is_2f, "pan helmet")
 
         floor_tag = "2F" if is_2f else "1F"
         if self._pan_dir == 0:
@@ -902,13 +917,33 @@ class CafeSkill(BaseSkill):
             return action_swipe(0.10, 0.45, 0.90, 0.45, 600, f"pan right ({floor_tag})")
 
         # Both directions swept and dry → floor done.
-        return self._finish_headpat(is_2f, "all views dry")
+        return self._finish_headpat(screen, is_2f, "all views dry")
 
-    def _finish_headpat(self, is_2f: bool, reason: str) -> Dict[str, Any]:
+    def _finish_headpat(self, screen: ScreenState, is_2f: bool, reason: str) -> Dict[str, Any]:
         if is_2f:
+            # IN-CAFE SIGNAL (user 2026-06-09: "店内黄点没消化"): the floor-
+            # switch button carries a 黄点 when the OTHER floor still has work
+            # (screenshot: 移動至1號店 with a yellow dot top-right). Consume it:
+            # switch back ONCE and re-sweep 1F instead of blindly exiting.
+            if not getattr(self, "_floor_back_done", False):
+                mv1 = self.find_cls(screen, UC.CAFE_MOVE_1F, conf=_CLS_CONF,
+                                    region=(0.0, 0.03, 0.30, 0.22))
+                if mv1 is not None and self.dot_in_region(
+                        screen, (mv1.x1 - 0.01, mv1.y1 - 0.05, mv1.x2 + 0.04, mv1.y2 + 0.01)):
+                    self._floor_back_done = True
+                    self._on_2f = False
+                    self._reset_headpat_for_floor()
+                    self._goto("headpat")
+                    self.log("⚠ 移動至1號店 黄点在 → 1F 还有活, 切回 1F 重扫")
+                    return action_click_box(mv1, "1F dot on switch btn → back to 1F")
             self.log(f"2F headpat done ({reason}, {self._pat_count} pats) → exit")
             self._goto("exit")
             return action_wait(300, "2F headpat done → exit")
+        if getattr(self, "_floor_back_done", False):
+            # This 1F pass WAS the dot-triggered re-sweep → done, don't loop 2F.
+            self.log(f"1F re-sweep done ({reason}, {self._pat_count} pats) → exit")
+            self._goto("exit")
+            return action_wait(300, "1F re-sweep done → exit")
         self.log(f"1F headpat done ({reason}, {self._pat_count} pats) → switch")
         self._goto("switch")
         return action_wait(300, "1F headpat done → switch")
