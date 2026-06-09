@@ -154,3 +154,6 @@ scripts/viz_*.py
 scripts/make_battle_*.py
 scripts/prepare_battle_*.py
 scripts/dedup_*.py
+
+# probe/scratch temp files at repo root (_sug.json, _peek.jpg, _COWORK_*.md ...)
+/_*
