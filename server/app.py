@@ -677,6 +677,7 @@ def _start_pipeline(*, payload: Dict[str, Any]) -> None:
             "event_max_rounds",
             "event_ap_reserve",
             "exploration_click",
+            "sub_only",
         ]:
             if payload.get(key) is not None:
                 profile_options[key] = payload.get(key)
@@ -745,6 +746,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         import numpy as np
 
         _enable_high_resolution_timer()
+        # Predefine so the `finally` cleanup never hits UnboundLocalError when we
+        # early-return before the high-FPS thread is created (e.g. window not
+        # found) — otherwise the real "Window not found" error gets masked.
+        _yolo_hfps = None
 
         hwnd = find_window_by_title_substring(window_title)
         if not hwnd:
@@ -771,9 +776,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _overlay = None
         try:
             from scripts.yolo_overlay import YoloOverlay
-            _overlay = YoloOverlay(render_hwnd)
+            # Daily pipeline = STATIC UI → track=False: overlay draws raw
+            # current-frame boxes only, NO BoxTracker velocity-coast / lead-aim
+            # (which flung boxes around on static screens = "框到处飞/锁不住/瞎预测").
+            # Battle overlay (moving heads) keeps the default track=True.
+            _overlay = YoloOverlay(render_hwnd, track=False)
             _overlay.start()
-            _log_pipeline(f"YOLO overlay started on render_hwnd={render_hwnd}")
+            _log_pipeline(f"YOLO overlay started (static, track=False) on render_hwnd={render_hwnd}")
         except Exception as e:
             _log_pipeline(f"YOLO overlay unavailable: {e}")
 
@@ -970,8 +979,27 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         pipe_ref = None
                         with _PIPELINE_LOCK:
                             pipe_ref = _PIPELINE
-                        skill_name = pipe_ref.current_skill.name if pipe_ref and pipe_ref.current_skill else ""
-                        in_cafe = skill_name == "Cafe"
+                        # current_skill is the meta DailyRoutine — dig into its
+                        # active sub-skill for the REAL name + sub_state (the old
+                        # `skill_name=="Cafe"` was always False since the meta is
+                        # named "DailyRoutine").
+                        active_name, active_sub = "", ""
+                        cur = pipe_ref.current_skill if pipe_ref and pipe_ref.current_skill else None
+                        if cur is not None:
+                            active_name = getattr(cur, "name", "")
+                            active_sub = getattr(cur, "sub_state", "")
+                            if hasattr(cur, "_plan") and hasattr(cur, "_cur_idx"):
+                                try:
+                                    sub_sk = cur._plan[cur._cur_idx][0]
+                                    active_name = getattr(sub_sk, "name", active_name)
+                                    active_sub = getattr(sub_sk, "sub_state", "")
+                                except Exception:
+                                    pass
+                        in_cafe = active_name == "Cafe"
+                        # Moving targets ⇒ tracker ON only for cafe 摸头 (students
+                        # walk). Everything else = static UI → raw boxes, no coast,
+                        # no leftover box when the page switches.
+                        _overlay.set_track(in_cafe and active_sub == "headpat")
                         overlay_out = []
                         for yb in yolo_boxes:
                             if hasattr(yb, "cls_name") and "headpat" in yb.cls_name.lower() and not in_cafe:
@@ -1139,7 +1167,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
     finally:
         # Stop high-FPS YOLO thread
         _yolo_thread_running = False
-        if _yolo_hfps.is_alive():
+        if _yolo_hfps is not None and _yolo_hfps.is_alive():
             _yolo_hfps.join(timeout=3)
         summary = ""
         progress = None

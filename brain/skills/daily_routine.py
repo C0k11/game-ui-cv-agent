@@ -35,7 +35,7 @@ class DailyRoutineSkill(BaseSkill):
     # override (set in commit 9eb9aa0).
     SUB_PLAN: List[Tuple[Type[BaseSkill], bool]] = []  # populated lazily below
 
-    def __init__(self):
+    def __init__(self, sub_only=None):
         super().__init__("DailyRoutine")
         # Larger than any single sub-skill's max_ticks (cafe alone = 160,
         # event_activity = 800, plus all the others). Total budget cap so
@@ -57,22 +57,36 @@ class DailyRoutineSkill(BaseSkill):
 
         # Order matters — runs top to bottom (user-defined daily order, probe).
         # `force_run` = True means skip the dot check entirely (always enter).
-        self._plan: List[Tuple[BaseSkill, bool]] = [
-            # (skill_instance, force_run)
-            (BuyPyroxeneSkill(), False),     # 购买青辉石 免费组合包 — 红点才进 (第1)
-            (ClubSkill(), False),            # 社交 — 红点才进 (10AP→信箱)
-            (CraftSkill(), True),            # 制造 — ALWAYS enter (user spec)
-            (ShopSkill(), False),            # 普通商店日购(动态预算)
-            (CafeSkill(), False),            # cafe — 收益/邀请/摸头 dot
-            (ScheduleSkill(), False),        # 课程表 — 黄点才进
-            (MomoTalkSkill(), False),        # MomoTalk 挖矿 — 红/黄点
-            (StoryMiningSkill(), False),     # 剧情挖矿(主线/短篇/支线)
+        # Full plan with stable snake-case sub-ids.  `sub_only` (a list of
+        # sub-ids) restricts the run to JUST those subs — used for SAFE
+        # single-sub live walk-throughs: e.g. schedule (青辉石买票) never even
+        # enters the plan unless its id is explicitly whitelisted.  This is a
+        # money-safety isolation layer on top of schedule's own 3 guards.
+        _full: List[Tuple[str, BaseSkill, bool]] = [
+            # (sub_id, skill_instance, force_run)
+            ("buy_pyroxene",  BuyPyroxeneSkill(), False),  # 免费组合包 — 红点才进
+            ("club",          ClubSkill(), False),         # 社交 — 红点才进 (10AP→信箱)
+            ("craft",         CraftSkill(), True),         # 制造 — ALWAYS enter (user spec)
+            ("shop",          ShopSkill(), False),         # 普通商店日购(动态预算)
+            ("cafe",          CafeSkill(), False),         # cafe — 收益/邀请/摸头 dot
+            ("schedule",      ScheduleSkill(), False),     # 课程表 — 黄点才进 (⚠️青辉石买票)
+            ("momo_talk",     MomoTalkSkill(), False),     # MomoTalk 挖矿 — 红/黄点
+            ("story_mining",  StoryMiningSkill(), False),  # 剧情挖矿(主线/短篇/支线)
             # mail 是收口：bounty/jfd/arena/club 奖励都汇入信箱 → 放挖矿后、
             # daily_mission前,确保本轮所有奖励都领到(probe: mail最后跑)。
-            (MailSkill(), False),            # 邮件收口 — 红点才进
+            ("mail",          MailSkill(), False),         # 邮件收口 — 红点才进
             # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。
-            (DailyMissionSkill(), False),    # 每日任务领奖(收口,最后)
+            ("daily_mission", DailyMissionSkill(), False), # 每日任务领奖(收口,最后)
         ]
+        if sub_only:
+            allow = {str(s).strip() for s in sub_only}
+            self._sub_only: Optional[List[str]] = sorted(allow)
+            self._plan: List[Tuple[BaseSkill, bool]] = [
+                (sk, fr) for (sid, sk, fr) in _full if sid in allow
+            ]
+        else:
+            self._sub_only = None
+            self._plan = [(sk, fr) for (_sid, sk, fr) in _full]
         self._cur_idx: int = 0
         self._cur_started: bool = False
 

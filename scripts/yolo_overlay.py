@@ -165,12 +165,20 @@ class YoloOverlay:
     """
 
     def __init__(self, target_hwnd: int, *, lead_ms: float = 0.0,
+                 track: bool = True,
                  max_age_frames: int = 30, min_cutoff: float = 1.2,
                  beta: float = 0.6):
-        # lead_ms: predictive lead-aim. Default 0 (safe for STATIC overlays —
-        # cafe/schedule, where leading would drift the box off a stationary
-        # button). Battle overlay passes lead_ms≈end-to-end latency for the
-        # aimbot-feel forward prediction on moving targets.
+        # track: enable the BoxTracker (ByteTrack assoc + One-Euro smoothing +
+        #   velocity COAST + predictive lead-aim).  Built for MOVING targets
+        #   (battle head-lock).  On STATIC UI (daily pipeline overlay) it is
+        #   HARMFUL: frame-to-frame detection flicker makes ByteTrack re-assoc /
+        #   switch IDs, and the velocity coast FLINGS a box across the screen
+        #   for max_age frames after a UI element vanishes (screen change /
+        #   popup) — exactly the "框到处飞 / 锁不住 / 瞎预测" the user reported.
+        #   ⇒ pass track=False for static UI: boxes become the raw current-frame
+        #   detections (rock-steady, no coast, no predict).  User rule (2026-06-09):
+        #   "只要是静态就不用预测了，主要是移动目标需要。"
+        # lead_ms: predictive lead-aim, only meaningful when track=True.
         self._target_hwnd = int(target_hwnd)
         self._overlay_hwnd: Optional[int] = None
         self._thread: Optional[threading.Thread] = None
@@ -181,20 +189,42 @@ class YoloOverlay:
         self._tx = self._ty = 0
         self._tw = self._th = 0
         self._tracker_update_ts = None    # perf_counter of last update (→ real dt)
-        # Industrial lock tracker: ByteTrack assoc + One-Euro smoothing +
-        # velocity coast + predictive lead-aim.  (see scripts/box_tracker.py)
-        try:
-            from scripts.box_tracker import BoxTracker
-            self._tracker = BoxTracker(
-                max_age=max_age_frames, min_hits=1, max_center_dist=1.5,
-                high_conf=0.25, lead_ms=lead_ms,
-                min_cutoff=min_cutoff, beta=beta,
-            )
-        except Exception as e:
-            print(f"[Overlay] BoxTracker init failed: {e}")
-            self._tracker = None
+        # track is RUNTIME-SWITCHABLE via set_track().  The overlay always owns
+        # a tracker but only routes boxes through it when _track_enabled is True.
+        #   - Static UI  → False: raw current-frame boxes, no coast → a box
+        #     vanishes the instant its element does ("存在时间和游戏匹配", no
+        #     leftover box when switching pages).
+        #   - cafe 摸头 → True: moving students need ByteTrack + One-Euro smooth.
+        self._track_enabled = bool(track)
+        self._tracker_kwargs = dict(
+            max_age=max_age_frames, min_hits=1, max_center_dist=1.5,
+            high_conf=0.25, lead_ms=lead_ms,
+            min_cutoff=min_cutoff, beta=beta,
+        )
+        self._tracker = self._new_tracker()
         self._cls_name = f"YoloOverlay_{id(self)}"
         self._dirty = True                # force first paint
+
+    def _new_tracker(self):
+        """Build a fresh BoxTracker (None if the module is unavailable)."""
+        try:
+            from scripts.box_tracker import BoxTracker
+            return BoxTracker(**self._tracker_kwargs)
+        except Exception as e:
+            print(f"[Overlay] BoxTracker init failed: {e}")
+            return None
+
+    def set_track(self, enabled: bool) -> None:
+        """Runtime toggle: True for moving targets (cafe 摸头), False for static
+        UI.  On every transition REBUILD a fresh tracker so stale tracks from
+        the previous moving session can't coast into the next page/sub-state
+        (= no leftover boxes after switching away).  box_tracker has no reset(),
+        so rebuild is the clean way to drop all live tracks."""
+        enabled = bool(enabled)
+        if enabled == self._track_enabled:
+            return
+        self._track_enabled = enabled
+        self._tracker = self._new_tracker()
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -238,7 +268,7 @@ class YoloOverlay:
         # last detection) so velocity / smoothing / lead-aim are frame-rate
         # independent — detection FPS varies, so a fixed-dt assumption would
         # make lead/coast wrong when the detector hitches.
-        if self._tracker is not None:
+        if self._track_enabled and self._tracker is not None:
             import time as _t
             now = _t.perf_counter()
             prev = self._tracker_update_ts

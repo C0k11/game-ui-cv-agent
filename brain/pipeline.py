@@ -882,7 +882,7 @@ class DailyPipeline:
             # (buy_pyroxene / club / craft / shop / cafe / schedule / momo_talk
             #  / story_mining / mail / daily_mission). Battle skills
             # (bounty / jfd / arena) stay as separate skill_order entries.
-            "daily_routine": DailyRoutineSkill(),
+            "daily_routine": DailyRoutineSkill(sub_only=opts.get("sub_only")),
         }
 
         names = skill_names or self.DEFAULT_SKILLS
