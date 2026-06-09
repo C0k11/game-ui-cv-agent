@@ -49,6 +49,10 @@ _EXIT_MAX = 14
 
 class ClubSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
+        # Badge-gating is a LOBBY decision only (schedule踩坑 2026-06-09: 复跑
+        # 停在中间屏时入口锚点误判 "no dot" → 整个skill被skip)。
+        if not screen.is_lobby():
+            return True
         return self.dot_on_entry(screen, [UC.NAV_SOCIAL])
 
     def __init__(self):
@@ -61,6 +65,9 @@ class ClubSkill(BaseSkill):
         self._nav_cooldown: int = 0      # ticks to wait after a navigation tap
         self._card_taps: int = 0
         self._checked_in: bool = False
+        # badge-verified one-shot re-entry (cafe 同款, deep-dive r2 M3)
+        self._verify_reentered: bool = False
+        self._exit_lobby_ticks: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -180,6 +187,21 @@ class ClubSkill(BaseSkill):
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":
+            # BADGE-VERIFIED completeness (cafe 同款): 社交入口还挂红点 = 签到
+            # 没成 → 重进一次。3-tick 驻留防 badge 渐入时序闪失。
+            if not self._verify_reentered:
+                entry = self.find_cls(screen, UC.NAV_SOCIAL, conf=0.40)
+                if entry is not None and self.dot_in_region(
+                        screen,
+                        (entry.x1 - 0.005, entry.y1 - 0.05, entry.x2 + 0.02, entry.y2)):
+                    self.log("⚠ 社交入口 still has dot → sign-in missed, re-entering once")
+                    self._init_state()
+                    self._verify_reentered = True
+                    self._goto("enter")
+                    return action_wait(300, "social dot persists → re-enter")
+                self._exit_lobby_ticks += 1
+                if self._exit_lobby_ticks < 3:
+                    return action_wait(350, f"lobby badge dwell ({self._exit_lobby_ticks}/3)")
             self.log(f"done (checked_in={self._checked_in})")
             return action_done(f"club complete (checked_in={self._checked_in})")
         if self._phase_ticks > _EXIT_MAX:
