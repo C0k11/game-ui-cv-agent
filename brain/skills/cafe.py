@@ -874,7 +874,7 @@ class CafeSkill(BaseSkill):
 
         # Safety helmet.
         if self._pat_count >= _MAX_HEADPATS_PER_FLOOR:
-            return self._finish_headpat(is_2f, "max headpats")
+            return self._finish_headpat(screen, is_2f, "max headpats")
 
         # Post-pat / post-pan settle — let animation finish before scanning.
         if self._pat_settle > 0:
