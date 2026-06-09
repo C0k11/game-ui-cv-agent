@@ -146,7 +146,11 @@ class CraftSkill(BaseSkill):
             return action_wait(400, "entered craft")
 
         if screen.is_lobby():
-            act = self.click_cls(screen, UC.NAV_CRAFT, "open craft", conf=_CLS_CONF)
+            # 0.20 (not _CLS_CONF=0.30): 制造入口 is a weak cls that often fires
+            # in the 0.2-0.3 band — the model floor is already 0.20, so a 0.30
+            # skill filter throws away real hits (user 2026-06-09: dashboard
+            # 低conf标记也抓得准). Total misses still fall to adjacency below.
+            act = self.click_cls(screen, UC.NAV_CRAFT, "open craft", conf=0.20)
             if act is not None:
                 self._entered = True
                 return act
