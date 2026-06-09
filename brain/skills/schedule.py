@@ -97,10 +97,13 @@ _SWITCH_MAX = 12
 _EXIT_MAX = 14
 # Reaction time: before concluding a region has "no room/target", re-scan this
 # many frames so fused_avatar (flickery per-frame on the small popout heads) and
-# the layout have time to settle (user: 给点击和模型识别一些反应时间). Each
-# re-scan waits ~0.5s, so ~3s of detection budget per region before leaving.
-_BARREN_SCAN_MAX = 6
-_HEAD_RENDER_SETTLE = 3     # ticks to let popout heads render before first pick
+# the layout have time to settle (user: 给点击和模型识别一些反应时间).
+# 10 (was 6) + settle 6 (was 3): live 2026-06-09 the post-dispatch celebration
+# ANIMATION (floating chibi art) occludes the middle room cards for seconds —
+# rescans inside that window saw "no rooms" and the bot LEFT the region with
+# 3 tickets unspent. Wider budget lets the animation clear.
+_BARREN_SCAN_MAX = 10
+_HEAD_RENDER_SETTLE = 6     # ticks to let popout heads render before first pick
 
 # Traverse at most this many regions before giving up the full circle. BA has
 # ~10 schedule regions; 14 leaves margin for re-detect retries.
@@ -188,6 +191,7 @@ class ScheduleSkill(BaseSkill):
         """Clear per-region state on entering a fresh region's popout."""
         self._region_locked = None
         self._clicked_heads = []
+        self._green_marks = []   # accumulated 绿勾 sightings (positions repeat across regions)
         self._ticket_read_pending = False
         self._barren_scans = 0          # consecutive no-room scans this region
         self._head_settle = _HEAD_RENDER_SETTLE  # let heads render before 1st pick
@@ -341,18 +345,29 @@ class ScheduleSkill(BaseSkill):
                 return True
         return False
 
+    def _accumulate_green_marks(self, screen: ScreenState) -> None:
+        """绿勾 (12f, FLICKERY) detections are ACCUMULATED per region — one
+        sighting anywhere this region permanently marks that spot dispatched,
+        so the flicker works FOR us instead of against us. Cleared on region
+        switch (_reset_region_state) since popout positions repeat across
+        regions."""
+        marks = getattr(self, "_green_marks", None)
+        if marks is None:
+            marks = self._green_marks = []
+        for b in (screen.yolo_boxes or []):
+            if b.cls_name != UC.GREEN_CHECK or b.confidence < 0.25:
+                continue
+            if not any(abs(b.cx - mx) < 0.03 and abs(b.cy - my) < 0.03 for mx, my in marks):
+                marks.append((b.cx, b.cy))
+
     def _room_dispatched_visual(self, screen: ScreenState, room: List[YoloBox]) -> bool:
         """User mechanic (2026-06-09): after a room is dispatched, OWNED heads
-        get a 绿勾 overlay and un-owned heads dim out. A GREEN_CHECK box inside
-        the room cluster ⇒ already dispatched — never re-click it (works ACROSS
-        sessions, unlike the session-local click memory which stays on as
-        belt-and-braces). NOTE: 绿勾 is under-trained (12f) → positive-only
-        signal (absence proves nothing); 补标 with today's clean frames."""
+        get a 绿勾 overlay and un-owned heads dim out. Any ACCUMULATED green
+        mark inside the room cluster ⇒ already dispatched — never re-click
+        (works ACROSS sessions too: fresh entry re-sees the in-game checks)."""
         cx, cy = self._room_center(room)
-        for b in (screen.yolo_boxes or []):
-            if b.cls_name != UC.GREEN_CHECK or b.confidence < 0.30:
-                continue
-            if abs(b.cx - cx) < _ROOM_X_GAP * 1.6 and abs(b.cy - cy) < 0.12:
+        for mx, my in getattr(self, "_green_marks", []):
+            if abs(mx - cx) < _ROOM_X_GAP * 1.6 and abs(my - cy) < 0.12:
                 return True
         return False
 
@@ -399,6 +414,7 @@ class ScheduleSkill(BaseSkill):
             rooms mark owned heads with a green check — cross-session signal).
         Case A (locks) = fill every remaining room to upgrade the region;
         Case B (no locks) = only rooms with a configured target student."""
+        self._accumulate_green_marks(screen)
         self._log_room_brightness(screen, rooms)
         candidates = []
         for r in rooms:
