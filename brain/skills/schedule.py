@@ -341,6 +341,45 @@ class ScheduleSkill(BaseSkill):
                 return True
         return False
 
+    def _room_dispatched_visual(self, screen: ScreenState, room: List[YoloBox]) -> bool:
+        """User mechanic (2026-06-09): after a room is dispatched, OWNED heads
+        get a 绿勾 overlay and un-owned heads dim out. A GREEN_CHECK box inside
+        the room cluster ⇒ already dispatched — never re-click it (works ACROSS
+        sessions, unlike the session-local click memory which stays on as
+        belt-and-braces). NOTE: 绿勾 is under-trained (12f) → positive-only
+        signal (absence proves nothing); 补标 with today's clean frames."""
+        cx, cy = self._room_center(room)
+        for b in (screen.yolo_boxes or []):
+            if b.cls_name != UC.GREEN_CHECK or b.confidence < 0.30:
+                continue
+            if abs(b.cx - cx) < _ROOM_X_GAP * 1.6 and abs(b.cy - cy) < 0.12:
+                return True
+        return False
+
+    def _log_room_brightness(self, screen: ScreenState, rooms: List[List[YoloBox]]) -> None:
+        """Calibration probe for DIM-detection (un-owned heads dim after a room
+        is dispatched): log mean head brightness per room so live runs give us
+        the threshold data before we enforce anything."""
+        try:
+            if screen.frame is None or not rooms:
+                return
+            h, w = screen.frame.shape[:2]
+            vals = []
+            for r in rooms:
+                vs = []
+                for hd in r:
+                    x1, y1 = max(0, int(hd.x1 * w)), max(0, int(hd.y1 * h))
+                    x2, y2 = int(hd.x2 * w), int(hd.y2 * h)
+                    crop = screen.frame[y1:y2, x1:x2]
+                    if crop.size:
+                        vs.append(float(crop.mean()))
+                if vs:
+                    vals.append(round(sum(vs) / len(vs), 1))
+            if vals:
+                self.log(f"room-brightness (dim-calib): {vals}")
+        except Exception:
+            pass
+
     def _room_has_target(self, room: List[YoloBox]) -> Optional[str]:
         """Return the matched target name if any head in the room is a
         configured target student, else None."""
@@ -354,15 +393,24 @@ class ScheduleSkill(BaseSkill):
 
     def _pick_room(self, screen: ScreenState, rooms: List[List[YoloBox]]) -> Tuple[
             Optional[List[YoloBox]], str]:
-        """Choose the next room to dispatch. Skips rooms clicked this session
-        (proximity dedup — NOT a 绿勾 detection; user will re-label 绿勾 for v6,
-        until then we don't depend on it). Case A (locks) = fill every remaining
-        room to upgrade the region; Case B (no locks) = only rooms with a target.
-        Re-clicking an already-done room across runs is harmless (its 課程表開始
-        is a no-op) — we just avoid building fragile green-check logic now."""
-        candidates = [r for r in rooms if not self._room_already_clicked(r)]
+        """Choose the next room to dispatch. A room is OFF the table when:
+          • clicked this session (proximity memory), OR
+          • it visually shows a 绿勾 (user mechanic 2026-06-09: dispatched
+            rooms mark owned heads with a green check — cross-session signal).
+        Case A (locks) = fill every remaining room to upgrade the region;
+        Case B (no locks) = only rooms with a configured target student."""
+        self._log_room_brightness(screen, rooms)
+        candidates = []
+        for r in rooms:
+            if self._room_already_clicked(r):
+                continue
+            if self._room_dispatched_visual(screen, r):
+                cx, cy = self._room_center(r)
+                self.log(f"room@({cx:.2f},{cy:.2f}) 绿勾 → already dispatched, skip")
+                continue
+            candidates.append(r)
         if not candidates:
-            return None, "all rooms clicked this session"
+            return None, "all rooms dispatched (clicked/绿勾)"
 
         # Case A (region has locks → level it up): fill EVERY remaining room.
         if self._region_locked:
