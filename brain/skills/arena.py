@@ -154,10 +154,12 @@ class ArenaSkill(BaseSkill):
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
         """A 青辉石 icon in the body AND a 取消键 = a buy-ticket cost dialog
-        (distinct from the cancel-less 達成賽季最高紀錄 reward popup)."""
-        if self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=_CLS_CONF, region=_PYROXENE_BODY_REGION) is None:
+        (distinct from the cancel-less 達成賽季最高紀錄 reward popup).
+        conf 0.20 (model floor, deep-dive C4): a DANGER detector must be as
+        sensitive as the model allows — a false positive merely cancels+exits."""
+        if self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.20, region=_PYROXENE_BODY_REGION) is None:
             return False
-        return self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None
+        return self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None
 
     # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
