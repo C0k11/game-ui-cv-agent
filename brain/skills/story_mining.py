@@ -315,6 +315,13 @@ class StoryMiningSkill(BaseSkill):
             conf=_CLS_CONF,
         ) is not None
 
+    def _card_has_mine_dot(self, screen: ScreenState, card: YoloBox) -> bool:
+        """黄点 at the card's TOP-RIGHT corner = this category has mines
+        (user 2026-06-10: 通过黄点识别有没有矿, 没点的类别根本不进)."""
+        region = (max(0.0, card.x2 - 0.07), max(0.0, card.y1 - 0.06),
+                  min(1.0, card.x2 + 0.05), min(1.0, card.y1 + 0.12))
+        return self.find_cls(screen, UC.DOT_YELLOW, conf=0.35, region=region) is not None
+
     def _pick_hub_card(self, screen: ScreenState) -> Optional[YoloBox]:
         if not self.find_cls(screen, [UC.STORY_SHORT, UC.STORY_SIDE, UC.STORY_MAIN], conf=_CLS_CONF):
             return None
@@ -329,6 +336,13 @@ class StoryMiningSkill(BaseSkill):
                 return None
             card = self.find_cls(screen, cat, conf=_CLS_CONF)
             if card is not None:
+                # ★ Signal-driven category gate: no 黄点 on the card = nothing
+                # to mine inside — skip without entering (e.g. 支線 today).
+                if not self._card_has_mine_dot(screen, card):
+                    self.log(f"category {cat}: 无黄点 → no mine, skip")
+                    self._exhausted.append(cat)
+                    self._cat_idx += 1
+                    continue
                 self._current_cat = cat
                 return card
             self._cat_idx += 1
