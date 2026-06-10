@@ -125,14 +125,22 @@ class StoryMiningSkill(BaseSkill):
             self._cut_ticks = 0
             return action_click_box(reward, "dismiss reward (≈80💎)")
 
-        # P0.5: after reward, 中断 (剧情中断退出) leaves the node cleanly
-        # (观看 = keep watching — ignore). Mining wants out.
+        # P0.5: 下一章節 prompt after an episode. ★ 觀看 chains STRAIGHT into
+        # the next episode (user 2026-06-10: battle win/lose are both scripted
+        # story; 連看連挖 beats 中断+re-navigation). 中断 only as fallback when
+        # the 观看 cls (12f weak) misses — the node-list scan re-enters then.
+        watch = self.find_cls(screen, UC.STORY_WATCH, conf=_CLS_CONF)
+        if watch is not None:
+            self._cut_ticks = 0
+            self._cooldown = 2
+            self._barren = 0
+            return action_click_box(watch, "觀看 — chain next episode")
         quit_node = self.find_cls(screen, UC.STORY_QUIT, conf=_CLS_CONF)
         if quit_node is not None:
             self._cut_ticks = 0
             self._cooldown = 2
             self._barren = 0
-            return action_click_box(quit_node, "中断 — leave node after mining")
+            return action_click_box(quit_node, "中断 — leave node (觀看 cls missed)")
 
         # P0.6: battle result (戰鬥結果) — a centered cancel-less 确认键. The
         # confirm+cancel-both-visible case = a COST dialog → never click confirm
