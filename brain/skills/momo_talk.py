@@ -69,7 +69,10 @@ class MomoTalkSkill(BaseSkill):
 
     def __init__(self):
         super().__init__("MomoTalk")
-        self.max_ticks = 200
+        # 400: a first-run BACKLOG (live 2026-06-10: 22 unread) measures ~22
+        # ticks/student incl. bond stories — 200 timed out at 9/22 mined.
+        # Steady-state dailies (1-3 unread) finish in <60.
+        self.max_ticks = 400
         self._init_state()
 
     def _init_state(self) -> None:
