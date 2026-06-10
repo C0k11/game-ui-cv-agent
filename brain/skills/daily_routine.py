@@ -81,8 +81,13 @@ class DailyRoutineSkill(BaseSkill):
         if sub_only:
             allow = {str(s).strip() for s in sub_only}
             self._sub_only: Optional[List[str]] = sorted(allow)
+            # sub_only = the user EXPLICITLY asked for these subs → force-run
+            # them (skip the dot gate). Live 2026-06-10: momo_talk's counted
+            # badge ("22") isn't a DOT_RED cls, so the dot gate silently
+            # skipped the very sub the walk-through was launched for. The
+            # skill's own internal guards still apply.
             self._plan: List[Tuple[BaseSkill, bool]] = [
-                (sk, fr) for (sid, sk, fr) in _full if sid in allow
+                (sk, True) for (sid, sk, _fr) in _full if sid in allow
             ]
         else:
             self._sub_only = None
