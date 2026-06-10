@@ -46,9 +46,14 @@ _AVATAR_DX = 0.28          # avatar sits ~this far LEFT of the unread badge
 # the reply renders) and the weak cls flickering (sending 28f / reply 32f → an
 # occasional missed frame). It is NOT a per-student cooldown — any reply/sending
 # frame instantly resets it, so a still-talking student is never abandoned.
-_STABLE_EMPTY = 8          # weak cls (sending 28f / reply 32f) misses a few frames +
+_STABLE_EMPTY = 14         # weak cls (sending 28f / reply 32f) misses a few frames +
                            # students pause between consecutive messages — bridge it.
                            # Still cls-driven: ANY reply/sending frame resets it.
+                           # 8 was too impatient (live 2026-06-10: students were
+                           # abandoned mid-chat → 横跳/re-opens).
+_ROW_OPEN_CAP = 2          # re-open a still-badged row at most this many times
+                           # (badge = ground truth; the cap only guards the 一花
+                           # class of badges that never clear).
 _MAX_SENDING = 30          # sending stuck this long = mis-detect (a real msg types <13s)
 # Lowered detection floors for the two weak chat cls so a faint reply/sending
 # frame still registers (was missing → false "done"). v6 should add samples.
@@ -84,8 +89,9 @@ class MomoTalkSkill(BaseSkill):
         self._sending_streak: int = 0        # consecutive sending frames (mis-detect cap)
         self._scan_misses: int = 0
         self._scrolls: int = 0               # list swipes done
-        self._clicked_rows: List[float] = []   # opened student row-cy (dedup within a view)
+        self._row_opens: List[List[float]] = []  # [row-cy, opens] — re-open cap per view
         self._reply_positions: set = set()     # tapped reply spots this student (skip mis-detect repeats)
+        self._reply_gone: int = 0              # consecutive frames with NO reply option
         self._story_taps: int = 0
         self._story_cut: int = 0
 
@@ -97,9 +103,20 @@ class MomoTalkSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    def _row_clicked(self, cy: float) -> bool:
-        """True if we've already opened a student at ~this row-cy this run."""
-        return any(abs(py - cy) < 0.05 for py in self._clicked_rows)
+    def _open_count(self, cy: float) -> int:
+        """How many times we've opened a student at ~this row-cy this view."""
+        for entry in self._row_opens:
+            if abs(entry[0] - cy) < 0.05:
+                return int(entry[1])
+        return 0
+
+    def _bump_open(self, cy: float) -> None:
+        for entry in self._row_opens:
+            if abs(entry[0] - cy) < 0.05:
+                entry[0] = cy
+                entry[1] += 1
+                return
+        self._row_opens.append([cy, 1])
 
     # ── page predicates ──────────────────────────────────────────────────
     def _on_momotalk(self, screen: ScreenState) -> bool:
@@ -216,39 +233,39 @@ class MomoTalkSkill(BaseSkill):
                 return action_wait(400, "lost MomoTalk → re-enter")
             return action_wait(400, "waiting for MomoTalk UI")
 
-        # ALL unread badges → open the TOP-MOST one not yet opened. find_cls
-        # returns highest-conf (not top-most) so it jumped to a mid-list student
-        # and, with no dedup, a lingering badge re-opened the same student
-        # forever (live: 一花 bottomed out but its badge stayed → loop). find_all
-        # + min-cy + row-dedup fixes both.
-        all_unread = self.find_all_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF)
-        fresh = [u for u in all_unread
-                 if 0.0 <= u.cx <= 0.62 and 0.15 <= u.cy <= 0.95
-                 and not self._row_clicked(u.cy)]
+        # Badge = GROUND TRUTH (user 2026-06-10: 从上到下挨个打完, 全部清空才
+        # scroll). Open the TOP-MOST visible badge, top-to-bottom, re-opening a
+        # still-badged row up to _ROW_OPEN_CAP times (an unfinished student's
+        # badge stays until truly done; the cap only guards 一花-class badges
+        # that never clear). NEVER scroll while a workable badge is visible.
+        all_unread = [u for u in self.find_all_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF)
+                      if 0.0 <= u.cx <= 0.62 and 0.15 <= u.cy <= 0.95]
+        fresh = [u for u in all_unread if self._open_count(u.cy) < _ROW_OPEN_CAP]
         if fresh:
-            unread = min(fresh, key=lambda b: b.cy)  # top-most fresh
-            self._clicked_rows.append(unread.cy)
+            unread = min(fresh, key=lambda b: b.cy)  # top-most, strict top-down
+            self._bump_open(unread.cy)
             self._scan_misses = 0
             self._empty_streak = 0
             self._sending_streak = 0
             self._reply_positions = set()
+            self._reply_gone = 0
             row_x = min(0.30, max(0.12, unread.cx - _AVATAR_DX))
-            self.log(f"open unread student y={unread.cy:.3f} (avatar x={row_x:.2f})")
+            self.log(f"open unread student y={unread.cy:.3f} (avatar x={row_x:.2f}, "
+                     f"open #{self._open_count(unread.cy)})")
             self._goto("dialogue")
             return action_click(row_x, unread.cy, "open unread student (avatar, not badge)")
 
-        # No FRESH unread in the visible list. Settle (badges may still render),
-        # then SCROLL DOWN to reveal more unread further down. Rows shift after a
-        # swipe, so clear row-dedup. Exit only after scrolling the cap with still
-        # nothing new (mine visible → scroll → repeat).
+        # No workable badge (none visible, or the visible ones are 一花-class
+        # stale after CAP re-opens). Settle (badges may still render), then
+        # SCROLL DOWN for more. Rows shift after a swipe → reset open counts.
         self._scan_misses += 1
         if self._scan_misses < 3:
-            return action_wait(400, f"no fresh unread (settle {self._scan_misses})")
+            return action_wait(400, f"no workable unread (settle {self._scan_misses})")
         if self._scrolls < _MAX_SCROLLS:
             self._scrolls += 1
             self._scan_misses = 0
-            self._clicked_rows = []   # rows shifted by the swipe
-            self.log(f"visible list mined → scroll down ({self._scrolls}/{_MAX_SCROLLS})")
+            self._row_opens = []   # rows shifted by the swipe
+            self.log(f"visible list cleared → scroll down ({self._scrolls}/{_MAX_SCROLLS})")
             return action_swipe(0.25, 0.72, 0.25, 0.42, 700,
                                 f"scroll unread list down ({self._scrolls})")
         self.log(f"no more unread after {self._scrolls} scrolls ({self._students_done} mined)")
@@ -284,17 +301,25 @@ class MomoTalkSkill(BaseSkill):
             self._sending_streak += 1
             if self._sending_streak <= _MAX_SENDING:
                 self._empty_streak = 0
+                # A new message wave makes previously-tapped reply spots STALE —
+                # the next option legitimately renders at the SAME fixed spot.
+                self._reply_positions.clear()
                 return action_wait(450, f"学生发送信息中 — waiting ({self._sending_streak}/{_MAX_SENDING})")
             # sending stuck → mis-detect; fall through to empty handling.
         else:
             self._sending_streak = 0
 
-        # Reply option → tap, DEDUP by position. A real option vanishes after
-        # tapping (the next renders elsewhere); a mis-detected chat-history bubble
-        # keeps firing at the SAME spot (一花 bottomed out → infinite pick-reply).
-        # Only tap fresh spots; a repeat falls through to the empty handling.
+        # Reply option → tap, with DYNAMIC position-dedup. ⚠️ The 回覆 box
+        # renders at a FIXED spot, so consecutive turns reuse the same position
+        # — a permanent dedup ate the 2nd+ option and ABANDONED the student
+        # mid-chat (live 2026-06-10 横跳 root cause: 40 opens for ~24 students).
+        # Dedup now invalidates when the option DISAPPEARS ≥2 frames (consumed)
+        # or a sending wave arrives. A mis-detected static chat bubble (一花
+        # class) never disappears → stays deduped → empty-streak still ends the
+        # student.
         reply = self.find_cls(screen, UC.MOMO_REPLY_OPT, conf=_REPLY_CONF)
         if reply is not None:
+            self._reply_gone = 0
             rpos = (round(reply.cx, 2), round(reply.cy, 2))
             if rpos not in self._reply_positions:
                 self._reply_positions.add(rpos)
@@ -302,6 +327,11 @@ class MomoTalkSkill(BaseSkill):
                 self._sending_streak = 0
                 return action_click_box(reply, "pick reply option")
             # same spot already tapped → mis-detect; fall through to empty.
+        elif self._reply_positions:
+            self._reply_gone += 1
+            if self._reply_gone >= 2:
+                self._reply_positions.clear()
+                self._reply_gone = 0
 
         # Nothing fresh to do → empty. The student is FULLY done only after
         # STABLE_EMPTY *consecutive* empties (post-bond chatter + typing pauses all
