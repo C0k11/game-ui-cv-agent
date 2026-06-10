@@ -86,6 +86,7 @@ class TicketSweepSkill(BaseSkill):
     _CONFIG_KEY: str = "bounty_branches"       # app_config profile key
     _COSTS_AP: bool = False                    # JFD sweeps cost AP
     _AP_PER_SWEEP: int = 15                    # estimated AP per sweep (JFD)
+    _MAX_RENDER_WAIT: int = 5                  # frames to wait for solid MAX before giving up
     _MAX_SWEEP_CYCLES: int = 8                 # safety cap on sweep cycles
 
     def __init__(self, name: str):
@@ -103,6 +104,7 @@ class TicketSweepSkill(BaseSkill):
         self._tickets: Optional[int] = None
         self._maxed: bool = False
         self._safe_to_max: bool = False
+        self._max_wait: int = 0
         self._branch_clicks: int = 0
         self._branch_settle: int = 0
 
@@ -366,8 +368,16 @@ class TicketSweepSkill(BaseSkill):
                 self._maxed = True
                 self.log("set sweep MAX (affordable)")
                 return action_click_box(max_btn, "set sweep MAX")
-            # MAX greyed (e.g. 1 ticket) → proceed to sweep start.
+            # No SOLID MAX yet. During the 任務資訊 popup open-animation the MAX
+            # button renders grey-then-solid; abandoning on the first miss (live
+            # 2026-06-09 JFD) set _maxed=True too early → swept ONCE with 24
+            # tickets unspent. Wait a few frames for the solid MAX to settle;
+            # only if it never appears (truly greyed = 1 ticket) fall back.
+            if self._max_wait < self._MAX_RENDER_WAIT:
+                self._max_wait += 1
+                return action_wait(350, f"waiting MAX render ({self._max_wait})")
             self._maxed = True
+            self.log("MAX greyed after wait → single sweep")
 
         sweep = self.find_cls(screen, UC.SWEEP_START, conf=_CLS_CONF)
         if sweep is not None:
