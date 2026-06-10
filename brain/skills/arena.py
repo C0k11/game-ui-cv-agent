@@ -81,6 +81,7 @@ class ArenaSkill(BaseSkill):
         self._select_rounds: int = 0        # extra-cooldown retries when select spins
         self._result_pending: bool = False
         self._tickets: Optional[int] = None
+        self._ticket_misses: int = 0        # consecutive failed ticket reads
 
     def reset(self) -> None:
         super().reset()
@@ -114,8 +115,13 @@ class ArenaSkill(BaseSkill):
         except Exception:
             return None
         bh = icon.y2 - icon.y1
-        x1 = max(0.0, icon.x2 + 0.002)
-        x2 = min(1.0, x1 + 0.11)
+        # ★ Strip must SKIP the fixed "持有票券" label (x≈0.068-0.118): feeding
+        # the digit-OCR Chinese text made it return None on EVERY frame (live
+        # 2026-06-09: fight 1 ran with zero successful reads). Digits "X/5" sit
+        # at x≈0.131-0.145; icon.x2≈0.066 → offset +0.05, span 0.08 verified
+        # offline on the live frame ('4/5' → (4,5)) with margin both sides.
+        x1 = max(0.0, icon.x2 + 0.050)
+        x2 = min(1.0, x1 + 0.08)
         raw = run_digit_ocr(screen.frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
         res = parse_count(raw)
         if res is None or res[0] is None:
@@ -155,6 +161,15 @@ class ArenaSkill(BaseSkill):
             res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_RESULT_BAND)
             res_marker = self.find_cls(screen, [UC.BATTLE_WIN, UC.GOT_REWARD], conf=0.35)
             if res_confirm is not None or res_marker is not None:
+                # ⛔ Never click a centered 确认键 while a 取消键 is also visible.
+                # Result popups are cancel-less; confirm+cancel together = a
+                # cost dialog mid-render racing past the _buy_dialog guard
+                # (deep-dive C2: one missing component on an animation frame
+                # defeats the conjunctive guard, and this block would then
+                # click the BUY button). Wait a frame — the fully-rendered
+                # dialog is caught by the guard above next tick.
+                if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None:
+                    return action_wait(400, "confirm+cancel both visible — not a result dialog, re-read")
                 # Count a fight ONLY if 出击 actually launched (stage>=2). A
                 # centered 确认键 also appears on NON-result notices — live
                 # 2026-06-09: 通知「已超過清單更新時間」(opponent-list refresh
@@ -260,21 +275,30 @@ class ArenaSkill(BaseSkill):
         return action_wait(250, "no active rewards → fight_check")
 
     def _fight_check(self, screen: ScreenState) -> Dict[str, Any]:
-        # Ticket gate (money-safety): 0 → done.
+        # ★ Hard ticket gate (money-safety): NO path may leave fight_check
+        # toward select/fight without a SUCCESSFUL ticket read this phase.
+        # Deep-dive C1 + live 2026-06-09: the old ">8 ticks → select anyway"
+        # fallback let the entire first fight run with _tickets=None (the OCR
+        # strip was mis-geometried and EVERY read failed silently).
         tickets = self._read_tickets(screen)
-        if tickets is not None:
-            self._tickets = tickets
-            if tickets <= 0:
-                self.log("tickets 0/5 → arena done")
+        if tickets is None:
+            self._ticket_misses += 1
+            page = self.detect_screen_yolo(screen)
+            if page in ("Lobby", "Mission"):
+                self.log(f"drifted to {page} → arena over")
                 self._goto("exit")
-                return action_wait(300, "0 tickets → exit")
-        elif self._phase_ticks > 12:
-            # Deep-dive C6 (2026-06-09): unreadable count must FAIL CLOSED —
-            # the old code carried _tickets=None into select/fight with only
-            # the (previously mis-regioned) confirm-dialog guard backstopping.
-            self.log("tickets unreadable after retries → exit (money fail-closed)")
+                return action_wait(300, "drifted out → exit")
+            if self._ticket_misses > 12:
+                self.log("tickets unreadable after retries → exit (money fail-closed)")
+                self._goto("exit")
+                return action_wait(300, "ticket unreadable → exit")
+            return action_wait(400, f"ticket read retry {self._ticket_misses}/12 (fail-closed gate)")
+        self._ticket_misses = 0
+        self._tickets = tickets
+        if tickets <= 0:
+            self.log("tickets 0/5 → arena done")
             self._goto("exit")
-            return action_wait(300, "ticket unreadable → exit")
+            return action_wait(300, "0 tickets → exit")
 
         # Safety cap.
         if self._fights_done >= _MAX_FIGHTS:
@@ -288,18 +312,11 @@ class ArenaSkill(BaseSkill):
             self._cooldown += 1
             return action_wait(1000, f"arena cooldown {self._cooldown}/{_COOLDOWN_TICKS} (~25s)")
 
-        if self._on_arena(screen):
-            self._goto("select")
-            return action_wait(250, "arena main → select")
-        page = self.detect_screen_yolo(screen)
-        if page in ("Lobby", "Mission"):
-            self.log(f"drifted to {page} → arena over")
-            self._goto("exit")
-            return action_wait(300, "drifted out → exit")
-        if self._phase_ticks > 8:
-            self._goto("select")
-            return action_wait(300, "arena unconfirmed → select")
-        return action_wait(400, "waiting for arena main")
+        # A successful ticket read ⇒ the arena left panel is on screen — safe
+        # to select. (The old _on_arena/blind-select fallbacks are gone; they
+        # were the leak.)
+        self._goto("select")
+        return action_wait(250, "arena main (tickets read) → select")
 
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
         # 對戰對象 popup may ALREADY be open (stray click / re-entry) — its body
@@ -411,6 +428,13 @@ class ArenaSkill(BaseSkill):
             return action_done("arena complete (on hub)")
         if self._phase_ticks > _EXIT_MAX:
             return action_done("arena exit timeout")
+        # ⛔ A 取消键 on screen while exiting = some cost/choice dialog is up
+        # (result dialogs are cancel-less). Cancel is ALWAYS the safe button
+        # on the way out — never the confirm (deep-dive: exit had no buy-dialog
+        # guard and clicked 确认键 first = BUY on a surviving purchase dialog).
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
+        if cancel is not None:
+            return action_click_box(cancel, "exit: cancel pending dialog (never confirm)")
         # Dismiss a leftover result dialog before ESC.
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_RESULT_BAND)
         if confirm is not None:
