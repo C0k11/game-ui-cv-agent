@@ -79,6 +79,10 @@ class StoryMiningSkill(BaseSkill):
         self._fighting: int = 0                # >0 = story battle in progress (hold
                                                # ticks; battle frames carry no known
                                                # ui cls → would otherwise nav-lose)
+        self._cat_opened_tick: int = -99       # tick when current category was opened
+                                               # (hub-re-reach exhaust needs >6 ticks
+                                               # gap; transition lag false-exhausted
+                                               # 主線 right after opening it)
 
     def reset(self) -> None:
         super().reset()
@@ -136,11 +140,15 @@ class StoryMiningSkill(BaseSkill):
         # the negative gate anyway.
         res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_RESULT_BAND)
         if res_confirm is not None:
-            if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None:
-                return action_wait(400, "confirm+cancel visible — not a result, re-read")
-            self._fighting = 0
-            self._cooldown = 2
-            return action_click_box(res_confirm, "dismiss battle/result dialog (确认键)")
+            if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is None:
+                self._fighting = 0
+                self._cooldown = 2
+                return action_click_box(res_confirm, "dismiss battle/result dialog (确认键)")
+            # confirm+cancel together = the story SKIP-CONFIRM dialog (是否略過
+            # 此劇情? — the only confirm+cancel dialog in the story flow). The
+            # old "wait and re-read" here deadlocked against the decayed
+            # _cut_ticks gate in the cutscene handler (live 2026-06-10: stuck
+            # 20 ticks staring at it). Fall through — P1 handles it.
 
         # P0.7: BATTLE node — a story node's 部队/出击 squad screen. ★ Story
         # battles cost NO AP (user 2026-06-10) and the account trivially
@@ -259,13 +267,20 @@ class StoryMiningSkill(BaseSkill):
 
     # ── cutscene skip ──────────────────────────────────────────────────────
     def _handle_cutscene(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
-        # After clicking skip/menu, the skip-confirm dialog appears → confirm.
-        if self._cut_ticks > 0:
+        # Skip-confirm dialog (是否略過此劇情? 取消/確認) → 確認. Recognized by
+        # confirm-in-band + story chrome (MENU/skip top-right stays rendered
+        # behind the dialog) — NOT only by _cut_ticks: that counter decays one
+        # per empty frame, so a 2-frame cls flicker disabled the branch and
+        # deadlocked on the dialog (live 2026-06-10).
+        story_chrome = self.find_cls(screen, [UC.STORY_MENU, UC.STORY_SKIP],
+                                     conf=0.30, region=(0.80, 0.0, 1.0, 0.30)) is not None
+        if self._cut_ticks > 0 or story_chrome:
             confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=(0.30, 0.55, 0.85, 0.85))
             if confirm is not None:
                 self._cut_ticks = 0
                 self._cooldown = 2
                 return action_click_box(confirm, "confirm story skip (确认键)")
+        if self._cut_ticks > 0:
             cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
             if cont is not None:
                 self._cut_ticks = 0
@@ -440,6 +455,11 @@ class StoryMiningSkill(BaseSkill):
                 # "return None → P4 barren scan" churned: hub scan → back out
                 # to 任务大厅 → re-enter → scan … ×8 before exhausting (live
                 # 2026-06-10, ~20s per lap).
+                # ★ But NOT right after opening it: the open-click's transition
+                # lags 2-3 ticks with the hub still on screen — that false-
+                # exhausted 主線 the moment it was opened (live 2026-06-10).
+                if self.ticks - self._cat_opened_tick <= 6:
+                    return None   # transition settling — re-read next tick
                 self.log(f"category {cat}: hub re-reached after drill → exhausted")
                 self._exhausted.append(cat)
                 self._current_cat = None
@@ -456,6 +476,7 @@ class StoryMiningSkill(BaseSkill):
                     self._cat_idx += 1
                     continue
                 self._current_cat = cat
+                self._cat_opened_tick = self.ticks
                 return card
             # Card cls not seen THIS frame. A 1-frame flicker must not skip the
             # whole category (live 2026-06-10: 短篇 flickered out right after
