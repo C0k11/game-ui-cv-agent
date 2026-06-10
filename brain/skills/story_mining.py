@@ -365,7 +365,12 @@ class StoryMiningSkill(BaseSkill):
         return self.find_cls(screen, UC.DOT_YELLOW, conf=0.35, region=region) is not None
 
     def _pick_hub_card(self, screen: ScreenState) -> Optional[YoloBox]:
-        if not self.find_cls(screen, [UC.STORY_SHORT, UC.STORY_SIDE, UC.STORY_MAIN], conf=_CLS_CONF):
+        # ★ The hub CATEGORY page shows ALL category cards; inside a category
+        # only its own header cls shows. Require ≥2 distinct category cls to
+        # call this the hub page — otherwise we're inside one (let P4 scan).
+        present = [c for c in (UC.STORY_MAIN, UC.STORY_SHORT, UC.STORY_SIDE)
+                   if self.find_cls(screen, c, conf=_CLS_CONF) is not None]
+        if len(present) < 2:
             return None
         while self._cat_idx < len(self._categories):
             cat = self._categories[self._cat_idx]
@@ -373,9 +378,17 @@ class StoryMiningSkill(BaseSkill):
                 self._cat_idx += 1
                 continue
             if cat == self._current_cat:
-                # Already drilled into this category — its card cls may still show
-                # (a tab/header) but we're INSIDE it. Don't re-open; let P4 scan.
-                return None
+                # Back ON the hub page after drilling this category ⇒ its
+                # mineable content is done (battle-gated nodes keep the dot/New
+                # but can't be mined) — exhaust and advance NOW. The old
+                # "return None → P4 barren scan" churned: hub scan → back out
+                # to 任务大厅 → re-enter → scan … ×8 before exhausting (live
+                # 2026-06-10, ~20s per lap).
+                self.log(f"category {cat}: hub re-reached after drill → exhausted")
+                self._exhausted.append(cat)
+                self._current_cat = None
+                self._cat_idx += 1
+                continue
             card = self.find_cls(screen, cat, conf=_CLS_CONF)
             if card is not None:
                 # ★ Signal-driven category gate: no 黄点 on the card = nothing
