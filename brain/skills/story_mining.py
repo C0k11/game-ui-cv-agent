@@ -79,6 +79,23 @@ class StoryMiningSkill(BaseSkill):
             self.log("timeout")
             return action_done("story mining timeout")
 
+        # ★ Decision inputs from a CLEAN ADB frame (overlay burn defense).
+        # Live 2026-06-10: the tick's box feed lost BOTH 剧情图标未完成 icons
+        # and the battle-node 入场键 (which detect at 0.98 on the same screen's
+        # clean frame) → _mine_action saw nothing → bogus reveal-swipes. This
+        # skill is fully detection-driven, so re-detect every tick on the
+        # overlay-free frame (~250ms, fine for turn-based mining).
+        try:
+            from brain.pipeline import get_clean_frame, _run_yolo_on_image
+            fr = get_clean_frame()
+            if fr is not None:
+                h, w = fr.shape[:2]
+                screen.frame = fr
+                screen.yolo_boxes = _run_yolo_on_image(fr, w, h, context="ui")
+                screen.image_w, screen.image_h = w, h
+        except Exception:
+            pass
+
         if self._cooldown > 0:
             self._cooldown -= 1
             return action_wait(400, f"story settle ({self._cooldown})")
