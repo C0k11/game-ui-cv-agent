@@ -197,6 +197,15 @@ class StoryMiningSkill(BaseSkill):
                     return action_back("battle hold expired")
                 return action_wait(1000, f"story battle in progress ({self._fighting})")
 
+        # P0.9: a dialog offering NAVIGATION-AWAY (取消键 present, 确认键
+        # absent — e.g. 獲得新收藏!是否立即移動? 取消/立即前往, live
+        # 2026-06-10; 立即前往 has no trained cls) → always 取消, stay mining.
+        # The skip-confirm dialog has BOTH buttons → unaffected (P1 handles).
+        cancel_only = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
+        if cancel_only is not None and self.find_cls(screen, UC.BTN_CONFIRM, conf=0.20) is None:
+            self._cooldown = 2
+            return action_click_box(cancel_only, "取消 — decline navigation offer, keep mining")
+
         # P1: cutscene skip chain (story auto-plays → skip ASAP).
         cut = self._handle_cutscene(screen)
         if cut is not None:
