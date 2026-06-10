@@ -155,7 +155,13 @@ class ArenaSkill(BaseSkill):
             res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_RESULT_BAND)
             res_marker = self.find_cls(screen, [UC.BATTLE_WIN, UC.GOT_REWARD], conf=0.35)
             if res_confirm is not None or res_marker is not None:
-                if not self._result_pending and self.sub_state == "fight":
+                # Count a fight ONLY if 出击 actually launched (stage>=2). A
+                # centered 确认键 also appears on NON-result notices — live
+                # 2026-06-09: 通知「已超過清單更新時間」(opponent-list refresh
+                # expired) at fight stage 1 was counted as fight 1 → cap would
+                # end arena one real fight early with a ticket unspent.
+                if not self._result_pending and self.sub_state == "fight" \
+                        and self._fight_stage >= 2:
                     self._fights_done += 1
                     self._result_pending = True
                     self.log(f"fight {self._fights_done} result → dismiss")
