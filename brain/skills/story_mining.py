@@ -147,6 +147,12 @@ class StoryMiningSkill(BaseSkill):
         # (arena C2 lesson); story flows have no legit cost dialogs, but keep
         # the negative gate anyway.
         res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_RESULT_BAND)
+        if res_confirm is None:
+            # Story "Battle Complete" puts its 確認 at the BOTTOM-RIGHT
+            # (live 2026-06-10: (0.89,0.91) — outside the centered arena-style
+            # band; the hold ran out staring at a finished battle).
+            res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
+                                        region=(0.78, 0.78, 1.0, 0.98))
         if res_confirm is not None:
             if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is None:
                 self._fighting = 0
