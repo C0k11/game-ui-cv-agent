@@ -286,9 +286,18 @@ def _read_topbar_count(screen, cls_name: str):
     if best is None or screen.frame is None:
         return None
     bh = best.y2 - best.y1
+    # Right edge: clip at the NEXT top-bar element (加号/next icon) so the strip
+    # never swallows the neighbouring counter (live 2026-06-09: credits read
+    # 9,581,179,414 because the 0.118 span reached into 青辉石's digits).
+    x_right = min(1.0, best.x2 + 0.118)
+    for b in (screen.yolo_boxes or []):
+        if b is best or b.cy >= 0.10 or b.confidence < 0.25:
+            continue
+        if b.x1 > best.x2 + 0.012 and b.x1 - 0.004 < x_right:
+            x_right = b.x1 - 0.004
     raw = run_digit_ocr(screen.frame, (
         min(1.0, best.x2 + 0.003), max(0.0, best.y1 - bh * 0.25),
-        min(1.0, best.x2 + 0.118), min(1.0, best.y2 + bh * 0.25)))
+        x_right, min(1.0, best.y2 + bh * 0.25)))
     res = parse_count(raw)
     return res[0] if (res is not None and res[0] is not None) else None
 
