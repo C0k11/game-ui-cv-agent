@@ -842,6 +842,15 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     except Exception:
                         pass
                     _log_pipeline(f"ADB ready {adb_host}:{adb_port} size={android_w}x{android_h}")
+                    # Money-read defense: let skills pull overlay-free frames
+                    # (DXcam frames carry burned-in overlay boxes that can kill
+                    # small-icon detection — see brain.pipeline.get_clean_frame).
+                    try:
+                        from brain.pipeline import set_clean_frame_source
+                        set_clean_frame_source(adb.capture_frame)
+                        _log_pipeline("clean-frame source registered (ADB)")
+                    except Exception as e:
+                        _log_pipeline(f"clean-frame source unavailable: {e}")
             except Exception as e:
                 _log_pipeline(f"ADB unavailable: {e}; switching pipeline to dry-run")
                 adb = None

@@ -101,18 +101,34 @@ class ArenaSkill(BaseSkill):
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """digit-OCR 持有票券 X/5 next to the arena ticket icon (LEFT panel,
         ~0.055,0.678 — NOT the top bar). ★ money defense #1 (0 → stop, never the
-        buy-ticket-pyroxene trap). read_count's generic strip clipped the first
-        digit → None (live 2026-06-02: ticket unread → kept retrying fights at
-        0 tickets). Anchor on the icon + OCR a tighter-left strip."""
-        if screen.frame is None:
-            return None
-        icon = self.find_cls(screen, UC.TICKET_ARENA, conf=_CLS_CONF,
-                             region=(0.0, 0.58, 0.22, 0.78))
-        if icon is None:
-            return None
+        buy-ticket-pyroxene trap).
+
+        ★ Runs on a CLEAN ADB frame, not screen.frame: the overlay burns a
+        tight box+label onto the small ticket icon in every DXcam frame, which
+        killed ui_v7's detection of it outright (live 2026-06-09: 0 detections
+        on burned frames vs conf 0.95 on the clean frame → every read None →
+        fail-closed exit with tickets unspent). Falls back to screen.frame
+        only if no clean source is registered."""
         try:
-            from brain.pipeline import run_digit_ocr, parse_count
+            from brain.pipeline import (get_clean_frame, _run_yolo_on_image,
+                                        run_digit_ocr, parse_count)
         except Exception:
+            return None
+        frame = get_clean_frame()
+        icon = None
+        if frame is not None:
+            h, w = frame.shape[:2]
+            cands = [b for b in _run_yolo_on_image(frame, w, h, context="ui+battle")
+                     if b.cls_name == UC.TICKET_ARENA and b.confidence >= _CLS_CONF
+                     and b.cx <= 0.22 and 0.58 <= b.cy <= 0.78]
+            icon = max(cands, key=lambda b: b.confidence) if cands else None
+        else:
+            frame = screen.frame
+            if frame is None:
+                return None
+            icon = self.find_cls(screen, UC.TICKET_ARENA, conf=_CLS_CONF,
+                                 region=(0.0, 0.58, 0.22, 0.78))
+        if icon is None:
             return None
         bh = icon.y2 - icon.y1
         # ★ Strip must SKIP the fixed "持有票券" label (x≈0.068-0.118): feeding
@@ -122,9 +138,17 @@ class ArenaSkill(BaseSkill):
         # offline on the live frame ('4/5' → (4,5)) with margin both sides.
         x1 = max(0.0, icon.x2 + 0.050)
         x2 = min(1.0, x1 + 0.08)
-        raw = run_digit_ocr(screen.frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
+        raw = run_digit_ocr(frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
         res = parse_count(raw)
         if res is None or res[0] is None:
+            return None
+        # Strict numerator proof: a bare number with no '/' could be the
+        # DENOMINATOR of a left-clipped "X/5" — the 2026-06-02 incident class
+        # ("0/5" clipped to '5' would read 0 tickets as 5 → 出击 at 0 → buy
+        # dialog). Right-clipped '3/' (denominator lost) is fine — numerator
+        # is provably the leading digit.
+        s = (raw or "").strip()
+        if "/" not in s or not s[:1].isdigit():
             return None
         return res[0]
 

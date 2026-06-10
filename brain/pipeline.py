@@ -521,6 +521,33 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     return boxes
 
 
+# ── Clean-frame source (money-read defense) ────────────────────────────
+# The Win32 YoloOverlay burns boxes/labels into every DXcam frame, which can
+# KILL detection of small icons (live 2026-06-09: arena 战术大赛票 icon got a
+# tight green box + label burned over it → ui_v7 detected NOTHING → ticket
+# read None every tick → fail-closed exit with tickets unspent). ADB screencap
+# runs inside Android where the overlay physically doesn't exist. Money-
+# critical reads should prefer this source. The server registers the ADB
+# capture function here once the pipeline's ADB connection is up.
+_CLEAN_FRAME_SOURCE = None
+
+
+def set_clean_frame_source(fn) -> None:
+    """Register a zero-arg callable returning a clean BGR frame (or None)."""
+    global _CLEAN_FRAME_SOURCE
+    _CLEAN_FRAME_SOURCE = fn
+
+
+def get_clean_frame():
+    """A fresh overlay-free frame via the registered source, or None."""
+    if _CLEAN_FRAME_SOURCE is None:
+        return None
+    try:
+        return _CLEAN_FRAME_SOURCE()
+    except Exception:
+        return None
+
+
 def run_digit_ocr(frame, region_norm) -> Optional[str]:
     """DIGIT-ONLY OCR on a normalized sub-region of a BGR frame.
 
