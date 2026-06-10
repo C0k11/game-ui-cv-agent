@@ -208,9 +208,17 @@ class TicketSweepSkill(BaseSkill):
 
         page = self.detect_screen_yolo(screen)
         if page == "Lobby":
-            act = self.click_cls(screen, UC.NAV_TASKS, "open campaign hub", conf=_CLS_CONF)
+            act = self.click_cls(screen, UC.NAV_TASKS, "open campaign hub", conf=0.20)
             if act is not None:
                 return act
+            # 任务大厅入口 (19f) systematically misses on event-skinned lobbies
+            # (live 2026-06-09: the 任務 tile wears a 正在進行考試 banner → cls
+            # never fired once all day → enter timed out, 0 sweeps). The tile
+            # is a fixed right-side fixture → fixed-slot fallback after a few
+            # patient ticks. 根治 = 补标 (clean-flywheel frames have it).
+            if self._enter_ticks > 4:
+                self.log("任务大厅入口 cls missed → fixed-pos fallback (0.935,0.80)")
+                return action_click(0.935, 0.80, "open campaign hub (fixed pos)")
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
             act = self.click_cls(screen, self._HUB_TILE, f"click {self.name} tile", conf=_CLS_CONF)
