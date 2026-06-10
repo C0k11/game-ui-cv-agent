@@ -223,6 +223,13 @@ class DailyMissionSkill(BaseSkill):
             return action_done(f"daily_mission complete (all={self._all_claims}, single={self._single_claims})")
         if self._phase_ticks > _EXIT_MAX:
             return action_done("daily_mission exit timeout")
+        # ESC after reaching the lobby opens the 是否結束 quit prompt, whose
+        # body hides the Lobby signature cls → the old exit ESC-looped on it
+        # until timeout (live 2026-06-10; never clicks 確認, so safe but
+        # stuck). Cancel-first clears any dialog on the way out.
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
+        if cancel is not None:
+            return action_click_box(cancel, "daily_mission exit: cancel pending dialog")
         home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "daily_mission exit: home")

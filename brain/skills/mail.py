@@ -57,6 +57,7 @@ class MailSkill(BaseSkill):
     def _init_state(self) -> None:
         self._phase_ticks: int = 0
         self._claims: int = 0
+        self._enter_settle: int = 0   # blind wait after clicking the mailbox
 
     def reset(self) -> None:
         super().reset()
@@ -116,16 +117,27 @@ class MailSkill(BaseSkill):
             self._goto("claim")
             return action_wait(400, "entered mail")
 
+        # ★ Settle after clicking the mailbox: during the open-transition the
+        # page reads neither Mail nor Lobby and the fallthrough action_back
+        # CLOSED the half-open mailbox (live 2026-06-10: open→back→open
+        # oscillated 3 rounds before luckily landing). Same race class as the
+        # arena enter fix.
+        if self._enter_settle > 0:
+            self._enter_settle -= 1
+            return action_wait(600, f"mailbox opening ({self._enter_settle} left)")
+
         if screen.is_lobby():
             mail_btn = self.find_cls(screen, UC.NAV_MAIL, conf=_CLS_CONF)
             if mail_btn is not None:
                 self.log("opening mail (YOLO 邮件箱)")
+                self._enter_settle = 3
                 return action_click_box(mail_btn, "open mailbox")
             # Envelope cls missed but its red dot is in the mail zone — click
             # the dot's anchor (its own center) to open the mailbox.
             dot = self.find_cls(screen, UC.DOT_RED, conf=0.35, region=_MAIL_ZONE)
             if dot is not None:
                 self.log("opening mail via red-dot anchor (envelope cls missed)")
+                self._enter_settle = 3
                 return action_click(dot.cx, min(0.06, dot.cy + 0.02), "open mailbox (dot)")
             self.log("on lobby but no 邮件箱/红点 — YOLO gap; waiting")
             return action_wait(400, "waiting for 邮件箱 cls")
@@ -174,6 +186,12 @@ class MailSkill(BaseSkill):
         if self._phase_ticks > _EXIT_MAX:
             self.log("exit budget exhausted, reporting done")
             return action_done("mail exit timeout")
+        # A 取消键 on the way out = some dialog is up (e.g. ESC-on-lobby opens
+        # the 是否結束 quit prompt, which also hides the Lobby signature) —
+        # cancel is always the safe dismiss (live 2026-06-10, daily_mission).
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
+        if cancel is not None:
+            return action_click_box(cancel, "mail exit: cancel pending dialog")
         home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "mail exit: home button")
