@@ -556,6 +556,13 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
         result, _ = ocr(crop)
         if not result:
             return None
+        # Sort fragments LEFT→RIGHT before joining — the detector returns text
+        # boxes in arbitrary order, which scrambles comma-grouped numbers
+        # (live 2026-06-09: "179,958,141" came back as '9581179414').
+        try:
+            result = sorted(result, key=lambda ln: min(p[0] for p in ln[0]))
+        except Exception:
+            pass
         # concat all recognized text on the strip, keep only digits + / and ,
         raw = "".join(line[1] for line in result)
         # Keep the decimal point too (deep-dive r2 C1, 2026-06-09): stripping it
