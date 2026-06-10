@@ -65,6 +65,10 @@ class StoryMiningSkill(BaseSkill):
         self._tried_chapters: List[float] = [] # chapter 黄点 cy already opened (a
                                                # battle-only chapter keeps its dot →
                                                # don't reopen it forever)
+        self._tried_cards: List[tuple] = []    # new-篇/卡 positions already selected
+                                               # (a battle-gated 篇 keeps its New badge
+                                               # forever AND selecting it resets barren
+                                               # → infinite category loop without this)
         self._back_streak: int = 0             # consecutive back-outs with nothing
                                                # mined (→ next category when high)
 
@@ -158,6 +162,7 @@ class StoryMiningSkill(BaseSkill):
             self._barren = 0
             self._page_turns = 0
             self._main_swipes = 0
+            self._tried_cards = []
             self._cooldown = 2
             return action_click_box(hub_card, f"open category ({hub_card.cls_name})")
 
@@ -273,9 +278,19 @@ class StoryMiningSkill(BaseSkill):
         #    入场键 is present. A New badge on a NODE (新节点, e.g. 巢穴 New) is
         #    NOT a 篇/卡 entry — clicking it does nothing and loops forever. New
         #    means "open this 篇/card" only on the 篇/grid screens (no 入场键 there).
+        #    ★ Dedup by position: a battle-gated 篇 keeps its New badge forever
+        #    AND selecting it resets barren/back_streak → infinite category loop
+        #    (live 2026-06-10: 卷6 re-selected endlessly). Tried positions reset
+        #    on swipe/page-turn (cards shift), bounded by the swipe caps.
         if self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF, region=_NODE_PANEL) is None:
-            new = self.find_cls(screen, [UC.NEW_MARK, UC.STORY_NEW], conf=_CLS_CONF, region=_CONTENT_REGION)
-            if new is not None:
+            news = self.find_all_cls(screen, [UC.NEW_MARK, UC.STORY_NEW],
+                                     conf=_CLS_CONF, region=_CONTENT_REGION)
+            for new in sorted(news, key=lambda b: (b.cy, b.cx)):
+                npos = (round(new.cx, 2), round(new.cy, 2))
+                if any(abs(px - npos[0]) < 0.05 and abs(py - npos[1]) < 0.05
+                       for px, py in self._tried_cards):
+                    continue
+                self._tried_cards.append(npos)
                 return action_click_box(new, "select new 篇 / enter new card")
         return None
 
@@ -295,6 +310,7 @@ class StoryMiningSkill(BaseSkill):
             self._page_turns += 1
             self._barren = 0
             self._cooldown = 2
+            self._tried_cards = []   # cards shift on page turn
             self.log(f"右切换 next page ({self._page_turns}/{_MAX_PAGE_TURNS})")
             return action_click_box(arrow, "next page (find new card)")
         # Main 卷 list scrolls horizontally — swipe LEFT to reveal newer 卷.
@@ -302,6 +318,7 @@ class StoryMiningSkill(BaseSkill):
             self._main_swipes += 1
             self._barren = 0
             self._cooldown = 2
+            self._tried_cards = []   # cards shift on swipe
             self.log(f"swipe-left 卷 list ({self._main_swipes}/{_MAX_MAIN_SWIPES})")
             return action_swipe(0.65, 0.42, 0.30, 0.42, 500, "reveal newer 卷")
         return None
@@ -314,6 +331,7 @@ class StoryMiningSkill(BaseSkill):
         self._barren = 0
         self._page_turns = 0
         self._main_swipes = 0
+        self._tried_cards = []
         self._cat_idx += 1
         if self._cat_idx >= len(self._categories):
             return action_done("story mining finished (all categories)")
