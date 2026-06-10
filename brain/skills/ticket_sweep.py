@@ -338,17 +338,21 @@ class TicketSweepSkill(BaseSkill):
                 return action_wait(300, "no sortie popup → exit")
             return action_wait(400, "waiting for 任務資訊 popup")
 
-        # AP gate (JFD): can we afford? safe_to_max = can afford MAX (all tickets).
+        # AP gate (JFD): the MAX button sweeps as many times as AP+tickets allow
+        # — the GAME caps it, never overspends (you can't go negative on AP).
+        # So MAX is safe whenever AP ≥ one sweep; the old `ap ≥ tix×AP_PER_SWEEP`
+        # gate wrongly fell back to a SINGLE sweep whenever full tickets couldn't
+        # all be afforded (live 2026-06-09: 24 tickets needed 360 AP > 240 cap →
+        # safe_to_max False → swept only 1, leaving AP+tickets unspent).
         if self._COSTS_AP and not self._maxed:
             ap = self._read_ap(screen)
-            tix = self._tickets or 1
             if ap is not None:
                 if ap < self._AP_PER_SWEEP:
                     self.log(f"AP {ap} < {self._AP_PER_SWEEP}/sweep → exit (no buy-AP)")
                     self._goto("exit")
                     return action_wait(300, "insufficient AP → exit")
-                self._safe_to_max = ap >= tix * self._AP_PER_SWEEP
-                self.log(f"AP {ap}, tickets {tix} → safe_to_max={self._safe_to_max}")
+                self._safe_to_max = True  # game caps MAX at affordable count
+                self.log(f"AP {ap} ≥ {self._AP_PER_SWEEP} → MAX (game caps to affordable)")
             else:
                 # AP unreadable → don't MAX (sweep 1 at a time; grey-confirm guards).
                 self._safe_to_max = False
