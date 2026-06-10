@@ -71,6 +71,9 @@ class StoryMiningSkill(BaseSkill):
                                                # → infinite category loop without this)
         self._back_streak: int = 0             # consecutive back-outs with nothing
                                                # mined (→ next category when high)
+        self._card_misses: int = 0             # consecutive hub frames missing the
+                                               # next category's card cls (3 → skip;
+                                               # 1-frame flicker must NOT skip a cat)
 
     def reset(self) -> None:
         super().reset()
@@ -165,6 +168,12 @@ class StoryMiningSkill(BaseSkill):
             self._tried_cards = []
             self._cooldown = 2
             return action_click_box(hub_card, f"open category ({hub_card.cls_name})")
+        # All categories exhausted/skipped → finish cleanly (the old finish in
+        # _exhaust_and_advance is unreachable from the hub fast-exhaust path —
+        # live 2026-06-10 the skill instead wandered into "nav: can't reach").
+        if self._cat_idx >= len(self._categories):
+            self.log(f"all categories done ({len(self._exhausted)} exhausted)")
+            return action_done("story mining finished (all categories)")
 
         # P4: INSIDE a category but nothing unplayed visible → reveal more, then
         # (if truly barren) exhaust the category and advance.
@@ -391,6 +400,7 @@ class StoryMiningSkill(BaseSkill):
                 continue
             card = self.find_cls(screen, cat, conf=_CLS_CONF)
             if card is not None:
+                self._card_misses = 0
                 # ★ Signal-driven category gate: no 黄点 on the card = nothing
                 # to mine inside — skip without entering (e.g. 支線 today).
                 if not self._card_has_mine_dot(screen, card):
@@ -400,6 +410,14 @@ class StoryMiningSkill(BaseSkill):
                     continue
                 self._current_cat = cat
                 return card
+            # Card cls not seen THIS frame. A 1-frame flicker must not skip the
+            # whole category (live 2026-06-10: 短篇 flickered out right after
+            # 主線 exhausted → its mine was skipped entirely). Retry a few hub
+            # frames before giving up on it.
+            self._card_misses += 1
+            if self._card_misses < 3:
+                return None
+            self._card_misses = 0
             self._cat_idx += 1
         return None
 
