@@ -140,13 +140,26 @@ class TicketSweepSkill(BaseSkill):
         0.11 from icon.x2+0.002 → '6/6')."""
         if screen.frame is None:
             return None
-        icon = self.find_cls(screen, self._TICKET_CLS, conf=_CLS_CONF,
-                             region=(0.0, 0.04, 0.26, 0.36))
-        if icon is None:
-            return None
         try:
             from brain.pipeline import run_digit_ocr, parse_count
         except Exception:
+            return None
+        icon = self.find_cls(screen, self._TICKET_CLS, conf=0.20,
+                             region=(0.0, 0.04, 0.26, 0.36))
+        if icon is None:
+            # Ticket cls anchor FLICKERS (live 2026-06-09: bounty 票 cls
+            # zero-detected on the branch page while "懸賞通緝票券 15/6"
+            # rendered plainly top-left). The counter is a stable page
+            # fixture → fixed-region OCR fallback; digits+slash survive
+            # the Chinese label in the strip.
+            # Region calibrated on the LIVE dxcam frame 2026-06-09: '15/6' ✓.
+            # x1=0.16 keeps the (sometimes-burned) overlay label out of the
+            # strip; y≥0.235 stays below the icon's label zone.
+            raw = run_digit_ocr(screen.frame, (0.16, 0.235, 0.30, 0.29))
+            res = parse_count(raw)
+            if res is not None and res[0] is not None:
+                self.log(f"tickets via fixed-region fallback: {res[0]} (raw {raw!r})")
+                return res[0]
             return None
         bh = icon.y2 - icon.y1
         x1 = max(0.0, icon.x2 + 0.002)
