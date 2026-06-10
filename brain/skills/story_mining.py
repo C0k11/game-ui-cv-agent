@@ -172,7 +172,9 @@ class StoryMiningSkill(BaseSkill):
         # above; a post-battle story resume (menu/skip/continue cls) releases
         # the hold so the P1 skip chain takes over.
         if self._fighting > 0:
-            if self._in_story(screen) or self._on_any_story_page(screen):
+            if (self._on_any_story_page(screen)
+                    or self.find_cls(screen, [UC.STORY_SKIP, UC.STORY_TAP_CONTINUE],
+                                     conf=0.30) is not None):
                 self._fighting = 0
             else:
                 self._fighting -= 1
