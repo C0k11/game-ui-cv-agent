@@ -76,6 +76,7 @@ class ArenaSkill(BaseSkill):
         self._fight_stage: int = 0          # 0=對戰對象 1=编队 2=battle
         self._fight_ticks: int = 0
         self._stage_settle: int = 0         # blind wait after each click (page transition)
+        self._enter_settle: int = 0         # blind wait after a nav click in enter
         self._select_attempts: int = 0
         self._select_rounds: int = 0        # extra-cooldown retries when select spins
         self._result_pending: bool = False
@@ -196,15 +197,26 @@ class ArenaSkill(BaseSkill):
             self._goto("claim")
             return action_wait(400, "entered arena")
 
+        # ★ Settle after any nav click — during the page transition the OLD page
+        # (and its cls boxes) linger at low conf for a frame or two; re-clicking
+        # the same spot then lands on the NEW page's UI. Live 2026-06-09: the
+        # tick-2 "arena tile" re-click hit the freshly-loaded arena main and
+        # opened the 對戰對象 popup → select spun on covered rows → false exit.
+        if self._enter_settle > 0:
+            self._enter_settle -= 1
+            return action_wait(600, f"enter transition ({self._enter_settle} left)")
+
         page = self.detect_screen_yolo(screen)
         if page == "Lobby":
             act = self.click_cls(screen, UC.NAV_TASKS, "open campaign hub", conf=_CLS_CONF)
             if act is not None:
+                self._enter_settle = 3
                 return act
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
             act = self.click_cls(screen, UC.HUB_ARENA, "click arena tile", conf=_CLS_CONF)
             if act is not None:
+                self._enter_settle = 4
                 return act
             return action_wait(450, "hub: arena tile not seen (transition)")
 
@@ -284,6 +296,18 @@ class ArenaSkill(BaseSkill):
         return action_wait(400, "waiting for arena main")
 
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
+        # 對戰對象 popup may ALREADY be open (stray click / re-entry) — its body
+        # covers the opponent rows, so spinning for cls92 here would falsely
+        # exit (live 2026-06-09). Hand over to fight stage 0, which clicks the
+        # visible 攻击编制.
+        if self.find_cls(screen, UC.ATTACK_FORMATION, conf=_CLS_CONF) is not None:
+            self.log("對戰對象 already open → fight stage0")
+            self._fight_stage = 0
+            self._fight_ticks = 0
+            self._stage_settle = 0
+            self._goto("fight")
+            return action_wait(250, "popup already open → fight")
+
         self._select_attempts += 1
         if self._select_attempts > 8:
             # Between fights a spin usually means the cooldown bar hadn't fully
