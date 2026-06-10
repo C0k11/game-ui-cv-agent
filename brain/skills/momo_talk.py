@@ -378,10 +378,17 @@ class MomoTalkSkill(BaseSkill):
             return action_done(f"momotalk complete ({self._students_done})")
         if self._phase_ticks > _EXIT_MAX:
             return action_done("momotalk exit timeout")
+        # Standard exit kit (2026-06-10): cancel-first (quit-prompt / cost
+        # dialogs), then home/back cls, then PACED blind ESC.
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
+        if cancel is not None:
+            return action_click_box(cancel, "momotalk exit: cancel pending dialog")
         home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "momotalk exit: home")
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "momotalk exit: back")
+        if self._phase_ticks % 3 != 0:
+            return action_wait(600, "exit: settle before next ESC")
         return action_back("momotalk exit: ESC toward lobby")
