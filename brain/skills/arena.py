@@ -471,4 +471,8 @@ class ArenaSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "exit: back key")
+        # Pace blind ESC — every-tick spam outruns transitions (and on the
+        # lobby pops the 是否結束 quit prompt repeatedly).
+        if self._phase_ticks % 3 != 0:
+            return action_wait(600, "exit: settle before next ESC")
         return action_back("arena exit: ESC toward hub/lobby")

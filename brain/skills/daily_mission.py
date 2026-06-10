@@ -236,4 +236,8 @@ class DailyMissionSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "daily_mission exit: back")
+        # Pace blind ESC — every-tick spam outruns transitions and pops the
+        # lobby 是否結束 quit prompt repeatedly (live 2026-06-10).
+        if self._phase_ticks % 3 != 0:
+            return action_wait(600, "exit: settle before next ESC")
         return action_back("daily_mission exit: ESC toward lobby")

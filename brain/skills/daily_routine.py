@@ -133,6 +133,17 @@ class DailyRoutineSkill(BaseSkill):
                 self._cur_started = True
                 self.sub_state = sub.name
                 self.log(f"→ entering '{sub.name}'")
+                # ★ YOLO context follows the ACTIVE SUB, not the static
+                # DailyRoutine loadout (which carried +cafe+avatar for the
+                # whole routine — the emoticon model then ran and drew boxes
+                # on every non-cafe screen, e.g. 每日任務, live 2026-06-10).
+                # Cafe gets +cafe+avatar, Schedule +avatar, the rest base ui.
+                try:
+                    from brain.pipeline import (SKILL_YOLO_MAP, BASE_DETECTORS,
+                                                set_yolo_context)
+                    set_yolo_context(SKILL_YOLO_MAP.get(sub.name, BASE_DETECTORS))
+                except Exception:
+                    pass
 
             # Delegate the tick to the current sub-skill
             try:

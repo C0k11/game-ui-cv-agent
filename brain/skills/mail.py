@@ -198,4 +198,9 @@ class MailSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "mail exit: back button")
+        # Pace blind ESC (user 2026-06-10: "ADB点击要有耐心") — spamming it every
+        # tick outruns page transitions and lands extra ESCs on the lobby,
+        # popping the 是否結束 quit prompt over and over.
+        if self._phase_ticks % 3 != 0:
+            return action_wait(600, "mail exit: settle before next ESC")
         return action_back("mail exit: ESC toward lobby")
