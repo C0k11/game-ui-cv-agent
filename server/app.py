@@ -83,6 +83,13 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 和 campaign_sweep 内部需要实例化), 但 dashboard 不再让用户单独勾选.
     # 老 profile 里残留的这些 id 会在 app.py 校验时被过滤掉, 用户重新
     # save profile 即可清理.
+
+    # 战斗扫荡单跑入口 (live 单 skill 测试用 — 2026-06-09: 传 "bounty" 被过滤
+    # → fallback 全套 daily_routine 真跑, step gate 拦住才没出事。这三个 id
+    # 必须合法, 否则单测只能跑全套):
+    {"id": "bounty", "label": "[测试] 悬赏通缉 单跑"},
+    {"id": "arena", "label": "[测试] 战术大赛 单跑"},
+    {"id": "jfd", "label": "[测试] 学院交流会 单跑"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
@@ -841,6 +848,34 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 dry_run = True
 
         _log_pipeline(f"Pipeline worker started. window='{window_title}' hwnd={hwnd} render={render_hwnd} sleep={step_sleep} dry_run={dry_run}")
+
+        # ── Clean-flywheel recorder (user rule 2026-06-09: 每次启动 bot 实跑都
+        # 录干净帧当迭代素材). ADB screencap runs INSIDE Android — the Win32
+        # overlay doesn't exist there, so frames are guaranteed overlay-free
+        # (DXcam/trajectory frames burn the boxes in). Each capture is its own
+        # adb subprocess (stateless, thread-safe vs. the input taps). Low rate
+        # (1 frame / 2.5s) keeps the cost invisible to the tick loop.
+        if adb is not None:
+            _clean_dir = RAW_IMAGES_DIR / ("run_" + time.strftime("%Y%m%d_%H%M%S") + "_clean")
+
+            def _clean_flywheel_worker():
+                import cv2 as _cv2
+                _clean_dir.mkdir(parents=True, exist_ok=True)
+                idx = 0
+                _log_pipeline(f"clean-flywheel recorder → {_clean_dir.name} (ADB, overlay-free)")
+                while _PIPELINE_RUNNING:
+                    try:
+                        fr = adb.capture_frame()
+                        if fr is not None:
+                            _cv2.imwrite(str(_clean_dir / f"frame_{idx:06d}.jpg"), fr,
+                                         [int(_cv2.IMWRITE_JPEG_QUALITY), 92])
+                            idx += 1
+                    except Exception:
+                        pass
+                    time.sleep(2.5)
+                _log_pipeline(f"clean-flywheel recorder stopped ({idx} frames)")
+
+            threading.Thread(target=_clean_flywheel_worker, daemon=True).start()
 
         # OCR + YOLO lazy-load on first use (no pre-warm to avoid deadlocks).
         # Florence pre-warm in background thread (needed for Lobby + Schedule avatar matching).
