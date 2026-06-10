@@ -40,6 +40,8 @@ _ROW_DY = 0.06                               # node-icon ↔ 入场键 same-row 
 _MAX_PAGE_TURNS = 6      # 右切换 paging cap per category (short/side grids)
 _MAX_MAIN_SWIPES = 5     # 卷-list swipe-left cap (main)
 _BARREN_LIMIT = 5        # empty scans before exhausting a category
+_RESULT_BAND = (0.32, 0.55, 0.68, 0.85)  # centered battle-result 确认键 band
+_FIGHT_HOLD = 120        # ticks to hold for a story auto-battle (~2min)
 
 
 class StoryMiningSkill(BaseSkill):
@@ -74,6 +76,9 @@ class StoryMiningSkill(BaseSkill):
         self._card_misses: int = 0             # consecutive hub frames missing the
                                                # next category's card cls (3 → skip;
                                                # 1-frame flicker must NOT skip a cat)
+        self._fighting: int = 0                # >0 = story battle in progress (hold
+                                               # ticks; battle frames carry no known
+                                               # ui cls → would otherwise nav-lose)
 
     def reset(self) -> None:
         super().reset()
@@ -125,16 +130,48 @@ class StoryMiningSkill(BaseSkill):
             self._barren = 0
             return action_click_box(quit_node, "中断 — leave node after mining")
 
-        # P0.7: ⚠️ BATTLE node — a 出击/部队 squad screen (a story node can be a
-        # battle node). Story mining does NOT fight (costs AP/stamina). Back out
-        # immediately — NEVER press 出击. Count it so a battle-only chapter
-        # eventually exhausts instead of looping.
+        # P0.6: battle result (戰鬥結果) — a centered cancel-less 确认键. The
+        # confirm+cancel-both-visible case = a COST dialog → never click confirm
+        # (arena C2 lesson); story flows have no legit cost dialogs, but keep
+        # the negative gate anyway.
+        res_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_RESULT_BAND)
+        if res_confirm is not None:
+            if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None:
+                return action_wait(400, "confirm+cancel visible — not a result, re-read")
+            self._fighting = 0
+            self._cooldown = 2
+            return action_click_box(res_confirm, "dismiss battle/result dialog (确认键)")
+
+        # P0.7: BATTLE node — a story node's 部队/出击 squad screen. ★ Story
+        # battles cost NO AP (user 2026-06-10) and the account trivially
+        # out-levels them — FIGHT (arena-style): 出击 → auto-battle → result
+        # dialog handled by P0.6. Completing the battle is what clears the
+        # node/chapter dot (backing out left the mine permanently blocked).
         if self.find_cls(screen, [UC.SORTIE, UC.SQUAD_1, UC.SQUAD_1_HI],
                          conf=_CLS_CONF) is not None:
-            self._cut_ticks = 0
-            self._cooldown = 2
-            self._barren += 1
-            return action_back("⚠️ battle node (部队出击) — back out, NEVER 出击 (no AP)")
+            sortie = self.find_cls(screen, UC.SORTIE, conf=_CLS_CONF)
+            if sortie is not None:
+                self._cut_ticks = 0
+                self._barren = 0
+                self._fighting = _FIGHT_HOLD
+                self._cooldown = 3
+                self.log("story battle node → 出击 (free, no AP)")
+                return action_click_box(sortie, "story battle 出击 (no AP)")
+            return action_wait(500, "squad screen — waiting for 出击")
+
+        # P0.8: battle in progress — battle frames carry no known ui cls; hold
+        # instead of nav-wandering. Result/reward popups are caught by P0/P0.6
+        # above; a post-battle story resume (menu/skip/continue cls) releases
+        # the hold so the P1 skip chain takes over.
+        if self._fighting > 0:
+            if self._in_story(screen) or self._on_any_story_page(screen):
+                self._fighting = 0
+            else:
+                self._fighting -= 1
+                if self._fighting == 0:
+                    self.log("battle hold expired → back out")
+                    return action_back("battle hold expired")
+                return action_wait(1000, f"story battle in progress ({self._fighting})")
 
         # P1: cutscene skip chain (story auto-plays → skip ASAP).
         cut = self._handle_cutscene(screen)
@@ -179,6 +216,16 @@ class StoryMiningSkill(BaseSkill):
         # (if truly barren) exhaust the category and advance.
         page = self.detect_screen_yolo(screen)
         on_story = (page == "Story") or self._on_any_story_page(screen)
+        # ★ Short/side card GRID pages carry NO trained page cls when no New
+        # card is visible (ui v8 backlog) — but their 右切换 pagination arrow
+        # detects fine (0.91). If we just opened a grid category and see the
+        # arrow on an otherwise-unknown page, treat it as in-category so
+        # _reveal_more pages toward the New card instead of nav-losing.
+        if (not on_story and page is None
+                and self._current_cat in (UC.STORY_SHORT, UC.STORY_SIDE)
+                and self.find_cls(screen, UC.ARROW_RIGHT, conf=_CLS_CONF,
+                                  region=(0.85, 0.30, 1.0, 0.70)) is not None):
+            on_story = True
         if on_story:
             reveal = self._reveal_more(screen)
             if reveal is not None:
