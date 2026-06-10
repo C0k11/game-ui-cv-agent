@@ -316,10 +316,17 @@ class StoryMiningSkill(BaseSkill):
         ) is not None
 
     def _card_has_mine_dot(self, screen: ScreenState, card: YoloBox) -> bool:
-        """黄点 at the card's TOP-RIGHT corner = this category has mines
-        (user 2026-06-10: 通过黄点识别有没有矿, 没点的类别根本不进)."""
-        region = (max(0.0, card.x2 - 0.07), max(0.0, card.y1 - 0.06),
-                  min(1.0, card.x2 + 0.05), min(1.0, card.y1 + 0.12))
+        """黄点 near the card's TOP-RIGHT = this category has mines (user
+        2026-06-10: 通过黄点识别有没有矿, 没点的类别根本不进).
+
+        Geometry (live-measured 2026-06-10, story_hub.png): the category cls
+        box is the TITLE TEXT near the card BOTTOM, while the dot sits at the
+        card's TOP edge (y≈0.165) — 0.35-0.55 ABOVE the title. Search the
+        vertical strip above the title: x within (title.x1, title.x2+0.06),
+        y from 0.10 down to the title top. Measured: 主線 title(0.31-0.43,
+        y0.72) dot(0.445,0.165) ✓; 短篇 title(0.57-0.65,y0.52) dot(0.667,
+        0.167) ✓; strips don't cross-talk (0.486<0.662, 0.574>0.450)."""
+        region = (card.x1, 0.10, min(1.0, card.x2 + 0.06), max(0.12, card.y1))
         return self.find_cls(screen, UC.DOT_YELLOW, conf=0.35, region=region) is not None
 
     def _pick_hub_card(self, screen: ScreenState) -> Optional[YoloBox]:
