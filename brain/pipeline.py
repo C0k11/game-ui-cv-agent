@@ -257,6 +257,41 @@ def get_yolo_context() -> str:
     with _yolo_context_lock:
         return _yolo_context
 
+
+# ── Lobby resource snapshot (user 2026-06-09: 大厅顶栏三资源稳读 → 全局复用) ──
+# Refreshed on lobby frames every ~30s. Consumers:
+#   • shop budget fallback (in-shop top-bar credit cls is flaky → use snapshot)
+#   • ⛔ PYROXENE KILL-SWITCH: a DROP between two consecutive confirmed reads =
+#     money breach somewhere → abort the whole pipeline (global audit on top of
+#     every per-skill guard).
+_RESOURCES: Dict[str, Any] = {"ap": None, "credits": None, "pyroxene": None, "ts": 0.0}
+
+
+def get_resource_snapshot() -> Dict[str, Any]:
+    """Latest lobby top-bar reads: {ap, credits, pyroxene, ts}. Values None
+    until the first successful lobby read; ts is time.time() of last refresh."""
+    return dict(_RESOURCES)
+
+
+def _read_topbar_count(screen, cls_name: str):
+    """DIGIT-only read of the number right of a top-bar icon (cy<0.10)."""
+    best = None
+    for b in (screen.yolo_boxes or []):
+        if b.cls_name != cls_name or b.confidence < 0.25:
+            continue
+        if b.cy >= 0.10:
+            continue
+        if best is None or b.confidence > best.confidence:
+            best = b
+    if best is None or screen.frame is None:
+        return None
+    bh = best.y2 - best.y1
+    raw = run_digit_ocr(screen.frame, (
+        min(1.0, best.x2 + 0.003), max(0.0, best.y1 - bh * 0.25),
+        min(1.0, best.x2 + 0.118), min(1.0, best.y2 + bh * 0.25)))
+    res = parse_count(raw)
+    return res[0] if (res is not None and res[0] is not None) else None
+
 # Per-skill YOLO detector loadout (module-level = single source of truth).
 # base = "ui" ONLY (FPS: avatar=fused yolo26X / battle are heavy nets, added
 # only where a skill needs them). _start_skill sets context from this at skill
@@ -1850,6 +1885,45 @@ class DailyPipeline:
                     set_yolo_context("ui+avatar")  # row avatars; no emoticon
                 else:
                     set_yolo_context("ui")         # enter/earnings/switch/exit
+        except Exception:
+            pass
+
+        # ── Lobby resource snapshot + 青辉石 kill-switch ──────────────────
+        try:
+            _now = time.time()
+            if _now - _RESOURCES["ts"] > 30 and screen.yolo_boxes:
+                from brain.skills.ui_classes import (
+                    LOBBY_NAV_ICONS, TOPBAR_AP, TOPBAR_CREDIT, TOPBAR_PYROXENE)
+                _navs = sum(1 for b in screen.yolo_boxes
+                            if b.cls_name in set(LOBBY_NAV_ICONS) and b.confidence >= 0.30)
+                if _navs >= 2:  # lobby (nav bar fully visible) — top bar reliable
+                    _ap = _read_topbar_count(screen, TOPBAR_AP)
+                    _cr = _read_topbar_count(screen, TOPBAR_CREDIT)
+                    _py = _read_topbar_count(screen, TOPBAR_PYROXENE)
+                    _prev_py = _RESOURCES.get("pyroxene")
+                    if _py is not None:
+                        if _prev_py is not None and _py < _prev_py:
+                            # Require TWO consecutive lower reads (an OCR misread
+                            # like 278-for-2787 must not nuke the run).
+                            if getattr(self, "_py_drop_pending", None) == _py:
+                                print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → {_py} "
+                                      f"(confirmed ×2) — MONEY BREACH, ABORTING PIPELINE",
+                                      flush=True)
+                                self._running = False
+                                return action_done("⛔ pyroxene drop detected — aborted")
+                            self._py_drop_pending = _py
+                        else:
+                            self._py_drop_pending = None
+                            _RESOURCES["pyroxene"] = _py
+                    if _ap is not None:
+                        _RESOURCES["ap"] = _ap
+                    if _cr is not None:
+                        _RESOURCES["credits"] = _cr
+                    if _ap is not None or _cr is not None or _py is not None:
+                        _RESOURCES["ts"] = _now
+                        print(f"[Pipeline] resources: AP={_RESOURCES['ap']} "
+                              f"credits={_RESOURCES['credits']} pyroxene={_RESOURCES['pyroxene']}",
+                              flush=True)
         except Exception:
             pass
 

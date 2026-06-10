@@ -144,6 +144,24 @@ class ShopSkill(BaseSkill):
             self._balance = res[0]
             self.log(f"shop credit balance (top-bar) = {self._balance:,} (raw {raw!r})")
 
+    def _balance_from_snapshot(self) -> None:
+        """Fallback: the shop grid's top-bar 信用点 cls is FLAKY (live 2026-06-09:
+        missed on every grid frame → balance=None → wrongly cancelled). The
+        LOBBY snapshot read seconds earlier is authoritative — use it when the
+        in-shop read failed and the snapshot is fresh (<10 min)."""
+        if self._balance is not None:
+            return
+        try:
+            import time as _t
+            from brain.pipeline import get_resource_snapshot
+            snap = get_resource_snapshot()
+            cr, ts = snap.get("credits"), snap.get("ts", 0.0)
+            if cr is not None and (_t.time() - ts) < 600:
+                self._balance = int(cr)
+                self.log(f"balance from LOBBY snapshot = {self._balance:,} (in-shop read failed)")
+        except Exception:
+            pass
+
     def _affordable(self) -> bool:
         """Buy only when the grid-read balance stays above reserve even after a
         worst-case purchase (一般-tab totals observed ~3M; 20M ceiling is safe).
@@ -316,6 +334,7 @@ class ShopSkill(BaseSkill):
         # Try one more balance read in case the dialog left the top bar visible
         # (mostly it won't — the grid-view read in _select is the real source).
         self._capture_balance(screen)
+        self._balance_from_snapshot()  # lobby-snapshot fallback (flaky in-shop cls)
         if not self._budget_logged:
             self.log(f"budget: balance={self._balance} reserve={self._reserve:,} "
                      f"ceiling={_ASSUMED_MAX_TOTAL:,}")
