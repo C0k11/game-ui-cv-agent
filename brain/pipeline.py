@@ -30,6 +30,7 @@ from brain.skills.schedule import ScheduleSkill
 from brain.skills.club import ClubSkill
 from brain.skills.bounty import BountySkill
 from brain.skills.jfd import JointFiringDrillSkill
+from brain.skills.batch_sweep import BatchSweepSkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
 from brain.skills.shop import ShopSkill
@@ -1071,14 +1072,17 @@ class DailyPipeline:
     # sub-flows. (Old event-farming / campaign_sweep removed 2026-06-02 —
     # probe-driven rewrite; events不测,刷体力未就绪。)
     DEFAULT_SKILLS = [
-        # ── Battle / ticket-sweep skills (explicit user control) ──
-        "bounty",           # 1.  悬赏通缉 ticket sweep
+        # ── Task-hall block (user order 2026-06-11): ticket activities first
+        #    (their AP+ticket spend is bounded), batch sweep eats the REMAINING
+        #    AP, arena (no AP) last. Prevents bounty/JFD starving each other.
+        "bounty",           # 1.  悬赏通缉 ticket sweep (tickets + AP)
         "jfd",              # 2.  学院交流会 ticket sweep (tickets + AP)
-        "arena",            # 3.  PvP fights + claim rewards
+        "batch_sweep",      # 3.  批量掃蕩 — spend remaining AP (saved preset, MAX)
+        "arena",            # 4.  PvP fights + claim rewards (no AP)
         # ── Daily harvest (dot-gated sub-flows) ──
-        # buy_pyroxene → club → craft → shop → cafe → schedule → momo_talk →
-        # story_mining → mail(收口) → daily_mission(last). See DailyRoutineSkill.
-        "daily_routine",    # 4.  All daily harvest in one go
+        # buy_pyroxene → club → craft → shop → cafe → schedule →
+        # mail(收口: hall rewards funnel here) → daily_mission(n/8≥7, last).
+        "daily_routine",    # 5.  All daily harvest in one go
     ]
 
     TRAJECTORIES_DIR = Path(__file__).resolve().parents[1] / "data" / "trajectories"
@@ -1098,6 +1102,7 @@ class DailyPipeline:
             "story_mining": StoryMiningSkill(),
             "bounty": BountySkill(),
             "jfd": JointFiringDrillSkill(),
+            "batch_sweep": BatchSweepSkill(),
             "arena": ArenaSkill(),
             "mail": MailSkill(),
             "daily_mission": DailyMissionSkill(),

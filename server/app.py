@@ -90,6 +90,7 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "bounty", "label": "[测试] 悬赏通缉 单跑"},
     {"id": "arena", "label": "[测试] 战术大赛 单跑"},
     {"id": "jfd", "label": "[测试] 学院交流会 单跑"},
+    {"id": "batch_sweep", "label": "批量掃蕩 (刷体力, 剩余AP全花)"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
