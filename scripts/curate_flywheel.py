@@ -106,7 +106,9 @@ def main() -> None:
     BATCH = 16
     for s in range(0, len(out_paths), BATCH):
         chunk = out_paths[s:s + BATCH]
-        for path, res in zip(chunk, model.predict(chunk, conf=args.conf, verbose=False)):
+        # imgsz=960: the training/serving size — tiny cls (dots/badges) lose
+        # their few-pixel color signal at the 640 default (live 2026-06-10).
+        for path, res in zip(chunk, model.predict(chunk, conf=args.conf, imgsz=960, verbose=False)):
             h, w = res.orig_shape
             lines = []
             for b in res.boxes:
