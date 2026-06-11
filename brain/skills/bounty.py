@@ -35,7 +35,11 @@ class BountySkill(TicketSweepSkill):
     _HUB_TILE = UC.HUB_BOUNTY
     _PAGE_NAME = "Bounty"
     _CONFIG_KEY = "bounty_branches"
-    _COSTS_AP = False
+    # Live-corrected 2026-06-11: bounty sweeps DO cost AP (~13/sweep — a MAX
+    # 15-ticket sweep silently ate ~197 AP and starved JFD downstream). The
+    # old probe note "tickets only" was wrong. AP gate + game-capped MAX.
+    _COSTS_AP = True
+    _AP_PER_SWEEP = 10   # min-AP gate; exact cost varies, grey-confirm guards
 
     def __init__(self):
         super().__init__("Bounty")
