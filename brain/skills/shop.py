@@ -253,11 +253,23 @@ class ShopSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "shop nothing to select")
 
-        # Already selected → go buy.
-        if (self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF) is not None
+        # Already selected → go buy. v8 reality (probed 2026-06-11):
+        #  · SHOP_ALL_SELECTED (cls402 已全部选择) has ZERO training samples →
+        #    never fires.
+        #  · SHOP_BUY_SELECTED (cls450 选择购买) flickers out live.
+        #  · BUT the checked select-all box renders a GREEN_CHECK (绿勾) right
+        #    at the checkbox (≈0.878,0.12), and the grid fills with 绿勾.
+        # So "selected" = a 绿勾 in the select-all checkbox zone, OR the buy
+        # button present (either cls). The actual spend is still gated by the
+        # _confirm credit-reserve check, so advancing here is money-safe.
+        sel_checked = self.find_cls(
+            screen, UC.GREEN_CHECK, conf=0.35, region=(0.84, 0.06, 0.91, 0.17)
+        )
+        if (sel_checked is not None
+                or self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF) is not None
                 or self.find_cls(screen, UC.SHOP_ALL_SELECTED, conf=_CLS_CONF) is not None):
             self._goto("buy")
-            return action_wait(250, "items selected → buy")
+            return action_wait(250, "items selected (绿勾/buy cls) → buy")
 
         sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF)
         if sel is not None:
@@ -302,20 +314,35 @@ class ShopSkill(BaseSkill):
                 return action_wait(300, "buy lost shop → exit")
             return action_wait(400, "waiting for shop UI (buy)")
 
+        # The 選擇購買 button: cls450 (选择购买) when v8 sees it, else the same
+        # yellow button gets MISCLASSIFIED as 任务开始 (probed 2026-06-11:
+        # 选择购买 absent, 任务开始@0.91,0.92 c0.63 = the buy button). Accept
+        # either in the bottom-right shop strip. Money-safe: the confirm dialog
+        # still gates the spend on the credit-reserve check (never pyroxene).
         buy = self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF)
+        if buy is None:
+            buy = self.find_cls(screen, UC.TASK_START, conf=0.30,
+                                region=(0.80, 0.86, 0.99, 0.98))
         if buy is not None:
             if self._buy_clicks >= 4:
-                self.log("选择购买 clicked 4x, no dialog — exiting")
+                self.log("buy button clicked 4x, no dialog — exiting")
                 self._goto("exit")
                 return action_wait(300, "buy stuck → exit")
+            # Pace (稳定规则): the confirm dialog takes a beat to render.
+            if self._phase_ticks % 3 != 1 and self._buy_clicks > 0:
+                return action_wait(450, "buy clicked — settling for dialog")
             self._buy_clicks += 1
-            self.log(f"click 选择购买 (#{self._buy_clicks})")
+            self.log(f"click 選擇購買 (#{self._buy_clicks}, cls={buy.cls_name})")
             return action_click_box(buy, "buy selected items")
 
-        # No batch-buy button — re-select or bail.
-        if self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF) is not None:
+        # No batch-buy button AND not selected — re-select or bail. Only loop
+        # back to select if we are NOT already selected (绿勾 absent), else the
+        # buy button is just flickering — wait for it.
+        sel_checked = self.find_cls(screen, UC.GREEN_CHECK, conf=0.35,
+                                    region=(0.84, 0.06, 0.91, 0.17))
+        if sel_checked is None and self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF) is not None:
             self._goto("select")
-            return action_wait(250, "no 选择购买 → back to select")
+            return action_wait(250, "not selected → back to select")
         if self._phase_ticks > _BUY_MAX:
             self._goto("exit")
             return action_wait(300, "no buy cls → exit")
