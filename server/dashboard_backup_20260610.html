@@ -6,66 +6,69 @@
 <title>私人碧蓝档案助手</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-/* ── Industrial dark theme (2026-06-10 rework) ──
- * Dense, flat, tool-grade: neutral graphite surfaces, one restrained
- * steel-blue accent + muted amber for "active/claim" semantics. No
- * gradients, no glows, no hover lifts — state changes are border/bg
- * shifts only. Numbers render in mono. Radii kept small (3-5px). */
+/* ── BA-themed palette (refactored 2026-05-13) ──
+ * Mirrors Blue Archive's mission-screen dark navy + cyan accents +
+ * signature gold "active" highlight on tabs/badges.  Keeps dark mode
+ * (BA's primary menus use dark navy), swaps slate→navy and blue→
+ * BA-cyan, adds gold accent variable for important callouts.
+ * Reference: BA mission/strategy screens (dark navy bg, cyan tab
+ * highlights, gold-yellow "selected" / "active" indicators). */
 :root{
-  --bg:#121417;            /* app background — neutral graphite */
-  --bg2:#1a1d21;           /* panel surface */
-  --bg3:#23272d;           /* hover / inputs */
-  --bg-soft:#1e2226;       /* sub-panel tint */
-  --border:#31373f;        /* 1px structural lines */
-  --border-soft:#272c32;
-  --text:#d7dde3;
-  --muted:#8a939d;
-  --accent:#4da3d9;        /* steel blue — single primary accent */
-  --accent2:#3b8cc0;
-  --accent-soft:rgba(77,163,217,.13);
-  --gold:#d9a13d;          /* muted amber (active / claim) */
-  --gold-soft:rgba(217,161,61,.14);
-  --green:#53b06d;
-  --red:#d96459;
-  --yellow:#d4b04a;
-  --shadow:0 1px 2px rgba(0,0,0,.35);
-  --shadow-soft:0 1px 2px rgba(0,0,0,.25);
+  --bg:#0e1a2d;            /* deep navy — BA mission screen bg */
+  --bg2:#182843;           /* card surface — slightly lighter navy */
+  --bg3:#243757;           /* hover / inputs */
+  --bg-soft:#1d2e4d;       /* sub-panel tint */
+  --border:#2f456a;        /* subtle navy border */
+  --border-soft:#26385a;
+  --text:#e7f0fb;          /* cream-white text */
+  --muted:#8ea5c3;         /* secondary text */
+  --accent:#4fc3f7;        /* BA primary cyan */
+  --accent2:#29a8e0;       /* hover cyan */
+  --accent-soft:rgba(79,195,247,.12);
+  --gold:#f4c430;          /* BA gold (active tab / claim) */
+  --gold-soft:rgba(244,196,48,.16);
+  --green:#4ade80;
+  --red:#f87171;
+  --yellow:#facc15;
+  --shadow:0 2px 8px rgba(0,8,24,.4);
+  --shadow-soft:0 1px 3px rgba(0,8,24,.25);
   --font:'Noto Sans SC','Source Han Sans SC',system-ui,-apple-system,'Segoe UI',sans-serif;
   --font-display:'Noto Sans SC','Source Han Sans SC',system-ui,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  --radius:4px;
-  --radius-lg:6px;
+  --radius:10px;
+  --radius-lg:14px;
 }
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex;font-size:13px}
-:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+body{font-family:var(--font);background:radial-gradient(circle at 20% 0%,#16294a 0%,var(--bg) 60%);color:var(--text);display:flex}
 
 /* ── Sidebar ── */
-.sidebar{width:56px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px;flex-shrink:0}
-.sidebar .logo{font-size:15px;margin-bottom:6px;padding:6px 0;color:var(--muted);font-weight:700;letter-spacing:0;font-family:var(--mono)}
-.nav-btn{width:40px;height:40px;border:none;background:transparent;color:var(--muted);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;transition:background .1s,color .1s;position:relative;font-family:var(--mono)}
+.sidebar{width:60px;background:linear-gradient(180deg,var(--bg2) 0%,#142441 100%);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;flex-shrink:0;transition:width .2s;box-shadow:1px 0 4px rgba(0,4,12,.3)}
+.sidebar .logo{font-size:20px;margin-bottom:8px;padding:8px 0;color:var(--accent);font-weight:700;letter-spacing:-1px;text-shadow:0 0 12px rgba(79,195,247,.4)}
+.nav-btn{width:44px;height:44px;border:none;background:transparent;color:var(--muted);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;transition:all .15s;position:relative}
 .nav-btn:hover{background:var(--bg3);color:var(--text)}
-.nav-btn.active{background:var(--bg3);color:var(--accent)}
-.nav-btn.active::after{content:"";position:absolute;left:-8px;top:50%;transform:translateY(-50%);width:2px;height:22px;background:var(--accent)}
+.nav-btn.active{background:var(--accent);color:#0b1a30;box-shadow:0 0 12px rgba(79,195,247,.5)}
+.nav-btn.active::after{content:"";position:absolute;left:-10px;top:50%;transform:translateY(-50%);width:3px;height:24px;background:var(--gold);border-radius:0 3px 3px 0}
 .nav-btn .label{display:none}
 .sidebar-bottom{margin-top:auto}
 
 /* ── Main ── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.page{display:none;flex:1;overflow:auto;padding:14px 18px}
+.page{display:none;flex:1;overflow:auto;padding:22px 26px}
 .page.active{display:flex;flex-direction:column}
-.page-title{font-size:15px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;color:var(--text);letter-spacing:.2px;border-left:3px solid var(--accent);padding-left:8px}
+.page-title{font-size:22px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:10px;color:var(--text);letter-spacing:.5px}
+.page-title::before{content:"";display:inline-block;width:4px;height:22px;background:linear-gradient(180deg,var(--accent) 0%,var(--gold) 100%);border-radius:2px}
 
 /* ── Cards ── */
-.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:10px}
-.card h3{font-size:11px;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:600;display:flex;align-items:center;gap:6px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px;box-shadow:var(--shadow-soft)}
+.card h3{font-size:13px;color:var(--accent);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;display:flex;align-items:center;gap:6px}
+.card h3::before{content:"◆";color:var(--gold);font-size:10px}
 
 /* ── Form elements ── */
 .form-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end}
 .form-group{display:flex;flex-direction:column;gap:5px}
-.form-group label{font-size:11px;color:var(--muted);letter-spacing:.3px;font-weight:500}
-.form-group input,.form-group textarea,.form-group select{padding:6px 9px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--font);font-size:13px;outline:none;transition:border-color .1s}
-.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--accent)}
+.form-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:500}
+.form-group input,.form-group textarea,.form-group select{padding:9px 11px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font);font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .form-group textarea{min-height:100px;font-family:var(--mono);font-size:12px;resize:vertical}
 .form-group.wide{flex:1;min-width:300px}
 .check-row{display:flex;gap:18px;align-items:center;font-size:13px;flex-wrap:wrap}
@@ -73,24 +76,24 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .check-row input[type=checkbox]{accent-color:var(--accent)}
 
 /* ── Buttons ── */
-.btn{padding:6px 13px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12.5px;font-family:var(--font);font-weight:500;transition:background .1s,border-color .1s;white-space:nowrap}
-.btn:hover{background:#2b3037;border-color:#3e454e}
-.btn-primary{background:var(--accent);border-color:var(--accent);color:#0d1116;font-weight:600}
-.btn-primary:hover{background:#5db0e3;border-color:#5db0e3}
-.btn-danger{background:transparent;border-color:var(--red);color:var(--red)}
+.btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-family:var(--font);font-weight:500;transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--border);border-color:var(--accent);color:var(--text)}
+.btn-primary{background:linear-gradient(180deg,var(--accent) 0%,var(--accent2) 100%);border-color:var(--accent2);color:#0b1a30;font-weight:700;box-shadow:0 2px 6px rgba(79,195,247,.25)}
+.btn-primary:hover{background:linear-gradient(180deg,#5fcffa 0%,#2eb0e8 100%);color:#08152a}
+.btn-danger{background:#7a1d1d;border-color:var(--red);color:#fff}
 .btn-danger:hover{background:var(--red);color:#fff}
-.btn-success{background:transparent;border-color:var(--green);color:var(--green)}
-.btn-success:hover{background:var(--green);color:#0d1116}
-.btn-gold{background:var(--gold);border-color:var(--gold);color:#1c1409;font-weight:600}
-.btn-gold:hover{background:#e3ad4e}
-.btn-sm{padding:4px 9px;font-size:12px;border-radius:3px}
+.btn-success{background:#1a6e3a;border-color:var(--green);color:#fff}
+.btn-success:hover{background:var(--green);color:#0b1a30}
+.btn-gold{background:linear-gradient(180deg,#facc41 0%,#d99c14 100%);border-color:#d99c14;color:#3a2400;font-weight:700;box-shadow:0 2px 6px rgba(244,196,48,.3)}
+.btn-gold:hover{background:linear-gradient(180deg,#ffd95a 0%,#e6ab1c 100%)}
+.btn-sm{padding:5px 11px;font-size:12px;border-radius:6px}
 
 /* ── Status pill ── */
-.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:3px;font-size:11.5px;font-weight:600;letter-spacing:.2px;font-family:var(--mono)}
-.pill.ok{background:rgba(83,176,109,.12);color:var(--green);border:1px solid rgba(83,176,109,.35)}
-.pill.bad{background:rgba(217,100,89,.12);color:var(--red);border:1px solid rgba(217,100,89,.35)}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:600;letter-spacing:.2px}
+.pill.ok{background:rgba(74,222,128,.14);color:var(--green);border:1px solid rgba(74,222,128,.4)}
+.pill.bad{background:rgba(248,113,113,.14);color:var(--red);border:1px solid rgba(248,113,113,.4)}
 .pill.idle{background:var(--bg3);color:var(--muted);border:1px solid var(--border)}
-.pill.gold{background:var(--gold-soft);color:var(--gold);border:1px solid rgba(217,161,61,.35)}
+.pill.gold{background:var(--gold-soft);color:var(--gold);border:1px solid rgba(244,196,48,.4)}
 
 /* ── Logs ── */
 .logs-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
@@ -98,25 +101,26 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .log-box textarea{flex:1;width:100%;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);resize:none}
 
 /* ── Routine HUD ── */
-.routine-hud{padding:10px 12px;border-radius:var(--radius);background:var(--bg-soft);border:1px solid var(--border);border-left:3px solid var(--accent);margin-top:8px}
-.routine-hud.recovery{background:#241a18;border-left-color:var(--red)}
-.progress-bar{width:100%;background:rgba(0,0,0,.35);height:5px;border-radius:2px;margin:7px 0;overflow:hidden}
-.progress-fill{height:100%;background:var(--accent);transition:width .3s}
+.routine-hud{padding:12px 14px;border-radius:var(--radius);background:linear-gradient(135deg,#143a5e 0%,#0d2b48 100%);border:1px solid rgba(79,195,247,.35);margin-top:10px;box-shadow:inset 0 0 12px rgba(79,195,247,.08)}
+.routine-hud.recovery{background:linear-gradient(135deg,#5e1414 0%,#3a0d0d 100%);border-color:rgba(248,113,113,.4)}
+.progress-bar{width:100%;background:rgba(0,0,0,.3);height:7px;border-radius:4px;margin:8px 0;overflow:hidden}
+.progress-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent) 0%,var(--gold) 100%);transition:width .3s}
 
 /* ── Toast (currently used by annotation save errors) ── */
 .toast-stack{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999;pointer-events:none;max-width:480px}
-.toast{padding:8px 13px;border-radius:var(--radius);font-size:12.5px;font-family:var(--font);box-shadow:0 2px 8px rgba(0,0,0,.45);pointer-events:auto;border-left:3px solid var(--border);background:var(--bg2);color:var(--text);animation:toastIn .15s ease-out;word-break:break-word}
-.toast.error{border-left-color:var(--red);background:#241a18}
-.toast.success{border-left-color:var(--green);background:#18211b}
+.toast{padding:10px 16px;border-radius:6px;font-size:13px;font-family:var(--font);box-shadow:0 4px 16px rgba(0,0,0,.5);pointer-events:auto;border-left:4px solid var(--border);background:var(--bg2);color:var(--text);animation:toastIn .2s ease-out;word-break:break-word}
+.toast.error{border-left-color:var(--red);background:linear-gradient(90deg,#3a0e0e 0%,var(--bg2) 70%)}
+.toast.success{border-left-color:var(--green);background:linear-gradient(90deg,#0e3a1f 0%,var(--bg2) 70%)}
 .toast.info{border-left-color:var(--accent)}
 .toast.fade-out{opacity:0;transition:opacity .3s}
 @keyframes toastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
 
 /* ── Capture page ── */
-.capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
-.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;text-align:center}
-.stat-card .num{font-size:24px;font-weight:600;color:var(--text);font-family:var(--mono)}
-.stat-card .lbl{font-size:10.5px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.8px}
+.capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.stat-card{background:linear-gradient(180deg,var(--bg2) 0%,var(--bg-soft) 100%);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;text-align:center;box-shadow:var(--shadow-soft);transition:transform .15s,box-shadow .15s}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,8,24,.5)}
+.stat-card .num{font-size:30px;font-weight:700;color:var(--accent);text-shadow:0 0 12px rgba(79,195,247,.4)}
+.stat-card .lbl{font-size:11px;color:var(--muted);margin-top:6px;text-transform:uppercase;letter-spacing:1px}
 
 /* ── Annotate page ── */
 .annotate-layout{display:flex;flex:1;gap:0;min-height:0;overflow:hidden}
@@ -152,14 +156,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .assistant-sub{font-size:12px;color:var(--muted);margin:-10px 0 14px 0}
 .profile-actions{display:flex;gap:6px;align-items:center}
 .skill-list{display:flex;flex-direction:column;gap:8px}
-.skill-row{display:flex;align-items:center;gap:10px;padding:7px 11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-soft);cursor:grab;user-select:none;transition:border-color .1s}
-.skill-row:hover{border-color:#3e454e}
+.skill-row{display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--border);border-radius:var(--radius);background:linear-gradient(180deg,var(--bg-soft) 0%,var(--bg) 100%);cursor:grab;user-select:none;transition:box-shadow .12s,transform .12s,border-color .12s}
+.skill-row:hover{border-color:var(--accent)}
 .skill-row:active{cursor:grabbing}
 .skill-row.dragging{opacity:.4}
-.skill-row.drag-over{box-shadow:0 0 0 1px var(--accent);border-color:var(--accent)}
+.skill-row.drag-over{box-shadow:0 0 0 2px var(--accent);transform:translateY(-1px);border-color:var(--accent)}
 .skill-row.off{opacity:.45;background:var(--bg)}
 .skill-row .skill-main{display:flex;align-items:center;gap:10px;flex:1}
-.skill-row .skill-handle{font-family:var(--mono);color:var(--gold);font-size:12px;font-weight:600;min-width:22px;text-align:center;background:var(--gold-soft);padding:1px 5px;border-radius:3px;border:1px solid rgba(217,161,61,.3)}
+.skill-row .skill-handle{font-family:var(--mono);color:var(--gold);font-size:12px;font-weight:700;min-width:22px;text-align:center;background:var(--gold-soft);padding:2px 6px;border-radius:4px;border:1px solid rgba(244,196,48,.3)}
 .skill-row.off .skill-handle{color:var(--muted);background:transparent;border-color:var(--border)}
 .skill-row .skill-grip{color:var(--muted);font-size:14px;cursor:grab;padding:0 2px;letter-spacing:-1px}
 .skill-row .skill-label{font-size:13px;color:var(--text);font-weight:500}
@@ -168,29 +172,30 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .profile-hint{font-size:11px;color:var(--muted);margin-top:8px;font-style:italic}
 
 /* ── Char picker ── */
-.fav-tray{display:flex;flex-wrap:wrap;gap:8px;min-height:72px;padding:8px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:8px}
-.fav-tray.empty::before{content:"未选择角色 · 从下方列表点击添加，在此拖动调整顺序";color:var(--muted);font-size:11px;width:100%;text-align:center;align-self:center;padding:12px 0}
-.fav-tray-item{position:relative;display:flex;flex-direction:column;align-items:center;padding:4px;border-radius:var(--radius);border:1px solid var(--accent);background:var(--bg-soft);cursor:grab;user-select:none}
+.fav-tray{display:flex;flex-wrap:wrap;gap:8px;min-height:80px;padding:10px;background:linear-gradient(180deg,#1c2c4a 0%,#0f1c33 100%);border:1px dashed rgba(79,195,247,.5);border-radius:var(--radius);margin-bottom:10px}
+.fav-tray.empty::before{content:"未选择角色 · 从下方列表点击添加，在此拖动调整顺序";color:var(--muted);font-size:11px;width:100%;text-align:center;align-self:center;padding:14px 0}
+.fav-tray-item{position:relative;display:flex;flex-direction:column;align-items:center;padding:4px;border-radius:6px;border:2px solid var(--accent);background:#1c3556;cursor:grab;user-select:none;transition:transform .12s,box-shadow .12s}
+.fav-tray-item:hover{box-shadow:0 3px 10px rgba(79,195,247,.5);transform:translateY(-1px)}
 .fav-tray-item:active{cursor:grabbing}
 .fav-tray-item.dragging{opacity:.4}
-.fav-tray-item.drag-over{box-shadow:0 0 0 2px var(--gold)}
-.fav-tray-item .priority-badge{position:absolute;top:-5px;left:-5px;background:var(--gold);color:#1c1409;font-size:10px;font-weight:700;min-width:17px;height:17px;padding:0 4px;border-radius:3px;line-height:17px;text-align:center;z-index:2;pointer-events:none}
+.fav-tray-item.drag-over{box-shadow:0 0 0 3px var(--gold)}
+.fav-tray-item .priority-badge{position:absolute;top:-5px;left:-5px;background:var(--gold);color:#3a2400;font-size:10px;font-weight:700;min-width:18px;height:18px;padding:0 5px;border-radius:9px;line-height:18px;text-align:center;z-index:2;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.6)}
 .fav-tray-item .remove-btn{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;font-size:10px;width:16px;height:16px;border-radius:50%;line-height:16px;text-align:center;z-index:2;cursor:pointer;opacity:0;transition:opacity .15s}
 .fav-tray-item:hover .remove-btn{opacity:1}
 .char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;max-height:350px;overflow-y:auto;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)}
-.char-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px;border-radius:var(--radius);border:1px solid transparent;transition:background .1s,border-color .1s;user-select:none}
-.char-item:hover{background:var(--bg3);border-color:var(--border)}
+.char-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;padding:4px;border-radius:6px;border:2px solid transparent;transition:all .15s;user-select:none}
+.char-item:hover{background:var(--bg3);border-color:var(--accent)}
 .char-item.hidden{display:none}
 .char-avatar{width:44px;height:44px;object-fit:cover;border-radius:4px;pointer-events:none}
 .char-name{font-size:9px;margin-top:3px;text-align:center;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;pointer-events:none}
-.fav-search{width:100%;padding:6px 9px;margin-bottom:8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:12px;box-sizing:border-box;outline:none;transition:border-color .1s}
-.fav-search:focus{border-color:var(--accent)}
+.fav-search{width:100%;padding:8px 10px;margin-bottom:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;box-sizing:border-box;outline:none;transition:border-color .15s,box-shadow .15s}
+.fav-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar{width:9px;height:9px}
+/* ── BA-themed scrollbar ── */
+::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:var(--bg)}
-::-webkit-scrollbar-thumb{background:#343a42;border-radius:2px;border:2px solid var(--bg)}
-::-webkit-scrollbar-thumb:hover{background:#4a525c}
+::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:5px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--accent)}
 </style>
 </head>
 <body>
@@ -211,8 +216,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 <!-- ════════════ AGENT PAGE ════════════ -->
 <div class="page active" id="page-agent">
-  <div class="page-title">助手控制台</div>
-  <div class="assistant-sub">本地日常自动化 · 档案 / Skill 编排 · YOLO 状态机驱动</div>
+  <div class="page-title">老师专属碧蓝档案助手 <span class="pill gold" style="font-size:10px;margin-left:6px">Sensei Mode</span></div>
+  <div class="assistant-sub">纯本地日常收菜工作台 · 多档案 / 多账号 / Skill 顺序编排 / 红黄点智能跳过 / OCR + 模板 + YOLO 状态机驱动</div>
   <div class="card">
     <!-- ── PRIMARY: Profile + Run controls (everything you actually press) ── -->
     <div class="form-row">
@@ -507,7 +512,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <h4>Find frames with class <span id="ann_findcount" style="color:var(--muted);font-weight:normal"></span></h4>
       <div class="add-class-row">
         <input type="text" id="ann_findclass" placeholder="class idx or name, e.g. 361 or 昴" onkeydown="if(event.key==='Enter')annFindFrames()" style="flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none"/>
-        <button class="btn btn-sm btn-success" onclick="annFindFrames()" style="padding:3px 6px" title="搜索包含该 class 的 frame">查</button>
+        <button class="btn btn-sm btn-success" onclick="annFindFrames()" style="padding:3px 6px" title="搜索包含该 class 的 frame">🔍</button>
         <button class="btn btn-sm" onclick="$('ann_findclass').value='';$('ann_findlist').innerHTML='';$('ann_findcount').textContent='';" style="padding:3px 6px" title="清空">✕</button>
       </div>
       <div id="ann_findlist" style="flex-shrink:0;max-height:240px;min-height:0;overflow-y:auto;background:#0d0d10;border:1px solid var(--border);border-radius:3px;font-size:11px;font-family:var(--mono)"></div>
@@ -558,15 +563,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           <option value="avatar">avatar 头像</option>
           <option value="ui">ui 图章</option>
         </select>
-        <button onclick="synthToggleStampMode()" id="synth_stamp_btn" class="btn btn-sm" title="开启后: 在画布上拖出一个 UI 图章框, 松手选 class. 关闭时画布行为=画 slot (不变)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">UI 图章: 关</button>
+        <button onclick="synthToggleStampMode()" id="synth_stamp_btn" class="btn btn-sm" title="开启后: 在画布上拖出一个 UI 图章框, 松手选 class. 关闭时画布行为=画 slot (不变)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">🏷️ UI 图章: 关</button>
         <button onclick="synthBuildUI()" id="synth_build_ui_btn" class="btn btn-sm" title="按当前模板的 ui_stamps 生成 UI 合成帧 (POST build_ui)" style="padding:5px 10px;background:#0e7490;border:1px solid #155e75;border-radius:4px;color:#fff;cursor:pointer;font-size:12px;font-weight:600">⚙ 生成UI合成</button>
-        <button onclick="synthNewTemplate()" class="btn btn-sm" title="新建自定义模板 (任意命名, e.g. tactical_tight)" style="padding:5px 10px;background:var(--accent);color:#0d1116;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">+ 新建</button>
-        <button onclick="synthPickSample()" class="btn btn-sm" title="选本地图片文件 (也可以直接拖到画布上)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">选样板图</button>
+        <button onclick="synthNewTemplate()" class="btn btn-sm" title="新建自定义模板 (任意命名, e.g. tactical_tight)" style="padding:5px 10px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">+ 新建</button>
+        <button onclick="synthPickSample()" class="btn btn-sm" title="选本地图片文件 (也可以直接拖到画布上)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">📁 选样板图</button>
         <button onclick="synthPickSampleByPath()" class="btn btn-sm" title="输入文件路径 (相对 repo 根 / 绝对路径)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">路径...</button>
         <button onclick="synthZeroAug()" class="btn btn-sm" title="一键把所有 augmentation 概率设为 0 (Lv/Star/Weapon/Heart/Dim/Border 都关)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">关 Aug</button>
         <button onclick="synthDefaultAug()" class="btn btn-sm" title="一键填推荐 augmentation 概率 (UI overlay 0.5, Lv 0.5, Star 0.3, Weapon 0.4, Heart 0.2, Dim 0.25, Border 0.4)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">推荐 Aug</button>
-        <button onclick="synthRandomAug()" class="btn btn-sm" title="每个 augmentation 概率随机化 (每次点都不同, 用来探索)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">随机 Aug</button>
-        <button onclick="synthDeleteContext()" class="btn btn-sm" title="删除当前 context 模板 + 样板图" style="padding:5px 8px;background:#7f1d1d;border:1px solid #991b1b;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">删除</button>
+        <button onclick="synthRandomAug()" class="btn btn-sm" title="每个 augmentation 概率随机化 (每次点都不同, 用来探索)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">🎲 Aug</button>
+        <button onclick="synthDeleteContext()" class="btn btn-sm" title="删除当前 context 模板 + 样板图" style="padding:5px 8px;background:#7f1d1d;border:1px solid #991b1b;border-radius:4px;color:#fff;cursor:pointer;font-size:11px">🗑️ 删除</button>
         <button onclick="synthSave()" class="btn btn-sm" style="background:var(--green);color:#0b1a30;border-color:var(--green);font-weight:700">保存模板</button>
         <button onclick="synthPreview()" style="padding:5px 10px;background:var(--accent);color:#0b1a30;border:1px solid var(--accent);border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">Preview 合成</button>
         <div style="display:flex;gap:2px;margin-left:8px">
@@ -586,7 +591,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <b>多选</b>: <kbd>Shift/Ctrl+空白拖</kbd> 框选/反选 · <kbd>Shift+点击</kbd> 加选 · <kbd>Ctrl+点击</kbd> 减选 · <kbd>双击 box</kbd> 选同类 · <kbd>Ctrl+A</kbd> 全选 · <kbd>Esc</kbd> 清空选中 · 拖动时 <kbd>Shift</kbd>=锁水平 / <kbd>Ctrl</kbd>=锁垂直<br>
         <b>批量</b>: <kbd>Shift+V</kbd> 复制上一帧 · <kbd>Shift+P</kbd> 任意帧 picker · <kbd>Shift+G</kbd> 阵列生成 · <kbd>Shift+T</kbd> Stamp 保存/粘贴<br>
         <b>视图</b>: 滚轮 缩放 (锚定鼠标) · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> / <kbd>0</kbd> 复位 · <kbd>左键</kbd>拖空白 / <kbd>中键</kbd>拖 平移<br>
-        <b>样板图</b>: 点 <b>选样板图</b> 或<b>直接把任意图片文件拖到画布上</b> (自动转格式/找路径都不需要)
+        <b>样板图</b>: 点 <b>📁 选样板图</b> 或<b>直接把任意图片文件拖到画布上</b> (自动转格式/找路径都不需要)
       </div>
     </div>
 
@@ -601,7 +606,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <!-- UI stamps (target=ui) -->
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:11px;color:#e879f9;text-transform:uppercase" title="UI 图章框 (合成 UI 数据用), 与 slots 独立">UI 图章 (<span id="synth_stamp_count">0</span>)</span>
-        <button onclick="synthDeleteStamp()" id="synth_stamp_del_btn" title="删除选中的 UI 图章 (也可按 Del)" style="margin-left:auto;padding:3px 8px;background:#7f1d1d;border:1px solid #991b1b;border-radius:3px;color:#fff;cursor:pointer;font-size:11px">删图章</button>
+        <button onclick="synthDeleteStamp()" id="synth_stamp_del_btn" title="删除选中的 UI 图章 (也可按 Del)" style="margin-left:auto;padding:3px 8px;background:#7f1d1d;border:1px solid #991b1b;border-radius:3px;color:#fff;cursor:pointer;font-size:11px">🗑️ 删图章</button>
       </div>
       <div id="synth_stamp_list" style="max-height:140px;overflow-y:auto;background:var(--bg2);border:1px solid #6b21a8;border-radius:4px;padding:4px"></div>
 
@@ -680,7 +685,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
             <input type="range" id="synth_aug_border" min="0" max="1" step="0.05" value="0.4"/>
             <span id="synth_aug_border_v" style="font-family:var(--mono);font-size:11px">0.40</span>
           </div>
-          <div style="margin-top:6px;font-size:10px;color:var(--muted);line-height:1.5;padding:6px;background:#0d0d10;border-radius:3px;border-left:2px solid var(--accent)">
+          <div style="margin-top:6px;font-size:10px;color:var(--muted);line-height:1.5;padding:6px;background:#0d0d10;border-radius:3px;border-left:2px solid #7c3aed">
             <b>UI 干扰说明</b> (训练 augmentation, 不是吸附框):<br>
             • <b>Lv/Star/Weapon/Heart</b> = 随机位置随机大小贴在 slot 内, 让 model 学会"忽略 UI 装饰看头像本体"<br>
             • 这些位置<b>不能手动微调</b>, 概率越高越多张合成图会带上对应干扰<br>
@@ -721,7 +726,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <summary style="cursor:pointer;user-select:none;font-weight:600">Preview 角色 (打样用)</summary>
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
           <div style="display:flex;gap:6px">
-            <button onclick="synthRandomPreview()" title="清空选中, 每个 slot 都填不同的随机角色 (= 实际 build 的效果)" style="flex:1;padding:6px;background:var(--accent);color:#0d1116;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px">随机所有 slot</button>
+            <button onclick="synthRandomPreview()" title="清空选中, 每个 slot 都填不同的随机角色 (= 实际 build 的效果)" style="flex:1;padding:6px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px">🎲 随机所有 slot</button>
             <button onclick="$('synth_char_pick').value='';$('synth_char_search').value='';synthRefreshCharList('');$('synth_status').textContent='已清空选中, 下次 Preview 用随机';" title="清空选中, 不立刻 preview" style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">清空</button>
           </div>
           <input type="text" id="synth_char_search" placeholder="搜角色名 (e.g. 若藻)..." style="padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
@@ -740,8 +745,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           <span style="color:#fff;font-weight:600;font-size:13px">Preview · </span>
           <span id="synth_pv_info" style="color:#aaa;font-size:12px;font-family:var(--mono)"></span>
           <div style="margin-left:auto;display:flex;gap:4px;align-items:center">
-            <button onclick="synthPreview()" title="重新生成 (R) — 把当前裁剪/aug 设置应用上看效果" style="padding:4px 10px;background:var(--accent);border:1px solid var(--accent2);color:#0d1116;cursor:pointer;border-radius:3px;font-weight:600">重新生成 (R)</button>
-            <button onclick="synthRandomPreview()" title="随机角色重新生成" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px">随机</button>
+            <button onclick="synthPreview()" title="重新生成 (R) — 把当前裁剪/aug 设置应用上看效果" style="padding:4px 10px;background:#7c3aed;border:1px solid #6d28d9;color:#fff;cursor:pointer;border-radius:3px;font-weight:600">🔄 重新生成</button>
+            <button onclick="synthRandomPreview()" title="随机角色重新生成" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px">🎲</button>
             <span style="width:1px;background:#444;align-self:stretch;margin:0 4px"></span>
             <button onclick="synthPvZoom(1/1.25)" title="缩小 (-)" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px;font-family:var(--mono)">−</button>
             <span id="synth_pv_zoom" style="color:#fff;font-size:11px;font-family:var(--mono);min-width:50px;text-align:center">100%</span>
@@ -1796,7 +1801,7 @@ async function annLoadDatasets(){
       sel.appendChild(og);
     }
     if(unused.length){
-      const og=document.createElement('optgroup');og.label='其他未纳入 (合成/废弃, 标了也不进 build)';
+      const og=document.createElement('optgroup');og.label='🗃️ 其他未纳入 (合成/废弃, 标了也不进 build)';
       unused.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
       sel.appendChild(og);
     }
@@ -4257,7 +4262,7 @@ function synthToggleStampMode(){
   SYNTH.stampMode = !SYNTH.stampMode;
   const btn = $('synth_stamp_btn');
   if (btn){
-    btn.textContent = SYNTH.stampMode ? 'UI 图章: 开' : 'UI 图章: 关';
+    btn.textContent = SYNTH.stampMode ? '🏷️ UI 图章: 开' : '🏷️ UI 图章: 关';
     btn.style.background = SYNTH.stampMode ? '#d946ef' : 'var(--bg3)';
     btn.style.color = SYNTH.stampMode ? '#fff' : 'var(--text)';
     btn.style.borderColor = SYNTH.stampMode ? '#d946ef' : 'var(--border)';
@@ -4959,7 +4964,7 @@ async function synthPreview(){
     holder.appendChild(img);
     const cap = document.createElement('div');
     cap.style.cssText = 'font-size:10px;color:var(--muted);margin-top:4px;text-align:center;pointer-events:none';
-    cap.textContent = info + ' · 点击放大';
+    cap.textContent = info + ' · 🔍 点击放大';
     holder.appendChild(cap);
     $('synth_status').textContent = '✓ Preview ready';
     // Auto-open modal (first time, can also be reopened by clicking thumbnail)
