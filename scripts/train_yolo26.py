@@ -530,6 +530,30 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v8b": {
+        # v8b = v8 best(ep26) 短程微调 + _arrow_boost(旧款箭头帧×1287重编码副本):
+        #  v8 在 ep15→20 间用旧款左右切换换了双倍三倍(风格灾难遗忘, momo新款47/47
+        #  vs 旧款15/238)。增压旧款把锚点拉回, 其余能力(双倍三倍0.51/红黄点0修复/
+        #  新类455-468)从 best.pt 继承。验收: 箭头≥0.9 且 双倍三倍≥0.45 且 红黄混淆=0。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v8" / "weights" / "best.pt"),
+        "epochs": 14,
+        "patience": 14,
+        "save_period": 2,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v8b",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.002,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.3, "close_mosaic": 4, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

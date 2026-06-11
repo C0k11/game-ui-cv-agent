@@ -11,7 +11,7 @@ Navigation is **vision-first**. Every button, tab, popup and badge the bot acts 
 | **Platform** | Windows 10 / 11, NVIDIA GPU |
 | **Game runtime** | MuMu Player 12 |
 | **Daily** | `DailyRoutine` (10 sub-skills) + `CampaignSweep` (bounty / arena) |
-| **Vision** | YOLO26m UI (455-cls) + YOLO26x avatar (252-cls) + YOLO26n emoticon + YOLOv8n battle head |
+| **Vision** | YOLO26m UI (469-cls) + YOLO26x avatar (252-cls) + YOLO26n emoticon + YOLOv8n battle head |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs — numeric fields only |
 | **Battle lock** | DXcam + ByteTrack + Kalman predict-correct (lead-aim) |
 | **Tooling** | WebView2 launcher + annotation / synth dashboard |
@@ -40,7 +40,7 @@ flowchart LR
 
 | Tier | Model | Job | Latency |
 |---|---|---|---|
-| **UI** (primary) | YOLO26m `ui_v7` (455-cls) | every button / tab / popup / badge → drives all nav + clicks; in-game flywheel-trained | ~6 ms |
+| **UI** (primary) | YOLO26m `ui_v8` (469-cls) | every button / tab / popup / badge → drives all nav + clicks; in-game flywheel-trained | ~6 ms |
 | Avatar ID | YOLO26x `fused_avatar_v6` (252-cls) | bbox + character ID in one pass + in-battle skill-card recognition (incl. grayed-out / charging) | ~10 ms |
 | Numeric OCR | PP-OCRv4 BA-tuned | AP / ticket / count digits only | ~50 ms |
 | Head-pat | YOLO26n `emoticon` | cafe head-pat bubble | ~2 ms |
@@ -98,16 +98,19 @@ What actually moved the needle, learned across UI v1→v5 and avatar v1→v4:
 - **The small held-out val lies** — it carried zero instances of the weak classes it was meant to measure, and picked the wrong checkpoint. Models ship from a frozen `last.pt` after a real-frame check, not from val-mAP alone.
 - **Warm-start** from the previous best preserves learned identity features and roughly halves wall-clock.
 
-**Active:** UI `ui_yolo26m_v7` · avatar `fused_avatar_yolo26x_v6` · emoticon `v26n` · battle `battle_heads`.
+**Active:** UI `ui_yolo26m_v8` · avatar `fused_avatar_yolo26x_v6` · emoticon `v26n` · battle `battle_heads`.
 
-**UI v7** (shipped) is the pure-UI + emoticon detector, warm-started from v5 and retrained on real in-game flywheel frames (head labels filtered out — those go to the avatar model). Validated on a held-out 477-frame flywheel set (fully real, zero synth → no inflated mAP): by-class recall **0.83 → 0.92**, with the weak classes the old model missed now covered — craft-entry **0→0.97**, plus loading / claim-gray / activity banners — while the strong classes (cafe income/invite, red/yellow dots, lobby tabs) held. Checkpoint picked from real-val peak.
+**UI v8** (shipped) grows the class map to **469** — adding the full batch-sweep dialog suite (批量扫荡 button/start/plan/equipment states) hand-labeled by the operator — and fixes the two long-standing weak spots: red/yellow notification-dot **cross-confusion 348 → 0** (a position-prior poisoning in teacher labels, cured by per-pixel HSV arbitration over 635 labels at the source) and the double/triple-event ribbon **0.03 → 0.51**. Micro-precision 0.993 on the 515-frame all-real val. Shipped from a 14-epoch arrow-rehearsal finetune (`v8b`), checkpoint picked by real-val peak with a full per-class regression scan against v7 — which surfaced one honest lesson: the val set's lobby arrows all wore a since-replaced memorial-lobby skin, so the headline arrow recall reads 0.06 on a dead domain while live frames from the last four days score 90%. Skin-dependent UI elements get synthetic-compositing insurance in the next cycle.
+
+**UI v7** (previous) was the first pure-UI flywheel retrain: by-class recall 0.83 → 0.92 on the real 477-frame val, craft-entry 0→0.97. Kept in the registry — rollback is a one-line `active` flip.
 
 **Avatar v6** (shipped) extends the 252-head detector to in-battle **EX skill cards** — the bottom-row character cards, including the grayed-out *insufficient-cost* state with its clock-wipe charge sweep — built from a template-synth pipeline with multi-background backgrounds and domain-accurate gray/sector augmentation. On held-out real frames: skill-card recall **0.85** (vs the prior cards-capable run's 0.56) while non-battle recognition (cafe / formation) holds at mAP50 **0.99**. The shipped checkpoint is the *real-val peak*, picked on a manual val set rather than the synth-inflated nominal best (later epochs overfit the synthetic cards).
 
 **In progress:**
 
-- **Unified detector** — one YOLO26x covering UI + avatar + emoticon + skill cards, to retire the multi-model split once it beats each domain specialist.
-- **Battle skill-card AI** — the detector now *sees* the cards (incl. gray/charging); a combat policy that *reads* them (cost-aware skill rotation) is the next layer.
+- **Batch-sweep skill** — the v8 dialog classes get their real acceptance test as a live skill walk (MAX → sweep → claim).
+- **Synthetic arrow hardening** — skin-dependent elements (lobby arrows et al.) composited over diverse backgrounds so the next lobby-skin change can't break them.
+- **Battle skill-card AI** — the detector now *sees* the cards (incl. gray/charging); a combat policy that *reads* them (cost-aware skill rotation) is the next layer. (The unified single-model path is parked: per-domain specialists keep winning on measurement.)
 
 ## Quick Start
 

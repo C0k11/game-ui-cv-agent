@@ -77,6 +77,9 @@ REAL_SOURCES = [
     # 两个 06-10 val run 已抽离进 _val_v8flywheel(整 run 抽, 防同 session 泄漏)。
     "run_20260610_v8queue",
     "run_20260610_024533",           # 用户手标批量扫荡 dialog 全套(127帧, 新类 455-468 主源)
+    # v8b: 旧款箭头增压 — v8 训到 ep20 左右切换在旧风格(lobby/任务屏白chevron)上
+    # 灾难遗忘(momo新款47/47 vs 旧款15/238), 旧款帧×重编码副本拉回锚点。
+    "_arrow_boost",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合

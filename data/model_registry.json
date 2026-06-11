@@ -36,13 +36,22 @@
     }
   },
   "ui": {
-    "active": "v7",
+    "active": "v8",
     "task": "detect",
-    "n_classes": 455,
+    "n_classes": 469,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v8": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v8b/weights/best_real.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-06-11",
+        "n_classes": 469,
+        "epoch_best": "v8b微调ep4 (v8 ep26真实峰 warm → +_arrow_boost 14ep微调, 真val选峰: meanClsR 0.9134 全ckpt最高)",
+        "acceptance": "515真val: 红黄互混 348→0, 红点0.849→0.978, 黄点0.976, 双倍三倍452 0.032→0.508, microP 0.9930, 制造入口/任务大厅0.975; 新类455-468(批量扫荡dialog全套) GT帧定向抽测11/11类全检出(train帧上限, 真验收=live走线); 全类回退扫描 vs v7 仅3类(箭头×2+emoticon)",
+        "known_gap": "①左/右切换 val 0.06 — 定性=过期考卷: val箭头100%是06-06阳奈睡床大厅皮, 用户已换城市夜景皮; 真实live帧(近4天trajectory 60tick) 54/60=90%, miss全是skill不消费场景(短篇网格左箭头×5+悬赏关卡页×1); schedule左箭头有坐标fallback。结构修复=synth箭头贴多样背景(v9债, 大厅再换皮还会断)。②emoticon451 0.44 << v26n 0.995 → _FOLD_IN_EMOTICON 继续 False, cafe由独立v26n承担, 零live影响。③加载中idx22: ep4保1.0(best/last退0.64, 故ship ep4)。"
+      },
       "v7": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v7/weights/best_real.pt",
         "model_arch": "yolo26m",
