@@ -302,27 +302,57 @@ def _read_topbar_count(screen, cls_name: str):
     return res[0] if (res is not None and res[0] is not None) else None
 
 
-def _read_pyroxene_clean():
-    """Authoritative pyroxene read from a fresh overlay-free ADB frame
-    (2026-06-10 money rule). Returns int or None. Used by the kill-switch to
-    confirm a suspected drop before aborting — the live DXcam read left-
-    truncates 6497→497 and false-tripped a breach (2026-06-11)."""
-    frame = get_clean_frame()
-    if frame is None:
-        return None
-    try:
-        from brain.skills.ui_classes import TOPBAR_PYROXENE
-        h, w = frame.shape[:2]
-        boxes = _run_yolo_on_image(frame, w, h)
+class _FrameShim:
+    """Minimal screen-like holder for _read_topbar_count on a raw frame."""
+    __slots__ = ("yolo_boxes", "frame")
 
-        class _Shim:
-            pass
-        s = _Shim()
-        s.yolo_boxes = boxes
-        s.frame = frame
-        return _read_topbar_count(s, TOPBAR_PYROXENE)
-    except Exception:
+    def __init__(self, boxes, frame):
+        self.yolo_boxes = boxes
+        self.frame = frame
+
+
+def _read_topbar_clean(cls_name, samples: int = 5):
+    """Top-bar count from fresh overlay-free ADB frames (2026-06-10 money rule),
+    made robust to the digit OCR's BOTH-WAY instability (live 2026-06-11:
+    leading-digit DROP 6587→587 AND right-edge OVER-read 999→9999 / credit
+    reaching into the neighbour). Neither "fewest" nor "most" digits is right,
+    so VOTE: read up to `samples` clean frames, return the MODE (the value the
+    OCR agrees on most often — correct more often than any single error mode).
+    Returns int or None.
+
+    ⚠️ KNOWN GAP (task#5): AP/credit still mis-crop on many frames; pyroxene is
+    reliable. Until per-currency right-edge crop is calibrated, callers that
+    spend on a balance (shop) must treat a low-confidence read as unverifiable
+    and skip — never over-trust an inflated read."""
+    from collections import Counter
+    reads = []
+    for _ in range(max(1, samples)):
+        frame = get_clean_frame()
+        if frame is None:
+            continue
+        try:
+            h, w = frame.shape[:2]
+            boxes = _run_yolo_on_image(frame, w, h)
+            v = _read_topbar_count(_FrameShim(boxes, frame), cls_name)
+        except Exception:
+            v = None
+        if v is not None:
+            reads.append(v)
+            if reads.count(v) >= 3:   # strong agreement → done early
+                return v
+    if not reads:
         return None
+    cnt = Counter(reads)
+    top, n = cnt.most_common(1)[0]
+    # Require a real majority (≥2 agreeing) before trusting; a single noisy
+    # read is not authoritative for money decisions.
+    return top if n >= 2 else None
+
+
+def _read_pyroxene_clean():
+    """Kill-switch helper: authoritative pyroxene from a clean frame."""
+    from brain.skills.ui_classes import TOPBAR_PYROXENE
+    return _read_topbar_clean(TOPBAR_PYROXENE)
 
 # Per-skill YOLO detector loadout (module-level = single source of truth).
 # base = "ui" ONLY (FPS: avatar=fused yolo26X / battle are heavy nets, added
@@ -1963,9 +1993,19 @@ class DailyPipeline:
                 _navs = sum(1 for b in screen.yolo_boxes
                             if b.cls_name in set(LOBBY_NAV_ICONS) and b.confidence >= 0.30)
                 if _navs >= 2:  # lobby (nav bar fully visible) — top bar reliable
-                    _ap = _read_topbar_count(screen, TOPBAR_AP)
-                    _cr = _read_topbar_count(screen, TOPBAR_CREDIT)
-                    _py = _read_topbar_count(screen, TOPBAR_PYROXENE)
+                    # Read from a CLEAN ADB frame (2026-06-11 rule): the live
+                    # frame left-truncates these on transition (6497→497,
+                    # AP→9999, credit→None). One clean YOLO pass per 30s snapshot
+                    # is cheap; fall back to the live read only if no clean
+                    # source is registered.
+                    if get_clean_frame() is not None:
+                        _ap = _read_topbar_clean(TOPBAR_AP)
+                        _cr = _read_topbar_clean(TOPBAR_CREDIT)
+                        _py = _read_topbar_clean(TOPBAR_PYROXENE)
+                    else:
+                        _ap = _read_topbar_count(screen, TOPBAR_AP)
+                        _cr = _read_topbar_count(screen, TOPBAR_CREDIT)
+                        _py = _read_topbar_count(screen, TOPBAR_PYROXENE)
                     _prev_py = _RESOURCES.get("pyroxene")
                     if _py is not None:
                         if _prev_py is not None and _py < _prev_py:

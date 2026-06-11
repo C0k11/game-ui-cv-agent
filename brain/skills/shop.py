@@ -128,6 +128,18 @@ class ShopSkill(BaseSkill):
         digit strip to its right (verified: span 0.11 → 141,602,561)."""
         if self._balance is not None or screen.frame is None:
             return
+        # Prefer a CLEAN ADB frame (2026-06-11): the in-shop top bar read on the
+        # live frame returns None/truncated → budget unverifiable → cancel,
+        # which blocked every purchase. The clean frame reads it correctly.
+        try:
+            from brain.pipeline import _read_topbar_clean
+            cr = _read_topbar_clean(UC.TOPBAR_CREDIT)
+            if cr is not None:
+                self._balance = cr
+                self.log(f"shop credit balance (clean frame) = {self._balance:,}")
+                return
+        except Exception:
+            pass
         icon = self.find_cls(screen, UC.TOPBAR_CREDIT, conf=_CLS_CONF,
                              region=(0.0, 0.0, 1.0, 0.10))
         if icon is None:
