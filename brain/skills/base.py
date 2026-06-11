@@ -957,6 +957,23 @@ class BaseSkill(ABC):
         Called once at skill entry before tick(). Default = always run."""
         return True
 
+    def hall_tile_dot(self, screen: ScreenState, tile_cls: str,
+                      *, dot_classes: Tuple[str, ...] = ("红点", "黄点")
+                      ) -> Optional[bool]:
+        """Task-hall per-activity work check (user iron rule 2026-06-11: the
+        LOBBY entry dot must never gate these skills — enter the hall and scan
+        each activity's own dot).
+
+        Returns None when the tile isn't visible (not in the hall — can't
+        decide), True when a red/yellow dot sits at the tile's TOP-RIGHT
+        (live-measured 2026-06-11: 悬赏 tile (0.561,0.550) → dot (0.634,0.512)),
+        False when the tile is visible with no dot (= no work today)."""
+        tile = self.find_cls(screen, tile_cls, conf=0.40)
+        if tile is None:
+            return None
+        region = (tile.x1, tile.y1 - 0.08, tile.x2 + 0.11, tile.y2)
+        return self.dot_in_region(screen, region, dot_classes=dot_classes)
+
     def dot_in_region(self, screen: ScreenState,
                        region: Tuple[float, float, float, float],
                        *, dot_classes: Tuple[str, ...] = ("红点", "黄点"),

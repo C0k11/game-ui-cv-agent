@@ -173,6 +173,18 @@ class TicketSweepSkill(BaseSkill):
         return res[0]
 
     def _read_ap(self, screen: ScreenState) -> Optional[int]:
+        # Calibrated clean-frame read (2026-06-11): the generic read_count span
+        # left-truncated 199/240 → '1/240' live → JFD exited with 13 sweeps of
+        # AP unspent. _read_topbar_clean votes over clean ADB frames with the
+        # per-currency span (AP 0.06) — fail to the live read only if no clean
+        # source is registered.
+        try:
+            from brain.pipeline import _read_topbar_clean
+            ap = _read_topbar_clean(UC.TOPBAR_AP)
+            if ap is not None:
+                return ap
+        except Exception:
+            pass
         res = self.read_count(screen, UC.TOPBAR_AP, side="right", span=0.10)
         return res[0] if res is not None else None
 
@@ -236,6 +248,13 @@ class TicketSweepSkill(BaseSkill):
                 return action_click(0.935, 0.80, "open campaign hub (fixed pos)")
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
+            # ★ Hall scan (user iron rule 2026-06-11): the per-activity dot is
+            # only visible HERE — tile with no red/yellow dot = no work today,
+            # exit gracefully instead of entering blind.
+            has_work = self.hall_tile_dot(screen, self._HUB_TILE)
+            if has_work is False:
+                self.log(f"hall scan: {self._HUB_TILE} 无红黄点 → no work today, done")
+                return action_done(f"{self.name} no work (hall scan)")
             act = self.click_cls(screen, self._HUB_TILE, f"click {self.name} tile", conf=_CLS_CONF)
             if act is not None:
                 return act

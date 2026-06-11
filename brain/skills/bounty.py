@@ -41,10 +41,11 @@ class BountySkill(TicketSweepSkill):
         super().__init__("Bounty")
 
     def should_run(self, screen: ScreenState) -> bool:
-        # Bounty enters via the right-side 任务大厅入口 campaign tile; run when it
-        # carries a dot (tickets available / tasks unclaimed). Tile not visible
-        # ⇒ defer (not on lobby). Battle skills are also user-toggled in order.
-        return self.dot_on_entry(screen, [UC.NAV_TASKS])
+        # Always enter (user iron rule 2026-06-11): the LOBBY entry dot only
+        # means "something in the hall has work" — it must NOT gate this skill.
+        # The real signal is the 悬赏通缉 tile's own dot, checked by the hall
+        # scan inside _enter (no dot there → graceful "no work" exit).
+        return True
 
     def _click_branch(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         """Click the first enabled branch tile by its cls (right panel)."""

@@ -60,7 +60,10 @@ _EXIT_MAX = 16
 
 class ArenaSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
-        return self.dot_on_entry(screen, [UC.NAV_TASKS])
+        # Always enter (user iron rule 2026-06-11): real signal = the 战术大赛
+        # tile's own dot inside the hall (hall scan in _enter), never the lobby
+        # entry dot.
+        return True
 
     def __init__(self):
         super().__init__("Arena")
@@ -261,6 +264,13 @@ class ArenaSkill(BaseSkill):
                 return act
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
+            # ★ Hall scan (user iron rule 2026-06-11): the 战术大赛 tile's own
+            # red/yellow dot is the work signal — visible only here. No dot →
+            # nothing to claim/fight today → graceful exit.
+            has_work = self.hall_tile_dot(screen, UC.HUB_ARENA)
+            if has_work is False:
+                self.log("hall scan: 战术大赛 无红黄点 → no work today, done")
+                return action_done("arena no work (hall scan)")
             act = self.click_cls(screen, UC.HUB_ARENA, "click arena tile", conf=_CLS_CONF)
             if act is not None:
                 self._enter_settle = 4

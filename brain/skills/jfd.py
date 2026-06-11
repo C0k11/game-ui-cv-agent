@@ -40,7 +40,10 @@ class JointFiringDrillSkill(TicketSweepSkill):
         super().__init__("JointFiringDrill")
 
     def should_run(self, screen: ScreenState) -> bool:
-        return self.dot_on_entry(screen, [UC.NAV_TASKS])
+        # Always enter (user iron rule 2026-06-11): real signal = the 学院交流会
+        # tile's own dot inside the hall (hall scan in _enter), never the lobby
+        # entry dot.
+        return True
 
     def _click_branch(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         """Select the academy by position (tiles have no cls — v6 gap). Only
