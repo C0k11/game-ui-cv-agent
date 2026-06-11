@@ -273,6 +273,26 @@ def get_resource_snapshot() -> Dict[str, Any]:
     return dict(_RESOURCES)
 
 
+# Per-currency digit-field span (fraction of frame width) right of the icon.
+# Calibrated 2026-06-11 from the live top-bar layout (体力→加号 gap 0.084,
+# 信用点→青辉石 0.141, 青辉石→加号 0.082). AP/pyrox narrow, credit wide.
+def _topbar_span_map():
+    # Calibrated 12-sample live 2026-06-11:
+    #   AP 0.06   → "999" only (excludes "/240"; 0.078 caught the slash → 9999)
+    #   credit 0.118 → reads ~1.8B (a stable +1-digit OCR over-read of the
+    #                  9-digit 1.8亿; good enough for shop's "rich enough?" gate.
+    #                  wider spans → None). Exact credit is an OCR-model limit.
+    #   pyrox 0.078 → "6587" reliably (6587 ×12).
+    from brain.skills.ui_classes import TOPBAR_AP, TOPBAR_CREDIT, TOPBAR_PYROXENE
+    return {TOPBAR_AP: 0.06, TOPBAR_CREDIT: 0.118, TOPBAR_PYROXENE: 0.078}
+
+
+try:
+    _TOPBAR_SPAN = _topbar_span_map()
+except Exception:
+    _TOPBAR_SPAN = {}
+
+
 def _read_topbar_count(screen, cls_name: str):
     """DIGIT-only read of the number right of a top-bar icon (cy<0.10)."""
     best = None
@@ -286,15 +306,16 @@ def _read_topbar_count(screen, cls_name: str):
     if best is None or screen.frame is None:
         return None
     bh = best.y2 - best.y1
-    # Right edge: clip at the NEXT top-bar element (加号/next icon) so the strip
-    # never swallows the neighbouring counter (live 2026-06-09: credits read
-    # 9,581,179,414 because the 0.118 span reached into 青辉石's digits).
-    x_right = min(1.0, best.x2 + 0.118)
-    for b in (screen.yolo_boxes or []):
-        if b is best or b.cy >= 0.10 or b.confidence < 0.25:
-            continue
-        if b.x1 > best.x2 + 0.012 and b.x1 - 0.004 < x_right:
-            x_right = b.x1 - 0.004
+    # Right edge = a per-currency FIXED span from the icon. The old
+    # neighbour-clip (clip at the next 加号/icon) was the bug: the neighbour
+    # flickers frame-to-frame, and when AP's 加号 dropped the span over-reached
+    # into credit and read 999→9999 (systematic, sampled 12× live 2026-06-11).
+    # The top bar is a fixed layout, so a per-field span is deterministic and
+    # frame-independent: AP/pyrox fields are narrow (~0.078), credit is a wide
+    # 9-digit field (~0.135). (parse_count takes the numerator of AP's
+    # "999/240", so a touch of slack on AP is harmless.)
+    _span = _TOPBAR_SPAN.get(cls_name, 0.078)
+    x_right = min(1.0, best.x2 + _span)
     raw = run_digit_ocr(screen.frame, (
         min(1.0, best.x2 + 0.003), max(0.0, best.y1 - bh * 0.25),
         x_right, min(1.0, best.y2 + bh * 0.25)))
