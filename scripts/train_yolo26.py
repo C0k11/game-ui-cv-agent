@@ -503,6 +503,33 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v8": {
+        # v8 (2026-06-10) = v7 + 全技能飞轮素材(v8queue 2075 + 用户手标批量扫荡127):
+        #  新类455-468(批量扫荡dialog/战斗完成/立即前往, cls头 455→469 重学)。
+        #  补强: 制造入口544/任务大厅入口542/双倍三倍617+76(hub badge模板锚定,
+        #  破位置先验)/绿勾1569/短篇网格/剧情战斗结算。红黄点已HSV仲裁全清洗
+        #  (源头+queue 635处) — 位置先验毒源已断。emoticon 仍弱样本(5框), 折叠
+        #  目标0.99继续等。val = flywheel477 + _val_v8flywheel38(整run抽防泄漏)。
+        #  配方完全复刻 v7 成功版(hsv_h/s=0 保点色相信号)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v7" / "weights" / "best_real.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v8",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

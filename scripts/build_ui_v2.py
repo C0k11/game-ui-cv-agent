@@ -71,6 +71,12 @@ REAL_SOURCES = [
     "_emoticon_v2",
     "run_20260607_193003",           # v7 飞轮: 女仆背景 lobby/cafe 弱类(制造入口等) 783标
     "run_20260607_140123",           # v7 飞轮: 银发背景 lobby/cafe 弱类 1409标
+    # v8 飞轮 (2026-06-09/10 全技能 live 素材, curate_flywheel 去重 + 多 teacher
+    # add-only 补标 + 红黄点 HSV 仲裁清洗 + hub badge 模板锚定补 452):
+    # 制造入口544 / 任务大厅入口542 / 双倍三倍617+76hub / 短篇网格 / 剧情战斗结算。
+    # 两个 06-10 val run 已抽离进 _val_v8flywheel(整 run 抽, 防同 session 泄漏)。
+    "run_20260610_v8queue",
+    "run_20260610_024533",           # 用户手标批量扫荡 dialog 全套(127帧, 新类 455-468 主源)
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合
@@ -80,6 +86,10 @@ SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 
                  # 删: _synth_bond/goto/enter — 假阴性毒 (2026-06-04)
 VAL_SOURCES = [
     "run_20260606_flywheel",  # v7 主 val: 06-06 飞轮 477帧(独立 session 防泄漏, 含 UI 弱类靶子). 旧 06-03 val 弃用(171121 与 v6c train 同 session 泄漏 / 183022 头像 / _ui_val_pool 旧盲)
+    # v8 增补 val: 从 v8queue 按整 run 抽的 38 帧(06-09/10 新界面覆盖)。稀有类保护:
+    # 任何类被抽走 >40% 或全局剩 <20 实例的 run 不许抽(momo/剧情场景类各 session
+    # 垄断, 实测仅 2 run 可安全抽出 — 别强抽, v9 等场景跨天重复后再扩)。
+    "_val_v8flywheel",
 ]
 
 TARGET = 30            # moderate oversample floor (was 200 — the overfit driver)
@@ -213,6 +223,11 @@ def main() -> int:
     # ── write train (uniques + synth once, then dups with __dN suffix) ──
     def write_entry(entry, dst_stem):
         s, stem, jpg, cleaned, _ = entry
+        # Source may vanish between scan and write (live dashboard labeling
+        # session deletes frames while a build runs — 2026-06-10). Skip, don't die.
+        if not jpg.exists():
+            print(f"[skip] source vanished mid-build: {jpg.name}")
+            return
         dj = img_tr / f"{dst_stem}.jpg"
         if dj.exists():
             dj.unlink()
