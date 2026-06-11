@@ -58,7 +58,11 @@
       "bounty_branches": [
         "教室"
       ],
-      "cafe_invite_targets": [],
+      "cafe_invite_targets": [
+        "凯伊",
+        "爱丽丝(战斗)",
+        "爱丽丝"
+      ],
       "schedule_target_students": [
         "莉央",
         "若藻",

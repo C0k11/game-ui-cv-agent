@@ -71,7 +71,7 @@ class DailyRoutineSkill(BaseSkill):
         _full: List[Tuple[str, BaseSkill, bool, bool]] = [
             ("buy_pyroxene",  BuyPyroxeneSkill(), False, True),  # 免费组合包 — 红点才进
             ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP→信箱)
-            ("craft",         CraftSkill(), True,  True),         # 制造 — ALWAYS enter (user spec)
+            ("craft",         CraftSkill(), False, True),         # 制造 — 红点才进(造好可领; user 2026-06-11)
             ("shop",          ShopSkill(), False, True),         # 普通商店日购(动态预算)
             ("cafe",          CafeSkill(), False, True),         # cafe — 收益/邀请/摸头 dot
             ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (⚠️青辉石买票)

@@ -55,8 +55,27 @@ class DailyMissionSkill(BaseSkill):
         UC.CLAIM_YELLOW, UC.CLAIM_GREY, UC.NODE_DONE,
     ]
 
+    # Claim only when the daily-task counter reaches this (user 2026-06-11:
+    # n/8 ≥ 7 → most rewards unlocked; below that entering is wasted motion).
+    _MIN_TASKS_DONE = 7
+
+    def _tasks_done_count(self, screen: ScreenState, entry) -> int | None:
+        """Read the 'n/8' badge ABOVE the 每日领奖 entry (probe-verified on the
+        live lobby: entry@(0.046,0.360), badge OCR raw '4/8'). None = unread."""
+        try:
+            from brain.pipeline import run_digit_ocr
+            raw = run_digit_ocr(screen.frame, (
+                max(0.0, entry.x1 - 0.02), max(0.0, entry.y1 - 0.055),
+                min(1.0, entry.x2 + 0.035), min(1.0, entry.y1 + 0.005)))
+            if raw and "/" in raw and raw.split("/")[0].isdigit():
+                return int(raw.split("/")[0])
+        except Exception:
+            pass
+        return None
+
     def should_run(self, screen: ScreenState) -> bool:
-        # Run when a red dot sits by the 每日领奖 entry. Entry not visible ⇒
+        # Run when a red dot sits by the 每日领奖 entry AND the n/8 daily-task
+        # counter says enough dailies are finished (n ≥ 7). Entry not visible ⇒
         # defer (True). (Rewards unlock as other dailies finish — run it last.)
         entry = self.find_cls(screen, UC.NAV_DAILY_REWARD, conf=0.40)
         if entry is None:
@@ -65,7 +84,13 @@ class DailyMissionSkill(BaseSkill):
                 return True
             return self.dot_on_entry(screen, [UC.NAV_DAILY_REWARD])
         region = (entry.x1 - 0.02, entry.y1 - 0.05, entry.x2 + 0.05, entry.y2 + 0.02)
-        return self.dot_in_region(screen, region, dot_classes=(UC.DOT_RED,))
+        if not self.dot_in_region(screen, region, dot_classes=(UC.DOT_RED,)):
+            return False
+        n = self._tasks_done_count(screen, entry)
+        if n is not None and n < self._MIN_TASKS_DONE:
+            self.log(f"daily tasks {n}/8 < {self._MIN_TASKS_DONE} → not worth claiming yet, skip")
+            return False
+        return True
 
     def __init__(self):
         super().__init__("DailyMission")

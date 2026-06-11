@@ -50,10 +50,11 @@ _EXIT_MAX = 14
 
 class CraftSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
-        # Craft is NOT dot-gated — always enter to collect finished + start new
-        # (user spec: 制造不需要靠黄点识别). Self-limiting: busy slots can't
-        # restart, so re-runs the same day spend nothing.
-        return True
+        # RED-dot gated (user 2026-06-11, supersedes the old always-enter
+        # spec): a red dot on 制造入口 = finished items ready to collect (then
+        # start new ones). No dot = crafts still cooking → nothing to do, skip.
+        return self.dot_on_entry(screen, [UC.NAV_CRAFT],
+                                 dot_classes=(UC.DOT_RED,))
 
     def __init__(self):
         super().__init__("Craft")
