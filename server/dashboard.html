@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>私人碧蓝档案助手</title>
+<title>BA Agent 控制台</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 /* ── Industrial dark theme (2026-06-10 rework) ──
@@ -145,8 +145,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .add-class-row input{flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none}
 .add-class-row input:focus{border-color:var(--accent)}
 .ann-minimap{margin-top:8px;border:1px solid var(--border);border-radius:4px;background:#000;cursor:crosshair;display:block;width:100%}
-.ann-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.ann-toolbar{display:flex;flex-direction:column;gap:5px;padding:7px 10px;background:var(--bg2);border-bottom:1px solid var(--border)}
 .ann-toolbar .info{font-size:12px;color:var(--muted)}
+.tb-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tb-sep{width:1px;height:18px;background:var(--border);margin:0 3px;flex-shrink:0}
+.tb-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-right:2px;flex-shrink:0;font-family:var(--mono)}
 .ann-help{font-size:10px;color:#64748b;line-height:1.5;padding:8px;margin-top:auto}
 .ann-help kbd{background:var(--bg3);padding:1px 4px;border-radius:2px;font-size:9px}
 .assistant-sub{font-size:12px;color:var(--muted);margin:-10px 0 14px 0}
@@ -431,33 +434,43 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 <!-- ════════════ ANNOTATE PAGE ════════════ -->
 <div class="page" id="page-annotate" style="padding:0;overflow:hidden">
   <div class="ann-toolbar">
+    <div class="tb-row">
+    <span class="tb-lbl">数据</span>
     <div class="form-group" style="margin:0">
       <select id="ann_dataset" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"><option value="">Select dataset...</option></select>
     </div>
-    <span id="ann_generation" class="info" title="当前各域 live 模型代数 (各域最强: UI / 头像 / 摸头)" style="font-family:var(--mono);font-size:11px;color:#06b6d4;white-space:nowrap;padding:0 6px">代数 -</span>
-    <button class="btn btn-sm" onclick="annPrev()">◀ Prev</button>
-    <span class="info" id="ann_counter">-</span>
-    <button class="btn btn-sm" onclick="annNext()">Next ▶</button>
-    <button class="btn btn-sm btn-primary" onclick="annSave()">Save</button>
-    <button class="btn btn-sm btn-danger" onclick="annDeleteImage()">Delete</button>
+    <span id="ann_generation" class="info" title="当前各域 live 模型代数 (各域最强: UI / 头像 / 摸头)" style="font-family:var(--mono);font-size:11px;color:var(--accent);white-space:nowrap;padding:0 6px">代数 -</span>
+    <span class="tb-sep"></span>
+    <button class="btn btn-sm" onclick="annPrev()" title="上一帧 (A)">◀ Prev</button>
+    <span class="info" id="ann_counter" style="font-family:var(--mono)">-</span>
+    <button class="btn btn-sm" onclick="annNext()" title="下一帧 (D)">Next ▶</button>
     <button class="btn btn-sm" onclick="annJumpEmpty()">Skip empty</button>
     <button class="btn btn-sm" onclick="annJumpLabeled()">Skip labeled</button>
-    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <span class="tb-sep"></span>
+    <button class="btn btn-sm btn-primary" onclick="annSave()" title="保存 (S)">Save</button>
+    <button class="btn btn-sm btn-danger" onclick="annDeleteImage()">Delete</button>
+    <span style="flex:1"></span>
+    <span class="info" id="ann_fileinfo" style="font-family:var(--mono);font-size:11px">-</span>
+    </div>
+    <div class="tb-row">
+    <span class="tb-lbl">视图</span>
     <button class="btn btn-sm" onclick="annZoomFit()" title="Fit to window">Fit</button>
     <button class="btn btn-sm" onclick="annZoomIn()" title="Zoom in">+</button>
     <button class="btn btn-sm" onclick="annZoomOut()" title="Zoom out">-</button>
-    <span class="info" id="ann_zoom">100%</span>
-    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
-    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    <span class="info" id="ann_zoom" style="font-family:var(--mono)">100%</span>
+    <span class="tb-sep"></span>
+    <span class="tb-lbl">画框</span>
     <select id="ann_shape" style="padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px" title="Box shape">
       <option value="rect">Rect</option>
       <option value="ellipse">Ellipse</option>
       <option value="polygon">Polygon (freehand)</option>
     </select>
-    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
+    </div>
+    <div class="tb-row">
+    <span class="tb-lbl">预填</span>
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
-    <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前 ui 模型(v3)预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
+    <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前选择的 teacher 模型预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
     <select id="ann_prefill_model" onchange="annFillVersions()" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option></select>
     <select id="ann_prefill_ver" title="模型版本: ★=prefill推荐teacher(=active), ·live=pipeline在用。UI 默认 v7(2026-06-08 上线, by-cls 0.92 全面最强: 制造入口0→0.97/emoticon/cafe/红黄点都到位, 超 v6c+v5)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"></select>
     <select id="ann_prefill_mode" title="累加=追加到其他模型已标的框上不覆盖(首次叠标用) / 覆盖=只替换本模型自己段的框、删旧写新、其他模型框(ui/头像)保留(重跑某模型修错用,如调高摸头conf去课程表乱标) / 跳过已标=不碰已标帧" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="merge">累加</option><option value="overwrite">覆盖(仅本模型)</option><option value="skip">跳过已标</option></select>
@@ -466,13 +479,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <datalist id="ann_cls_datalist"></datalist>
     <span id="ann_targets_hint" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
     <button class="btn btn-sm" id="btn_yolo_run" onclick="annPrefillRun()" title="按上面选的模型+模式批量预填整个 run。累加模式可让 ui/头像/摸头 逐次预填同一批帧而不互相覆盖 (~1min/600帧)">YOLO预填(整run)</button>
+    <span class="tb-sep"></span>
     <button class="btn btn-sm" id="btn_ocr_save" onclick="annSaveOCR()" title="Save OCR to JSON">Save OCR</button>
     <button class="btn btn-sm" id="btn_ocr_batch" onclick="annBatchOCR()" title="Batch scan all images">Batch</button>
     <button class="btn btn-sm" id="btn_ocr_folder" onclick="annOpenOCRFolder()" title="Open OCR results folder">Open Folder</button>
-    <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
     <!-- X2: Multi-select group toolbar (only visible when ≥ 2 boxes selected) -->
+    <span class="tb-sep"></span>
     <span id="ann_group_toolbar" style="display:none;align-items:center;gap:2px">
-      <span id="ann_group_count" style="color:#06b6d4;font-size:11px;font-family:var(--mono);font-weight:700;padding:0 4px"></span>
+      <span id="ann_group_count" style="color:var(--accent);font-size:11px;font-family:var(--mono);font-weight:700;padding:0 4px"></span>
       <button class="btn btn-sm" onclick="annAlignLeft()" title="左对齐">⫷</button>
       <button class="btn btn-sm" onclick="annAlignCenterH()" title="水平居中">≡H</button>
       <button class="btn btn-sm" onclick="annAlignRight()" title="右对齐">⫸</button>
@@ -488,7 +502,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <button class="btn btn-sm" onclick="annArrayGenerate()" title="阵列生成 (Shift+G, 选 2 个时用)">⋯N</button>
       <button class="btn btn-sm" onclick="annStampAction()" title="保存/粘贴 stamp (Shift+T)">⎘</button>
     </span>
-    <span class="info" id="ann_fileinfo">-</span>
+    </div>
   </div>
   <div class="annotate-layout">
     <div class="ann-sidebar">
@@ -571,13 +585,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <button onclick="synthPreview()" style="padding:5px 10px;background:var(--accent);color:#0b1a30;border:1px solid var(--accent);border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">Preview 合成</button>
         <div style="display:flex;gap:2px;margin-left:8px">
           <button onclick="synthZoomBy(1/1.25)" title="缩小 (-)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px 0 0 3px;color:var(--text);cursor:pointer;font-size:11px;font-family:var(--mono)">−</button>
-          <button onclick="SYNTH.zoom=1;SYNTH.panX=0;SYNTH.panY=0;synthDraw();$('synth_status').textContent='Zoom 100%';" title="复位 (F / 0)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-left:0;border-right:0;color:var(--text);cursor:pointer;font-size:11px">⟲</button>
+          <button onclick="synthZoomBy(1.25)" title="放大 (滚轮↑)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-right:0;color:var(--text);cursor:pointer;font-size:11px">+</button><button onclick="synthZoomBy(0.8)" title="缩小 (滚轮↓)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-right:0;color:var(--text);cursor:pointer;font-size:11px">−</button><button onclick="SYNTH.zoom=1;SYNTH.panX=0;SYNTH.panY=0;synthDraw();$('synth_status').textContent='Zoom 100%';" title="复位 (F / 0)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-left:0;border-right:0;color:var(--text);cursor:pointer;font-size:11px">⟲</button>
           <button onclick="synthZoomBy(1.25)" title="放大 (+)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:0 3px 3px 0;color:var(--text);cursor:pointer;font-size:11px;font-family:var(--mono)">+</button>
         </div>
         <span id="synth_status" style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto"></span>
       </div>
       <div id="synth_canvas_wrap" style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
-        <canvas id="synth_canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
+        <canvas id="synth_canvas" style="display:block;width:100%;height:100%;cursor:grab"></canvas>
         <div id="synth_info" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none"></div>
         <div id="synth_drop_hint" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#facc1530;border:3px dashed #facc15;border-radius:6px;color:#facc15;font-size:18px;font-weight:700;pointer-events:none;z-index:5">📥 松开放下样板图</div>
       </div>
@@ -3883,6 +3897,15 @@ function synthAttachCanvasEvents(){
     const r = c.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
     const hit = synthHitTest(mx, my);
+    if (hit.idx < 0) {
+      // Empty canvas: left-drag pans (parity with the label canvas). Slots
+      // are only moved/resized when actually grabbed.
+      SYNTH.selIdx = -1; synthDraw(); synthUpdateSlotList();
+      SYNTH.panning = true;
+      SYNTH.panStart = {cx: e.clientX, cy: e.clientY, panX: SYNTH.panX, panY: SYNTH.panY};
+      c.style.cursor = 'grabbing';
+      return;
+    }
     SYNTH.selIdx = hit.idx;
     SYNTH.dragMode = hit.mode;
     SYNTH.dragStart = {mx, my};
@@ -3906,7 +3929,7 @@ function synthAttachCanvasEvents(){
       synthDraw();
       return;
     }
-    if (SYNTH.spaceHeld) { c.style.cursor = 'grab'; } else { c.style.cursor = 'crosshair'; }
+    if (!SYNTH.panning) { c.style.cursor = SYNTH.stampMode ? 'crosshair' : 'grab'; }
     // ── UI-stamp drawing: update rubber-band ──
     if (SYNTH.stampMode && SYNTH.stampDrawing) {
       const nn = synthCanvasToNorm(mx, my);
@@ -4008,7 +4031,7 @@ function synthAttachCanvasEvents(){
       return;
     }
     SYNTH.dragMode = null; SYNTH.dragOrig = null;
-    if (SYNTH.panning) { SYNTH.panning = false; c.style.cursor = SYNTH.spaceHeld ? 'grab' : 'crosshair'; }
+    if (SYNTH.panning) { SYNTH.panning = false; c.style.cursor = SYNTH.stampMode ? 'crosshair' : 'grab'; }
     // After slot edit, refresh the ref-crop canvas so its representative slot stays in sync
     if (typeof synthCropDraw === 'function') synthCropDraw();
   };

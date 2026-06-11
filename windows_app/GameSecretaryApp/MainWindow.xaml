@@ -2,16 +2,18 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        Title="老师专属碧蓝档案助手" Height="900" Width="1400" Background="#FF0E1A2D">
+        Title="BA Agent 控制台" Height="900" Width="1400" Background="#FF121417">
   <Window.Resources>
-    <!--  BA-themed tool button: navy bg, cyan hover, gold accent on press  -->
+    <!--  Industrial tool button: flat graphite, steel-blue hover border.
+          Matches dashboard.html tokens (2026-06-10 rework):
+          bg #23272D · border #31373F · text #D7DDE3 · accent #4DA3D9  -->
     <Style x:Key="ToolButton" TargetType="Button">
-      <Setter Property="Background" Value="#FF1D2E4D" />
-      <Setter Property="Foreground" Value="#FFE7F0FB" />
-      <Setter Property="BorderBrush" Value="#FF2F456A" />
+      <Setter Property="Background" Value="#FF23272D" />
+      <Setter Property="Foreground" Value="#FFD7DDE3" />
+      <Setter Property="BorderBrush" Value="#FF31373F" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Padding" Value="10,4" />
-      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Padding" Value="11,4" />
+      <Setter Property="Margin" Value="0,0,5,0" />
       <Setter Property="FontSize" Value="12" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
@@ -21,18 +23,18 @@
                     Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="6"
+                    CornerRadius="4"
                     Padding="{TemplateBinding Padding}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="BorderBrush" Value="#FF4FC3F7" />
-                <Setter TargetName="Bd" Property="Background" Value="#FF243757" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#FF3E454E" />
+                <Setter TargetName="Bd" Property="Background" Value="#FF2B3037" />
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#FF4FC3F7" />
-                <Setter Property="Foreground" Value="#FF0B1A30" />
+                <Setter TargetName="Bd" Property="Background" Value="#FF4DA3D9" />
+                <Setter Property="Foreground" Value="#FF0D1116" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -46,36 +48,25 @@
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" BorderBrush="#FF2F456A" BorderThickness="0,0,0,1" Padding="12,8">
-      <Border.Background>
-        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-          <GradientStop Color="#FF182843" Offset="0" />
-          <GradientStop Color="#FF142441" Offset="1" />
-        </LinearGradientBrush>
-      </Border.Background>
+    <Border Grid.Row="0" Background="#FF1A1D21" BorderBrush="#FF31373F" BorderThickness="0,0,0,1" Padding="10,6">
       <DockPanel LastChildFill="True">
-        <!--  Left: brand mark + gold accent strip  -->
+        <!--  Left: mark + tool buttons  -->
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-          <Border Width="3" Height="20" CornerRadius="0,2,2,0" Margin="0,0,10,0">
-            <Border.Background>
-              <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#FF4FC3F7" Offset="0" />
-                <GradientStop Color="#FFF4C430" Offset="1" />
-              </LinearGradientBrush>
-            </Border.Background>
-          </Border>
-          <TextBlock Text="BA" Foreground="#FF4FC3F7" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" Margin="0,0,16,0" />
+          <Border Width="2" Height="18" Background="#FF4DA3D9" Margin="0,0,9,0" />
+          <TextBlock Text="BA" Foreground="#FF8A939D" FontWeight="Bold" FontSize="13"
+                     FontFamily="Consolas" VerticalAlignment="Center" Margin="0,0,14,0" />
           <Button x:Name="BtnRestart" Content="重启后端" Style="{StaticResource ToolButton}" Click="BtnRestart_Click" />
           <Button x:Name="BtnReload" Content="刷新" Style="{StaticResource ToolButton}" Click="BtnReload_Click" />
           <Button x:Name="BtnToggleOverlay" Content="Overlay" Style="{StaticResource ToolButton}" Click="BtnToggleOverlay_Click" />
           <Button x:Name="BtnOpenLogs" Content="日志" Style="{StaticResource ToolButton}" Click="BtnOpenLogs_Click" />
-          <Button x:Name="BtnOpenBrowser" Content="浏览器打开" Style="{StaticResource ToolButton}" Click="BtnOpenBrowser_Click" />
+          <Button x:Name="BtnOpenBrowser" Content="浏览器" Style="{StaticResource ToolButton}" Click="BtnOpenBrowser_Click" />
         </StackPanel>
 
-        <!--  Right: status pill  -->
-        <Border DockPanel.Dock="Right" VerticalAlignment="Center" CornerRadius="999"
-                Background="#FF243757" BorderBrush="#FF2F456A" BorderThickness="1" Padding="10,3">
-          <TextBlock x:Name="TxtStatus" Foreground="#FF8EA5C3" FontSize="11" Text="Status: ..." />
+        <!--  Right: status (mono, flat tag)  -->
+        <Border DockPanel.Dock="Right" VerticalAlignment="Center" CornerRadius="3"
+                Background="#FF23272D" BorderBrush="#FF31373F" BorderThickness="1" Padding="9,3">
+          <TextBlock x:Name="TxtStatus" Foreground="#FF8A939D" FontSize="11"
+                     FontFamily="Consolas" Text="Status: ..." />
         </Border>
       </DockPanel>
     </Border>
