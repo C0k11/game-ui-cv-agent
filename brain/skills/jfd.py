@@ -33,8 +33,12 @@ class JointFiringDrillSkill(TicketSweepSkill):
     _HUB_TILE = UC.HUB_SCHOOL_EXCHANGE
     _PAGE_NAME = ""              # JFD has no PAGE_SIGNATURE → rely on ticket cls
     _CONFIG_KEY = "jfd_academy"
-    _COSTS_AP = True
-    _AP_PER_SWEEP = 15
+    # User-corrected 2026-06-11: with the monthly passes (大小月卡, active on
+    # this account) JFD sweeps cost NO AP — gating on AP wrongly exited with
+    # 15 free tickets unspent (live, twice). The no-pass case is still safe
+    # without the gate: an unaffordable sweep greys the confirm (defense ③
+    # cancels) and the order runs JFD before batch_sweep eats the AP anyway.
+    _COSTS_AP = False
 
     def __init__(self):
         super().__init__("JointFiringDrill")

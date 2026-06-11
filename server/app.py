@@ -91,6 +91,10 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "arena", "label": "[测试] 战术大赛 单跑"},
     {"id": "jfd", "label": "[测试] 学院交流会 单跑"},
     {"id": "batch_sweep", "label": "批量掃蕩 (刷体力, 剩余AP全花)"},
+    # 2026-06-11 编排重构: mail / daily_mission 升为顶层(厅后收口), 必须在
+    # 白名单否则 _normalize_skill_order 静默过滤(第三次踩这个坑)。
+    {"id": "mail", "label": "邮件箱收口"},
+    {"id": "daily_mission", "label": "每日领奖 (n/8≥7)"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
@@ -172,7 +176,7 @@ def _normalize_skill_order(values: Any) -> List[str]:
     # both yesterday's accumulated mail and today's just-generated
     # rewards get claimed within a single run).  Other skills are
     # deduped — running e.g. cafe twice doesn't gain anything.
-    _ALLOW_DUPLICATES = {"mail"}
+    _ALLOW_DUPLICATES = {"mail", "batch_sweep"}  # batch_sweep ×2: 厅后 + 领奖后再刷新到的AP
     order: List[str] = []
     seen: Set[str] = set()
     if isinstance(values, list):

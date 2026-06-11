@@ -1072,17 +1072,25 @@ class DailyPipeline:
     # sub-flows. (Old event-farming / campaign_sweep removed 2026-06-02 —
     # probe-driven rewrite; events不测,刷体力未就绪。)
     DEFAULT_SKILLS = [
-        # ── Task-hall block (user order 2026-06-11): ticket activities first
-        #    (their AP+ticket spend is bounded), batch sweep eats the REMAINING
-        #    AP, arena (no AP) last. Prevents bounty/JFD starving each other.
-        "bounty",           # 1.  悬赏通缉 ticket sweep (tickets + AP)
-        "jfd",              # 2.  学院交流会 ticket sweep (tickets + AP)
-        "batch_sweep",      # 3.  批量掃蕩 — spend remaining AP (saved preset, MAX)
-        "arena",            # 4.  PvP fights + claim rewards (no AP)
-        # ── Daily harvest (dot-gated sub-flows) ──
-        # buy_pyroxene → club → craft → shop → cafe → schedule →
-        # mail(收口: hall rewards funnel here) → daily_mission(n/8≥7, last).
-        "daily_routine",    # 5.  All daily harvest in one go
+        # Full daily (user canonical order 2026-06-11):
+        # ① lobby harvest, ending on cafe (its earnings GRANT AP → segue to
+        #   the hall block that spends it)
+        "daily_routine",    # 购买青辉石→社团→制造→商店→课程表→咖啡厅
+        # ② task-hall block — free-ticket activities first (no AP: bounty
+        #   never costs AP; JFD free with monthly pass, and ordered before the
+        #   AP eater regardless, for the no-pass case), then batch sweep eats
+        #   ALL remaining AP, arena (no AP) last.
+        "bounty",           # 悬赏通缉 (tickets only, never AP)
+        "jfd",              # 学院交流会 (tickets; free w/ 月卡)
+        "batch_sweep",      # 批量掃蕩 — spend remaining AP (saved preset, MAX)
+        "arena",            # 战术大赛 (no AP)
+        # ③ claims: hall rewards funnel into the mailbox → claim → daily
+        #   rewards (n/8 ≥ 7 gate).
+        "mail",
+        "daily_mission",
+        # ④ AP dynamic re-sweep: mail/daily rewards GRANT fresh AP — sweep it
+        #   too (AP gate skips when nothing arrived). 体力动态规划 v1.
+        "batch_sweep",
     ]
 
     TRAJECTORIES_DIR = Path(__file__).resolve().parents[1] / "data" / "trajectories"

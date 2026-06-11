@@ -68,20 +68,22 @@ class DailyRoutineSkill(BaseSkill):
         # in_default_daily=False → registered (runnable via sub_only) but NOT
         # part of the unattended daily harvest. User 2026-06-11: 剧情挖矿 +
         # momotalk 挖矿 are bond-story grinding, not 收菜 — separate triggers.
+        # Order (user 2026-06-11): 购买青辉石 → 社团 → 制造 → 商店 → 课程表 →
+        # 咖啡厅(LAST: cafe earnings grant AP, segueing straight into the task
+        # hall block that spends it). mail / daily_mission moved OUT to the
+        # TOP-LEVEL order (they run AFTER the hall block so hall rewards are
+        # in the mailbox; daily_mission gates on n/8≥7).
         _full: List[Tuple[str, BaseSkill, bool, bool]] = [
             ("buy_pyroxene",  BuyPyroxeneSkill(), False, True),  # 免费组合包 — 红点才进
             ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP→信箱)
-            ("craft",         CraftSkill(), False, True),         # 制造 — 红点才进(造好可领; user 2026-06-11)
+            ("craft",         CraftSkill(), False, True),        # 制造 — 红点才进(造好可领)
             ("shop",          ShopSkill(), False, True),         # 普通商店日购(动态预算)
-            ("cafe",          CafeSkill(), False, True),         # cafe — 收益/邀请/摸头 dot
             ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (⚠️青辉石买票)
+            ("cafe",          CafeSkill(), False, True),         # cafe 最后 — 收益给AP, 衔接任务大厅
             ("momo_talk",     MomoTalkSkill(), False, False),    # MomoTalk 挖矿 — 单独开(非收菜)
             ("story_mining",  StoryMiningSkill(), False, False), # 剧情挖矿 — 单独开(非收菜)
-            # mail 是收口：bounty/jfd/arena/club 奖励都汇入信箱 → 放最后,
-            # 确保本轮所有奖励都领到(probe: mail最后跑)。
-            ("mail",          MailSkill(), False, True),         # 邮件收口 — 红点才进
-            # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。
-            ("daily_mission", DailyMissionSkill(), False, True), # 每日任务领奖(收口,最后)
+            ("mail",          MailSkill(), False, False),        # → top-level(厅后收口)
+            ("daily_mission", DailyMissionSkill(), False, False),# → top-level(n/8≥7, 最后)
         ]
         if sub_only:
             allow = {str(s).strip() for s in sub_only}
