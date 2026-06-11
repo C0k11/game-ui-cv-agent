@@ -301,6 +301,29 @@ def _read_topbar_count(screen, cls_name: str):
     res = parse_count(raw)
     return res[0] if (res is not None and res[0] is not None) else None
 
+
+def _read_pyroxene_clean():
+    """Authoritative pyroxene read from a fresh overlay-free ADB frame
+    (2026-06-10 money rule). Returns int or None. Used by the kill-switch to
+    confirm a suspected drop before aborting — the live DXcam read left-
+    truncates 6497→497 and false-tripped a breach (2026-06-11)."""
+    frame = get_clean_frame()
+    if frame is None:
+        return None
+    try:
+        from brain.skills.ui_classes import TOPBAR_PYROXENE
+        h, w = frame.shape[:2]
+        boxes = _run_yolo_on_image(frame, w, h)
+
+        class _Shim:
+            pass
+        s = _Shim()
+        s.yolo_boxes = boxes
+        s.frame = frame
+        return _read_topbar_count(s, TOPBAR_PYROXENE)
+    except Exception:
+        return None
+
 # Per-skill YOLO detector loadout (module-level = single source of truth).
 # base = "ui" ONLY (FPS: avatar=fused yolo26X / battle are heavy nets, added
 # only where a skill needs them). _start_skill sets context from this at skill
@@ -1946,15 +1969,36 @@ class DailyPipeline:
                     _prev_py = _RESOURCES.get("pyroxene")
                     if _py is not None:
                         if _prev_py is not None and _py < _prev_py:
-                            # Require TWO consecutive lower reads (an OCR misread
-                            # like 278-for-2787 must not nuke the run).
-                            if getattr(self, "_py_drop_pending", None) == _py:
-                                print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → {_py} "
-                                      f"(confirmed ×2) — MONEY BREACH, ABORTING PIPELINE",
+                            # Suspected drop. The #1 false positive is OCR
+                            # left-truncation (6497→497, stable across reads so
+                            # the old "2 consecutive" guard never helped, and
+                            # it false-tripped a breach 2026-06-11).
+                            # ① A digit-count SHRINK is a truncation misread —
+                            #    our skills never spend ~90% of the balance in
+                            #    one 30s window. Reject outright.
+                            if len(str(_py)) < len(str(_prev_py)):
+                                print(f"[Pipeline] pyroxene {_prev_py}→{_py}: digit "
+                                      f"shrink = OCR truncation, ignored (no spend)",
                                       flush=True)
-                                self._running = False
-                                return action_done("⛔ pyroxene drop detected — aborted")
-                            self._py_drop_pending = _py
+                            else:
+                                # ② Same/more digits → confirm on a CLEAN ADB
+                                #    frame (authoritative, 2026-06-10 rule)
+                                #    before aborting.
+                                _py_clean = _read_pyroxene_clean()
+                                if (_py_clean is not None and _py_clean < _prev_py
+                                        and len(str(_py_clean)) == len(str(_prev_py))):
+                                    print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → "
+                                          f"{_py_clean} (clean-frame confirmed) — MONEY "
+                                          f"BREACH, ABORTING PIPELINE", flush=True)
+                                    self._running = False
+                                    return action_done("⛔ pyroxene drop detected — aborted")
+                                elif _py_clean is not None and _py_clean >= _prev_py:
+                                    # clean frame shows balance intact → glitch
+                                    _RESOURCES["pyroxene"] = _py_clean
+                                else:
+                                    print(f"[Pipeline] pyroxene {_prev_py}→{_py}: clean "
+                                          f"re-read={_py_clean} unconfirmed, ignoring",
+                                          flush=True)
                         else:
                             self._py_drop_pending = None
                             _RESOURCES["pyroxene"] = _py

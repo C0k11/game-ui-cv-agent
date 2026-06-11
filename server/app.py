@@ -717,6 +717,9 @@ def _start_pipeline(*, payload: Dict[str, Any]) -> None:
         step_sleep = float(payload.get("step_sleep_s") or profile_settings.get("step_sleep_s") or 0.6)
         dry_run = bool(payload.get("dry_run") if payload.get("dry_run") is not None else profile_settings.get("dry_run", True))
         globals()["_STEP_MODE"] = bool(payload.get("step_mode", False))
+        globals()["_GAME_OVERLAY"] = str(payload.get("game_overlay")
+                                         or profile_settings.get("game_overlay")
+                                         or "battle_only").strip().lower()
         globals()["_STEP_PENDING"] = None
         _STEP_GO.clear()
         account_label = str(payload.get("account_label") or profile_settings.get("account_label") or active_profile).strip()
@@ -803,19 +806,26 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         # Store top-level hwnd for SetForegroundWindow (child windows can't be foregrounded)
         _set_parent_hwnd(int(hwnd))
 
-        # Start YOLO overlay on the render window
+        # Overlay policy (2026-06-11, user rule): boxes ONLY in battle mode.
+        # The daily loop's overlay lags detection by a tick on static UI
+        # (drift / flicker / size-jitter) and burns into window-captured
+        # frames (training poison — see flywheel overlay-burn incident).
+        # Battle tooling (battle_overlay_demo / future combat runner) draws
+        # its own Kalman-smoothed overlay where boxes can actually lock on.
+        # profile/payload `game_overlay: "always"` re-enables here for debug.
         _overlay = None
-        try:
-            from scripts.yolo_overlay import YoloOverlay
-            # Daily pipeline = STATIC UI → track=False: overlay draws raw
-            # current-frame boxes only, NO BoxTracker velocity-coast / lead-aim
-            # (which flung boxes around on static screens = "框到处飞/锁不住/瞎预测").
-            # Battle overlay (moving heads) keeps the default track=True.
-            _overlay = YoloOverlay(render_hwnd, track=False)
-            _overlay.start()
-            _log_pipeline(f"YOLO overlay started (static, track=False) on render_hwnd={render_hwnd}")
-        except Exception as e:
-            _log_pipeline(f"YOLO overlay unavailable: {e}")
+        if globals().get("_GAME_OVERLAY") == "always":
+            try:
+                from scripts.yolo_overlay import YoloOverlay
+                # track=False: raw current-frame boxes, no velocity-coast
+                # (BoxTracker lead-aim flung boxes around on static screens).
+                _overlay = YoloOverlay(render_hwnd, track=False)
+                _overlay.start()
+                _log_pipeline(f"YOLO overlay started (debug 'always' mode) on render_hwnd={render_hwnd}")
+            except Exception as e:
+                _log_pipeline(f"YOLO overlay unavailable: {e}")
+        else:
+            _log_pipeline("YOLO overlay OFF (battle_only policy — daily frames stay clean)")
 
         adb = None
         android_w, android_h = 1280, 720
@@ -997,8 +1007,17 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             except Exception as e:
                 _log_pipeline(f"YOLO high-FPS thread import failed: {e}")
                 return
-            _log_pipeline("YOLO high-FPS thread started")
-            _yolo_fps_target = 30
+            # GPU budget (2026-06-11, live-caught: 68% GPU util lagged the
+            # user's machine): 30 FPS continuous inference exists for the
+            # battle overlay. With the overlay OFF (battle_only policy) the
+            # only consumer is the tick loop (1-2s cadence) — 2 FPS keeps
+            # frames fresh at ~1/15th the GPU burn.
+            if globals().get("_GAME_OVERLAY") == "always":
+                _yolo_fps_target = 30
+            else:
+                _yolo_fps_target = 2
+            _log_pipeline(f"YOLO high-FPS thread started ({_yolo_fps_target} FPS"
+                          f"{' — overlay off, low-power mode' if _yolo_fps_target == 2 else ''})")
             _interval = 1.0 / _yolo_fps_target
             _frame_count = 0
             _errors = 0
@@ -1195,6 +1214,18 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _prev_ocr_boxes = pipe.last_screen.ocr_boxes
             action_type = action.get("action", "")
             reason = action.get("reason", "")
+            # Loading gate (稳定规则 2026-06-11): 加载中 visible → never act this
+            # tick, the game is mid-transition. Skills check is_loading() too,
+            # but stale injected boxes can slip an action through — this is the
+            # belt-and-braces hold at the execution layer.
+            if (action_type in ("click", "back", "swipe")
+                    and pipe.last_screen is not None
+                    and pipe.last_screen.is_loading()):
+                _log_pipeline(f"loading gate: 加载中 on screen → holding '{reason}'")
+                action = {"action": "wait", "duration_ms": 900,
+                          "reason": f"loading-gate hold ({reason})"}
+                action_type = "wait"
+                reason = action["reason"]
             _PIPELINE_STATUS["ticks"] = pipe._total_ticks
             _PIPELINE_STATUS["progress"] = pipe.progress
 
@@ -1279,9 +1310,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             elif action_type in ("click", "back"):
                 # After click/back: invalidate OCR cache so next tick runs
                 # fresh OCR instead of reusing stale boxes from the old screen.
-                # Also sleep 500ms to let the game start its transition.
+                # Settle 1.6s (稳定规则 2026-06-11, was 0.5s): popups/page
+                # transitions take 1-2s to render — re-evaluating too early
+                # sees the OLD screen, re-clicks, and the second tap lands
+                # OUTSIDE the freshly-opened popup and dismisses it
+                # (open/close oscillation, caught live on buy_pyroxene entry).
                 _prev_ocr_boxes = None
-                _high_res_sleep(0.5)
+                _high_res_sleep(1.6)
             else:
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
 

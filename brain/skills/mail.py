@@ -38,6 +38,7 @@ _MAIL_ZONE = (0.86, 0.0, 0.97, 0.09)   # top-right envelope + its red dot
 _ENTER_MAX = 20
 _CLAIM_MAX = 30
 _EXIT_MAX = 14
+_CLAIM_STUCK = 4   # 一次領取 still yellow after this many taps = blocked (bag full)
 
 
 class MailSkill(BaseSkill):
@@ -159,9 +160,25 @@ class MailSkill(BaseSkill):
                 return action_wait(300, "claim lost mail → exit")
             return action_wait(400, "waiting for mail UI (claim)")
 
+        # ⛔ Stuck-claim block (live-caught 2026-06-11): 一次領取 = claim the
+        # WHOLE queue in one tap, so a healthy mailbox greys out after 1-2
+        # claims. If it stays YELLOW past _CLAIM_STUCK taps, something blocks
+        # every claim — here it was 通知「背包已滿，請整理背包」(item bag full).
+        # The bot can't tidy the bag; spinning here also kept the screen off
+        # the lobby, so the global money-read left-truncated (6497→497) and
+        # false-tripped the breach guard. Recognise the block and exit.
+        if self._claims >= _CLAIM_STUCK:
+            self.log(f"⚠️ 一次領取 still yellow after {self._claims} taps "
+                     f"(背包满/被阻挡) → exit, 待用户整理背包")
+            self._goto("exit")
+            return action_wait(300, "claim blocked (bag full?) → exit")
+
         # Claim-all (一次领取黄色) — one tap claims the whole unclaimed queue.
         claim_all = self.find_cls(screen, UC.CLAIM_ONCE_YELLOW, conf=_CLS_CONF)
         if claim_all is not None:
+            # Pace re-claims (稳定规则): reward / 通知 popup takes a beat.
+            if self._phase_ticks % 3 != 1:
+                return action_wait(500, "claim clicked — settling")
             self._claims += 1
             self.log(f"claim all mail (#{self._claims}, YOLO 一次领取黄色)")
             return action_click_box(claim_all, "claim all mail")

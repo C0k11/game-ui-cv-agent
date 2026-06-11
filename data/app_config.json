@@ -6,7 +6,7 @@
       "window_title": "MuMu",
       "goal": "保持碧蓝档案日常流程稳定、安全、可回退，优先完成收菜与领奖，不触碰抽卡/氪金相关按钮。",
       "steps": 0,
-      "step_sleep_s": 0.3,
+      "step_sleep_s": 1.0,
       "dry_run": false,
       "forbid_premium_currency": true,
       "ap_purchase_limit": 0,
@@ -53,11 +53,41 @@
         "Toki_(Bunny_Girl).png"
       ],
       "skill_order": [
-        "daily_routine",
-        "campaign_sweep"
+        "daily_routine"
       ],
       "bounty_branches": [
         "教室"
+      ],
+      "cafe_invite_targets": [],
+      "schedule_target_students": [
+        "莉央",
+        "若藻",
+        "亚子",
+        "亚子礼服",
+        "爱丽丝",
+        "爱丽丝女仆",
+        "亚留",
+        "明日奈兔女郎",
+        "明日奈制服",
+        "风华正月",
+        "花子泳装",
+        "莲实泳装",
+        "光",
+        "环奈泳装",
+        "花凛制服",
+        "佳世子礼服",
+        "佳世子正月",
+        "桔梗",
+        "妃姬",
+        "玛丽偶像",
+        "渚泳装",
+        "宁留制服",
+        "希望",
+        "樱子偶像",
+        "沙织礼服",
+        "圣亚泳装",
+        "季",
+        "季兔女郎"
       ],
       "scheduler": {
         "enabled": false,
@@ -97,36 +127,7 @@
         "difficulty_list": [],
         "choose_team_method": "preset"
       },
-      "schedule_target_students": [
-        "莉央",
-        "若藻",
-        "亚子",
-        "亚子礼服",
-        "爱丽丝",
-        "爱丽丝女仆",
-        "亚留",
-        "明日奈兔女郎",
-        "明日奈制服",
-        "风华正月",
-        "花子泳装",
-        "莲实泳装",
-        "光",
-        "环奈泳装",
-        "花凛制服",
-        "佳世子礼服",
-        "佳世子正月",
-        "桔梗",
-        "妃姬",
-        "玛丽偶像",
-        "渚泳装",
-        "宁留制服",
-        "希望",
-        "樱子偶像",
-        "沙织礼服",
-        "圣亚泳装",
-        "季",
-        "季兔女郎"
-      ]
+      "cafe_skip_invite": false
     }
   },
   "active_profile": "default",

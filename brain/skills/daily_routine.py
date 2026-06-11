@@ -1,11 +1,13 @@
 """DailyRoutineSkill: one-shot dispatcher for all daily-harvest sub-flows.
 
 Replaces the old "skill_order has 12 separate harvest skills" UX where the
-user had to toggle each one. This single skill cycles through every
-sub-flow in fixed order:
+user had to toggle each one. This single skill cycles through the daily
+HARVEST sub-flows in fixed order:
 
-    mail → event_activity → cafe → schedule → club → daily_tasks
-    → craft → pass_reward → momo_talk → story_mining → shop → ap_planning
+    buy_pyroxene → club → craft → shop → cafe → schedule → mail → daily_mission
+
+momo_talk / story_mining are registered but NOT in the default harvest
+(user 2026-06-11: bond-story grinding ≠ 收菜) — run them via sub_only.
 
 Per sub-flow:
 - Check sub.should_run(screen) (most have a red/yellow dot check on the
@@ -62,36 +64,40 @@ class DailyRoutineSkill(BaseSkill):
         # single-sub live walk-throughs: e.g. schedule (青辉石买票) never even
         # enters the plan unless its id is explicitly whitelisted.  This is a
         # money-safety isolation layer on top of schedule's own 3 guards.
-        _full: List[Tuple[str, BaseSkill, bool]] = [
-            # (sub_id, skill_instance, force_run)
-            ("buy_pyroxene",  BuyPyroxeneSkill(), False),  # 免费组合包 — 红点才进
-            ("club",          ClubSkill(), False),         # 社交 — 红点才进 (10AP→信箱)
-            ("craft",         CraftSkill(), True),         # 制造 — ALWAYS enter (user spec)
-            ("shop",          ShopSkill(), False),         # 普通商店日购(动态预算)
-            ("cafe",          CafeSkill(), False),         # cafe — 收益/邀请/摸头 dot
-            ("schedule",      ScheduleSkill(), False),     # 课程表 — 黄点才进 (⚠️青辉石买票)
-            ("momo_talk",     MomoTalkSkill(), False),     # MomoTalk 挖矿 — 红/黄点
-            ("story_mining",  StoryMiningSkill(), False),  # 剧情挖矿(主线/短篇/支线)
-            # mail 是收口：bounty/jfd/arena/club 奖励都汇入信箱 → 放挖矿后、
-            # daily_mission前,确保本轮所有奖励都领到(probe: mail最后跑)。
-            ("mail",          MailSkill(), False),         # 邮件收口 — 红点才进
+        # (sub_id, skill_instance, force_run, in_default_daily)
+        # in_default_daily=False → registered (runnable via sub_only) but NOT
+        # part of the unattended daily harvest. User 2026-06-11: 剧情挖矿 +
+        # momotalk 挖矿 are bond-story grinding, not 收菜 — separate triggers.
+        _full: List[Tuple[str, BaseSkill, bool, bool]] = [
+            ("buy_pyroxene",  BuyPyroxeneSkill(), False, True),  # 免费组合包 — 红点才进
+            ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP→信箱)
+            ("craft",         CraftSkill(), True,  True),         # 制造 — ALWAYS enter (user spec)
+            ("shop",          ShopSkill(), False, True),         # 普通商店日购(动态预算)
+            ("cafe",          CafeSkill(), False, True),         # cafe — 收益/邀请/摸头 dot
+            ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (⚠️青辉石买票)
+            ("momo_talk",     MomoTalkSkill(), False, False),    # MomoTalk 挖矿 — 单独开(非收菜)
+            ("story_mining",  StoryMiningSkill(), False, False), # 剧情挖矿 — 单独开(非收菜)
+            # mail 是收口：bounty/jfd/arena/club 奖励都汇入信箱 → 放最后,
+            # 确保本轮所有奖励都领到(probe: mail最后跑)。
+            ("mail",          MailSkill(), False, True),         # 邮件收口 — 红点才进
             # 每日任务领奖 —— 必须最后跑(其他日常完成才解锁奖励)。
-            ("daily_mission", DailyMissionSkill(), False), # 每日任务领奖(收口,最后)
+            ("daily_mission", DailyMissionSkill(), False, True), # 每日任务领奖(收口,最后)
         ]
         if sub_only:
             allow = {str(s).strip() for s in sub_only}
             self._sub_only: Optional[List[str]] = sorted(allow)
             # sub_only = the user EXPLICITLY asked for these subs → force-run
-            # them (skip the dot gate). Live 2026-06-10: momo_talk's counted
-            # badge ("22") isn't a DOT_RED cls, so the dot gate silently
-            # skipped the very sub the walk-through was launched for. The
-            # skill's own internal guards still apply.
+            # them (skip the dot gate AND the in_default filter, so momo_talk /
+            # story_mining run when explicitly requested). Live 2026-06-10:
+            # momo_talk's counted badge ("22") isn't a DOT_RED cls, so the dot
+            # gate silently skipped the very sub the walk-through targeted.
             self._plan: List[Tuple[BaseSkill, bool]] = [
-                (sk, True) for (sid, sk, _fr) in _full if sid in allow
+                (sk, True) for (sid, sk, _fr, _d) in _full if sid in allow
             ]
         else:
             self._sub_only = None
-            self._plan = [(sk, fr) for (_sid, sk, fr) in _full]
+            # Default unattended daily = harvest subs only (in_default=True).
+            self._plan = [(sk, fr) for (_sid, sk, fr, d) in _full if d]
         self._cur_idx: int = 0
         self._cur_started: bool = False
 

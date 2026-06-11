@@ -176,6 +176,7 @@ class ScheduleSkill(BaseSkill):
         self._jumped_to_last: bool = False  # done the initial ARROW_LEFT jump?
         self._regions_seen: int = 0         # regions whose popout we've opened
         self._full_circle: bool = False     # traversed all regions → fallback
+        self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
         # per-region (reset on each region switch)
         self._region_locked: Optional[bool] = None   # case A (True) / B (False)
         self._clicked_heads: List[Tuple[float, float]] = []  # heads dispatched here
@@ -700,6 +701,14 @@ class ScheduleSkill(BaseSkill):
             self.log("opening 全體課程表 popout (YOLO 全体课程表)")
             return action_click_box(sched_all, "open 全體課程表 popout")
 
+        # SCHED_ALL missing + region LIST visible = bounced to Location Select
+        # (no SCHED_ALL there, ever) → route to _switch, whose row-walk
+        # recovery enters the next region directly (v2, 2026-06-11).
+        if self.find_cls(screen, UC.SCHOOL_OFFICE, conf=_CLS_CONF) is not None:
+            self.log("Location Select detected (navigate) → switch row-walk")
+            self._goto("switch")
+            return action_wait(250, "location select → switch recovery")
+
         # SCHED_ALL button not seen — give it a few ticks (region transition),
         # then surface the gap and try the next region rather than stalling.
         if self._phase_ticks > _NAVIGATE_MAX:
@@ -864,8 +873,12 @@ class ScheduleSkill(BaseSkill):
                 self._goto("exit")
                 return action_wait(300, "full circle → exit")
 
-        # Close a lingering popout first.
+        # Close a lingering popout first. Pace it (稳定规则 2026-06-11): a
+        # double-fired X/ESC lands on the region screen behind and exits to
+        # Location Select — the very bounce that strands tickets.
         if self._roster_open(screen):
+            if self._phase_ticks % 2 == 0:
+                return action_wait(450, "popout closing — settle")
             close = self._popout_close(screen)
             if close is not None:
                 return action_click_box(close, "close popout before switch")
@@ -878,6 +891,27 @@ class ScheduleSkill(BaseSkill):
             self._reset_region()
             self._goto("navigate")
             return action_click_box(arrow, "ARROW_LEFT next region")
+
+        # Location Select recovery v2 (live 2026-06-11): closing a popout can
+        # bounce us to the region LIST (no ARROW_LEFT/SCHED_ALL there). v1
+        # re-entered row 0 every time → infinite loop on a fully-dispatched
+        # first region. v2 turns the bounce INTO the traversal: each bounce
+        # enters the NEXT list row directly (rows sit at fixed y), capped.
+        if self.find_cls(screen, UC.SCHOOL_OFFICE, conf=_CLS_CONF) is not None:
+            self._ls_recoveries += 1
+            if self._ls_recoveries > 8:
+                self.log("Location Select bounce cap (8) → exit with leftovers")
+                self._goto("exit")
+                return action_wait(300, "ls bounce cap → exit")
+            rows_y = (0.262, 0.407, 0.552, 0.697, 0.842)
+            row = self._ls_recoveries % len(rows_y)
+            self.log(f"Location Select → entering list row {row} directly "
+                     f"(bounce #{self._ls_recoveries})")
+            self._office_clicked = True   # row click IS the region entry
+            self._jumped_to_last = True   # no arrow jump; scan this region as-is
+            self._reset_region()
+            self._goto("navigate")
+            return action_click(0.70, rows_y[row], f"enter region list row {row}")
 
         # GAP: arrow cls not seen → symmetric left-edge coord, then navigate.
         if self._phase_ticks > _SWITCH_MAX:

@@ -33,7 +33,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from brain.skills.base import (
     BaseSkill, ScreenState, YoloBox,
-    action_click_box, action_wait, action_back, action_done,
+    action_click, action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
@@ -261,9 +261,18 @@ class ShopSkill(BaseSkill):
 
         sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF)
         if sel is not None:
+            # Pace retries (稳定规则 2026-06-11): give the toggle a beat to
+            # render before judging the click dropped.
+            if self._phase_ticks % 3 != 1:
+                return action_wait(500, "select-all clicked — settling")
             self._select_clicks += 1
-            self.log("select all (YOLO 全部选择)")
-            return action_click_box(sel, "select all items")
+            # v8 boxes only the 全部選擇 LABEL TEXT (x1≈0.902); the real
+            # hit-area is the checkbox square LEFT of it, centered ≈0.875
+            # (zoom-measured 2026-06-11 after text-center & x1-0.013 both
+            # missed). Offset 0.027 left of the label's x1 lands on it.
+            cb_x = max(0.0, sel.x1 - 0.027)
+            self.log(f"select all (checkbox @ {cb_x:.3f},{sel.cy:.3f})")
+            return action_click(cb_x, sel.cy, "select all items")
 
         if self._phase_ticks > _SELECT_MAX:
             self.log("no 全部选择 cls — YOLO gap; exiting")
