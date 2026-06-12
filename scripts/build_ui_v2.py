@@ -80,6 +80,30 @@ REAL_SOURCES = [
     # v8b: 旧款箭头增压 — v8 训到 ep20 左右切换在旧风格(lobby/任务屏白chevron)上
     # 灾难遗忘(momo新款47/47 vs 旧款15/238), 旧款帧×重编码副本拉回锚点。
     "_arrow_boost",
+    # v9 飞轮 (2026-06-11 全天 live 干净帧, 用户全手标/人审, review_v9_pools 复查
+    # 标签零问题): 完整日常编排全技能素材 — 455/456 第二session / 450×110 /
+    # 452 hub ribbon×576 (v8 val 盲区解药) / 格黑娜vs阿拜多斯 87帧 (v8 混淆解药) /
+    # dialog 调暗大厅 / schedule Location Select 滚动多态。
+    "run_20260611_044844_clean",
+    "run_20260611_050507_clean",
+    "run_20260611_051200_clean",
+    "run_20260611_052955_clean",
+    "run_20260611_053359_clean",
+    "run_20260611_053709_clean",
+    "run_20260611_055934_clean",
+    "run_20260611_061637_clean",
+    "run_20260611_061938_clean",
+    "run_20260611_064804_clean",
+    "run_20260611_071526_clean",
+    "run_20260611_072242_clean",
+    "run_20260611_073139_clean",
+    "run_20260611_073341_clean",
+    "run_20260611_074607_clean",
+    # v9 晚间专录: 战术大赛商店(新类469-473 主源, 含472/473能量饮料+471货币) +
+    # cafe emoticon 高帧×2 (451×747 — 摸头折叠进 ui 的底气)。
+    "run_20260611_205439",
+    "run_20260611_205540",
+    "run_20260611_212919",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合

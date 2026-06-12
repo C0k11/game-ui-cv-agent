@@ -554,6 +554,33 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v9": {
+        # v9 (2026-06-11) = v8b + 全天live干净帧18池(~1,493帧用户手标, review零问题)
+        #  + 老训练集审计修复(238框auto-add回源池, HSV仲裁拦32可疑点色)。
+        #  新类469-473(战术大赛商店/货币/能量饮料, cls头 469→474 重学)。
+        #  靶子(val=冻结回归考卷, v8b PHANTOM 1,356 → 看降幅): 旧皮箭头651 /
+        #  hub活動進行中ribbon 350(452新增576实例) / dialog调暗大厅 / 451折叠
+        #  (新增747实例, emoticon已退役出live管线 — v9的451就是摸头唯一来源) /
+        #  格黑娜vs阿拜多斯混淆(87帧解药)。配方复刻 v8 成功版(hsv_h/s=0 保点色)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v8b" / "weights" / "best_real.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v9",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
