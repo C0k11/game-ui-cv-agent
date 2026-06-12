@@ -256,6 +256,7 @@ def main() -> int:
           f"450→{TARGET_OVERRIDE[450]}, min_unique {MIN_UNIQUE})")
 
     # ── write train (uniques + synth once, then dups with __dN suffix) ──
+    written_tr = set()   # dst stems this build produced — stray purge below
     def write_entry(entry, dst_stem):
         s, stem, jpg, cleaned, _ = entry
         # Source may vanish between scan and write (live dashboard labeling
@@ -271,6 +272,7 @@ def main() -> int:
         except OSError:
             shutil.copy2(jpg, dj)
         (lbl_tr / f"{dst_stem}.txt").write_text(cleaned, encoding="utf-8")
+        written_tr.add(dst_stem)
 
     neg = 0
     for entry in base:
@@ -289,6 +291,7 @@ def main() -> int:
           f"{neg} negatives)")
 
     # ── val from VAL_SOURCES (held-out 多域: ui+头像+摸头, 跨多个 run) ──
+    written_va = set()
     n_val = 0
     for vsrc in VAL_SOURCES:
         vd = RAW / vsrc
@@ -308,8 +311,27 @@ def main() -> int:
             except OSError:
                 shutil.copy2(jpg, dj)
             (lbl_va / f"{stem}.txt").write_text(cleaned, encoding="utf-8")
+            written_va.add(stem)
             n_val += 1
     print(f"[val] {n_val} frames from {len(VAL_SOURCES)} sources: {VAL_SOURCES}")
+
+    # ── hygiene: purge strays + caches (2026-06-11 实锤双病根) ──────────────
+    # Build is incremental (no rmtree without --clean), so entries dropped from
+    # sources (deleted frames / removed pools / renamed stems) linger as orphan
+    # jpg+txt — ultralytics globs the dir, so STRAYS GET TRAINED with stale
+    # labels (131 found tonight). And cache='disk' .npy never get reclaimed
+    # (190.9GB of v8-era cache found). Purge anything this build didn't write.
+    n_stray = n_npy = 0
+    for d, keep in ((img_tr, written_tr), (lbl_tr, written_tr),
+                    (img_va, written_va), (lbl_va, written_va)):
+        for f in d.iterdir():
+            if f.suffix == ".npy":
+                f.unlink(); n_npy += 1
+            elif f.suffix in (".jpg", ".txt") and f.stem not in keep:
+                f.unlink(); n_stray += 1
+    for c in OUT_ROOT.rglob("*.cache"):   # ultralytics scan caches — stale lists
+        c.unlink()
+    print(f"[hygiene] purged {n_stray} stray files + {n_npy} npy caches")
 
     # ── data.yaml ──
     yaml = [f"path: {OUT_ROOT.as_posix()}", "train: images/train", "val: images/val",
