@@ -104,6 +104,14 @@ REAL_SOURCES = [
     "run_20260611_205439",
     "run_20260611_205540",
     "run_20260611_212919",
+    # v9 防遗忘考古回收 (2026-06-11 全历史盘点, 用户"都有用的, 免得遗忘很多cls"):
+    # 171121 = 06-03 被弃 ex-val(513帧6,809框 UI 大池, 弃因=与v6c train同session泄漏
+    # → 进 train 反而合法; 入库前 HSV 修复 29 处黄点→红点 — 它没吃过 v8 那轮清洗)。
+    # _ui_val_pool = 05-27 老风格旧 val(51帧1,010框 红黄点/货币/邀请键 rehearsal)。
+    # 考古明确排除: 021030(与v8queue同内容已重编码, 双标签互污) / 173604+183022(纯
+    # 头像归fused域) / _synth_*(用户06-06砍的毒) / expanded·full·static(古schema不兼容)。
+    "run_20260603_171121",
+    "_ui_val_pool",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合
