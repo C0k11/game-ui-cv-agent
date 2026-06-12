@@ -204,7 +204,13 @@ class BuyPyroxeneSkill(BaseSkill):
         if screen.is_lobby():
             entry = self.find_cls(screen, UC.SHOP_BUY_PYROXENE, conf=_CLS_CONF)
             if entry is not None:
-                self.log("clicking 购买青辉石 entry (retry on drop)")
+                # Pace the retry (稳定规则 2026-06-11): the popup takes 1-2s to
+                # render and the entry sits OUTSIDE it — an eager re-click
+                # dismisses the popup we just opened (live-caught oscillation).
+                # Click on tick 1 of every 3-tick window, settle otherwise.
+                if self._phase_ticks % 3 != 1:
+                    return action_wait(600, "entry clicked — settling for shop popup")
+                self.log("clicking 购买青辉石 entry (paced retry)")
                 return action_click_box(entry, "open buy-pyroxene shop")
             self.log("on lobby but no 购买青辉石 cls — YOLO gap; waiting")
             return action_wait(400, "waiting for 购买青辉石 cls")

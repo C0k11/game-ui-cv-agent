@@ -499,9 +499,12 @@ def _get_yolo():
         # 输出被域过滤丢弃 (emoticon 走 v26n 专用 0.995 >> v6b 0.764) → 绝不能
         # fold-in 掉 v26n。仅独立 ui 模型 (非 unified) 自带 emoticon 类时才折叠。
         # ⚠️ (2026-06-08) ui v7 实测: emoticon recall 0.71 << 独立 v26n 0.995 →
-        # 折叠会让 cafe headpat 退步~29%(省一次推理 vs 摸头质量, 不值得)。**保 v26n,
-        # 暂不 fold-in**, 直到 ui 的 emoticon 训到 >0.99 再把开关打开。
-        _FOLD_IN_EMOTICON = False
+        # 折叠会让 cafe headpat 退步~29%(省一次推理 vs 摸头质量, 不值得)。
+        # (2026-06-11 用户决策) 翻开: ui 接管摸头, v26n 退役出 live 管线, 只留
+        # dashboard 预标注 teacher (server prefill 走 registry, 不受此开关影响)。
+        # 已知代价: v8 的 451 仍弱 (val PHANTOM 71 条) — v9 专录 cafe 高帧 + 补标
+        # 451 后补齐; 在那之前漏摸头少摸几下, 用户接受。
+        _FOLD_IN_EMOTICON = True
         ui_has_emoticon = _FOLD_IN_EMOTICON and (not _UI_IS_UNIFIED) and any(
             "emoticon" in str(n).lower()
             for m, _c, t in _yolo_models if t == "ui"
@@ -752,6 +755,12 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
         "battle": 960,
         "cafe": 640,       # emoticon — 1 class, simple, default ok
     }
+    # Standalone emoticon (tag "cafe") actually running in THIS call? The
+    # ui-emoticon yield rule below must only fire when v26n is really there —
+    # after fold-in the model is unloaded and ui's 451 IS the headpat source.
+    _standalone_emo_active = any(
+        t == "cafe" and (wanted_tags is None or t in wanted_tags)
+        for _y, _c, t in _yolo_models)
     for yolo, model_conf, model_tag in _yolo_models:
         if wanted_tags is not None and model_tag not in wanted_tags:
             continue
@@ -771,14 +780,15 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                         continue
                     cls_name = yolo.names.get(cls_id, str(cls_id))
                     cls_low = str(cls_name).lower()
-                    # ui v7 carries a folded Emoticon_Action (cls451, ~0.71
-                    # quality). The standalone v26n (tag "cafe", 0.995) is the
-                    # emoticon AUTHORITY — drop the ui copy whenever v26n is in
-                    # this context, else the two models double-box every bubble
-                    # (offset boxes, IoU<0.6 → dedup can't catch) = ghosting +
-                    # "emoticon 和 ui 抢信用点" (live 2026-06-09).
+                    # ui carries a folded Emoticon_Action (cls451). When the
+                    # standalone v26n (tag "cafe", 0.995) is ALSO running it is
+                    # the emoticon AUTHORITY — drop the ui copy, else the two
+                    # models double-box every bubble (offset boxes, IoU<0.6 →
+                    # dedup can't catch) = ghosting + "emoticon 和 ui 抢信用点"
+                    # (live 2026-06-09). After fold-in (2026-06-11) v26n is
+                    # unloaded → _standalone_emo_active False → ui 451 passes.
                     if (model_tag == "ui" and "emoticon" in cls_low
-                            and (wanted_tags is None or "cafe" in wanted_tags)):
+                            and _standalone_emo_active):
                         continue
                     nx1, ny1, nx2, ny2 = bx1/w, by1/h, bx2/w, by2/h
                     # Filter headpat/emoticon: only accept in cafe play area

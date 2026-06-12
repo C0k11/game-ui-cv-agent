@@ -38,6 +38,7 @@ data/_pipeline_frame.jpg
 data/florence_assets/
 data/florence_ui_dataset/
 data/raw_images/
+data/raw_archive/
 data/yolo_datasets/
 data/yolo_battle_dataset/
 data/yolo_headpat_dataset/
