@@ -36,13 +36,22 @@
     }
   },
   "ui": {
-    "active": "v8",
+    "active": "v9",
     "task": "detect",
-    "n_classes": 469,
+    "n_classes": 474,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v9": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v9/weights/best.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-06-12",
+        "n_classes": 474,
+        "epoch_best": "ep21 (51ep早停patience30; nominal best=真峰, 复核val 0.9749/0.9353 与results.csv一致, 无需手工冻结)",
+        "acceptance": "冻结val515 vs v8b: ALL R 0.912→0.934 / mAP50-95 0.9234→0.9353; PHANTOM审计(conf>=0.10) 1356→608(-55%); 旧皮箭头651→2根治(左R 0.06→1.00/右0.05→0.98); 数据=12,934帧(06-11十八池全手标+考古回收171121/_ui_val_pool+审计auto-add238框+全池红黄点HSV修33处+build孤儿清除131)。新类469-473(战术大赛商店)+455/456+450+38/39无val实例, 真验收=2026-06-12 15:00 live完整日常链。",
+        "known_gap": "①双倍三倍452: 旧era(06-06)ribbon仍低conf(PHANTOM 350→253, R@F1 0.05但mAP50 0.94=检出在conf<0.10), 当前era(06-11训576实例)live预期正常, 实战盯; 若hub badge漏检, 降业务conf门。②emoticon451旧era R 0.41(新era 747实例已训, live验摸头 — 已折叠接管, v26n退役为teacher)。③移动至2号点 PHANTOM 24不变(无新数据)。④dialog调暗大厅入口仍盲(9帧×13入口, semantizer dialog通道兜底)。"
+      },
       "v8": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v8b/weights/best_real.pt",
         "model_arch": "yolo26m",
@@ -140,7 +149,7 @@
   },
   "emoticon": {
     "active": "v26n",
-    "_merge_note": "被折叠进 ui v6 (新增 cls451 Emoticon_Action)。ui active 切到 v6 后, pipeline._get_yolo 检测到 ui 模型含该类即自动停止加载本独立模型 (省每 cafe tick 一次推理)。在此之前 (v5 active) 仍由 pipeline 以 tag=cafe / conf 0.15 单独加载, 维持 cafe headpat。",
+    "_merge_note": "(2026-06-12) 已正式退役出 live 管线: pipeline._FOLD_IN_EMOTICON=True + ui v9 的 451 接管摸头。本模型仅剩 dashboard 预标注 teacher 用途 (server prefill 走本 registry 不受影响)。",
     "task": "detect",
     "n_classes": 1,
     "versions": {

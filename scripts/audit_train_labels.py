@@ -34,7 +34,8 @@ DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\ui_v2")
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 SPLIT = sys.argv[1] if len(sys.argv) > 1 else "train"
 OUT = Path(rf"D:\Project\ai game secretary\data\_audit_{SPLIT}_labels.csv")
-WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v8b\weights\best_real.pt"
+WEIGHTS = sys.argv[2] if len(sys.argv) > 2 else \
+    r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v8b\weights\best_real.pt"
 
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 NAME2M = {n: i for i, n in enumerate(MASTER)}
