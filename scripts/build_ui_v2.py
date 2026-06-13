@@ -112,6 +112,13 @@ REAL_SOURCES = [
     # 头像归fused域) / _synth_*(用户06-06砍的毒) / expanded·full·static(古schema不兼容)。
     "run_20260603_171121",
     "_ui_val_pool",
+    # ── v10 待加 (2026-06-12, ⚠ DASHBOARD 人审后才解注释训练) ──────────────
+    # 两批今日素材, v9 预标 + 星标/sweep 清洗, 但 v9 预标=teacher, 必须人审过
+    # 才进 train(否则重演 关卡得星 teacher 污染). 审完去掉下面两行的注释再 build:
+    #   run_20260612_191319   = 313帧 (星修110 + 455补128, commit fd40b59)
+    #   run_20260612_chainlive = 452帧 (今日整链+商店, 6059框 v9预标)
+    # "run_20260612_191319",
+    # "run_20260612_chainlive",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合

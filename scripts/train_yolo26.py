@@ -581,6 +581,30 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v10": {
+        # v10 (2026-06-12) = v9 warm + 今日整链live素材(run_20260612_191319 313帧 +
+        #  run_20260612_chainlive 452帧, ⚠ 必须 DASHBOARD 人审后才解注释入 REAL_SOURCES)。
+        #  补强靶子: shop确认弹窗/战术大赛商店/能量饮料/批量扫荡 normal页/课程表popout。
+        #  ⚠ 前置: build_ui_v2 REAL_SOURCES 末两行解注释; 配方复刻 v9 成功版。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v9" / "weights" / "best.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v10",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
