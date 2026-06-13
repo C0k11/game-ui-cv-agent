@@ -29,7 +29,13 @@ RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 BACKUP = Path(r"D:\Project\ai game secretary\data\_dotclean_backup")
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 RED, YEL = MASTER.index("红点"), MASTER.index("黄点")
+GREEN = MASTER.index("绿勾")
 FRAC = 0.08   # ≥8% coloured pixels in the core ⇒ that colour is really there
+# 绿勾: UNLIKE the red dots (dark-red overlaps grey), the green check is always
+# bright saturated green — green% over a label is cleanly BIMODAL (empty
+# checkbox ~0 vs real check ~47, nothing between; live 2026-06-13: 24@<5% vs
+# 904@30%+). So green% < this is a SAFE delete for the position-prior 绿勾 FPs.
+GREEN_MIN = 0.15
 
 
 def _is_empty(img, xc, yc, bw, bh):
@@ -52,6 +58,19 @@ def _is_empty(img, xc, yc, bw, bh):
     return sat_frac < 0.02
 
 
+def _green_pct(img, xc, yc, bw, bh):
+    import cv2
+    h, w = img.shape[:2]
+    x1, y1 = int((xc - bw / 2) * w), int((yc - bh / 2) * h)
+    x2, y2 = int((xc + bw / 2) * w), int((yc + bh / 2) * h)
+    crop = img[y1:y2, x1:x2]
+    if crop.size == 0:
+        return 1.0   # unreadable → treat as real (keep)
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    return float(((hsv[..., 0] >= 35) & (hsv[..., 0] <= 90)
+                  & (hsv[..., 1] > 50) & (hsv[..., 2] > 60)).mean())
+
+
 def process_pool(pool):
     import cv2  # noqa
     pdir = RAW / pool
@@ -60,7 +79,7 @@ def process_pool(pool):
         if txt.name == "classes.txt":
             continue
         lines = [l for l in txt.read_text(encoding="utf-8").splitlines() if l.strip()]
-        if not any(int(l.split()[0]) in (RED, YEL)
+        if not any(int(l.split()[0]) in (RED, YEL, GREEN)
                    for l in lines if len(l.split()) == 5):
             continue
         img = cv2.imread(str(txt.with_suffix(".jpg")))
@@ -70,10 +89,18 @@ def process_pool(pool):
         changed = False
         for l in lines:
             p = l.split()
-            if len(p) != 5 or int(p[0]) not in (RED, YEL):
+            if len(p) != 5 or int(p[0]) not in (RED, YEL, GREEN):
                 out.append(l)
                 continue
             xc, yc, bw, bh = map(float, p[1:])
+            if int(p[0]) == GREEN:
+                if _green_pct(img, xc, yc, bw, bh) < GREEN_MIN:
+                    deletes += 1
+                    changed = True
+                    continue   # empty checkbox falsely labelled 绿勾 → drop
+                keeps += 1
+                out.append(l)
+                continue
             if _is_empty(img, xc, yc, bw, bh):
                 deletes += 1
                 changed = True
