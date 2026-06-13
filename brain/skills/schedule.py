@@ -287,15 +287,21 @@ class ScheduleSkill(BaseSkill):
         ):
             return True
         # The close-X flickers (live 2026-06-09: popout clearly open, X cls
-        # missed one frame → "popout closed" re-click loop). Backup signatures
-        # that exist ONLY on the popout:
-        #   • a ROOM_LOCKED tile (locked rooms render only inside the popout)
-        #   • 课程表票 in the TOP-CENTER header band — the region screen's
-        #     ticket counter sits top-LEFT (cx≈0.06), the popout's at cx≈0.5.
-        if self.find_cls(screen, UC.ROOM_LOCKED, conf=_CLS_CONF) is not None:
-            return True
+        # missed one frame → "popout closed" re-click loop). Backup signature
+        # that exists ONLY on the popout:
+        #   • 课程表票 in the TOP-CENTER header band — the region screen's ticket
+        #     counter sits top-LEFT (cx≈0.06), the popout's at cx≈0.45,cy≈0.21.
+        # ⛔ REMOVED (2026-06-13, user-caught bug): ROOM_LOCKED → open. The map's
+        #    locked BUILDING (需要RANKx, e.g. 需要RANK9) ALSO fires 房间区域未解锁
+        #    (live run_20260613_051748 t13: map screen, 房间区域未解锁@0.305,0.764
+        #    conf0.95, NO popout) → _roster_open falsely True → skill scanned the
+        #    MAP heads as a roster, judged "all dispatched", and SKIPPED the whole
+        #    locked region without ever opening the popout. The lock cls is NOT
+        #    popout-exclusive, so it can't gate popout-open.
+        # y-band widened 0.16→0.26: the popout's centred ticket sits at cy≈0.21,
+        # which the old 0.04-0.16 band missed entirely.
         if self.find_cls(screen, UC.SCHED_TICKET, conf=_CLS_CONF,
-                         region=(0.30, 0.04, 0.70, 0.16)) is not None:
+                         region=(0.30, 0.04, 0.70, 0.26)) is not None:
             return True
         return False
 
