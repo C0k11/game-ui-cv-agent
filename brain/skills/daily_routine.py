@@ -55,6 +55,7 @@ class DailyRoutineSkill(BaseSkill):
         from brain.skills.momo_talk import MomoTalkSkill
         from brain.skills.story_mining import StoryMiningSkill
         from brain.skills.shop import ShopSkill
+        from brain.skills.arena_shop import ArenaShopSkill
         from brain.skills.daily_mission import DailyMissionSkill
 
         # Order matters — runs top to bottom (user-defined daily order, probe).
@@ -78,6 +79,10 @@ class DailyRoutineSkill(BaseSkill):
             ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP→信箱)
             ("craft",         CraftSkill(), False, True),        # 制造 — 红点才进(造好可领)
             ("shop",          ShopSkill(), False, True),         # 普通商店日购(动态预算)
+            # 战术大赛商店买体力 — 与信用点商店同次访问(用户2026-06-13: "应该和信用点
+            # 商店一块"). 紧跟 shop, force_run(无大厅红点可门, 进店下滑到战术大赛tab买能量
+            # 饮料; skill自身余额门不够则跳过). 只花战术大赛货币, 青辉石防火墙全程在岗.
+            ("arena_shop",    ArenaShopSkill(), True, True),
             ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (⚠️青辉石买票)
             ("cafe",          CafeSkill(), False, True),         # cafe 最后 — 收益给AP, 衔接任务大厅
             ("momo_talk",     MomoTalkSkill(), False, False),    # MomoTalk 挖矿 — 单独开(非收菜)
