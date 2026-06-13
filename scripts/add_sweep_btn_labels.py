@@ -28,6 +28,11 @@ TPL = Path(r"D:\Project\ai game secretary\logs\_tpl_455_blue.png")
 CLS = 455
 BOX_W, BOX_H = 0.0635, 0.0320
 THR = 0.85
+# template-center → text-center offset (calibrated 2026-06-12 on 4 frames
+# with hand/prefill GT, scores 0.995; the template carries asymmetric
+# padding above the button — raw match center rides ~0.007 HIGH. User
+# caught the drift reviewing the dashboard.)
+OFF_X, OFF_Y = 0.0007, 0.0071
 SKIP = {"_synth_ui_swap", "_synth_bond", "_synth_bond_enter", "_synth_bond_goto",
         "_fused_synth_remap", "run_20260606_flywheel_labels_bak", "_v8queue_meta",
         "_emoticon_v2", "_battle_val"}
@@ -68,8 +73,8 @@ def process_pool(pool: str):
         _mn, mx, _l, loc = cv2.minMaxLoc(res)
         if mx < THR:
             continue
-        cx = (int(0.30*w) + loc[0] + tw/2) / w
-        cy = (int(0.72*h) + loc[1] + th/2) / h
+        cx = (int(0.30*w) + loc[0] + tw/2) / w + OFF_X
+        cy = (int(0.72*h) + loc[1] + th/2) / h + OFF_Y
         bdir = BACKUP / pool
         bdir.mkdir(parents=True, exist_ok=True)
         bak = bdir / txt.name
