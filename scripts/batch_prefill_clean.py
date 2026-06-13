@@ -22,9 +22,20 @@ MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.s
 NAME2IDX = {n: i for i, n in enumerate(MASTER)}
 
 
+_DOT_CLS = {"红点", "黄点"}
+
+
 def main():
     pat = sys.argv[1] if len(sys.argv) > 1 else "2026061"
     force = "--force" in sys.argv
+    # 红点/黄点 fire a POSITION PRIOR at low conf on grey/blue entry placeholders
+    # (user 2026-06-13: pale-blue 社交 badge labelled 红点). v9 conf separates:
+    # false position-prior firings ~0.2-0.45, real dots ~0.75+. So stamp dots
+    # only at a higher floor; other cls keep the low floor.
+    dot_conf = 0.55
+    for a in sys.argv:
+        if a.startswith("--dot-conf="):
+            dot_conf = float(a.split("=", 1)[1])
 
     pools = sorted(p for p in RAW.iterdir()
                    if p.is_dir() and pat in p.name and p.name.endswith("_clean"))
@@ -59,8 +70,12 @@ def main():
             h, w = res.orig_shape
             lines = []
             for b in res.boxes:
-                mi = n2m.get(int(b.cls[0]))
+                local = int(b.cls[0])
+                mi = n2m.get(local)
                 if mi is None:
+                    continue
+                # dot classes need a higher conf floor (drop position-prior FPs)
+                if model.names[local] in _DOT_CLS and float(b.conf[0]) < dot_conf:
                     continue
                 x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
                 xc, yc = (x1 + x2) / 2 / w, (y1 + y2) / 2 / h
