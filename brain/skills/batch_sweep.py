@@ -91,6 +91,7 @@ class BatchSweepSkill(BaseSkill):
     def reset(self) -> None:
         super().reset()
         self._init_state()
+        self._hard_assist_done = False
 
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
@@ -188,7 +189,17 @@ class BatchSweepSkill(BaseSkill):
             return action_wait(600, "批量掃蕩 clicked — settling")
         if btn is not None:
             return action_click_box(btn, "open batch sweep dialog")
-        # cls455 live gap → fixed position from the walk.
+        # v9 context bias (user-diagnosed 2026-06-12): 455 trained almost
+        # entirely on Hard-selected pages → blind when Normal selected.
+        # User's mitigation: click the Hard tab once so the model can SEE
+        # the button (cls-driven beats blind fixed-pos; sweep itself uses
+        # the saved preset, independent of the visible tab). One attempt.
+        from brain.skills.ui_classes import STAGE_HARD
+        hard = self.find_cls(screen, STAGE_HARD, conf=0.4)
+        if hard is not None and not getattr(self, "_hard_assist_done", False):
+            self._hard_assist_done = True
+            return action_click_box(hard, "select Hard tab (455 visibility assist)")
+        # final fallback: fixed position from the live walk.
         return action_click(*_POS_SWEEP_BTN, "open batch sweep dialog (fixed pos)")
 
     def _dialog(self, screen: ScreenState) -> Dict[str, Any]:

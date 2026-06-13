@@ -161,6 +161,12 @@ class ClubSkill(BaseSkill):
                 self._nav_cooldown = 3
                 self.log("opening social overlay (YOLO 社交入口)")
                 return action_click_box(social, "open social")
+            # A stray popup (e.g. buy_pyroxene's free-pack leftovers) hides the
+            # bottom nav while is_lobby() stays true → close it instead of
+            # starving (live 2026-06-12: 50 ticks waiting under a popup).
+            x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
+            if x is not None:
+                return action_click_box(x, "close stray popup blocking lobby nav")
             self.log("on lobby but no 社交入口 — YOLO gap; waiting")
             return action_wait(400, "waiting for 社交入口 cls")
 

@@ -375,6 +375,13 @@ class BuyPyroxeneSkill(BaseSkill):
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
+            # is_lobby() is TRUE even with a residual popup over the nav (the
+            # lobby entries peek out behind it) — declaring done here left the
+            # free-pack popup open and starved Club of 社交入口 for 50 ticks
+            # (live 2026-06-12 t80-128). Popup gone = actually done.
+            close = self._close_x(screen)
+            if close is not None:
+                return action_click_box(close, "close residual popup before done")
             self.log("back in lobby, buy_pyroxene done")
             return action_done("buy_pyroxene complete")
         if self._phase_ticks > _EXIT_MAX:

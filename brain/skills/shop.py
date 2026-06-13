@@ -379,12 +379,44 @@ class ShopSkill(BaseSkill):
                 return action_wait(300, "confirm dialog gone → exit")
             return action_wait(300, "waiting for confirm dialog")
 
-        # Try one more balance read in case the dialog left the top bar visible
-        # (mostly it won't — the grid-view read in _select is the real source).
+        # ★ PRIMARY budget source (2026-06-12): the confirm dialog itself shows
+        # 持有數量 (balance) and 總購買價格 (total) in large clear text — read
+        # BOTH from fixed dialog regions and do the exact check. This replaces
+        # the topbar read (vote-flaky: '25,583,379' OCR'd unstably → None →
+        # false cancel, live t0163) and the over-conservative 20M ceiling
+        # (balance 25.58M vs reserve5M+20M gate = razor margin).
+        from brain.pipeline import run_digit_ocr, parse_count
+        dlg_bal = parse_count(run_digit_ocr(screen.frame, (0.26, 0.63, 0.47, 0.71)))
+        # 總購買價格 sits on a DARK band — det fragments the digits beyond
+        # repair (offline 2026-06-12: raw/invert/otsu/threshold all chop
+        # '3,121,500' into overlapping pieces). Use the price when it reads,
+        # else a realistic ceiling: 一般-tab full daily stock is a FIXED ~3.1M
+        # basket — 8M = 2.5x observed, far saner than the old 20M.
+        dlg_tot = parse_count(run_digit_ocr(screen.frame, (0.59, 0.63, 0.83, 0.71)))
+        _DIALOG_CEILING = 8_000_000
+        if dlg_bal and dlg_bal[0]:
+            bal = dlg_bal[0]
+            tot = dlg_tot[0] if (dlg_tot and dlg_tot[0]) else _DIALOG_CEILING
+            # OCR'd totals below 100k are fragment garbage (real basket ~3.1M)
+            if tot < 100_000:
+                tot = _DIALOG_CEILING
+            self.log(f"dialog budget: 持有={bal:,} 總價={tot:,} reserve={self._reserve:,}")
+            if bal - tot >= self._reserve:
+                self._purchased = True
+                self._goto("exit")
+                return action_click_box(confirm, "confirm shop purchase (within budget)")
+            self.log("⛔ dialog budget: balance-total < reserve → cancel")
+            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+            self._goto("exit")
+            if cancel is not None:
+                return action_click_box(cancel, "cancel purchase (budget)")
+            return action_back("cancel purchase (budget, ESC)")
+
+        # Dialog numbers unreadable → legacy fallback: topbar balance + ceiling.
         self._capture_balance(screen)
         self._balance_from_snapshot()  # lobby-snapshot fallback (flaky in-shop cls)
         if not self._budget_logged:
-            self.log(f"budget: balance={self._balance} reserve={self._reserve:,} "
+            self.log(f"budget(fallback): balance={self._balance} reserve={self._reserve:,} "
                      f"ceiling={_ASSUMED_MAX_TOTAL:,}")
             self._budget_logged = True
 

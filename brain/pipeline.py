@@ -670,11 +670,25 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
             pass
         # concat all recognized text on the strip, keep only digits + / and ,
         raw = "".join(line[1] for line in result)
+        # Comma-grouped big numbers (credit 25,583,379 etc): blind strip-and-
+        # join DUPLICATES digits when OCR fragments overlap (live 2026-06-12:
+        # '25,583,379' → '255833379' = 10x over-read → shop budget chaos).
+        # The comma grouping VALIDATES digit structure — when present, trust
+        # only a clean single group; several disjoint groups = fragment mess →
+        # fail-closed None (multi-sample voting retries).
+        raw_n = raw.replace("，", ",")
+        groups = _re.findall(r"\d{1,3}(?:,\d{3})+", raw_n)
+        if groups:
+            longest = max(groups, key=len)
+            others = [g for g in groups if g != longest and g not in longest]
+            if others:
+                return None   # ambiguous overlapping fragments
+            return longest.replace(",", "")
         # Keep the decimal point too (deep-dive r2 C1, 2026-06-09): stripping it
         # turned "0.0%" into "00" and "58.3" into "583" — consumers that parse
         # floats (cafe earnings % gate) need the dot. parse_count() is dot-free
         # by domain (counts/AP/tickets never render decimals) so this is safe.
-        kept = _re.sub(r"[^0-9/.]", "", raw.replace(",", "").replace("，", ""))
+        kept = _re.sub(r"[^0-9/.]", "", raw_n.replace(",", ""))
         return kept or None
     except Exception as e:
         print(f"[digit-OCR] error: {e}")

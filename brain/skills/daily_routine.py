@@ -12,8 +12,8 @@ momo_talk / story_mining are registered but NOT in the default harvest
 Per sub-flow:
 - Check sub.should_run(screen) (most have a red/yellow dot check on the
   lobby entry icon — skip if no dot).
-- CraftSkill explicitly DOES NOT have a dot check — it always enters,
-  per user spec ("制造不需要靠黄点识别").
+- CraftSkill gates on the NAV_CRAFT red dot (user 2026-06-11: "制造有
+  红点的时候才代表东西造好了" — 没红点不进, 别每次都跑一趟).
 - Run sub.tick(screen) until it returns action 'done', then advance.
 
 Battle / sweep / arena / bounty etc. are NOT in here — those stay as

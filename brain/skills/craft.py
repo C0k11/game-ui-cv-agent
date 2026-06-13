@@ -216,7 +216,12 @@ class CraftSkill(BaseSkill):
         yellow = self.find_cls(screen, UC.CLAIM_ONCE_YELLOW, conf=_CLS_CONF)
         if yellow is not None:
             self.log("tapping 一次领取黄色 (collect finished crafts)")
-            self._collect_settle = 2
+            # 4 (was 2): the GOT_REWARD popup renders ~2.5-3s after the tap —
+            # with 2 the skill reached start, saw a covered screen, and exited
+            # "nothing startable" BEFORE the popup even appeared (live
+            # 2026-06-12 t0134-0139: collected yesterday's crafts but never
+            # started new ones).
+            self._collect_settle = 4
             return action_click_box(yellow, "collect finished crafts")
 
         # Grey claim-all or nothing → nothing (free) to collect.
@@ -289,6 +294,11 @@ class CraftSkill(BaseSkill):
             self._quick_settle -= 1
             return action_wait(350, f"quick-craft dialog settle ({self._quick_settle})")
 
+        # Patience window (live 2026-06-12): right after a collect the screen
+        # is mid-transition / covered by the incoming reward popup — 快速制造
+        # is invisible for a few ticks. Verdict only after a real window.
+        if self._phase_ticks < 6:
+            return action_wait(450, "start: no 快速制造 yet — settling before verdict")
         # Nothing startable (slots busy / no free slot) or budget out → exit.
         self.log("nothing startable (busy slots / YOLO gap) → exit")
         self._goto("exit")
