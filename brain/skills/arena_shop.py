@@ -65,11 +65,17 @@ _DIALOG_BAND = (0.28, 0.78, 0.72, 0.95)
 
 _ENTER_MAX = 20
 _LOCATE_MAX = 24          # includes several swipes
-_SELECT_MAX = 18
+_SELECT_MAX = 24
 _BUY_MAX = 12
 _CONFIRM_MAX = 12
 _EXIT_MAX = 14
 _MAX_SWIPES = 6
+# Tap-once selection (live 2026-06-13: the per-tick 绿勾 re-check + the gate's
+# cap re-click TOGGLED 下级 on/off forever — never reached 一般). Tap a drink
+# ONCE, then WAIT (not re-tap) for its 绿勾 to render; re-tap only if the tap was
+# genuinely lost. Never tap a card already showing 绿勾 (that would deselect it).
+_RENDER_WAIT = 3          # _phase_ticks to wait for a tapped drink's 绿勾
+_MAX_TAP = 2              # per-drink tap cap (lost-tap recovery, never spam)
 
 
 class ArenaShopSkill(BaseSkill):
@@ -88,7 +94,10 @@ class ArenaShopSkill(BaseSkill):
         self._swipes: int = 0
         self._balance: Optional[int] = None
         self._want: Dict[str, int] = {}      # cls_name → price, what we'll buy
-        self._selected: set = set()          # cls_names tapped (green-checked)
+        self._selected: set = set()          # cls_names confirmed green-checked
+        self._skipped: set = set()           # cls_names we gave up selecting
+        self._tap_count: Dict[str, int] = {} # cls_name → times tapped
+        self._last_tap_tick: int = -10       # _phase_ticks of the last drink tap
         self._purchased: bool = False
 
     def reset(self) -> None:
@@ -200,6 +209,14 @@ class ArenaShopSkill(BaseSkill):
             return action_wait(300, "arena tab unreachable")
         return action_wait(400, "waiting for 战术大赛商店 tab cls")
 
+    def _green_on(self, screen: ScreenState, card: YoloBox) -> bool:
+        """True if a 绿勾 marks THIS card selected. The check sits at the card's
+        top-left corner (live: 下级 card x1≈0.76 → 绿勾 center ≈0.74,0.625)."""
+        return self.find_cls(
+            screen, UC.GREEN_CHECK, conf=0.35,
+            region=(card.x1 - 0.05, card.y1 - 0.06, card.cx, card.cy),
+        ) is not None
+
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
         # ⛔ tab lock: only ever select while the arena tab is confirmed active.
         if not self._in_arena_tab(screen):
@@ -234,25 +251,52 @@ class ArenaShopSkill(BaseSkill):
             self._want = want
             self.log(f"buying {list(want)} total={total} 货币, balance={bal} — ok")
 
-        # Tap each wanted drink not yet green-checked.
+        # Tap each wanted drink ONCE; confirm via its 绿勾; NEVER re-tap a card
+        # that already shows 绿勾 (that would deselect it — the toggle bug).
         for name in self._want:
             if name in self._selected:
                 continue
             card = self.find_cls(screen, name, conf=_CLS_CONF)
             if card is None:
                 continue
-            # already checked? a 绿勾 sits on the card (near its top-left).
-            checked = self.find_cls(
-                screen, UC.GREEN_CHECK, conf=0.35,
-                region=(card.x1 - 0.02, card.y1 - 0.04, card.x2, card.cy),
-            )
-            if checked is not None:
+            if self._green_on(screen, card):          # already selected → done
                 self._selected.add(name)
+                self.log(f"{name} 已选中(绿勾)")
                 continue
-            self.log(f"select {name}")
+            tapped = self._tap_count.get(name, 0)
+            if tapped > 0:
+                # already tapped — WAIT for the 绿勾 to render, do NOT re-tap
+                # (re-tapping mid-render toggles it back off → livelock).
+                if self._phase_ticks - self._last_tap_tick < _RENDER_WAIT:
+                    return action_wait(450, f"{name} 已点 — 等绿勾渲染")
+                if tapped >= _MAX_TAP:
+                    # genuinely not selecting → give up THIS drink (under-buy is
+                    # free; never spam-toggle). Move on to any other drink.
+                    self.log(f"⚠️ {name} 点{tapped}次仍无绿勾 → 放弃该饮料")
+                    self._skipped.add(name)
+                    self._selected.add(name)   # treat as handled
+                    continue
+            self._tap_count[name] = tapped + 1
+            self._last_tap_tick = self._phase_ticks
+            self.log(f"select {name} (tap {tapped + 1})")
             return action_click_box(card, f"select {name}")
 
-        # All wanted drinks selected → go buy when 选择购买 shows.
+        # ⛔ MONEY GUARD: count 绿勾 on screen. If MORE items are checked than the
+        # drinks we wanted, an accidental 全部选择 happened → ABORT, never bulk-buy
+        # (live 2026-06-13: bot bought 11 items / 469 货币 via 全部选择 path).
+        greens = sum(1 for b in (screen.yolo_boxes or [])
+                     if b.cls_name == UC.GREEN_CHECK and b.confidence >= 0.35)
+        real_want = [n for n in self._want if n not in self._skipped]
+        if greens > len(real_want):
+            self.log(f"⛔ {greens} 绿勾 > {len(real_want)} 想买 → 疑似全选, 中止不买")
+            self._goto("exit")
+            return action_wait(300, "over-selected (全选?) → abort")
+        if not real_want:
+            self.log("无可选饮料 → exit")
+            self._goto("exit")
+            return action_wait(300, "nothing selectable → exit")
+
+        # All wanted drinks selected, count sane → go buy when 选择购买 shows.
         if self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF) is not None:
             self._goto("buy")
             return action_wait(250, "drinks selected → buy")

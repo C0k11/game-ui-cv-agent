@@ -36,13 +36,23 @@
     }
   },
   "ui": {
-    "active": "v9",
+    "active": "v10",
     "task": "detect",
     "n_classes": 474,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v10": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v10/weights/best.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-06-13",
+        "n_classes": 474,
+        "epoch_best": "ep15 (45ep早停patience30; warm from v9 best.pt; 70ep配方复刻v9 hsv_h/s=0 batch12)",
+        "acceptance": "冻结val515 vs v9: mAP50 0.9749→0.9826(+0.77pt) / mAP50-95 0.9353→0.9383(+0.30pt); 偏移=召回换精度(mP 0.9689→0.9583 -1.05pt / mR 0.9339→0.9461 +1.23pt)。数据=13,948帧(v9全源 + 用户手标run_20260612_191319 + 14个6/12-13 bot飞轮_clean池, 砍chainlive重复)。上线动机=任务刷关normal已选中屏检出批量扫荡(v10带6/12-13新farming数据)。",
+        "known_gap": "①⚠️红点召回回归: val 0.974→0.889(-8.5pt)。根因=batch_prefill_clean给_clean池点设conf≥0.55门槛, 把0.20-0.55真·中conf红点(任務角标等)变负样本, v10学成对真红点保守。实测737飞轮帧: 先验区0.20-0.55点 379→75(-80%)但目检证实抑制的≈全是真红点非灰占位假阳→位置先验假阳实际未修好(灰/蓝占位FP仍在, pale-blue有饱和像素HSV判空碰不到, 待人审)。操作影响小(红点驱动领取非花钱+每tick重检+门控点击兜底)。v11修法=_clean点改0.20门槛捞回真点+只HSV色彩判空删灰框。②新类469-473(arena_shop)/绿勾 val零GT全进train, 无法val验, 真验收=live。③其余继承v9 known_gap。",
+        "v11_todo": "重建v11: scripts/batch_prefill_clean.py dot_conf降回0.20(或删点floor) + clean_prefill_dots.py色彩判空删灰占位 → 恢复红点召回。用户决策(2026-06-13): 先用v10, 今天录新飞轮+用户素材后再重建。"
+      },
       "v9": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v9/weights/best.pt",
         "model_arch": "yolo26m",
