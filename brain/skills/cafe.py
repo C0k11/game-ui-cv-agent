@@ -58,15 +58,24 @@ _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
 # ── tuning knobs ─────────────────────────────────────────────────────────
 _CLS_CONF = 0.30            # default UI cls confidence floor
-_EMOTICON_CONF = 0.55       # headpat marker (emoticon model) — probe-confirmed
+_EMOTICON_CONF = 0.40       # headpat marker. 0.55→0.40 STOPGAP (user 2026-06-13):
+#   v10 folded the retired emoticon v26n (mAP 0.995) into ui cls 451; measured on
+#   650 cafe frames its 451 conf is weak/wide (mean 0.65, 18/51 detections <0.55)
+#   → real 摸头标识 fell under the 0.55 floor → student missed. Lower the floor to
+#   catch them; FP risk (指定訪問/隨機訪問 mis-as-451) backstopped by _FP_ZONE +
+#   domain dedup. PROPER FIX = v11: retrain 451 with ALL headpat material (old
+#   v26n set + new frames) to restore 0.99-grade detection, then raise floor back.
 _AVATAR_CONF = 0.25         # fused_avatar row-head confidence (registry default)
 _HEADPAT_DX = 0.025         # click this much right of the bubble = student body
 _HEADPAT_DEDUP_DIST = 0.06  # skip clicks within this of a recent headpat
 _HEADPAT_DEDUP_KEEP = 4     # remember the last N headpat coords for dedup
-_HEADPAT_DRY_FRAMES = 5     # consecutive empty frames ⇒ current view cleared
+_HEADPAT_DRY_FRAMES = 7     # consecutive empty frames ⇒ current view cleared
 #   3 (840ms) was too eager — emoticon bubbles render 400-600ms late after a
 #   pan/pat settle, so a slow bubble got declared "dry" and a student was
-#   missed (deep-dive r2 H3; live 2026-06-09 1F漏摸一个).
+#   missed (deep-dive r2 H3; live 2026-06-09 1F漏摸一个). 5→7 (user 2026-06-13
+#   "要给足摸头处理时间" — 漏摸复发: 7×280≈2s scan before declaring a region dry,
+#   extra margin for late bubbles / v10-folded-451 lower-conf renders). 精确根因
+#   (时序 vs v10 451检测弱 vs pan盲区) 待明天 live 走一步看漏摸那帧确认。
 _MAX_HEADPATS_PER_FLOOR = 12  # safety helmet (probe: ~12 students/floor)
 _MAX_PANS_PER_FLOOR = 6       # safety helmet on camera sweeps
 _INVITES_PER_FLOOR = 1        # invite 1 student per floor (2 total per cafe)
@@ -904,7 +913,7 @@ class CafeSkill(BaseSkill):
             self._pan_dir = 1
             self._pan_count += 1
             self._empty_frames = 0
-            self._pat_settle = 2
+            self._pat_settle = 3   # 2→3 (user 2026-06-13 给足时间): late bubbles after a pan
             self.log(f"{floor_tag} sweep LEFT full-span (reveal right overflow)")
             return action_swipe(0.80, 0.45, 0.10, 0.45, 600, f"pan left ({floor_tag})")
         if self._pan_dir == 1:
@@ -912,7 +921,7 @@ class CafeSkill(BaseSkill):
             self._pan_dir = 2
             self._pan_count += 1
             self._empty_frames = 0
-            self._pat_settle = 2
+            self._pat_settle = 3   # 2→3 (user 2026-06-13 给足时间): late bubbles after a pan
             self.log(f"{floor_tag} sweep RIGHT full-span (reveal left overflow)")
             return action_swipe(0.10, 0.45, 0.90, 0.45, 600, f"pan right ({floor_tag})")
 
