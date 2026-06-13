@@ -98,6 +98,10 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 2026-06-12: 新顶层 skill 必须进白名单, 否则 _normalize_skill_order 静默过滤
     # (第五次同型陷阱). arena_shop = 战术大赛商店买体力(花战术大赛货币).
     {"id": "arena_shop", "label": "[测试] 战术大赛商店买体力 单跑"},
+    # 2026-06-13: schedule/cafe 是 daily_routine 子 skill 但已在 pipeline._skill_registry,
+    # 加进白名单即可单跑(step_mode 调阶段辨别+门控). 同型陷阱第六次.
+    {"id": "schedule", "label": "[测试] 课程表 单跑"},
+    {"id": "cafe", "label": "[测试] 咖啡厅 单跑"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
