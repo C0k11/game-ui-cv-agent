@@ -55,7 +55,7 @@ def _is_empty(img, xc, yc, bw, bh):
 def process_pool(pool):
     import cv2  # noqa
     pdir = RAW / pool
-    deletes = keeps = touched = 0
+    deletes = keeps = touched = flips = 0
     for txt in sorted(pdir.glob("*.txt")):
         if txt.name == "classes.txt":
             continue
@@ -80,7 +80,6 @@ def process_pool(pool):
                 continue   # empty grey square → drop (becomes a negative)
             keeps += 1
             out.append(l)
-        flips = 0
         if changed:
             bdir = BACKUP / pool
             bdir.mkdir(parents=True, exist_ok=True)
