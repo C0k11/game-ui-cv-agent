@@ -112,13 +112,27 @@ REAL_SOURCES = [
     # 头像归fused域) / _synth_*(用户06-06砍的毒) / expanded·full·static(古schema不兼容)。
     "run_20260603_171121",
     "_ui_val_pool",
-    # ── v10 待加 (2026-06-12, ⚠ DASHBOARD 人审后才解注释训练) ──────────────
-    # 两批今日素材, v9 预标 + 星标/sweep 清洗, 但 v9 预标=teacher, 必须人审过
-    # 才进 train(否则重演 关卡得星 teacher 污染). 审完去掉下面两行的注释再 build:
-    #   run_20260612_191319   = 313帧 (星修110 + 455补128, commit fd40b59)
-    #   run_20260612_chainlive = 452帧 (今日整链+商店, 6059框 v9预标)
-    # "run_20260612_191319",
-    # "run_20260612_chainlive",
+    # ── v10 素材 (2026-06-13, 用户授权开训) ────────────────────────────────
+    # 用户手标全审: 313帧(星修110+455补128, commit fd40b59)。
+    "run_20260612_191319",
+    # bot飞轮 _clean 池(6/12-13 整链/商店/schedule/arena_shop live): v9预标 +
+    # 三道清洗(红黄点conf0.55门槛滤位置先验低conf假阳 / 绿勾空框HSV删 / 空帧立绘删)。
+    # ⚠残留高conf红黄点假阳无法自动删(用户接受, 飞轮负样本逐步破先验)。
+    # chainlive(452, curate自trajectory)被砍 — 与下列_clean池同run内容重复。
+    "run_20260612_205142_clean",
+    "run_20260612_205201_clean",
+    "run_20260612_211227_clean",
+    "run_20260612_211617_clean",
+    "run_20260612_213424_clean",
+    "run_20260612_213916_clean",
+    "run_20260612_214301_clean",
+    "run_20260612_215139_clean",
+    "run_20260612_215555_clean",
+    "run_20260612_215845_clean",
+    "run_20260613_044708_clean",
+    "run_20260613_050835_clean",
+    "run_20260613_051748_clean",
+    "run_20260613_053333_clean",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合
