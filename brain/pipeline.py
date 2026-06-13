@@ -31,6 +31,7 @@ from brain.skills.club import ClubSkill
 from brain.skills.bounty import BountySkill
 from brain.skills.jfd import JointFiringDrillSkill
 from brain.skills.batch_sweep import BatchSweepSkill
+from brain.skills.arena_shop import ArenaShopSkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
 from brain.skills.shop import ShopSkill
@@ -547,7 +548,11 @@ _OCR_ENABLED = False
 # interceptor's reward/level-up/exit-cancel dismissals, and the popup
 # 取消/X dismiss (never ESC the exit dialog). Flip False to restore the
 # recovery nets for unattended production runs.
-_BRINGUP_EXPOSE = True
+# (2026-06-12) flipped False — production nightly chains now. The exposed-hole
+# mode cost a run: BA's idle showcase (放置立绘屏, zero UI cls) sat through the
+# 30-tick no-UI abort because the dismiss-tap net was disabled. The net's
+# rotation taps (0.5,0.88 / X / corners) dismiss it; harmless elsewhere.
+_BRINGUP_EXPOSE = False
 
 # Debug: force EVERY skill to run, bypassing the red/yellow-dot should_run gate.
 # Set via mumu_runner --force-skills. For testing a skill's internals when the
@@ -1136,6 +1141,10 @@ class DailyPipeline:
             "jfd": JointFiringDrillSkill(),
             "batch_sweep": BatchSweepSkill(),
             "arena": ArenaSkill(),
+            # 战术大赛商店买体力 (花战术大赛货币, 非青辉石). NOT in DEFAULT_SKILLS —
+            # run via skill_order/sub_only for the confirm-step live calibration,
+            # integrate into harvest after verify.
+            "arena_shop": ArenaShopSkill(),
             "mail": MailSkill(),
             "daily_mission": DailyMissionSkill(),
             # Single dispatcher for all dot-gated daily-harvest sub-flows

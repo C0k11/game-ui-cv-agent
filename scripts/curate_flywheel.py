@@ -26,8 +26,10 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw_images"
+TRAJ = ROOT / "data" / "trajectories"
 MASTER = RAW / "_classes.txt"
-UI_WEIGHTS = Path(r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v7\weights\best_real.pt")
+# v9 active (2026-06-12) — prefill today's clean frames with the live model.
+UI_WEIGHTS = Path(r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v9\weights\best.pt")
 
 _THUMB = (48, 27)   # grayscale thumb for near-dupe metric
 
@@ -54,7 +56,9 @@ def _dedup_dir(args):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="output dataset name under data/raw_images/")
-    ap.add_argument("--include", nargs="+", required=True, help="source dir glob(s) under data/raw_images/")
+    ap.add_argument("--include", nargs="+", required=True, help="source dir glob(s)")
+    ap.add_argument("--from-traj", action="store_true",
+                    help="search data/trajectories/ instead of raw_images/")
     ap.add_argument("--dedup", type=float, default=3.0, help="mean-abs-diff threshold on 48x27 gray thumbs")
     ap.add_argument("--conf", type=float, default=0.20, help="pre-label conf floor (model floor)")
     args = ap.parse_args()
@@ -62,7 +66,8 @@ def main() -> None:
     out_dir = RAW / args.out
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    srcs = sorted({d for pat in args.include for d in RAW.iterdir()
+    search_root = TRAJ if args.from_traj else RAW
+    srcs = sorted({d for pat in args.include for d in search_root.iterdir()
                    if d.is_dir() and fnmatch.fnmatch(d.name, pat) and d.name != args.out})
     if not srcs:
         print("no source dirs matched"); sys.exit(1)
@@ -88,7 +93,11 @@ def main() -> None:
             cv2.imwrite(str(dst), img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
         else:
             shutil.copy2(src, dst)
-        manifest.append((dst.name, str(sp.relative_to(RAW))))
+        try:
+            prov = str(sp.relative_to(search_root))
+        except ValueError:
+            prov = str(sp)
+        manifest.append((dst.name, prov))
         out_paths.append(str(dst))
     with open(out_dir / "manifest.csv", "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows([("frame", "source")] + manifest)

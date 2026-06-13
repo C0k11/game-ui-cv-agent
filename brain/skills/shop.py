@@ -156,6 +156,50 @@ class ShopSkill(BaseSkill):
             self._balance = res[0]
             self.log(f"shop credit balance (top-bar) = {self._balance:,} (raw {raw!r})")
 
+    def _read_balance_longest(self, frame, region):
+        """OCR a region → the LONGEST contiguous digit run (commas stripped),
+        as int, or None. Bypasses run_digit_ocr's comma-group early-return,
+        which on a live OCR fragment ('28,096' + '458') returned a short
+        number that got reserve-rejected (2026-06-12 shop never bought). Only
+        accepts >= 1M (real credit balances are millions; shorter = truncated /
+        garbage). Logs the raw on miss so the next failure is debuggable."""
+        if frame is None:
+            return None
+        try:
+            import re as _re
+            import cv2
+            from brain.pipeline import _get_ocr
+            h, w = frame.shape[:2]
+            x1, y1 = int(region[0]*w), int(region[1]*h)
+            x2, y2 = int(region[2]*w), int(region[3]*h)
+            crop = frame[max(0, y1):y2, max(0, x1):x2]
+            if crop.size == 0:
+                return None
+            if crop.shape[0] < 40:
+                sc = 40.0 / crop.shape[0]
+                crop = cv2.resize(crop, (int(crop.shape[1]*sc), 40),
+                                  interpolation=cv2.INTER_CUBIC)
+            result, _ = _get_ocr()(crop)
+            if not result:
+                return None
+            try:
+                result = sorted(result, key=lambda ln: min(p[0] for p in ln[0]))
+            except Exception:
+                pass
+            raw = "".join(line[1] for line in result)
+            digits = _re.sub(r"[^0-9]", "", raw.replace(",", "").replace("，", ""))
+            if not digits:
+                return None
+            val = int(digits)
+            if val >= 1_000_000:
+                return val
+            if not getattr(self, "_bal_miss_logged", False):
+                self.log(f"持有數量 read too small: raw={raw!r} digits={digits!r}")
+                self._bal_miss_logged = True
+            return None
+        except Exception:
+            return None
+
     def _balance_from_snapshot(self) -> None:
         """Fallback: the shop grid's top-bar 信用点 cls is FLAKY (live 2026-06-09:
         missed on every grid frame → balance=None → wrongly cancelled). The
@@ -385,49 +429,43 @@ class ShopSkill(BaseSkill):
         # the topbar read (vote-flaky: '25,583,379' OCR'd unstably → None →
         # false cancel, live t0163) and the over-conservative 20M ceiling
         # (balance 25.58M vs reserve5M+20M gate = razor margin).
-        from brain.pipeline import run_digit_ocr, parse_count
-        dlg_bal = parse_count(run_digit_ocr(screen.frame, (0.26, 0.63, 0.47, 0.71)))
+        # The dialog's 持有數量 is white-on-light, clear, and IMMUNE to the
+        # topbar's left-truncation (live 2026-06-12: topbar 28,096,458 OCR'd
+        # as 96,458 → shop never bought). It IS the topbar balance. Read it
+        # from the fixed region — but only AFTER the popup finishes rendering,
+        # so retry on the in-screen (never-vanishing) dialog instead of bailing
+        # to the truncated topbar on the first miss. Use the LONGEST-digit-run
+        # parse (NOT run_digit_ocr's comma logic, which returned a short
+        # fragment live → rejected → 8 retries → cancel, 2026-06-12).
+        bal = self._read_balance_longest(screen.frame, (0.26, 0.63, 0.47, 0.71))
+        if bal is None:
+            if self._phase_ticks <= 8:
+                return action_wait(450, f"confirm dialog up, re-reading 持有數量 "
+                                        f"({self._phase_ticks}/8)")
+            # Exhausted retries → fail-CLOSED cancel (never blind-buy on an
+            # unread balance). Don't fall through to the truncated topbar.
+            self.log("⛔ 持有數量 unreadable after retries → cancel (fail-closed)")
+            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
+            self._goto("exit")
+            if cancel is not None:
+                return action_click_box(cancel, "cancel purchase (unread balance)")
+            return action_back("cancel purchase (unread, ESC)")
+
         # 總購買價格 sits on a DARK band — det fragments the digits beyond
         # repair (offline 2026-06-12: raw/invert/otsu/threshold all chop
         # '3,121,500' into overlapping pieces). Use the price when it reads,
         # else a realistic ceiling: 一般-tab full daily stock is a FIXED ~3.1M
         # basket — 8M = 2.5x observed, far saner than the old 20M.
+        from brain.pipeline import run_digit_ocr, parse_count
         dlg_tot = parse_count(run_digit_ocr(screen.frame, (0.59, 0.63, 0.83, 0.71)))
         _DIALOG_CEILING = 8_000_000
-        if dlg_bal and dlg_bal[0]:
-            bal = dlg_bal[0]
-            tot = dlg_tot[0] if (dlg_tot and dlg_tot[0]) else _DIALOG_CEILING
-            # OCR'd totals below 100k are fragment garbage (real basket ~3.1M)
-            if tot < 100_000:
-                tot = _DIALOG_CEILING
-            self.log(f"dialog budget: 持有={bal:,} 總價={tot:,} reserve={self._reserve:,}")
-            if bal - tot >= self._reserve:
-                self._purchased = True
-                self._goto("exit")
-                return action_click_box(confirm, "confirm shop purchase (within budget)")
-            self.log("⛔ dialog budget: balance-total < reserve → cancel")
-            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
-            self._goto("exit")
-            if cancel is not None:
-                return action_click_box(cancel, "cancel purchase (budget)")
-            return action_back("cancel purchase (budget, ESC)")
-
-        # Dialog numbers unreadable → legacy fallback: topbar balance + ceiling.
-        self._capture_balance(screen)
-        self._balance_from_snapshot()  # lobby-snapshot fallback (flaky in-shop cls)
-        if not self._budget_logged:
-            self.log(f"budget(fallback): balance={self._balance} reserve={self._reserve:,} "
-                     f"ceiling={_ASSUMED_MAX_TOTAL:,}")
-            self._budget_logged = True
-
-        if self._affordable():
-            self.log("affordable (balance ≥ reserve+ceiling) → confirm (credits)")
+        tot = dlg_tot[0] if (dlg_tot and dlg_tot[0] and dlg_tot[0] >= 100_000) else _DIALOG_CEILING
+        self.log(f"dialog budget: 持有={bal:,} 總價={tot:,} reserve={self._reserve:,}")
+        if bal - tot >= self._reserve:
             self._purchased = True
             self._goto("exit")
             return action_click_box(confirm, "confirm shop purchase (within budget)")
-
-        # Not affordable / can't verify → cancel (never overspend / blind-buy).
-        self.log("⛔ not within budget / unverifiable → cancel")
+        self.log("⛔ dialog budget: balance-total < reserve → cancel")
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
         self._goto("exit")
         if cancel is not None:

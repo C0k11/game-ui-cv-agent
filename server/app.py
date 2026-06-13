@@ -95,6 +95,9 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 白名单否则 _normalize_skill_order 静默过滤(第三次踩这个坑)。
     {"id": "mail", "label": "邮件箱收口"},
     {"id": "daily_mission", "label": "每日领奖 (n/8≥7)"},
+    # 2026-06-12: 新顶层 skill 必须进白名单, 否则 _normalize_skill_order 静默过滤
+    # (第五次同型陷阱). arena_shop = 战术大赛商店买体力(花战术大赛货币).
+    {"id": "arena_shop", "label": "[测试] 战术大赛商店买体力 单跑"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
@@ -1158,26 +1161,35 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             _tick_counter += 1
 
-            # 1. Capture: read latest frame from YOLO high-FPS thread (DXcam),
-            #    ADB fallback, BitBlt last resort.
-            #    DXcam is owned exclusively by the YOLO thread — do NOT grab here.
+            # 1. Capture — ADB FIRST (主tick抓帧ADB化, 2026-06-12): the Android
+            #    internal screencap is full-res 3840x2160, overlay-free, and
+            #    window-size independent. The old DXcam-first path fed the tick
+            #    whatever the DESKTOP WINDOW size was (~900px when small) —
+            #    digit-OCR physically impossible (топ-bar credit 28,096,458
+            #    read as 96,458 → shop refused to buy twice; dialog 持有數量
+            #    unreadable at 10px). DXcam shared frame = fallback only;
+            #    BitBlt last resort. Bonus: trajectory frames become train-grade
+            #    clean flywheel material at full res.
             frame = None
-            with _yolo_latest_lock:
-                if _yolo_latest_frame is not None:
-                    # Only use DXcam frame if fresh (< 3s old);
-                    # stale frames mean window is minimized → fall through to ADB
-                    if time.perf_counter() - _yolo_latest_ts < 3.0:
-                        frame = _yolo_latest_frame.copy()
-            if frame is None and adb is not None:
+            _frame_src = ""
+            if adb is not None:
                 try:
                     frame = adb.capture_frame()
+                    _frame_src = "adb"
                 except Exception:
                     frame = None
+            if frame is None:
+                with _yolo_latest_lock:
+                    if (_yolo_latest_frame is not None
+                            and time.perf_counter() - _yolo_latest_ts < 3.0):
+                        frame = _yolo_latest_frame.copy()
+                        _frame_src = "dxcam"
             if frame is None:
                 try:
                     pil_img = capture_client(render_hwnd)
                     if pil_img is not None:
                         frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                        _frame_src = "bitblt"
                 except Exception:
                     pass
             if frame is None:
@@ -1195,21 +1207,20 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             # 2. Pipeline tick — OCR at tick rate, YOLO from high-FPS thread
             skip_ocr = (_tick_counter % _OCR_INTERVAL != 0) and _prev_ocr_boxes is not None
-            # Inject YOLO from high-FPS thread only when DXcam feed is active.
-            # If DXcam is unavailable, pass None so pipeline runs inline YOLO
-            # on the captured frame instead of permanently using empty boxes.
+            # YOLO source must match the frame source: ADB frames run INLINE
+            # YOLO (boxes correspond to this exact full-res frame). Inject the
+            # high-FPS thread's boxes only when we actually fell back to its
+            # DXcam frame (they were computed on that feed).
             _injected_yolo = None
-            if _dxcam_camera is not None:
+            if _frame_src == "dxcam" and _dxcam_camera is not None:
                 with _yolo_latest_lock:
-                    # Only inject YOLO from high-FPS thread if frame is fresh;
-                    # stale = window minimized → run inline YOLO on ADB frame
                     if (_yolo_latest_frame is not None
                             and time.perf_counter() - _yolo_latest_ts < 3.0):
                         _injected_yolo = list(_yolo_latest_boxes)
-            else:
-                if not _inline_yolo_logged:
-                    _log_pipeline("DXcam unavailable: running YOLO inline at pipeline tick rate")
-                    _inline_yolo_logged = True
+            elif not _inline_yolo_logged:
+                _log_pipeline(f"main tick frame source = {_frame_src or 'none'}: "
+                              f"running YOLO inline at pipeline tick rate")
+                _inline_yolo_logged = True
             action = pipe.tick_from_frame(frame, screenshot_path=tmp_path,
                                           skip_ocr=skip_ocr,
                                           prev_ocr_boxes=_prev_ocr_boxes,
