@@ -554,6 +554,11 @@ _OCR_ENABLED = False
 # rotation taps (0.5,0.88 / X / corners) dismiss it; harmless elsewhere.
 _BRINGUP_EXPOSE = False
 
+# Gated-click hold cap (user 2026-06-13): after a transition click whose screen
+# hasn't changed, hold ~this many ticks (×~0.45s ≈ 7s) before assuming the tap
+# was lost and allowing one retry. Generous so slow scene loads aren't fought.
+_CLICK_HOLD_CAP = 16
+
 # Debug: force EVERY skill to run, bypassing the red/yellow-dot should_run gate.
 # Set via mumu_runner --force-skills. For testing a skill's internals when the
 # account has no dot on it today (e.g. cafe with nothing to collect).
@@ -1952,53 +1957,87 @@ class DailyPipeline:
         """Last ScreenState processed by tick (for overlay access)."""
         return getattr(self, '_last_screen', None)
 
-    def _dedup_click(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        """Suppress stale repeated clicks.
+    # cls that flicker frame-to-frame (badges / currency digits) — excluded
+    # from the stage fingerprint so a single dot blinking doesn't read as a
+    # screen transition.
+    _SIG_SKIP = frozenset({
+        "红点", "黄点", "绿勾", "加号", "减号", "加载中",
+        "信用点", "体力", "青辉石", "战术大赛商店货币",
+    })
 
-        If the same click target+reason fires twice in a row, the second
-        time is almost certainly acting on stale OCR data from before the
-        screen transitioned.  Convert it to a short wait instead.
+    def _screen_sig(self, screen) -> frozenset:
+        """Coarse 'which stage are we on' fingerprint = the set of structural
+        cls on screen (buttons/entries/tabs, conf≥0.5; badges/currency dropped).
+        Transitioning to the next stage changes this set; flicker does not."""
+        return frozenset(
+            b.cls_name for b in (getattr(screen, "yolo_boxes", None) or [])
+            if b.confidence >= 0.50 and b.cls_name not in self._SIG_SKIP)
+
+    def _dedup_click(self, action: Dict[str, Any], screen=None) -> Dict[str, Any]:
+        """Gated click (user 2026-06-13: 点了一个cls, 等下一阶段cls出现再点).
+
+        A transition click is allowed ONCE, then HELD (converted to wait) until
+        the screen fingerprint actually changes — the next stage rendered — or a
+        generous cap (lost tap → one retry). This kills the frantic ADB re-click
+        that re-fired the SAME button before the screen transitioned (live
+        2026-06-13: arena_shop 商店入口 ×2 / schedule popout thrash → Location
+        Select 乱走). 加载中 always waits (暂停 process 给游戏加载时间).
+
+        Same-target steppers (e.g. MAX clicked defensively ×3) are unaffected:
+        the FIRST tap is allowed (sets the value); the rest hold harmlessly.
+        Different-target clicks (multi-select cards, room heads) always pass.
         """
         action_type = action.get("action", "")
         if action_type != "click":
-            # Reset tracking on non-click actions
             self._last_click_target = None
-            self._last_click_reason = ""
-            self._click_repeat_count = 0
+            self._last_click_sig = None
+            self._click_hold = 0
             return action
+
+        # ── universal loading gate: never tap mid-transition ──
+        try:
+            if screen is not None and screen.is_loading():
+                return action_wait(500, "加载中 → 暂停, 等加载完成")
+        except Exception:
+            pass
 
         target = action.get("target")
         reason = str(action.get("reason", "") or "")
+        sig = self._screen_sig(screen) if screen is not None else frozenset()
+        last_target = getattr(self, "_last_click_target", None)
+        last_sig = getattr(self, "_last_click_sig", None)
 
-        # Compare with positional tolerance — OCR returns slightly different
-        # bounding boxes each frame, so the "same" button gets different coords.
         same_target = False
-        if target and self._last_click_target:
+        if target and last_target:
             try:
-                dx = abs(target[0] - self._last_click_target[0])
-                dy = abs(target[1] - self._last_click_target[1])
-                same_target = dx < 0.03 and dy < 0.03
+                same_target = (abs(target[0] - last_target[0]) < 0.03
+                               and abs(target[1] - last_target[1]) < 0.03)
             except (TypeError, IndexError):
-                same_target = target == self._last_click_target
+                same_target = target == last_target
 
-        if same_target and reason == self._last_click_reason:
-            self._click_repeat_count += 1
-            if self._click_repeat_count <= 2:
-                # Allow max 2 repeats (3 total), then throttle
+        if same_target and last_sig is not None:
+            union = sig | last_sig
+            jacc = (len(sig & last_sig) / len(union)) if union else 1.0
+            if jacc >= 0.5:
+                # Screen still the same stage → the click hasn't landed/rendered
+                # → HOLD instead of re-tapping.
+                self._click_hold = getattr(self, "_click_hold", 0) + 1
+                if self._click_hold <= _CLICK_HOLD_CAP:
+                    return action_wait(
+                        450, f"等下一阶段cls出现 "
+                             f"({self._click_hold}/{_CLICK_HOLD_CAP}): {reason}")
+                # Cap hit → tap likely lost → allow ONE retry, reset.
+                print(f"[Pipeline] click hold cap → 重试: {reason}", flush=True)
+                self._click_hold = 0
+                self._last_click_sig = sig
                 return action
-            # Throttle — convert to wait AND reset counter so the next
-            # attempt gets a fresh start.  This prevents permanent deadlock
-            # when a click genuinely needs retrying (game lag, slow transition).
-            print(f"[Pipeline] Click throttled (repeat #{self._click_repeat_count}): {reason}")
-            self._last_click_target = None
-            self._last_click_reason = ""
-            self._click_repeat_count = 0
-            return action_wait(400, f"click throttled: {reason}")
-        else:
-            self._last_click_target = target
-            self._last_click_reason = reason
-            self._click_repeat_count = 0
-            return action
+            # else: screen advanced → genuine new action, fall through to record.
+
+        self._last_click_target = target
+        self._last_click_reason = reason
+        self._last_click_sig = sig
+        self._click_hold = 0
+        return action
 
     def _tick_with_screen(self, screen: ScreenState, *, screenshot_path: str = "") -> Dict[str, Any]:
         """Internal tick logic shared by tick() and tick_from_frame()."""
@@ -2295,9 +2334,21 @@ class DailyPipeline:
             except Exception as e:
                 print(f"[Pipeline] should_run check failed for {skill.name}: {e}")
 
+        # ── universal loading gate (user 2026-06-13: 有加载中就暂停process给
+        # 游戏加载时间). Pause the skill entirely while the 加载中 spinner is up —
+        # don't run skill logic on a transient loading frame.
+        try:
+            if screen.is_loading():
+                self._last_action_reason = "加载中 → 暂停等待"
+                return {"action": "wait", "duration_ms": 600,
+                        "reason": "加载中 → 暂停等待", "_pipeline": True,
+                        "_skill": skill.name, "_tick": skill.ticks}
+        except Exception:
+            pass
+
         # Let skill decide
         action = skill.tick(screen)
-        action = self._dedup_click(action)
+        action = self._dedup_click(action, screen)
         action_type = action.get("action", "")
         action_reason = str(action.get("reason", "") or "")
         self._last_action_reason = action_reason
