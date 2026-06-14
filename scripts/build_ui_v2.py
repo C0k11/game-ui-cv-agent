@@ -133,6 +133,20 @@ REAL_SOURCES = [
     "run_20260613_050835_clean",
     "run_20260613_051748_clean",
     "run_20260613_053333_clean",
+    # v11: 2026-06-13 全天 live (整链/arena_shop/schedule/bounty/jfd step_mode walk
+    # + 最终 autonomous arena/mail/daily/batch_sweep). v10 预标, 用户 dashboard 人审
+    # (无可见假阳, 仅 cafe 漏摸1 — 451 弱待明天 cafe 帧强化). 18 空帧已删。
+    "run_20260613_171257_clean",
+    "run_20260613_171928_clean",
+    "run_20260613_174617_clean",
+    "run_20260613_175555_clean",
+    "run_20260613_180407_clean",
+    "run_20260613_183133_clean",
+    "run_20260613_183328_clean",
+    "run_20260613_185122_clean",
+    "run_20260613_190244_clean",
+    "run_20260613_190646_clean",
+    "run_20260613_203352_clean",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合

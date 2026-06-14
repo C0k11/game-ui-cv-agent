@@ -605,6 +605,31 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v11": {
+        # v11 (2026-06-13) = v10 warm + 今日全天 live 素材(11 个 _clean 池/~1028 帧:
+        #  整链/arena_shop/schedule/bounty/jfd step_mode walk + autonomous 尾链)。
+        #  v10 预标 + 用户 dashboard 人审(无可见假阳, 仅 cafe 漏摸1)。配方复刻 v10 成功版。
+        #  ⚠ cafe 451 摸头弱本版不修(今日飞轮无 cafe 摸头帧, 老 _emoticon_v2 200 帧已在源)
+        #  — 451 强化待明天 cafe walk 多录摸头帧; 眼下 inference conf 0.40 stopgap 兜着。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v10" / "weights" / "best.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v11",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
