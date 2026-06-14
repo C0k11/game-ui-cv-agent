@@ -555,9 +555,13 @@ _OCR_ENABLED = False
 _BRINGUP_EXPOSE = False
 
 # Gated-click hold cap (user 2026-06-13): after a transition click whose screen
-# hasn't changed, hold ~this many ticks (×~0.45s ≈ 7s) before assuming the tap
-# was lost and allowing one retry. Generous so slow scene loads aren't fought.
-_CLICK_HOLD_CAP = 16
+# hasn't changed, hold ~this many ticks before assuming the tap was lost and
+# allowing one retry. 16→5 (user 2026-06-13 "无端等待": 16 was ~22s of dead
+# waiting; a real nav transition renders in 2-3 ticks so the fingerprint flips
+# and releases well before the cap — the cap only fires on a genuinely stuck
+# screen, where re-tapping after ~5 ticks is right). Reward/dismiss popups are
+# exempted from holding entirely in _dedup_click (see "看到目标就点").
+_CLICK_HOLD_CAP = 5
 
 # Debug: force EVERY skill to run, bypassing the red/yellow-dot should_run gate.
 # Set via mumu_runner --force-skills. For testing a skill's internals when the
@@ -2006,6 +2010,23 @@ class DailyPipeline:
         sig = self._screen_sig(screen) if screen is not None else frozenset()
         last_target = getattr(self, "_last_click_target", None)
         last_sig = getattr(self, "_last_click_sig", None)
+
+        # ── "看到目标就点" exemption (user 2026-06-13: 无端等待) ──────────────
+        # Stacked popups (sweep/battle/event rewards, 領取/確認/continue, X-close)
+        # sit at the SAME position and EACH layer must be clicked through. The
+        # same-target hold below would HOLD the dismiss → the popup never gets
+        # clicked → deadlock until the cap (the ~22s "无端等待"). These act on a
+        # popup that IS on screen right now → click it immediately, never hold.
+        _r = reason
+        if any(k in _r for k in (
+                "interceptor", "dismiss", "reward", "獎勵", "奖励", "result",
+                "結果", "结果", "确认键", "確認", "continue", "繼續", "領取",
+                "领取", "claim", "close", "关闭", "關閉", "叉叉")):
+            self._last_click_target = target
+            self._last_click_reason = reason
+            self._last_click_sig = sig
+            self._click_hold = 0
+            return action
 
         same_target = False
         if target and last_target:

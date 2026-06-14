@@ -47,11 +47,18 @@ _PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
 _RESULT_BAND = (0.32, 0.55, 0.68, 0.85)
 
 _MAX_FIGHTS = 5            # daily arena ticket cap (must complete all 5)
-# ~25s 等待時間 between fights. Blind wait @1s/tick (+~0.15s capture/infer) so the
-# cooldown bar clears before re-selecting (else the opponent row is greyed /
-# unclickable → select spins → false exit). If it still spins, _select re-enters
-# cooldown for one more round. v6 could OCR the mm:ss countdown.
+# ~25s 等待時間 between fights. NOW countdown-aware (user 2026-06-13: 倒计时早没了
+# bot还傻等22tick≈30s — the game countdown STARTS when the battle ends, well before
+# the bot finishes dismissing results and begins counting, so a full blind 22-tick
+# wait massively over-shoots). _read_cooldown OCRs the mm:ss 等待時間 value; we go
+# the moment it reads --:-- (ready). _COOLDOWN_TICKS stays as the hard fallback cap;
+# _COOLDOWN_MIN is a short floor so a one-frame unreadable '--:--' can't false-ready
+# into a greyed opponent row (which _select recovers from anyway via extra cooldown).
 _COOLDOWN_TICKS = 22
+_COOLDOWN_MIN = 4
+# 等待時間 value region (fixed left panel; calibrated 2026-06-13 on a live arena
+# frame: '00:13' → digit-OCR '013'). --:-- (ready) → no digits → None.
+_COOLDOWN_REGION = (0.12, 0.71, 0.27, 0.77)
 
 _ENTER_MAX = 24
 _CLAIM_MAX = 12
@@ -154,6 +161,29 @@ class ArenaSkill(BaseSkill):
         if "/" not in s or not s[:1].isdigit():
             return None
         return res[0]
+
+    def _read_cooldown(self, screen: ScreenState) -> Optional[int]:
+        """等待時間 mm:ss countdown remaining seconds, or None if --:-- (ready)
+        / unreadable. Clean ADB frame preferred. User 2026-06-13: align with the
+        real countdown instead of a blind 22-tick wait."""
+        try:
+            from brain.pipeline import get_clean_frame, run_digit_ocr
+        except Exception:
+            return None
+        frame = get_clean_frame()
+        if frame is None:
+            frame = getattr(screen, "frame", None)
+        if frame is None:
+            return None
+        raw = run_digit_ocr(frame, _COOLDOWN_REGION)
+        digits = "".join(c for c in (raw or "") if c.isdigit())
+        if not digits:
+            return None   # --:-- (ready) or unreadable
+        try:
+            # '013'→0:13=13s, '0024'→0:24=24s, '13'→13s (last 2 = seconds)
+            return int(digits[:-2] or 0) * 60 + int(digits[-2:]) if len(digits) > 2 else int(digits)
+        except ValueError:
+            return None
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
         """A 青辉石 icon in the body AND a 取消键 = a buy-ticket cost dialog
@@ -342,11 +372,21 @@ class ArenaSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "fight cap → exit")
 
-        # Cooldown between fights (~25s 等待時間). Wait it out fully — selecting an
-        # opponent mid-cooldown does nothing (greyed row) and burns select attempts.
-        if self._fights_done > 0 and self._cooldown < _COOLDOWN_TICKS:
+        # Cooldown between fights — countdown-aware (user 2026-06-13: 倒计时早没了
+        # 别傻等). Read the 等待時間 mm:ss: go the moment it reads --:-- (ready),
+        # only wait while it actually shows time left. Hard cap + short floor guard.
+        if self._fights_done > 0:
             self._cooldown += 1
-            return action_wait(1000, f"arena cooldown {self._cooldown}/{_COOLDOWN_TICKS} (~25s)")
+            secs = self._read_cooldown(screen)
+            if secs is not None and secs > 1 and self._cooldown < _COOLDOWN_TICKS:
+                return action_wait(1000, f"arena 等待時間 {secs}s 倒计时 "
+                                          f"(cd {self._cooldown}/{_COOLDOWN_TICKS})")
+            if secs is None and self._cooldown < _COOLDOWN_MIN:
+                # --:-- unreadable this early ⇒ don't trust "ready" yet (avoid a
+                # greyed-row select); short floor then proceed.
+                return action_wait(1000, f"arena cooldown floor "
+                                          f"{self._cooldown}/{_COOLDOWN_MIN}")
+            self._cooldown = 0   # countdown cleared / floor passed / hard cap → go
 
         # A successful ticket read ⇒ the arena left panel is on screen — safe
         # to select. (The old _on_arena/blind-select fallbacks are gone; they
