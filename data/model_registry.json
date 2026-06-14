@@ -36,13 +36,23 @@
     }
   },
   "ui": {
-    "active": "v10",
+    "active": "v11",
     "task": "detect",
     "n_classes": 474,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v11": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v11/weights/best.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-06-13",
+        "n_classes": 474,
+        "epoch_best": "ep32 (62ep早停patience30; warm from v10 best.pt; 70ep配方复刻v10)",
+        "acceptance": "冻结val515: mAP50 0.9776/mAP50-95 0.9348/P0.9614/R0.9401。vs v10(0.9826/0.9383)略低0.5pt但在噪声内。⚠️冻结val是旧的(6/06大厅cafe帧), 不含今天新增场景(arena_shop/普通关卡选中80/批量扫荡455/hub, val=0)→ val既证不了v11更好也证不了v10更好。数据=14,931帧(v10全源 + 今天11个6/13全天live _clean池/~983帧: 整链/arena_shop/schedule/bounty/jfd step_mode walk + autonomous尾链, v10预标+用户dashboard人审无可见假阳仅cafe漏摸1, 删18空帧)。用户决策(2026-06-13): v10已live验过, 直接上v11。",
+        "known_gap": "①cafe 451摸头弱(均值0.65)本版不修: 今日飞轮无cafe摸头帧, 老_emoticon_v2 200帧已在源(200帧在474类被稀释)→ 451强化待明天cafe walk多录摸头帧; 眼下pipeline inference用_EMOTICON_CONF 0.40 stopgap兜。②红点dot用0.55先验滤(用户人审认可无假阳, 没改0.20; 故继承v10红点召回特性)。③真验收=明天cafe walk+日常live对比v10/v11新场景检出(arena_shop/普通关卡选中)。",
+        "v_next_todo": "录全新val(含今天新场景, 旧val测不准) + cafe walk多录摸头帧强化451 + dot可选0.20+HSV洗。"
+      },
       "v10": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v10/weights/best.pt",
         "model_arch": "yolo26m",
