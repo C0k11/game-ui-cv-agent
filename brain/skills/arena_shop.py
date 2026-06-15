@@ -59,9 +59,12 @@ _POS_HOME = (0.965, 0.033)           # 回大厅 top-right
 # live frames cx0.069 cy0.395). cls 469 (UNSELECTED tab) is starved (27 train
 # instances vs 470's 534) → YOLO misses it → click this fixed pos to switch tabs.
 _POS_ARENA_TAB = (0.068, 0.395)
-# Left tab column swipe (reveal 战术大赛商店 below the fold).
+# Left tab column ONE swipe to reveal 战术大赛商店 (shop opens on the 一般/credit
+# tab; 战术大赛 sits below the fold). Magnitude ~0.40 — live 2026-06-14: one swipe
+# 0.75→0.35 brings 战术大赛 to cy0.396 where v11 detects cls469 @0.96. user: 滑一下
+# 就行别猛滑 → single swipe, this distance lands it right.
 _SWIPE_FROM = (0.05, 0.75)
-_SWIPE_TO = (0.05, 0.30)
+_SWIPE_TO = (0.05, 0.35)
 
 # Confirm-dialog body region (pyroxene guard scan) + button band.
 _DIALOG_BODY = (0.15, 0.12, 0.85, 0.78)
@@ -80,6 +83,10 @@ _MAX_SWIPES = 6
 # genuinely lost. Never tap a card already showing 绿勾 (that would deselect it).
 _RENDER_WAIT = 3          # _phase_ticks to wait for a tapped drink's 绿勾
 _MAX_TAP = 2              # per-drink tap cap (lost-tap recovery, never spam)
+# Both drink cards may fade in over a couple frames after the tab switch — scan a
+# short window before committing _want so 一般 isn't missed (live 2026-06-14: only
+# 下级 bought because _want was committed on the first in-tab frame).
+_DRINK_SCAN = 3           # _phase_ticks to accumulate detected drinks
 
 
 class ArenaShopSkill(BaseSkill):
@@ -97,6 +104,7 @@ class ArenaShopSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._swipes: int = 0
         self._balance: Optional[int] = None
+        self._drink_seen: set = set()        # drinks detected over the scan window
         self._want: Dict[str, int] = {}      # cls_name → price, what we'll buy
         self._selected: set = set()          # cls_names confirmed green-checked
         self._skipped: set = set()           # cls_names we gave up selecting
@@ -205,15 +213,28 @@ class ArenaShopSkill(BaseSkill):
         # fixed pos. Event-driven: click once → 1s settle + _dedup hold wait for 470
         # to render → loop. No %3 pacing counter, no swipe (user 2026-06-14: 不靠计数
         # 器, locate 卡是代码 bug 不是模型 — v11 认得 470/471/472/473, 只 469 弱).
+        # 469 (UNSELECTED tab). v11 detects it @0.96 WHEN VISIBLE (live 2026-06-14
+        # — the "469 weak" theory was wrong: it's not weak, it's just OFF-SCREEN
+        # because the shop opens on the 一般/credit tab with 战术大赛 below the fold).
+        # So: YOLO-click it when present; if absent → swipe ONCE to reveal, then YOLO
+        # picks it up next tick.
         tab = self.find_cls(screen, UC.ARENA_SHOP_TAB, conf=0.30)
         if tab is not None:
             return action_click_box(tab, "switch to 战术大赛商店 tab (YOLO 469)")
+        # 469 not on screen → below the fold → ONE swipe (~0.40) reveals it.
+        if self._swipes < 1:
+            self._swipes += 1
+            self.log("战术大赛 tab 在 fold 下 → 下滑一下露出(单次)")
+            return action_swipe(*_SWIPE_FROM, *_SWIPE_TO, duration_ms=500,
+                                reason="reveal 战术大赛 tab (one swipe)")
         if self._phase_ticks > _LOCATE_MAX:
-            self.log("战术大赛 tab unreachable (no 469/470 after fixed-pos taps) → exit")
+            self.log("战术大赛 tab unreachable after swipe → exit")
             self._goto("exit")
             return action_wait(300, "arena tab unreachable → exit")
+        # swiped but 469 not detected this frame → fixed-pos safety net (valid at
+        # the post-swipe scroll position, measured 0.068,0.395).
         return action_click(*_POS_ARENA_TAB,
-                            "switch to 战术大赛 tab (fixed pos — 469 弱类 fallback)")
+                            "switch to 战术大赛 tab (fixed pos — post-swipe safety)")
 
     def _green_on(self, screen: ScreenState, card: YoloBox) -> bool:
         """True if a 绿勾 marks THIS card selected. The check sits at the card's
@@ -234,8 +255,15 @@ class ArenaShopSkill(BaseSkill):
         # Decide what to buy ONCE: which drinks are present, summed price,
         # and whether the balance covers it (fail-closed).
         if not self._want:
-            drinks = {n for n in (UC.ENERGY_DRINK_LOW, UC.ENERGY_DRINK_MID)
-                      if self.find_cls(screen, n, conf=_CLS_CONF) is not None}
+            # Accumulate detected drinks over a short window — both cards fade in
+            # over a couple frames after the tab switch, so a one-frame snapshot
+            # misses 一般 (live 2026-06-14). Commit once both are seen OR the scan
+            # window passes (handles a genuinely sold-out / single-drink day).
+            self._drink_seen |= {n for n in (UC.ENERGY_DRINK_LOW, UC.ENERGY_DRINK_MID)
+                                 if self.find_cls(screen, n, conf=_CLS_CONF) is not None}
+            if len(self._drink_seen) < 2 and self._phase_ticks <= _DRINK_SCAN:
+                return action_wait(350, f"扫描饮料中 ({len(self._drink_seen)}/2)")
+            drinks = set(self._drink_seen)
             if not drinks:
                 if self._phase_ticks > _SELECT_MAX:
                     self.log("no energy drinks detected → exit")
