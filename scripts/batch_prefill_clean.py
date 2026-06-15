@@ -17,7 +17,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
-WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v10\weights\best.pt"
+WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v11\weights\best.pt"
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 NAME2IDX = {n: i for i, n in enumerate(MASTER)}
 
@@ -28,6 +28,12 @@ _DOT_CLS = {"红点", "黄点"}
 def main():
     pat = sys.argv[1] if len(sys.argv) > 1 else "2026061"
     force = "--force" in sys.argv
+    # --any-suffix: also prefill pools NOT ending in _clean (e.g. a manual
+    # capture/start recording like the 战术大赛商店 material run_20260614_205540,
+    # which IS clean ADB but lacks the auto _clean suffix). Only flip this on
+    # for pools you have VISUALLY CONFIRMED are overlay-free — DXcam/trajectory
+    # runs are burned and must never be prefilled into train.
+    any_suffix = "--any-suffix" in sys.argv
     # 红点/黄点 fire a POSITION PRIOR at low conf on grey/blue entry placeholders
     # (user 2026-06-13: pale-blue 社交 badge labelled 红点). v9 conf separates:
     # false position-prior firings ~0.2-0.45, real dots ~0.75+. So stamp dots
@@ -38,7 +44,8 @@ def main():
             dot_conf = float(a.split("=", 1)[1])
 
     pools = sorted(p for p in RAW.iterdir()
-                   if p.is_dir() and pat in p.name and p.name.endswith("_clean"))
+                   if p.is_dir() and pat in p.name
+                   and (any_suffix or p.name.endswith("_clean")))
     # collect frames needing labels
     jobs = []
     for pool in pools:
@@ -56,7 +63,7 @@ def main():
     if not jobs:
         print("nothing to prefill")
         return
-    print(f"\nprefilling {len(jobs)} frames with v9 …", flush=True)
+    print(f"\nprefilling {len(jobs)} frames with v11 …", flush=True)
 
     from ultralytics import YOLO
     model = YOLO(WEIGHTS)
