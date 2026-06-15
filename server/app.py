@@ -1343,11 +1343,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, 0.12))
             elif action_type in ("click", "back"):
                 # invalidate OCR cache so the next tick OCRs the fresh screen.
-                # 1.6s→0.4s (zero-wait): enough for the tap to register + a fresh
-                # capture; transitions are covered by the 加载中 gate + _dedup_click
-                # (which holds a premature same-target re-click until the screen flips).
+                # 0.4s→1.0s (user 2026-06-14: 点完一次固定等1s就行 — 纯事件驱动太快
+                # 会在转场半渲染帧上重点/过点, arena 打完第2场就这样飘进任务大厅).
+                # 1s 给屏幕渲染完再 re-poll, 下一步目标 cls 真出现了才点, 不靠计数器.
+                # (历史: 1.6s→0.4s zero-wait; transitions 由 加载中 gate + _dedup_click
+                # same-target hold 兜, 但转场结果屏的 dismiss 是 no-hold exempt → 会过点.)
                 _prev_ocr_boxes = None
-                _high_res_sleep(0.4)
+                _high_res_sleep(1.0)
             else:
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
 

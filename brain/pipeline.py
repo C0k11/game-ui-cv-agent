@@ -552,7 +552,13 @@ _OCR_ENABLED = False
 # mode cost a run: BA's idle showcase (放置立绘屏, zero UI cls) sat through the
 # 30-tick no-UI abort because the dismiss-tap net was disabled. The net's
 # rotation taps (0.5,0.88 / X / corners) dismiss it; harmless elsewhere.
-_BRINGUP_EXPOSE = False
+# (2026-06-14) flipped True — user iron rule: "不要瞎点返回大厅或者返回, skill 没完成
+# 不要瞎退". The blind-tap escalation + ESC-burst nets are exactly that blind nav —
+# they wandered arena into the task hall after battle 2. During supervised step_mode
+# bring-up a stuck skill must FREEZE+log (we see the hole, fix it event-driven), NOT
+# wander. Idle-showcase 放置立绘屏 only triggers on lobby idle (not mid-skill); the
+# human supervisor taps it. Flip back False only for unattended nightly.
+_BRINGUP_EXPOSE = True
 
 # Gated-click hold cap (user 2026-06-13): after a transition click whose screen
 # hasn't changed, hold ~this many ticks before assuming the tap was lost and
