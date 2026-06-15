@@ -58,6 +58,11 @@ _STAGE_PANEL = (0.58, 0.12, 1.0, 0.98)
 # 任務資訊 popup MAX button fixed pos (right of 加号; proven on special_sweep
 # 2026-06-15). Fallback when cls111 MAX_可点击 is missed → 防只扫1票.
 _POS_TICKET_MAX = (0.84, 0.42)
+# Re-click the 入場键 this many times if 任務資訊 never opens (a dropped tap —
+# root-fixed by AdbInput._IO_LOCK, but kept as self-healing so a single lost
+# enter never costs the whole sweep). Live 2026-06-15: swept 0, manual same-pos
+# tap opened it → tap was lost, not mis-aimed.
+_SORTIE_MAX_RETRIES = 2
 
 
 def _load_profile_list(key: str) -> List[str]:
@@ -110,6 +115,7 @@ class TicketSweepSkill(BaseSkill):
         self._max_wait: int = 0
         self._branch_clicks: int = 0
         self._branch_settle: int = 0
+        self._sortie_retries: int = 0
 
     def reset(self) -> None:
         super().reset()
@@ -355,9 +361,19 @@ class TicketSweepSkill(BaseSkill):
             return action_wait(200, "confirm dialog → confirm")
 
         if not self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX, UC.QTY_MAX_GREY], conf=_CLS_CONF):
-            # 任務資訊 not open yet — re-enter the stage, or bail.
-            if self._phase_ticks > 12:
-                self.log("任務資訊 never opened → exit")
+            # 任務資訊 not open yet. The 入場 tap intermittently DROPS under adbd
+            # contention (live 2026-06-15: skill tap lost → popup never showed →
+            # 0 tickets swept; manual same-pos tap opened it). Root-fixed by the
+            # AdbInput I/O lock; self-healing backstop here — re-click the 入場键
+            # (bounded) instead of giving up with tickets unspent.
+            if self._phase_ticks > 7:
+                if self._sortie_retries < _SORTIE_MAX_RETRIES:
+                    self._sortie_retries += 1
+                    self.log(f"任務資訊 未开 (入場 tap 可能丢失) → 回 stage 重点入場键 "
+                             f"retry {self._sortie_retries}/{_SORTIE_MAX_RETRIES}")
+                    self._goto("stage")
+                    return action_wait(300, "re-enter stage (tap-loss retry)")
+                self.log("任務資訊 never opened after retries → exit")
                 self._goto("exit")
                 return action_wait(300, "no sortie popup → exit")
             return action_wait(400, "waiting for 任務資訊 popup")

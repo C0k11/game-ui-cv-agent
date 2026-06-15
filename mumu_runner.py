@@ -60,6 +60,17 @@ def _find_adb() -> str:
 class AdbInput:
     """Send touch/key events to MuMu via ADB."""
 
+    # ★ ADB I/O serialization (live 2026-06-15: bounty/jfd swept 0 tickets).
+    # Root cause: the clean-flywheel worker's `exec-out screencap` (streaming a
+    # multi-MB 3840x2160 PNG ~200-300ms) and the main-tick `input tap` hit the
+    # same adbd transport concurrently with NO lock — the tap's MotionEvent got
+    # dropped/timed-out, so the game never saw the 入場 press (manual same-pos
+    # tap DID open the popup → not a coordinate bug). One class-wide lock makes
+    # every adb subprocess (capture/tap/swipe/back) mutually exclusive: a tap
+    # now waits ≤1 in-flight screencap instead of racing it. The old comment
+    # "each capture is thread-safe vs input taps" was a wrong assumption.
+    _IO_LOCK = threading.Lock()
+
     def __init__(self, host: str = "127.0.0.1", port: int = 7555):
         self.addr = f"{host}:{port}"
         self._connected = False
@@ -83,10 +94,11 @@ class AdbInput:
 
     def _shell(self, cmd: str, timeout: float = 3.0) -> bool:
         try:
-            subprocess.run(
-                [self._adb, "-s", self.addr, "shell", cmd],
-                capture_output=True, timeout=timeout,
-            )
+            with AdbInput._IO_LOCK:
+                subprocess.run(
+                    [self._adb, "-s", self.addr, "shell", cmd],
+                    capture_output=True, timeout=timeout,
+                )
             return True
         except Exception:
             return False
@@ -105,11 +117,12 @@ class AdbInput:
 
     def capture_frame(self) -> Optional[np.ndarray]:
         try:
-            r = subprocess.run(
-                [self._adb, "-s", self.addr, "exec-out", "screencap", "-p"],
-                capture_output=True,
-                timeout=8,
-            )
+            with AdbInput._IO_LOCK:
+                r = subprocess.run(
+                    [self._adb, "-s", self.addr, "exec-out", "screencap", "-p"],
+                    capture_output=True,
+                    timeout=8,
+                )
             data = bytes(r.stdout or b"")
             if not data:
                 return None
