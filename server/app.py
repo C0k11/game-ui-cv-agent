@@ -1324,19 +1324,30 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
 
             # 4. Sleep + OCR cache management
+            # ── ZERO-WAIT policy (user 2026-06-14: 不要有wait time — 出现目标就点 /
+            # 没目标pass / 只有"加载中"cls在时才硬wait, wait时长=加载中存在时长). All
+            # the per-skill settle/re-scan/render-wait counters are squashed to a
+            # fast re-poll; only a 加载中/loading wait keeps its full duration (the
+            # loading gate re-checks each cycle until 加载中 is gone). Re-clicking a
+            # not-yet-transitioned screen is already prevented by _dedup_click
+            # (same-target hold), so we no longer pay the blanket 1.6s settle.
+            _wait_reason = str(action.get("reason", "") or "")
+            _is_loading_wait = ("加载中" in _wait_reason or "加載中" in _wait_reason
+                                or "loading" in _wait_reason.lower())
             if action_type == "wait":
-                wait_ms = action.get("duration_ms", 500)
-                _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, wait_ms / 1000.0))
+                if _is_loading_wait:
+                    wait_ms = action.get("duration_ms", 500)
+                    _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, wait_ms / 1000.0))
+                else:
+                    # non-loading wait → fast re-poll (≈one capture+infer cycle)
+                    _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, 0.12))
             elif action_type in ("click", "back"):
-                # After click/back: invalidate OCR cache so next tick runs
-                # fresh OCR instead of reusing stale boxes from the old screen.
-                # Settle 1.6s (稳定规则 2026-06-11, was 0.5s): popups/page
-                # transitions take 1-2s to render — re-evaluating too early
-                # sees the OLD screen, re-clicks, and the second tap lands
-                # OUTSIDE the freshly-opened popup and dismisses it
-                # (open/close oscillation, caught live on buy_pyroxene entry).
+                # invalidate OCR cache so the next tick OCRs the fresh screen.
+                # 1.6s→0.4s (zero-wait): enough for the tap to register + a fresh
+                # capture; transitions are covered by the 加载中 gate + _dedup_click
+                # (which holds a premature same-target re-click until the screen flips).
                 _prev_ocr_boxes = None
-                _high_res_sleep(1.6)
+                _high_res_sleep(0.4)
             else:
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
 
