@@ -55,6 +55,10 @@ _PRICES = {UC.ENERGY_DRINK_LOW: 15, UC.ENERGY_DRINK_MID: 30}
 # Fixed-pos fallbacks from the walk (cls can flicker on event-skin lobbies).
 _POS_SHOP_ENTRY = (0.621, 0.953)     # 商店入口 on lobby
 _POS_HOME = (0.965, 0.033)           # 回大厅 top-right
+# 战术大赛 tab fixed pos in the left column (cls 469/470 center, measured on 238
+# live frames cx0.069 cy0.395). cls 469 (UNSELECTED tab) is starved (27 train
+# instances vs 470's 534) → YOLO misses it → click this fixed pos to switch tabs.
+_POS_ARENA_TAB = (0.068, 0.395)
 # Left tab column swipe (reveal 战术大赛商店 below the fold).
 _SWIPE_FROM = (0.05, 0.75)
 _SWIPE_TO = (0.05, 0.30)
@@ -188,26 +192,28 @@ class ArenaShopSkill(BaseSkill):
         return action_back("arena_shop: recover toward lobby")
 
     def _locate(self, screen: ScreenState) -> Dict[str, Any]:
+        # 470 (已选择) on screen → we're on the arena tab. v11 detects 470 well
+        # (534 train instances) so this is reliable.
         if self._in_arena_tab(screen):
             self.log("战术大赛商店 tab active → select")
             self._goto("select")
             return action_wait(300, "arena tab active")
+        # Switch to the 战术大赛 tab. The tab is at a FIXED left-column position,
+        # ALWAYS visible (the old swipe-below-fold assumption was wrong — measured
+        # cy0.395, mid-screen). cls 469 (UNSELECTED tab) is starved (27 instances)
+        # so YOLO usually misses it → prefer YOLO when it DOES fire, else click the
+        # fixed pos. Event-driven: click once → 1s settle + _dedup hold wait for 470
+        # to render → loop. No %3 pacing counter, no swipe (user 2026-06-14: 不靠计数
+        # 器, locate 卡是代码 bug 不是模型 — v11 认得 470/471/472/473, 只 469 弱).
         tab = self.find_cls(screen, UC.ARENA_SHOP_TAB, conf=0.30)
         if tab is not None:
-            # Pace the click so the tab-switch animation can settle.
-            if self._phase_ticks % 3 != 1:
-                return action_wait(450, "战术大赛 tab clicked — settling")
-            return action_click_box(tab, "switch to 战术大赛商店 tab")
-        if self._swipes < _MAX_SWIPES:
-            self._swipes += 1
-            self.log(f"战术大赛 tab below fold → swipe column down ({self._swipes})")
-            return action_swipe(*_SWIPE_FROM, *_SWIPE_TO, duration_ms=600,
-                                reason="reveal 战术大赛商店 tab")
+            return action_click_box(tab, "switch to 战术大赛商店 tab (YOLO 469)")
         if self._phase_ticks > _LOCATE_MAX:
-            self.log("战术大赛 tab not found after swipes → exit")
+            self.log("战术大赛 tab unreachable (no 469/470 after fixed-pos taps) → exit")
             self._goto("exit")
-            return action_wait(300, "arena tab unreachable")
-        return action_wait(400, "waiting for 战术大赛商店 tab cls")
+            return action_wait(300, "arena tab unreachable → exit")
+        return action_click(*_POS_ARENA_TAB,
+                            "switch to 战术大赛 tab (fixed pos — 469 弱类 fallback)")
 
     def _green_on(self, screen: ScreenState, card: YoloBox) -> bool:
         """True if a 绿勾 marks THIS card selected. The check sits at the card's
