@@ -87,6 +87,10 @@ _MAX_TAP = 2              # per-drink tap cap (lost-tap recovery, never spam)
 # short window before committing _want so 一般 isn't missed (live 2026-06-14: only
 # 下级 bought because _want was committed on the first in-tab frame).
 _DRINK_SCAN = 3           # _phase_ticks to accumulate detected drinks
+_SWIPE_SETTLE = 2         # _phase_ticks to let the locate swipe's scroll settle
+                          # before the fixed-pos fallback fires (audit 2026-06-14:
+                          # firing it pre-settle can hit the wrong tab — scroll
+                          # may still be at the pre-swipe position)
 
 
 class ArenaShopSkill(BaseSkill):
@@ -103,6 +107,7 @@ class ArenaShopSkill(BaseSkill):
     def _init_state(self) -> None:
         self._phase_ticks: int = 0
         self._swipes: int = 0
+        self._swipe_tick: int = -10          # _phase_ticks of the locate swipe
         self._entry_clicked: bool = False    # clicked 商店入口 → wait for load, no back
         self._balance: Optional[int] = None
         self._drink_seen: set = set()        # drinks detected over the scan window
@@ -110,7 +115,7 @@ class ArenaShopSkill(BaseSkill):
         self._selected: set = set()          # cls_names confirmed green-checked
         self._skipped: set = set()           # cls_names we gave up selecting
         self._tap_count: Dict[str, int] = {} # cls_name → times tapped
-        self._last_tap_tick: int = -10       # _phase_ticks of the last drink tap
+        self._last_tap_tick: Dict[str, int] = {}  # per-drink last-tap tick (render-wait)
         self._purchased: bool = False
 
     def reset(self) -> None:
@@ -233,6 +238,7 @@ class ArenaShopSkill(BaseSkill):
         # 469 not on screen → below the fold → ONE swipe (~0.40) reveals it.
         if self._swipes < 1:
             self._swipes += 1
+            self._swipe_tick = self._phase_ticks
             self.log("战术大赛 tab 在 fold 下 → 下滑一下露出(单次)")
             return action_swipe(*_SWIPE_FROM, *_SWIPE_TO, duration_ms=500,
                                 reason="reveal 战术大赛 tab (one swipe)")
@@ -240,7 +246,18 @@ class ArenaShopSkill(BaseSkill):
             self.log("战术大赛 tab unreachable after swipe → exit")
             self._goto("exit")
             return action_wait(300, "arena tab unreachable → exit")
-        # swiped but 469 not detected this frame → fixed-pos safety net (valid at
+        # Let the swipe's scroll settle before the blind fixed-pos fallback — YOLO
+        # gets a few ticks to pick up 469 @0.96 (the common case), and the fixed pos
+        # is only valid once the scroll has landed (audit 2026-06-14: pre-settle it
+        # can hit the wrong tab).
+        if self._phase_ticks - self._swipe_tick < _SWIPE_SETTLE:
+            return action_wait(450, "等下滑落定再定位(防点错tab)")
+        # If a credit/other shop tab is clearly selected, the scroll didn't land on
+        # 战术大赛 → don't blind-tap the fixed pos; wait (the fixed pos is only the
+        # right tab at the post-swipe scroll position).
+        if self.find_cls(screen, [UC.SHOP_TAB_CREDIT_SEL], conf=0.30) is not None:
+            return action_wait(450, "滚动态没对(信用点tab选中) → 等, 不盲点固定位")
+        # swiped + settled + 469 still not detected → fixed-pos safety net (valid at
         # the post-swipe scroll position, measured 0.068,0.395).
         return action_click(*_POS_ARENA_TAB,
                             "switch to 战术大赛 tab (fixed pos — post-swipe safety)")
@@ -309,8 +326,10 @@ class ArenaShopSkill(BaseSkill):
             tapped = self._tap_count.get(name, 0)
             if tapped > 0:
                 # already tapped — WAIT for the 绿勾 to render, do NOT re-tap
-                # (re-tapping mid-render toggles it back off → livelock).
-                if self._phase_ticks - self._last_tap_tick < _RENDER_WAIT:
+                # (re-tapping mid-render toggles it back off → livelock). Per-drink
+                # last-tap tick (audit 2026-06-14: a shared scalar let drink A's tap
+                # time pollute drink B's render-wait window).
+                if self._phase_ticks - self._last_tap_tick.get(name, -10) < _RENDER_WAIT:
                     return action_wait(450, f"{name} 已点 — 等绿勾渲染")
                 if tapped >= _MAX_TAP:
                     # genuinely not selecting → give up THIS drink (under-buy is
@@ -320,7 +339,7 @@ class ArenaShopSkill(BaseSkill):
                     self._selected.add(name)   # treat as handled
                     continue
             self._tap_count[name] = tapped + 1
-            self._last_tap_tick = self._phase_ticks
+            self._last_tap_tick[name] = self._phase_ticks
             self.log(f"select {name} (tap {tapped + 1})")
             return action_click_box(card, f"select {name}")
 
@@ -408,8 +427,27 @@ class ArenaShopSkill(BaseSkill):
                 return action_wait(300, "confirm dialog gone → exit")
             return action_wait(300, "waiting for confirm dialog")
 
-        # Budget already gated in _select; currency is non-premium; pyroxene
-        # firewall passed → confirm (spends 战术大赛货币 only).
+        # ✅ WHITELIST firewall (fail-closed, user 铁律 + 2026-06-14 audit): a
+        # confirm button is present, but only click it if this is POSITIVELY the
+        # energy-drink dialog — require an energy drink (472/473) in the dialog
+        # body. v11 detects 472 @0.96 in-body on the real confirm frame (471货币
+        # sits at the bg tab edge cx0.03, NOT a reliable in-body anchor). Absent →
+        # this is NOT our drink purchase (could be a mis-routed premium/other
+        # dialog) → CANCEL. The old code was blacklist-only ("no pyroxene →
+        # confirm") = fail-OPEN: a mis-detected premium dialog would get confirmed.
+        drink = self.find_cls(screen, [UC.ENERGY_DRINK_LOW, UC.ENERGY_DRINK_MID],
+                              conf=_CLS_CONF, region=_DIALOG_BODY)
+        if drink is None:
+            self.log("⛔ confirm 框内无饮料正向证据(472/473) → 取消(fail-closed 白名单)")
+            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF,
+                                   region=_DIALOG_BAND)
+            self._goto("exit")
+            if cancel is not None:
+                return action_click_box(cancel, "cancel (no drink anchor, fail-closed)")
+            return action_back("cancel (no drink anchor, ESC)")
+
+        # Budget gated in _select; currency non-premium; pyroxene firewall passed;
+        # drink anchor present → confirm (spends 战术大赛货币 only).
         self.log(f"confirm purchase (战术大赛货币, balance was {self._balance})")
         self._purchased = True
         self._goto("exit")
