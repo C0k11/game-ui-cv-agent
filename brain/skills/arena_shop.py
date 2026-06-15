@@ -103,6 +103,7 @@ class ArenaShopSkill(BaseSkill):
     def _init_state(self) -> None:
         self._phase_ticks: int = 0
         self._swipes: int = 0
+        self._entry_clicked: bool = False    # clicked 商店入口 → wait for load, no back
         self._balance: Optional[int] = None
         self._drink_seen: set = set()        # drinks detected over the scan window
         self._want: Dict[str, int] = {}      # cls_name → price, what we'll buy
@@ -191,12 +192,20 @@ class ArenaShopSkill(BaseSkill):
         if screen.is_lobby():
             entry = self.find_cls(screen, UC.NAV_SHOP, conf=_CLS_CONF)
             if entry is not None:
+                self._entry_clicked = True
                 return action_click_box(entry, "open shop (YOLO 商店入口)")
+            self._entry_clicked = True
             return action_click(*_POS_SHOP_ENTRY, "open shop (fixed pos)")
         if self._phase_ticks > _ENTER_MAX:
             return action_done("could not reach shop")
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(600, "no UI — likely loading")
+        # Not lobby, not shop, but UI present = the shop-opening transition. If we
+        # already clicked the entry, WAIT for it to load — do NOT back-bounce
+        # (user 2026-06-14: 转场期别瞎退; the back-press cancelled the transition →
+        # bounced to lobby → re-click). Only recover-back if we never clicked entry.
+        if self._entry_clicked:
+            return action_wait(500, "等商店加载(已点入口, 不瞎退)")
         return action_back("arena_shop: recover toward lobby")
 
     def _locate(self, screen: ScreenState) -> Dict[str, Any]:
