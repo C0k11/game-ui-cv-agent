@@ -630,6 +630,31 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v12": {
+        # v12 (2026-06-14) = v11 warm + 今日9个审过的池(任务大厅live + arena_shop walk).
+        #  ⭐核心补强: run_20260614_205540 用户手录战术大赛商店素材(245帧) → 把 cls469
+        #  (战术大赛商店未选中tab)从饿着的27实例大幅补足, 根治 arena_shop locate 弱检测
+        #  (虽已用固定位/swipe代码绕开, 数据补上更稳)。配方复刻 v11/v10 成功版。
+        #  ⚠ cafe 451 摸头本版仍不修(今日无cafe摸头帧); 待明天cafe walk录摸头帧再强化。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v11" / "weights" / "best.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v12",
+        "cache": "disk",
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

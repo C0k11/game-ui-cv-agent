@@ -147,6 +147,20 @@ REAL_SOURCES = [
     "run_20260613_190244_clean",
     "run_20260613_190646_clean",
     "run_20260613_203352_clean",
+    # ── v12 素材 (2026-06-14, 用户 dashboard 人审"标注无问题") ──────────────
+    # 任务大厅 skill live (arena/mail/daily/batch_sweep) + arena_shop step_mode walk
+    # 的干净帧, v11 预标. 关键: run_20260614_205540 = 用户手录战术大赛商店素材(245帧,
+    # 469战术大赛商店未选中tab的解药 — 之前仅27实例饿着; 含470已选择/471货币/472下级/473一般
+    # 能量饮料). 5 空帧已删入 _unlabeled_backup.
+    "run_20260614_202243_clean",
+    "run_20260614_203531_clean",
+    "run_20260614_205111_clean",
+    "run_20260614_205540",
+    "run_20260614_210716_clean",
+    "run_20260614_211302_clean",
+    "run_20260614_213324_clean",
+    "run_20260614_213728_clean",
+    "run_20260614_213959_clean",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合
