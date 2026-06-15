@@ -427,6 +427,16 @@ class CafeSkill(BaseSkill):
             self._begin_invite(floor_2=False)
             return action_wait(300, "earnings done → invite")
 
+        # Post-claim popup chain fully closed (cafe page back) → done → invite.
+        # audit 2026-06-15: claim 后是双层弹窗(领取奖励动画 + 收益明细), 旧码 close
+        # 一次就 _earnings_done=True 前进 → 明细层还盖着 → invite 卡 20t 到 stuck-recovery
+        # 才关。改成: close 到 _is_cafe(咖啡页签名回来)才算完, 不是 close 一次就走。
+        if self._earnings_claimed and self._is_cafe(screen):
+            self._earnings_claimed = False
+            self._earnings_done = True
+            self._begin_invite(floor_2=False)
+            return action_wait(300, "earnings popup chain closed → invite")
+
         # ★ FIRST-ENTRY POPUP (user spec: 第一次进咖啡厅有"訪問學生目錄"说明弹窗,
         # 点叉叉关掉再看收益). live 2026-06-14: that popup covered the 咖啡厅收益
         # button (100% FULL!) → _earnings waited 18 ticks for CAFE_EARNINGS, never
@@ -492,11 +502,20 @@ class CafeSkill(BaseSkill):
             # _EARNINGS_MAX skip would leave the popup OPEN → headpat sees no
             # students (live 2026-06-09: 咖啡1 没摸头).
             if self._earnings_claimed:
-                close = self._close_x(screen)
-                if close is not None:
+                # Keep closing any layered popup (reward anim + 收益 breakdown)
+                # until the cafe page is back (the early _is_cafe check above
+                # advances). NEVER set _earnings_done here — a single close can
+                # leave the 2nd layer up → invite stuck. Timeout → give up (the
+                # dry-frame/stuck-recovery catches a stray popup).
+                if self._phase_ticks > _EARNINGS_MAX:
+                    self.log("earnings close timeout → invite (recovery兜底)")
                     self._earnings_claimed = False
                     self._earnings_done = True
+                    return action_wait(300, "earnings close timeout → invite")
+                close = self._close_x(screen)
+                if close is not None:
                     return action_click_box(close, "close earnings popup (post-claim)")
+                return action_back("close earnings popup (ESC, post-claim X miss)")
             if screen.is_lobby():
                 self.log("earnings: on lobby, re-entering")
                 self._enter_attempts = 0
