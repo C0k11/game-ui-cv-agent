@@ -427,7 +427,25 @@ class CafeSkill(BaseSkill):
             self._begin_invite(floor_2=False)
             return action_wait(300, "earnings done → invite")
 
-        # ★ FIRST, regardless of _is_cafe: the earnings POPUP covers the cafe
+        # ★ FIRST-ENTRY POPUP (user spec: 第一次进咖啡厅有"訪問學生目錄"说明弹窗,
+        # 点叉叉关掉再看收益). live 2026-06-14: that popup covered the 咖啡厅收益
+        # button (100% FULL!) → _earnings waited 18 ticks for CAFE_EARNINGS, never
+        # found it, skipped the income. If a popup-X is up AND there's neither a
+        # claim button (not the claim popup) NOR CAFE_EARNINGS visible yet, it's an
+        # obstructing popup → dismiss it so the earnings button shows.
+        _CB = (0.28, 0.50, 0.74, 0.90)
+        _has_claim = self.find_cls(
+            screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE,
+                     UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY], conf=_CLS_CONF,
+            region=_CB) is not None
+        _has_earn = self.find_cls(screen, UC.CAFE_EARNINGS, conf=_CLS_CONF) is not None
+        if not _has_claim and not _has_earn and not self._earnings_claimed:
+            popup_x = self._close_x(screen, region=(0.55, 0.08, 0.82, 0.34))
+            if popup_x is not None:
+                self.log("first-entry 訪問學生目錄 popup 挡住收益 → 先点叉叉关掉 (spec)")
+                return action_click_box(popup_x, "dismiss cafe first-entry popup (X)")
+
+        # ★ next, regardless of _is_cafe: the earnings POPUP covers the cafe
         # page signature (detect_screen_yolo!="Cafe" while it's open), so the
         # claim MUST be checked before any _is_cafe gate — otherwise the bot
         # opens the popup then freezes "waiting for cafe UI" (live 2026-06-02:
