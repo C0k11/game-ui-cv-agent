@@ -36,7 +36,8 @@
     }
   },
   "ui": {
-    "active": "v11",
+    "active": "v10",
+    "_rollback_note": "2026-06-14 回滚 v11→v10: v11 在 战术大赛商店 tab(469, 仅30训练实例)上回归(v10检0.34/v11<0.30) → arena_shop locate找不到tab卡死→blind-tap乱飘误进课程表误用1票。旧冻结val测不出弱类回归。v11数据进dataset备v12。v12修: 补469训练实例 + arena_shop locate加固定位fallback + 修blind-tap乱navigate(违反补盲点原则)。",
     "task": "detect",
     "n_classes": 474,
     "n_classes_in_use": 160,
