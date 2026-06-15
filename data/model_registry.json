@@ -36,14 +36,24 @@
     }
   },
   "ui": {
-    "active": "v10",
-    "_rollback_note": "2026-06-14 回滚 v11→v10: v11 在 战术大赛商店 tab(469, 仅30训练实例)上回归(v10检0.34/v11<0.30) → arena_shop locate找不到tab卡死→blind-tap乱飘误进课程表误用1票。旧冻结val测不出弱类回归。v11数据进dataset备v12。v12修: 补469训练实例 + arena_shop locate加固定位fallback + 修blind-tap乱navigate(违反补盲点原则)。",
+    "active": "v12",
+    "_rollback_note": "2026-06-15 上线 v12 (warm v11 + 06-14审过9池含商店205540)。回滚: 改 active 回 'v11' 即可秒退。v12真验收=live实战走线(旧冻结val测不出商店增益)。如live退化(尤其arena_shop买/红点)→回v11。",
     "task": "detect",
     "n_classes": 474,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
     "versions": {
+      "v12": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v12/weights/best.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-06-15",
+        "n_classes": 474,
+        "epoch_best": "43ep早停patience30(best~ep13); warm from v11 best.pt; 70ep配方复刻v11/v10",
+        "acceptance": "冻结val515: mAP50~0.982/mAP50-95~0.935 ≈v10(0.9826/0.9383), 高于v11(0.9776/0.9348) → 不退化。⚠️旧冻结val不含商店场景(469/470/471/472/473 val=0)→测不出本版核心增益。数据=15,298帧(v11全源 + 06-14审过9池: 任务大厅live arena/mail/daily/batch_sweep + arena_shop step_mode walk + 用户手录战术大赛商店205540 245帧)。",
+        "known_gap": "①核心补强=471货币1812/472下级620/473一般329(商店买/confirm白名单检测)+9池任务大厅live覆盖。②469战术大赛未选中tab仅30实例(205540全是已选中470态补不了469); 但469实测@0.96够用, arena_shop代码已swipe露出+固定位绕开fold, 不缺数据。③cafe 451摸头仍0.917/0.779弱(无新cafe摸头帧, 待cafe walk录)。④红点继承v10/v11的0.55先验特性。",
+        "v_next_todo": "真验收=live实战走线(arena_shop买两瓶/任务大厅链/cafe). 录全新val(含商店场景) + cafe walk强化451. 222724+今晚6池=下代飞轮待预标。"
+      },
       "v11": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v11/weights/best.pt",
         "model_arch": "yolo26m",
@@ -159,7 +169,7 @@
         "training_hours": 10.56,
         "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate. SUPERSEDED by v2 — key cls (一次领取/邀请键 etc) under-trained at 12f. Kept for rollback.",
         "worst_classes_ap50": {
-          "27_移动至2号点": 0.000,
+          "27_移动至2号点": 0.0,
           "95_活动商店": 0.055,
           "1_右切换": 0.341,
           "96_活动任务": 0.359,
@@ -211,7 +221,11 @@
         "epoch_best": 10,
         "mAP50": 0.864,
         "mAP50_95": 0.814,
-        "domain_mAP50": {"ui_130cls": 0.892, "avatar_246cls": 0.850, "emoticon": 0.764},
+        "domain_mAP50": {
+          "ui_130cls": 0.892,
+          "avatar_246cls": 0.85,
+          "emoticon": 0.764
+        },
         "notes": "ep10 best (ep11+ 退化, 根因 synth:real 2.03 过拟合; 关 mosaic 微调无效). 超 v6 峰 0.805. 替代 ui v5 + fused v4(0.966) + emoticon v26n. 头像 0.85 弱类全在泳装/造型变体(BA 迭代靶子: 飞轮补样本 + 下版降 synth 追 0.9). 接线: unified active 时 pipeline._get_yolo 所有 tag 返回此模型, class 按 _classes.txt nc455 划分(143-394 头像 / 451 emoticon / 其余 UI). MUST infer @imgsz=960. 待 live 验证日常跑通才正式切 active=v6b."
       },
       "v6c": {
