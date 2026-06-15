@@ -55,6 +55,9 @@ _DONE_CONFIRM_BAND = (0.30, 0.74, 0.70, 0.90)
 _PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
 # Stage list lives in the right panel.
 _STAGE_PANEL = (0.58, 0.12, 1.0, 0.98)
+# 任務資訊 popup MAX button fixed pos (right of 加号; proven on special_sweep
+# 2026-06-15). Fallback when cls111 MAX_可点击 is missed → 防只扫1票.
+_POS_TICKET_MAX = (0.84, 0.42)
 
 
 def _load_profile_list(key: str) -> List[str]:
@@ -395,6 +398,15 @@ class TicketSweepSkill(BaseSkill):
             if self._max_wait < self._MAX_RENDER_WAIT:
                 self._max_wait += 1
                 return action_wait(350, f"waiting MAX render ({self._max_wait})")
+            # cls111 MAX_可点击 flaky (live 2026-06-15: bounty/jfd 只扫了1票, MAX 没
+            # 检到就退化 single sweep, 浪费票). 等待后仍没检到 → 点 任務資訊 popup 的
+            # 固定位 MAX(special_sweep 已验证 0.84,0.42)再扫, 不退 single。游戏把 MAX
+            # 钳到可负担数, 安全; 若 MAX 是灰的(真只剩1票/到上限), 点固定位是无害空操作。
+            if not getattr(self, "_max_fixed_tried", False):
+                self._max_fixed_tried = True
+                self._maxed = True
+                self.log("MAX cls 没检到 → 固定位 MAX (防只扫1票)")
+                return action_click(*_POS_TICKET_MAX, "set sweep MAX (fixed pos)")
             self._maxed = True
             self.log("MAX greyed after wait → single sweep")
 
