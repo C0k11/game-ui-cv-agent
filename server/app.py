@@ -103,6 +103,11 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 加进白名单即可单跑(step_mode 调阶段辨别+门控). 同型陷阱第六次.
     {"id": "schedule", "label": "[测试] 课程表 单跑"},
     {"id": "cafe", "label": "[测试] 咖啡厅 单跑"},
+    # 2026-06-15: shop(信用点商店)/craft(制造)/momo_talk(社交) 也是 daily_routine
+    # 子 skill, 加进白名单单跑验证 (同型陷阱第七次).
+    {"id": "shop", "label": "[测试] 信用点商店 单跑"},
+    {"id": "craft", "label": "[测试] 制造 单跑"},
+    {"id": "momo_talk", "label": "[测试] 社交(MomoTalk) 单跑"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
