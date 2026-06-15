@@ -214,6 +214,12 @@ EVENT_SHOP = "活动商店"              # 95  (37f)
 EVENT_TASK = "活动任务"              # 96  (37f)
 EVENT_BONUS = "活动关卡产出额外加成"  # 110 (12f)
 EVENT_END_LEFT = "距离结束还剩"       # 405 (23f)
+# 2x/3x 多倍产出加成 badge — drives 智能 AP 分配 (special_sweep): 这个 badge 在哪个
+# 板块, AP 就优先扫那 (2026-06-15 在 特殊任务). v12 检 @0.93+.
+EVENT_DOUBLE_TRIPLE = "双倍或三倍活动进行中"   # 452
+# 特殊任务 两个委托 (2x/3x 期间可扫荡刷 AP): 据点防御=学生经验道具 / 信用货币回收=信用点.
+SPECIAL_DEFENSE = "据点防御"          # 453
+SPECIAL_CREDIT = "信用货币回收"        # 454
 
 # ── 剧情 / story mining ─────────────────────────────────────────────
 STORY_MAIN = "主线剧情"              # 423 (15f)

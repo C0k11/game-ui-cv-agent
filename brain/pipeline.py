@@ -31,6 +31,7 @@ from brain.skills.club import ClubSkill
 from brain.skills.bounty import BountySkill
 from brain.skills.jfd import JointFiringDrillSkill
 from brain.skills.batch_sweep import BatchSweepSkill
+from brain.skills.special_sweep import SpecialSweepSkill
 from brain.skills.arena_shop import ArenaShopSkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
@@ -1155,6 +1156,9 @@ class DailyPipeline:
             "bounty": BountySkill(),
             "jfd": JointFiringDrillSkill(),
             "batch_sweep": BatchSweepSkill(),
+            # 智能 AP 分配: 扫 2x/3x bonus 板块(今天特殊任务). 排在 batch_sweep 前 —
+            # 有 bonus 先吃, 没有就退、batch_sweep 兜底扫正常关.
+            "special_sweep": SpecialSweepSkill(),
             "arena": ArenaSkill(),
             # 战术大赛商店买体力 (花战术大赛货币, 非青辉石). NOT in DEFAULT_SKILLS —
             # run via skill_order/sub_only for the confirm-step live calibration,
