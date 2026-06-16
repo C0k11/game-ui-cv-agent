@@ -110,6 +110,8 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "momo_talk", "label": "[测试] MomoTalk挖矿 单跑(手动)"},
     # club = 社團签到(社交入口红点的真主人, 10AP进邮箱). 单跑验证.
     {"id": "club", "label": "[测试] 社團签到 单跑"},
+    # buy_pyroxene = 每日免费组合包(只领免费, 绝不买付费). 单跑验证(陷阱第8次).
+    {"id": "buy_pyroxene", "label": "[测试] 每日购买青辉石(免费组合包) 单跑"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
