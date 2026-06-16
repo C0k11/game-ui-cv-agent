@@ -204,46 +204,44 @@ class SpecialSweepSkill(BaseSkill):
         return action_wait(400, "waiting for stage list (入场键)")
 
     def _sweep(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ MONEY GATE #0 (2026-06-15 事故根治): NEVER sweep when AP can't fund one
-        # run. 一次 MAX 扫荡后余 AP < 单次成本时, 点扫荡开始会弹「購買體力(青辉石)」框 →
-        # 险些用青辉石补 AP。扫前读 AP, 不够就 close(从源头不触发买体力框)。读不出=
-        # fail-closed 也 close(不盲扫)。
+        # ⛔⛔ MONEY GATE (用户 2026-06-15 澄清 + 30青辉石事故根治): 扫荡**正常不弹**买体力/
+        # 买票框 —— 只有 **MAX 是灰色(QTY_MAX_GREY=资源不足)** 时点扫荡才弹「購買體力(青辉石)」。
+        # 所以最准的安全门: **只有 MAX 可点(QTY_MAX positively 检到)才扫; MAX 灰 → close,
+        # 绝不点扫荡。** 不确定(MAX 都没正向检到)也不盲扫(money skill 安全 > 多扫一次)。
+        # _confirm 仍保留青辉石防线③ 兜底。AP 读数只当 early-skip 优化(读不出不据此 close)。
         try:
             from brain.pipeline import _read_topbar_clean
             ap = _read_topbar_clean(UC.TOPBAR_AP)
         except Exception:
             ap = None
-        if ap is None or ap < _SWEEP_COST:
-            self.log(f"AP={ap} < 单次成本{_SWEEP_COST}(或读不出) → close, 绝不触发买体力框")
+        if ap is not None and ap < _SWEEP_COST:
+            self.log(f"AP={ap} < 单次成本{_SWEEP_COST} → close (early-skip, 不触发买体力框)")
             self._goto("close")
             return action_wait(250, "AP 不够一次扫荡 → close (money-safe)")
-        # MAX once per round (sets count to the AP/limit ceiling).
-        if not self._maxed:
-            max_btn = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
-            if max_btn is not None:
-                self._maxed = True
-                self.log("click MAX (count → ceiling)")
-                return action_click_box(max_btn, "sweep count MAX")
-            if self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF) is not None:
-                # MAX grey = count already capped (AP ceiling or stage daily limit).
-                # If 扫荡开始 also unavailable ⇒ AP exhausted ⇒ close.
-                if self.find_cls(screen, UC.SWEEP_START, conf=0.25) is None:
-                    self.log("MAX+start grey → AP/limit exhausted → close")
-                    self._goto("close")
-                    return action_wait(250, "nothing affordable → close")
-                self._maxed = True
-                self.log("MAX already grey (count capped) → start")
-            else:
-                if self._phase_ticks > _PHASE_MAX:
-                    self._goto("close")
-                    return action_wait(300, "MAX never seen → close")
-                # MAX cls missed but panel up → fixed-pos MAX.
-                if self.find_cls(screen, UC.SWEEP_START, conf=0.25) is not None:
-                    self._maxed = True
-                    return action_click(*_POS_MAX, "sweep count MAX (fixed pos)")
-                return action_wait(400, "waiting for MAX / sweep panel")
 
-        # 扫荡开始.
+        max_ok = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
+        max_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
+
+        # ⛔ MAX 灰 (且无可点 MAX) = 资源不足 → close。这正是点扫荡会弹买体力框的情形。
+        if max_grey is not None and max_ok is None:
+            self.log("⛔ MAX 灰色 = 资源不足 → close (绝不点扫荡触发买体力/买票框)")
+            self._goto("close")
+            return action_wait(250, "MAX grey (insufficient) → close (money-safe)")
+
+        # MAX 可点 (resources sufficient) → 点 MAX 设满, 然后扫荡。
+        if not self._maxed:
+            if max_ok is not None:
+                self._maxed = True
+                self.log("click MAX (可点 = 资源够, 扫了不弹买体力框)")
+                return action_click_box(max_ok, "sweep count MAX")
+            # MAX 还没正向检到 (可能在渲染) — 等; 始终没检到 → close (不盲扫)。
+            if self._phase_ticks > _PHASE_MAX:
+                self.log("MAX 可点键始终没检到 → close (不盲扫, money-safe)")
+                self._goto("close")
+                return action_wait(300, "no clickable MAX → close")
+            return action_wait(400, "waiting for clickable MAX (QTY_MAX)")
+
+        # MAX 已点 (资源确认够) → 扫荡开始。
         if self._phase_ticks % 3 != 1:
             return action_wait(700, "扫荡开始 clicked — settling")
         start = self.find_cls(screen, UC.SWEEP_START, conf=0.25)
@@ -256,7 +254,7 @@ class SpecialSweepSkill(BaseSkill):
         if self._phase_ticks > _PHASE_MAX:
             self._goto("close")
             return action_wait(300, "扫荡开始 never seen → close")
-        return action_click(*_POS_SWEEP_START, "start special sweep (fixed pos)")
+        return action_wait(400, "waiting for 扫荡开始 (扫荡 cls)")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
         # ⛔ Money gate (2026-06-15 事故加强): 青辉石出现在 topbar 以下任意位置(cy>0.10)
