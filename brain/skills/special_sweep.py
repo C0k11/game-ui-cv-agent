@@ -219,7 +219,10 @@ class SpecialSweepSkill(BaseSkill):
             self._goto("close")
             return action_wait(250, "AP 不够一次扫荡 → close (money-safe)")
 
-        max_ok = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
+        # QTY_MAX (MAX_可点击) is a WEAK cls — live 2026-06-15 实测它在明显可点的蓝色
+        # MAX 上只 fire 到 conf 0.26 (< 0.30) → 被过滤掉 → 误判没法扫。所以用低地板 0.20
+        # 抓它。QTY_MAX_GREY(灰=不足)用正常 0.30(灰是强信号)。
+        max_ok = self.find_cls(screen, UC.QTY_MAX, conf=0.20)
         max_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
 
         # ⛔ MAX 灰 (且无可点 MAX) = 资源不足 → close。这正是点扫荡会弹买体力框的情形。
@@ -232,14 +235,22 @@ class SpecialSweepSkill(BaseSkill):
         if not self._maxed:
             if max_ok is not None:
                 self._maxed = True
-                self.log("click MAX (可点 = 资源够, 扫了不弹买体力框)")
+                self.log(f"click MAX (可点 c≥0.20 = 资源够); AP={ap}")
                 return action_click_box(max_ok, "sweep count MAX")
-            # MAX 还没正向检到 (可能在渲染) — 等; 始终没检到 → close (不盲扫)。
+            # 两个 MAX cls 都没 fire(弱 cls 全闪)→ 用 AP 当可负担兜底: AP≥单次成本 ⇒
+            # 几乎肯定是可点的(灰只在不足时出)→ 固定位 MAX(已知位置)。AP 不足/读不出 ⇒
+            # close(绝不盲扫触发买体力框)。_confirm 青辉石防线③ 仍兜底。
+            if ap is not None and ap >= _SWEEP_COST:
+                if self._phase_ticks <= 3:
+                    return action_wait(400, "等 MAX cls 一会儿 (AP 够)")
+                self._maxed = True
+                self.log(f"MAX cls 全闪但 AP={ap}≥{_SWEEP_COST}够 → 固定位 MAX (可负担)")
+                return action_click(*_POS_MAX, "sweep count MAX (fixed pos, AP affordable)")
             if self._phase_ticks > _PHASE_MAX:
-                self.log("MAX 可点键始终没检到 → close (不盲扫, money-safe)")
+                self.log(f"MAX 没检到且 AP={ap} 不足/读不出 → close (不盲扫, money-safe)")
                 self._goto("close")
-                return action_wait(300, "no clickable MAX → close")
-            return action_wait(400, "waiting for clickable MAX (QTY_MAX)")
+                return action_wait(300, "no affordable MAX → close")
+            return action_wait(400, "waiting for MAX (QTY_MAX c≥0.20)")
 
         # MAX 已点 (资源确认够) → 扫荡开始。
         if self._phase_ticks % 3 != 1:
@@ -254,7 +265,8 @@ class SpecialSweepSkill(BaseSkill):
         if self._phase_ticks > _PHASE_MAX:
             self._goto("close")
             return action_wait(300, "扫荡开始 never seen → close")
-        return action_wait(400, "waiting for 扫荡开始 (扫荡 cls)")
+        # _maxed=True (资源已确认可负担) → 固定位扫荡开始兜底安全。
+        return action_click(*_POS_SWEEP_START, "start special sweep (fixed pos)")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
         # ⛔ Money gate (2026-06-15 事故加强): 青辉石出现在 topbar 以下任意位置(cy>0.10)
