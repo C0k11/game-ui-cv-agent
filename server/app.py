@@ -107,7 +107,9 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 子 skill, 加进白名单单跑验证 (同型陷阱第七次).
     {"id": "shop", "label": "[测试] 信用点商店 单跑"},
     {"id": "craft", "label": "[测试] 制造 单跑"},
-    {"id": "momo_talk", "label": "[测试] 社交(MomoTalk) 单跑"},
+    {"id": "momo_talk", "label": "[测试] MomoTalk挖矿 单跑(手动)"},
+    # club = 社團签到(社交入口红点的真主人, 10AP进邮箱). 单跑验证.
+    {"id": "club", "label": "[测试] 社團签到 单跑"},
 ]
 # Default order = the 10 production skills in display order.  Mail
 # moved to the END so it captures today's club sign-in AP, event
