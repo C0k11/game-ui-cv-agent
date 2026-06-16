@@ -219,20 +219,19 @@ class SpecialSweepSkill(BaseSkill):
             self._goto("close")
             return action_wait(250, "AP 不够一次扫荡 → close (money-safe)")
 
-        # QTY_MAX (MAX_可点击) is a WEAK cls — live 2026-06-15 实测它在明显可点的蓝色
-        # MAX 上只 fire 到 conf 0.26 (< 0.30) → 被过滤掉 → 误判没法扫。所以用低地板 0.20
-        # 抓它。QTY_MAX_GREY(灰=不足)用正常 0.30(灰是强信号)。
-        max_ok = self.find_cls(screen, UC.QTY_MAX, conf=0.20)
-        max_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
-
-        # ⛔ MAX 灰 (且无可点 MAX) = 资源不足 → close。这正是点扫荡会弹买体力框的情形。
-        if max_grey is not None and max_ok is None:
-            self.log("⛔ MAX 灰色 = 资源不足 → close (绝不点扫荡触发买体力/买票框)")
-            self._goto("close")
-            return action_wait(250, "MAX grey (insufficient) → close (money-safe)")
-
-        # MAX 可点 (resources sufficient) → 点 MAX 设满, 然后扫荡。
+        # ⚠️ 灰 MAX 有歧义: **点 MAX 前**灰=资源不足(该 close); **点 MAX 后**灰=count 已设满
+        # (正常, 该继续扫)。所以 grey→close 只在 not _maxed 时判; _maxed 后不再看 MAX 状态。
         if not self._maxed:
+            # QTY_MAX (MAX_可点击) is a WEAK cls — live 2026-06-15 实测它在明显可点的蓝色
+            # MAX 上只 fire 到 conf 0.26 (< 0.30) → 被过滤掉 → 误判没法扫。低地板 0.20 抓它。
+            # QTY_MAX_GREY(灰=不足)用正常 0.30(灰是强信号)。
+            max_ok = self.find_cls(screen, UC.QTY_MAX, conf=0.20)
+            max_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
+            # ⛔ MAX 灰(未设, 无可点 MAX)= 资源不足 → close。这正是点扫荡弹买体力框的情形。
+            if max_grey is not None and max_ok is None:
+                self.log("⛔ MAX 灰色(未设)= 资源不足 → close (绝不点扫荡触发买体力/买票框)")
+                self._goto("close")
+                return action_wait(250, "MAX grey (insufficient) → close (money-safe)")
             if max_ok is not None:
                 self._maxed = True
                 self.log(f"click MAX (可点 c≥0.20 = 资源够); AP={ap}")
@@ -252,7 +251,7 @@ class SpecialSweepSkill(BaseSkill):
                 return action_wait(300, "no affordable MAX → close")
             return action_wait(400, "waiting for MAX (QTY_MAX c≥0.20)")
 
-        # MAX 已点 (资源确认够) → 扫荡开始。
+        # MAX 已点 (资源确认够, count 设满) → 扫荡开始。MAX 此时变灰是 count 已满, 正常。
         if self._phase_ticks % 3 != 1:
             return action_wait(700, "扫荡开始 clicked — settling")
         start = self.find_cls(screen, UC.SWEEP_START, conf=0.25)
