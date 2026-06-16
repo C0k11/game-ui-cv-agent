@@ -17,7 +17,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
-WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v11\weights\best.pt"
+WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v12\weights\best.pt"
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 NAME2IDX = {n: i for i, n in enumerate(MASTER)}
 
@@ -63,7 +63,7 @@ def main():
     if not jobs:
         print("nothing to prefill")
         return
-    print(f"\nprefilling {len(jobs)} frames with v11 …", flush=True)
+    print(f"\nprefilling {len(jobs)} frames with v12 …", flush=True)
 
     from ultralytics import YOLO
     model = YOLO(WEIGHTS)
