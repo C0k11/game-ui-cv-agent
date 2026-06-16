@@ -70,14 +70,14 @@ _EXIT_MAX = 14
 
 class MomoTalkSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
-        # ★ The unread-MomoTalk dot appears on the NAVBAR 社交入口 (NAV_SOCIAL),
-        # NOT on the left-side MomoTalk widget — NAV_MOMOTALK has NO dot, so
-        # gating on it alone ALWAYS false-skipped (live 2026-06-15: 社交入口 红点
-        # clearly present + LobbyBadge saw social=red, but dot_on_entry anchored
-        # the wrong icon → skipped every run). The 社交入口 dot is the real signal
-        # (user: 红点在社交旁边 = 进). Check both icons so the dot is found
-        # wherever it renders; momo_talk still clicks NAV_MOMOTALK to enter.
-        return self.dot_on_entry(screen, [UC.NAV_SOCIAL, UC.NAV_MOMOTALK])
+        # MomoTalk + bond-story mining is NOT a daily-routine auto-task — it is a
+        # MANUAL, player-chosen action (user 2026-06-15: "momotalk和剧情不在每日
+        # 里面, 是玩家在前端选择去不去挖矿的"). So when this skill is triggered it
+        # ALWAYS runs (the player already decided to mine); never dot-gate it.
+        # (The 社交入口 navbar dot is CLUB's — 社團 sign-in, owned by ClubSkill —
+        # NOT MomoTalk's, so it must not gate this skill either.) The scan phase
+        # exits cleanly if there happen to be no unread conversations.
+        return True
 
     def __init__(self):
         super().__init__("MomoTalk")
