@@ -70,7 +70,14 @@ _EXIT_MAX = 14
 
 class MomoTalkSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
-        return self.dot_on_entry(screen, [UC.NAV_MOMOTALK])
+        # ★ The unread-MomoTalk dot appears on the NAVBAR 社交入口 (NAV_SOCIAL),
+        # NOT on the left-side MomoTalk widget — NAV_MOMOTALK has NO dot, so
+        # gating on it alone ALWAYS false-skipped (live 2026-06-15: 社交入口 红点
+        # clearly present + LobbyBadge saw social=red, but dot_on_entry anchored
+        # the wrong icon → skipped every run). The 社交入口 dot is the real signal
+        # (user: 红点在社交旁边 = 进). Check both icons so the dot is found
+        # wherever it renders; momo_talk still clicks NAV_MOMOTALK to enter.
+        return self.dot_on_entry(screen, [UC.NAV_SOCIAL, UC.NAV_MOMOTALK])
 
     def __init__(self):
         super().__init__("MomoTalk")

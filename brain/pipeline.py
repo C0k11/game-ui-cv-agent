@@ -1380,6 +1380,11 @@ class DailyPipeline:
         self._last_sub_state = ""
         self._last_wait_reason = ""
         self._stuck_counter = 0
+        # Multi-frame dot gate state (reset per skill). The red/yellow dot cls
+        # flickers frame-to-frame, so should_run is voted over the first few
+        # frames instead of decided on a single (possibly flickered) frame.
+        self._dot_gate_done = False
+        self._dot_gate_ticks = 0
         # Set YOLO context based on skill — only run relevant model(s).
         # FPS FIX (2026-05-29): base is now "ui" ONLY. The avatar model is
         # fused_avatar yolo26X (the heaviest net) — running it every tick just
@@ -2357,34 +2362,50 @@ class DailyPipeline:
             self._save_trajectory(screenshot_path, screen, skill, intercept)
             return intercept
 
-        # Dot-driven skip: on the FIRST tick after skill start, call
-        # should_run(screen). Daily-harvest skills (cafe / mail / schedule /
-        # club / daily_tasks / event_activity) override should_run to look
-        # for their red/yellow dot — no dot = no work = advance to next skill.
-        # Battle / sweep skills don't override should_run so always pass.
-        if skill.ticks == 0:
+        # Dot-driven skip — MULTI-FRAME VOTE (2026-06-15). Daily-harvest skills
+        # (cafe / mail / schedule / club / craft / momo_talk / ...) override
+        # should_run to look for their red/yellow dot — no dot = no work = skip.
+        # The dot cls FLICKERS frame-to-frame (live: social 红点 detected on some
+        # lobby frames, missed on others → single-frame should_run false-skipped
+        # a real 未读 day, repeatedly). So we VOTE: should_run True on ANY of the
+        # first _DOT_GATE_FRAMES frames = has work (run); only skip after that
+        # many CONSECUTIVE no-dot frames. Keeps the dot-gate (user: 通过红黄点进入,
+        # 别 always-enter) while being robust to weak-cls flicker. Battle/sweep
+        # skills don't override should_run (returns True) → pass on frame 1.
+        _DOT_GATE_FRAMES = 4
+        if not getattr(self, "_dot_gate_done", False):
             try:
                 if _FORCE_ALL_SKILLS:
+                    self._dot_gate_done = True
                     print(f"[Pipeline] '{skill.name}' FORCE-RUN (--force-skills, dot gate bypassed)")
-                elif not skill.should_run(screen):
-                    print(f"[Pipeline] '{skill.name}' should_run=False (no dot) → skip")
-                    self._results.append(
-                        SkillResult(
-                            skill_name=skill.name,
-                            status="skipped",
-                            ticks=0,
-                            duration_s=0.0,
-                            reason="no relevant dot on lobby",
+                elif skill.should_run(screen):
+                    self._dot_gate_done = True  # dot seen this frame → run the skill
+                else:
+                    g = int(getattr(self, "_dot_gate_ticks", 0)) + 1
+                    self._dot_gate_ticks = g
+                    if g >= _DOT_GATE_FRAMES:
+                        print(f"[Pipeline] '{skill.name}' should_run=False "
+                              f"({g}-frame vote, no dot) → skip")
+                        self._results.append(
+                            SkillResult(
+                                skill_name=skill.name,
+                                status="skipped",
+                                ticks=0,
+                                duration_s=0.0,
+                                reason="no relevant dot on lobby",
+                            )
                         )
-                    )
-                    self._current_idx += 1
-                    if self._current_idx >= len(self._skill_order):
-                        self._running = False
-                        return action_done("all skills complete (last was dot-skipped)")
-                    self._start_current_skill()
-                    return action_wait(200, f"{skill.name} skipped — moving on")
+                        self._current_idx += 1
+                        if self._current_idx >= len(self._skill_order):
+                            self._running = False
+                            return action_done("all skills complete (last was dot-skipped)")
+                        self._start_current_skill()
+                        return action_wait(200, f"{skill.name} skipped — moving on")
+                    # still voting — wait a frame for a clearer dot read
+                    return action_wait(300, f"{skill.name} dot-gate vote ({g}/{_DOT_GATE_FRAMES})")
             except Exception as e:
                 print(f"[Pipeline] should_run check failed for {skill.name}: {e}")
+                self._dot_gate_done = True
 
         # ── universal loading gate (user 2026-06-13: 有加载中就暂停process给
         # 游戏加载时间). Pause the skill entirely while the 加载中 spinner is up —
