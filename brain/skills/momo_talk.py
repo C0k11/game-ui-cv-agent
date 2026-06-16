@@ -419,10 +419,16 @@ class MomoTalkSkill(BaseSkill):
         if self._phase_ticks > _EXIT_MAX:
             return action_done("momotalk exit timeout")
         # Standard exit kit (2026-06-10): cancel-first (quit-prompt / cost
-        # dialogs), then home/back cls, then PACED blind ESC.
+        # dialogs), then the MomoTalk close-X, then home/back cls, then PACED
+        # blind ESC.
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
         if cancel is not None:
             return action_click_box(cancel, "momotalk exit: cancel pending dialog")
+        # MomoTalk closes via its top-right X (弹窗叉叉) — ESC alone left it open
+        # (live 2026-06-15: mined 未讀→0 但 exit timeout 停在 MomoTalk 屏, ESC 没关).
+        close_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF, region=(0.55, 0.05, 0.99, 0.25))
+        if close_x is not None:
+            return action_click_box(close_x, "momotalk exit: close X (弹窗叉叉)")
         home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "momotalk exit: home")
