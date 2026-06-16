@@ -2283,6 +2283,27 @@ class DailyPipeline:
                     f"interceptor: blind-tap dismiss overlay ({self._no_ba_ticks}/30)")
                 self._save_trajectory(screenshot_path, screen, None, blind)
                 return blind
+            # 放置立绘屏 (lobby idle showcase) wake-tap — EXPOSE-compatible.
+            # The lobby auto-hides ALL UI after ~15s idle, leaving only the
+            # Live2D character → ZERO YOLO cls → counts as no-UI → 30-tick abort
+            # (live 2026-06-15: momo_talk 等大厅门控 skill 全被它卡死/误skip).
+            # A BRIGHT (non-black) 0-box frame is the showcase, NOT a black
+            # loading screen — a SINGLE benign wake-tap on the empty TOP-CENTER
+            # sky (0.5,0.05: never the character → no touch-dialogue; never a nav
+            # button → no wandering) reveals the UI so the next tick sees it.
+            # This is NOT the prohibited blind-nav (no ESC/返回/return-to-lobby):
+            # it only wakes an idle screen. Abort safety net preserved — if the
+            # tap can't reveal UI, _no_ba_ticks keeps climbing → 30-tick abort.
+            try:
+                _bright = screen.frame is not None and float(screen.frame.mean()) > 25.0
+            except Exception:
+                _bright = False
+            if _bright and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0:
+                wake = action_click(
+                    0.5, 0.05,
+                    f"wake 放置立绘屏 (reveal idle lobby UI, {self._no_ba_ticks}/30)")
+                self._save_trajectory(screenshot_path, screen, None, wake)
+                return wake
             return wait_action
 
         # First lobby-visit of the run → snapshot all 8 nav-icon badges.
