@@ -221,7 +221,7 @@ class BuyPyroxeneSkill(BaseSkill):
         # Unknown / transition screen — wait, then nudge back toward lobby.
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(600, "no UI detected, likely loading")
-        return action_back("recover toward lobby before buy-pyroxene")
+        return self.nav_home(screen, "buy_pyroxene recover")
 
     # ── combo_tab ────────────────────────────────────────────────────────────
 
@@ -394,4 +394,4 @@ class BuyPyroxeneSkill(BaseSkill):
         home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
             return action_click_box(home, "exit: home button")
-        return action_back("buy_pyroxene exit: ESC toward lobby")
+        return self.nav_home(screen, "buy_pyroxene exit")

@@ -197,7 +197,7 @@ class MomoTalkSkill(BaseSkill):
         if self._enter_ticks > _ENTER_MAX:
             return action_done("momotalk unreachable")
         if self.detect_screen_yolo(screen) not in (None, "Lobby"):
-            return action_back("momotalk: recover toward lobby")
+            return self.nav_home(screen, "momotalk recover")
         return action_wait(400, "entering MomoTalk")
 
     def _open_tab(self, screen: ScreenState) -> Dict[str, Any]:
@@ -437,4 +437,4 @@ class MomoTalkSkill(BaseSkill):
             return action_click_box(back, "momotalk exit: back")
         if self._phase_ticks % 3 != 0:
             return action_wait(600, "exit: settle before next ESC")
-        return action_back("momotalk exit: ESC toward lobby")
+        return self.nav_home(screen, "momotalk exit")

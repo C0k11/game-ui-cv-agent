@@ -946,7 +946,7 @@ class ScheduleSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "schedule exit: back (YOLO 返回键)")
-        return action_back("schedule exit: ESC toward lobby")
+        return self.nav_home(screen, "schedule exit")
 
 
 # Region tiles that HAVE a YOLO ui cls (region-select list). Ordered the way

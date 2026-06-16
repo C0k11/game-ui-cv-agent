@@ -148,7 +148,7 @@ class MailSkill(BaseSkill):
             return action_done("could not reach mailbox")
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI detected, likely loading")
-        return action_back("mail: recover toward lobby")
+        return self.nav_home(screen, "mail recover")
 
     def _claim(self, screen: ScreenState) -> Dict[str, Any]:
         if not self._on_mail(screen):
@@ -220,4 +220,4 @@ class MailSkill(BaseSkill):
         # popping the 是否結束 quit prompt over and over.
         if self._phase_ticks % 3 != 0:
             return action_wait(600, "mail exit: settle before next ESC")
-        return action_back("mail exit: ESC toward lobby")
+        return self.nav_home(screen, "mail exit")

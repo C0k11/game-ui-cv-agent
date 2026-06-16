@@ -525,4 +525,4 @@ class ArenaSkill(BaseSkill):
         # lobby pops the 是否結束 quit prompt repeatedly).
         if self._phase_ticks % 3 != 0:
             return action_wait(600, "exit: settle before next ESC")
-        return action_back("arena exit: ESC toward hub/lobby")
+        return self.nav_home(screen, "arena exit")

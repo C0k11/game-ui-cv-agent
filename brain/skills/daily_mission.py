@@ -172,7 +172,7 @@ class DailyMissionSkill(BaseSkill):
             return action_done("could not reach daily mission")
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI, likely loading")
-        return action_back("daily_mission: recover toward lobby")
+        return self.nav_home(screen, "daily_mission recover")
 
     def _claim_all(self, screen: ScreenState) -> Dict[str, Any]:
         if not self._on_page(screen):
@@ -265,4 +265,4 @@ class DailyMissionSkill(BaseSkill):
         # lobby 是否結束 quit prompt repeatedly (live 2026-06-10).
         if self._phase_ticks % 3 != 0:
             return action_wait(600, "exit: settle before next ESC")
-        return action_back("daily_mission exit: ESC toward lobby")
+        return self.nav_home(screen, "daily_mission exit")

@@ -283,7 +283,7 @@ class ShopSkill(BaseSkill):
             return action_done("could not reach shop")
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI detected, likely loading")
-        return action_back("shop: recover toward lobby")
+        return self.nav_home(screen, "shop recover")
 
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
         if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
@@ -485,4 +485,4 @@ class ShopSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "shop exit: back button")
-        return action_back("shop exit: ESC toward lobby")
+        return self.nav_home(screen, "shop exit")

@@ -180,7 +180,7 @@ class CraftSkill(BaseSkill):
             return action_done("could not reach craft")
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI detected, likely loading")
-        return action_back("craft: recover toward lobby")
+        return self.nav_home(screen, "craft recover")
 
     def _collect(self, screen: ScreenState) -> Dict[str, Any]:
         if not self._is_craft(screen) and not self._confirm_dialog(screen):
@@ -320,4 +320,4 @@ class CraftSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "craft exit: back button")
-        return action_back("craft exit: ESC toward lobby")
+        return self.nav_home(screen, "craft exit")

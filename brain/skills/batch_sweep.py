@@ -155,7 +155,7 @@ class BatchSweepSkill(BaseSkill):
         # Unknown screen — semantizer rule: don't click what we can't name.
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI — likely loading")
-        return action_back("recover toward lobby (unknown screen)")
+        return self.nav_home(screen, "batch_sweep recover")
 
     def _hall(self, screen: ScreenState) -> Dict[str, Any]:
         sid, _, _ = self._screen(screen)
@@ -329,7 +329,7 @@ class BatchSweepSkill(BaseSkill):
             home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
             if home is not None:
                 return action_click_box(home, "hall → lobby")
-            return action_back("hall → lobby (ESC)")
+            return self.nav_home(screen, "batch_sweep hall→lobby")
         if self._phase_ticks > _ENTER_MAX:
             return action_done(f"batch_sweep exit timeout (swept={self._swept})")
         if self._phase_ticks % 3 != 1:
@@ -348,4 +348,4 @@ class BatchSweepSkill(BaseSkill):
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF)
         if confirm is not None and self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is None:
             return action_click_box(confirm, "close: dismiss leftover result")
-        return action_back("close: ESC toward lobby")
+        return self.nav_home(screen, "batch_sweep close")

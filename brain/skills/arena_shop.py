@@ -211,7 +211,7 @@ class ArenaShopSkill(BaseSkill):
         # bounced to lobby → re-click). Only recover-back if we never clicked entry.
         if self._entry_clicked:
             return action_wait(500, "等商店加载(已点入口, 不瞎退)")
-        return action_back("arena_shop: recover toward lobby")
+        return self.nav_home(screen, "arena_shop recover")
 
     def _locate(self, screen: ScreenState) -> Dict[str, Any]:
         # 470 (已选择) on screen → we're on the arena tab. v11 detects 470 well

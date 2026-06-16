@@ -145,7 +145,7 @@ class SpecialSweepSkill(BaseSkill):
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI — likely loading")
         if page is not None:
-            return action_back(f"recover toward lobby ({page})")
+            return self.nav_home(screen, f"special_sweep recover ({page})")
         return action_wait(450, "entering hub")
 
     def _board(self, screen: ScreenState) -> Dict[str, Any]:
@@ -346,4 +346,4 @@ class SpecialSweepSkill(BaseSkill):
         close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
         if close is not None:
             return action_click_box(close, "close popup (X)")
-        return action_back("close: ESC toward lobby")
+        return self.nav_home(screen, "special_sweep close")

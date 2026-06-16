@@ -1174,6 +1174,27 @@ class BaseSkill(ABC):
             return None
         return action_click_box(box, f"{reason} (YOLO {box.cls_name} {box.confidence:.2f})")
 
+    def nav_home(self, screen: ScreenState, reason: str = "回大厅") -> Dict[str, Any]:
+        """Navigate toward the lobby using ONLY in-game buttons — NEVER a blind
+        ESC / back keyevent (user 2026-06-15 iron rule: 反复 ESC-spam recovery
+        多次触发 Unity ANR「Blue Archive没有响应」, freezing the game; "只点基于游戏
+        内的返回大厅还是叉叉"). Preference: 回大厅按钮(home → lobby directly) →
+        弹窗叉叉(close popup) → 返回键(back one screen). If NONE is detected this
+        frame, WAIT — do not blind-tap a guessed position and do not ESC; the
+        caller's own _phase_ticks timeout ends the skill cleanly if truly stuck.
+        """
+        from brain.skills import ui_classes as UC
+        home = self.find_cls(screen, UC.BTN_HOME, conf=0.30)
+        if home is not None:
+            return action_click_box(home, f"{reason}: 回大厅按钮")
+        x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+        if x is not None:
+            return action_click_box(x, f"{reason}: 弹窗叉叉")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
+        if back is not None:
+            return action_click_box(back, f"{reason}: 返回键")
+        return action_wait(450, f"{reason}: 无 home/X/返回键 → 等待 (绝不瞎按 ESC)")
+
     def detect_screen_yolo(self, screen: ScreenState) -> Optional[str]:
         """Detect current page from YOLO cls signatures (no OCR).
 
@@ -1690,7 +1711,7 @@ class BaseSkill(ABC):
         """Try to navigate back to lobby."""
         if screen.is_lobby():
             return None
-        return action_back(f"{self.name}: press back toward lobby")
+        return self.nav_home(screen, f"{self.name} go-lobby")
 
     # OCR-text → YOLO ui_v1 cls_name map for bottom-nav entries.
     # YOLO cls is more reliable than OCR for these icons (consistent location,

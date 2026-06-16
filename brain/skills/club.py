@@ -174,7 +174,7 @@ class ClubSkill(BaseSkill):
             self.log("enter budget exhausted, exiting")
             self._goto("exit")
             return action_wait(300, "enter timeout → exit")
-        return action_back("club: recover toward lobby")
+        return self.nav_home(screen, "club recover")
 
     def _checkin(self, screen: ScreenState) -> Dict[str, Any]:
         confirm = self._checkin_dialog(screen)
@@ -218,4 +218,4 @@ class ClubSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "club exit: back button")
-        return action_back("club exit: ESC toward lobby")
+        return self.nav_home(screen, "club exit")

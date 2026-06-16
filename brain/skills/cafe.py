@@ -408,7 +408,7 @@ class CafeSkill(BaseSkill):
         if screen.is_loading() or len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI detected, likely loading")
         if self._enter_attempts > 8:
-            return action_back("recover from unknown screen before cafe")
+            return self.nav_home(screen, "cafe recover")
         return action_wait(400, "entering cafe")
 
     # ── earnings ──────────────────────────────────────────────────────────
@@ -1090,4 +1090,4 @@ class CafeSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "cafe exit: back button (YOLO 返回键)")
-        return action_back("cafe exit: ESC toward lobby")
+        return self.nav_home(screen, "cafe exit")
