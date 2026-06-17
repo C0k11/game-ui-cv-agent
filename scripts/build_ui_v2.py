@@ -174,6 +174,14 @@ VAL_SOURCES = [
     # 任何类被抽走 >40% 或全局剩 <20 实例的 run 不许抽(momo/剧情场景类各 session
     # 垄断, 实测仅 2 run 可安全抽出 — 别强抽, v9 等场景跨天重复后再扩)。
     "_val_v8flywheel",
+    # v12 新场景 val (2026-06-16, 用户 dashboard 复审"当 val 没问题"): 0616 全 skill
+    # 测试 session 飞轮 48 池合并→ v12 预标 2086 帧。补旧 val 的盲区: arena PvP /
+    # 批量扫荡 dialog / 特殊任务扫荡 / buy_pyroxene 战术大赛商店 / hub — 旧 val 这些=0。
+    # ⛔铁律: 此池整批只进 val, 永不加进 REAL_SOURCES(同 session live 帧, 进 train =
+    # 近邻泄漏 val 虚高)。性质: v12-预标人审 silver(非手标 gold)→ 能测"对 v12 基线有无
+    # 回归 + 新场景覆盖", 但测不出 v12 自身盲区(那需独立手标 gold val)。内部 96% 近邻重复
+    # → 有效 ~40 distinct 场景, mAP 被 dup 计数加权, 看趋势别看绝对值。
+    "_val_v12flywheel_0616",
 ]
 
 TARGET = 30            # moderate oversample floor (was 200 — the overfit driver)

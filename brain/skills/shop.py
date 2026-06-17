@@ -85,6 +85,10 @@ class ShopSkill(BaseSkill):
         super().__init__("Shop")
         self.max_ticks = 60
         self._reserve = _DEFAULT_RESERVE
+        # shop统一 (2026-06-16): True = 买完信用点留在店内(done-in-shop), 由紧随的
+        # arena_shop 在同一次访问继续切战术大赛 tab。daily 编排 shop→arena_shop 永远
+        # 相邻, 故默认 True。单跑/无 arena_shop 跟随时设 False 则正常退大厅。
+        self.chain_in_shop = True
         self._init_state()
 
     def _init_state(self) -> None:
@@ -329,6 +333,14 @@ class ShopSkill(BaseSkill):
 
         sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF)
         if sel is not None:
+            # 今日已售罄 robustness (2026-06-16 实测): 当日商品全部买光后 ITEM 卡变灰,
+            # 但「全部選擇」按钮本身不变灰 → SHOP_SELECT_ALL_GREY 检测落空 → 旧码无限
+            # 点全部選擇(售罄商品选不中→无绿勾→不前进)直到 max_ticks。绿勾检测在上面,
+            # 走到这=点了仍无绿勾。点≥3次仍无绿勾 = 无可选 = 售罄 → exit(钱安全, 没选没买)。
+            if self._select_clicks >= 3:
+                self.log("全部選擇 ×3 无绿勾 → 今日已售罄 nothing to buy → exit")
+                self._goto("exit")
+                return action_wait(300, "shop sold out (3x select no 绿勾) → exit")
             # Pace retries (稳定规则 2026-06-11): give the toggle a beat to
             # render before judging the click dropped.
             if self._phase_ticks % 3 != 1:
@@ -473,6 +485,16 @@ class ShopSkill(BaseSkill):
         return action_back("cancel purchase (budget, ESC)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
+        # ── shop统一 (用户 2026-06-16: 信用点商店 + 战术大赛商店是同一个商店, 左栏
+        # 下滑切 tab 即可, 没必要退大厅再进) ──────────────────────────────────
+        # 信用点(一般 tab)买完后, 若仍在商店网格内, 就 done-IN-SHOP(不 nav_home),
+        # 让紧随的 arena_shop 在同一次访问里继续(arena_shop._enter 已支持 _on_shop
+        # → 直接 swipe 到战术大赛 tab, 无需从大厅重进)。复用 arena_shop 全部钱防线。
+        # 仅在确实回到大厅(已被别处导走)或超时才正常收尾。
+        if self.chain_in_shop and self._on_shop(screen):
+            status = "purchased" if self._purchased else "no purchase"
+            self.log(f"done ON shop grid ({status}) → 留在店内, arena_shop 接力切战术大赛 tab")
+            return action_done(f"shop complete in-shop ({status}) → arena tab next")
         if self.detect_screen_yolo(screen) == "Lobby":
             status = "purchased" if self._purchased else "no purchase"
             self.log(f"done ({status})")

@@ -193,7 +193,9 @@ def _normalize_skill_order(values: Any) -> List[str]:
     # both yesterday's accumulated mail and today's just-generated
     # rewards get claimed within a single run).  Other skills are
     # deduped — running e.g. cafe twice doesn't gain anything.
-    _ALLOW_DUPLICATES = {"mail", "batch_sweep"}  # batch_sweep ×2: 厅后 + 领奖后再刷新到的AP
+    # ×2 允许重复: mail(开局+收口) / batch_sweep(厅后+领奖后) / special_sweep
+    # (2026-06-16 替 batch 当默认 AP-eater, 回马枪需出现两次否则被去重)。
+    _ALLOW_DUPLICATES = {"mail", "batch_sweep", "special_sweep"}
     order: List[str] = []
     seen: Set[str] = set()
     if isinstance(values, list):

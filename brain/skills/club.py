@@ -195,7 +195,11 @@ class ClubSkill(BaseSkill):
         if self.detect_screen_yolo(screen) == "Lobby":
             # BADGE-VERIFIED completeness (cafe 同款): 社交入口还挂红点 = 签到
             # 没成 → 重进一次。3-tick 驻留防 badge 渐入时序闪失。
-            if not self._verify_reentered:
+            # ⚠2026-06-16 实测: 签到成功后 navbar 社交的蓝「+」徽标被 v12 误判成
+            # 红点 → 假"dot persists"触发无谓重进(社团→空转5次才自退, 浪费~40s)。
+            # 既然本轮已签到成功(_checked_in), navbar dot 必是假阳/残留 → 不重进,
+            # 直接收尾。真·漏签到(_checked_in=False)的安全重进保留。
+            if not self._verify_reentered and not self._checked_in:
                 entry = self.find_cls(screen, UC.NAV_SOCIAL, conf=0.40)
                 if entry is not None and self.dot_in_region(
                         screen,

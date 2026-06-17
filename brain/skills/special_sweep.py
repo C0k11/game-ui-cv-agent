@@ -236,20 +236,18 @@ class SpecialSweepSkill(BaseSkill):
                 self._maxed = True
                 self.log(f"click MAX (可点 c≥0.20 = 资源够); AP={ap}")
                 return action_click_box(max_ok, "sweep count MAX")
-            # 两个 MAX cls 都没 fire(弱 cls 全闪)→ 用 AP 当可负担兜底: AP≥单次成本 ⇒
-            # 几乎肯定是可点的(灰只在不足时出)→ 固定位 MAX(已知位置)。AP 不足/读不出 ⇒
-            # close(绝不盲扫触发买体力框)。_confirm 青辉石防线③ 仍兜底。
-            if ap is not None and ap >= _SWEEP_COST:
-                if self._phase_ticks <= 3:
-                    return action_wait(400, "等 MAX cls 一会儿 (AP 够)")
-                self._maxed = True
-                self.log(f"MAX cls 全闪但 AP={ap}≥{_SWEEP_COST}够 → 固定位 MAX (可负担)")
-                return action_click(*_POS_MAX, "sweep count MAX (fixed pos, AP affordable)")
+            # ⛔⛔ 2026-06-17 fail-closed 加固(多agent审计 #1/#2 核实后): 删掉旧的
+            # "AP≥成本就固定位盲点 MAX" 兜底。它在 QTY_MAX cls 全闪时凭 AP 读数盲设 MAX
+            # → 随后盲点扫荡開始, 若 AP 读错(读成够其实不够)就会弹「購買體力(青辉石)」框,
+            # 而 _confirm 的青辉石黑名单是 fail-OPEN(青辉石 cls 漏检即确认买)= 30青辉石
+            # 事故同款链。根治: **只在正向检到 QTY_MAX(资源确认够)才设 _maxed→才扫**;
+            # 两个 MAX cls 全闪 → 等→超时 close, 绝不盲扫触发买体力框。漏扫的 AP 由编排
+            # 里紧跟的 batch_sweep 兜底(no-bonus 日同理)。宁可漏扫一次, 绝不碰青辉石风险。
             if self._phase_ticks > _PHASE_MAX:
-                self.log(f"MAX 没检到且 AP={ap} 不足/读不出 → close (不盲扫, money-safe)")
+                self.log(f"QTY_MAX cls 没正向检到(AP={ap}) → close (不盲扫, money fail-closed)")
                 self._goto("close")
-                return action_wait(300, "no affordable MAX → close")
-            return action_wait(400, "waiting for MAX (QTY_MAX c≥0.20)")
+                return action_wait(300, "no positive QTY_MAX cls → close (fail-closed)")
+            return action_wait(400, "waiting for positive QTY_MAX (c≥0.20)")
 
         # MAX 已点 (资源确认够, count 设满) → 扫荡开始。MAX 此时变灰是 count 已满, 正常。
         if self._phase_ticks % 3 != 1:

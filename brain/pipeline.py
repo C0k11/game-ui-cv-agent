@@ -1127,14 +1127,24 @@ class DailyPipeline:
         #   ALL remaining AP, arena (no AP) last.
         "bounty",           # 悬赏通缉 (tickets only, never AP)
         "jfd",              # 学院交流会 (tickets; free w/ 月卡)
-        "batch_sweep",      # 批量掃蕩 — spend remaining AP (saved preset, MAX)
+        # AP-eater = special_sweep (智能AP分配, 用户 2026-06-16 定: 替 batch_sweep 当
+        # 默认)。扫 hub 的 452 bonus badge → 特殊任务/信用货币回收/双倍三倍板块 → 纯AP扫
+        # (实测 +7.7M 信用点零青辉石)。batch_sweep(笨扫保存的普通关预设)保留为前端
+        # 可选项(_SKILL_OPTIONS), 用户想指定刷普通关时手选; 不选则默认走动态规划。
+        "special_sweep",    # 智能AP分配 — 优先扫 bonus board(特殊任务/双倍三倍)
+        # no-bonus 兜底(审计 #5, 2026-06-17): special_sweep._board 在 452 不落在特殊
+        # 任务时直接 done(不扫), 当天 AP 就没人花。故跟一个 batch_sweep 兜底扫普通关
+        # 吃剩余 AP。special 扫光时 batch_sweep 自身 AP 门会跳过(AP 已低)→ 不双花。
+        "batch_sweep",      # no-bonus/剩余AP 兜底(扫保存的普通关预设, AP门自跳过)
         "arena",            # 战术大赛 (no AP)
         # ③ claims: hall rewards funnel into the mailbox → claim → daily
         #   rewards (n/8 ≥ 7 gate).
         "mail",
         "daily_mission",
-        # ④ AP dynamic re-sweep: mail/daily rewards GRANT fresh AP — sweep it
-        #   too (AP gate skips when nothing arrived). 体力动态规划 v1.
+        # ④ AP dynamic re-sweep (回马枪): mail/daily rewards GRANT fresh AP →
+        #   special_sweep 再吃一趟 + batch_sweep 兜底。体力动态规划 v1。
+        #   (special_sweep/batch_sweep 均在 server _ALLOW_DUPLICATES 才能出现两次。)
+        "special_sweep",
         "batch_sweep",
     ]
 
@@ -1172,6 +1182,11 @@ class DailyPipeline:
             # (bounty / jfd / arena) stay as separate skill_order entries.
             "daily_routine": DailyRoutineSkill(sub_only=opts.get("sub_only")),
         }
+        # 审计 #3 (2026-06-17): registry 的 shop 是 TOP-LEVEL 单跑实例, 后面没有
+        # arena_shop 承接留店 → 必须正常退大厅(否则单跑完游戏卡在商店网格)。
+        # daily_routine 内部自己 new 的 ShopSkill 保持 chain_in_shop=True(紧跟
+        # arena_shop, 同访问切战术大赛 tab)。
+        self._skill_registry["shop"].chain_in_shop = False
 
         names = skill_names or self.DEFAULT_SKILLS
         self._skill_order: List[str] = [n for n in names if n in self._skill_registry]

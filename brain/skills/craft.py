@@ -70,6 +70,7 @@ class CraftSkill(BaseSkill):
         self._quick_settle: int = 0
         self._started: bool = False
         self._start_clicked: bool = False  # we pressed 开始制造 → confirm is ours
+        self._start_taps: int = 0          # 开始制造 clicks w/o resulting confirm
         self._claims: int = 0
 
     def reset(self) -> None:
@@ -266,6 +267,16 @@ class CraftSkill(BaseSkill):
             return action_click_box(max_btn, "set craft quantity MAX")
         start_btn = self.find_cls(screen, UC.CRAFT_START, conf=_CLS_CONF)
         if start_btn is not None:
+            # ⚠2026-06-16 实测: 材料不足时 開始製造 变灰但 CRAFT_START cls 仍 fire,
+            # 点了没反应/不弹確定製造框 → 旧码每 tick 重点到 max_ticks 超时空转 60+ 拍。
+            # 成功时点 1 次就弹確定製造 → _confirm_dialog 接走(_start_taps 到不了 3)。
+            # 点≥3 次仍无确认框 = 灰按钮材料不足 = 今天造不了 → pass(用户 2026-06-16:
+            # "材料不够造不了就 pass 就行")。钱安全(灰按钮本就不扣信用点)。
+            if self._start_taps >= 8:
+                self.log("开始制造 ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap6, 让丢点重试先落)")
+                self._goto("exit")
+                return action_wait(300, "craft 开始制造 greyed (材料不足) → skip")
+            self._start_taps += 1
             self.log("clicking 开始制造")
             self._start_clicked = True
             return action_click_box(start_btn, "start craft (开始制造)")
@@ -276,9 +287,14 @@ class CraftSkill(BaseSkill):
         # 跨分辨率)。点中 → 弹「確定製造N次」确认框 → _confirm_dialog 收口(信用点,
         # 安全)。根治靠飞轮补 开始制造 样本 → v6c。
         if self._maxed_clicks > 0 and max_btn is not None:
+            if self._start_taps >= 8:
+                self.log("开始制造(外推) ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap6, 让丢点重试先落)")
+                self._goto("exit")
+                return action_wait(300, "craft 开始制造 greyed (材料不足) → skip")
             sx = max(0.0, max_btn.cx - 0.056)
             sy = min(1.0, max_btn.cy + 0.10)
             self.log(f"开始制造漏检 → MAX 外推点击 ({sx:.3f},{sy:.3f})")
+            self._start_taps += 1
             self._start_clicked = True
             return action_click(sx, sy, "start craft (MAX 外推开始制造)")
 

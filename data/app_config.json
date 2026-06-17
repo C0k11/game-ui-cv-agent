@@ -53,7 +53,16 @@
         "Toki_(Bunny_Girl).png"
       ],
       "skill_order": [
-        "daily_routine"
+        "daily_routine",
+        "bounty",
+        "jfd",
+        "special_sweep",
+        "batch_sweep",
+        "arena",
+        "mail",
+        "daily_mission",
+        "special_sweep",
+        "batch_sweep"
       ],
       "bounty_branches": [
         "教室"
