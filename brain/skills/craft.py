@@ -273,7 +273,7 @@ class CraftSkill(BaseSkill):
             # 点≥3 次仍无确认框 = 灰按钮材料不足 = 今天造不了 → pass(用户 2026-06-16:
             # "材料不够造不了就 pass 就行")。钱安全(灰按钮本就不扣信用点)。
             if self._start_taps >= 8:
-                self.log("开始制造 ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap6, 让丢点重试先落)")
+                self.log("开始制造 ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
                 return action_wait(300, "craft 开始制造 greyed (材料不足) → skip")
             self._start_taps += 1
@@ -288,7 +288,7 @@ class CraftSkill(BaseSkill):
         # 安全)。根治靠飞轮补 开始制造 样本 → v6c。
         if self._maxed_clicks > 0 and max_btn is not None:
             if self._start_taps >= 8:
-                self.log("开始制造(外推) ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap6, 让丢点重试先落)")
+                self.log("开始制造(外推) ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
                 return action_wait(300, "craft 开始制造 greyed (材料不足) → skip")
             sx = max(0.0, max_btn.cx - 0.056)

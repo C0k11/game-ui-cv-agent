@@ -449,7 +449,11 @@ class ShopSkill(BaseSkill):
         # to the truncated topbar on the first miss. Use the LONGEST-digit-run
         # parse (NOT run_digit_ocr's comma logic, which returned a short
         # fragment live → rejected → 8 retries → cancel, 2026-06-12).
-        bal = self._read_balance_longest(screen.frame, (0.26, 0.63, 0.47, 0.71))
+        # 持有數量 region: 4K 帧上 RapidOCR det 对 7位逗号数字('7,432,788')分组易碎,
+        # 旧区(0.26,0.63,0.47,0.71)会丢最左组只读出 '432788'<1M → 误 fail-closed 取消
+        # (2026-06-26 实测+多agent帧取证)。垂直留白放宽到 (0.61,0.73) 后 det 一次读出整串
+        # '7,432,788' conf0.895。读小=取消(fail-closed方向), 改区不引入 fail-open。
+        bal = self._read_balance_longest(screen.frame, (0.28, 0.61, 0.49, 0.73))
         if bal is None:
             if self._phase_ticks <= 8:
                 return action_wait(450, f"confirm dialog up, re-reading 持有數量 "

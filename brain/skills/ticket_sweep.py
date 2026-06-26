@@ -401,7 +401,13 @@ class TicketSweepSkill(BaseSkill):
 
         # MAX (one shot) only when affordable; else leave qty=1 (single sweep).
         if not self._maxed and self._safe_to_max:
-            max_btn = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
+            # QTY_MAX(MAX_可点击)是弱类: 在明显可点的蓝 MAX 上只 fire 到 conf≈0.26
+            # (<0.30, special_sweep.py:228 实测), 用 _CLS_CONF=0.30 检不到 → 退化固定位
+            # MAX(2026-06-26 实测 bounty/jfd 都走了固定位)。降到 0.20 地板对齐 special_sweep
+            # 让 cls 路径优先(action_click_box 比硬编码 0.84,0.42 跨分辨率更鲁棒)。bounty/jfd
+            # 纯票券: 即便 0.20 在灰 MAX 上误 fire, 游戏把 count 钳到持有票数→confirm "用N票券"
+            # 不弹买票框, 且 _confirm 青辉石防线兜底 → 安全。固定位 fallback 仍保留兜底。
+            max_btn = self.find_cls(screen, UC.QTY_MAX, conf=0.20)
             if max_btn is not None:
                 self._maxed = True
                 self.log("set sweep MAX (affordable)")
