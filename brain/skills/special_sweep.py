@@ -339,7 +339,13 @@ class SpecialSweepSkill(BaseSkill):
         return action_wait(450, "waiting for results")
 
     def _close(self, screen: ScreenState) -> Dict[str, Any]:
+        # 收尾停 hub(用户 2026-07-07: "去任何任务大厅的地方只需要回到任务大厅",
+        # 别退大厅再让下一个 hub skill 重进 — ticket_sweep 的 done-on-hub 同款)。
+        # 编排里 special_sweep 后面是 batch_sweep/arena, 都支持从 hub 起。
         page = self.detect_screen_yolo(screen)
+        if page == "Mission":
+            self.log(f"done on hub (swept={self._swept}, rounds={self._sweep_rounds})")
+            return action_done(f"special_sweep complete on hub (swept={self._swept})")
         if page == "Lobby":
             self.log(f"done (swept={self._swept}, rounds={self._sweep_rounds})")
             return action_done(f"special_sweep complete (swept={self._swept})")
@@ -347,10 +353,14 @@ class SpecialSweepSkill(BaseSkill):
             return action_done(f"special_sweep exit timeout (swept={self._swept})")
         if self._phase_ticks % 3 != 1:
             return action_wait(600, "closing — settling")
-        home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
-        if home is not None:
-            return action_click_box(home, "→ lobby (home)")
+        # 先叉弹窗, 再返回键(回上一级=hub), 都没有才回大厅按钮(最后手段)。
         close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
         if close is not None:
             return action_click_box(close, "close popup (X)")
+        back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
+        if back is not None:
+            return action_click_box(back, "→ hub (back)")
+        home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
+        if home is not None:
+            return action_click_box(home, "→ lobby (home, fallback)")
         return self.nav_home(screen, "special_sweep close")

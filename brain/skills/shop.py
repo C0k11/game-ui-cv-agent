@@ -160,6 +160,42 @@ class ShopSkill(BaseSkill):
             self._balance = res[0]
             self.log(f"shop credit balance (top-bar) = {self._balance:,} (raw {raw!r})")
 
+    def _read_total_thousands(self, frame, region):
+        """OCR a region → the FIRST full thousands-grouped number (e.g.
+        '3,121,500'), as int, or None. STRICT structure gate: only accepts a
+        complete `\\d{1,3}(,\\d{3})+` token — det fragments ('121,5' / '3,121,5')
+        never match, so a broken read can NOT come back smaller than the true
+        total (total-read-small = fail-OPEN toward overspending; reject → the
+        caller falls back to the conservative ceiling)."""
+        if frame is None:
+            return None
+        try:
+            import re as _re
+            import cv2
+            from brain.pipeline import _get_ocr
+            h, w = frame.shape[:2]
+            x1, y1 = int(region[0]*w), int(region[1]*h)
+            x2, y2 = int(region[2]*w), int(region[3]*h)
+            crop = frame[max(0, y1):y2, max(0, x1):x2]
+            if crop.size == 0:
+                return None
+            result, _ = _get_ocr()(crop)
+            if not result:
+                return None
+            raw = " ".join(line[1] for line in result)
+            # boundary-anchored token + TOTALITY check: the accepted token must
+            # contain EVERY digit OCR saw (det dropping any group would make the
+            # read smaller than the true total = fail-OPEN; '3,121,5 500' and
+            # '31,215 500' style fragments both fail totality → ceiling).
+            m = _re.search(r"(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])", raw)
+            digits_all = _re.sub(r"\D", "", raw)
+            if not m or _re.sub(r"\D", "", m.group(0)) != digits_all:
+                self.log(f"總價 invalid/partial thousands token: raw={raw!r} → ceiling")
+                return None
+            return int(m.group(0).replace(",", ""))
+        except Exception:
+            return None
+
     def _read_balance_longest(self, frame, region):
         """OCR a region → the LONGEST contiguous digit run (commas stripped),
         as int, or None. Bypasses run_digit_ocr's comma-group early-return,
@@ -472,10 +508,15 @@ class ShopSkill(BaseSkill):
         # '3,121,500' into overlapping pieces). Use the price when it reads,
         # else a realistic ceiling: 一般-tab full daily stock is a FIXED ~3.1M
         # basket — 8M = 2.5x observed, far saner than the old 20M.
-        from brain.pipeline import run_digit_ocr, parse_count
-        dlg_tot = parse_count(run_digit_ocr(screen.frame, (0.59, 0.63, 0.83, 0.71)))
+        # 總價暗底读取 (2026-07-07 实验修): run_digit_ocr/parse_count 链在暗底上
+        # comma 截断(同余额病), 但 RapidOCR **直读同一 crop 就完整出 '3,121,500'**
+        # (离线实测 A/C 配方全对)。改直读 + **严格千分位结构校验**: 总价读小 =
+        # balance-tot 虚高 = fail-OPEN 方向, 所以只接受完整 `\d{1,3}(,\d{3})+`
+        # 结构(det 碎裂产物必不合法 → 拒 → 退保守 8M 天花板, fail-closed)。
+        tot = self._read_total_thousands(screen.frame, (0.59, 0.61, 0.85, 0.73))
         _DIALOG_CEILING = 8_000_000
-        tot = dlg_tot[0] if (dlg_tot and dlg_tot[0] and dlg_tot[0] >= 100_000) else _DIALOG_CEILING
+        if tot is None or tot < 10_000:
+            tot = _DIALOG_CEILING
         self.log(f"dialog budget: 持有={bal:,} 總價={tot:,} reserve={self._reserve:,}")
         if bal - tot >= self._reserve:
             self._purchased = True

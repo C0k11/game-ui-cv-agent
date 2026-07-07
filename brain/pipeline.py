@@ -412,6 +412,9 @@ SKILL_YOLO_MAP = {
 _yolo_load_attempts = 0
 _MAX_YOLO_LOAD_ATTEMPTS = 3
 _yolo_status = "not_attempted"
+# ui 模型加载失败旗标 (2026-07-07): True = 导航之眼缺失, tick 循环立刻 abort,
+# 绝不 blind/wake-tap (假 no-UI 下 wake-tap 曾反复戳开購買AP框)。
+_UI_LOAD_FAILED = False
 # No class-name filter — purpose-built models (battle_heads, emoticon) only
 # contain relevant classes.  The old _YOLO_ALLOWED_SUBSTRINGS gate silently
 # dropped every detection from battle_heads whose classes are c0-c3.
@@ -478,16 +481,32 @@ def _get_yolo():
         from ultralytics import YOLO
         import numpy as np
         loaded_names = []
+        global _UI_LOAD_FAILED
+        _UI_LOAD_FAILED = False
         for model_path, model_conf, model_tag in candidates:
-            try:
-                m = YOLO(str(model_path))
-                m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
-                _yolo_models.append((m, model_conf, model_tag))
-                loaded_names.append(f"{model_path.stem}({len(m.names)}cls)")
-                print(f"[Pipeline] YOLO loaded from {model_path} (conf={model_conf}, tag={model_tag})")
-            except Exception as e:
-                print(f"[Pipeline] YOLO load failed for {model_path}: {e}")
-                continue
+            # ui 模型是导航的眼睛 — 加载失败(fresh-server CUDA dtype 瞬态, 2026-07-07
+            # 实锤 "float != c10::Half")就重试一次; 仍失败则打 _UI_LOAD_FAILED 旗标,
+            # tick 循环见旗标立刻 abort(绝不带着假 no-UI 去 wake-tap/blind-tap —
+            # 那次假 no-UI 让 wake-tap 反复戳开「購買AP」框, 差点碰钱)。
+            # 2026-07-07 实锤: dtype 病是随机咬(ui 加了重试后 fused_avatar 中招
+            # "float != c10::Half") → 重试扩到全模型。
+            _tries = 2
+            _ok = False
+            for _t in range(_tries):
+                try:
+                    m = YOLO(str(model_path))
+                    m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
+                    _yolo_models.append((m, model_conf, model_tag))
+                    loaded_names.append(f"{model_path.stem}({len(m.names)}cls)")
+                    print(f"[Pipeline] YOLO loaded from {model_path} (conf={model_conf}, tag={model_tag})")
+                    _ok = True
+                    break
+                except Exception as e:
+                    print(f"[Pipeline] YOLO load failed for {model_path} (try {_t+1}/{_tries}): {e}")
+            if not _ok and model_tag == "ui":
+                _UI_LOAD_FAILED = True
+                print("[Pipeline] ⛔ ui model FAILED to load after retry — pipeline will "
+                      "abort immediately (fail-closed: no taps without UI eyes)")
         # ── emoticon fold-in (ui v6+) ──────────────────────────────────────
         # Once the active ui model carries the Emoticon_Action class, its single
         # cafe-bubble class is served by the ui forward pass — so drop the
@@ -2269,6 +2288,15 @@ class DailyPipeline:
                 f"trained cls — 有框才操作: we do NOT blind-tap]"
             )
             self._save_trajectory(screenshot_path, screen, None, wait_action)
+            # ⛔ ui 模型没加载成功 = 假 no-UI(眼睛缺失非画面空), 立刻 abort,
+            # 绝不走下面的 blind/wake-tap(2026-07-07: 假 no-UI + wake-tap 固定位
+            # 撞上 topbar AP「+」→ 反复戳开購買AP框)。fail-closed: 无眼不动手。
+            if _UI_LOAD_FAILED:
+                print("[Pipeline] ⛔ ui model failed to load — aborting immediately "
+                      "(fail-closed, no blind/wake taps without UI eyes). "
+                      "Restart the server to reload the model.")
+                self._running = False
+                return action_done("pipeline aborted: ui model load failed")
             if self._no_ba_ticks >= 30:
                 print(
                     f"[Pipeline] No Blue Archive UI detected for "
@@ -2319,8 +2347,12 @@ class DailyPipeline:
             except Exception:
                 _bright = False
             if _bright and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0:
+                # ⚠️位置从 (0.5,0.05) 挪到 (0.35,0.12) — 旧点自以为是"空天区", 实际
+                # 压在 topbar 的 AP「+」按钮带上(2026-07-07 假 no-UI 时反复戳开
+                # 購買AP框)。(0.35,0.12) = topbar 下方 / 左侧图标列右侧 / 角色左侧,
+                # 两代 lobby 皮肤实测都是空背景; 真立绘屏(UI 全隐)点哪都安全。
                 wake = action_click(
-                    0.5, 0.05,
+                    0.35, 0.12,
                     f"wake 放置立绘屏 (reveal idle lobby UI, {self._no_ba_ticks}/30)")
                 self._save_trajectory(screenshot_path, screen, None, wake)
                 return wake

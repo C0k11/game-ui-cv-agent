@@ -326,10 +326,10 @@ class BatchSweepSkill(BaseSkill):
             self.log(f"done (swept={self._swept})")
             return action_done(f"batch_sweep complete (swept={self._swept})")
         if sid == "task_hall":
-            home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
-            if home is not None:
-                return action_click_box(home, "hall → lobby")
-            return self.nav_home(screen, "batch_sweep hall→lobby")
+            # 收尾停 hub(用户 2026-07-07: hub 内技能别退大厅 — 下一个 hub skill
+            # (arena / special_sweep 回马枪) 从 hub 直接起, 省一次 lobby 往返)。
+            self.log(f"done on hub (swept={self._swept})")
+            return action_done(f"batch_sweep complete on hub (swept={self._swept})")
         if self._phase_ticks > _ENTER_MAX:
             return action_done(f"batch_sweep exit timeout (swept={self._swept})")
         if self._phase_ticks % 3 != 1:

@@ -900,12 +900,21 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         # (1 frame / 2.5s) keeps the cost invisible to the tick loop.
         if adb is not None:
             _clean_dir = RAW_IMAGES_DIR / ("run_" + time.strftime("%Y%m%d_%H%M%S") + "_clean")
+            # Interval env-tunable (2026-07-06): battle-material runs want denser
+            # frames (e.g. 1.2s) — VFX/battle scenes change fast; menus dedup out
+            # later anyway. All captures serialize through AdbInput._IO_LOCK with
+            # the taps, so a faster rate cannot re-introduce the tap-loss bug the
+            # way a parallel ADB process would (it would bypass the lock).
+            try:
+                _fly_iv = max(0.5, float(os.environ.get("GAMESEC_FLYWHEEL_INTERVAL", "2.5")))
+            except Exception:
+                _fly_iv = 2.5
 
             def _clean_flywheel_worker():
                 import cv2 as _cv2
                 _clean_dir.mkdir(parents=True, exist_ok=True)
                 idx = 0
-                _log_pipeline(f"clean-flywheel recorder → {_clean_dir.name} (ADB, overlay-free)")
+                _log_pipeline(f"clean-flywheel recorder → {_clean_dir.name} (ADB, overlay-free, {_fly_iv}s)")
                 while _PIPELINE_RUNNING:
                     try:
                         fr = adb.capture_frame()
@@ -915,7 +924,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                             idx += 1
                     except Exception:
                         pass
-                    time.sleep(2.5)
+                    time.sleep(_fly_iv)
                 _log_pipeline(f"clean-flywheel recorder stopped ({idx} frames)")
 
             threading.Thread(target=_clean_flywheel_worker, daemon=True).start()
