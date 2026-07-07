@@ -92,6 +92,8 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "jfd", "label": "[测试] 学院交流会 单跑"},
     {"id": "batch_sweep", "label": "批量掃蕩 (刷体力, 剩余AP全花)"},
     {"id": "special_sweep", "label": "[测试] 智能AP分配 — 扫2x/3x bonus板块(今天特殊任务)"},
+    # 2026-07-08 活动规划器: Bonus解锁→活動點數优先→货币扫荡→领奖 (无活动自动 done)。
+    {"id": "event_quest", "label": "活动规划器 (加成解锁+点数优先+货币扫荡)"},
     # 2026-06-11 编排重构: mail / daily_mission 升为顶层(厅后收口), 必须在
     # 白名单否则 _normalize_skill_order 静默过滤(第三次踩这个坑)。
     {"id": "mail", "label": "邮件箱收口"},

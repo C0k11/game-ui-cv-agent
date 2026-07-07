@@ -32,6 +32,7 @@ from brain.skills.bounty import BountySkill
 from brain.skills.jfd import JointFiringDrillSkill
 from brain.skills.batch_sweep import BatchSweepSkill
 from brain.skills.special_sweep import SpecialSweepSkill
+from brain.skills.event_quest import EventQuestSkill
 from brain.skills.arena_shop import ArenaShopSkill
 from brain.skills.mail import MailSkill
 from brain.skills.arena import ArenaSkill
@@ -1150,6 +1151,10 @@ class DailyPipeline:
         # 默认)。扫 hub 的 452 bonus badge → 特殊任务/信用货币回收/双倍三倍板块 → 纯AP扫
         # (实测 +7.7M 信用点零青辉石)。batch_sweep(笨扫保存的普通关预设)保留为前端
         # 可选项(_SKILL_OPTIONS), 用户想指定刷普通关时手选; 不选则默认走动态规划。
+        # ⭐活动优先 (用户 AP 铁律 2026-07-08: 活动 > 双倍三倍 > 正常关):
+        # event_quest = 活动规划器 (Bonus解锁→活動點數→货币扫荡→领奖)。无活动时
+        # enter 阶段 hub 无 405 banner → done, AP 原样留给 special/batch。
+        "event_quest",      # 活动 AP 规划器 (405 banner 有活动才跑)
         "special_sweep",    # 智能AP分配 — 优先扫 bonus board(特殊任务/双倍三倍)
         # no-bonus 兜底(审计 #5, 2026-06-17): special_sweep._board 在 452 不落在特殊
         # 任务时直接 done(不扫), 当天 AP 就没人花。故跟一个 batch_sweep 兜底扫普通关
@@ -1188,6 +1193,8 @@ class DailyPipeline:
             # 智能 AP 分配: 扫 2x/3x bonus 板块(今天特殊任务). 排在 batch_sweep 前 —
             # 有 bonus 先吃, 没有就退、batch_sweep 兜底扫正常关.
             "special_sweep": SpecialSweepSkill(),
+            # 活动 AP 规划器 (2026-07-08): 排 special_sweep 前, 活动吃 AP 优先。
+            "event_quest": EventQuestSkill(),
             "arena": ArenaSkill(),
             # 战术大赛商店买体力 (花战术大赛货币, 非青辉石). NOT in DEFAULT_SKILLS —
             # run via skill_order/sub_only for the confirm-step live calibration,
