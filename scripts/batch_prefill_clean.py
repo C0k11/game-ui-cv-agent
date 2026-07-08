@@ -100,6 +100,11 @@ def main():
                 x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
                 xc, yc = (x1 + x2) / 2 / w, (y1 + y2) / 2 / h
                 bw, bh = (x2 - x1) / w, (y2 - y1) / h
+                # 397 获得奖励 语义混淆闸 (2026-07-08): 戰鬥結果弹窗的 WIN! 横幅
+                # (同为黄色斜体艺术字)被误标 397。尺寸干净分离: 真标题 h≤0.094
+                # (p90, n=277) / WIN 假框 h≥0.115 (n=18) → h>0.105 拒。
+                if model.names[local] == "获得奖励" and bh > 0.105:
+                    continue
                 lines.append(f"{mi} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}")
             Path(path).with_suffix(".txt").write_text(
                 "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
