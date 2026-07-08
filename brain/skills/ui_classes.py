@@ -214,6 +214,10 @@ EVENT_SHOP = "活动商店"              # 95  (37f)
 EVENT_TASK = "活动任务"              # 96  (37f)
 EVENT_BONUS = "活动关卡产出额外加成"  # 110 (12f)
 EVENT_END_LEFT = "距离结束还剩"       # 405 (23f)
+# ⛔语义区分(用户 2026-07-08): 「距離獎勵獲得結束」= 上个活动的领奖余韵期 banner
+# (只能进去领尾奖, 无关卡可打)。405 只标「距離結束還剩」(进行中可打)。
+# event skill: 检到 474 的活动 = 领奖期, 只领奖不派 AP。51 样本(0708 OCR 重分类)。
+EVENT_REWARD_END = "距离奖励获得结束"  # 474 (51f, waits v13)
 # 2x/3x 多倍产出加成 badge — drives 智能 AP 分配 (special_sweep): 这个 badge 在哪个
 # 板块, AP 就优先扫那 (2026-06-15 在 特殊任务). v12 检 @0.93+.
 EVENT_DOUBLE_TRIPLE = "双倍或三倍活动进行中"   # 452
