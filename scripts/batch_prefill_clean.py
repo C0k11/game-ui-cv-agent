@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+sys.path.insert(0, r"D:\Project\ai game secretary")
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v12\weights\best.pt"
@@ -84,6 +85,18 @@ def main():
                 # dot classes need a higher conf floor (drop position-prior FPs)
                 if model.names[local] in _DOT_CLS and float(b.conf[0]) < dot_conf:
                     continue
+                # dot HSV posterior (2026-07-08): conf 已不可分(假点0.72爬进真点
+                # 区间0.85-0.92), 颜色占比完美分离(真0.67+/假0.00)。非红非黄→丢;
+                # 颜色与模型 cls 相反(红黄混淆)→ 按颜色改写 cls。
+                if model.names[local] in _DOT_CLS:
+                    bx1, by1, bx2, by2 = [float(v) for v in b.xyxy[0]]
+                    from brain.skills.base import classify_dot_color
+                    seen = classify_dot_color(
+                        res.orig_img, bx1 / w, by1 / h, bx2 / w, by2 / h)
+                    if seen is None:
+                        continue
+                    if seen != model.names[local]:
+                        mi = NAME2IDX[seen]
                 x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
                 xc, yc = (x1 + x2) / 2 / w, (y1 + y2) / 2 / h
                 bw, bh = (x2 - x1) / w, (y2 - y1) / h

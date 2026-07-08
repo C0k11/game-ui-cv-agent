@@ -865,6 +865,40 @@ class ScreenState:
         return False
 
 
+# ── Dot color posterior (2026-07-08) ────────────────────────────────────
+# v12 红点/黄点位置先验强: 社交入口的蓝「+」badge 被标红点 conf0.72, 已爬进
+# 真点 conf 区间(0.85-0.92, 闪烁真点低至 0.69) → conf 阈值不可分。但点类是
+# 纯色小圆, 颜色占比完美分离(同帧实测: 真红点 red%=0.67-0.75 / 真黄点
+# yellow%=0.72-0.74 / 假点(蓝+) 两者=0.00)。所有 dot 判定过此闸。
+
+def classify_dot_color(frame, x1: float, y1: float, x2: float, y2: float
+                       ) -> Optional[str]:
+    """HSV posterior for a dot bbox (normalized coords). Returns '红点' /
+    '黄点' / None (neither red nor yellow = position-prior false fire).
+    frame None → caller should treat as "cannot verify" (pass-through)."""
+    if frame is None:
+        return None
+    try:
+        import cv2
+        import numpy as np
+        h, w = frame.shape[:2]
+        px1, py1 = max(0, int(x1 * w)), max(0, int(y1 * h))
+        px2, py2 = min(w, int(x2 * w)), min(h, int(y2 * h))
+        crop = frame[py1:py2, px1:px2]
+        if crop.size == 0:
+            return None
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        vivid = (sat > 120) & (val > 120)
+        red = float(np.mean(((hue < 10) | (hue > 170)) & vivid))
+        yel = float(np.mean((hue >= 15) & (hue <= 35) & vivid))
+        if max(red, yel) < 0.25:
+            return None
+        return "红点" if red >= yel else "黄点"
+    except Exception:
+        return None
+
+
 # ── Action helpers ──────────────────────────────────────────────────────
 
 def action_click(nx: float, ny: float, reason: str = "") -> Dict[str, Any]:
@@ -991,6 +1025,13 @@ class BaseSkill(ABC):
                 continue
             cx, cy = (b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2
             if x1 <= cx <= x2 and y1 <= cy <= y2:
+                # 颜色后验 (2026-07-08): 位置先验假点(社交蓝+ conf0.72)过滤。
+                # frame 缺失时放行(验色只做增量过滤, 不引入新失败模式)。
+                if screen.frame is not None:
+                    seen = classify_dot_color(
+                        screen.frame, b.x1, b.y1, b.x2, b.y2)
+                    if seen is None or seen not in dot_classes:
+                        continue
                 return True
         return False
 
@@ -1033,6 +1074,11 @@ class BaseSkill(ABC):
         # a small expansion so a badge near the entry counts.
         mx, my = 0.03, 0.06
         for d in dots:
+            # 颜色后验 (2026-07-08): 蓝+/灰位假点过滤 (club 假重进同根)。
+            if screen.frame is not None:
+                seen = classify_dot_color(screen.frame, d.x1, d.y1, d.x2, d.y2)
+                if seen is None or seen not in dot_classes:
+                    continue
             dcx = (d.x1 + d.x2) / 2
             dcy = (d.y1 + d.y2) / 2
             for e in entries:
