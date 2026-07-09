@@ -739,7 +739,7 @@ class CafeSkill(BaseSkill):
                 self._invite_settle = _INVITE_SWIPE_SETTLE
                 self.log(f"fav '{name}' found, hunting target — scroll "
                          f"({self._invite_scrolls}/{_INVITE_MAX_SCROLLS})")
-                return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll invite list (hunt)")
+                return action_swipe(0.5, 0.70, 0.5, 0.30, 800, "scroll invite list (hunt)")
 
             # No configured target on screen.
             if bottom or budget_out or not self._invite_targets:
@@ -761,7 +761,7 @@ class CafeSkill(BaseSkill):
                     self._invite_scrolls += 1
                     self._invite_settle = _INVITE_SWIPE_SETTLE
                     self.log("first-row all invited/unknown → scroll for fresh")
-                    return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll for uninvited row")
+                    return action_swipe(0.5, 0.70, 0.5, 0.30, 800, "scroll for uninvited row")
                 top = ranked[0]
                 top_name = self._row_name(screen, top.cy) or "?"
                 return self._fire_invite(top, top_name, floor, "first-row/exhausted")
@@ -769,7 +769,7 @@ class CafeSkill(BaseSkill):
             self._invite_scrolls += 1
             self._invite_settle = _INVITE_SWIPE_SETTLE
             self.log(f"target not visible, scrolling ({self._invite_scrolls}/{_INVITE_MAX_SCROLLS})")
-            return action_swipe(0.35, 0.68, 0.35, 0.46, 800, "scroll invite list")
+            return action_swipe(0.5, 0.70, 0.5, 0.30, 800, "scroll invite list")
 
         # Stage 0: open the invite ticket from the cafe main screen.
         # First: if the list is already open (toggle race), go to stage 1 —

@@ -2353,6 +2353,18 @@ class DailyPipeline:
                 _bright = screen.frame is not None and float(screen.frame.mean()) > 25.0
             except Exception:
                 _bright = False
+            # skill 声明的 no-UI 逃生 (2026-07-09): event_quest 点 405 可能落进
+            # 模型盲区页(特殊作戰運輸船主页 v13 全零检出), wake-tap 救不了 —
+            # skill 设 no_ui_escape="back" 时按返回键回已知页面, skill 恢复 tick
+            # 后自行重试。立绘屏唤醒场景不受影响(daily 系 skill 不声明)。
+            _cur_skill = self.current_skill
+            if (getattr(_cur_skill, "no_ui_escape", None) == "back"
+                    and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0):
+                esc = {"action": "back",
+                       "reason": f"no-UI escape: back to known page "
+                                 f"({self._no_ba_ticks}/30)"}
+                self._save_trajectory(screenshot_path, screen, None, esc)
+                return esc
             if _bright and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0:
                 # ⚠️位置从 (0.5,0.05) 挪到 (0.35,0.12) — 旧点自以为是"空天区", 实际
                 # 压在 topbar 的 AP「+」按钮带上(2026-07-07 假 no-UI 时反复戳开

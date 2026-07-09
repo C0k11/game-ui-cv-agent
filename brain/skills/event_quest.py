@@ -48,7 +48,7 @@ from brain.skills import ui_classes as UC
 _CLS_CONF = 0.30
 _WEAK_CONF = 0.20          # 活动皮肤弱类 (活动商店/活动任务/活动quest_已选择) 地板
 _ENTER_MAX = 24
-_VERIFY_RETRY_MAX = 3      # 405 轮播重试上限
+_VERIFY_RETRY_MAX = 6      # 405 轮播重试上限 (递增等待破共振)
 _PHASE_MAX = 18
 _BATTLE_MAX = 46           # battle poll ticks (pipeline tick ~5s → ~230s)
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
@@ -74,6 +74,10 @@ def _read_digits(frame, region) -> Optional[str]:
 
 class EventQuestSkill(BaseSkill):
     """活动 quest AP 规划器: Bonus 解锁 → 点数优先 → 货币扫荡 → 领奖。"""
+
+    # no-UI 逃生 (2026-07-09): 405 轮播可能落进模型盲区页(特殊作戰運輸船主页
+    # v13 全零检出) — pipeline no-UI 时按 back 回已知页, 本 skill 恢复重试。
+    no_ui_escape = "back"
 
     def __init__(self, points_target: int = _POINTS_TARGET_DEFAULT,
                  tail_quests: int = _TAIL_QUESTS):
@@ -118,11 +122,16 @@ class EventQuestSkill(BaseSkill):
                   if b.cls_name == UC.STAGE_ENTER and b.confidence >= _CLS_CONF]
         if len(enters) < 2:
             return False
-        has_star = self.find_cls(
-            screen, [UC.STAGE_STAR_0, UC.STAGE_STAR_3], conf=_CLS_CONF) is not None
+        # ⛔负特征 (2026-07-09 live 实锤): 特殊作戰運輸船列表也有 入场键+得星_0,
+        # 曾骗过 verify → survey 在错活动里跑。「普通关卡选中」= 主线/特殊作戰
+        # tab 指示器, 活动页绝不出现。
+        if self.find_cls(screen, "普通关卡选中", conf=0.5) is not None:
+            return False
+        # 硬条件: 活动专属底栏 (v13 下 活动商店0.98/活动任务0.96 稳; 弱检出
+        # 地板 0.20 兜底)。得星不再单独放行 — 它对特殊作戰无区分度。
         has_bottom = self.find_cls(
             screen, [UC.EVENT_SHOP, UC.EVENT_TASK], conf=_WEAK_CONF) is not None
-        return has_star or has_bottom
+        return has_bottom
 
     def _on_popup(self, screen: ScreenState) -> bool:
         """任務資訊 popup 特征: 扫荡开始 + 任务开始 同屏."""
@@ -146,6 +155,49 @@ class EventQuestSkill(BaseSkill):
             if a.isdigit() and b.isdigit() and int(b) >= 1000:
                 return int(a), int(b)
         return None
+
+    # ── banner 指纹 (2026-07-09): crop 直方图记"点过且 verify 失败"的轮播项 ──
+    _BANNER_CROP = (0.02, 0.10, 0.16, 0.29)   # hub 左上 banner 本体区
+
+    def _banner_hist(self, screen: ScreenState):
+        try:
+            import cv2
+            fr = screen.frame
+            if fr is None:
+                return None
+            h, w = fr.shape[:2]
+            x1, y1 = int(self._BANNER_CROP[0]*w), int(self._BANNER_CROP[1]*h)
+            x2, y2 = int(self._BANNER_CROP[2]*w), int(self._BANNER_CROP[3]*h)
+            crop = fr[y1:y2, x1:x2]
+            hist = cv2.calcHist([crop], [0, 1, 2], None, [8, 8, 8],
+                                [0, 256, 0, 256, 0, 256])
+            cv2.normalize(hist, hist)
+            return hist
+        except Exception:
+            return None
+
+    def _banner_snapshot(self, screen: ScreenState) -> None:
+        """点击前存当前项指纹 (verify 失败时转入黑名单)."""
+        self._banner_pending = self._banner_hist(screen)
+
+    def _banner_mark_bad(self) -> None:
+        h = getattr(self, "_banner_pending", None)
+        if h is not None:
+            if not hasattr(self, "_banner_bad"):
+                self._banner_bad = []
+            self._banner_bad.append(h)
+            self._banner_pending = None
+
+    def _banner_seen_bad(self, screen: ScreenState) -> bool:
+        import cv2
+        bad = getattr(self, "_banner_bad", None)
+        if not bad:
+            return False
+        cur = self._banner_hist(screen)
+        if cur is None:
+            return False
+        return any(cv2.compareHist(cur, b, cv2.HISTCMP_CORREL) > 0.90
+                   for b in bad)
 
     def _pyroxene_in_body(self, screen: ScreenState) -> bool:
         """money backstop: 对话框 body(y>0.12) 出现青辉石 = 绝不是纯AP扫荡框."""
@@ -174,10 +226,20 @@ class EventQuestSkill(BaseSkill):
         if self._on_quest_list(screen):
             self._set("survey")
             return action_wait(300, "on event quest list")
+        # ⛔474 负门 (2026-07-09): banner 当前项=「距離獎勵獲得結束」领奖期活动
+        # (如特殊作戰運輸船 — 无关卡可打, 其主页 v13 全零检出=no-UI 陷阱) →
+        # 主动横滑翻到下一项(banner 支持手势翻页, 3项小圆点, live 实测)。
+        if self.find_cls(screen, UC.EVENT_REWARD_END, conf=0.4) is not None:
+            return action_swipe(0.11, 0.185, 0.035, 0.185, duration_ms=400,
+                                reason="banner=reward-end → swipe next item")
         banner = self.find_cls(screen, UC.EVENT_END_LEFT, conf=0.5)
         if banner is not None:
+            # ⛔零延迟点击 (2026-07-09 终版): 重进 hub 会把轮播重置到 item0
+            # (本期=目标活动, 手动实测两次), item0 窗口只有开头几秒 — 任何
+            # "稳定闸/指纹/等待"防护都是延迟源, 反而把点击推出窗口(live 9连
+            # miss 的真凶)。检到 405 的第一个 tick 立即点; 错了 verify 兜底。
             self._set("verify")
-            return action_click_box(banner, "enter event via 405 banner")
+            return action_click_box(banner, "enter event via 405 banner (instant)")
         hub = self.find_cls(screen, UC.NAV_TASKS, conf=_CLS_CONF)
         if hub is not None:
             return action_click_box(hub, "lobby → task hub")
@@ -212,19 +274,30 @@ class EventQuestSkill(BaseSkill):
         if self._verify_retries > _VERIFY_RETRY_MAX:
             return action_done("event_quest: banner carousel retries exhausted")
         self._set("enter")
-        return action_back(f"wrong landing — back & retry banner "
-                           f"({self._verify_retries}/{_VERIFY_RETRY_MAX})")
+        # 回 lobby 重进 hub = 轮播重置到 item0, 下一击零延迟点击 (不 back 回
+        # hub — back 不重置轮播, 会继续在错误项上转)。
+        return self.nav_home(screen,
+                             f"wrong landing → lobby, reset carousel "
+                             f"({self._verify_retries}/{_VERIFY_RETRY_MAX})")
 
     # ── survey ─────────────────────────────────────────────────────
 
     def _survey(self, screen: ScreenState) -> Dict[str, Any]:
         """列表滑到底, 自底向上开尾部 N 关 popup 记录 Bonus 状态."""
         if self._phase_ticks > _PHASE_MAX * 2:
-            return action_done("event_quest survey timeout")
+            self.log("survey timeout → close (do NOT retry blind)")
+            self._set("close")
+            return action_wait(300, "survey timeout")
         if not self._survey_swiped:
             self._survey_swiped = True
-            return action_swipe(0.75, 0.45, 0.75, 0.75, duration_ms=400,
+            self._survey_settle = 2   # 滚动后等 2 tick 用新鲜坐标 (回弹稳定闸)
+            # 向底部滚 = 内容上移 = from 下 to 上 (2026-07-09 live: 方向写反把
+            # 列表拖回顶部, tail keys 全点歪 → popup 卡死 stuck20)
+            return action_swipe(0.75, 0.72, 0.75, 0.42, duration_ms=400,
                                 reason="scroll quest list to bottom")
+        if getattr(self, "_survey_settle", 0) > 0:
+            self._survey_settle -= 1
+            return action_wait(700, "survey: list settling")
         if self._popup_open:
             if self._on_popup(screen):
                 unlocked = self.find_cls(

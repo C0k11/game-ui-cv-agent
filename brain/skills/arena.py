@@ -333,9 +333,15 @@ class ArenaSkill(BaseSkill):
         claim = self.find_cls(screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW], conf=_CLS_CONF)
         if claim is not None:
             self._claim_clicks += 1
+            self._claim_settle = 0
             self.log(f"claim arena reward #{self._claim_clicks} ({claim.cls_name})")
             return action_click_box(claim, "claim arena reward")
 
+        # 2026-07-09: 领完第1个的toast动画期间第2个黄钮检不出 → settle 2 tick
+        # 再确认(今天live: 時間獎勵+每日獎勵两黄钮只领了1个就过)。
+        self._claim_settle = getattr(self, "_claim_settle", 0) + 1
+        if self._claim_settle <= 2:
+            return action_wait(600, f"claim settle re-check ({self._claim_settle}/2)")
         self.log("no 领取奖励_黄 → fight_check")
         self._goto("fight_check")
         return action_wait(250, "no active rewards → fight_check")
@@ -358,6 +364,19 @@ class ArenaSkill(BaseSkill):
                 self.log("tickets unreadable after retries → exit (money fail-closed)")
                 self._goto("exit")
                 return action_wait(300, "ticket unreadable → exit")
+            # 2026-07-09 live: 第1场结算后停在过渡页(Rank变动/奖励toast/TOUCH),
+            # 票icon不在屏上 → 干等12次必败(4/5票没打+奖励没领全)。retry 时
+            # 主动清过渡元素。⛔负门禁: 確認+取消同屏=可能是购买框, 绝不点確認。
+            got = self.find_cls(screen, UC.GOT_REWARD, conf=0.5)
+            if got is not None:
+                return action_click(0.5, 0.90, "dismiss reward (ticket retry)")
+            cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=0.5)
+            if cont is not None:
+                return action_click_box(cont, "tap continue (ticket retry)")
+            conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
+            cancel_btn = self.find_cls(screen, UC.BTN_CANCEL, conf=0.5)
+            if conf_btn is not None and cancel_btn is None:
+                return action_click_box(conf_btn, "dismiss result dialog (ticket retry)")
             return action_wait(400, f"ticket read retry {self._ticket_misses}/12 (fail-closed gate)")
         self._ticket_misses = 0
         self._tickets = tickets
