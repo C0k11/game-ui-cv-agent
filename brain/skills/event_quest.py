@@ -93,7 +93,11 @@ class EventQuestSkill(BaseSkill):
         self._verify_retries = 0
         # survey 结果: [(cy_of_入场键, bonus_unlocked)] 自上而下
         self._quests: List[Tuple[float, bool]] = []
-        self._survey_idx = 0
+        # cy 记账 (2026-07-10 同关反复开合 bug 修): 点过的 cy±0.03 不再点。
+        # 旧 _survey_idx 索引制病灶: 关 popup 后过渡帧入场键检出不全 →
+        # keys[-4:] tail 切片错位 → 同一关反复开合 + Bonus 状态记错关。
+        self._surveyed_cys: List[float] = []
+        self._popup_wait = 0
         self._survey_swiped = False
         self._unlock_idx = 0
         self._battle_ticks = 0
@@ -316,31 +320,59 @@ class EventQuestSkill(BaseSkill):
             return action_wait(700, "survey: list settling")
         if self._popup_open:
             if self._on_popup(screen):
-                unlocked = self.find_cls(
-                    screen, UC.EVENT_BONUS, conf=_CLS_CONF) is not None
-                self._quests.append((self._survey_cy, unlocked))
-                self.log(f"survey quest#{len(self._quests)} (cy={self._survey_cy:.3f})"
-                         f" bonus_unlocked={unlocked}")
+                self._popup_wait = 0
                 self._popup_open = False
-                self._survey_idx += 1
+                # 去重: X 点漏 popup 残留 / late-popup 重入时不重复记账
+                if all(abs(self._survey_cy - c) > 0.03
+                       for c in self._surveyed_cys):
+                    unlocked = self.find_cls(
+                        screen, UC.EVENT_BONUS, conf=_CLS_CONF) is not None
+                    self._quests.append((self._survey_cy, unlocked))
+                    self._surveyed_cys.append(self._survey_cy)
+                    self.log(f"survey quest#{len(self._quests)} "
+                             f"(cy={self._survey_cy:.3f})"
+                             f" bonus_unlocked={unlocked}")
+                else:
+                    self.log("survey: duplicate popup (already recorded) — close")
+                # 关 popup 后 settle 1 tick 再取 keys (过渡帧检出不全是
+                # 同关反复开合 bug 的根因之一)
+                self._survey_settle = 1
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 if close is not None:
                     return action_click_box(close, "close survey popup")
                 return action_back("close survey popup (back)")
+            self._popup_wait += 1
+            if self._popup_wait > 4:
+                # 点击没开出 popup (过渡帧点歪) → 放弃本次, 回列表重选同关
+                self._popup_wait = 0
+                self._popup_open = False
+                return action_wait(400, "survey: popup never opened — reselect")
             return action_wait(600, "waiting survey popup")
+        if self._on_popup(screen):
+            # popup 迟到 (开窗动画慢于重选判定) — 续用上次点击的 cy 记账
+            self._popup_open = True
+            return action_wait(300, "survey: popup appeared late")
         keys = self._enter_keys(screen)
-        if not keys:
-            return action_wait(600, "survey: waiting quest list")
+        # 过渡帧检出不全 → tail 错位, 必须看到完整尾部才动手
+        if len(keys) < self._tail_quests:
+            return action_wait(600, f"survey: partial list ({len(keys)} keys)")
         tail = keys[-self._tail_quests:]
-        if self._survey_idx >= len(tail):
+        # cy 记账: 点过(±0.03)的关不再点
+        todo = [b for b in tail
+                if all(abs((b.y1 + b.y2) / 2 - c) > 0.03
+                       for c in self._surveyed_cys)]
+        if not todo:
             # survey 完毕 → unlock 队列 = 未解锁的关 (自底向上: 点数关优先解锁)
-            self._quests = self._quests[-len(tail):]
+            self._quests.sort(key=lambda q: q[0])
+            self._quests = self._quests[-self._tail_quests:]
             self._set("unlock")
             return action_wait(300, f"survey done ({len(self._quests)} tail quests)")
-        box = tail[self._survey_idx]
+        box = todo[0]
         self._survey_cy = (box.y1 + box.y2) / 2
         self._popup_open = True
-        return action_click_box(box, f"survey open quest popup #{self._survey_idx}")
+        self._popup_wait = 0
+        return action_click_box(
+            box, f"survey open quest popup cy={self._survey_cy:.3f}")
 
     # ── unlock (加成解锁: 自动编队 + 真打一次) ────────────────────────
 
@@ -366,7 +398,13 @@ class EventQuestSkill(BaseSkill):
             if keys:
                 cy = self._quests[self._unlock_idx][0]
                 box = min(keys, key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
-                return action_click_box(box, f"unlock: open quest cy={cy:.3f}")
+                # cy 容差防呆: 目标关不在视野 (过渡帧/列表被复位) 绝不点最近邻
+                if abs((box.y1 + box.y2) / 2 - cy) <= 0.04:
+                    return action_click_box(box, f"unlock: open quest cy={cy:.3f}")
+                if self._phase_ticks % 3 == 0:
+                    return action_swipe(0.75, 0.72, 0.75, 0.42, duration_ms=400,
+                                        reason="unlock: re-scroll to bottom")
+                return action_wait(600, "unlock: target quest not in view")
             return action_wait(600, "unlock: waiting list")
         if step == "edit":
             sq2_hi = self.find_cls(screen, UC.SQUAD_2_HI, conf=_CLS_CONF)
@@ -522,7 +560,13 @@ class EventQuestSkill(BaseSkill):
         if keys and quest_idx < len(self._quests):
             cy = self._quests[quest_idx][0]
             box = min(keys, key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
-            return action_click_box(box, f"{label}: open quest cy={cy:.3f}")
+            # cy 容差防呆 (同 survey/unlock): 目标关不在视野绝不点最近邻
+            if abs((box.y1 + box.y2) / 2 - cy) <= 0.04:
+                return action_click_box(box, f"{label}: open quest cy={cy:.3f}")
+            if self._phase_ticks % 3 == 0:
+                return action_swipe(0.75, 0.72, 0.75, 0.42, duration_ms=400,
+                                    reason=f"{label}: re-scroll to bottom")
+            return action_wait(600, f"{label}: target quest not in view")
         return action_wait(600, f"{label}: waiting")
 
     # ── tasks (活动任務领奖) / close ──────────────────────────────────

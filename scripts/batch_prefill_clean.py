@@ -18,7 +18,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, r"D:\Project\ai game secretary")
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
-WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v12\weights\best.pt"
+WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v13\weights\last.pt"
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 NAME2IDX = {n: i for i, n in enumerate(MASTER)}
 

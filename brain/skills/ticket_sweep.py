@@ -159,25 +159,33 @@ class TicketSweepSkill(BaseSkill):
                              region=(0.0, 0.04, 0.26, 0.36))
         if icon is None:
             # Ticket cls anchor FLICKERS (live 2026-06-09: bounty 票 cls
-            # zero-detected on the branch page while "懸賞通緝票券 15/6"
-            # rendered plainly top-left). The counter is a stable page
-            # fixture → fixed-region OCR fallback; digits+slash survive
-            # the Chinese label in the strip.
-            # Region calibrated on the LIVE dxcam frame 2026-06-09: '15/6' ✓.
-            # x1=0.16 keeps the (sometimes-burned) overlay label out of the
-            # strip; y≥0.235 stays below the icon's label zone.
-            raw = run_digit_ocr(screen.frame, (0.16, 0.235, 0.30, 0.29))
+            # zero-detected on the branch page while the counter rendered
+            # plainly top-left). The counter is a stable page fixture →
+            # fixed-region OCR fallback on the DIGITS zone only (0708 新皮肤
+            # 「持有票券 6/6」布局, 两页帧离线验证 '6/6' ✓)。
+            raw = run_digit_ocr(screen.frame, (0.115, 0.121, 0.185, 0.163))
             res = parse_count(raw)
             if res is not None and res[0] is not None:
                 self.log(f"tickets via fixed-region fallback: {res[0]} (raw {raw!r})")
                 return res[0]
+            self.log(f"[tkdbg] no icon anchor; fallback raw={raw!r}")
             return None
         bh = icon.y2 - icon.y1
         x1 = max(0.0, icon.x2 + 0.002)
         x2 = min(1.0, x1 + 0.11)
-        raw = run_digit_ocr(screen.frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
+        y1s, y2s = icon.y1 - bh * 0.4, icon.y2 + bh * 0.4
+        raw = run_digit_ocr(screen.frame, (x1, y1s, x2, y2s))
         res = parse_count(raw)
         if res is None or res[0] is None:
+            # 0708 更新换皮:「持有票券 6/6」斜体数字在含中文标签的整条 strip 上
+            # 被 det 漏检(live 实锤 raw=None ×8 → fail-closed 0 sweeps; 同帧
+            # 去掉标签只留数字区就读出)。数字区 = 标签右侧 x1+0.055 起。
+            raw = run_digit_ocr(screen.frame, (min(1.0, x1 + 0.055), y1s, x2, y2s))
+            res = parse_count(raw)
+        if res is None or res[0] is None:
+            self.log(f"[tkdbg] icon@({icon.x1:.3f},{icon.y1:.3f},{icon.x2:.3f},"
+                     f"{icon.y2:.3f}) conf={icon.confidence:.2f} both strips "
+                     f"unread (last raw={raw!r})")
             return None
         return res[0]
 
