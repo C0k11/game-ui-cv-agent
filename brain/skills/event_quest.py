@@ -156,6 +156,26 @@ class EventQuestSkill(BaseSkill):
                 return int(a), int(b)
         return None
 
+    # ── k-偏移原子连发 (2026-07-09 终案, 活动无关): swipe×k 翻页后 0.5s 内
+    # tap — 一条 adb shell 原子完成(swipe 后轮播暂停, 静止期内必落)。k=0/1/2
+    # 覆盖三项轮播, verify 落点错→k+1 重试, 不认 banner 内容(下期活动零改动)。
+    _ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
+    _DEV = "127.0.0.1:7555"
+
+    def _atomic_banner_tap(self, k: int) -> None:
+        import subprocess
+        parts = []
+        for _ in range(min(k, 4)):
+            parts.append("input swipe 420 400 130 400 300")
+            parts.append("sleep 0.6")
+        parts.append("input tap 264 321")
+        try:
+            subprocess.run([self._ADB, "-s", self._DEV, "shell",
+                            " && ".join(parts)],
+                           capture_output=True, timeout=30)
+        except Exception as e:
+            self.log(f"atomic banner tap failed: {e}")
+
     # ── banner 指纹 (2026-07-09): crop 直方图记"点过且 verify 失败"的轮播项 ──
     _BANNER_CROP = (0.02, 0.10, 0.16, 0.29)   # hub 左上 banner 本体区
 
@@ -226,20 +246,16 @@ class EventQuestSkill(BaseSkill):
         if self._on_quest_list(screen):
             self._set("survey")
             return action_wait(300, "on event quest list")
-        # ⛔474 负门 (2026-07-09): banner 当前项=「距離獎勵獲得結束」领奖期活动
-        # (如特殊作戰運輸船 — 无关卡可打, 其主页 v13 全零检出=no-UI 陷阱) →
-        # 主动横滑翻到下一项(banner 支持手势翻页, 3项小圆点, live 实测)。
-        if self.find_cls(screen, UC.EVENT_REWARD_END, conf=0.4) is not None:
-            return action_swipe(0.11, 0.185, 0.035, 0.185, duration_ms=400,
-                                reason="banner=reward-end → swipe next item")
-        banner = self.find_cls(screen, UC.EVENT_END_LEFT, conf=0.5)
+        banner = self.find_cls(
+            screen, [UC.EVENT_END_LEFT, UC.EVENT_REWARD_END], conf=0.4)
         if banner is not None:
-            # ⛔零延迟点击 (2026-07-09 终版): 重进 hub 会把轮播重置到 item0
-            # (本期=目标活动, 手动实测两次), item0 窗口只有开头几秒 — 任何
-            # "稳定闸/指纹/等待"防护都是延迟源, 反而把点击推出窗口(live 9连
-            # miss 的真凶)。检到 405 的第一个 tick 立即点; 错了 verify 兜底。
+            # k-偏移原子连发(终案, 活动无关): 见 _atomic_banner_tap 注释。
+            # verify 失败次数=k, k=0/1/2 覆盖三项轮播, 落错 verify 兜底 k+1。
+            k = self._verify_retries
+            self.log(f"banner combo: swipe×{k} && tap (atomic)")
+            self._atomic_banner_tap(k)
             self._set("verify")
-            return action_click_box(banner, "enter event via 405 banner (instant)")
+            return action_wait(3500, f"banner combo k={k} → verify landing")
         hub = self.find_cls(screen, UC.NAV_TASKS, conf=_CLS_CONF)
         if hub is not None:
             return action_click_box(hub, "lobby → task hub")
