@@ -36,8 +36,8 @@
     }
   },
   "ui": {
-    "active": "v12",
-    "_rollback_note": "2026-06-15 上线 v12 (warm v11 + 06-14审过9池含商店205540)。回滚: 改 active 回 'v11' 即可秒退。v12真验收=live实战走线(旧冻结val测不出商店增益)。如live退化(尤其arena_shop买/红点)→回v11。",
+    "active": "v13",
+    "_rollback_note": "2026-07-09 上线 v13(last.pt, 活动皮肤补课+2新类)。回滚: active 改回 'v12' 秒退。真验收=live活动走线(event_quest 首跑)。如live退化(尤其daily核心类)→回v12。",
     "task": "detect",
     "n_classes": 474,
     "n_classes_in_use": 160,
@@ -175,6 +175,16 @@
           "96_活动任务": 0.359,
           "31_返回键": 0.476
         }
+      },
+      "v13": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v13/weights/last.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-07-09",
+        "n_classes": 476,
+        "epoch_deployed": 31,
+        "frozen_val_mAP50": 0.9774,
+        "frozen_val_mAP50_95": 0.9671,
+        "notes": "warm v12, nc 474→476(+474距离奖励获得结束/+475奖励资讯), train 20,404帧(0616-0708 merged池5,550入train, dedup后20,185 unique)。⚠部署 last.pt(ep31)非 best.pt(ep1): best整体mAP微高(0.9845/0.9710)但474新类8/8全错判405; last对474 8/8全对+弱类大涨(MAX_可点击0.60→0.97/活动商店0.80→0.98/奖励资讯0.79检出), 整体仅-0.007/-0.004在silver val噪声内。已知盲区: 89/90里程碑弹窗黄灰钮(素材仅2帧, 零检出, 攒帧v14补)。"
       }
     }
   },
