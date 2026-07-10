@@ -655,6 +655,33 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26n_v2": {
+        # 战斗模型 v2 (2026-07-09) = battle_heads(老v8n 4cls) 的 yolo26 重生。
+        #  数据: run_battle_material_20260708 用户手标 133 帧 → battle_v2 (114/19),
+        #  7 类 = 我方/敌方(新身份类, combat AI 2.0 检测层) + 战斗HUD 5 类
+        #  (暂停/三倍速/自动开/自动关/胜利 — 与 ui 模型有意重复: 战斗高频循环
+        #  单模型拿 AUTO gate, 不等 5s 主 tick)。
+        #  ⭐26n@640 = battle_lock_upgrade_plan 定案: 2 类身份不缺容量, 高频循环
+        #  实测 98 FPS@640(4090 half, 2026-07-09 bench); 26x 反而掉到 60。
+        #  ⚠fliplr=0 铁律: 我方永远左侧/敌方右侧, 翻转破坏方向语义。
+        #  hsv 开得比 UI 大(h0.015/s0.3/v0.4): 3D 战场光效/VFX 色变打底,
+        #  真 VFX 合成 augmentation 留 Phase 2。copy_paste=0(小人重叠假样本)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "yolo26n.pt"),
+        "epochs": 150,
+        "patience": 40,
+        "save_period": 10,
+        "imgsz": 640,
+        "batch": 32,
+        "out_name": "battle_yolo26n_v2",
+        "cache": True,          # 133帧 RAM cache, 绝不 disk(v13 爆盘教训不适用但统一心智)
+        "workers": 8,
+        "mosaic": 0.5, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.4, "translate": 0.1,
+        "hsv_h": 0.015, "hsv_s": 0.3, "hsv_v": 0.4,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
