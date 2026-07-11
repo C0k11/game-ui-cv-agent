@@ -1233,7 +1233,9 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             cv2.imwrite(tmp_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
             # 2. Pipeline tick — OCR at tick rate, YOLO from high-FPS thread
-            skip_ocr = (_tick_counter % _OCR_INTERVAL != 0) and _prev_ocr_boxes is not None
+            # ⭐OCR on-demand (2026-07-11): 恒 True, 真正决定权在
+            # read_screen_from_frame — YOLO ≥3框(已知屏)零 OCR, <3框(盲区)才跑
+            skip_ocr = True
             # YOLO source must match the frame source: ADB frames run INLINE
             # YOLO (boxes correspond to this exact full-res frame). Inject the
             # high-FPS thread's boxes only when we actually fell back to its

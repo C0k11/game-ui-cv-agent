@@ -1109,14 +1109,19 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
     if frame_bgr is None:
         return ScreenState(screenshot_path=screenshot_path)
     h, w = frame_bgr.shape[:2]
-    if skip_ocr and prev_ocr_boxes is not None:
-        ocr_boxes = prev_ocr_boxes
-    else:
-        ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
     if injected_yolo_boxes is not None:
         yolo_boxes = injected_yolo_boxes
     else:
         yolo_boxes = _run_yolo_on_image(frame_bgr, w, h)
+    # ⭐OCR on-demand (2026-07-11 用户铁律: OCR 只在读数字/盲区兜底时跑):
+    # YOLO ≥3 框 = 已知屏, cls 主导, 整帧 OCR 纯浪费(实测每次 1-1.5s, 旧策略
+    # 每 3 tick 一跑拖慢全链)。YOLO <3 框 = 未知屏(羁绊升级/通知弹窗/TOUCH
+    # START 等 OCR 拦截器兜底场景) → 才跑整帧 OCR。数字读取(票数/AP/总价)
+    # 各 skill 本来就走 screen.frame 裁剪 digit-OCR, 不依赖这里。
+    if skip_ocr and len(yolo_boxes) >= 3:
+        ocr_boxes = prev_ocr_boxes if prev_ocr_boxes is not None else []
+    else:
+        ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
     template_hits = _run_template_matching(frame_bgr)
     return ScreenState(
         ocr_boxes=ocr_boxes,

@@ -128,6 +128,28 @@ class AdbInput:
         return self._shell("input keyevent 4")  # KEYCODE_BACK
 
     def capture_frame(self) -> Optional[np.ndarray]:
+        # ⭐RAW screencap 优先 (2026-07-11 实测: PNG 1.50s vs RAW 0.77s @4K —
+        # 设备端 PNG 编码是大头, localhost 传 33MB 反而快)。RAW 头=w,h,format
+        # (+colorspace) uint32 LE, 后跟 RGBA8888。解析失败回退 PNG。
+        try:
+            with AdbInput._IO_LOCK:
+                r = subprocess.run(
+                    [self._adb, "-s", self.addr, "exec-out", "screencap"],
+                    capture_output=True, timeout=8,
+                )
+            data = bytes(r.stdout or b"")
+            if len(data) > 16:
+                import struct
+                w0, h0 = struct.unpack_from("<II", data, 0)
+                if 100 < w0 < 10000 and 100 < h0 < 10000:
+                    expect = w0 * h0 * 4
+                    hdr = len(data) - expect
+                    if hdr in (12, 16):
+                        arr = np.frombuffer(data, np.uint8, count=expect,
+                                            offset=hdr).reshape(h0, w0, 4)
+                        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+        except Exception:
+            pass
         try:
             with AdbInput._IO_LOCK:
                 r = subprocess.run(
