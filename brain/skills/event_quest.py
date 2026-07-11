@@ -113,6 +113,7 @@ class EventQuestSkill(BaseSkill):
         self._popup_open = False
         self._formation_step = ""     # unlock 子步: '', 'edit', 'auto', 'confirm', 'sortie'
         self._tasks_done = False
+        self._milestone_done = False  # 里程碑(獎勵資訊)领奖阶段
 
     def reset(self) -> None:
         super().reset()
@@ -211,6 +212,50 @@ class EventQuestSkill(BaseSkill):
                 if (b.y1 + b.y2) / 2 > 0.12:
                     return True
         return False
+
+    # ⛔⛔ 2026-07-11 事故修复(30青辉石买AP, 逐帧取证 run_144712 t30):
+    # 「購買AP」框上 v13 对 body 青辉石**完全漏检**(黑名单gate盲) → 需要
+    # 结构白名单: 纯AP扫荡确认框(通知) body 只有 取消/确认/叉(t56实锤);
+    # 購買AP框 body 必有 数量stepper(MIN_灰色/加号/MAX_可点击@0.96)+
+    # 体力图标@0.92(0.820,0.680)。确认框上下文里检到任一 = 购买框, 取消。
+    _BUY_DIALOG_MARKERS = ("MAX_可点击", "MIN_灰色", "MIN_可点击", "加号",
+                           "减号", "加号灰色")
+
+    def _dialog_is_purchase(self, screen: ScreenState) -> bool:
+        """确认+取消同屏语境下: body 出现数量stepper/体力/青辉石 = 购买框."""
+        if self._pyroxene_in_body(screen):
+            return True
+        for b in (screen.yolo_boxes or []):
+            cy = (b.y1 + b.y2) / 2
+            if cy <= 0.12 or b.confidence < 0.20:
+                continue
+            if b.cls_name in self._BUY_DIALOG_MARKERS:
+                return True
+            if b.cls_name == UC.TOPBAR_AP and cy > 0.12:
+                return True
+        return False
+
+    def _read_ap(self, screen: ScreenState) -> Optional[int]:
+        """topbar AP 读数(体力icon cls锚定 + 右侧数字strip, span 0.06 只读
+        斜杠前; 主tick帧=ADB干净帧)。读不出 → None(调用方 fail-closed)."""
+        icon = self.find_cls(screen, UC.TOPBAR_AP, conf=0.5)
+        if icon is None or screen.frame is None:
+            return None
+        cy = (icon.y1 + icon.y2) / 2
+        if cy > 0.12:          # body 里的体力图标(如購買AP框)不是 topbar
+            return None
+        raw = _read_digits(screen.frame,
+                           (icon.x2 + 0.002, max(0.0, icon.y1 - 0.012),
+                            icon.x2 + 0.062, icon.y2 + 0.012))
+        if not raw:
+            return None
+        num = ""
+        for ch in raw:
+            if ch.isdigit():
+                num += ch
+            elif num:
+                break
+        return int(num) if num else None
 
     # ── tick ───────────────────────────────────────────────────────
 
@@ -588,7 +633,7 @@ class EventQuestSkill(BaseSkill):
                 self._set("currency")
                 return action_wait(300, "points target reached → currency")
         return self._sweep_quest(screen, quest_idx=len(self._quests) - 1,
-                                 phase_after="tasks", label="points")
+                                 phase_after="milestone", label="points")
 
     def _currency(self, screen: ScreenState) -> Dict[str, Any]:
         """货币关轮流 MAX 扫 (点数满后才进入)."""
@@ -599,7 +644,7 @@ class EventQuestSkill(BaseSkill):
         # 轮转: 倒数第2 → 倒数第3 → 倒数第4
         idx = n - 2 - (self._currency_idx % max(1, n - 1))
         return self._sweep_quest(screen, quest_idx=max(0, idx),
-                                 phase_after="tasks", label="currency")
+                                 phase_after="milestone", label="currency")
 
     def _sweep_quest(self, screen: ScreenState, quest_idx: int,
                      phase_after: str, label: str) -> Dict[str, Any]:
@@ -629,12 +674,25 @@ class EventQuestSkill(BaseSkill):
                 pass
             if qmax_grey is not None and plus_grey is not None:
                 ss = self.find_cls(screen, UC.SWEEP_START, conf=0.5)
-                # 全灰: 顶格(可扫) or AP<单次(不可扫)。用 count 区分不了 —
-                # 点一次扫荡开始, 确认框出不来(AP不足时按钮无效)则收工。
+                # ⛔源头闸(2026-07-11 事故修复): 全灰≠可扫 — AP=0 时点掃蕩開始
+                # 会弹「購買AP」框(30青辉石实锤)。扫前必读 topbar AP, 读不出
+                # 或 <20(单次成本) 一律收工, **绝不试探点掃蕩開始**(fail-closed,
+                # 同 special_sweep 0615 教训: 耗尽型扫荡必先读余额)。
                 if ss is not None and self._phase_ticks % 3 == 1:
+                    ap = self._read_ap(screen)
+                    if ap is None or ap < 20:
+                        self.log(f"{label}: AP={ap} <单次成本/读不出 → "
+                                 f"fail-closed 收工(绝不碰購買AP框)")
+                        close = self.find_cls(screen, UC.BTN_CLOSE_X,
+                                              conf=_CLS_CONF)
+                        self._set(phase_after)
+                        if close is not None:
+                            return action_click_box(
+                                close, f"{label}: close popup, AP done")
+                        return action_back(f"{label}: AP done → back")
                     self._sweep_rounds += 1
                     return action_click_box(ss, f"{label}: 掃蕩開始 (round "
-                                                f"{self._sweep_rounds})")
+                                                f"{self._sweep_rounds}, AP={ap})")
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 if self._phase_ticks > 8 and close is not None:
                     self.log(f"{label}: sweep not opening (AP exhausted) → done")
@@ -645,15 +703,23 @@ class EventQuestSkill(BaseSkill):
         conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
         cancel_btn = self.find_cls(screen, UC.BTN_CANCEL, conf=0.5)
         if conf_btn is not None and cancel_btn is not None:
-            # ⛔ money gate: body 有青辉石 = 買AP框 → 取消 + 全 skill 收工
-            if self._pyroxene_in_body(screen):
-                self.log("⛔ pyroxene in sweep-confirm body — CANCEL (fail-closed)")
+            # ⛔ money gate(2026-07-11 强化): 青辉石黑名单会漏检(購買AP框上
+            # v13 全盲实锤) → 加结构闸: body 有 stepper/体力 = 购买框 → 取消。
+            # 纯AP扫荡确认框 body 只有取消/确认/叉(t56 实锤), 误伤=安全重试。
+            if self._dialog_is_purchase(screen):
+                self.log("⛔ purchase-dialog structure in confirm body — "
+                         "CANCEL (fail-closed)")
                 self._set("close")
-                return action_click_box(cancel_btn, "PYROXENE DIALOG — cancel!")
+                return action_click_box(cancel_btn, "PURCHASE DIALOG — cancel!")
             self._swept += 1
             return action_click_box(conf_btn, f"{label}: confirm sweep (pure AP)")
         if conf_btn is not None and cancel_btn is None:
             # 掃蕩完成框 (确认键无取消): tooltip 坑 → 连点两次由 tick 自然完成
+            # ⛔同样过结构闸: 取消键偶发漏检时購買AP框会伪装成完成框
+            if self._dialog_is_purchase(screen):
+                self.log("⛔ purchase-dialog structure (no-cancel frame) — back off")
+                self._set("close")
+                return action_back("PURCHASE DIALOG suspected — back!")
             return action_click_box(conf_btn, f"{label}: 掃蕩完成 確認")
         # 列表页 → 开目标关 popup
         keys = self._enter_keys(screen)
@@ -668,6 +734,44 @@ class EventQuestSkill(BaseSkill):
                                     reason=f"{label}: re-scroll to bottom")
             return action_wait(600, f"{label}: target quest not in view")
         return action_wait(600, f"{label}: waiting")
+
+    # ── milestone (獎勵資訊里程碑领奖, 2026-07-11 落码; 0710 手动probe验证
+    # 过链路: 奖励资讯475@0.96红点→popup→領取獎勵_黄89(一键领所有到达档,
+    # +9M信用点实录)→獲得獎勵toast→灰90翻转→叉退回) ────────────────────
+
+    def _milestone(self, screen: ScreenState) -> Dict[str, Any]:
+        if self._phase_ticks > _PHASE_MAX:
+            self._set("tasks")
+            return action_wait(200, "milestone phase timeout → tasks")
+        if self._milestone_done:
+            self._set("tasks")
+            return action_wait(200, "milestone claimed → tasks")
+        got = self.find_cls(screen, UC.GOT_REWARD, conf=0.5)
+        if got is not None:
+            return action_click(*_POS_TOUCH_CONTINUE, "milestone: dismiss reward")
+        claim_y = self.find_cls(screen, UC.CLAIM_REWARD_YELLOW, conf=0.5)
+        if claim_y is not None:
+            return action_click_box(claim_y, "milestone: 領取獎勵 (黄)")
+        claim_g = self.find_cls(screen, UC.CLAIM_REWARD_GREY, conf=0.30)
+        if claim_g is not None:
+            self._milestone_done = True
+            close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
+            if close is not None:
+                self._set("tasks")
+                return action_click_box(close, "milestone: 领完(灰) → close")
+            self._set("tasks")
+            return action_back("milestone: 领完(灰) → back")
+        info = self.find_cls(screen, UC.EVENT_REWARD_INFO, conf=_WEAK_CONF)
+        if info is not None:
+            region = (info.x1 - 0.02, info.y1 - 0.05,
+                      info.x2 + 0.04, info.y2 + 0.02)
+            if self.dot_in_region(screen, region, dot_classes=("红点",)):
+                return action_click_box(info, "milestone: 獎勵資訊 (red dot)")
+            self.log("milestone: no red dot on 獎勵資訊 — skip")
+            self._milestone_done = True
+            self._set("tasks")
+            return action_wait(200, "no milestone rewards")
+        return action_wait(600, "milestone: waiting")
 
     # ── tasks (活动任務领奖) / close ──────────────────────────────────
 
