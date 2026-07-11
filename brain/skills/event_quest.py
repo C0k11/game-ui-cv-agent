@@ -96,6 +96,11 @@ class EventQuestSkill(BaseSkill):
         self._pending_hash = None
         # 上次落点是否盲区页(no-UI escape 逃生回 hub) — 决定下次 tap 相位修正
         self._blind_landing = False
+        # ⭐加成台账(用户 2026-07-11: 本地记录哪些关打过加成, 记过的不再挨个
+        # 开 popup 检查; 没打过的活动内一次性补打)
+        self._bonus_ledger: dict = {}     # {round(cy,3): True} 只记已解锁
+        self._bonus_created = 0.0
+        self._load_bonus_ledger()
         # survey 结果: [(cy_of_入场键, bonus_unlocked)] 自上而下
         self._quests: List[Tuple[float, bool]] = []
         # cy 记账 (2026-07-10 同关反复开合 bug 修): 点过的 cy±0.03 不再点。
@@ -204,6 +209,39 @@ class EventQuestSkill(BaseSkill):
             self._pending_hash = None
             self.log(f"banner instance blacklisted ({why}), "
                      f"total={len(self._banner_bad_hashes)}")
+
+    # ── 加成台账 (persistent, data/event_bonus_state.json) ────────────
+    _BONUS_STATE_PATH = "data/event_bonus_state.json"
+
+    def _load_bonus_ledger(self) -> None:
+        try:
+            import json, os, time as _t
+            if os.path.exists(self._BONUS_STATE_PATH):
+                d = json.load(open(self._BONUS_STATE_PATH, encoding="utf-8"))
+                created = float(d.get("created", 0))
+                if _t.time() - created < 10 * 86400:   # 超10天=新活动, 作废
+                    self._bonus_created = created
+                    self._bonus_ledger = {
+                        round(float(k), 3): True
+                        for k, v in (d.get("quests") or {}).items() if v}
+        except Exception:
+            self._bonus_ledger = {}
+
+    def _mark_bonus_done(self, cy: float) -> None:
+        self._bonus_ledger[round(cy, 3)] = True
+        try:
+            import json, time as _t
+            if not self._bonus_created:
+                self._bonus_created = _t.time()
+            with open(self._BONUS_STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump({"created": self._bonus_created,
+                           "quests": {f"{k:.3f}": True
+                                      for k in self._bonus_ledger}}, f)
+        except Exception:
+            pass
+
+    def _bonus_recorded(self, cy: float) -> bool:
+        return any(abs(cy - k) <= 0.03 for k in self._bonus_ledger)
 
     def _pyroxene_in_body(self, screen: ScreenState) -> bool:
         """money backstop: 对话框 body(y>0.12) 出现青辉石 = 绝不是纯AP扫荡框."""
@@ -465,15 +503,25 @@ class EventQuestSkill(BaseSkill):
             return action_wait(700, "survey: list settling")
         if self._popup_open:
             if self._on_popup(screen):
+                # ⭐先停一拍再判(用户 2026-07-11: "点开马上就关, 没好好对比"
+                # — 半渲染帧上 EVENT_BONUS 会漏检 → 误判已解锁)。settle 1 tick
+                # 用稳定帧判, 判据仍是 cls「活动关卡产出额外加成」(0708 双向
+                # 实测: 解锁前 0 检出/解锁后 0.95+; 数字对比=后续升级路径)。
+                if not getattr(self, "_popup_judge_settle", 0):
+                    self._popup_judge_settle = 1
+                    return action_wait(500, "survey: popup settling before judge")
+                self._popup_judge_settle = 0
                 self._popup_wait = 0
                 self._popup_open = False
                 # 去重: X 点漏 popup 残留 / late-popup 重入时不重复记账
                 if all(abs(self._survey_cy - c) > 0.03
                        for c in self._surveyed_cys):
                     unlocked = self.find_cls(
-                        screen, UC.EVENT_BONUS, conf=_CLS_CONF) is not None
+                        screen, UC.EVENT_BONUS, conf=0.5) is not None
                     self._quests.append((self._survey_cy, unlocked))
                     self._surveyed_cys.append(self._survey_cy)
+                    if unlocked:
+                        self._mark_bonus_done(self._survey_cy)
                     self.log(f"survey quest#{len(self._quests)} "
                              f"(cy={self._survey_cy:.3f})"
                              f" bonus_unlocked={unlocked}")
@@ -513,7 +561,14 @@ class EventQuestSkill(BaseSkill):
             self._set("unlock")
             return action_wait(300, f"survey done ({len(self._quests)} tail quests)")
         box = todo[0]
-        self._survey_cy = (box.y1 + box.y2) / 2
+        _cy = (box.y1 + box.y2) / 2
+        # ⭐台账命中 = 该关加成已打过, 不再开 popup 复查(用户 2026-07-11)
+        if self._bonus_recorded(_cy):
+            self._quests.append((_cy, True))
+            self._surveyed_cys.append(_cy)
+            self.log(f"survey: cy={_cy:.3f} 台账已记加成解锁 — skip popup")
+            return action_wait(200, "survey: ledger hit, next")
+        self._survey_cy = _cy
         self._popup_open = True
         self._popup_wait = 0
         return action_click_box(
@@ -530,6 +585,15 @@ class EventQuestSkill(BaseSkill):
         if self._unlock_idx >= len(self._quests):
             self._set("points")
             return action_wait(300, "all tail quests bonus-unlocked")
+        # ⛔AP 闸(2026-07-11): 解锁=加成队真出击一场(消耗关卡 AP ~20)。
+        # AP<20 → 跳过解锁直接 points(台账不记, 明天带 AP 优先补打), 绝不
+        # 在 AP 不足时往出击链里走。
+        if self._formation_step == "":
+            _ap = self._read_ap(screen)
+            if _ap is not None and _ap < 20:
+                self.log(f"unlock: AP={_ap} <20 无法出击解锁 — 留待明日补打")
+                self._set("points")
+                return action_wait(300, "unlock deferred (AP insufficient)")
         step = self._formation_step
         # 子步机: popup → 任務開始 → 编队 → 快速編輯 → 自動 → 確認 → 出击 → battle
         if step == "":
@@ -587,6 +651,7 @@ class EventQuestSkill(BaseSkill):
                                  "skip sortie, mark unlocked")
                         self._quests[self._unlock_idx] = (
                             self._quests[self._unlock_idx][0], True)
+                        self._mark_bonus_done(self._quests[self._unlock_idx][0])
                         self._formation_step = ""
                         return action_back("0% bonus — leave formation")
                 self.log(f"unlock: sortie w/ squad-2 (bonus%={pct_raw!r})")
@@ -615,6 +680,7 @@ class EventQuestSkill(BaseSkill):
                 self.log(f"unlock: quest#{self._unlock_idx} bonus run DONE")
                 self._quests[self._unlock_idx] = (
                     self._quests[self._unlock_idx][0], True)
+                self._mark_bonus_done(self._quests[self._unlock_idx][0])
                 self._unlock_idx += 1
                 self._formation_step = ""
                 return action_wait(500, "back on list after unlock")

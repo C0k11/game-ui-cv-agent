@@ -442,9 +442,20 @@ class TicketSweepSkill(BaseSkill):
 
         sweep = self.find_cls(screen, UC.SWEEP_START, conf=_CLS_CONF)
         if sweep is not None:
+            self._sweep_btn_wait = 0
             self.log("click 扫荡开始")
             self._goto("confirm")
             return action_click_box(sweep, "click sweep start")
+        # ⛔死等根治(2026-07-11 live 实锤: jfd AP=12<15 时 _maxed 已置位跳过
+        # AP 闸, 扫荡开始灰色在 0.30 检不出 → 该分支无超时干等 70+ tick 直到
+        # skill 上限)。popup 已开而 扫荡开始 连续 6 tick 不出现 = 灰(AP/票
+        # 不可负担) → fail-closed 收工, 绝不点任何东西(不给補AP框出现机会)。
+        self._sweep_btn_wait = getattr(self, "_sweep_btn_wait", 0) + 1
+        if self._sweep_btn_wait > 6:
+            self._sweep_btn_wait = 0
+            self.log("扫荡开始 6-tick 未出现(灰=不可负担) → exit (fail-closed)")
+            self._goto("exit")
+            return action_wait(300, "扫荡开始 unavailable → exit")
         return action_wait(400, "waiting for 扫荡开始")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
