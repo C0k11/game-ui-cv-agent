@@ -254,7 +254,9 @@ class ScheduleSkill(BaseSkill):
         tickets=-1 the whole run, so the ==0 gates never fire); this catches the
         0-ticket 购买课程表券 popup regardless of the count. The top-bar pyroxene
         balance (cy<0.10) is excluded by the body region."""
-        return self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=_CLS_CONF,
+        # +清辉石(idx2 同物异名遗留类, 2026-07-11 cls审计): 多收一路零成本
+        return self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"],
+                             conf=_CLS_CONF,
                              region=_PYROXENE_BODY_REGION) is not None
 
     def _is_schedule(self, screen: ScreenState) -> bool:

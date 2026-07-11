@@ -190,7 +190,9 @@ class ArenaSkill(BaseSkill):
         (distinct from the cancel-less 達成賽季最高紀錄 reward popup).
         conf 0.20 (model floor, deep-dive C4): a DANGER detector must be as
         sensitive as the model allows — a false positive merely cancels+exits."""
-        if self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.20, region=_PYROXENE_BODY_REGION) is None:
+        # +清辉石(idx2 同物异名遗留类, 2026-07-11 cls审计): 危险检测器多收一路零成本
+        if self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"], conf=0.20,
+                         region=_PYROXENE_BODY_REGION) is None:
             return False
         return self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None
 

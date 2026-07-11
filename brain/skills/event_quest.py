@@ -261,7 +261,7 @@ class EventQuestSkill(BaseSkill):
     # 購買AP框 body 必有 数量stepper(MIN_灰色/加号/MAX_可点击@0.96)+
     # 体力图标@0.92(0.820,0.680)。确认框上下文里检到任一 = 购买框, 取消。
     _BUY_DIALOG_MARKERS = ("MAX_可点击", "MIN_灰色", "MIN_可点击", "加号",
-                           "减号", "加号灰色")
+                           "减号", "加号灰色", "减号灰色")
 
     def _dialog_is_purchase(self, screen: ScreenState) -> bool:
         """确认+取消同屏语境下: body 出现数量stepper/体力/青辉石 = 购买框.

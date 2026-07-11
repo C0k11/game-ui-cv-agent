@@ -208,8 +208,27 @@ class TicketSweepSkill(BaseSkill):
     def _pyroxene_buy_dialog(self, screen: ScreenState) -> bool:
         """A 青辉石 icon in the dialog body = a buy-ticket/buy-AP dialog."""
         return self.find_cls(
-            screen, UC.TOPBAR_PYROXENE, conf=_CLS_CONF, region=_PYROXENE_BODY_REGION
+            screen, [UC.TOPBAR_PYROXENE, "清辉石"], conf=_CLS_CONF,
+            region=_PYROXENE_BODY_REGION
         ) is not None
+
+    def _purchase_structure(self, screen: ScreenState) -> bool:
+        """⛔结构白名单闸(2026-07-11 cls审计移植 event_quest 同款): 青辉石
+        黑名单在購買AP框上被 v13 漏检实锤打穿(30青辉石事故), 需要第二判据 —
+        确认框语境下 body(y>0.12) 出现数量 stepper(購買框@0.96)或体力图标
+        @≥0.60(真購買AP框@0.92, 纯AP/票确认框正文弱检出@0.38 以下) = 购买框。
+        扫荡确认框被 dim 盖住底层 popup, stepper 零检出(t46 实证)不误伤。"""
+        _markers = ("MAX_可点击", "MIN_灰色", "MIN_可点击", "加号",
+                    "减号", "加号灰色", "减号灰色")
+        for b in (screen.yolo_boxes or []):
+            cy = (b.y1 + b.y2) / 2
+            if cy <= 0.12 or b.confidence < 0.20:
+                continue
+            if b.cls_name in _markers:
+                return True
+            if b.cls_name == UC.TOPBAR_AP and b.confidence >= 0.60:
+                return True
+        return False
 
     def _stage_enters(self, screen: ScreenState) -> List[YoloBox]:
         return self.find_all_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF, region=_STAGE_PANEL)
@@ -469,6 +488,12 @@ class TicketSweepSkill(BaseSkill):
         # ⛔ pyroxene buy dialog → cancel + exit.
         if self._pyroxene_buy_dialog(screen):
             self.log("⛔ pyroxene buy dialog at confirm — cancel + exit")
+            return self._cancel_and_exit(screen)
+
+        # ⛔ 购买框结构闸(青辉石漏检兜底, 2026-07-11): stepper/体力在 body
+        # = 購買AP/購買票券框 → 取消收工, 绝不点确认。
+        if self._purchase_structure(screen):
+            self.log("⛔ purchase-dialog structure at confirm — cancel + exit")
             return self._cancel_and_exit(screen)
 
         # ⛔ greyed confirm = insufficient (AP/ticket) → cancel + exit.
