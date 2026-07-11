@@ -682,6 +682,35 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.015, "hsv_s": 0.3, "hsv_v": 0.4,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26n_v3": {
+        # 战斗 v3 (2026-07-10) = v2 warm + 用户审定3池(498帧: 活动关133 +
+        #  总力战賽特233[固定物传播] + 综合战术考试132[Boss 89框])。
+        #  nc 7→14: +塞特的愤怒/Boss(BOSS图标)/一倍速/二倍速/暂停菜单三键
+        #  (重开/继续/放弃 — 用户: 战斗模型要会操作暂停菜单)。v2 idx 0-6 不动。
+        #  ⚠nc变化: head cls 分支重初始化, 早期 ep 低是正常(v13 同款)。
+        #  弱类实况: 胜利7框/二倍速11/菜单三键各23 — 小样本UI固定元素, 26n
+        #  历史证明能学(52帧0.995); 敌方172仍是形态类最弱项。
+        #  ⭐aug 收敛(用户 2026-07-10: 战斗本身VFX噪声大, 别叠合成噪声学歪):
+        #  hsv 几乎关(我方/敌方区分线索一半在色彩, 大抖毁特征), scale 减半;
+        #  dim/选中微高亮由离线合成承担(synth_battle_dim.py, train 12%,
+        #  模拟卡牌指目标瞄准态)。mosaic 0.3 保留不关: 总力战固定框大量重复,
+        #  不打散位置会学成纯位置先验(x=0.15必有柱), 换boss战就崩。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v3" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26n_v2" / "weights" / "best.pt"),
+        "epochs": 150,
+        "patience": 40,
+        "save_period": 10,
+        "imgsz": 640,
+        "batch": 32,
+        "out_name": "battle_yolo26n_v3",
+        "cache": True,
+        "workers": 8,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
