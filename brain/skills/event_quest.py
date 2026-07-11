@@ -91,6 +91,9 @@ class EventQuestSkill(BaseSkill):
         self.sub_state = "enter"
         self._phase_ticks = 0
         self._verify_retries = 0
+        # banner 实例记账(pHash): 点错的轮播项拉黑防复点(情人節同为405)
+        self._banner_bad_hashes: list = []
+        self._pending_hash = None
         # survey 结果: [(cy_of_入场键, bonus_unlocked)] 自上而下
         self._quests: List[Tuple[float, bool]] = []
         # cy 记账 (2026-07-10 同关反复开合 bug 修): 点过的 cy±0.03 不再点。
@@ -160,68 +163,39 @@ class EventQuestSkill(BaseSkill):
                 return int(a), int(b)
         return None
 
-    # ── k-偏移原子连发 (2026-07-09 终案, 活动无关): swipe×k 翻页后 0.5s 内
-    # tap — 一条 adb shell 原子完成(swipe 后轮播暂停, 静止期内必落)。k=0/1/2
-    # 覆盖三项轮播, verify 落点错→k+1 重试, 不认 banner 内容(下期活动零改动)。
-    _ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
-    _DEV = "127.0.0.1:7555"
+    # ── banner 实例记账 (⭐感知铁律 2026-07-11: 判断主导=cls, pHash 只做
+    # "同一实例防复点"记账辅助) ────────────────────────────────────────
+    # hub 轮播实测(v13): 遊戲開發部=405@0.97 / 情人節=405@0.97(复刻, 无关卡,
+    # 落成就页) / 鋼鐵大陸=474@0.88(领奖余韵)。405 有两个实例 → 点错落成就页
+    # 由 verify 用 cls 证据识别, 该实例 pHash 拉黑, 下次 405 检出先比对。
+    _BANNER_BODY_CROP = (0.02, 0.16, 0.16, 0.285)   # hub banner 本体(405条下方)
 
-    def _atomic_banner_tap(self, k: int) -> None:
-        import subprocess
-        parts = []
-        for _ in range(min(k, 4)):
-            parts.append("input swipe 420 400 130 400 300")
-            parts.append("sleep 0.6")
-        parts.append("input tap 264 321")
-        try:
-            subprocess.run([self._ADB, "-s", self._DEV, "shell",
-                            " && ".join(parts)],
-                           capture_output=True, timeout=30)
-        except Exception as e:
-            self.log(f"atomic banner tap failed: {e}")
-
-    # ── banner 指纹 (2026-07-09): crop 直方图记"点过且 verify 失败"的轮播项 ──
-    _BANNER_CROP = (0.02, 0.10, 0.16, 0.29)   # hub 左上 banner 本体区
-
-    def _banner_hist(self, screen: ScreenState):
+    def _banner_phash(self, screen: ScreenState, frame=None):
         try:
             import cv2
-            fr = screen.frame
+            fr = frame if frame is not None else screen.frame
             if fr is None:
                 return None
             h, w = fr.shape[:2]
-            x1, y1 = int(self._BANNER_CROP[0]*w), int(self._BANNER_CROP[1]*h)
-            x2, y2 = int(self._BANNER_CROP[2]*w), int(self._BANNER_CROP[3]*h)
-            crop = fr[y1:y2, x1:x2]
-            hist = cv2.calcHist([crop], [0, 1, 2], None, [8, 8, 8],
-                                [0, 256, 0, 256, 0, 256])
-            cv2.normalize(hist, hist)
-            return hist
+            x1, y1, x2, y2 = self._BANNER_BODY_CROP
+            crop = fr[int(y1 * h):int(y2 * h), int(x1 * w):int(x2 * w)]
+            g = cv2.cvtColor(cv2.resize(crop, (16, 16)), cv2.COLOR_BGR2GRAY)
+            return (g > g.mean()).flatten()
         except Exception:
             return None
 
-    def _banner_snapshot(self, screen: ScreenState) -> None:
-        """点击前存当前项指纹 (verify 失败时转入黑名单)."""
-        self._banner_pending = self._banner_hist(screen)
-
-    def _banner_mark_bad(self) -> None:
-        h = getattr(self, "_banner_pending", None)
-        if h is not None:
-            if not hasattr(self, "_banner_bad"):
-                self._banner_bad = []
-            self._banner_bad.append(h)
-            self._banner_pending = None
-
-    def _banner_seen_bad(self, screen: ScreenState) -> bool:
-        import cv2
-        bad = getattr(self, "_banner_bad", None)
-        if not bad:
+    def _banner_blacklisted(self, screen: ScreenState, frame=None) -> bool:
+        cur = self._banner_phash(screen, frame)
+        if cur is None or not self._banner_bad_hashes:
             return False
-        cur = self._banner_hist(screen)
-        if cur is None:
-            return False
-        return any(cv2.compareHist(cur, b, cv2.HISTCMP_CORREL) > 0.90
-                   for b in bad)
+        return any(int((cur != b).sum()) < 40 for b in self._banner_bad_hashes)
+
+    def _blacklist_pending(self, why: str) -> None:
+        if self._pending_hash is not None:
+            self._banner_bad_hashes.append(self._pending_hash)
+            self._pending_hash = None
+            self.log(f"banner instance blacklisted ({why}), "
+                     f"total={len(self._banner_bad_hashes)}")
 
     def _pyroxene_in_body(self, screen: ScreenState) -> bool:
         """money backstop: 对话框 body(y>0.12) 出现青辉石 = 绝不是纯AP扫荡框."""
@@ -244,61 +218,139 @@ class EventQuestSkill(BaseSkill):
     # ── enter / verify ─────────────────────────────────────────────
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
+        """⭐感知铁律(2026-07-11): cls 主导 + 极端事件驱动 —
+        目标 cls(405)出现→立即点; 加载中→wait; 无锁定→wait(轮播在转)。"""
         if self._phase_ticks > _ENTER_MAX:
             return action_done("event_quest enter timeout")
         # already on the quest list? (re-entry / retry path)
         if self._on_quest_list(screen):
             self._set("survey")
             return action_wait(300, "on event quest list")
-        banner = self.find_cls(
-            screen, [UC.EVENT_END_LEFT, UC.EVENT_REWARD_END], conf=0.4)
+        if screen.is_loading():
+            return action_wait(400, "加载中 loading — wait")
+        # 目标 cls: 405 距離結束還剩 = 进行中活动 banner(hub 轮播实测 0.97)。
+        # 474 距離獎勵獲得結束 = 领奖余韵, 不点。情人節同为 405 → 点错由
+        # verify 用 cls 证据识别并 pHash 拉黑该实例, 此处先比对黑名单。
+        # ⭐帧龄(2026-07-11 工业级链路): 主 tick 帧龄 ~2.2s vs 轮播 2.6s/项
+        # → "帧上的项"和"点到的项"错位率 ~85%(五连点全落错实锤)。高频
+        # DXcam 线程检出(帧龄≤0.5s)可用且新鲜时优先, 判定/pHash/点击
+        # 坐标全用同一新鲜源。
+        import time as _time
+        fresh = getattr(screen, "fresh_boxes", None)
+        fresh_frame = getattr(screen, "fresh_frame", None)
+        # ⚠fresh_ts 时基 = server 高频线程的 perf_counter(同进程同时基),
+        # 不是 epoch time.time()(2026-07-11 踩坑: 混用 age 恒大 → 永远回退)
+        fresh_age = _time.perf_counter() - getattr(screen, "fresh_ts", 0.0)
+        tick_banner = self.find_cls(
+            screen, [UC.EVENT_END_LEFT, UC.EVENT_REWARD_END], conf=0.5)
+        banner = None
+        src_frame = None
+        fresh_usable = (fresh is not None and fresh_age < 1.2
+                        and not getattr(self, "_fresh_distrust", False))
+        if fresh_usable:
+            for b in fresh:
+                if b.cls_name == UC.EVENT_END_LEFT and b.confidence >= 0.5:
+                    banner = b
+                    src_frame = fresh_frame
+                    break
+            # 失信裁决(2026-07-11: DXcam 桌面遮挡/窗口错位时 fresh 内容错 —
+            # 主 tick 帧看得见 banner 而 fresh 完全没有 = 源不可信, 2 次即弃)
+            if banner is None and tick_banner is not None:
+                fresh_any = any(b.cls_name in (UC.EVENT_END_LEFT,
+                                               UC.EVENT_REWARD_END)
+                                and b.confidence >= 0.4 for b in fresh)
+                if not fresh_any:
+                    self._fresh_mismatch = getattr(self, "_fresh_mismatch", 0) + 1
+                    if self._fresh_mismatch >= 2:
+                        self._fresh_distrust = True
+                        self.log("fresh source DISTRUSTED (tick sees banner, "
+                                 "fresh blind) — pure tick mode")
+        if banner is None and not fresh_usable:
+            # tick 源帧龄错位(2026-07-11 实锤: 帧龄~2.2s/项2.6s → tap 85%
+            # 落"帧上项的下一项", 15% 落同项)。轮播序[情405→鋼474→遊405]
+            # → **优先点 474 帧**(85% 落下一项=目标活动); 无 474 才点 405。
+            # 落错由 verify cls 证据兜底(成就页领/運輸船逃生), 期望 ≤2 轮。
+            tick474 = self.find_cls(screen, UC.EVENT_REWARD_END, conf=0.5)
+            banner = tick474 if tick474 is not None else \
+                self.find_cls(screen, UC.EVENT_END_LEFT, conf=0.5)
         if banner is not None:
-            # k-偏移原子连发(终案, 活动无关): 见 _atomic_banner_tap 注释。
-            # verify 失败次数=k, k=0/1/2 覆盖三项轮播, 落错 verify 兜底 k+1。
-            k = self._verify_retries
-            self.log(f"banner combo: swipe×{k} && tap (atomic)")
-            self._atomic_banner_tap(k)
+            if src_frame is not None and self._banner_blacklisted(screen, src_frame):
+                return action_wait(400, "405=已拉黑实例 — 等轮播下一项")
+            # pHash 记账只在 fresh 模式有意义(tick 错位下"帧上项"≠"落点项",
+            # 拉黑会反噬正确项)
+            self._pending_hash = (self._banner_phash(screen, src_frame)
+                                  if src_frame is not None else None)
             self._set("verify")
-            return action_wait(3500, f"banner combo k={k} → verify landing")
+            tag = "fresh" if src_frame is not None else "tick+1"
+            return action_click_box(banner, f"banner tap ({tag}, "
+                                            f"帧上={banner.cls_name})")
         hub = self.find_cls(screen, UC.NAV_TASKS, conf=_CLS_CONF)
         if hub is not None:
             return action_click_box(hub, "lobby → task hub")
-        if self._phase_ticks % 4 == 0:
-            return self.nav_home(screen, "event_quest enter")
-        return action_wait(500, "enter: settling")
+        # 无锁定: hub 轮播转在 474/卡池项 或 lobby 未识别 — wait 等目标出现;
+        # 久等不出(2 个轮播周期+)才 nav_home 重置。
+        if self._phase_ticks % 8 == 7:
+            return self.nav_home(screen, "no 405 for 8 ticks — reset")
+        return action_wait(400, "no target cls — wait (carousel)")
 
     def _verify(self, screen: ScreenState) -> Dict[str, Any]:
-        """405 落点校验 (轮播歧义 + Challenge tab)."""
-        if self._phase_ticks > _PHASE_MAX:
-            return action_done("event_quest verify timeout")
+        """落点校验 — ⭐cls 证据制(2026-07-11): 有明确 cls 证据才判,
+        转场/无检出/加载中一律 wait(旧版在转场帧 2s 枪毙点对的入口×3)。"""
         if self._on_quest_list(screen):
             self.log("verify OK — on event quest list")
+            self._pending_hash = None            # 点对了, 不拉黑
+            self._verify_retries = 0
             self._set("survey")
             return action_wait(300, "verified event")
-        # 错活动的成就页 (情人節約定式): 顺手领 → back
+        if screen.is_loading():
+            return action_wait(400, "verify: 加载中 loading — wait")
+        # 证据1: 成就页(情人節式复刻) → 顺手领免费 → 拉黑该 banner 实例
         claim_all = self.find_cls(screen, UC.CLAIM_ALL_YELLOW, conf=0.5)
         if claim_all is not None:
-            self.log("wrong event (achievement page) — claim freebies first")
+            self._blacklist_pending("achievement page (claimable)")
             return action_click_box(claim_all, "claim-all on wrong event (free)")
+        grey = self.find_cls(screen, UC.CLAIM_ALL_GREY, conf=0.5)
+        if grey is not None:
+            self._blacklist_pending("achievement page (all claimed)")
+            self._verify_retries += 1
+            if self._verify_retries > _VERIFY_RETRY_MAX:
+                return action_done("event_quest: carousel retries exhausted")
+            self._set("enter")
+            return action_back("wrong event(领完) → back, rescan carousel")
         got = self.find_cls(screen, UC.GOT_REWARD, conf=0.5)
         if got is not None:
             return action_click(*_POS_TOUCH_CONTINUE, "dismiss reward toast")
-        # Challenge tab 落点: 无入场键但有活动底栏 → 切 Quest tab
+        # 证据2: 特殊作戰列表(普通关卡选中 = 该 tab 指示器, 活动页绝不出现)
+        if self.find_cls(screen, "普通关卡选中", conf=0.5) is not None:
+            self._blacklist_pending("特殊作戰 landing")
+            self._verify_retries += 1
+            if self._verify_retries > _VERIFY_RETRY_MAX:
+                return action_done("event_quest: carousel retries exhausted")
+            self._set("enter")
+            return action_back("wrong: 特殊作戰 → back, rescan")
+        # 证据3: 仍在 hub(hub tile 可见) = tap 落空/轮播翻走 → 直接重扫
+        if self.find_cls(screen, [UC.HUB_BOUNTY, "学院交流会", "战术大赛"],
+                         conf=0.5) is not None:
+            self._pending_hash = None            # 没点进任何页, 不拉黑
+            self._verify_retries += 1
+            if self._verify_retries > _VERIFY_RETRY_MAX:
+                return action_done("event_quest: carousel retries exhausted")
+            self._set("enter")
+            return action_wait(300, "still on hub (tap missed) — rescan")
+        # 证据4: Challenge tab 落点(活动底栏在, 无入场键) → 切 Quest tab
         if self.find_cls(screen, [UC.EVENT_SHOP, UC.EVENT_TASK],
                          conf=_WEAK_CONF) is not None \
                 and not self._enter_keys(screen):
             self.log("landed on Challenge tab — switching to Quest tab")
             return action_click(*_POS_QUEST_TAB, "switch to Quest tab (fixed)")
-        # 其他错落点 → back 重试轮播
-        self._verify_retries += 1
-        if self._verify_retries > _VERIFY_RETRY_MAX:
-            return action_done("event_quest: banner carousel retries exhausted")
-        self._set("enter")
-        # 回 lobby 重进 hub = 轮播重置到 item0, 下一击零延迟点击 (不 back 回
-        # hub — back 不重置轮播, 会继续在错误项上转)。
-        return self.nav_home(screen,
-                             f"wrong landing → lobby, reset carousel "
-                             f"({self._verify_retries}/{_VERIFY_RETRY_MAX})")
+        # 无证据(转场渲染/模型盲区页) → wait; 超时兜底 back 重扫
+        if self._phase_ticks > _PHASE_MAX:
+            self._verify_retries += 1
+            if self._verify_retries > _VERIFY_RETRY_MAX:
+                return action_done("event_quest: carousel retries exhausted")
+            self._set("enter")
+            return action_back("verify timeout (no evidence) → back, rescan")
+        return action_wait(500, "verify: no cls evidence yet — wait")
 
     # ── survey ─────────────────────────────────────────────────────
 

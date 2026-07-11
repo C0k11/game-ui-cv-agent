@@ -374,6 +374,50 @@ def _read_topbar_clean(cls_name, samples: int = 5):
     return top if n >= 2 else None
 
 
+def _read_topbar_clean_multi(cls_names, samples: int = 5):
+    """快照专用: 一批 clean 帧共享给多个货币读数 (2026-07-11 链路审计).
+    语义与 _read_topbar_clean 完全一致(≤samples 帧 / 每 cls mode 投票 /
+    3 票强共识早退 / ≥2 票才信), 但 3 货币共享同批帧 → captures 15→5、
+    YOLO 15→5(旧版 lobby 快照单 tick 16 连拍阻塞主循环 7-20s 的元凶)。
+    _read_topbar_clean 本体保持原样 — shop/ticket_sweep 等金钱敏感调用方
+    的单币种投票语义不动。Returns {cls_name: int|None}."""
+    from collections import Counter
+    reads = {c: [] for c in cls_names}
+    done = set()
+    for _ in range(max(1, samples)):
+        if len(done) == len(cls_names):
+            break
+        frame = get_clean_frame()
+        if frame is None:
+            continue
+        try:
+            h, w = frame.shape[:2]
+            boxes = _run_yolo_on_image(frame, w, h)
+            shim = _FrameShim(boxes, frame)
+        except Exception:
+            continue
+        for c in cls_names:
+            if c in done:
+                continue
+            try:
+                v = _read_topbar_count(shim, c)
+            except Exception:
+                v = None
+            if v is not None:
+                reads[c].append(v)
+                if reads[c].count(v) >= 3:
+                    done.add(c)
+    out = {}
+    for c in cls_names:
+        r = reads[c]
+        if not r:
+            out[c] = None
+            continue
+        top, n = Counter(r).most_common(1)[0]
+        out[c] = top if (n >= 2 or r.count(top) >= 3) else None
+    return out
+
+
 def _read_pyroxene_clean():
     """Kill-switch helper: authoritative pyroxene from a clean frame."""
     from brain.skills.ui_classes import TOPBAR_PYROXENE
@@ -1614,6 +1658,10 @@ class DailyPipeline:
             # "stuck" time.  Many skills have _enter_ticks with hard limits.
             if hasattr(skill, '_enter_ticks'):
                 skill._enter_ticks = max(0, getattr(skill, '_enter_ticks', 0) - 1)
+            # no-UI escape 护栏喂点(2026-07-11): 加载序列的后期是零框帧,
+            # no-UI back 曾在活动页加载到一半时把它拆掉(实锤×7)。记下
+            # 最近一次「加载中」时刻, 12s 内禁止 no-UI escape/wake。
+            self._last_loading_ts = time.time()
             return action_wait(1500, "interceptor: game loading / updating")
 
         # ── P0: Disconnect / reconnect ──
@@ -1997,7 +2045,9 @@ class DailyPipeline:
     def tick_from_frame(self, frame_bgr, *, screenshot_path: str = "",
                         skip_ocr: bool = False,
                         prev_ocr_boxes=None,
-                        injected_yolo_boxes=None) -> Dict[str, Any]:
+                        injected_yolo_boxes=None,
+                        fresh_boxes=None, fresh_frame=None,
+                        fresh_ts: float = 0.0) -> Dict[str, Any]:
         """Process one in-memory BGR frame. Returns an action dict.
 
         Args:
@@ -2005,11 +2055,17 @@ class DailyPipeline:
             prev_ocr_boxes: cached OCR boxes from a previous tick.
             injected_yolo_boxes: pre-computed YOLO boxes from high-FPS thread.
                 If provided, skip running YOLO in read_screen_from_frame.
+            fresh_boxes/fresh_ts: 高频 DXcam 线程的最新检出+时间戳(2026-07-11
+                工业级链路: 主 tick 帧龄 ~2.2s 对轮播类时敏目标必错位, skill
+                可读 screen.fresh_boxes(帧龄≤0.5s@2FPS)做"有目标就点"判定)。
         """
         screen = read_screen_from_frame(frame_bgr, screenshot_path=screenshot_path,
                                         skip_ocr=skip_ocr,
                                         prev_ocr_boxes=prev_ocr_boxes,
                                         injected_yolo_boxes=injected_yolo_boxes)
+        screen.fresh_boxes = fresh_boxes
+        screen.fresh_frame = fresh_frame
+        screen.fresh_ts = fresh_ts
         return self._tick_with_screen(screen, screenshot_path=screenshot_path)
 
     @property
@@ -2093,18 +2149,27 @@ class DailyPipeline:
                 same_target = target == last_target
 
         if same_target and last_sig is not None:
+            if not sig or not last_sig:
+                # 空指纹 = 转场黑屏/模型盲区帧: 空∩空/空∪空 Jaccard=1.0 的
+                # 数学假象把"转场中"误判成"页面没变"(2026-07-11 实锤 hold 拖
+                # 25s)。转场中不重点击、也不吃 hold 计数 — 等渲染出 cls 再判。
+                return action_wait(450, "转场渲染中(空指纹) — 等 cls 出现")
             union = sig | last_sig
             jacc = (len(sig & last_sig) / len(union)) if union else 1.0
             if jacc >= 0.5:
                 # Screen still the same stage → the click hasn't landed/rendered
-                # → HOLD instead of re-tapping.
+                # → HOLD instead of re-tapping. 墙钟上限(2026-07-11 链路审计:
+                # 旧 5-tick 上限 ×~2s/tick ≈9s, 丢 tap 恢复太慢, 轮播类目标必
+                # miss) — 2.5s 覆盖正常转场渲染, 丢 tap 快速重试。
                 self._click_hold = getattr(self, "_click_hold", 0) + 1
-                if self._click_hold <= _CLICK_HOLD_CAP:
+                if self._click_hold == 1:
+                    self._click_hold_t0 = time.time()
+                if time.time() - getattr(self, "_click_hold_t0", 0.0) < 2.5:
                     return action_wait(
                         450, f"等下一阶段cls出现 "
-                             f"({self._click_hold}/{_CLICK_HOLD_CAP}): {reason}")
-                # Cap hit → tap likely lost → allow ONE retry, reset.
-                print(f"[Pipeline] click hold cap → 重试: {reason}", flush=True)
+                             f"(hold {self._click_hold}, <2.5s): {reason}")
+                # 墙钟到 → tap likely lost → allow ONE retry, reset.
+                print(f"[Pipeline] click hold 2.5s → 重试: {reason}", flush=True)
                 self._click_hold = 0
                 self._last_click_sig = sig
                 return action
@@ -2182,9 +2247,13 @@ class DailyPipeline:
                     # is cheap; fall back to the live read only if no clean
                     # source is registered.
                     if get_clean_frame() is not None:
-                        _ap = _read_topbar_clean(TOPBAR_AP)
-                        _cr = _read_topbar_clean(TOPBAR_CREDIT)
-                        _py = _read_topbar_clean(TOPBAR_PYROXENE)
+                        # 共享帧批读(2026-07-11): 旧版 3×5=16 连拍单 tick 阻塞
+                        # 7-20s(链路审计元凶之一), 现 5 帧共享, 投票语义不变。
+                        _vals = _read_topbar_clean_multi(
+                            [TOPBAR_AP, TOPBAR_CREDIT, TOPBAR_PYROXENE])
+                        _ap = _vals.get(TOPBAR_AP)
+                        _cr = _vals.get(TOPBAR_CREDIT)
+                        _py = _vals.get(TOPBAR_PYROXENE)
                     else:
                         _ap = _read_topbar_count(screen, TOPBAR_AP)
                         _cr = _read_topbar_count(screen, TOPBAR_CREDIT)
@@ -2229,8 +2298,11 @@ class DailyPipeline:
                         _RESOURCES["ap"] = _ap
                     if _cr is not None:
                         _RESOURCES["credits"] = _cr
+                    # ts 无条件更新(2026-07-11): 旧版只在读到值时更新 → 全
+                    # None 时下个 lobby tick 立即重跑整个连拍 = 重试风暴。
+                    # 失败也等 30s 再试(kill-switch 周期不变)。
+                    _RESOURCES["ts"] = _now
                     if _ap is not None or _cr is not None or _py is not None:
-                        _RESOURCES["ts"] = _now
                         print(f"[Pipeline] resources: AP={_RESOURCES['ap']} "
                               f"credits={_RESOURCES['credits']} pyroxene={_RESOURCES['pyroxene']}",
                               flush=True)
@@ -2358,14 +2430,30 @@ class DailyPipeline:
             # skill 设 no_ui_escape="back" 时按返回键回已知页面, skill 恢复 tick
             # 后自行重试。立绘屏唤醒场景不受影响(daily 系 skill 不声明)。
             _cur_skill = self.current_skill
+            # 转场护栏(2026-07-11 实锤×2: 轮播 tap 点对活动页, 落地加载的零框
+            # 帧在第 3 个 tick 就被 back 拆掉): ①暗帧=加载转场, 只等不 back
+            # (盲区页如運輸船主页是亮的) ②距上次 click/back/swipe <8s = 转场
+            # 窗口, 不 escape。
+            _recent_act = (time.time()
+                           - getattr(self, "_last_act_ts", 0.0)) < 8.0
+            # 加载序列护栏(2026-07-11 实锤×7: 点对活动页→加载中→后期零框帧
+            # →第3个零框tick被back拆掉): 距最近「加载中」检出<30s = 大概率
+            # 仍在加载/进场动画序列, 零框帧只等不动。(活动进场动画实测零框
+            # 暗帧持续 18s+, 12s 窗口不够又被 6/30 拆一次; 代价=真盲区页
+            # 的逃生推迟到 30s, 可接受 — no_ba 30-tick abort 兜底仍在。)
+            _recent_loading = (time.time()
+                               - getattr(self, "_last_loading_ts", 0.0)) < 30.0
             if (getattr(_cur_skill, "no_ui_escape", None) == "back"
+                    and _bright and not _recent_act and not _recent_loading
                     and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0):
                 esc = {"action": "back",
                        "reason": f"no-UI escape: back to known page "
                                  f"({self._no_ba_ticks}/30)"}
                 self._save_trajectory(screenshot_path, screen, None, esc)
+                self._last_act_ts = time.time()
                 return esc
-            if _bright and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0:
+            if (_bright and not _recent_act and not _recent_loading
+                    and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0):
                 # ⚠️位置从 (0.5,0.05) 挪到 (0.35,0.12) — 旧点自以为是"空天区", 实际
                 # 压在 topbar 的 AP「+」按钮带上(2026-07-07 假 no-UI 时反复戳开
                 # 購買AP框)。(0.35,0.12) = topbar 下方 / 左侧图标列右侧 / 角色左侧,
@@ -2374,6 +2462,7 @@ class DailyPipeline:
                     0.35, 0.12,
                     f"wake 放置立绘屏 (reveal idle lobby UI, {self._no_ba_ticks}/30)")
                 self._save_trajectory(screenshot_path, screen, None, wake)
+                self._last_act_ts = time.time()
                 return wake
             return wait_action
 
@@ -2634,6 +2723,9 @@ class DailyPipeline:
         action["_pipeline"] = True
         action["_skill"] = skill.name
         action["_tick"] = self._total_ticks
+        if action_type in ("click", "back", "swipe"):
+            # no-UI escape 的转场护栏用: 最近有动作 = 可能在转场窗口内
+            self._last_act_ts = time.time()
         return action
 
     def _save_trajectory(self, screenshot_path: str, screen: ScreenState,

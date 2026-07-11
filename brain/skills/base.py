@@ -107,6 +107,12 @@ class ScreenState:
     # populated (e.g. read_screen from a path skips it); digit-OCR helpers must
     # null-check. Excluded from any serialization (it's a big array).
     frame: Any = field(default=None, repr=False, compare=False)
+    # 高频 DXcam 线程的最新检出(2026-07-11 工业级链路): 帧龄≤0.5s@2FPS,
+    # 主 tick 帧龄 ~2.2s 对轮播类时敏目标必错位 — skill 做"有目标就点"
+    # 判定时优先读这里。None = 线程未跑/未接线, 调用方必须 null-check。
+    fresh_boxes: Any = field(default=None, repr=False, compare=False)
+    fresh_frame: Any = field(default=None, repr=False, compare=False)
+    fresh_ts: float = 0.0
 
     def add_florence_boxes(self, boxes: List[OcrBox]) -> None:
         """Append Florence detection boxes."""

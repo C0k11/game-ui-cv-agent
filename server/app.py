@@ -1248,10 +1248,18 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _log_pipeline(f"main tick frame source = {_frame_src or 'none'}: "
                               f"running YOLO inline at pipeline tick rate")
                 _inline_yolo_logged = True
+            # 高频线程新鲜检出直通 skill(2026-07-11 工业级链路: 轮播类时敏
+            # 点击不能吃主 tick 的 ~2.2s 帧龄)
+            with _yolo_latest_lock:
+                _fresh_b = list(_yolo_latest_boxes) if _yolo_latest_ts > 0 else None
+                _fresh_f = _yolo_latest_frame      # 引用(线程替换式更新, 只读安全)
+                _fresh_t = _yolo_latest_ts
             action = pipe.tick_from_frame(frame, screenshot_path=tmp_path,
                                           skip_ocr=skip_ocr,
                                           prev_ocr_boxes=_prev_ocr_boxes,
-                                          injected_yolo_boxes=_injected_yolo)
+                                          injected_yolo_boxes=_injected_yolo,
+                                          fresh_boxes=_fresh_b,
+                                          fresh_frame=_fresh_f, fresh_ts=_fresh_t)
             # Cache OCR boxes for reuse on OCR-skip ticks
             if not skip_ocr and pipe.last_screen:
                 _prev_ocr_boxes = pipe.last_screen.ocr_boxes
