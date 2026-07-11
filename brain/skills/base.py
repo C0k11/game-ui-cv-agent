@@ -939,6 +939,18 @@ def action_swipe(fx: float, fy: float, tx: float, ty: float,
             "duration_ms": duration_ms, "reason": reason}
 
 
+def action_swipe_tap(fx: float, fy: float, tx: float, ty: float,
+                     cx: float, cy: float, duration_ms: int = 150,
+                     reason: str = "") -> Dict[str, Any]:
+    """原子 swipe→tap(一条 adb shell 连发, 间隔<0.5s)。
+
+    对自动轮播 UI: swipe 把轮播拉停数秒并翻到确定项, tap 在静止期内落点
+    无时序竞争(hub banner 帧龄 2.2s vs 项周期 2.6s 的错位问题唯一硬解)。
+    """
+    return {"action": "swipe_tap", "from": [fx, fy], "to": [tx, ty],
+            "target": [cx, cy], "duration_ms": duration_ms, "reason": reason}
+
+
 def action_scroll(nx: float, ny: float, clicks: int = -3, reason: str = "",
                   with_ctrl: bool = False) -> Dict[str, Any]:
     """Mouse wheel scroll at normalized position.

@@ -1269,7 +1269,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # tick, the game is mid-transition. Skills check is_loading() too,
             # but stale injected boxes can slip an action through — this is the
             # belt-and-braces hold at the execution layer.
-            if (action_type in ("click", "back", "swipe")
+            if (action_type in ("click", "back", "swipe", "swipe_tap")
                     and pipe.last_screen is not None
                     and pipe.last_screen.is_loading()):
                 _log_pipeline(f"loading gate: 加载中 on screen → holding '{reason}'")
@@ -1323,7 +1323,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             # 3a. Single-step approval gate — pause before each click/back/swipe,
             # expose the pending action, block until POST /api/v1/step/go.
-            if _STEP_MODE and not dry_run and action_type in ("click", "back", "swipe"):
+            if _STEP_MODE and not dry_run and action_type in ("click", "back", "swipe", "swipe_tap"):
                 _cur = pipe.current_skill
                 _aname = getattr(_cur, "name", "") if _cur else ""
                 _asub = getattr(_cur, "sub_state", "") if _cur else ""
@@ -1372,7 +1372,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 else:
                     # non-loading wait → fast re-poll (≈one capture+infer cycle)
                     _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, 0.12))
-            elif action_type in ("click", "back"):
+            elif action_type in ("click", "back", "swipe_tap"):
                 # invalidate OCR cache so the next tick OCRs the fresh screen.
                 # 0.4s→1.0s (user 2026-06-14: 点完一次固定等1s就行 — 纯事件驱动太快
                 # 会在转场半渲染帧上重点/过点, arena 打完第2场就这样飘进任务大厅).
@@ -1479,6 +1479,20 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
                 int(frm[0] * android_w), int(frm[1] * android_h),
                 int(to[0] * android_w), int(to[1] * android_h),
                 dur_ms,
+            )
+            return
+        if action_type == "swipe_tap":
+            # 原子 swipe→tap: 轮播类 UI 的唯一无竞争落点方式(swipe 拉停轮播,
+            # tap 在静止期内落; 分两个 action 发则间隔 >1s 耗尽暂停期)
+            frm = action.get("from", [0.5, 0.5])
+            to = action.get("to", [0.5, 0.5])
+            tgt = action.get("target", [0.5, 0.5])
+            dur_ms = int(action.get("duration_ms", 150) or 150)
+            adb.swipe_tap(
+                int(frm[0] * android_w), int(frm[1] * android_h),
+                int(to[0] * android_w), int(to[1] * android_h),
+                dur_ms,
+                int(tgt[0] * android_w), int(tgt[1] * android_h),
             )
             return
         if action_type == "scroll":

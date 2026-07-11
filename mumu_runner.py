@@ -112,6 +112,18 @@ class AdbInput:
             timeout=max(5.0, dur_ms / 1000.0 + 2.0),
         )
 
+    def swipe_tap(self, x1: int, y1: int, x2: int, y2: int, dur_ms: int,
+                  tx: int, ty: int) -> bool:
+        # 原子连发(一条 adb shell 内 swipe→tap, 间隔≈input进程启动~0.3s):
+        # 对自动轮播类 UI, 手动 swipe 会把轮播拉停数秒(2026-07-09 hub banner
+        # 实锤), tap 在静止期内落点无时序竞争 — 分两次 adb 调用则间隔 >1s
+        # 会耗尽暂停期(0709 败因)。
+        return self._shell(
+            f"input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(dur_ms)}"
+            f" && input tap {int(tx)} {int(ty)}",
+            timeout=max(6.0, dur_ms / 1000.0 + 4.0),
+        )
+
     def back(self) -> bool:
         return self._shell("input keyevent 4")  # KEYCODE_BACK
 

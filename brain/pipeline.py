@@ -2723,7 +2723,7 @@ class DailyPipeline:
         action["_pipeline"] = True
         action["_skill"] = skill.name
         action["_tick"] = self._total_ticks
-        if action_type in ("click", "back", "swipe"):
+        if action_type in ("click", "back", "swipe", "swipe_tap"):
             # no-UI escape 的转场护栏用: 最近有动作 = 可能在转场窗口内
             self._last_act_ts = time.time()
         return action
