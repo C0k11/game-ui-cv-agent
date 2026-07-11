@@ -122,12 +122,18 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 # claimed by the end-of-run Mail since BA's mailbox accumulates
 # until claimed — no need for an additional start-of-run Mail.
 _DEFAULT_SKILL_ORDER = [
-    # 2026-05-28 归一化默认顺序 — 新 profile 默认勾这 2 个就跑完整套日常。
-    # 战斗扫荡先消耗 AP / 体力，然后 daily_routine 一次扫所有收菜。
-    "campaign_sweep",   # 一键扫荡 悬赏/战术/活动副本
-    "daily_routine",    # 所有收菜 (mail/cafe/schedule/club/daily_tasks/craft/
-                        #  event_activity/pass_reward/momo_talk/story_mining/
-                        #  shop/ap_planning, 内部 dot 自动判断 + craft 强制进)
+    # ⭐canonical 日常顺序(用户 2026-07-11 定死): 收菜攒AP → 纯票扫荡 →
+    # 学园交流会(吃AP) → 活动(剩余AP全灌+加成台账) → 战术大赛 → 邮件 →
+    # 每日领奖(必须最后, 且大额扫荡后立跑防 server 3AM 重置吞箱) →
+    # 活动再跑一轮(消化 mail/任务回灌的新AP, AP<20 自动秒过)。
+    "daily_routine",
+    "bounty",
+    "jfd",
+    "event_quest",
+    "arena",
+    "mail",
+    "daily_mission",
+    "event_quest",
 ]
 _VALID_SKILL_IDS = {item["id"] for item in _SKILL_OPTIONS}
 
@@ -197,7 +203,9 @@ def _normalize_skill_order(values: Any) -> List[str]:
     # deduped — running e.g. cafe twice doesn't gain anything.
     # ×2 允许重复: mail(开局+收口) / batch_sweep(厅后+领奖后) / special_sweep
     # (2026-06-16 替 batch 当默认 AP-eater, 回马枪需出现两次否则被去重)。
-    _ALLOW_DUPLICATES = {"mail", "batch_sweep", "special_sweep"}
+    # +event_quest(2026-07-11 canonical序尾部再跑一轮消化 mail/任务回灌AP,
+    # AP<20 时秒过零成本)
+    _ALLOW_DUPLICATES = {"mail", "batch_sweep", "special_sweep", "event_quest"}
     order: List[str] = []
     seen: Set[str] = set()
     if isinstance(values, list):
