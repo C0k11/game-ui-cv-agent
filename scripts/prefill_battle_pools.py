@@ -22,12 +22,15 @@ sys.path.insert(0, r"D:\Project\ai game secretary")
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 UI_W = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v13\weights\last.pt"
-BT_W = r"D:\Project\ml_cache\models\yolo\runs\battle_yolo26n_v2\weights\best.pt"
+# v3 (2026-07-10): nc14 全战斗域直出(身份+塞特+Boss+HUD+倍速+暂停菜单),
+# 战斗域检出 0.93-0.995 全面强于通用 ui 模型 → 路由反转: battle 全收,
+# ui 只补 battle 词表外的类(叉叉/确认/取消/加载/获得奖励等)。
+BT_W = r"D:\Project\ml_cache\models\yolo\runs\battle_yolo26n_v3\weights\best.pt"
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 NAME2IDX = {n: i for i, n in enumerate(MASTER)}
 
 _DROP_UI = {"红点", "黄点"}          # 战斗帧上纯假阳
-_BATTLE_KEEP = {"我方", "敌方"}      # battle v2 只贡献身份类
+_BATTLE_KEEP = None                  # None = battle 模型全类直出 (v3 nc14)
 _GOT_REWARD = "获得奖励"             # 397 尺寸闸
 
 
@@ -62,12 +65,15 @@ def main():
                               verbose=False, device=0)
             r_bt = bt.predict(chunk, conf=0.35, imgsz=640, half=True,
                               verbose=False, device=0)
+            bt_names = set(bt.names.values())
             for path, ru, rb in zip(chunk, r_ui, r_bt):
                 lines = []
                 for b in ru.boxes:
                     name = ui.names[int(b.cls)]
                     if name in _DROP_UI or name not in NAME2IDX:
                         continue
+                    if name in bt_names:
+                        continue   # battle 词表内的类以 battle 模型为准
                     x, y, w, h = b.xywhn[0].tolist()
                     if name == _GOT_REWARD and h > 0.105:
                         continue   # WIN! 横幅假阳
@@ -75,7 +81,8 @@ def main():
                     stats[name] = stats.get(name, 0) + 1
                 for b in rb.boxes:
                     name = bt.names[int(b.cls)]
-                    if name not in _BATTLE_KEEP or name not in NAME2IDX:
+                    if (_BATTLE_KEEP is not None and name not in _BATTLE_KEEP) \
+                            or name not in NAME2IDX:
                         continue
                     x, y, w, h = b.xywhn[0].tolist()
                     lines.append(f"{NAME2IDX[name]} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")

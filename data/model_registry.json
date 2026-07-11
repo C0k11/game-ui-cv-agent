@@ -233,9 +233,19 @@
           "战斗胜利": "val无实例(7框全train, train帧sanity 3/3检出0.64-0.93)"
         },
         "notes": "用户手标133帧(run_battle_material_20260708) → battle_v2(114/19)。7类=我方/敌方(combat AI身份检测层)+战斗HUD 5类(与ui模型有意重复, 高频循环单模型拿AUTO gate)。150ep 3min, fliplr=0铁律(我方左/敌方右), hsv开大打底VFX, copy_paste=0。4090实测98FPS@640(half, 含前后处理; 纯推理0.5ms)。已知弱点: 敌方R 0.749(176框样本少, 形态多) — 下代补敌方素材+VFX合成aug。"
+      },
+      "v3": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v3/weights/best.pt",
+        "model_arch": "yolo26n",
+        "trained_on": "2026-07-10",
+        "n_classes": 14,
+        "imgsz": 640,
+        "val_mAP50": 0.982,
+        "val_mAP50_95": 0.92,
+        "notes": "用户审定3池498帧(活动关/总力战賽特/综合战术考试)+57张dim瞄准态合成(train12%)。nc7→14: +塞特的愤怒0.995/Boss0.995/一倍速0.995/二倍速0.995/暂停菜单三键(重开/继续/放弃)0.995。敌方0.887→0.951(考试mob素材)。aug收敛版(hsv几乎关/mosaic0.3防固定框位置先验)。97ep早停best=ep57。"
       }
     },
-    "_v2_note": "v2 已训好待接线: pipeline._YOLO_BATTLE_HEADS(pipeline.py:184) 与 battle_overlay_demo.py 都是硬路径不读本 registry — 切 v2 要改那两处路径。当前 daily 管线无 consumer 依赖新类, 等 combat AI 2.0 高频循环工程时一起接线+live 验证再切 active。"
+    "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
   },
   "unified": {
     "_doc": "v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
