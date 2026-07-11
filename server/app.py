@@ -2355,6 +2355,13 @@ def list_datasets() -> Dict[str, Any]:
         _val_set = set(VAL_SOURCES)
     except Exception:
         _train_set, _val_set = set(), set()
+    # battle 模型 sources (build_battle_v3 直接引用原池 = 已并入永久 train 集,
+    # 不再是"飞轮待标注" — 2026-07-10 用户: 飞轮区只留没用过/即将要用的)
+    try:
+        from scripts.build_battle_v3 import SRCS as _battle_srcs  # noqa: PLC0415
+        _train_set |= {p.name for p in _battle_srcs}
+    except Exception:
+        pass
     for d in sorted(RAW_IMAGES_DIR.iterdir()):
         if not d.is_dir():
             continue
