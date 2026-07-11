@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""battle_v3 dim/选中微高亮合成 (2026-07-10, 用户 spec).
+"""battle_v4 dim/选中微高亮合成 (2026-07-10, 用户 spec).
 
 模拟卡牌选中目标时的瞄准态: 全图暗化 45-55%, 随机 1-3 个身份目标框
 (我方/敌方/塞特/Boss)保持原亮度(边缘羽化防矩形 artifact)。GT 标签不变
@@ -17,7 +17,7 @@ import numpy as np
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v3")
+DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v4")
 IDENTITY_CLS = {0, 1, 7, 8}     # 我方/敌方/塞特的愤怒/Boss
 FRAC = 0.15
 SEED = 1042

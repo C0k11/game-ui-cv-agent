@@ -711,6 +711,28 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26n_v4": {
+        # 战斗 v4 (2026-07-11) = v3 warm + 两新池(110759总力战157帧 +
+        #  104427综合考试86帧: v3预标→用户人审身份类 + ui v13重建HUD —
+        #  v3 的 HUD 双框/1倍速误标三倍速/暂停漏标已根治, 见
+        #  fix_battle_ui_labels.py)。713对: train607+86dim合成 / val106。
+        #  nc=14 不变(纯增量 warm, 无 head 重初始化)。配方=v3 aug收敛版原样。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v4" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26n_v3" / "weights" / "best.pt"),
+        "epochs": 150,
+        "patience": 40,
+        "save_period": 10,
+        "imgsz": 640,
+        "batch": 32,
+        "out_name": "battle_yolo26n_v4",
+        "cache": True,
+        "workers": 8,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
