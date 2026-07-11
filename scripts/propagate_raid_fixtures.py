@@ -7,6 +7,10 @@
 
 只适用总力战池(110430/110759)。104427/104718 是綜合戰術考試(体育场), 无此三物。
 
+⚠ 2026-07-10 用户改判: 柱子不建新类, 就用 476「我方」标(友方保护目标),
+坐标抄用户 frame_000009 示范框; master「柱子」行已删(479 行)。本脚本的
+PILLAR_IDX/框已同步 — 重跑前注意 pass0 的幂等清理按坐标匹配柱框。
+
 存在性判据(不标暂停画面/转场/开场/死亡, 全部实测校准 2026-07-10):
   ① cls 闸: 帧含 弹窗叉叉19/确认键20/加载中22/取消键118/暂停菜单131-133/
      胜利136/获得奖励397 → 三固定物全不标(暂停/结算/加载画面)
@@ -28,10 +32,10 @@ POOLS = ["run_20260710_110430", "run_20260710_110759"]
 ALL_TODAY = POOLS + ["run_20260710_104427", "run_20260710_104718"]
 
 SKIP_CLS = {19, 20, 22, 118, 131, 132, 133, 136, 397}
-SETH_IDX, PILLAR_IDX = 478, 479
+SETH_IDX, PILLAR_IDX = 478, 476                       # 柱子=我方(用户改判)
 SETH_BOX = (0.6463, 0.3607, 0.3515, 0.4267)          # 用户 7 帧中位
-PILLARS = [(0.150, 0.506, 0.058, 0.262),              # A 左中(含血条)
-           (0.476, 0.790, 0.063, 0.310)]              # B 中下(含血条)
+PILLARS = [(0.1532, 0.5056, 0.0631, 0.2718),          # A 左中(用户 frame_000009)
+           (0.4779, 0.7845, 0.0673, 0.2958)]          # B 中下(用户 frame_000009)
 BOSS_HP_R = (0.33, 0.028, 0.60, 0.048)
 CYAN = (np.array((80, 80, 120)), np.array((105, 255, 255)))
 PA_HP_R = (0.120, 0.372, 0.156, 0.393)
@@ -50,12 +54,7 @@ def color_frac(img, region, lo_hi):
 def main():
     master = [l.strip() for l in
               open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
-    if "柱子" not in master:
-        master.append("柱子")
-        (RAW / "_classes.txt").write_text("\n".join(master) + "\n",
-                                          encoding="utf-8")
-        print(f"master += 柱子 (idx {master.index('柱子')})")
-    assert master.index("柱子") == PILLAR_IDX and master[SETH_IDX] == "塞特的愤怒"
+    assert master[SETH_IDX] == "塞特的愤怒" and master[PILLAR_IDX] == "我方"
 
     for name in ALL_TODAY:   # classes.txt 统一刷成最新 master
         (RAW / name / "classes.txt").write_text(
@@ -63,17 +62,28 @@ def main():
 
     USER_SETH_FRAMES = {f"frame_{i:06d}" for i in range(8, 15)}  # 用户示范, 保留
 
+    def matches_pillar(l, boxes):
+        p = l.split()
+        if int(p[0]) != PILLAR_IDX:
+            return False
+        cx, cy = float(p[1]), float(p[2])
+        return any(abs(cx - b[0]) < 0.02 and abs(cy - b[1]) < 0.02
+                   for b in boxes)
+
+    def is_pillar_box(l):
+        return matches_pillar(l, PILLARS)
+
     for name in POOLS:
         pool = RAW / name
         txts = sorted(pool.glob("frame_*.txt"))
-        # pass 0: 清掉本脚本旧输出(478 除用户示范帧 / 479 全部), 幂等重入
+        # pass 0: 清掉本脚本旧输出(478 除用户示范帧 / 柱框按坐标匹配), 幂等重入
         for txt in txts:
             lines = [l for l in txt.read_text(encoding="utf-8").splitlines()
                      if l.strip()]
             keep = []
             for l in lines:
                 c = int(l.split()[0])
-                if c == PILLAR_IDX:
+                if is_pillar_box(l):        # 柱子=476, 只按坐标删, 不伤小人
                     continue
                 if c == SETH_IDX and txt.stem not in USER_SETH_FRAMES:
                     continue
@@ -120,7 +130,8 @@ def main():
                 lines.append(f"{SETH_IDX} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
                 n_seth += 1
             for key, box in (("pA", PILLARS[0]), ("pB", PILLARS[1])):
-                if spans[key] and spans[key][0] <= i <= spans[key][1]:
+                if spans[key] and spans[key][0] <= i <= spans[key][1] \
+                        and not any(matches_pillar(l, [box]) for l in lines):
                     x, y, w, h = box
                     lines.append(
                         f"{PILLAR_IDX} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
