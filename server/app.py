@@ -1376,12 +1376,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, 0.12))
             elif action_type in ("click", "back", "swipe_tap"):
                 # invalidate OCR cache so the next tick OCRs the fresh screen.
-                # 1.0s→0.4s (user 2026-07-11: "从锁定到点击再快些" — 覆盖 0614 的
-                # 固定1s)。过点防护现由三层兜: 加载中 gate + _dedup_click
-                # same-target hold + skill 侧 cls 证据制 wait, 不再靠长 sleep。
-                # (历史: 1.6→0.4 zero-wait → 0614 回调 1.0 → 0711 压回 0.4)
+                # 0.4→0.15s (user 2026-07-11 二次: "不要给等待时间, 极限测试,
+                # 模拟人眼有就点没有就不点")。过点防护三层兜: 加载中 gate +
+                # _dedup_click same-target hold + skill 侧 cls 证据制 wait。
+                # (历史: 1.6→0.4→0614回调1.0→0711压0.4→0711极限0.15)
                 _prev_ocr_boxes = None
-                _high_res_sleep(0.4)
+                _high_res_sleep(0.15)
             else:
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
 
