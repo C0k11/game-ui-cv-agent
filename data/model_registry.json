@@ -243,6 +243,16 @@
         "val_mAP50": 0.982,
         "val_mAP50_95": 0.92,
         "notes": "用户审定3池498帧(活动关/总力战賽特/综合战术考试)+57张dim瞄准态合成(train12%)。nc7→14: +塞特的愤怒0.995/Boss0.995/一倍速0.995/二倍速0.995/暂停菜单三键(重开/继续/放弃)0.995。敌方0.887→0.951(考试mob素材)。aug收敛版(hsv几乎关/mosaic0.3防固定框位置先验)。97ep早停best=ep57。"
+      },
+      "v4": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v4/weights/best.pt",
+        "model_arch": "yolo26n",
+        "trained_on": "2026-07-11",
+        "n_classes": 14,
+        "imgsz": 640,
+        "val_mAP50": 0.988,
+        "val_mAP50_95": 0.948,
+        "notes": "v3三池+用户审定两新池(110759/104427: 身份类人审+HUD由ui v13重建根治v3双框/1倍速误标/暂停漏标)。713对train607+86dim/val106, warm v3, aug收敛配方原样, 150ep跑满10.6min。同卷对比(v4 val): v3=0.962/0.910 → v4=0.988/0.948, 增益全在标注手术处: 战斗暂停0.803→0.973/自动战斗关闭0.944→0.995/敌方0.900→0.977/我方0.941→0.991。⚠战斗胜利0 val样本(仅7 train)未受测。"
       }
     },
     "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
