@@ -253,6 +253,15 @@
         "val_mAP50": 0.988,
         "val_mAP50_95": 0.948,
         "notes": "v3三池+用户审定两新池(110759/104427: 身份类人审+HUD由ui v13重建根治v3双框/1倍速误标/暂停漏标)。713对train607+86dim/val106, warm v3, aug收敛配方原样, 150ep跑满10.6min。同卷对比(v4 val): v3=0.962/0.910 → v4=0.988/0.948, 增益全在标注手术处: 战斗暂停0.803→0.973/自动战斗关闭0.944→0.995/敌方0.900→0.977/我方0.941→0.991。⚠战斗胜利0 val样本(仅7 train)未受测。"
+      },
+      "v5": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v5/weights/best.pt",
+        "arch": "yolo26s",
+        "imgsz": 960,
+        "nc": 15,
+        "map50": 0.9831,
+        "map5095": 0.9474,
+        "note": "2026-07-12 v4五池+凹轴耶罗尼姆斯池(真实视频域)+主教类; ep74 best(150ep计划因Win dataloader死锁截停, 已收敛); 同卷vs v4: 0.956/0.904→0.983/0.947, 我方0.896→0.994 敌方0.634→0.981; 85.6fps@1080p单帧串行"
       }
     },
     "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"

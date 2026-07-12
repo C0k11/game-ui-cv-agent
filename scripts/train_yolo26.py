@@ -733,6 +733,29 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26s_v5": {
+        # 战斗 v5 (2026-07-12) = v4五池 + 凹轴耶罗尼姆斯池(第一份真实视频域:
+        #  B站1080p60压缩录屏/暗夜战/UP攻略条遮挡) + 新类主教(local 14, nc=15)。
+        #  train 990+142dim / val 174。**架构升级 26n@640 → 26s@960**(用户拍板:
+        #  密集血条粘连/暗帧弱检出主因=容量+分辨率; 战斗模型不跑主 tick, 4090
+        #  推理开销无所谓)。nc 变(14→15)+换架构 → 不能 warm v4, 用 COCO 预训练
+        #  yolo26s.pt。aug = v4 收敛配方原样。主教仅标可见帧(遮死不标=设计)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v5" / "data.yaml",
+        "base": str(YOLO_ROOT / "yolo26s.pt"),
+        "epochs": 150,
+        "patience": 40,
+        "save_period": 10,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "battle_yolo26s_v5",
+        "cache": True,
+        "workers": 8,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

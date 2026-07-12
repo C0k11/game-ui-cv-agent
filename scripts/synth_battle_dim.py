@@ -17,8 +17,8 @@ import numpy as np
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v4")
-IDENTITY_CLS = {0, 1, 7, 8}     # 我方/敌方/塞特的愤怒/Boss
+DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v5")
+IDENTITY_CLS = {0, 1, 7, 8, 14}  # 我方/敌方/塞特的愤怒/Boss/主教
 FRAC = 0.15
 SEED = 1042
 
@@ -41,9 +41,16 @@ def main() -> None:
 
     rng = random.Random(SEED)
     picks = rng.sample(candidates, int(len(candidates) * FRAC))
+    written = 0
     for lbl, boxes in picks:
         img_p = img_dir / (lbl.stem + ".jpg")
-        img = cv2.imread(str(img_p))
+        # ⚠cv2.imread/imwrite 不吃中文路径(凹轴池帧带中文前缀, 静默 None
+        # → v5 首跑 142 报数实写 87 实锤) — 走 fromfile/imencode。
+        try:
+            img = cv2.imdecode(np.fromfile(str(img_p), dtype=np.uint8),
+                               cv2.IMREAD_COLOR)
+        except Exception:
+            img = None
         if img is None:
             continue
         H, W = img.shape[:2]
@@ -57,11 +64,14 @@ def main() -> None:
         mask = cv2.GaussianBlur(mask, (25, 25), 0)
         gain = dim + (1.0 - dim) * mask[..., None]
         out = np.clip(img.astype(np.float32) * gain, 0, 255).astype(np.uint8)
-        cv2.imwrite(str(img_dir / (lbl.stem + "__dim.jpg")), out,
-                    [cv2.IMWRITE_JPEG_QUALITY, 92])
+        ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        if not ok:
+            continue
+        buf.tofile(str(img_dir / (lbl.stem + "__dim.jpg")))
         (lbl_dir / (lbl.stem + "__dim.txt")).write_text(
             lbl.read_text(encoding="utf-8"), encoding="utf-8")
-    print(f"synthesized {len(picks)} dim variants "
+        written += 1
+    print(f"synthesized {written}/{len(picks)} dim variants "
           f"(train {len(list(img_dir.glob('*.jpg')))} imgs total)")
 
 
