@@ -158,3 +158,5 @@ scripts/dedup_*.py
 
 # probe/scratch temp files at repo root (_sug.json, _peek.jpg, _COWORK_*.md ...)
 /_*
+data/axis_videos/
+data/axis_cookies.txt

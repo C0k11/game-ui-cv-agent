@@ -2940,16 +2940,19 @@ def _axis_spawn_job(kind: str, label: str, cmd: List[str], post=None) -> str:
                     if len(job["log"]) > 80:
                         del job["log"][: len(job["log"]) - 80]
             rc = proc.wait()
+            post_failed = False
             if rc == 0 and not job["_cancel"] and post is not None:
                 try:
                     post()
                 except Exception as e:
+                    post_failed = True     # post=完整性校验等硬闸, 失败即 error
                     with _AXIS_JOBS_LOCK:
                         job["log"].append(f"[post] {e}")
             with _AXIS_JOBS_LOCK:
                 job["rc"] = rc
                 job["status"] = ("cancelled" if job["_cancel"]
-                                 else ("done" if rc == 0 else "error"))
+                                 else ("done" if rc == 0 and not post_failed
+                                       else "error"))
                 job["ended"] = time.time()
         except Exception as e:
             with _AXIS_JOBS_LOCK:
@@ -2989,7 +2992,37 @@ def axis_videos() -> Dict[str, Any]:
                     "mtime": p.stat().st_mtime,
                     "pool": pool, "frames": frames, "labeled": labeled,
                     "sheet_rows": rows})
-    return {"videos": out}
+    return {"videos": out, "cookies_file": AXIS_COOKIES_FILE.exists()}
+
+
+# B站登录态 cookies 文件(Netscape 格式, 只需 SESSDATA 一行)。
+# ⚠2026-07-12 实锤: 未登录裸下载 B 站会给**截断的试看流**(av01 只 80s/avc1 只
+# 15s, 格式列表却显示全长, yt-dlp 还 rc=0 报成功); --cookies-from-browser 在
+# Windows 上对 Chrome(#7271 文件锁)/Edge(#10927 app-bound DPAPI)全挂 → 唯一
+# 稳路 = 用户导一次 SESSDATA 进此文件, 存在即自动使用。不入 git(.gitignore)。
+AXIS_COOKIES_FILE = REPO_ROOT / "data" / "axis_cookies.txt"
+
+
+def _axis_probe_video_ok(p: Path) -> "str | None":
+    """下载后完整性校验: 视频流时长 vs 容器时长差 >15% = 截断流。返回错误描述或 None。"""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "format=duration:stream=codec_type,duration",
+             "-of", "json", str(p)],
+            capture_output=True, text=True, timeout=20)
+        d = json.loads(r.stdout or "{}")
+        fmt_dur = float((d.get("format") or {}).get("duration") or 0)
+        v_dur = 0.0
+        for s in d.get("streams") or []:
+            if s.get("codec_type") == "video":
+                v_dur = float(s.get("duration") or 0)
+        if fmt_dur > 0 and v_dur > 0 and v_dur < fmt_dur * 0.85:
+            return (f"视频流仅 {v_dur:.0f}s / 容器 {fmt_dur:.0f}s — B站截断试看流"
+                    f"(未登录?), 配置 data/axis_cookies.txt 后重下")
+    except Exception:
+        pass    # 校验自身失败不拦(ffprobe 缺失等), 只拦实锤截断
+    return None
 
 
 @app.post("/api/v1/axis/download")
@@ -3000,13 +3033,29 @@ def axis_download(payload: Dict[str, Any]) -> Dict[str, Any]:
     cookies = str(payload.get("cookies") or "").strip()
     AXIS_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "yt_dlp"]
-    if cookies in ("chrome", "edge", "firefox"):
+    if AXIS_COOKIES_FILE.exists():          # 文件优先 — 浏览器提取在 Win 上全挂
+        cmd += ["--cookies", str(AXIS_COOKIES_FILE)]
+    elif cookies in ("chrome", "edge", "firefox"):
         cmd += ["--cookies-from-browser", cookies]
-    cmd += ["-f", "bv*+ba/b", "--merge-output-format", "mp4",
+    cmd += ["-f", "bv*[vcodec^=avc1]+ba/bv*+ba/b",   # avc1 主流最稳, av01 转码流坑多
+            "--merge-output-format", "mp4",
             "--windows-filenames", "--no-part", "-N", "4", "--newline",
             "-o", str(AXIS_VIDEO_DIR / "%(title).60s [%(id)s].%(ext)s"), url]
-    jid = _axis_spawn_job("download", url, cmd)
-    return {"ok": True, "job": jid}
+
+    before = {p.name for p in AXIS_VIDEO_DIR.iterdir() if p.is_file()}
+
+    def post() -> None:
+        new = [p for p in AXIS_VIDEO_DIR.iterdir()
+               if p.is_file() and p.suffix.lower() in _AXIS_VIDEO_EXTS
+               and p.name not in before]
+        for p in new:
+            err = _axis_probe_video_ok(p)
+            if err:
+                raise RuntimeError(f"{p.name}: {err}")
+
+    jid = _axis_spawn_job("download", url, cmd, post=post)
+    return {"ok": True, "job": jid,
+            "cookies_file": AXIS_COOKIES_FILE.exists()}
 
 
 def _axis_parse_ts(v: str) -> float:

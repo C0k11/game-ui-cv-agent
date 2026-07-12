@@ -792,16 +792,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <input id="axis_url" type="text" placeholder="https://www.bilibili.com/video/BVxxxxxxxx" onkeydown="if(event.key==='Enter')axisDownload()"/>
       </div>
       <div class="form-group" style="min-width:170px">
-        <label>登录 cookies (高画质)</label>
+        <label>登录 cookies</label>
         <select id="axis_cookies">
-          <option value="">不带 (~480p)</option>
-          <option value="chrome">Chrome (大会员画质)</option>
-          <option value="edge">Edge</option>
-          <option value="firefox">Firefox</option>
+          <option value="">cookies.txt / 无</option>
+          <option value="firefox">Firefox 提取</option>
         </select>
       </div>
       <button class="btn btn-primary" onclick="axisDownload()" style="margin-bottom:11px">⬇ 下载</button>
     </div>
+    <div id="axis_cookie_hint" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
     <div id="axis_jobs" style="font-size:11px;font-family:var(--mono);color:var(--muted);max-height:170px;overflow-y:auto;background:#0d0d10;border:1px solid var(--border);border-radius:3px;padding:6px;margin-top:6px;display:none"></div>
   </div>
 
@@ -5337,7 +5336,13 @@ async function clsMgrMergeInto(dstIdx){
 let AXIS = {videos:[], cur:null, rows:[], dirty:false, jobTimer:null, wasRunning:false};
 function axisInit(){ axisRefresh(); axisPollJobs(); }
 async function axisRefresh(){
-  try{ const r = await clsApi('/api/v1/axis/videos'); AXIS.videos=r.videos||[]; axisRenderVideos(); }
+  try{
+    const r = await clsApi('/api/v1/axis/videos'); AXIS.videos=r.videos||[]; axisRenderVideos();
+    const h=$('axis_cookie_hint');
+    if(h) h.innerHTML = r.cookies_file
+      ? '🍪 <span style="color:#4ade80">data/axis_cookies.txt 已配置 — 下载自动带 B 站登录态(全长+高画质)</span>'
+      : '⚠ <span style="color:#f59e0b">未配置 data/axis_cookies.txt — B 站未登录只给截断试看流(实锤15-80s)。Chrome/Edge cookie 提取在 Windows 已被加密堵死, 从浏览器 F12 复制 SESSDATA 建此文件即可</span>';
+  }
   catch(e){ $('axis_video_list').textContent='加载失败: '+e.message; }
 }
 function axisRenderVideos(){
