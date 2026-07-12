@@ -3404,7 +3404,7 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         # that model's authoritative span — so an avatar pass won't suggest a
         # spurious UI class on a sprite (and vice-versa). Shared with the 整run
         # prefill so single-frame and batch behave identically.
-        from scripts.yolo_prefill_run import get_model, owns_for, _IMGSZ_BY_TAG  # noqa: PLC0415
+        from scripts.yolo_prefill_run import get_model, owns_for, is_dup_box, _IMGSZ_BY_TAG  # noqa: PLC0415
         model, remap, tag = get_model(model_key, version)
         owns = owns_for(tag, remap)
         tgt = _parse_target_classes(payload.get("target_classes"))  # 只标目标 cls
@@ -3424,12 +3424,11 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             raw.append((sc, mi, [x1, y1, x2, y2]))
         raw.sort(key=lambda t: -t[0])  # high conf first
-        # Dedup within this single model's output (any-cls IoU>0.6, keep higher
-        # conf) — one clean box per element. Cross-pass accumulation (a head box
-        # sitting next to a UI box) is handled client-side by same-class dedup.
+        # Dedup within this single model's output — any-cls IoU>0.6 + 同类包含型
+        # (is_dup_box, 与整run预标同源: 含血条大框 vs 本体小框 IoU~0.5 漏网根治)。
         kept = []
         for sc, mi, box in raw:
-            if any(_iou_box(box, k[2]) > 0.6 for k in kept):
+            if is_dup_box(box, mi, ((k[1], k[2]) for k in kept)):
                 continue
             kept.append((sc, mi, box))
         suggestions = []

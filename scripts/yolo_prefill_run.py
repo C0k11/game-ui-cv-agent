@@ -145,6 +145,32 @@ def _iou(a, b) -> float:
     return inter / (aa + bb - inter + 1e-9)
 
 
+def _containment(a, b) -> float:
+    """交集 / 较小框面积 — 包含关系强度(大小框对的 IoU 天然低, 用这个补判)。"""
+    ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    amin = min((ax2 - ax1) * (ay2 - ay1), (bx2 - bx1) * (by2 - by1))
+    return inter / (amin + 1e-9)
+
+
+def is_dup_box(box, mi, kept) -> bool:
+    """预标去重: 任意类 IoU>0.6(同位歧义双标: 红点/黄点、确认/灰确认), 或
+    **同类**包含型(交集/小框>0.75) — 2026-07-12 凹轴池实锤14对: 训练口径不
+    统一让模型对同一学生出「含血条大框」+「本体小框」, IoU 仅~0.5 溜过 0.6
+    线。跨类包含不删(Boss 大框套我方小框/角色框套 UI 按钮 = 合法结构)。
+    kept: iterable of (master_id, [x1,y1,x2,y2])。"""
+    for kmid, kbox in kept:
+        if _iou(box, kbox) > 0.6:
+            return True
+        if kmid == mi and _containment(box, kbox) > 0.75:
+            return True
+    return False
+
+
 def _read_existing(lp: Path, w: float, h: float):
     """Existing label rows -> [(master_id, [x1,y1,x2,y2] px)]. 5-col master
     format; a stray 6th col (OBB angle) is ignored."""
@@ -224,10 +250,8 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
             else:
                 kept = existing  # merge: keep all, append new (same-cls dedup)
             for _sc, mi, box in new:
-                if any(_iou(box, k[1]) > 0.6 for k in kept):
-                    continue  # 任意类高 IoU 去重(与 suggest 一致): 防同目标类歧义双标
-                              # (红点/黄点·MIN灰色/可点击·确认键/灰色确认)。跨域框(UI 按钮
-                              # vs 头像/摸头)位置不同 IoU 低, 不会误删, 共存设计不破。
+                if is_dup_box(box, mi, kept):
+                    continue  # IoU>0.6 任意类 + 同类包含型 — 见 is_dup_box 注释
                 kept.append((mi, box))
             lines = []
             for mid, (x1, y1, x2, y2) in kept:
