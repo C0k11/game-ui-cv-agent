@@ -1118,7 +1118,11 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
     # 每 3 tick 一跑拖慢全链)。YOLO <3 框 = 未知屏(羁绊升级/通知弹窗/TOUCH
     # START 等 OCR 拦截器兜底场景) → 才跑整帧 OCR。数字读取(票数/AP/总价)
     # 各 skill 本来就走 screen.frame 裁剪 digit-OCR, 不依赖这里。
-    if skip_ocr and len(yolo_boxes) >= 3:
+    # 2026-07-11 用户二次收紧("OCR只有花钱/用票时启动"): 门从 <3框 收到
+    # **完全零检出的亮屏**才跑 — 加载中转场(加载中 cls ≥1框)/普通页一律
+    # 零 OCR(旧 <3框 门在每个转场帧白跑 1-1.5s); 钱/票数字=skill 内裁剪
+    # digit-OCR 天然按需, 与整帧 OCR 无关。
+    if skip_ocr and len(yolo_boxes) >= 1:
         ocr_boxes = prev_ocr_boxes if prev_ocr_boxes is not None else []
     else:
         ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
