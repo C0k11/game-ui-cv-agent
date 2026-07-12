@@ -926,7 +926,9 @@ function showToast(msg, type='info', durMs=4000){
 /* ── beforeunload guard: warn on unsaved annotations ──
    Triggers modern browsers' native "Leave site?" confirmation. */
 window.addEventListener('beforeunload', e => {
-  if (typeof ANN !== 'undefined' && ANN && ANN.dirty){
+  const annDirty = typeof ANN !== 'undefined' && ANN && ANN.dirty;
+  const axisDirty = typeof AXIS !== 'undefined' && AXIS && AXIS.dirty;  // 轴表未保存打点
+  if (annDirty || axisDirty){
     e.preventDefault();
     e.returnValue = '';  // legacy Chrome/Firefox compat
     return '';
@@ -5375,12 +5377,24 @@ async function axisDownload(){
 }
 async function axisExtract(v){
   const est = f=>v.duration?`≈${Math.round(v.duration*f)}帧`:'';
-  const fps = prompt(`抽帧 fps (建议 2-5)\n视频 ${v.duration}s → 3fps ${est(3)} / 5fps ${est(5)}\n已有帧会被覆盖:`, '3');
+  const fps = prompt(`抽帧 fps (建议 2-5)\n视频 ${v.duration}s → 3fps ${est(3)} / 5fps ${est(5)}:`, '3');
   if(!fps) return;
+  const send = async force=>clsApi('/api/v1/axis/extract',{video:v.name, fps:parseFloat(fps), force});
   try{
-    const r = await clsApi('/api/v1/axis/extract',{video:v.name, fps:parseFloat(fps)});
+    const r = await send(false);
     showToast('抽帧任务已启动 → '+r.pool,'ok'); axisPollJobs();
-  }catch(e){ alert('抽帧失败: '+e.message); }
+  }catch(e){
+    if(e.status===409){
+      // 池已有帧/标注: 服务端拒绝, 需确认清池重抽(标注先自动备份)
+      if(!confirm('⚠ '+e.message+'\n\n确认清池重抽?')) return;
+      try{ const r = await send(true); showToast('已清池重抽 → '+r.pool,'ok'); axisPollJobs(); }
+      catch(e2){ alert('抽帧失败: '+e2.message); }
+    } else alert('抽帧失败: '+e.message);
+  }
+}
+async function axisJobCancel(jid){
+  try{ await clsApi('/api/v1/axis/job_cancel',{id:jid}); showToast('已取消 '+jid,'ok'); axisPollJobs(); }
+  catch(e){ alert('取消失败: '+e.message); }
 }
 async function axisPrefill(v){
   if(!confirm(`用 battle v4 预标 ${v.pool} (${v.frames}帧)?\n同步执行, 约 ${Math.max(1,Math.ceil(v.frames/600))} 分钟, 完成前别关页面。`)) return;
@@ -5398,9 +5412,10 @@ async function axisDeleteVideo(v){
   catch(e){ alert(e.message); }
 }
 async function axisPollJobs(){
-  let running=false;
+  let running=false, fetchOk=false;
   try{
     const r = await clsApi('/api/v1/axis/jobs');
+    fetchOk=true; AXIS.pollFails=0;
     const el=$('axis_jobs');
     if(!(r.jobs||[]).length){ el.style.display='none'; }
     else{
@@ -5408,17 +5423,25 @@ async function axisPollJobs(){
       el.innerHTML = r.jobs.map(j=>{
         const dur=Math.round((j.ended||Date.now()/1000)-j.started);
         const col=j.status==='running'?'#facc15':(j.status==='done'?'#4ade80':'#f87171');
-        return `<div style="margin-bottom:5px"><span style="color:${col}">[${j.status}]</span> ${clsEsc(j.kind)} · ${clsEsc(j.label)} · ${dur}s<br><span style="opacity:.65">${(j.log||[]).slice(-3).map(clsEsc).join('<br>')}</span></div>`;
+        const cancel=j.status==='running'?` <button class="btn btn-sm btn-danger" style="padding:0 5px;font-size:10px" onclick="axisJobCancel('${clsEsc(j.id)}')">✕取消</button>`:'';
+        return `<div style="margin-bottom:5px"><span style="color:${col}">[${j.status}]</span> ${clsEsc(j.kind)} · ${clsEsc(j.label)} · ${dur}s${cancel}<br><span style="opacity:.65">${(j.log||[]).slice(-3).map(clsEsc).join('<br>')}</span></div>`;
       }).join('');
       running = r.jobs.some(j=>j.status==='running');
     }
   }catch(_){}
   clearTimeout(AXIS.jobTimer);
   if(running){ AXIS.wasRunning=true; AXIS.jobTimer=setTimeout(axisPollJobs,2000); }
+  else if(!fetchOk && AXIS.wasRunning){
+    // 瞬时请求失败不能断轮询链(server 重启/网络抖动) — 重试到 10 次再放弃
+    AXIS.pollFails=(AXIS.pollFails||0)+1;
+    if(AXIS.pollFails<=10) AXIS.jobTimer=setTimeout(axisPollJobs,3000);
+    else{ AXIS.wasRunning=false; const el=$('axis_jobs'); if(el){el.style.display='block'; el.innerHTML='<span style="color:#f87171">job 轮询失败(server 离线?) — 点上方 ↻ 刷新重试</span>';} }
+  }
   else if(AXIS.wasRunning){ AXIS.wasRunning=false; axisRefresh(); }
 }
 function axisOpenSheet(v){
-  AXIS.cur=v; AXIS.rows=[]; AXIS.dirty=false;
+  if(AXIS.dirty && !confirm('当前轴表有未保存修改, 丢弃?')) return;
+  AXIS.cur=v; AXIS.rows=[]; AXIS.dirty=false; AXIS.loadFailed=false;
   $('axis_sheet_card').style.display='block';
   $('axis_sheet_title').textContent=v.name;
   const p=$('axis_player');
@@ -5426,7 +5449,8 @@ function axisOpenSheet(v){
   p.ontimeupdate=()=>{ $('axis_player_t').textContent='t = '+p.currentTime.toFixed(2)+'s'; };
   clsApi('/api/v1/axis/sheet?video='+encodeURIComponent(v.name))
     .then(r=>{ AXIS.rows=r.rows||[]; axisSheetRender(); })
-    .catch(()=>axisSheetRender());
+    .catch(e=>{ AXIS.loadFailed=true; axisSheetRender();
+      $('axis_sheet_status').textContent='⚠ 轴表加载失败, 已禁止保存(防空表覆盖): '+e.message; });
   $('axis_sheet_card').scrollIntoView({behavior:'smooth'});
 }
 function axisPlayerStep(d){ const p=$('axis_player'); p.currentTime=Math.max(0,p.currentTime+d); }
@@ -5463,6 +5487,7 @@ function axisSheetRender(){
 function axisSheetStatus(){ $('axis_sheet_status').textContent = AXIS.dirty ? '未保存 *' : (AXIS.rows.length? '已保存':''); }
 async function axisSheetSave(){
   if(!AXIS.cur) return;
+  if(AXIS.loadFailed){ alert('轴表当初加载失败 — 保存会用当前(可能空的)表覆盖磁盘。请重新打开该视频的轴表确认加载成功后再存。'); return; }
   try{
     const r = await clsApi('/api/v1/axis/sheet',{video:AXIS.cur.name, rows:AXIS.rows});
     AXIS.dirty=false; axisSheetStatus();

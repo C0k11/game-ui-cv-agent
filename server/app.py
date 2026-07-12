@@ -2200,6 +2200,11 @@ def _safe_dataset_path(name: str) -> Path:
 
 # ── Universal class registry helpers ──────────────────────────────────────
 
+# master 读-改-写全路径互斥(2026-07-11 审计: merge 分钟级窗口内并发 add_class/
+# 懒迁移的 append 会被回滚 = idx 移位铁律违规)。RLock: 迁移内部会调 append。
+_MASTER_LOCK = threading.RLock()
+
+
 def _load_master_classes() -> List[str]:
     """Read the universal class registry shared across all datasets."""
     if not MASTER_CLASSES_FILE.exists():
@@ -2218,12 +2223,13 @@ def _save_master_classes(names: List[str]) -> None:
 
 def _master_append(name: str) -> int:
     """Append a class to master if not already present.  Returns its index."""
-    master = _load_master_classes()
-    if name in master:
-        return master.index(name)
-    master.append(name)
-    _save_master_classes(master)
-    return len(master) - 1
+    with _MASTER_LOCK:
+        master = _load_master_classes()
+        if name in master:
+            return master.index(name)
+        master.append(name)
+        _save_master_classes(master)
+        return len(master) - 1
 
 
 def _bootstrap_master_from_existing() -> None:
@@ -2264,6 +2270,11 @@ def _ensure_dataset_migrated(img_dir: Path) -> None:
 
     Idempotent: no-op if dataset's classes.txt already matches master.
     """
+    with _MASTER_LOCK:
+        _ensure_dataset_migrated_locked(img_dir)
+
+
+def _ensure_dataset_migrated_locked(img_dir: Path) -> None:
     _bootstrap_master_from_existing()
     master = _load_master_classes()
     cf = img_dir / "classes.txt"
@@ -2295,6 +2306,16 @@ def _ensure_dataset_migrated(img_dir: Path) -> None:
     # Rewrite label files only if local indices differ from master
     needs_label_remap = any(remap.get(i, i) != i for i in range(len(local)))
     if needs_label_remap:
+        # 防呆快照(2026-07-11 审计): 懒迁移重写手标前先备份 — 若 rename/merge
+        # 后有池 classes.txt 未同步到新 master, 这里的 remap 会大面积改写人工
+        # 标注(且旧路径零备份), 必须可回滚。
+        try:
+            tag = img_dir.parent.name if img_dir.name == "frames" else img_dir.name
+            _backup_label_files(
+                [f for f in img_dir.glob("*.txt") if f.name != "classes.txt"],
+                f"migrate_{tag}"[:60])
+        except Exception:
+            pass
         for label_file in img_dir.glob("*.txt"):
             if label_file.name == "classes.txt":
                 continue
@@ -2492,6 +2513,9 @@ def get_dataset_image(dataset: str = Query(...), filename: str = Query(...)) -> 
 
 @app.post("/api/v1/datasets/save_labels")
 def save_dataset_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if _BULK_LABEL_LOCK.locked():
+        raise HTTPException(status_code=409,
+                            detail="全库合并/整run预标进行中, 稍后再保存(防互踩回滚)")
     dataset = str(payload.get("dataset") or "")
     img_name = str(payload.get("img") or "")
     label_text = str(payload.get("labels") or "")
@@ -2538,15 +2562,32 @@ def add_dataset_class(payload: Dict[str, Any]) -> Dict[str, Any]:
 # (删行走 scripts/trim_master_classes.py 的显式全库 remap, 不进 API)。
 
 _CLS_STATS_CACHE: Dict[str, Any] = {"data": None}
+# 批量 label 写者互斥(2026-07-11 审计): merge 全库重写 与 整run预标 不能并发
+# (互踩=用户标注静默回滚/漏 remap); 单帧 save_labels 在批量操作进行中一律 409。
+_BULK_LABEL_LOCK = threading.Lock()
+
+
+# merge/rename/stats 的扫描范围排除项 — **只排真正的快照/元数据目录**。
+# ⚠2026-07-11 审计教训: 最初一刀切 startswith('_') 跳过, 但 _emoticon_v2/
+# _arrow_boost/_ui_val_pool(build_ui_v2 REAL_SOURCES)/_val_v8flywheel/
+# _val_v12flywheel_0616(VAL_SOURCES)/_battle_val/_fused_synth_remap 全是活
+# train/val 源(~15k label 文件) — 跳过=merge 漏改 idx 语义分裂+统计撒谎+懒
+# 迁移把墓碑旧名复活进 master 尾部。范围必须与 _ensure_dataset_migrated 可
+# 触达的池集合对齐。
+def _label_dir_excluded(name: str) -> bool:
+    return (name in ("_backups", "_v8queue_meta")
+            or name.startswith("_dup_")
+            or name.endswith("_labels_bak"))
 
 
 def _all_label_dirs() -> List[Path]:
-    """Every dir that may hold YOLO label .txt files (raw pools + trajectories).
-    下划线开头的目录(_backups/_synth_* 快照类)跳过 — 备份绝不参与重写。"""
+    """Every dir that may hold YOLO label .txt files (raw pools incl. 下划线
+    train/val 源池 + trajectories)。只排 _backups/_v8queue_meta/_dup_*/
+    *_labels_bak 这类快照与元数据目录。"""
     out: List[Path] = []
     if RAW_IMAGES_DIR.is_dir():
         for d in sorted(RAW_IMAGES_DIR.iterdir()):
-            if not d.is_dir() or d.name.startswith("_"):
+            if not d.is_dir() or _label_dir_excluded(d.name):
                 continue
             sub = d / "frames" if (d / "frames").is_dir() else d
             out.append(sub)
@@ -2558,19 +2599,34 @@ def _all_label_dirs() -> List[Path]:
 
 
 def _class_code_refs(name: str) -> List[str]:
-    """brain/ 源码里引用该类名的文件 — 改名/合并前的防呆警告源(skill 逻辑按
-    类名字符串匹配模型输出, registry 改了名, 下代模型训出来后旧名失配)。"""
+    """brain/ + scripts/ 源码里引用该类名的文件 — 改名/合并前的防呆警告源
+    (skill 逻辑按类名字符串匹配模型输出; scripts/ 里也有按名硬查 master 的
+    消费方如 clean_prefill_dots 的 MASTER.index('红点'), 改名即 import 崩)。"""
     hits: List[str] = []
-    brain = REPO_ROOT / "brain"
-    if not brain.is_dir() or not name:
+    if not name:
         return hits
-    for p in brain.rglob("*.py"):
-        try:
-            if name in p.read_text(encoding="utf-8"):
-                hits.append(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
-        except Exception:
+    for root in (REPO_ROOT / "brain", REPO_ROOT / "scripts"):
+        if not root.is_dir():
             continue
+        for p in root.rglob("*.py"):
+            try:
+                if name in p.read_text(encoding="utf-8"):
+                    hits.append(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
+            except Exception:
+                continue
     return hits
+
+
+def _invalidate_prefill_caches() -> None:
+    """rename/merge 改 master 后失效 yolo_prefill_run 的模块级 name→idx 缓存
+    (2026-07-11 审计: 不失效则同进程随后的预填/建议按旧 idx 写回 = 静默回滚)。"""
+    m = sys.modules.get("scripts.yolo_prefill_run")
+    if m is not None:
+        try:
+            m._MASTER_IDX = None
+            m._MODELS.clear()
+        except Exception:
+            pass
 
 
 def _scan_class_usage() -> Dict[int, Dict[str, Any]]:
@@ -2673,31 +2729,38 @@ def classes_rename(payload: Dict[str, Any]) -> Dict[str, Any]:
     idx = int(payload.get("idx", -1))
     new_name = str(payload.get("new_name") or "").strip()
     force = bool(payload.get("force"))
-    master = _load_master_classes()
-    if not (0 <= idx < len(master)):
-        raise HTTPException(status_code=400, detail="idx out of range")
-    if not new_name:
-        raise HTTPException(status_code=400, detail="new_name required")
-    if any(ch.isspace() for ch in new_name):
-        raise HTTPException(status_code=400, detail="类名不能含空白字符(用下划线)")
-    old = master[idx]
-    if new_name == old:
-        return {"ok": True, "idx": idx, "old": old, "new": new_name, "synced": 0}
-    if new_name in master:
-        raise HTTPException(
-            status_code=409,
-            detail=f"'{new_name}' 已存在(idx {master.index(new_name)}) — 两类合一请用合并")
-    refs = _class_code_refs(old)
-    if refs and not force:
-        raise HTTPException(status_code=409, detail={
-            "code_refs": refs,
-            "hint": "该类名被 brain/ 源码引用: 改名只改标注 registry, 下代模型"
-                    "训出来后 skill 里旧名字会失配, 需同步改代码。确认请 force=true。"})
-    _backup_label_files([], f"rename{idx}")   # master 快照
-    master[idx] = new_name
-    _save_master_classes(master)
-    synced = _sync_all_classes_txt(master)
+    with _MASTER_LOCK:
+        master = _load_master_classes()
+        if not (0 <= idx < len(master)):
+            raise HTTPException(status_code=400, detail="idx out of range")
+        if not new_name:
+            raise HTTPException(status_code=400, detail="new_name required")
+        if any(ch.isspace() for ch in new_name):
+            raise HTTPException(status_code=400, detail="类名不能含空白字符(用下划线)")
+        old = master[idx]
+        if old.startswith("_dead"):
+            raise HTTPException(status_code=400,
+                                detail=f"idx {idx} 是墓碑类({old}), 不能改名复活 — 新类请用 add_class 追加")
+        if new_name.startswith("_dead"):
+            raise HTTPException(status_code=400, detail="类名不能用 _dead 前缀(墓碑保留)")
+        if new_name == old:
+            return {"ok": True, "idx": idx, "old": old, "new": new_name, "synced": 0}
+        if new_name in master:
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{new_name}' 已存在(idx {master.index(new_name)}) — 两类合一请用合并")
+        refs = _class_code_refs(old)
+        if refs and not force:
+            raise HTTPException(status_code=409, detail={
+                "code_refs": refs,
+                "hint": "该类名被 brain//scripts/ 源码引用: 改名只改标注 registry, 下代"
+                        "模型训出来后代码里旧名字会失配, 需同步改代码。确认请 force=true。"})
+        _backup_label_files([], f"rename{idx}")   # master 快照
+        master[idx] = new_name
+        _save_master_classes(master)
+        synced = _sync_all_classes_txt(master)
     _CLS_STATS_CACHE["data"] = None
+    _invalidate_prefill_caches()
     return {"ok": True, "idx": idx, "old": old, "new": new_name,
             "synced": synced, "code_refs": refs}
 
@@ -2754,33 +2817,51 @@ def classes_merge(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "src_name": src_name, "dst_name": dst_name,
                 "files": len(files), "code_refs": refs}
 
-    backup = _backup_label_files(files, f"merge{src}to{dst}")
+    if not _BULK_LABEL_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409,
+                            detail="另一批量操作(合并/整run预标)进行中, 稍后再试")
+    try:
+        backup = _backup_label_files(files, f"merge{src}to{dst}")
 
-    lines_remapped = 0
-    for lf in files:
-        out_lines: List[str] = []
-        seen: Set[str] = set()
-        for ln in lf.read_text(encoding="utf-8").splitlines():
-            if not ln.strip():
-                continue
-            if ln.startswith(prefix):
-                ln = f"{dst} " + ln[len(prefix):]
-                lines_remapped += 1
-            if ln in seen:      # src/dst 完全重合框 → 保一行
-                continue
-            seen.add(ln)
-            out_lines.append(ln)
-        lf.write_text("\n".join(out_lines) + ("\n" if out_lines else ""),
-                      encoding="utf-8")
-
-    master[src] = f"_dead{src}_{src_name}"   # 墓碑占位, idx 永不移位
-    _save_master_classes(master)
-    synced = _sync_all_classes_txt(master)
+        lines_remapped = 0
+        failed: List[str] = []
+        for lf in files:
+            try:
+                out_lines: List[str] = []
+                seen: Set[str] = set()
+                for ln in lf.read_text(encoding="utf-8").splitlines():
+                    if not ln.strip():
+                        continue
+                    if ln.startswith(prefix):
+                        ln = f"{dst} " + ln[len(prefix):]
+                        lines_remapped += 1
+                    if ln in seen:      # src/dst 完全重合框 → 保一行
+                        continue
+                    seen.add(ln)
+                    out_lines.append(ln)
+                # 原子写: tmp + replace, 中途崩溃不留半截文件
+                tmp = lf.with_suffix(".txt.tmp")
+                tmp.write_text("\n".join(out_lines) + ("\n" if out_lines else ""),
+                               encoding="utf-8")
+                os.replace(tmp, lf)
+            except Exception:
+                failed.append(str(lf))   # 并发删除/占用: 跳过继续, 不弃跑
+        # master 墓碑化放在 label 重写**之后**: 中途崩溃时 src 仍活, 重跑
+        # merge 可自愈补完; 反序则崩溃即留下"墓碑类还有活框"的分裂态。
+        with _MASTER_LOCK:
+            master = _load_master_classes()
+            if master[src] == src_name:      # 并发防呆: 窗口内没被别人动过
+                master[src] = f"_dead{src}_{src_name}"   # 墓碑占位, idx 永不移位
+                _save_master_classes(master)
+            synced = _sync_all_classes_txt(master)
+    finally:
+        _BULK_LABEL_LOCK.release()
     _CLS_STATS_CACHE["data"] = None
+    _invalidate_prefill_caches()
     return {"ok": True, "src": src, "dst": dst, "src_name": src_name,
             "dst_name": dst_name, "files": len(files),
             "lines_remapped": lines_remapped, "synced": synced,
-            "backup": str(backup), "code_refs": refs}
+            "failed": failed, "backup": str(backup), "code_refs": refs}
 
 
 # ── 凹轴: 总力战轴视频素材管线 (下载 → 抽帧 → battle 预标 → 轴表打点) ────────
@@ -2821,21 +2902,34 @@ def _axis_duration(p: Path) -> float:
     return dur
 
 
+_AXIS_JOB_SEQ = 0
+
+
 def _axis_spawn_job(kind: str, label: str, cmd: List[str], post=None) -> str:
-    """后台线程跑 subprocess, log 尾部滚动进 job 注册表(dashboard 轮询)。"""
-    jid = f"{kind}_{int(time.time() * 1000) % 100000000}"
-    job: Dict[str, Any] = {"id": jid, "kind": kind, "label": label,
-                           "status": "running", "log": [],
-                           "started": time.time(), "ended": None, "rc": None}
+    """后台线程跑 subprocess, log 尾部滚动进 job 注册表(dashboard 轮询)。
+    job 存 _proc 句柄供 job_cancel 杀进程; _ 前缀键不进 jobs 响应。"""
+    global _AXIS_JOB_SEQ
     with _AXIS_JOBS_LOCK:
+        _AXIS_JOB_SEQ += 1
+        jid = f"{kind}_{_AXIS_JOB_SEQ}_{int(time.time()) % 100000}"
+        job: Dict[str, Any] = {"id": jid, "kind": kind, "label": label,
+                               "status": "running", "log": [],
+                               "started": time.time(), "ended": None,
+                               "rc": None, "_proc": None, "_cancel": False}
         _AXIS_JOBS[jid] = job
 
     def run() -> None:
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
                 text=True, encoding="utf-8", errors="replace",
                 cwd=str(REPO_ROOT))
+            with _AXIS_JOBS_LOCK:
+                job["_proc"] = proc
+                cancelled = job["_cancel"]
+            if cancelled:      # cancel 赶在 Popen 前到达
+                proc.kill()
             assert proc.stdout is not None
             for line in proc.stdout:
                 line = line.rstrip()
@@ -2846,7 +2940,7 @@ def _axis_spawn_job(kind: str, label: str, cmd: List[str], post=None) -> str:
                     if len(job["log"]) > 80:
                         del job["log"][: len(job["log"]) - 80]
             rc = proc.wait()
-            if rc == 0 and post is not None:
+            if rc == 0 and not job["_cancel"] and post is not None:
                 try:
                     post()
                 except Exception as e:
@@ -2854,7 +2948,8 @@ def _axis_spawn_job(kind: str, label: str, cmd: List[str], post=None) -> str:
                         job["log"].append(f"[post] {e}")
             with _AXIS_JOBS_LOCK:
                 job["rc"] = rc
-                job["status"] = "done" if rc == 0 else "error"
+                job["status"] = ("cancelled" if job["_cancel"]
+                                 else ("done" if rc == 0 else "error"))
                 job["ended"] = time.time()
         except Exception as e:
             with _AXIS_JOBS_LOCK:
@@ -2914,9 +3009,18 @@ def axis_download(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "job": jid}
 
 
+def _axis_parse_ts(v: str) -> float:
+    """'90' / '1:30' / '01:02:03.5' → 秒。"""
+    total = 0.0
+    for part in v.split(":"):
+        total = total * 60 + float(part or 0)
+    return total
+
+
 @app.post("/api/v1/axis/extract")
 def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
     video = _axis_safe_video(str(payload.get("video") or ""))
+    force = bool(payload.get("force"))
     try:
         fps = float(payload.get("fps") or 3)
     except (TypeError, ValueError):
@@ -2928,16 +3032,42 @@ def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
         if v and not re.match(r"^[\d:.]+$", v):
             raise HTTPException(status_code=400,
                                 detail="start/end 格式: 秒数 或 mm:ss")
+    ss = _axis_parse_ts(start) if start else 0.0
+    dur = None
+    if end:
+        dur = _axis_parse_ts(end) - ss
+        if dur <= 0:
+            raise HTTPException(status_code=400, detail="end 必须大于 start")
     pool = _axis_pool_name(video.stem)
     pool_dir = RAW_IMAGES_DIR / pool
     pool_dir.mkdir(parents=True, exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostats"]
-    if start:
-        cmd += ["-ss", start]
-    cmd += ["-i", str(video)]
-    if end:
-        cmd += ["-to", end]
-    cmd += ["-vf", f"fps={fps}", "-qscale:v", "2",
+    # 重抽清池(2026-07-11 审计): ffmpeg 每次从 frame_00001 重编号, 换 fps/区间后
+    # 同名旧 label 贴到新画面 = 标签错位毒数据, 多余旧帧成孤儿。已有内容必须
+    # force 确认; 有标注先备份再清。
+    old_jpg = sorted(pool_dir.glob("*.jpg"))
+    old_txt = [t for t in pool_dir.glob("*.txt") if t.name != "classes.txt"]
+    labeled = [t for t in old_txt if t.stat().st_size > 0]
+    if (old_jpg or old_txt) and not force:
+        raise HTTPException(status_code=409, detail=(
+            f"帧池 {pool} 已有 {len(old_jpg)}帧/{len(labeled)}个非空标注 — 重抽会清池"
+            f"(标注先备份到 _backups), 确认请带 force=true"))
+    if labeled:
+        _backup_label_files(labeled, f"extract_{pool}"[:60])
+    for f in old_jpg + old_txt:
+        try:
+            f.unlink()
+        except Exception:
+            pass
+    # -ss/-t 都放 -i 前(输入选项): 输入 seek 会重置时间戳, `-to` 放输出侧会退化
+    # 成"时长"语义(ffmpeg 8 实测帧数翻倍) — 服务端算好 duration 传 -t 最稳。
+    cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "warning",
+           "-nostats"]
+    if ss > 0:
+        cmd += ["-ss", f"{ss:.3f}"]
+    if dur is not None:
+        cmd += ["-t", f"{dur:.3f}"]
+    cmd += ["-i", str(video),
+            "-vf", f"fps={fps}", "-qscale:v", "2",
             str(pool_dir / "frame_%05d.jpg")]
 
     def post() -> None:
@@ -2953,7 +3083,28 @@ def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
 def axis_jobs() -> Dict[str, Any]:
     with _AXIS_JOBS_LOCK:
         jobs = sorted(_AXIS_JOBS.values(), key=lambda j: -j["started"])[:10]
-        return {"jobs": [dict(j, log=list(j["log"])[-6:]) for j in jobs]}
+        return {"jobs": [
+            {**{k: v for k, v in j.items() if not k.startswith("_")},
+             "log": list(j["log"])[-6:]} for j in jobs]}
+
+
+@app.post("/api/v1/axis/job_cancel")
+def axis_job_cancel(payload: Dict[str, Any]) -> Dict[str, Any]:
+    jid = str(payload.get("id") or "")
+    with _AXIS_JOBS_LOCK:
+        job = _AXIS_JOBS.get(jid)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["status"] != "running":
+            return {"ok": False, "status": job["status"]}
+        job["_cancel"] = True
+        proc = job["_proc"]
+    if proc is not None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    return {"ok": True, "id": jid}
 
 
 @app.get("/api/v1/axis/video_file")
@@ -3006,6 +3157,13 @@ def axis_sheet_save(payload: Dict[str, Any]) -> Dict[str, Any]:
                       "action": str(r.get("action") or "")[:48],
                       "note": str(r.get("note") or "")[:120]})
     clean.sort(key=lambda x: x["t"])
+    f = AXIS_SHEET_DIR / (stem + ".json")
+    if f.exists():          # 覆盖前留上一版(误存空表可回滚)
+        try:
+            import shutil
+            shutil.copy2(f, f.with_suffix(".json.bak"))
+        except Exception:
+            pass
     (AXIS_SHEET_DIR / (stem + ".json")).write_text(
         json.dumps({"video": stem, "rows": clean, "updated": time.time()},
                    ensure_ascii=False, indent=1),
@@ -3189,9 +3347,9 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         # that model's authoritative span — so an avatar pass won't suggest a
         # spurious UI class on a sprite (and vice-versa). Shared with the 整run
         # prefill so single-frame and batch behave identically.
-        from scripts.yolo_prefill_run import get_model, _OWNS, _IMGSZ_BY_TAG  # noqa: PLC0415
+        from scripts.yolo_prefill_run import get_model, owns_for, _IMGSZ_BY_TAG  # noqa: PLC0415
         model, remap, tag = get_model(model_key, version)
-        owns = _OWNS.get(tag, lambda i: True)
+        owns = owns_for(tag, remap)
         tgt = _parse_target_classes(payload.get("target_classes"))  # 只标目标 cls
         use_imgsz = int(payload.get("imgsz") or _IMGSZ_BY_TAG.get(tag, 960))
         master = _load_master_classes()
@@ -3255,6 +3413,8 @@ def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
     img_dir = d / "frames" if (d / "frames").is_dir() else d
     if not img_dir.is_dir():
         raise HTTPException(status_code=404, detail="dataset not found")
+    if not _BULK_LABEL_LOCK.acquire(blocking=False):
+        return {"ok": False, "error": "另一批量操作(合并/整run预标)进行中, 稍后再试"}
     try:
         from scripts.yolo_prefill_run import prefill_run  # noqa: PLC0415
         res = prefill_run(img_dir, model_key=model_key, version=version, conf=conf,
@@ -3262,6 +3422,8 @@ def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, **res}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    finally:
+        _BULK_LABEL_LOCK.release()
 
 
 @app.get("/api/v1/datasets/yolo_models")
@@ -3277,7 +3439,7 @@ def dataset_yolo_models() -> Dict[str, Any]:
     master = _load_master_classes()
     label = {"ui": "ui", "fused_avatar": "头像", "emoticon": "摸头",
              "battle_heads": "战斗头"}
-    teacher_default = {}  # (2026-06-08) ui v7 上线=active 即最强 UI(by-cls 0.921 全面超 v6c) → teacher=active(v7); fused v6 / emoticon v26n 同理 active=最强。旧 v6c teacher 弃用
+    teacher_default = {"battle_heads": "v4"}  # (2026-06-08) ui v7 上线=active 即最强 UI(by-cls 0.921 全面超 v6c) → teacher=active(v7); fused v6 / emoticon v26n 同理 active=最强。旧 v6c teacher 弃用。battle: active=legacy 是 pipeline 硬路径占位(词表 c0-c3 与 master 零命中, 预标=纯垃圾), prefill teacher 独立 pin v4
     out = []
     for key in ("ui", "fused_avatar", "emoticon", "battle_heads"):
         node = reg.get(key)

@@ -58,13 +58,25 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i != 451  # UI=非头像非emoticon(自动含 452-454 双倍三倍/据点防御/信用回收, 与 pipeline 域过滤一致)
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
-# battle 域 = battle_heads 训练词表本身(我方/敌方/Boss/塞特 476-479 + HUD 128-136
-# + 战斗2倍速 412)。remap 已按名字过滤(不在 master 的名字直接丢), battle 模型只训
-# 战斗类 → 词表即权威 span, 不枚举 idx 集合(旧 lambda: False 把 battle 预标全数
-# 丢框 = 凹轴管线上线前实锤; 枚举法在 v5 加新类时又会静默漏, 与 imgsz 静默零检出
-# 同型坑)。
+# battle 静态 span(v4 词表的 master 落点) — 只供 UI datalist 之类展示用途;
+# **写路径一律用 owns_for(tag, remap) 的词表动态 span**(见下)。
+_BATTLE_SPAN = set(range(128, 137)) | {412} | set(range(476, 480))
+def _battle_span(i: int) -> bool:   return i in _BATTLE_SPAN
 _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
-         "cafe": _emoticon_span, "battle": (lambda i: True)}
+         "cafe": _emoticon_span, "battle": _battle_span}
+
+
+def owns_for(tag: str, remap: dict):
+    """写路径(prefill/suggest)用的 owns 判定。battle 域 = 该权重词表∩master
+    (remap.values(), v5 加新类自动跟随, 无枚举漏类)。
+    ⚠2026-07-11 审计教训: 曾把 _OWNS['battle'] 设 lambda True — merge 模式
+    没事(检出本来只有战斗类), 但 **overwrite 模式 kept=[e if not owns] 起始
+    变空 = 整池 UI/头像/emoticon 手标全被清掉**, owns 在 overwrite 里是
+    "保留其他模型框"的过滤器, 双重用途缺一不可。"""
+    if tag == "battle":
+        owned = set(remap.values())
+        return owned.__contains__
+    return _OWNS.get(tag, lambda i: True)
 
 
 def resolve_img_dir(dataset: str) -> Path:
@@ -110,6 +122,13 @@ def get_model(model_key: str = "ui", version: "str | None" = None):
             mi = midx.get(nm)
             if mi is not None:
                 remap[int(li)] = mi
+        if not remap:
+            # 词表与 master 零命中 = 权重错配(如 battle legacy 的 c0/c1/c2/c3
+            # 占位名) — 静默跑会把未标帧全写成空 label 还报成功, 必须炸。
+            raise ValueError(
+                f"{model_key}/{ver} 权重词表与 master 零命中"
+                f"(names={list(m.names.values())[:6]}...) — 选错版本? "
+                f"battle 预标请用 v4。")
         tag = _KEY_TO_TAG.get(model_key, "ui")
         _MODELS[cache_key] = (m, remap, tag)
     return _MODELS[cache_key]
@@ -156,7 +175,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
         mode = "overwrite"
     img_dir = Path(img_dir)
     m, remap, tag = get_model(model_key, version)
-    owns = _OWNS.get(tag, lambda i: True)
+    owns = owns_for(tag, remap)
     # 只标目标 cls (飞轮补单个/几个弱类时, 不用标全部, 大幅提效)。空=标该模型全 span。
     tgt = set(int(t) for t in target_classes) if target_classes else None
     if imgsz is None:
