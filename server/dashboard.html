@@ -207,6 +207,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   <button class="nav-btn" onclick="showPage('capture')" title="采集中心">C</button>
   <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
   <button class="nav-btn" onclick="showPage('synth')" title="合成数据模板编辑（生成训练用 composite 头像）">S</button>
+  <button class="nav-btn" onclick="showPage('axis')" title="凹轴 · 总力战轴视频素材管线（下载→抽帧→预标→轴表）">轴</button>
   <div class="sidebar-bottom">
     <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API 文档">?</button>
   </div>
@@ -473,7 +474,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
     <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前选择的 teacher 模型预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
-    <select id="ann_prefill_model" onchange="annFillVersions()" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option></select>
+    <select id="ann_prefill_model" onchange="annFillVersions()" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option><option value="battle_heads">战斗头</option></select>
     <select id="ann_prefill_ver" title="模型版本: ★=prefill推荐teacher(=active), ·live=pipeline在用。UI 默认 v7(2026-06-08 上线, by-cls 0.92 全面最强: 制造入口0→0.97/emoticon/cafe/红黄点都到位, 超 v6c+v5)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"></select>
     <select id="ann_prefill_mode" title="累加=追加到其他模型已标的框上不覆盖(首次叠标用) / 覆盖=只替换本模型自己段的框、删旧写新、其他模型框(ui/头像)保留(重跑某模型修错用,如调高摸头conf去课程表乱标) / 跳过已标=不碰已标帧" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="merge">累加</option><option value="overwrite">覆盖(仅本模型)</option><option value="skip">跳过已标</option></select>
     <input id="ann_prefill_conf" type="number" min="0.05" max="0.95" step="0.05" value="0.25" title="预填 conf 阈值。摸头/头像在非主场景(如课程表)易假阳性,调高到 0.4-0.6 滤掉乱标" style="width:56px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
@@ -516,6 +517,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div class="add-class-row">
         <input type="text" id="ann_new_class" placeholder="new class..." onkeydown="if(event.key==='Enter')annAddClass()"/>
         <button class="btn btn-sm btn-success" onclick="annAddClass()" style="padding:3px 6px">+</button>
+      </div>
+      <div class="add-class-row">
+        <button class="btn btn-sm" onclick="clsMgrOpen()" style="flex:1" title="全库类管理: 两类合并 / 改名 / 用量统计 (自动备份, idx 永不移位)">🛠 类管理</button>
       </div>
       <div id="ann_classlist"></div>
       <h4>Boxes <span id="ann_boxcount"></span></h4>
@@ -775,6 +779,97 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   </div>
 </div>
 
+<!-- ════════════ AXIS PAGE (凹轴素材) ════════════ -->
+<div class="page" id="page-axis">
+  <div class="page-title">凹轴素材</div>
+  <div class="assistant-sub">总力战轴视频 · bilibili 下载 → ffmpeg 抽帧 → battle v4 预标 → 轴表打点</div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px;font-size:13px">📥 视频下载 (bilibili / YouTube)</h3>
+    <div class="form-row" style="align-items:flex-end">
+      <div class="form-group" style="flex:1;min-width:320px">
+        <label>视频 URL (BV 号页面链接)</label>
+        <input id="axis_url" type="text" placeholder="https://www.bilibili.com/video/BVxxxxxxxx" onkeydown="if(event.key==='Enter')axisDownload()"/>
+      </div>
+      <div class="form-group" style="min-width:170px">
+        <label>登录 cookies (高画质)</label>
+        <select id="axis_cookies">
+          <option value="">不带 (~480p)</option>
+          <option value="chrome">Chrome (大会员画质)</option>
+          <option value="edge">Edge</option>
+          <option value="firefox">Firefox</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="axisDownload()" style="margin-bottom:11px">⬇ 下载</button>
+    </div>
+    <div id="axis_jobs" style="font-size:11px;font-family:var(--mono);color:var(--muted);max-height:170px;overflow-y:auto;background:#0d0d10;border:1px solid var(--border);border-radius:3px;padding:6px;margin-top:6px;display:none"></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;margin-bottom:8px">
+      <h3 style="margin:0;font-size:13px">🎞 视频库 <span style="color:var(--muted);font-weight:normal;font-size:11px">(data/axis_videos/ — 手动放文件也会出现在这)</span></h3>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm" onclick="axisRefresh()">↻ 刷新</button>
+    </div>
+    <div id="axis_video_list" style="font-size:12px;color:var(--muted)">Loading…</div>
+  </div>
+
+  <div class="card" id="axis_sheet_card" style="display:none">
+    <h3 style="margin:0 0 8px;font-size:13px">📝 轴表 · <span id="axis_sheet_title" style="color:var(--accent)"></span></h3>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="flex:1.2;min-width:380px">
+        <video id="axis_player" controls style="width:100%;max-height:420px;background:#000;border-radius:4px"></video>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-sm btn-success" onclick="axisSheetStamp()" title="用视频当前时刻新建一行">⏱ 打点</button>
+          <button class="btn btn-sm" onclick="axisPlayerStep(-1)">-1s</button>
+          <button class="btn btn-sm" onclick="axisPlayerStep(-0.1)">-0.1</button>
+          <button class="btn btn-sm" onclick="axisPlayerStep(0.1)">+0.1</button>
+          <button class="btn btn-sm" onclick="axisPlayerStep(1)">+1s</button>
+          <span id="axis_player_t" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:360px;display:flex;flex-direction:column">
+        <div style="flex:1;overflow-y:auto;max-height:420px;border:1px solid var(--border);border-radius:4px">
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead><tr style="position:sticky;top:0;background:#1b1f27;color:var(--muted);text-align:left;z-index:2">
+              <th style="padding:4px 6px">t(s)</th><th>费用</th><th>角色</th><th>动作</th><th>备注</th><th></th>
+            </tr></thead>
+            <tbody id="axis_sheet_rows"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="axisSheetAddRow()">+ 行</button>
+          <div style="flex:1"></div>
+          <span id="axis_sheet_status" style="font-size:11px;color:var(--muted);align-self:center"></span>
+          <button class="btn btn-sm btn-success" onclick="axisSheetSave()">💾 保存轴表</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 类管理 modal (合并 / 改名 / 用量统计) ── -->
+<div id="cls_mgr_modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)clsMgrClose()">
+  <div style="background:var(--bg2);border:1px solid var(--accent);border-radius:8px;width:780px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;padding:14px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <b style="font-size:14px">🛠 类管理</b>
+      <span id="cls_mgr_meta" style="font-size:11px;color:var(--muted)"></span>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm" onclick="clsMgrLoad(true)" title="重扫全库统计">↻ 重扫</button>
+      <button class="btn btn-sm" onclick="clsMgrClose()">✕</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+      <input id="cls_mgr_filter" type="text" placeholder="过滤: 名称或 idx…" oninput="clsMgrRender()" style="flex:1;padding:4px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:12px;outline:none"/>
+      <label style="font-size:11px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="cls_mgr_used" onchange="clsMgrRender()"/> 只看有框</label>
+    </div>
+    <div id="cls_mgr_merge_bar" style="display:none;background:#1b1f27;border:1px solid #facc15;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px"></div>
+    <div id="cls_mgr_list" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--mono)"></div>
+    <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.55">
+      合并 = 全库(raw_images + trajectories) label 行 src→dst 重写, src 变 <code>_dead</code> 墓碑占位 — <b>idx 永不移位</b>, 不破 build REMAP / 头像段 143-394 / battle 段路由; 执行前自动备份到 data/raw_images/_backups/。改名 = 原位改 master 行 + 全池 classes.txt 同步。⚠ 标 <span style="color:#f87171">CODE</span> 的类名被 brain/ 源码引用 — 动之前想清楚: 下代模型训完后 skill 里旧名会失配。
+    </div>
+  </div>
+</div>
+
 <!-- ── Paste-from-frame picker modal (Shift+P) ── -->
 <div id="ann_paste_picker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)annClosePastePicker()">
   <div style="background:#0d0d10;border:1px solid var(--border);border-radius:6px;padding:14px;width:560px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;gap:10px;font-family:var(--mono)">
@@ -844,11 +939,12 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   $('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,synth:3}[name]].classList.add('active');
+  document.querySelectorAll('.nav-btn')[{agent:0,capture:1,annotate:2,synth:3,axis:4}[name]].classList.add('active');
   currentPage = name;
   if (name === 'capture') refreshCapture();
   if (name === 'annotate') annLoadDatasets();
   if (name === 'synth') { synthInit(); synthAttachCanvasEvents(); }
+  if (name === 'axis') axisInit();
 }
 
 /* ════════════════════════════════════════════════════
@@ -5136,6 +5232,244 @@ function synthPvRender(){
     setTimeout(attach, 0);
   }
 })();
+/* ════════════════════════════════════════════════════
+   类管理 (merge / rename / stats)
+   ════════════════════════════════════════════════════ */
+function clsEsc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+async function clsApi(path, body){
+  const r = await fetch(path, body!==undefined?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:undefined);
+  let j={}; try{ j = await r.json(); }catch(_){}
+  if(!r.ok){
+    const d = j && j.detail;
+    const e = new Error(typeof d==='string' ? d : ((d&&d.hint)||JSON.stringify(d||j)));
+    e.status = r.status; e.detail = d;
+    throw e;
+  }
+  return j;
+}
+let CLSM = {stats:null, mergeSrc:null};
+function clsMgrOpen(){ $('cls_mgr_modal').style.display='flex'; if(!CLSM.stats) clsMgrLoad(false); else clsMgrRender(); }
+function clsMgrClose(){ $('cls_mgr_modal').style.display='none'; }
+async function clsMgrLoad(refresh){
+  $('cls_mgr_list').innerHTML='<div style="padding:20px;color:var(--muted)">全库扫描统计中… (2万+ label 文件, 约几秒)</div>';
+  try{
+    const r = await clsApi('/api/v1/classes/stats'+(refresh?'?refresh=true':''));
+    CLSM.stats = r.classes;
+    $('cls_mgr_meta').textContent = `${r.total} 类 · 统计于 ${new Date(r.generated_at*1000).toLocaleTimeString()}`;
+    clsMgrRender();
+  }catch(e){ $('cls_mgr_list').innerHTML='<div style="padding:20px;color:#f87171">加载失败: '+clsEsc(e.message)+'</div>'; }
+}
+function clsMgrRender(){
+  if(!CLSM.stats) return;
+  const q = ($('cls_mgr_filter').value||'').trim().toLowerCase();
+  const onlyUsed = $('cls_mgr_used').checked;
+  const bar = $('cls_mgr_merge_bar');
+  if(CLSM.mergeSrc!=null){
+    const s = CLSM.stats.find(c=>c.idx===CLSM.mergeSrc);
+    bar.style.display='block';
+    bar.innerHTML = `合并模式: src = <b>${s.idx}: ${clsEsc(s.name)}</b> (${s.boxes}框) — 在列表里点目标类的 <b>⇐并入</b> <button class="btn btn-sm" style="margin-left:10px" onclick="CLSM.mergeSrc=null;clsMgrRender()">取消</button>`;
+  } else bar.style.display='none';
+  const el = $('cls_mgr_list');
+  el.innerHTML='';
+  CLSM.stats.forEach(c=>{
+    if(onlyUsed && c.boxes===0 && !c.dead) return;
+    if(q && String(c.idx)!==q && !c.name.toLowerCase().includes(q)) return;
+    const d=document.createElement('div');
+    d.style.cssText='display:flex;align-items:center;gap:8px;padding:3px 8px;border-bottom:1px solid #1b1f27'+(c.dead?';opacity:.38':'');
+    const isSrc = CLSM.mergeSrc===c.idx;
+    d.innerHTML = `<span style="width:34px;color:var(--muted)">${c.idx}</span>`+
+      `<span class="class-dot" style="background:${COLORS[c.idx%COLORS.length]};flex-shrink:0"></span>`+
+      `<span style="flex:1;word-break:break-all${isSrc?';color:#facc15':''}">${clsEsc(c.name)}${c.code_ref?' <span style="color:#f87171;font-size:9px" title="被 brain/ 源码引用">CODE</span>':''}</span>`+
+      `<span style="width:96px;color:var(--muted);text-align:right">${c.boxes}框/${c.pools}池</span>`;
+    const act=document.createElement('span');
+    act.style.cssText='display:flex;gap:3px;flex-shrink:0';
+    if(!c.dead){
+      const bR=document.createElement('button');bR.className='btn btn-sm';bR.textContent='改名';bR.onclick=()=>clsMgrRename(c.idx);act.appendChild(bR);
+      const bM=document.createElement('button');bM.className='btn btn-sm';
+      if(CLSM.mergeSrc==null){ bM.textContent='合并…'; bM.title='把这个类当 src(被并掉的那个)'; bM.onclick=()=>{CLSM.mergeSrc=c.idx;clsMgrRender();}; }
+      else if(isSrc){ bM.textContent='取消'; bM.onclick=()=>{CLSM.mergeSrc=null;clsMgrRender();}; }
+      else { bM.textContent='⇐并入'; bM.className='btn btn-sm btn-success'; bM.title=`把 ${CLSM.mergeSrc} 并入 ${c.idx}`; bM.onclick=()=>clsMgrMergeInto(c.idx); }
+      act.appendChild(bM);
+    }
+    d.appendChild(act);
+    el.appendChild(d);
+  });
+}
+async function clsMgrRename(idx){
+  const c = CLSM.stats.find(x=>x.idx===idx);
+  const nn = prompt(`改名 idx ${idx} (${c.boxes}框):\n${c.name}\n\n→ 新名字:`, c.name);
+  if(!nn || nn.trim()===c.name) return;
+  const send = async force=>clsApi('/api/v1/classes/rename',{idx, new_name:nn.trim(), force});
+  try{ await send(false); }
+  catch(e){
+    if(e.status===409 && e.detail && e.detail.code_refs){
+      if(!confirm(`⚠ '${c.name}' 被代码引用:\n${e.detail.code_refs.join('\n')}\n\n${e.detail.hint}\n\n仍要改名?`)) return;
+      try{ await send(true); }catch(e2){ alert('改名失败: '+e2.message); return; }
+    } else { alert('改名失败: '+e.message); return; }
+  }
+  showToast(`已改名 ${idx}: ${c.name} → ${nn.trim()}`,'ok');
+  await clsMgrLoad(true);
+  try{ if(ANN.dataset) annLoadDataset(); }catch(_){}
+}
+async function clsMgrMergeInto(dstIdx){
+  const src = CLSM.stats.find(c=>c.idx===CLSM.mergeSrc);
+  const dst = CLSM.stats.find(c=>c.idx===dstIdx);
+  let pv;
+  try{ pv = await clsApi('/api/v1/classes/merge',{src:src.idx,dst:dst.idx,dry_run:true}); }
+  catch(e){ alert('预检失败: '+e.message); return; }
+  let msg = `合并确认:\n\nsrc ${src.idx}: ${src.name} (${src.boxes}框)\n → dst ${dst.idx}: ${dst.name} (${dst.boxes}框)\n\n将改写 ${pv.files} 个 label 文件, src 变墓碑(idx 不移位)。\n自动备份后执行, 不可从 UI 撤销。`;
+  if(pv.code_refs && pv.code_refs.length) msg += `\n\n⚠ '${src.name}' 被代码引用:\n${pv.code_refs.join('\n')}`;
+  if(!confirm(msg)) return;
+  try{
+    const r = await clsApi('/api/v1/classes/merge',{src:src.idx,dst:dst.idx,force:true});
+    showToast(`合并完成: ${r.lines_remapped} 行 / ${r.files} 文件, 备份 ${r.backup.split(/[\\\/]/).pop()}`,'ok',7000);
+    CLSM.mergeSrc=null;
+    await clsMgrLoad(true);
+    try{ if(ANN.dataset) annLoadDataset(); }catch(_){}
+  }catch(e){ alert('合并失败: '+e.message); }
+}
+
+/* ════════════════════════════════════════════════════
+   凹轴素材 (axis): 下载 → 抽帧 → battle v4 预标 → 轴表
+   ════════════════════════════════════════════════════ */
+let AXIS = {videos:[], cur:null, rows:[], dirty:false, jobTimer:null, wasRunning:false};
+function axisInit(){ axisRefresh(); axisPollJobs(); }
+async function axisRefresh(){
+  try{ const r = await clsApi('/api/v1/axis/videos'); AXIS.videos=r.videos||[]; axisRenderVideos(); }
+  catch(e){ $('axis_video_list').textContent='加载失败: '+e.message; }
+}
+function axisRenderVideos(){
+  const el=$('axis_video_list');
+  if(!AXIS.videos.length){ el.innerHTML='<span style="color:var(--muted)">还没有视频 — 上面贴 bilibili 链接下载, 或手动把 mp4 放进 data/axis_videos/</span>'; return; }
+  el.innerHTML='';
+  const tbl=document.createElement('table'); tbl.style.cssText='width:100%;border-collapse:collapse;font-size:12px';
+  tbl.innerHTML='<thead><tr style="color:var(--muted);text-align:left;font-size:11px"><th style="padding:4px">视频</th><th>时长</th><th>大小</th><th>帧池</th><th>轴表</th><th style="min-width:250px">操作</th></tr></thead>';
+  const tb=document.createElement('tbody');
+  AXIS.videos.forEach(v=>{
+    const tr=document.createElement('tr'); tr.style.borderTop='1px solid #1b1f27';
+    const dur = v.duration ? `${Math.floor(v.duration/60)}:${String(Math.round(v.duration%60)).padStart(2,'0')}` : '—';
+    tr.innerHTML = `<td style="padding:6px 4px;max-width:280px;word-break:break-all">${clsEsc(v.name)}</td>`+
+      `<td style="font-family:var(--mono)">${dur}</td><td style="font-family:var(--mono)">${v.size_mb}MB</td>`+
+      `<td style="font-size:11px;font-family:var(--mono)">${v.frames?clsEsc(v.pool)+'<br>'+v.frames+'帧/'+v.labeled+'标':'—'}</td>`+
+      `<td style="font-family:var(--mono)">${v.sheet_rows||0}行</td><td></td>`;
+    const td=tr.lastElementChild;
+    const mk=(label,title,fn,cls='btn btn-sm')=>{const b=document.createElement('button');b.className=cls;b.textContent=label;b.title=title;b.style.margin='1px';b.onclick=fn;td.appendChild(b);};
+    mk('🎬 轴表','打点标轴(播放器+行表)',()=>axisOpenSheet(v));
+    mk('抽帧','ffmpeg 抽帧进 raw_images/'+v.pool,()=>axisExtract(v));
+    if(v.frames){
+      mk('预标v4','battle v4 预标该帧池 (同步, ~600帧/分钟)',()=>axisPrefill(v));
+      mk('标注页','跳到标注中心该池人审',()=>{showPage('annotate');setTimeout(()=>{const s=$('ann_dataset');if(s){s.value=v.pool;if(s.value===v.pool)annLoadDataset();else showToast('列表里选 '+v.pool,'info');}},700);});
+    }
+    mk('删','删除视频文件(帧池不动)',()=>axisDeleteVideo(v),'btn btn-sm btn-danger');
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb); el.appendChild(tbl);
+}
+async function axisDownload(){
+  const url=$('axis_url').value.trim(); if(!url){ alert('先贴视频链接'); return; }
+  try{
+    await clsApi('/api/v1/axis/download',{url, cookies:$('axis_cookies').value});
+    showToast('下载任务已启动 (后台)','ok'); $('axis_url').value='';
+    axisPollJobs();
+  }catch(e){ alert('启动失败: '+e.message); }
+}
+async function axisExtract(v){
+  const est = f=>v.duration?`≈${Math.round(v.duration*f)}帧`:'';
+  const fps = prompt(`抽帧 fps (建议 2-5)\n视频 ${v.duration}s → 3fps ${est(3)} / 5fps ${est(5)}\n已有帧会被覆盖:`, '3');
+  if(!fps) return;
+  try{
+    const r = await clsApi('/api/v1/axis/extract',{video:v.name, fps:parseFloat(fps)});
+    showToast('抽帧任务已启动 → '+r.pool,'ok'); axisPollJobs();
+  }catch(e){ alert('抽帧失败: '+e.message); }
+}
+async function axisPrefill(v){
+  if(!confirm(`用 battle v4 预标 ${v.pool} (${v.frames}帧)?\n同步执行, 约 ${Math.max(1,Math.ceil(v.frames/600))} 分钟, 完成前别关页面。`)) return;
+  showToast('battle v4 预标进行中…','info',20000);
+  try{
+    const r = await clsApi('/api/v1/datasets/yolo_prefill_run',{dataset:v.pool, model:'battle_heads', version:'v4', conf:0.30, mode:'merge'});
+    if(r.ok===false) throw new Error(r.error||'unknown');
+    showToast(`预标完成: ${r.written}帧写入 / ${r.skipped}跳过`,'ok',6000);
+    axisRefresh();
+  }catch(e){ alert('预标失败: '+e.message); }
+}
+async function axisDeleteVideo(v){
+  if(!confirm(`删除视频文件 ${v.name}?\n(已抽帧池 ${v.frames?v.pool:'无'} 与轴表不动)`)) return;
+  try{ await clsApi('/api/v1/axis/delete_video',{name:v.name}); showToast('已删除 '+v.name,'ok'); axisRefresh(); }
+  catch(e){ alert(e.message); }
+}
+async function axisPollJobs(){
+  let running=false;
+  try{
+    const r = await clsApi('/api/v1/axis/jobs');
+    const el=$('axis_jobs');
+    if(!(r.jobs||[]).length){ el.style.display='none'; }
+    else{
+      el.style.display='block';
+      el.innerHTML = r.jobs.map(j=>{
+        const dur=Math.round((j.ended||Date.now()/1000)-j.started);
+        const col=j.status==='running'?'#facc15':(j.status==='done'?'#4ade80':'#f87171');
+        return `<div style="margin-bottom:5px"><span style="color:${col}">[${j.status}]</span> ${clsEsc(j.kind)} · ${clsEsc(j.label)} · ${dur}s<br><span style="opacity:.65">${(j.log||[]).slice(-3).map(clsEsc).join('<br>')}</span></div>`;
+      }).join('');
+      running = r.jobs.some(j=>j.status==='running');
+    }
+  }catch(_){}
+  clearTimeout(AXIS.jobTimer);
+  if(running){ AXIS.wasRunning=true; AXIS.jobTimer=setTimeout(axisPollJobs,2000); }
+  else if(AXIS.wasRunning){ AXIS.wasRunning=false; axisRefresh(); }
+}
+function axisOpenSheet(v){
+  AXIS.cur=v; AXIS.rows=[]; AXIS.dirty=false;
+  $('axis_sheet_card').style.display='block';
+  $('axis_sheet_title').textContent=v.name;
+  const p=$('axis_player');
+  p.src='/api/v1/axis/video_file?name='+encodeURIComponent(v.name);
+  p.ontimeupdate=()=>{ $('axis_player_t').textContent='t = '+p.currentTime.toFixed(2)+'s'; };
+  clsApi('/api/v1/axis/sheet?video='+encodeURIComponent(v.name))
+    .then(r=>{ AXIS.rows=r.rows||[]; axisSheetRender(); })
+    .catch(()=>axisSheetRender());
+  $('axis_sheet_card').scrollIntoView({behavior:'smooth'});
+}
+function axisPlayerStep(d){ const p=$('axis_player'); p.currentTime=Math.max(0,p.currentTime+d); }
+function axisSheetStamp(){
+  const p=$('axis_player');
+  AXIS.rows.push({t:+p.currentTime.toFixed(2),cost:'',char:'',action:'',note:''});
+  AXIS.rows.sort((a,b)=>a.t-b.t);
+  AXIS.dirty=true; axisSheetRender();
+}
+function axisSheetAddRow(){ AXIS.rows.push({t:0,cost:'',char:'',action:'',note:''}); AXIS.dirty=true; axisSheetRender(); }
+function axisSheetRender(){
+  const tb=$('axis_sheet_rows'); tb.innerHTML='';
+  AXIS.rows.forEach((r,i)=>{
+    const tr=document.createElement('tr'); tr.style.borderTop='1px solid #1b1f27';
+    const cell=(key,w)=>{
+      const td=document.createElement('td');
+      const inp=document.createElement('input'); inp.type='text'; inp.value=r[key];
+      inp.style.cssText=`width:${w};padding:2px 4px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:2px;font-size:11px`;
+      inp.oninput=()=>{ r[key]=(key==='t')?(parseFloat(inp.value)||0):inp.value; AXIS.dirty=true; axisSheetStatus(); };
+      td.appendChild(inp); return td;
+    };
+    tr.appendChild(cell('t','50px'));
+    tr.appendChild(cell('cost','38px'));
+    tr.appendChild(cell('char','86px'));
+    tr.appendChild(cell('action','116px'));
+    tr.appendChild(cell('note','126px'));
+    const td=document.createElement('td'); td.style.whiteSpace='nowrap';
+    const j=document.createElement('button'); j.className='btn btn-sm'; j.textContent='▶'; j.title='跳到该时刻'; j.onclick=()=>{ $('axis_player').currentTime=r.t; }; td.appendChild(j);
+    const del=document.createElement('button'); del.className='btn btn-sm btn-danger'; del.textContent='✕'; del.style.marginLeft='2px'; del.onclick=()=>{ AXIS.rows.splice(i,1); AXIS.dirty=true; axisSheetRender(); }; td.appendChild(del);
+    tr.appendChild(td); tb.appendChild(tr);
+  });
+  axisSheetStatus();
+}
+function axisSheetStatus(){ $('axis_sheet_status').textContent = AXIS.dirty ? '未保存 *' : (AXIS.rows.length? '已保存':''); }
+async function axisSheetSave(){
+  if(!AXIS.cur) return;
+  try{
+    const r = await clsApi('/api/v1/axis/sheet',{video:AXIS.cur.name, rows:AXIS.rows});
+    AXIS.dirty=false; axisSheetStatus();
+    showToast(`轴表已存 (${r.rows} 行) → data/axis_sheets/`,'ok');
+    axisRefresh();
+  }catch(e){ alert('保存失败: '+e.message); }
+}
 </script>
 </body>
 </html>

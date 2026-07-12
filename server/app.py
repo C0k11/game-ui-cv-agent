@@ -2531,6 +2531,488 @@ def add_dataset_class(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "id": idx}
 
 
+# ── Class registry management: stats / rename / merge ─────────────────────
+# 铁律: master 索引一经分配**绝不移位** — 部署模型 idx、build 脚本 REMAP、头像段
+# 143-394、battle 段 128-136/412/476-479 的路由全按 idx 走。合并 = 全库 label 行
+# src→dst 重写 + src 行墓碑化(_dead 前缀占位); 改名 = 原位改行。绝不删行/挪行
+# (删行走 scripts/trim_master_classes.py 的显式全库 remap, 不进 API)。
+
+_CLS_STATS_CACHE: Dict[str, Any] = {"data": None}
+
+
+def _all_label_dirs() -> List[Path]:
+    """Every dir that may hold YOLO label .txt files (raw pools + trajectories).
+    下划线开头的目录(_backups/_synth_* 快照类)跳过 — 备份绝不参与重写。"""
+    out: List[Path] = []
+    if RAW_IMAGES_DIR.is_dir():
+        for d in sorted(RAW_IMAGES_DIR.iterdir()):
+            if not d.is_dir() or d.name.startswith("_"):
+                continue
+            sub = d / "frames" if (d / "frames").is_dir() else d
+            out.append(sub)
+    if TRAJECTORIES_DIR.is_dir():
+        for d in sorted(TRAJECTORIES_DIR.iterdir()):
+            if d.is_dir() and d.name.startswith("run_"):
+                out.append(d)
+    return out
+
+
+def _class_code_refs(name: str) -> List[str]:
+    """brain/ 源码里引用该类名的文件 — 改名/合并前的防呆警告源(skill 逻辑按
+    类名字符串匹配模型输出, registry 改了名, 下代模型训出来后旧名失配)。"""
+    hits: List[str] = []
+    brain = REPO_ROOT / "brain"
+    if not brain.is_dir() or not name:
+        return hits
+    for p in brain.rglob("*.py"):
+        try:
+            if name in p.read_text(encoding="utf-8"):
+                hits.append(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
+        except Exception:
+            continue
+    return hits
+
+
+def _scan_class_usage() -> Dict[int, Dict[str, Any]]:
+    """并行扫全库 label(2万+文件), 统计每 cls 的框数 + 出现的池数。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def scan_dir(d: Path):
+        counts: Dict[int, int] = {}
+        for lf in d.glob("*.txt"):
+            if lf.name == "classes.txt":
+                continue
+            try:
+                for line in lf.read_text(encoding="utf-8").splitlines():
+                    p = line.split()
+                    if p and p[0].isdigit():
+                        ci = int(p[0])
+                        counts[ci] = counts.get(ci, 0) + 1
+            except Exception:
+                continue
+        return d, counts
+
+    usage: Dict[int, Dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=32) as ex:
+        for d, counts in ex.map(scan_dir, _all_label_dirs()):
+            pool = d.parent.name if d.name == "frames" else d.name
+            for ci, n in counts.items():
+                u = usage.setdefault(ci, {"boxes": 0, "pools": set()})
+                u["boxes"] += n
+                u["pools"].add(pool)
+    return usage
+
+
+@app.get("/api/v1/classes/stats")
+def classes_stats(refresh: bool = Query(False)) -> Dict[str, Any]:
+    """全 master 类的用量统计(缓存, refresh=true 重扫) + brain/ 代码引用标记。"""
+    if not refresh and _CLS_STATS_CACHE["data"] is not None:
+        return _CLS_STATS_CACHE["data"]
+    master = _load_master_classes()
+    usage = _scan_class_usage()
+    try:
+        brain_blob = "\n".join(
+            p.read_text(encoding="utf-8")
+            for p in (REPO_ROOT / "brain").rglob("*.py"))
+    except Exception:
+        brain_blob = ""
+    rows = []
+    for i, name in enumerate(master):
+        u = usage.get(i) or {}
+        dead = name.startswith("_dead")
+        rows.append({
+            "idx": i, "name": name,
+            "boxes": u.get("boxes", 0),
+            "pools": len(u.get("pools") or ()),
+            "code_ref": (not dead) and (name in brain_blob),
+            "dead": dead,
+        })
+    data = {"classes": rows, "total": len(master), "generated_at": time.time()}
+    _CLS_STATS_CACHE["data"] = data
+    return data
+
+
+def _backup_label_files(files: List[Path], tag: str) -> Path:
+    """Snapshot the exact label files a mutation is about to rewrite (+ master).
+    只备份将被改的文件(非全库) — merge 常见只碰几百个文件, 秒级。"""
+    import shutil
+    stamp = time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time()*1000)%1000:03d}"
+    out = RAW_IMAGES_DIR / "_backups" / f"{stamp}_{tag}"
+    out.mkdir(parents=True, exist_ok=True)
+    data_root = REPO_ROOT / "data"
+    for f in files:
+        try:
+            rel = f.relative_to(data_root)
+        except ValueError:
+            rel = Path(f.name)
+        dst = out / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, dst)
+    if MASTER_CLASSES_FILE.exists():
+        shutil.copy2(MASTER_CLASSES_FILE, out / "_classes.txt")
+    return out
+
+
+def _sync_all_classes_txt(master: List[str]) -> int:
+    """把 master 副本刷进每个有标注的池的 classes.txt (训练/标注两侧同源)。"""
+    txt = "\n".join(master) + "\n"
+    n = 0
+    for d in _all_label_dirs():
+        cf = d / "classes.txt"
+        try:
+            if cf.exists() or next(d.glob("*.txt"), None) is not None:
+                cf.write_text(txt, encoding="utf-8")
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
+@app.post("/api/v1/classes/rename")
+def classes_rename(payload: Dict[str, Any]) -> Dict[str, Any]:
+    idx = int(payload.get("idx", -1))
+    new_name = str(payload.get("new_name") or "").strip()
+    force = bool(payload.get("force"))
+    master = _load_master_classes()
+    if not (0 <= idx < len(master)):
+        raise HTTPException(status_code=400, detail="idx out of range")
+    if not new_name:
+        raise HTTPException(status_code=400, detail="new_name required")
+    if any(ch.isspace() for ch in new_name):
+        raise HTTPException(status_code=400, detail="类名不能含空白字符(用下划线)")
+    old = master[idx]
+    if new_name == old:
+        return {"ok": True, "idx": idx, "old": old, "new": new_name, "synced": 0}
+    if new_name in master:
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{new_name}' 已存在(idx {master.index(new_name)}) — 两类合一请用合并")
+    refs = _class_code_refs(old)
+    if refs and not force:
+        raise HTTPException(status_code=409, detail={
+            "code_refs": refs,
+            "hint": "该类名被 brain/ 源码引用: 改名只改标注 registry, 下代模型"
+                    "训出来后 skill 里旧名字会失配, 需同步改代码。确认请 force=true。"})
+    _backup_label_files([], f"rename{idx}")   # master 快照
+    master[idx] = new_name
+    _save_master_classes(master)
+    synced = _sync_all_classes_txt(master)
+    _CLS_STATS_CACHE["data"] = None
+    return {"ok": True, "idx": idx, "old": old, "new": new_name,
+            "synced": synced, "code_refs": refs}
+
+
+@app.post("/api/v1/classes/merge")
+def classes_merge(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """src 类并入 dst 类: 全库 label 行重写 + src 墓碑化。dry_run=true 只预检。"""
+    src = int(payload.get("src", -1))
+    dst = int(payload.get("dst", -1))
+    force = bool(payload.get("force"))
+    dry = bool(payload.get("dry_run"))
+    master = _load_master_classes()
+    for v, nm in ((src, "src"), (dst, "dst")):
+        if not (0 <= v < len(master)):
+            raise HTTPException(status_code=400, detail=f"{nm} idx out of range")
+    if src == dst:
+        raise HTTPException(status_code=400, detail="src == dst")
+    src_name, dst_name = master[src], master[dst]
+    if src_name.startswith("_dead"):
+        raise HTTPException(status_code=400, detail=f"src '{src_name}' 已是墓碑类")
+    if dst_name.startswith("_dead"):
+        raise HTTPException(status_code=400, detail=f"dst '{dst_name}' 是墓碑类, 不能并入")
+    refs = _class_code_refs(src_name)
+    if refs and not force and not dry:
+        raise HTTPException(status_code=409, detail={
+            "code_refs": refs,
+            "hint": f"'{src_name}' 被 brain/ 源码引用 — 合并后该名进墓碑, 下代模型"
+                    "不再训它, skill 逻辑要同步改。确认请 force=true。"})
+
+    # pass 1: 并行找出所有含 src 行的 label 文件
+    from concurrent.futures import ThreadPoolExecutor
+    prefix = f"{src} "
+
+    def hits_in(d: Path) -> List[Path]:
+        out = []
+        for lf in d.glob("*.txt"):
+            if lf.name == "classes.txt":
+                continue
+            try:
+                txt = lf.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if any(ln.startswith(prefix) for ln in txt.splitlines()):
+                out.append(lf)
+        return out
+
+    files: List[Path] = []
+    with ThreadPoolExecutor(max_workers=32) as ex:
+        for lst in ex.map(hits_in, _all_label_dirs()):
+            files.extend(lst)
+
+    if dry:
+        return {"ok": True, "dry_run": True, "src": src, "dst": dst,
+                "src_name": src_name, "dst_name": dst_name,
+                "files": len(files), "code_refs": refs}
+
+    backup = _backup_label_files(files, f"merge{src}to{dst}")
+
+    lines_remapped = 0
+    for lf in files:
+        out_lines: List[str] = []
+        seen: Set[str] = set()
+        for ln in lf.read_text(encoding="utf-8").splitlines():
+            if not ln.strip():
+                continue
+            if ln.startswith(prefix):
+                ln = f"{dst} " + ln[len(prefix):]
+                lines_remapped += 1
+            if ln in seen:      # src/dst 完全重合框 → 保一行
+                continue
+            seen.add(ln)
+            out_lines.append(ln)
+        lf.write_text("\n".join(out_lines) + ("\n" if out_lines else ""),
+                      encoding="utf-8")
+
+    master[src] = f"_dead{src}_{src_name}"   # 墓碑占位, idx 永不移位
+    _save_master_classes(master)
+    synced = _sync_all_classes_txt(master)
+    _CLS_STATS_CACHE["data"] = None
+    return {"ok": True, "src": src, "dst": dst, "src_name": src_name,
+            "dst_name": dst_name, "files": len(files),
+            "lines_remapped": lines_remapped, "synced": synced,
+            "backup": str(backup), "code_refs": refs}
+
+
+# ── 凹轴: 总力战轴视频素材管线 (下载 → 抽帧 → battle 预标 → 轴表打点) ────────
+
+AXIS_VIDEO_DIR = REPO_ROOT / "data" / "axis_videos"
+AXIS_SHEET_DIR = REPO_ROOT / "data" / "axis_sheets"
+_AXIS_VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".flv", ".mov"}
+_AXIS_JOBS: Dict[str, Dict[str, Any]] = {}
+_AXIS_JOBS_LOCK = threading.Lock()
+_AXIS_DUR_CACHE: Dict[str, float] = {}
+
+
+def _axis_safe_video(name: str) -> Path:
+    p = AXIS_VIDEO_DIR / os.path.basename(name or "")
+    if not p.is_file() or p.suffix.lower() not in _AXIS_VIDEO_EXTS:
+        raise HTTPException(status_code=404, detail="video not found")
+    return p
+
+
+def _axis_pool_name(stem: str) -> str:
+    clean = re.sub(r"[^\w一-鿿]+", "_", stem).strip("_")[:60]
+    return f"axis_{clean or 'video'}"
+
+
+def _axis_duration(p: Path) -> float:
+    key = f"{p.name}:{p.stat().st_size}"
+    if key in _AXIS_DUR_CACHE:
+        return _AXIS_DUR_CACHE[key]
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(p)],
+            capture_output=True, text=True, timeout=15)
+        dur = float((r.stdout or "0").strip() or 0)
+    except Exception:
+        dur = 0.0
+    _AXIS_DUR_CACHE[key] = dur
+    return dur
+
+
+def _axis_spawn_job(kind: str, label: str, cmd: List[str], post=None) -> str:
+    """后台线程跑 subprocess, log 尾部滚动进 job 注册表(dashboard 轮询)。"""
+    jid = f"{kind}_{int(time.time() * 1000) % 100000000}"
+    job: Dict[str, Any] = {"id": jid, "kind": kind, "label": label,
+                           "status": "running", "log": [],
+                           "started": time.time(), "ended": None, "rc": None}
+    with _AXIS_JOBS_LOCK:
+        _AXIS_JOBS[jid] = job
+
+    def run() -> None:
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                cwd=str(REPO_ROOT))
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
+                with _AXIS_JOBS_LOCK:
+                    job["log"].append(line)
+                    if len(job["log"]) > 80:
+                        del job["log"][: len(job["log"]) - 80]
+            rc = proc.wait()
+            if rc == 0 and post is not None:
+                try:
+                    post()
+                except Exception as e:
+                    with _AXIS_JOBS_LOCK:
+                        job["log"].append(f"[post] {e}")
+            with _AXIS_JOBS_LOCK:
+                job["rc"] = rc
+                job["status"] = "done" if rc == 0 else "error"
+                job["ended"] = time.time()
+        except Exception as e:
+            with _AXIS_JOBS_LOCK:
+                job["log"].append(f"[job] {e}")
+                job["status"] = "error"
+                job["ended"] = time.time()
+
+    threading.Thread(target=run, daemon=True, name=f"axis-{jid}").start()
+    return jid
+
+
+@app.get("/api/v1/axis/videos")
+def axis_videos() -> Dict[str, Any]:
+    AXIS_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    vids = [p for p in AXIS_VIDEO_DIR.iterdir()
+            if p.is_file() and p.suffix.lower() in _AXIS_VIDEO_EXTS]
+    for p in sorted(vids, key=lambda x: -x.stat().st_mtime):
+        pool = _axis_pool_name(p.stem)
+        pool_dir = RAW_IMAGES_DIR / pool
+        frames = labeled = 0
+        if pool_dir.is_dir():
+            frames = sum(1 for _ in pool_dir.glob("*.jpg"))
+            labeled = sum(1 for t in pool_dir.glob("*.txt")
+                          if t.name != "classes.txt")
+        sheet = AXIS_SHEET_DIR / (p.stem + ".json")
+        rows = 0
+        if sheet.exists():
+            try:
+                rows = len((json.loads(sheet.read_text(encoding="utf-8"))
+                            or {}).get("rows") or [])
+            except Exception:
+                rows = 0
+        out.append({"name": p.name, "stem": p.stem,
+                    "size_mb": round(p.stat().st_size / 1048576, 1),
+                    "duration": round(_axis_duration(p), 1),
+                    "mtime": p.stat().st_mtime,
+                    "pool": pool, "frames": frames, "labeled": labeled,
+                    "sheet_rows": rows})
+    return {"videos": out}
+
+
+@app.post("/api/v1/axis/download")
+def axis_download(payload: Dict[str, Any]) -> Dict[str, Any]:
+    url = str(payload.get("url") or "").strip()
+    if not re.match(r"^https?://", url):
+        raise HTTPException(status_code=400, detail="need http(s) url")
+    cookies = str(payload.get("cookies") or "").strip()
+    AXIS_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, "-m", "yt_dlp"]
+    if cookies in ("chrome", "edge", "firefox"):
+        cmd += ["--cookies-from-browser", cookies]
+    cmd += ["-f", "bv*+ba/b", "--merge-output-format", "mp4",
+            "--windows-filenames", "--no-part", "-N", "4", "--newline",
+            "-o", str(AXIS_VIDEO_DIR / "%(title).60s [%(id)s].%(ext)s"), url]
+    jid = _axis_spawn_job("download", url, cmd)
+    return {"ok": True, "job": jid}
+
+
+@app.post("/api/v1/axis/extract")
+def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
+    video = _axis_safe_video(str(payload.get("video") or ""))
+    try:
+        fps = float(payload.get("fps") or 3)
+    except (TypeError, ValueError):
+        fps = 3.0
+    fps = max(0.2, min(fps, 15.0))
+    start = str(payload.get("start") or "").strip()
+    end = str(payload.get("end") or "").strip()
+    for v in (start, end):
+        if v and not re.match(r"^[\d:.]+$", v):
+            raise HTTPException(status_code=400,
+                                detail="start/end 格式: 秒数 或 mm:ss")
+    pool = _axis_pool_name(video.stem)
+    pool_dir = RAW_IMAGES_DIR / pool
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning", "-nostats"]
+    if start:
+        cmd += ["-ss", start]
+    cmd += ["-i", str(video)]
+    if end:
+        cmd += ["-to", end]
+    cmd += ["-vf", f"fps={fps}", "-qscale:v", "2",
+            str(pool_dir / "frame_%05d.jpg")]
+
+    def post() -> None:
+        master = _load_master_classes()
+        (pool_dir / "classes.txt").write_text(
+            "\n".join(master) + "\n", encoding="utf-8")
+
+    jid = _axis_spawn_job("extract", f"{video.name} fps={fps}", cmd, post=post)
+    return {"ok": True, "job": jid, "pool": pool}
+
+
+@app.get("/api/v1/axis/jobs")
+def axis_jobs() -> Dict[str, Any]:
+    with _AXIS_JOBS_LOCK:
+        jobs = sorted(_AXIS_JOBS.values(), key=lambda j: -j["started"])[:10]
+        return {"jobs": [dict(j, log=list(j["log"])[-6:]) for j in jobs]}
+
+
+@app.get("/api/v1/axis/video_file")
+def axis_video_file(name: str = Query(...)) -> FileResponse:
+    p = _axis_safe_video(name)
+    return FileResponse(str(p), media_type="video/mp4")
+
+
+@app.post("/api/v1/axis/delete_video")
+def axis_delete_video(payload: Dict[str, Any]) -> Dict[str, Any]:
+    p = _axis_safe_video(str(payload.get("name") or ""))
+    p.unlink()
+    return {"ok": True, "deleted": p.name}
+
+
+@app.get("/api/v1/axis/sheet")
+def axis_sheet(video: str = Query(...)) -> Dict[str, Any]:
+    stem = Path(os.path.basename(video)).stem
+    f = AXIS_SHEET_DIR / (stem + ".json")
+    if not f.exists():
+        return {"video": stem, "rows": []}
+    try:
+        d = json.loads(f.read_text(encoding="utf-8")) or {}
+    except Exception:
+        d = {}
+    return {"video": stem, "rows": d.get("rows") or [],
+            "updated": d.get("updated")}
+
+
+@app.post("/api/v1/axis/sheet")
+def axis_sheet_save(payload: Dict[str, Any]) -> Dict[str, Any]:
+    stem = Path(os.path.basename(str(payload.get("video") or ""))).stem
+    if not stem:
+        raise HTTPException(status_code=400, detail="video required")
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=400, detail="rows must be a list")
+    AXIS_SHEET_DIR.mkdir(parents=True, exist_ok=True)
+    clean = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        try:
+            t = round(float(r.get("t") or 0), 2)
+        except (TypeError, ValueError):
+            t = 0.0
+        clean.append({"t": t,
+                      "cost": str(r.get("cost") or "")[:8],
+                      "char": str(r.get("char") or "")[:24],
+                      "action": str(r.get("action") or "")[:48],
+                      "note": str(r.get("note") or "")[:120]})
+    clean.sort(key=lambda x: x["t"])
+    (AXIS_SHEET_DIR / (stem + ".json")).write_text(
+        json.dumps({"video": stem, "rows": clean, "updated": time.time()},
+                   ensure_ascii=False, indent=1),
+        encoding="utf-8")
+    return {"ok": True, "rows": len(clean)}
+
+
 @app.post("/api/v1/datasets/delete_image")
 def delete_dataset_image(payload: Dict[str, Any]) -> Dict[str, Any]:
     dataset = str(payload.get("dataset") or "")

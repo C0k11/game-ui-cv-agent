@@ -58,8 +58,13 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i != 451  # UI=非头像非emoticon(自动含 452-454 双倍三倍/据点防御/信用回收, 与 pipeline 域过滤一致)
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
+# battle 域 = battle_heads 训练词表本身(我方/敌方/Boss/塞特 476-479 + HUD 128-136
+# + 战斗2倍速 412)。remap 已按名字过滤(不在 master 的名字直接丢), battle 模型只训
+# 战斗类 → 词表即权威 span, 不枚举 idx 集合(旧 lambda: False 把 battle 预标全数
+# 丢框 = 凹轴管线上线前实锤; 枚举法在 v5 加新类时又会静默漏, 与 imgsz 静默零检出
+# 同型坑)。
 _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
-         "cafe": _emoticon_span, "battle": (lambda i: False)}
+         "cafe": _emoticon_span, "battle": (lambda i: True)}
 
 
 def resolve_img_dir(dataset: str) -> Path:
