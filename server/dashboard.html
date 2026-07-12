@@ -5340,8 +5340,8 @@ async function axisRefresh(){
     const r = await clsApi('/api/v1/axis/videos'); AXIS.videos=r.videos||[]; axisRenderVideos();
     const h=$('axis_cookie_hint');
     if(h) h.innerHTML = r.cookies_file
-      ? '🍪 <span style="color:#4ade80">data/axis_cookies.txt 已配置 — 下载自动带 B 站登录态(全长+高画质)</span>'
-      : '⚠ <span style="color:#f59e0b">未配置 data/axis_cookies.txt — B 站未登录只给截断试看流(实锤15-80s)。Chrome/Edge cookie 提取在 Windows 已被加密堵死, 从浏览器 F12 复制 SESSDATA 建此文件即可</span>';
+      ? '🍪 <span style="color:#4ade80">data/axis_cookies.txt 已配置 — 下载 1080p 全长流</span>'
+      : 'ℹ <span style="color:#facc15">未配置 data/axis_cookies.txt → 自动降 480p(实锤完整流, 抄轴/训练够用)。要 1080p: B站页面 F12 → Application → Cookies → 复制 SESSDATA 值建此文件(720p+ 未登录只给15-80s试看, Chrome/Edge cookie 提取在 Win 已被加密堵死)</span>';
   }
   catch(e){ $('axis_video_list').textContent='加载失败: '+e.message; }
 }

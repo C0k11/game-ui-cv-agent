@@ -3033,11 +3033,19 @@ def axis_download(payload: Dict[str, Any]) -> Dict[str, Any]:
     cookies = str(payload.get("cookies") or "").strip()
     AXIS_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "yt_dlp"]
+    authed = False
     if AXIS_COOKIES_FILE.exists():          # 文件优先 — 浏览器提取在 Win 上全挂
         cmd += ["--cookies", str(AXIS_COOKIES_FILE)]
+        authed = True
     elif cookies in ("chrome", "edge", "firefox"):
         cmd += ["--cookies-from-browser", cookies]
-    cmd += ["-f", "bv*[vcodec^=avc1]+ba/bv*+ba/b",   # avc1 主流最稳, av01 转码流坑多
+        authed = True
+    # ⚠B站未登录实锤(2026-07-12): 720p+ 流只给截断试看(15-80s), **480p 流完整**
+    # (183.65s/5509帧全长验证) → 无登录态自动降 480p 保完整, 有登录态上高清。
+    # avc1 主流最稳, av01 转码流坑多。完整性硬闸(post ffprobe)兜底。
+    fmt = ("bv*[vcodec^=avc1]+ba/bv*+ba/b" if authed else
+           "bv*[vcodec^=avc1][height<=480]+ba/bv*[height<=480]+ba/b")
+    cmd += ["-f", fmt,
             "--merge-output-format", "mp4",
             "--windows-filenames", "--no-part", "-N", "4", "--newline",
             "-o", str(AXIS_VIDEO_DIR / "%(title).60s [%(id)s].%(ext)s"), url]
