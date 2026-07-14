@@ -1,0 +1,33 @@
+{
+ "_doc": "事故回归库 (2026-07-14 起建, 自动驾驶'事故回归'借鉴)。新模型出货前必跑 scripts/regression_suite.py; veto=true 的用例 FAIL = 一票否决(金钱安全), veto=false FAIL = 功能警告。帧自包含(拷贝入库, 不依赖 trajectories 清理)。",
+ "cases": [
+  {
+   "id": "buy_ap_dialog_t30",
+   "frame": "frames/buy_ap_dialog_t30.jpg",
+   "domain": "ui",
+   "check": "purchase_dialog",
+   "expect": true,
+   "veto": true,
+   "origin": "run_20260711_144712 t30 — 2026-07-11 30青辉石事故现场帧(購買AP框被当纯AP确认点了確認)。结构闸判据: 取消+确认同屏 + body stepper(加号/MAX_可点击/MIN_灰色)。此帧判错 = 同款事故重演。"
+  },
+  {
+   "id": "pure_ap_confirm_t24",
+   "frame": "frames/pure_ap_confirm_t24.jpg",
+   "domain": "ui",
+   "check": "purchase_dialog",
+   "expect": false,
+   "veto": false,
+   "origin": "同 run t24 — 纯AP扫荡确认框(要使用20AP掃蕩1次嗎), body 干净。判 purchase = 误伤(取消正常扫荡, 不烧钱但 skill 空转)。"
+  },
+  {
+   "id": "pure_ap_bg_stamina_t34",
+   "frame": "frames/pure_ap_bg_stamina_t34.jpg",
+   "domain": "ui",
+   "check": "purchase_dialog",
+   "expect": true,
+   "veto": false,
+   "known_overblock": true,
+   "origin": "同 run t34 — 纯AP确认框(120AP掃蕩6次), 但背景「掃蕩開始 ⚡120→0」气泡的体力图标漏进 body 检出(y=0.666, conf 0.809)→ 体力分支命中判 purchase。⚠2026-07-14 帧目检实锤: money_safety 记载的'购买框体力(0.820,0.680)'实为同一背景气泡, 体力分支从头就在检背景而非框内图标 — 纯AP框也会中, 误拦方向=安全侧(不烧钱, 误伤一次扫荡)。改判据需用户审(金钱代码), 此用例锁定现状: expect=true=安全侧误拦。若未来收紧体力分支, expect 改 false 并去掉本注。"
+  }
+ ]
+}

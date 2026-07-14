@@ -1,0 +1,14 @@
+# ByteTrack · 实战版(combat 2.0 战斗时 DXcam 高频线程, ~30fps)
+# ⚠理论推导版(2026-07-14), combat 2.0 live 接线时必须用真实帧率回放校准:
+#   track_buffer 60帧@30fps=2s — boss 大招 CG/全屏 VFX 遮挡跨度;
+#   match_thresh 0.8 — 30fps 帧间位移小, IoU 匹配余量充足, 收紧防串 id;
+#   new_track_thresh 0.25 — v8 检测强(全类 AP50≥0.98), 低阈值起新轨迹安全。
+# 若实战线程实际帧率≠30fps(DXcam 非战斗 2FPS 模式勿用 tracker),
+# track_buffer 按 "遮挡秒数×实际fps" 重算。
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 60
+match_thresh: 0.8
+fuse_score: True

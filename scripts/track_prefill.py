@@ -68,7 +68,9 @@ def main():
     for fi, p in enumerate(jpgs):
         img = imread_any(str(p))
         r = model.track(img, persist=True, conf=0.10, iou=0.5, imgsz=960,
-                        tracker="bytetrack.yaml", verbose=False)[0]
+                        tracker=str(Path(__file__).parent.parent / "configs" /
+                                    "trackers" / "bytetrack_axis3fps.yaml"),
+                        verbose=False)[0]
         n_plain = 0
         if r.boxes is not None and len(r.boxes):
             H, W = r.orig_shape

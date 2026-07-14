@@ -1,0 +1,16 @@
+# ByteTrack · 3fps 离线版(凹轴池预标 / 回放评测 / 轴表 GT 评测)
+# 2026-07-14 track_eval.py 实测定案(白_黑473帧+赫赛德454帧, 人审 GT 链):
+#   本配置 vs 内置默认(30fps假设 buf30): 我方链 idsw 41→14(-66%),
+#   purity 0.892→0.949(赫赛德); 白_黑 0.987→0.997。
+#   botsort(无ReID)无增益; 光流 gmc 被战斗 VFX 骗(purity 0.987→0.944)=禁用。
+# ⚠track_buffer 是帧数语义(ultralytics 原生 track 固定 frame_rate=30 不缩放):
+#   9帧@3fps=3s 遮挡保活 — boss 大招 CG 典型时长; 默认30帧=10s, 僵尸轨迹
+#   漂移后吃掉新出现的角色框 = idsw 主源。
+# match_thresh 0.9: 3fps 帧间位移大(可达自身宽度), 0.8 会把快速位移判成新目标。
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 9
+match_thresh: 0.9
+fuse_score: True
