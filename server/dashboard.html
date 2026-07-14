@@ -5364,7 +5364,8 @@ function axisRenderVideos(){
     mk('🎬 轴表','打点标轴(播放器+行表)',()=>axisOpenSheet(v));
     mk('抽帧','ffmpeg 抽帧进 raw_images/'+v.pool,()=>axisExtract(v));
     if(v.frames){
-      mk('预标v4','battle v4 预标该帧池 (同步, ~600帧/分钟)',()=>axisPrefill(v));
+      mk('⚡track预标','ByteTrack 预标(闪烁捞回+遮挡插值+轨迹类别投票), 权重=battle 最新版, 后台job ~3分钟',()=>axisTrackPrefill(v));
+      mk('单帧预标','普通逐帧预标(battle 最新版, 同步)',()=>axisPrefill(v));
       mk('标注页','跳到标注中心该池人审',()=>{showPage('annotate');setTimeout(()=>{const s=$('ann_dataset');if(s){s.value=v.pool;if(s.value===v.pool)annLoadDataset();else showToast('列表里选 '+v.pool,'info');}},700);});
     }
     mk('删','删除视频文件(帧池不动)',()=>axisDeleteVideo(v),'btn btn-sm btn-danger');
@@ -5401,11 +5402,23 @@ async function axisJobCancel(jid){
   try{ await clsApi('/api/v1/axis/job_cancel',{id:jid}); showToast('已取消 '+jid,'ok'); axisPollJobs(); }
   catch(e){ alert('取消失败: '+e.message); }
 }
-async function axisPrefill(v){
-  if(!confirm(`用 battle v4 预标 ${v.pool} (${v.frames}帧)?\n同步执行, 约 ${Math.max(1,Math.ceil(v.frames/600))} 分钟, 完成前别关页面。`)) return;
-  showToast('battle v4 预标进行中…','info',20000);
+async function axisTrackPrefill(v){
+  if(!confirm(`⚡ track 预标 ${v.pool} (${v.frames}帧)?\nByteTrack 时序预标(闪烁捞回/遮挡插值/类别投票), 权重=battle 最新版。\n⚠ 会覆盖该池现有 battle 域标注(自动备份) — 已人审过的池别跑!`)) return;
   try{
-    const r = await clsApi('/api/v1/datasets/yolo_prefill_run',{dataset:v.pool, model:'battle_heads', version:'v4', conf:0.30, mode:'merge'});
+    await clsApi('/api/v1/axis/track_prefill',{pool:v.pool});
+    showToast('track 预标已启动(后台 job, 约2-4分钟)','ok'); axisPollJobs();
+  }catch(e){ alert('启动失败: '+e.message); }
+}
+async function axisPrefill(v){
+  // battle teacher 版本由 server 动态解析(registry 最新 vN); version 不传 →
+  // 端点默认 active=legacy 会被空 remap 守卫拒绝, 故这里显式拉 teacher。
+  let ver = '';
+  try{ const m=(await clsApi('/api/v1/datasets/yolo_models')).models.find(x=>x.key==='battle_heads'); ver=m&&m.teacher||''; }catch(_){}
+  if(!ver){ alert('拿不到 battle teacher 版本'); return; }
+  if(!confirm(`用 battle ${ver} 单帧预标 ${v.pool} (${v.frames}帧)?\n同步执行, 约 ${Math.max(1,Math.ceil(v.frames/600))} 分钟, 完成前别关页面。`)) return;
+  showToast(`battle ${ver} 预标进行中…`,'info',20000);
+  try{
+    const r = await clsApi('/api/v1/datasets/yolo_prefill_run',{dataset:v.pool, model:'battle_heads', version:ver, conf:0.30, mode:'merge'});
     if(r.ok===false) throw new Error(r.error||'unknown');
     showToast(`预标完成: ${r.written}帧写入 / ${r.skipped}跳过`,'ok',6000);
     axisRefresh();

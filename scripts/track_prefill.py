@@ -27,7 +27,22 @@ sys.path.insert(0, r"D:\Project\ai game secretary")
 from vision.io_utils import imread_any  # noqa: E402
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
-WEIGHTS = r"D:\Project\ml_cache\models\yolo\runs\battle_yolo26s_v6\weights\best.pt"
+
+
+def _latest_battle_weights() -> str:
+    """registry battle_heads 最新 vN(active=legacy 是 pipeline 占位, 不用)。"""
+    import json
+    import re as _re
+    reg = json.loads(Path(r"D:\Project\ai game secretary\data\model_registry.json")
+                     .read_text(encoding="utf-8"))
+    vers = reg["battle_heads"]["versions"]
+    vn = max((v for v in vers if _re.fullmatch(r"v\d+", v)),
+             key=lambda x: int(x[1:]))
+    print(f"weights = battle_heads {vn}")
+    return vers[vn]["path"]
+
+
+WEIGHTS = _latest_battle_weights()
 MASTER = [l.strip() for l in
           open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
 NAME2IDX = {n: i for i, n in enumerate(MASTER)}

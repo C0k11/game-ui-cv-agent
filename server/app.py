@@ -3136,6 +3136,21 @@ def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "job": jid, "pool": pool}
 
 
+@app.post("/api/v1/axis/track_prefill")
+def axis_track_prefill(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """tracker 化预标(ByteTrack 闪烁捞回+gap插值+轨迹投票), 后台 job 跑
+    scripts/track_prefill.py --apply。权重=registry battle 最新 vN。"""
+    pool = os.path.basename(str(payload.get("pool") or "").strip())
+    if not pool or not (RAW_IMAGES_DIR / pool).is_dir():
+        raise HTTPException(status_code=404, detail="pool not found")
+    if not _BULK_LABEL_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="另一批量操作进行中")
+    _BULK_LABEL_LOCK.release()   # 只做冲突预检; 子进程期间不长持锁(job 异步)
+    cmd = [sys.executable, "-u", "scripts/track_prefill.py", pool, "--apply"]
+    jid = _axis_spawn_job("track_prefill", pool[:50], cmd)
+    return {"ok": True, "job": jid}
+
+
 @app.get("/api/v1/axis/jobs")
 def axis_jobs() -> Dict[str, Any]:
     with _AXIS_JOBS_LOCK:
@@ -3495,7 +3510,14 @@ def dataset_yolo_models() -> Dict[str, Any]:
     master = _load_master_classes()
     label = {"ui": "ui", "fused_avatar": "头像", "emoticon": "摸头",
              "battle_heads": "战斗头"}
-    teacher_default = {"battle_heads": "v4"}  # (2026-06-08) ui v7 上线=active 即最强 UI(by-cls 0.921 全面超 v6c) → teacher=active(v7); fused v6 / emoticon v26n 同理 active=最强。旧 v6c teacher 弃用。battle: active=legacy 是 pipeline 硬路径占位(词表 c0-c3 与 master 零命中, 预标=纯垃圾), prefill teacher 独立 pin v4
+    teacher_default = {}  # (2026-06-08) ui v7 上线=active 即最强 UI → teacher=active; fused/emoticon 同理
+    # battle: active=legacy 是 pipeline 硬路径占位(词表 c0-c3 与 master 零命中,
+    # 预标=纯垃圾) → prefill teacher 动态取 registry 最新 vN(v8 出来自动跟,
+    # 2026-07-14 根治"teacher 硬编码 pin 旧版"债)
+    _b_vers = [v for v in (reg.get("battle_heads", {}).get("versions") or {})
+               if re.fullmatch(r"v\d+", v)]
+    if _b_vers:
+        teacher_default["battle_heads"] = max(_b_vers, key=lambda x: int(x[1:]))
     out = []
     for key in ("ui", "fused_avatar", "emoticon", "battle_heads"):
         node = reg.get(key)
