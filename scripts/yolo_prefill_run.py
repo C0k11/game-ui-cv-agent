@@ -55,13 +55,15 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 # master layout: [0,142]=UI-A, [143,393]=avatars(251), [394,450]=UI-B,
 # 451=Emoticon_Action. A pass keeps ONLY boxes inside its span so the ui model
 # can't stamp a spurious avatar class onto a cafe sprite (and vice-versa).
-def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i != 451  # UI=非头像非emoticon(自动含 452-454 双倍三倍/据点防御/信用回收, 与 pipeline 域过滤一致)
+def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i != 451 and i < 476  # UI=非头像非emoticon非战斗身份段(476+)
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
-# battle 静态 span(v4 词表的 master 落点) — 只供 UI datalist 之类展示用途;
-# **写路径一律用 owns_for(tag, remap) 的词表动态 span**(见下)。
-_BATTLE_SPAN = set(range(128, 137)) | {412} | set(range(476, 480))
-def _battle_span(i: int) -> bool:   return i in _BATTLE_SPAN
+# battle 静态 span — 只供 UI datalist 展示/校验; **写路径一律用
+# owns_for(tag, remap) 的词表动态 span**(见下)。
+# ⚠2026-07-14 教训: 曾枚举 476-479, 主教480/球481/黑白482 加类后静默漏
+# (用户"只标cls"输黑白被拒实锤) → 改开放规则: HUD 段 + 476 起全部身份类
+# (新 boss 类永远往 master 尾部追加, 自动纳入)。
+def _battle_span(i: int) -> bool:   return i in (set(range(128, 137)) | {412}) or i >= 476
 _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
          "cafe": _emoticon_span, "battle": _battle_span}
 

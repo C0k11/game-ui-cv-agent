@@ -3509,7 +3509,7 @@ def dataset_yolo_models() -> Dict[str, Any]:
     reg = _read_registry()
     master = _load_master_classes()
     label = {"ui": "ui", "fused_avatar": "头像", "emoticon": "摸头",
-             "battle_heads": "战斗头"}
+             "battle_heads": "战斗"}   # key 是历史遗名(早期"战斗头像"设想), 模型=现役战斗检测器 v5/v6/v7
     teacher_default = {}  # (2026-06-08) ui v7 上线=active 即最强 UI → teacher=active; fused/emoticon 同理
     # battle: active=legacy 是 pipeline 硬路径占位(词表 c0-c3 与 master 零命中,
     # 预标=纯垃圾) → prefill teacher 动态取 registry 最新 vN(v8 出来自动跟,
