@@ -7,6 +7,12 @@
   类别闪变   → 轨迹级类别投票(一条轨迹 80% 帧是我方 → 全轨迹统一)
   假阳性     → 短命轨迹(<3帧)丢弃
 
+⚠轨迹管线只适用身份类(master≥476, "一条轨迹=一个不变实体")。
+HUD 状态类(倍速/AUTO/暂停 128-136,412)是**会切换的状态**: 倍速按钮
+固定位全场一条轨迹, 投票会把 1x 段"纠正"成 3x — 2026-07-14 大蛇池
+100 框中毒实锤(v8 单帧本判对 0.95-0.99, 毒全来自投票)。HUD 类改
+单帧 conf0.35 直写, 不投票不插值 — 与实战设计一致(HUD 单帧读)。
+
 用法:
   py scripts/track_prefill.py <pool_substr>            # 分析: 对比单帧版, 不写盘
   py scripts/track_prefill.py <pool_substr> --apply    # 写盘(备份先行)
@@ -63,7 +69,8 @@ def main():
     n2m = {i: NAME2IDX[n] for i, n in model.names.items() if n in NAME2IDX}
 
     # ── pass 1: 按帧序 track (conf 放低到 0.10, 让 ByteTrack 捞低分框) ──
-    tracks = defaultdict(list)   # tid -> [(fi, mi, conf, xc,yc,w,h)]
+    tracks = defaultdict(list)   # tid -> [(fi, mi, conf, xc,yc,w,h)] 身份类
+    hud_frames = defaultdict(list)   # fi -> [(mi, xc,yc,w,h)] HUD 单帧直写
     per_frame_plain = []         # 单帧基线: conf 0.35 会保留的框数
     for fi, p in enumerate(jpgs):
         img = imread_any(str(p))
@@ -81,19 +88,24 @@ def main():
                 conf = float(b.conf[0])
                 if conf >= 0.35:
                     n_plain += 1
+                x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
+                box = ((x1 + x2) / 2 / W, (y1 + y2) / 2 / H,
+                       (x2 - x1) / W, (y2 - y1) / H)
+                if mi < 476:                 # HUD 状态类: 单帧直写不进轨迹
+                    if conf >= 0.35:
+                        hud_frames[fi].append((mi, *box))
+                    continue
                 if b.id is None:
                     continue
-                x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
-                tracks[int(b.id[0])].append(
-                    (fi, mi, conf,
-                     (x1 + x2) / 2 / W, (y1 + y2) / 2 / H,
-                     (x2 - x1) / W, (y2 - y1) / H))
+                tracks[int(b.id[0])].append((fi, mi, conf, *box))
         per_frame_plain.append(n_plain)
         if fi % 100 == 0:
             print(f"  track {fi}/{len(jpgs)}", flush=True)
 
-    # ── pass 2: 轨迹后处理 ──
+    # ── pass 2: 轨迹后处理(仅身份类; HUD 已单帧直写) ──
     out_frames = defaultdict(list)   # fi -> [(mi, xc,yc,w,h)]
+    for fi, boxes in hud_frames.items():
+        out_frames[fi].extend(boxes)
     n_short = n_vote = n_interp = n_lowconf_saved = 0
     for tid, obs in tracks.items():
         if len(obs) < MIN_TRACK_LEN:

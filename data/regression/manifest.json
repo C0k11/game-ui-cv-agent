@@ -28,6 +28,15 @@
    "veto": false,
    "known_overblock": true,
    "origin": "同 run t34 — 纯AP确认框(120AP掃蕩6次), 但背景「掃蕩開始 ⚡120→0」气泡的体力图标漏进 body 检出(y=0.666, conf 0.809)→ 体力分支命中判 purchase。⚠2026-07-14 帧目检实锤: money_safety 记载的'购买框体力(0.820,0.680)'实为同一背景气泡, 体力分支从头就在检背景而非框内图标 — 纯AP框也会中, 误拦方向=安全侧(不烧钱, 误伤一次扫荡)。改判据需用户审(金钱代码), 此用例锁定现状: expect=true=安全侧误拦。若未来收紧体力分支, expect 改 false 并去掉本注。"
+  },
+  {
+   "id": "speed_1x_bright_bg",
+   "frame": "frames/speed_1x_bright_f140.jpg",
+   "domain": "battle",
+   "check": "speed_1x",
+   "expect": true,
+   "veto": false,
+   "origin": "大蛇池(BV1giiYBeELr p5) frame_00140 — 2026-07-14 用户报「单▶被标三倍速」。排查真相: v8 单帧判定本来就对(1倍速0.95-0.99×9帧实测), 毒来自 track_prefill 轨迹类别投票把倍速按钮(HUD固定位一条轨迹)的 1x 段统一成 3x, 预标 100 框错(已修正+track_prefill 已改 HUD 单帧直写)。本用例守住: 任何新 battle 模型在白亮底单▶帧上必须判 1倍速非三倍速。"
   }
  ]
 }

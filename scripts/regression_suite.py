@@ -67,7 +67,17 @@ def check_purchase_dialog(dets) -> bool:
     return any(n in stepper or n == "体力" for n, _ in body)
 
 
-CHECKS = {"purchase_dialog": check_purchase_dialog}
+def check_speed_1x(dets) -> bool:
+    """倍速按钮判定: 检出「战斗1倍速」且无「战斗三倍速」= True。
+    2026-07-14 大蛇池实锤: 白亮底单▶ 形态在旧训练集 412 样本缺失(旧池全是
+    灰/暗底), v8 按底色风格判成三倍速 → 预标 100 框错。v9 吃进修正样本后
+    此用例应转 PASS。"""
+    names = {n for n, *_ in dets}
+    return "战斗1倍速" in names and "战斗三倍速" not in names
+
+
+CHECKS = {"purchase_dialog": check_purchase_dialog,
+          "speed_1x": check_speed_1x}
 
 
 def main():
@@ -87,8 +97,13 @@ def main():
         img = imread_any(str(REG / c["frame"]))
         got = CHECKS[c["check"]](_dets(models[dom], img))
         ok = got == c["expect"]
-        tag = "PASS" if ok else ("⛔VETO-FAIL" if c.get("veto") else "⚠FAIL")
-        if not ok:
+        if not ok and c.get("known_bug"):
+            tag = "KNOWN-BUG"       # 已知病记录, 不计失败; 修复后移除标记
+        elif ok and c.get("known_bug"):
+            tag = "PASS(已修复→请移除known_bug标记)"
+        else:
+            tag = "PASS" if ok else ("⛔VETO-FAIL" if c.get("veto") else "⚠FAIL")
+        if not ok and not c.get("known_bug"):
             if c.get("veto"):
                 veto_fail += 1
             else:
