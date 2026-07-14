@@ -3003,6 +3003,25 @@ def axis_videos() -> Dict[str, Any]:
 AXIS_COOKIES_FILE = REPO_ROOT / "data" / "axis_cookies.txt"
 
 
+def _bili_sessdata_alive() -> "bool | None":
+    """B站登录态探测(nav API)。True=有效 / False=实锤失效 / None=网络未知。
+    ⚠2026-07-14 实锤: SESSDATA 两天就被 B 站轮换作废(isLogin=false), yt-dlp
+    带失效 cookies 会**静默降 480p**(大蛇池首下中招) — 下载前 fail fast。"""
+    try:
+        import http.cookiejar
+        import urllib.request
+        cj = http.cookiejar.MozillaCookieJar(str(AXIS_COOKIES_FILE))
+        cj.load(ignore_discard=True, ignore_expires=True)
+        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        op.addheaders = [("User-Agent", "Mozilla/5.0"),
+                         ("Referer", "https://www.bilibili.com")]
+        d = json.loads(op.open(
+            "https://api.bilibili.com/x/web-interface/nav", timeout=5).read())
+        return bool((d.get("data") or {}).get("isLogin"))
+    except Exception:
+        return None     # 网络/解析失败 ≠ 失效实锤, 不拦
+
+
 def _axis_probe_video_ok(p: Path) -> "str | None":
     """下载后完整性校验: 视频流时长 vs 容器时长差 >15% = 截断流。返回错误描述或 None。"""
     try:
@@ -3035,6 +3054,11 @@ def axis_download(payload: Dict[str, Any]) -> Dict[str, Any]:
     cmd = [sys.executable, "-m", "yt_dlp"]
     authed = False
     if AXIS_COOKIES_FILE.exists():          # 文件优先 — 浏览器提取在 Win 上全挂
+        if "bilibili.com" in url and _bili_sessdata_alive() is False:
+            raise HTTPException(status_code=409, detail=(
+                "SESSDATA 已失效(nav isLogin=false) — 带它下载会静默拿 480p。"
+                "重新导出 SESSDATA 更新 data/axis_cookies.txt 后重试; "
+                "或删除该文件明确走 480p 降级。"))
         cmd += ["--cookies", str(AXIS_COOKIES_FILE)]
         authed = True
     elif cookies in ("chrome", "edge", "firefox"):
