@@ -822,6 +822,30 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26s_v9": {
+        # 战斗 v9 (2026-07-14) = v8 + 大蛇池(薇娜, 新类 local17, nc=18)。
+        #  倍速投票毒100框已修 + 白亮底1倍速新形态(回归用例解药) + 并框拆分
+        #  141 + 战斗胜利分层切分(val 终于≥2)。warm v8。
+        #  batch16=本机验证上限(batch32 炸[17,5]张量bug)。
+        #  ⚠cache RAM+workers8 在 v9 首跑炸 error 1455(worker 共享映射 commit
+        #  瞬时峰值, RAM 全局才 24% — pagefile 扩展跟不上 spawn 突增), v6 同款
+        #  → 回归 v6 验证配方 cache=False+workers4(NVMe 直读实测无损 4.3it/s)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v9" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v8" / "weights" / "best.pt"),
+        "epochs": 150,
+        "patience": 40,
+        "save_period": 10,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "battle_yolo26s_v9",
+        "cache": False,
+        "workers": 4,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

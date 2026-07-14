@@ -1,328 +1,337 @@
 {
-  "_doc": "Single source of truth for active model versions. brain/pipeline.py reads this to find weights paths.  When training a new version, add a new entry under versions{} and bump active.  Old versions stay listed for rollback.",
-  "fused_avatar": {
-    "active": "v6",
-    "task": "detect",
+ "_doc": "Single source of truth for active model versions. brain/pipeline.py reads this to find weights paths.  When training a new version, add a new entry under versions{} and bump active.  Old versions stay listed for rollback.",
+ "fused_avatar": {
+  "active": "v6",
+  "task": "detect",
+  "n_classes": 252,
+  "versions": {
+   "v6": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v6/weights/best_real.pt",
+    "model_arch": "yolo26x",
+    "trained_on": "2026-06-07",
     "n_classes": 252,
-    "versions": {
-      "v6": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v6/weights/best_real.pt",
-        "model_arch": "yolo26x",
-        "trained_on": "2026-06-07",
-        "n_classes": 252,
-        "epoch_best": 5,
-        "card_recall": 0.854,
-        "manual_mAP50": 0.989,
-        "manual_R": 0.995,
-        "notes": "纯252头像 + 战斗技能牌(复用头像名,无新类) + 灰牌识别(扇形充能/暗灰/低饱和 synth)。冻结 epoch5=真实峰(GPU选峰 vs last 0.805/best 0.810: ep6+ 过拟合 synth、真实灰牌反降)。数据集 build 四修: load_character_names 纯252(排 UI-B 395-454)/灰牌明度暗灰/扇形12点顺时针扩张/val泄漏排除。技能牌 recall 0.557(v5)→0.854。names=v4 完全一致, pipeline 按 cls_name 零改兼容。MUST infer @imgsz960。⚠️技能牌检测能力 ready 但战斗目前 auto 无读牌 skill 消费(combat AI 2.0 地基)。",
-        "warning": "训练后期(ep6+)过拟合 synth 致真实灰牌降 → 必须 save_period 存中间 ckpt + 真实 val(eval_v6_pick.py)选峰, 不能用 nominal best.pt"
-      },
-      "v4": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v4/weights/best_manual.pt",
-        "model_arch": "yolo26x",
-        "trained_on": "2026-05-20",
-        "manual_mAP50": 0.9657,
-        "manual_mAP50_95": 0.8321,
-        "manual_R": 0.9574,
-        "notes": "ep11 weights via manual_fitness_watcher (not ep15 nominal-best, which was synth-bias-fitted)"
-      },
-      "v3": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/weights/best.pt",
-        "model_arch": "yolo26x",
-        "trained_on": "2026-05-20",
-        "manual_mAP50": 0.683,
-        "notes": "baseline before v4 warm-start"
-      }
-    }
-  },
-  "ui": {
-    "active": "v13",
-    "_rollback_note": "2026-07-09 上线 v13(last.pt, 活动皮肤补课+2新类)。回滚: active 改回 'v12' 秒退。真验收=live活动走线(event_quest 首跑)。如live退化(尤其daily核心类)→回v12。",
-    "task": "detect",
-    "n_classes": 474,
-    "n_classes_in_use": 160,
-    "_infer_imgsz": 960,
-    "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
-    "versions": {
-      "v12": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v12/weights/best.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-06-15",
-        "n_classes": 474,
-        "epoch_best": "43ep早停patience30(best~ep13); warm from v11 best.pt; 70ep配方复刻v11/v10",
-        "acceptance": "冻结val515: mAP50~0.982/mAP50-95~0.935 ≈v10(0.9826/0.9383), 高于v11(0.9776/0.9348) → 不退化。⚠️旧冻结val不含商店场景(469/470/471/472/473 val=0)→测不出本版核心增益。数据=15,298帧(v11全源 + 06-14审过9池: 任务大厅live arena/mail/daily/batch_sweep + arena_shop step_mode walk + 用户手录战术大赛商店205540 245帧)。",
-        "known_gap": "①核心补强=471货币1812/472下级620/473一般329(商店买/confirm白名单检测)+9池任务大厅live覆盖。②469战术大赛未选中tab仅30实例(205540全是已选中470态补不了469); 但469实测@0.96够用, arena_shop代码已swipe露出+固定位绕开fold, 不缺数据。③cafe 451摸头仍0.917/0.779弱(无新cafe摸头帧, 待cafe walk录)。④红点继承v10/v11的0.55先验特性。",
-        "v_next_todo": "真验收=live实战走线(arena_shop买两瓶/任务大厅链/cafe). 录全新val(含商店场景) + cafe walk强化451. 222724+今晚6池=下代飞轮待预标。"
-      },
-      "v11": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v11/weights/best.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-06-13",
-        "n_classes": 474,
-        "epoch_best": "ep32 (62ep早停patience30; warm from v10 best.pt; 70ep配方复刻v10)",
-        "acceptance": "冻结val515: mAP50 0.9776/mAP50-95 0.9348/P0.9614/R0.9401。vs v10(0.9826/0.9383)略低0.5pt但在噪声内。⚠️冻结val是旧的(6/06大厅cafe帧), 不含今天新增场景(arena_shop/普通关卡选中80/批量扫荡455/hub, val=0)→ val既证不了v11更好也证不了v10更好。数据=14,931帧(v10全源 + 今天11个6/13全天live _clean池/~983帧: 整链/arena_shop/schedule/bounty/jfd step_mode walk + autonomous尾链, v10预标+用户dashboard人审无可见假阳仅cafe漏摸1, 删18空帧)。用户决策(2026-06-13): v10已live验过, 直接上v11。",
-        "known_gap": "①cafe 451摸头弱(均值0.65)本版不修: 今日飞轮无cafe摸头帧, 老_emoticon_v2 200帧已在源(200帧在474类被稀释)→ 451强化待明天cafe walk多录摸头帧; 眼下pipeline inference用_EMOTICON_CONF 0.40 stopgap兜。②红点dot用0.55先验滤(用户人审认可无假阳, 没改0.20; 故继承v10红点召回特性)。③真验收=明天cafe walk+日常live对比v10/v11新场景检出(arena_shop/普通关卡选中)。",
-        "v_next_todo": "录全新val(含今天新场景, 旧val测不准) + cafe walk多录摸头帧强化451 + dot可选0.20+HSV洗。"
-      },
-      "v10": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v10/weights/best.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-06-13",
-        "n_classes": 474,
-        "epoch_best": "ep15 (45ep早停patience30; warm from v9 best.pt; 70ep配方复刻v9 hsv_h/s=0 batch12)",
-        "acceptance": "冻结val515 vs v9: mAP50 0.9749→0.9826(+0.77pt) / mAP50-95 0.9353→0.9383(+0.30pt); 偏移=召回换精度(mP 0.9689→0.9583 -1.05pt / mR 0.9339→0.9461 +1.23pt)。数据=13,948帧(v9全源 + 用户手标run_20260612_191319 + 14个6/12-13 bot飞轮_clean池, 砍chainlive重复)。上线动机=任务刷关normal已选中屏检出批量扫荡(v10带6/12-13新farming数据)。",
-        "known_gap": "①⚠️红点召回回归: val 0.974→0.889(-8.5pt)。根因=batch_prefill_clean给_clean池点设conf≥0.55门槛, 把0.20-0.55真·中conf红点(任務角标等)变负样本, v10学成对真红点保守。实测737飞轮帧: 先验区0.20-0.55点 379→75(-80%)但目检证实抑制的≈全是真红点非灰占位假阳→位置先验假阳实际未修好(灰/蓝占位FP仍在, pale-blue有饱和像素HSV判空碰不到, 待人审)。操作影响小(红点驱动领取非花钱+每tick重检+门控点击兜底)。v11修法=_clean点改0.20门槛捞回真点+只HSV色彩判空删灰框。②新类469-473(arena_shop)/绿勾 val零GT全进train, 无法val验, 真验收=live。③其余继承v9 known_gap。",
-        "v11_todo": "重建v11: scripts/batch_prefill_clean.py dot_conf降回0.20(或删点floor) + clean_prefill_dots.py色彩判空删灰占位 → 恢复红点召回。用户决策(2026-06-13): 先用v10, 今天录新飞轮+用户素材后再重建。"
-      },
-      "v9": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v9/weights/best.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-06-12",
-        "n_classes": 474,
-        "epoch_best": "ep21 (51ep早停patience30; nominal best=真峰, 复核val 0.9749/0.9353 与results.csv一致, 无需手工冻结)",
-        "acceptance": "冻结val515 vs v8b: ALL R 0.912→0.934 / mAP50-95 0.9234→0.9353; PHANTOM审计(conf>=0.10) 1356→608(-55%); 旧皮箭头651→2根治(左R 0.06→1.00/右0.05→0.98); 数据=12,934帧(06-11十八池全手标+考古回收171121/_ui_val_pool+审计auto-add238框+全池红黄点HSV修33处+build孤儿清除131)。新类469-473(战术大赛商店)+455/456+450+38/39无val实例, 真验收=2026-06-12 15:00 live完整日常链。",
-        "known_gap": "①双倍三倍452: 旧era(06-06)ribbon仍低conf(PHANTOM 350→253, R@F1 0.05但mAP50 0.94=检出在conf<0.10), 当前era(06-11训576实例)live预期正常, 实战盯; 若hub badge漏检, 降业务conf门。②emoticon451旧era R 0.41(新era 747实例已训, live验摸头 — 已折叠接管, v26n退役为teacher)。③移动至2号点 PHANTOM 24不变(无新数据)。④dialog调暗大厅入口仍盲(9帧×13入口, semantizer dialog通道兜底)。"
-      },
-      "v8": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v8b/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-06-11",
-        "n_classes": 469,
-        "epoch_best": "v8b微调ep4 (v8 ep26真实峰 warm → +_arrow_boost 14ep微调, 真val选峰: meanClsR 0.9134 全ckpt最高)",
-        "acceptance": "515真val: 红黄互混 348→0, 红点0.849→0.978, 黄点0.976, 双倍三倍452 0.032→0.508, microP 0.9930, 制造入口/任务大厅0.975; 新类455-468(批量扫荡dialog全套) GT帧定向抽测11/11类全检出(train帧上限, 真验收=live走线); 全类回退扫描 vs v7 仅3类(箭头×2+emoticon)",
-        "known_gap": "①左/右切换 val 0.06 — 定性=过期考卷: val箭头100%是06-06阳奈睡床大厅皮, 用户已换城市夜景皮; 真实live帧(近4天trajectory 60tick) 54/60=90%, miss全是skill不消费场景(短篇网格左箭头×5+悬赏关卡页×1); schedule左箭头有坐标fallback。结构修复=synth箭头贴多样背景(v9债, 大厅再换皮还会断)。②emoticon451 0.44 << v26n 0.995 → _FOLD_IN_EMOTICON 继续 False, cafe由独立v26n承担, 零live影响。③加载中idx22: ep4保1.0(best/last退0.64, 故ship ep4)。"
-      },
-      "v7": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v7/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-06-08",
-        "n_classes": 455,
-        "epoch_best": "70满 (mAP50 0.953 flywheel纯真实val)",
-        "flywheel_recall_mean": 0.921,
-        "notes": "纯 UI+emoticon (头像143-394 build _keep_ui_lines drop, 归 fused v6)。warm-start v5(m)。真实飞轮帧补弱类: 新2run(193003女仆+140123银发两背景)+旧真实+_emoticon_v2, 砍全部synth(伪背景毒)。val=flywheel 477纯真实→best.pt可信。**验收 v5→v7 by-cls 整体均值 0.830→0.921**: 制造入口0→0.97(v5头号弱项!)/emoticon0→0.71/距离结束0.02→0.94/灰色领取0→0.62/加载0.58→1.0; 强类不退(cafe收益0.98/邀请卷1.0/红点0.85/黄点0.99/底栏入口0.97-1.0)。MUST infer @imgsz960。按 cls_name 匹配, pipeline 零改兼容。",
-        "known_gap": "①左切换 1.0→0.72(-0.27, 右切换不退0.98, 不对称待查) ②双倍三倍活动452 0.03(678GT仍漏, train731框没学会)。下版专项补。③emoticon v7 0.71 << 独立 v26n 0.995 → pipeline `_FOLD_IN_EMOTICON=False` 保独立 v26n(不折叠, 等 ui emoticon 训>0.99 再开)。"
-      },
-      "v6c": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
-        "model_arch": "yolo26x",
-        "trained_on": "2026-06-06",
-        "n_classes": 455,
-        "epoch_best": 12,
-        "status": "TEACHER-ONLY (不是 ui 独立模型, 是 unified v6c nc455 借来当纯 UI teacher; live UI 入口域 conf 远胜 v5)。",
-        "_teacher_note": "prefill/suggest 选 model=ui + version=v6c → get_model 走 ui span(_ui_span: 只留 UI 域 0-142/395-450, 头像143-394+emoticon451 丢弃), remap by name 自动对齐 master。当 v7 val 标注主 UI teacher。但 cafe 内部弱类(咖啡厅收益/邀请卷) v6c 退步 → 那几个改 version=v5 + target_classes 单独补。NOT for pipeline live (pipeline 读 unified.active, 与此无关)。"
-      },
-      "v6": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v6/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "PENDING",
-        "n_classes": 452,
-        "status": "NOT-YET-TRAINED — active 维持 v5, 训练+验证后再切到 v6",
-        "notes": "v5 + emoticon 折叠: 新增 cls451 Emoticon_Action, 把独立 emoticon_yolo26n 并进 ui 模型 (pipeline 每个 cafe tick 少跑一次 YOLO 推理)。数据集 ui_v2 已重建 nc=452 (198帧/588框 emoticon; teacher=ui_v5 重标 cafe UI chrome 防 200 帧把 收益/邀请卷 等弱cls 训成负样本)。训练: py scripts/train_yolo26.py ui_yolo26m_v6。训完 eval→冻结 last.pt 为 best_real.pt→把本节点 active 改 v6 (pipeline 检测到 ui 含 Emoticon_Action 会自动丢弃独立 emoticon 模型, 无需改码)。配合飞轮: 补弱cls 的新 source 加进 build_ui_v2.py REAL_SOURCES, 重建后与 emoticon 一并训。",
-        "merge_tooling": "scripts/build_emoticon_ui_source.py (teacher 自动标注) + build_ui_v2.py REAL_SOURCES 末加 _emoticon_v2"
-      },
-      "v5": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v5/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-05-31",
-        "trained_epoch": 60,
-        "n_classes": 451,
-        "notes": "warm-start 微调 from v4 (Transferred 756/768; cls头因nc450→451重学). 数据集 ui_v2: 旧train去重(16157→2377唯一, 砍200x oversample过拟合源)+ run_20260531_110516(1052真实)+ run_20260531_143201(37商店, 补选择购买/已选中/绿勾)+ bond synth(441/442/449). cls92恢复. nc=451(新增450选择购买). 薄类适度oversample到30(450→50). lr0=0.005, 60ep, v4同款空间aug, close_mosaic末10ep. best_real.pt=ep60 last.pt冻结(close_mosaic干净收尾, blindval 0.585→0.606). MUST infer @imgsz=960.",
-        "eval_note": "无独立held-out(1052/37已进train); 真实验收=dashboard目检. blind _ui_val_pool(51帧)仅early-stop, 末值mAP50≈0.606(不可比v4的0.915@1052). 关键train实例: 92=144/450=56/54=83/绿勾=485/441=415/442=510/449=918.",
-        "known_gap": "盯回退类 cls83关卡得星_0/cls112 MIN_灰色(v4曾回退); arena待改用cls92区域选对手(去avatar依赖)."
-      },
-      "v4": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v4/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-05-29",
-        "trained_epoch": 31,
-        "notes": "synth(900帧: 441/442/449 贴多样背景)+空间aug(mosaic0.5/copy_paste0.3/scale0.3/translate0.1/hsv_v0.3, fliplr/flipud/degrees=0)修过拟合. from COCO, batch12 imgsz960 cache=disk. 训练ep31中断(机器睡, 未到close_mosaic@140)但已胜v3. best_real.pt = ep31 last.pt 的冻结副本 (NOT nominal best.pt — real-eval: last 0.915 > best 0.877, blind 51帧 val 再次误导). MUST infer @ imgsz=960.",
-        "eval_real_held_out": "run_20260531_110516 (1052真实held-out帧/140类/10634实例): mAP50 0.915 vs v3 0.862. 修好: 449 momotalk聊天区 0→0.964, 7每日领奖 0→1.0, 8MomoTalk入口 0→1.0, 395购买青辉石 0.014→1.0, 139进入章节 0.25→1.0, 142点击继续 0→0.916, 136战斗胜利 0→1.0, 442进入羁绊 0.667→0.833. synth+aug 成功.",
-        "known_gap": "cls92 战术大赛对战选择区域=0 (v4训练时被drop; v3也0@IoU0.5因巨框定位差但能粗检供arena点击; v5恢复). 小回退待v5补: cls83 关卡得星_0 0.83→0.11, cls112 MIN_灰色 0.71→0.29 (ep31欠训)."
-      },
-      "v3": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v3/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-05-29",
-        "trained_epoch": 34,
-        "notes": "lobby 入口 cls 改标文字(底栏8+MomoTalk+每日领奖+任务大厅) + oversample target=200 (157 cls 全>=200) + 5训练目录(加000756新capture). from COCO (NOT warm-start), patience30 early-stop@ep34, aug全0, batch12, cache=disk. best_real.pt=ep34 last.pt (val-best ep4 只检4入口, ep34 检全8入口 — val 再次误导, ship 看真实截图). MUST infer @ imgsz=960.",
-        "verified_real_frame": "lobby tick_0010 底栏8入口全检出 0.88-0.99 (v2全0!); 训练帧 每日领奖0.98/MomoTalk0.97/咖啡厅0.99; mail 一次领取0.89. 邮件箱cls4 仍0 (19px太小, oversample救不了, 靠红点兜底).",
-        "known_gap": "邮件箱(19px小图标)检不出靠mail.py红点兜底; 每日领奖/MomoTalk 在特殊lobby(banner布局变)泛化弱, 正常lobby OK"
-      },
-      "v2": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v2/weights/best_real.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-05-28",
-        "trained_epoch": 16,
-        "val_mAP50_at_best": 0.8705,
-        "notes": "Retrain with oversample target=60 (770→4472 frames) + ALL aug=0 (clean UI glyph learning, user spec). best_real.pt = ep16 last.pt — picked over ep5 val-best because real-screenshot generalization is better at ep16 (val mAP is inflated by oversample-duplicate same-distribution val set; ep16 detects 一次领取黄色 conf 0.936 on real mail frame, ep5 misses it). Training was killed at ep16 (resume deadlocked on 4472-img re-scan). MUST infer @ imgsz=960.",
-        "verified_real_frame": "mail tick_0012: 一次领取黄色 0.936, 体力 0.935, 领取蓝色 0.97 — vs v1 @1920 only cls417 0.567"
-      },
-      "v1": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v1/weights/best.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-05-28",
-        "mAP50": 0.8625,
-        "mAP50_95": 0.7396,
-        "P": 0.7616,
-        "R": 0.8574,
-        "best_at_epoch": 77,
-        "training_hours": 10.56,
-        "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate. SUPERSEDED by v2 — key cls (一次领取/邀请键 etc) under-trained at 12f. Kept for rollback.",
-        "worst_classes_ap50": {
-          "27_移动至2号点": 0.0,
-          "95_活动商店": 0.055,
-          "1_右切换": 0.341,
-          "96_活动任务": 0.359,
-          "31_返回键": 0.476
-        }
-      },
-      "v13": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v13/weights/last.pt",
-        "model_arch": "yolo26m",
-        "trained_on": "2026-07-09",
-        "n_classes": 476,
-        "epoch_deployed": 31,
-        "frozen_val_mAP50": 0.9774,
-        "frozen_val_mAP50_95": 0.9671,
-        "notes": "warm v12, nc 474→476(+474距离奖励获得结束/+475奖励资讯), train 20,404帧(0616-0708 merged池5,550入train, dedup后20,185 unique)。⚠部署 last.pt(ep31)非 best.pt(ep1): best整体mAP微高(0.9845/0.9710)但474新类8/8全错判405; last对474 8/8全对+弱类大涨(MAX_可点击0.60→0.97/活动商店0.80→0.98/奖励资讯0.79检出), 整体仅-0.007/-0.004在silver val噪声内。已知盲区: 89/90里程碑弹窗黄灰钮(素材仅2帧, 零检出, 攒帧v14补)。"
-      }
-    }
-  },
-  "emoticon": {
-    "active": "v26n",
-    "_merge_note": "(2026-06-12) 已正式退役出 live 管线: pipeline._FOLD_IN_EMOTICON=True + ui v9 的 451 接管摸头。本模型仅剩 dashboard 预标注 teacher 用途 (server prefill 走本 registry 不受影响)。",
-    "task": "detect",
-    "n_classes": 1,
-    "versions": {
-      "v26n": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/emoticon_yolo26n/weights/best.pt",
-        "model_arch": "yolo26n",
-        "trained_on": "2026-05-17",
-        "mAP50": 0.995,
-        "notes": "single class Emoticon_Action, cafe headpat bubbles"
-      }
-    }
-  },
-  "battle_heads": {
-    "active": "legacy",
-    "task": "detect",
-    "n_classes": 4,
-    "versions": {
-      "legacy": {
-        "path": "D:/Project/ml_cache/models/yolo/battle_heads.pt",
-        "model_arch": "yolov8n",
-        "trained_on": "early-2026",
-        "mAP50": 0.995,
-        "notes": "old v8n, to be retrained with yolo26 + VFX augmentation"
-      },
-      "v2": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v2/weights/best.pt",
-        "model_arch": "yolo26n",
-        "trained_on": "2026-07-09",
-        "n_classes": 7,
-        "imgsz": 640,
-        "val_mAP50": 0.965,
-        "val_mAP50_95": 0.863,
-        "per_class_mAP50": {
-          "我方": 0.984,
-          "敌方": 0.887,
-          "战斗暂停": 0.933,
-          "战斗三倍速": 0.995,
-          "自动战斗开启": 0.995,
-          "自动战斗关闭": 0.995,
-          "战斗胜利": "val无实例(7框全train, train帧sanity 3/3检出0.64-0.93)"
-        },
-        "notes": "用户手标133帧(run_battle_material_20260708) → battle_v2(114/19)。7类=我方/敌方(combat AI身份检测层)+战斗HUD 5类(与ui模型有意重复, 高频循环单模型拿AUTO gate)。150ep 3min, fliplr=0铁律(我方左/敌方右), hsv开大打底VFX, copy_paste=0。4090实测98FPS@640(half, 含前后处理; 纯推理0.5ms)。已知弱点: 敌方R 0.749(176框样本少, 形态多) — 下代补敌方素材+VFX合成aug。"
-      },
-      "v3": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v3/weights/best.pt",
-        "model_arch": "yolo26n",
-        "trained_on": "2026-07-10",
-        "n_classes": 14,
-        "imgsz": 640,
-        "val_mAP50": 0.982,
-        "val_mAP50_95": 0.92,
-        "notes": "用户审定3池498帧(活动关/总力战賽特/综合战术考试)+57张dim瞄准态合成(train12%)。nc7→14: +塞特的愤怒0.995/Boss0.995/一倍速0.995/二倍速0.995/暂停菜单三键(重开/继续/放弃)0.995。敌方0.887→0.951(考试mob素材)。aug收敛版(hsv几乎关/mosaic0.3防固定框位置先验)。97ep早停best=ep57。"
-      },
-      "v4": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v4/weights/best.pt",
-        "model_arch": "yolo26n",
-        "trained_on": "2026-07-11",
-        "n_classes": 14,
-        "imgsz": 640,
-        "val_mAP50": 0.988,
-        "val_mAP50_95": 0.948,
-        "notes": "v3三池+用户审定两新池(110759/104427: 身份类人审+HUD由ui v13重建根治v3双框/1倍速误标/暂停漏标)。713对train607+86dim/val106, warm v3, aug收敛配方原样, 150ep跑满10.6min。同卷对比(v4 val): v3=0.962/0.910 → v4=0.988/0.948, 增益全在标注手术处: 战斗暂停0.803→0.973/自动战斗关闭0.944→0.995/敌方0.900→0.977/我方0.941→0.991。⚠战斗胜利0 val样本(仅7 train)未受测。"
-      },
-      "v5": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v5/weights/best.pt",
-        "arch": "yolo26s",
-        "imgsz": 960,
-        "nc": 15,
-        "map50": 0.9831,
-        "map5095": 0.9474,
-        "note": "2026-07-12 v4五池+凹轴耶罗尼姆斯池(真实视频域)+主教类; ep74 best(150ep计划因Win dataloader死锁截停, 已收敛); 同卷vs v4: 0.956/0.904→0.983/0.947, 我方0.896→0.994 敌方0.634→0.981; 85.6fps@1080p单帧串行"
-      },
-      "v6": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v6/weights/best.pt",
-        "arch": "yolo26s",
-        "imgsz": 960,
-        "nc": 16,
-        "map50": 0.9892,
-        "map5095": 0.9576,
-        "note": "2026-07-12 +赫赛德池(球boss新类+敌方浮游炮2083手标+并框拆分); warm v5, ep114; 同卷 vs v5: 0.954/0.923→0.989/0.958, 敌方0.422→0.985(+0.56); 小怪潮目检19/20"
-      },
-      "v7": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v7/weights/best.pt",
-        "arch": "yolo26s",
-        "imgsz": 960,
-        "nc": 17,
-        "map50": 0.9881,
-        "map5095": 0.958,
-        "note": "2026-07-14 +白&黑池(黑白155框/HUD v13重写/日文暂停键全域清零/星野泡泡→我方/孤儿补检128); warm v6, ep108; 全类0.98+ 除黑白0.918(多形态boss传播受限, 变身段样本待补)"
-      },
-      "v8": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v8/weights/best.pt",
-        "arch": "yolo26s",
-        "imgsz": 960,
-        "nc": 17,
-        "map50": 0.9917,
-        "map5095": 0.9586,
-        "note": "2026-07-14 用户补齐黑白变身段(155→469框, 覆盖99%战斗帧); warm v7, ep41早停; 全17类AP50≥0.98(黑白0.918→0.980); 清场满载训练(GPU 68%/289W); ⚠batch32触发ultralytics张量bug, 16为本机上限"
-      }
-    },
-    "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
-  },
-  "unified": {
-    "_doc": "v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
-    "active": "PENDING-LIVE-VERIFY",
-    "_active_note": "用户决策(2026-06-06): 分域跑(UI=ui v5 / 头像=fused v4 / 摸头=emoticon v26n 三独立模型), unified 等 v7 全域无敌再上线。PENDING = pipeline._resolve_unified 返 None → _UI_IS_UNIFIED=False → 日常 UI 用 ui v5(零影响)。v6c 仅借作 prefill teacher(见 ui.versions.v6c), 不影响 live。改成具体版本号(如 'v6c')即通电, 秒级回滚。",
-    "task": "detect",
-    "n_classes": 455,
-    "versions": {
-      "v6b": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6b/weights/best.pt",
-        "model_arch": "yolo26x",
-        "trained_on": "2026-06-04",
-        "epoch_best": 10,
-        "mAP50": 0.864,
-        "mAP50_95": 0.814,
-        "domain_mAP50": {
-          "ui_130cls": 0.892,
-          "avatar_246cls": 0.85,
-          "emoticon": 0.764
-        },
-        "notes": "ep10 best (ep11+ 退化, 根因 synth:real 2.03 过拟合; 关 mosaic 微调无效). 超 v6 峰 0.805. 替代 ui v5 + fused v4(0.966) + emoticon v26n. 头像 0.85 弱类全在泳装/造型变体(BA 迭代靶子: 飞轮补样本 + 下版降 synth 追 0.9). 接线: unified active 时 pipeline._get_yolo 所有 tag 返回此模型, class 按 _classes.txt nc455 划分(143-394 头像 / 451 emoticon / 其余 UI). MUST infer @imgsz=960. 待 live 验证日常跑通才正式切 active=v6b."
-      },
-      "v6c": {
-        "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
-        "model_arch": "yolo26x",
-        "trained_on": "2026-06-06",
-        "epoch_best": 12,
-        "mAP50_95": 0.787,
-        "status": "训练已停(ep12 best 冻结)。砍 UI synth(build_ui_v2 只留 _fused_synth_remap, 去 _synth_ui_swap 伪背景)版。不全域上线(用户决策分域)。",
-        "notes": "live 飞轮帧(519, 06-06)实测: UI 入口域大胜 v6b(咖啡厅入口 conf 0.27→0.89, 底栏入口更高)→ 借作 ui.versions.v6c teacher 给 v7 val 标注。代价: cafe 内部 cls(咖啡厅收益/邀请卷)反而退步漏检 → 那几个弱类标注改用 ui v5(旧特化)单独补。cls 过拟合根因仍未根治(train_cls↓/val_cls↑ ep10-12 峰)。⛔ v6c 训练集含 06-03; 06-06 飞轮帧专做 val, train 永不碰。"
-      }
-    }
+    "epoch_best": 5,
+    "card_recall": 0.854,
+    "manual_mAP50": 0.989,
+    "manual_R": 0.995,
+    "notes": "纯252头像 + 战斗技能牌(复用头像名,无新类) + 灰牌识别(扇形充能/暗灰/低饱和 synth)。冻结 epoch5=真实峰(GPU选峰 vs last 0.805/best 0.810: ep6+ 过拟合 synth、真实灰牌反降)。数据集 build 四修: load_character_names 纯252(排 UI-B 395-454)/灰牌明度暗灰/扇形12点顺时针扩张/val泄漏排除。技能牌 recall 0.557(v5)→0.854。names=v4 完全一致, pipeline 按 cls_name 零改兼容。MUST infer @imgsz960。⚠️技能牌检测能力 ready 但战斗目前 auto 无读牌 skill 消费(combat AI 2.0 地基)。",
+    "warning": "训练后期(ep6+)过拟合 synth 致真实灰牌降 → 必须 save_period 存中间 ckpt + 真实 val(eval_v6_pick.py)选峰, 不能用 nominal best.pt"
+   },
+   "v4": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v4/weights/best_manual.pt",
+    "model_arch": "yolo26x",
+    "trained_on": "2026-05-20",
+    "manual_mAP50": 0.9657,
+    "manual_mAP50_95": 0.8321,
+    "manual_R": 0.9574,
+    "notes": "ep11 weights via manual_fitness_watcher (not ep15 nominal-best, which was synth-bias-fitted)"
+   },
+   "v3": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x/weights/best.pt",
+    "model_arch": "yolo26x",
+    "trained_on": "2026-05-20",
+    "manual_mAP50": 0.683,
+    "notes": "baseline before v4 warm-start"
+   }
   }
+ },
+ "ui": {
+  "active": "v13",
+  "_rollback_note": "2026-07-09 上线 v13(last.pt, 活动皮肤补课+2新类)。回滚: active 改回 'v12' 秒退。真验收=live活动走线(event_quest 首跑)。如live退化(尤其daily核心类)→回v12。",
+  "task": "detect",
+  "n_classes": 474,
+  "n_classes_in_use": 160,
+  "_infer_imgsz": 960,
+  "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
+  "versions": {
+   "v12": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v12/weights/best.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-06-15",
+    "n_classes": 474,
+    "epoch_best": "43ep早停patience30(best~ep13); warm from v11 best.pt; 70ep配方复刻v11/v10",
+    "acceptance": "冻结val515: mAP50~0.982/mAP50-95~0.935 ≈v10(0.9826/0.9383), 高于v11(0.9776/0.9348) → 不退化。⚠️旧冻结val不含商店场景(469/470/471/472/473 val=0)→测不出本版核心增益。数据=15,298帧(v11全源 + 06-14审过9池: 任务大厅live arena/mail/daily/batch_sweep + arena_shop step_mode walk + 用户手录战术大赛商店205540 245帧)。",
+    "known_gap": "①核心补强=471货币1812/472下级620/473一般329(商店买/confirm白名单检测)+9池任务大厅live覆盖。②469战术大赛未选中tab仅30实例(205540全是已选中470态补不了469); 但469实测@0.96够用, arena_shop代码已swipe露出+固定位绕开fold, 不缺数据。③cafe 451摸头仍0.917/0.779弱(无新cafe摸头帧, 待cafe walk录)。④红点继承v10/v11的0.55先验特性。",
+    "v_next_todo": "真验收=live实战走线(arena_shop买两瓶/任务大厅链/cafe). 录全新val(含商店场景) + cafe walk强化451. 222724+今晚6池=下代飞轮待预标。"
+   },
+   "v11": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v11/weights/best.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-06-13",
+    "n_classes": 474,
+    "epoch_best": "ep32 (62ep早停patience30; warm from v10 best.pt; 70ep配方复刻v10)",
+    "acceptance": "冻结val515: mAP50 0.9776/mAP50-95 0.9348/P0.9614/R0.9401。vs v10(0.9826/0.9383)略低0.5pt但在噪声内。⚠️冻结val是旧的(6/06大厅cafe帧), 不含今天新增场景(arena_shop/普通关卡选中80/批量扫荡455/hub, val=0)→ val既证不了v11更好也证不了v10更好。数据=14,931帧(v10全源 + 今天11个6/13全天live _clean池/~983帧: 整链/arena_shop/schedule/bounty/jfd step_mode walk + autonomous尾链, v10预标+用户dashboard人审无可见假阳仅cafe漏摸1, 删18空帧)。用户决策(2026-06-13): v10已live验过, 直接上v11。",
+    "known_gap": "①cafe 451摸头弱(均值0.65)本版不修: 今日飞轮无cafe摸头帧, 老_emoticon_v2 200帧已在源(200帧在474类被稀释)→ 451强化待明天cafe walk多录摸头帧; 眼下pipeline inference用_EMOTICON_CONF 0.40 stopgap兜。②红点dot用0.55先验滤(用户人审认可无假阳, 没改0.20; 故继承v10红点召回特性)。③真验收=明天cafe walk+日常live对比v10/v11新场景检出(arena_shop/普通关卡选中)。",
+    "v_next_todo": "录全新val(含今天新场景, 旧val测不准) + cafe walk多录摸头帧强化451 + dot可选0.20+HSV洗。"
+   },
+   "v10": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v10/weights/best.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-06-13",
+    "n_classes": 474,
+    "epoch_best": "ep15 (45ep早停patience30; warm from v9 best.pt; 70ep配方复刻v9 hsv_h/s=0 batch12)",
+    "acceptance": "冻结val515 vs v9: mAP50 0.9749→0.9826(+0.77pt) / mAP50-95 0.9353→0.9383(+0.30pt); 偏移=召回换精度(mP 0.9689→0.9583 -1.05pt / mR 0.9339→0.9461 +1.23pt)。数据=13,948帧(v9全源 + 用户手标run_20260612_191319 + 14个6/12-13 bot飞轮_clean池, 砍chainlive重复)。上线动机=任务刷关normal已选中屏检出批量扫荡(v10带6/12-13新farming数据)。",
+    "known_gap": "①⚠️红点召回回归: val 0.974→0.889(-8.5pt)。根因=batch_prefill_clean给_clean池点设conf≥0.55门槛, 把0.20-0.55真·中conf红点(任務角标等)变负样本, v10学成对真红点保守。实测737飞轮帧: 先验区0.20-0.55点 379→75(-80%)但目检证实抑制的≈全是真红点非灰占位假阳→位置先验假阳实际未修好(灰/蓝占位FP仍在, pale-blue有饱和像素HSV判空碰不到, 待人审)。操作影响小(红点驱动领取非花钱+每tick重检+门控点击兜底)。v11修法=_clean点改0.20门槛捞回真点+只HSV色彩判空删灰框。②新类469-473(arena_shop)/绿勾 val零GT全进train, 无法val验, 真验收=live。③其余继承v9 known_gap。",
+    "v11_todo": "重建v11: scripts/batch_prefill_clean.py dot_conf降回0.20(或删点floor) + clean_prefill_dots.py色彩判空删灰占位 → 恢复红点召回。用户决策(2026-06-13): 先用v10, 今天录新飞轮+用户素材后再重建。"
+   },
+   "v9": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v9/weights/best.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-06-12",
+    "n_classes": 474,
+    "epoch_best": "ep21 (51ep早停patience30; nominal best=真峰, 复核val 0.9749/0.9353 与results.csv一致, 无需手工冻结)",
+    "acceptance": "冻结val515 vs v8b: ALL R 0.912→0.934 / mAP50-95 0.9234→0.9353; PHANTOM审计(conf>=0.10) 1356→608(-55%); 旧皮箭头651→2根治(左R 0.06→1.00/右0.05→0.98); 数据=12,934帧(06-11十八池全手标+考古回收171121/_ui_val_pool+审计auto-add238框+全池红黄点HSV修33处+build孤儿清除131)。新类469-473(战术大赛商店)+455/456+450+38/39无val实例, 真验收=2026-06-12 15:00 live完整日常链。",
+    "known_gap": "①双倍三倍452: 旧era(06-06)ribbon仍低conf(PHANTOM 350→253, R@F1 0.05但mAP50 0.94=检出在conf<0.10), 当前era(06-11训576实例)live预期正常, 实战盯; 若hub badge漏检, 降业务conf门。②emoticon451旧era R 0.41(新era 747实例已训, live验摸头 — 已折叠接管, v26n退役为teacher)。③移动至2号点 PHANTOM 24不变(无新数据)。④dialog调暗大厅入口仍盲(9帧×13入口, semantizer dialog通道兜底)。"
+   },
+   "v8": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v8b/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-06-11",
+    "n_classes": 469,
+    "epoch_best": "v8b微调ep4 (v8 ep26真实峰 warm → +_arrow_boost 14ep微调, 真val选峰: meanClsR 0.9134 全ckpt最高)",
+    "acceptance": "515真val: 红黄互混 348→0, 红点0.849→0.978, 黄点0.976, 双倍三倍452 0.032→0.508, microP 0.9930, 制造入口/任务大厅0.975; 新类455-468(批量扫荡dialog全套) GT帧定向抽测11/11类全检出(train帧上限, 真验收=live走线); 全类回退扫描 vs v7 仅3类(箭头×2+emoticon)",
+    "known_gap": "①左/右切换 val 0.06 — 定性=过期考卷: val箭头100%是06-06阳奈睡床大厅皮, 用户已换城市夜景皮; 真实live帧(近4天trajectory 60tick) 54/60=90%, miss全是skill不消费场景(短篇网格左箭头×5+悬赏关卡页×1); schedule左箭头有坐标fallback。结构修复=synth箭头贴多样背景(v9债, 大厅再换皮还会断)。②emoticon451 0.44 << v26n 0.995 → _FOLD_IN_EMOTICON 继续 False, cafe由独立v26n承担, 零live影响。③加载中idx22: ep4保1.0(best/last退0.64, 故ship ep4)。"
+   },
+   "v7": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v7/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-06-08",
+    "n_classes": 455,
+    "epoch_best": "70满 (mAP50 0.953 flywheel纯真实val)",
+    "flywheel_recall_mean": 0.921,
+    "notes": "纯 UI+emoticon (头像143-394 build _keep_ui_lines drop, 归 fused v6)。warm-start v5(m)。真实飞轮帧补弱类: 新2run(193003女仆+140123银发两背景)+旧真实+_emoticon_v2, 砍全部synth(伪背景毒)。val=flywheel 477纯真实→best.pt可信。**验收 v5→v7 by-cls 整体均值 0.830→0.921**: 制造入口0→0.97(v5头号弱项!)/emoticon0→0.71/距离结束0.02→0.94/灰色领取0→0.62/加载0.58→1.0; 强类不退(cafe收益0.98/邀请卷1.0/红点0.85/黄点0.99/底栏入口0.97-1.0)。MUST infer @imgsz960。按 cls_name 匹配, pipeline 零改兼容。",
+    "known_gap": "①左切换 1.0→0.72(-0.27, 右切换不退0.98, 不对称待查) ②双倍三倍活动452 0.03(678GT仍漏, train731框没学会)。下版专项补。③emoticon v7 0.71 << 独立 v26n 0.995 → pipeline `_FOLD_IN_EMOTICON=False` 保独立 v26n(不折叠, 等 ui emoticon 训>0.99 再开)。"
+   },
+   "v6c": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
+    "model_arch": "yolo26x",
+    "trained_on": "2026-06-06",
+    "n_classes": 455,
+    "epoch_best": 12,
+    "status": "TEACHER-ONLY (不是 ui 独立模型, 是 unified v6c nc455 借来当纯 UI teacher; live UI 入口域 conf 远胜 v5)。",
+    "_teacher_note": "prefill/suggest 选 model=ui + version=v6c → get_model 走 ui span(_ui_span: 只留 UI 域 0-142/395-450, 头像143-394+emoticon451 丢弃), remap by name 自动对齐 master。当 v7 val 标注主 UI teacher。但 cafe 内部弱类(咖啡厅收益/邀请卷) v6c 退步 → 那几个改 version=v5 + target_classes 单独补。NOT for pipeline live (pipeline 读 unified.active, 与此无关)。"
+   },
+   "v6": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v6/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "PENDING",
+    "n_classes": 452,
+    "status": "NOT-YET-TRAINED — active 维持 v5, 训练+验证后再切到 v6",
+    "notes": "v5 + emoticon 折叠: 新增 cls451 Emoticon_Action, 把独立 emoticon_yolo26n 并进 ui 模型 (pipeline 每个 cafe tick 少跑一次 YOLO 推理)。数据集 ui_v2 已重建 nc=452 (198帧/588框 emoticon; teacher=ui_v5 重标 cafe UI chrome 防 200 帧把 收益/邀请卷 等弱cls 训成负样本)。训练: py scripts/train_yolo26.py ui_yolo26m_v6。训完 eval→冻结 last.pt 为 best_real.pt→把本节点 active 改 v6 (pipeline 检测到 ui 含 Emoticon_Action 会自动丢弃独立 emoticon 模型, 无需改码)。配合飞轮: 补弱cls 的新 source 加进 build_ui_v2.py REAL_SOURCES, 重建后与 emoticon 一并训。",
+    "merge_tooling": "scripts/build_emoticon_ui_source.py (teacher 自动标注) + build_ui_v2.py REAL_SOURCES 末加 _emoticon_v2"
+   },
+   "v5": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v5/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-05-31",
+    "trained_epoch": 60,
+    "n_classes": 451,
+    "notes": "warm-start 微调 from v4 (Transferred 756/768; cls头因nc450→451重学). 数据集 ui_v2: 旧train去重(16157→2377唯一, 砍200x oversample过拟合源)+ run_20260531_110516(1052真实)+ run_20260531_143201(37商店, 补选择购买/已选中/绿勾)+ bond synth(441/442/449). cls92恢复. nc=451(新增450选择购买). 薄类适度oversample到30(450→50). lr0=0.005, 60ep, v4同款空间aug, close_mosaic末10ep. best_real.pt=ep60 last.pt冻结(close_mosaic干净收尾, blindval 0.585→0.606). MUST infer @imgsz=960.",
+    "eval_note": "无独立held-out(1052/37已进train); 真实验收=dashboard目检. blind _ui_val_pool(51帧)仅early-stop, 末值mAP50≈0.606(不可比v4的0.915@1052). 关键train实例: 92=144/450=56/54=83/绿勾=485/441=415/442=510/449=918.",
+    "known_gap": "盯回退类 cls83关卡得星_0/cls112 MIN_灰色(v4曾回退); arena待改用cls92区域选对手(去avatar依赖)."
+   },
+   "v4": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v4/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-05-29",
+    "trained_epoch": 31,
+    "notes": "synth(900帧: 441/442/449 贴多样背景)+空间aug(mosaic0.5/copy_paste0.3/scale0.3/translate0.1/hsv_v0.3, fliplr/flipud/degrees=0)修过拟合. from COCO, batch12 imgsz960 cache=disk. 训练ep31中断(机器睡, 未到close_mosaic@140)但已胜v3. best_real.pt = ep31 last.pt 的冻结副本 (NOT nominal best.pt — real-eval: last 0.915 > best 0.877, blind 51帧 val 再次误导). MUST infer @ imgsz=960.",
+    "eval_real_held_out": "run_20260531_110516 (1052真实held-out帧/140类/10634实例): mAP50 0.915 vs v3 0.862. 修好: 449 momotalk聊天区 0→0.964, 7每日领奖 0→1.0, 8MomoTalk入口 0→1.0, 395购买青辉石 0.014→1.0, 139进入章节 0.25→1.0, 142点击继续 0→0.916, 136战斗胜利 0→1.0, 442进入羁绊 0.667→0.833. synth+aug 成功.",
+    "known_gap": "cls92 战术大赛对战选择区域=0 (v4训练时被drop; v3也0@IoU0.5因巨框定位差但能粗检供arena点击; v5恢复). 小回退待v5补: cls83 关卡得星_0 0.83→0.11, cls112 MIN_灰色 0.71→0.29 (ep31欠训)."
+   },
+   "v3": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v3/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-05-29",
+    "trained_epoch": 34,
+    "notes": "lobby 入口 cls 改标文字(底栏8+MomoTalk+每日领奖+任务大厅) + oversample target=200 (157 cls 全>=200) + 5训练目录(加000756新capture). from COCO (NOT warm-start), patience30 early-stop@ep34, aug全0, batch12, cache=disk. best_real.pt=ep34 last.pt (val-best ep4 只检4入口, ep34 检全8入口 — val 再次误导, ship 看真实截图). MUST infer @ imgsz=960.",
+    "verified_real_frame": "lobby tick_0010 底栏8入口全检出 0.88-0.99 (v2全0!); 训练帧 每日领奖0.98/MomoTalk0.97/咖啡厅0.99; mail 一次领取0.89. 邮件箱cls4 仍0 (19px太小, oversample救不了, 靠红点兜底).",
+    "known_gap": "邮件箱(19px小图标)检不出靠mail.py红点兜底; 每日领奖/MomoTalk 在特殊lobby(banner布局变)泛化弱, 正常lobby OK"
+   },
+   "v2": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v2/weights/best_real.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-05-28",
+    "trained_epoch": 16,
+    "val_mAP50_at_best": 0.8705,
+    "notes": "Retrain with oversample target=60 (770→4472 frames) + ALL aug=0 (clean UI glyph learning, user spec). best_real.pt = ep16 last.pt — picked over ep5 val-best because real-screenshot generalization is better at ep16 (val mAP is inflated by oversample-duplicate same-distribution val set; ep16 detects 一次领取黄色 conf 0.936 on real mail frame, ep5 misses it). Training was killed at ep16 (resume deadlocked on 4472-img re-scan). MUST infer @ imgsz=960.",
+    "verified_real_frame": "mail tick_0012: 一次领取黄色 0.936, 体力 0.935, 领取蓝色 0.97 — vs v1 @1920 only cls417 0.567"
+   },
+   "v1": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v1/weights/best.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-05-28",
+    "mAP50": 0.8625,
+    "mAP50_95": 0.7396,
+    "P": 0.7616,
+    "R": 0.8574,
+    "best_at_epoch": 77,
+    "training_hours": 10.56,
+    "notes": "1220 train frames (4 dirs + minority oversample target=12) + 51 val. mosaic 0.5, no mixup/fliplr/rotate. SUPERSEDED by v2 — key cls (一次领取/邀请键 etc) under-trained at 12f. Kept for rollback.",
+    "worst_classes_ap50": {
+     "27_移动至2号点": 0.0,
+     "95_活动商店": 0.055,
+     "1_右切换": 0.341,
+     "96_活动任务": 0.359,
+     "31_返回键": 0.476
+    }
+   },
+   "v13": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v13/weights/last.pt",
+    "model_arch": "yolo26m",
+    "trained_on": "2026-07-09",
+    "n_classes": 476,
+    "epoch_deployed": 31,
+    "frozen_val_mAP50": 0.9774,
+    "frozen_val_mAP50_95": 0.9671,
+    "notes": "warm v12, nc 474→476(+474距离奖励获得结束/+475奖励资讯), train 20,404帧(0616-0708 merged池5,550入train, dedup后20,185 unique)。⚠部署 last.pt(ep31)非 best.pt(ep1): best整体mAP微高(0.9845/0.9710)但474新类8/8全错判405; last对474 8/8全对+弱类大涨(MAX_可点击0.60→0.97/活动商店0.80→0.98/奖励资讯0.79检出), 整体仅-0.007/-0.004在silver val噪声内。已知盲区: 89/90里程碑弹窗黄灰钮(素材仅2帧, 零检出, 攒帧v14补)。"
+   }
+  }
+ },
+ "emoticon": {
+  "active": "v26n",
+  "_merge_note": "(2026-06-12) 已正式退役出 live 管线: pipeline._FOLD_IN_EMOTICON=True + ui v9 的 451 接管摸头。本模型仅剩 dashboard 预标注 teacher 用途 (server prefill 走本 registry 不受影响)。",
+  "task": "detect",
+  "n_classes": 1,
+  "versions": {
+   "v26n": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/emoticon_yolo26n/weights/best.pt",
+    "model_arch": "yolo26n",
+    "trained_on": "2026-05-17",
+    "mAP50": 0.995,
+    "notes": "single class Emoticon_Action, cafe headpat bubbles"
+   }
+  }
+ },
+ "battle_heads": {
+  "active": "legacy",
+  "task": "detect",
+  "n_classes": 4,
+  "versions": {
+   "legacy": {
+    "path": "D:/Project/ml_cache/models/yolo/battle_heads.pt",
+    "model_arch": "yolov8n",
+    "trained_on": "early-2026",
+    "mAP50": 0.995,
+    "notes": "old v8n, to be retrained with yolo26 + VFX augmentation"
+   },
+   "v2": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v2/weights/best.pt",
+    "model_arch": "yolo26n",
+    "trained_on": "2026-07-09",
+    "n_classes": 7,
+    "imgsz": 640,
+    "val_mAP50": 0.965,
+    "val_mAP50_95": 0.863,
+    "per_class_mAP50": {
+     "我方": 0.984,
+     "敌方": 0.887,
+     "战斗暂停": 0.933,
+     "战斗三倍速": 0.995,
+     "自动战斗开启": 0.995,
+     "自动战斗关闭": 0.995,
+     "战斗胜利": "val无实例(7框全train, train帧sanity 3/3检出0.64-0.93)"
+    },
+    "notes": "用户手标133帧(run_battle_material_20260708) → battle_v2(114/19)。7类=我方/敌方(combat AI身份检测层)+战斗HUD 5类(与ui模型有意重复, 高频循环单模型拿AUTO gate)。150ep 3min, fliplr=0铁律(我方左/敌方右), hsv开大打底VFX, copy_paste=0。4090实测98FPS@640(half, 含前后处理; 纯推理0.5ms)。已知弱点: 敌方R 0.749(176框样本少, 形态多) — 下代补敌方素材+VFX合成aug。"
+   },
+   "v3": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v3/weights/best.pt",
+    "model_arch": "yolo26n",
+    "trained_on": "2026-07-10",
+    "n_classes": 14,
+    "imgsz": 640,
+    "val_mAP50": 0.982,
+    "val_mAP50_95": 0.92,
+    "notes": "用户审定3池498帧(活动关/总力战賽特/综合战术考试)+57张dim瞄准态合成(train12%)。nc7→14: +塞特的愤怒0.995/Boss0.995/一倍速0.995/二倍速0.995/暂停菜单三键(重开/继续/放弃)0.995。敌方0.887→0.951(考试mob素材)。aug收敛版(hsv几乎关/mosaic0.3防固定框位置先验)。97ep早停best=ep57。"
+   },
+   "v4": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26n_v4/weights/best.pt",
+    "model_arch": "yolo26n",
+    "trained_on": "2026-07-11",
+    "n_classes": 14,
+    "imgsz": 640,
+    "val_mAP50": 0.988,
+    "val_mAP50_95": 0.948,
+    "notes": "v3三池+用户审定两新池(110759/104427: 身份类人审+HUD由ui v13重建根治v3双框/1倍速误标/暂停漏标)。713对train607+86dim/val106, warm v3, aug收敛配方原样, 150ep跑满10.6min。同卷对比(v4 val): v3=0.962/0.910 → v4=0.988/0.948, 增益全在标注手术处: 战斗暂停0.803→0.973/自动战斗关闭0.944→0.995/敌方0.900→0.977/我方0.941→0.991。⚠战斗胜利0 val样本(仅7 train)未受测。"
+   },
+   "v5": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v5/weights/best.pt",
+    "arch": "yolo26s",
+    "imgsz": 960,
+    "nc": 15,
+    "map50": 0.9831,
+    "map5095": 0.9474,
+    "note": "2026-07-12 v4五池+凹轴耶罗尼姆斯池(真实视频域)+主教类; ep74 best(150ep计划因Win dataloader死锁截停, 已收敛); 同卷vs v4: 0.956/0.904→0.983/0.947, 我方0.896→0.994 敌方0.634→0.981; 85.6fps@1080p单帧串行"
+   },
+   "v6": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v6/weights/best.pt",
+    "arch": "yolo26s",
+    "imgsz": 960,
+    "nc": 16,
+    "map50": 0.9892,
+    "map5095": 0.9576,
+    "note": "2026-07-12 +赫赛德池(球boss新类+敌方浮游炮2083手标+并框拆分); warm v5, ep114; 同卷 vs v5: 0.954/0.923→0.989/0.958, 敌方0.422→0.985(+0.56); 小怪潮目检19/20"
+   },
+   "v7": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v7/weights/best.pt",
+    "arch": "yolo26s",
+    "imgsz": 960,
+    "nc": 17,
+    "map50": 0.9881,
+    "map5095": 0.958,
+    "note": "2026-07-14 +白&黑池(黑白155框/HUD v13重写/日文暂停键全域清零/星野泡泡→我方/孤儿补检128); warm v6, ep108; 全类0.98+ 除黑白0.918(多形态boss传播受限, 变身段样本待补)"
+   },
+   "v8": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v8/weights/best.pt",
+    "arch": "yolo26s",
+    "imgsz": 960,
+    "nc": 17,
+    "map50": 0.9917,
+    "map5095": 0.9586,
+    "note": "2026-07-14 用户补齐黑白变身段(155→469框, 覆盖99%战斗帧); warm v7, ep41早停; 全17类AP50≥0.98(黑白0.918→0.980); 清场满载训练(GPU 68%/289W); ⚠batch32触发ultralytics张量bug, 16为本机上限"
+   },
+   "v9": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v9/weights/best.pt",
+    "arch": "yolo26s",
+    "imgsz": 960,
+    "nc": 18,
+    "map50": 0.989,
+    "map5095": 0.942,
+    "note": "2026-07-14 大蛇池(薇娜1080p60)入库: 新类大蛇local17 AP50=0.950; 倍速投票毒100框修正(track_prefill HUD改单帧直写)+白亮底1倍速新形态; 战斗胜利分层切分val=2首次验收0.995; warm v8, ep113; cache=False+workers4定稿(cache RAM+workers8炸1455 commit峰值, 第二次实锤)"
+   }
+  },
+  "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
+ },
+ "unified": {
+  "_doc": "v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
+  "active": "PENDING-LIVE-VERIFY",
+  "_active_note": "用户决策(2026-06-06): 分域跑(UI=ui v5 / 头像=fused v4 / 摸头=emoticon v26n 三独立模型), unified 等 v7 全域无敌再上线。PENDING = pipeline._resolve_unified 返 None → _UI_IS_UNIFIED=False → 日常 UI 用 ui v5(零影响)。v6c 仅借作 prefill teacher(见 ui.versions.v6c), 不影响 live。改成具体版本号(如 'v6c')即通电, 秒级回滚。",
+  "task": "detect",
+  "n_classes": 455,
+  "versions": {
+   "v6b": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6b/weights/best.pt",
+    "model_arch": "yolo26x",
+    "trained_on": "2026-06-04",
+    "epoch_best": 10,
+    "mAP50": 0.864,
+    "mAP50_95": 0.814,
+    "domain_mAP50": {
+     "ui_130cls": 0.892,
+     "avatar_246cls": 0.85,
+     "emoticon": 0.764
+    },
+    "notes": "ep10 best (ep11+ 退化, 根因 synth:real 2.03 过拟合; 关 mosaic 微调无效). 超 v6 峰 0.805. 替代 ui v5 + fused v4(0.966) + emoticon v26n. 头像 0.85 弱类全在泳装/造型变体(BA 迭代靶子: 飞轮补样本 + 下版降 synth 追 0.9). 接线: unified active 时 pipeline._get_yolo 所有 tag 返回此模型, class 按 _classes.txt nc455 划分(143-394 头像 / 451 emoticon / 其余 UI). MUST infer @imgsz=960. 待 live 验证日常跑通才正式切 active=v6b."
+   },
+   "v6c": {
+    "path": "D:/Project/ml_cache/models/yolo/runs/unified_yolo26x_v6c/weights/best.pt",
+    "model_arch": "yolo26x",
+    "trained_on": "2026-06-06",
+    "epoch_best": 12,
+    "mAP50_95": 0.787,
+    "status": "训练已停(ep12 best 冻结)。砍 UI synth(build_ui_v2 只留 _fused_synth_remap, 去 _synth_ui_swap 伪背景)版。不全域上线(用户决策分域)。",
+    "notes": "live 飞轮帧(519, 06-06)实测: UI 入口域大胜 v6b(咖啡厅入口 conf 0.27→0.89, 底栏入口更高)→ 借作 ui.versions.v6c teacher 给 v7 val 标注。代价: cafe 内部 cls(咖啡厅收益/邀请卷)反而退步漏检 → 那几个弱类标注改用 ui v5(旧特化)单独补。cls 过拟合根因仍未根治(train_cls↓/val_cls↑ ep10-12 峰)。⛔ v6c 训练集含 06-03; 06-06 飞轮帧专做 val, train 永不碰。"
+   }
+  }
+ }
 }

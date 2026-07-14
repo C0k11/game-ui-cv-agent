@@ -17,8 +17,8 @@ import numpy as np
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v8")
-IDENTITY_CLS = {0, 1, 7, 8, 14, 15, 16}  # 我方/敌方/塞特的愤怒/Boss/主教/球
+DS = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v9")
+IDENTITY_CLS = {0, 1, 7, 8, 14, 15, 16, 17}  # 我方/敌方/塞特/Boss/主教/球/黑白/大蛇
 FRAC = 0.15
 SEED = 1042
 
