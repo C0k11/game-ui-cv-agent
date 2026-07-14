@@ -756,6 +756,31 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26s_v6": {
+        # 战斗 v6 (2026-07-12) = v5 + 赫赛德池(球boss新类167框 + 敌方浮游炮
+        #  2083框用户手标 + 并框拆分器过刀)。nc=16(+球 local15)。
+        #  warm v5 best(nc 15→16 head 重初始化, backbone 保留真实视频域特征,
+        #  远强于 COCO 起点) → 120ep 足。⚠训前必清 GPU 大占用(v5 教训:
+        #  server v13 4.3G 挤爆 OOM); 监控用 log 增量判活(Win dataloader
+        #  死锁时进程全活但 stdout 冻结)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v6" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v5" / "weights" / "best.pt"),
+        "epochs": 120,
+        "patience": 30,
+        "save_period": 10,
+        "imgsz": 960,
+        "batch": 14,   # v5 在 batch16+4.3G桌面基线下 ep74 OOM — 留峰值余量
+        "out_name": "battle_yolo26s_v6",
+        # ⚠首跑爆系统 commit(RAM+pagefile, 0xC000012D): 用户桌面占70%RAM +
+        #  cache 2.3G + 8 spawn worker 承诺开销 → cache 关 + worker 减半
+        "cache": False,
+        "workers": 4,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
