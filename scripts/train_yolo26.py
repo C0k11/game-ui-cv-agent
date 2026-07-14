@@ -781,6 +781,26 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26s_v7": {
+        # 战斗 v7 (2026-07-14) = v6 + 白&黑池(黑白单类155框 + HUD v13重写 +
+        #  日文暂停键全域清零 + 星野泡泡→我方 + 孤儿血条补检128)。nc=17。
+        #  warm v6 best。配方=v6 内存安全版(cache False + workers 4)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v7" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v6" / "weights" / "best.pt"),
+        "epochs": 120,
+        "patience": 30,
+        "save_period": 10,
+        "imgsz": 960,
+        "batch": 14,
+        "out_name": "battle_yolo26s_v7",
+        "cache": False,
+        "workers": 4,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、

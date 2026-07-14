@@ -271,6 +271,15 @@
         "map50": 0.9892,
         "map5095": 0.9576,
         "note": "2026-07-12 +赫赛德池(球boss新类+敌方浮游炮2083手标+并框拆分); warm v5, ep114; 同卷 vs v5: 0.954/0.923→0.989/0.958, 敌方0.422→0.985(+0.56); 小怪潮目检19/20"
+      },
+      "v7": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v7/weights/best.pt",
+        "arch": "yolo26s",
+        "imgsz": 960,
+        "nc": 17,
+        "map50": 0.9881,
+        "map5095": 0.958,
+        "note": "2026-07-14 +白&黑池(黑白155框/HUD v13重写/日文暂停键全域清零/星野泡泡→我方/孤儿补检128); warm v6, ep108; 全类0.98+ 除黑白0.918(多形态boss传播受限, 变身段样本待补)"
       }
     },
     "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
