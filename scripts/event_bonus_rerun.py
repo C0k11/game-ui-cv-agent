@@ -207,34 +207,88 @@ def main():
     print("[A] 12关加成全记录 ✓", flush=True)
 
     # ── B. Q12 扫荡吃剩余 AP ──
-    for _ in range(6):               # 找到 Q12 行
+    # B0. ⛔金钱铁律: 扫前正向读 AP(体力cls锚定+右侧0.06 strip),
+    # None 或 <20(单次成本) → 收工, 绝不试探点扫荡开始(fail-closed)
+    fr = ensure_quest_tab()
+    if fr is None:
+        print("[B] ⛔Quest tab 正锚拿不到 — 停")
+        return
+    ap = None
+    for n, c, x1, y1, x2, y2, W, H in dets(ui, fr, 0.5):
+        if n == "体力" and (y1 + y2) / 2 / H < 0.12:
+            raw = run_digit_ocr(fr, (x2 / W + 0.002, max(0.0, y1 / H - 0.012),
+                                     x2 / W + 0.062, y2 / H + 0.012))
+            num = ""
+            for ch in (raw or ""):
+                if ch.isdigit():
+                    num += ch
+                elif num:
+                    break
+            ap = int(num) if num else None
+            break
+    print(f"[B] 扫前 AP={ap}", flush=True)
+    if ap is None or ap < 20:
+        print("[B] AP 读不出/不足 20 — 收工(绝不试探)", flush=True)
+        return
+    # B1. Q12 = 滑到底后倒数第 1 行入场键(结构化定位, 零 OCR 依赖)
+    prev_sig = None
+    for _ in range(10):
         fr = ensure_quest_tab()
         if fr is None:
-            print("[B] ⛔Quest tab 正锚拿不到 — 停")
+            print("[B] ⛔Quest tab 正锚丢失 — 停")
             return
-        rows = list_rows(fr)
-        hit = next(((q, cy) for q, cy in rows if q == TOTAL_Q), None)
-        if hit:
-            tap(3340, int(hit[1] * 2160))
+        d = dets(ui, fr, 0.5)
+        entries = sorted(
+            ((y1 + y2) / 2 / H, (int((x1 + x2) / 2), int((y1 + y2) / 2)))
+            for n, c, x1, y1, x2, y2, W, H in d if n == "入场键")
+        sig = tuple(round(cy, 2) for cy, _ in entries)
+        if entries and sig == prev_sig:      # 滑不动了 = 到底
+            tap(*entries[-1][1])
             time.sleep(7)
             break
+        prev_sig = sig
         adb._shell("input swipe 2760 1500 2760 700 500")
-        time.sleep(2.5)
+        time.sleep(2.0)
     else:
         print("[B] 找不到Q12 — 停")
         return
-    tap(3245, 900)               # 扫荡 MAX
-    time.sleep(3)
-    tap(2803, 1220)              # 掃蕩開始
+    # B2. 扫荡面板全 cls 驱动(fail-closed: 检不出就停, 绝不盲点)
+    fr = adb.capture_frame()
+    d = dets(ui, fr, 0.5)
+    mx = next((b for b in d if b[0] == "MAX_可点击"), None)
+    if mx is None:
+        print("[B] ⛔MAX_可点击 检不出 — 不扫, 人工看", flush=True)
+        return
+    tap(int((mx[2] + mx[4]) / 2), int((mx[3] + mx[5]) / 2))
+    time.sleep(2.5)
+    fr = adb.capture_frame()
+    d = dets(ui, fr, 0.20)
+    # 弹框前 body 危险 cls 位置基线(面板 stepper 会透进确认帧, 见
+    # sweep_event.py 2026-07-15 实锤; 类名差分会裸奔, 必须位置差分)
+    _DANGER = ("加号", "MAX_可点击", "MIN_灰色", "体力")
+    pre_pos = [(n, (x1 + x2) / 2 / W, (y1 + y2) / 2 / H)
+               for n, c, x1, y1, x2, y2, W, H in d
+               if y1 / H > 0.12 and n in _DANGER]
+    sw = next((b for b in d if b[0] == "扫荡开始" and b[1] >= 0.5), None)
+    if sw is None:
+        print("[B] ⛔扫荡开始 检不出 — 不扫, 人工看", flush=True)
+        return
+    tap(int((sw[2] + sw[4]) / 2), int((sw[3] + sw[5]) / 2))
     time.sleep(5)
     fr = adb.capture_frame()
     d = dets(ui, fr, 0.20)       # 守卫地板 conf
     names = {x[0] for x in d}
+
+    def _is_new(n, cx, cy):
+        return not any(pn == n and abs(px - cx) < 0.04 and abs(py - cy) < 0.04
+                       for pn, px, py in pre_pos)
+
     body_bad = [n for n, c, x1, y1, x2, y2, W, H in d
-                if y1 / H > 0.12 and n in
-                ("加号", "MAX_可点击", "MIN_灰色", "体力")]
+                if y1 / H > 0.12 and n in _DANGER
+                and _is_new(n, (x1 + x2) / 2 / W, (y1 + y2) / 2 / H)]
     if {"取消键", "确认键"} <= names and not body_bad:
-        tap(2300, 1570)          # 純AP確認 (白名单过闸)
+        ck = next(b for b in d if b[0] == "确认键")
+        tap(int((ck[2] + ck[4]) / 2), int((ck[3] + ck[5]) / 2))
         print("[B] 扫荡确认(纯AP闸过) ✓", flush=True)
         time.sleep(6)
         tap(1920, 1900)          # 结果窗 TOUCH
