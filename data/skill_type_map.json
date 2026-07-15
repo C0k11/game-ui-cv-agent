@@ -4,1759 +4,2419 @@
   "ex_name": "Giant Heel Crash",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "一花": {
   "idx": 144,
   "ex_name": "稍微失礼一下的说",
   "cost": 6,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 850
  },
  "一花泳装": {
   "idx": 145,
   "ex_name": "觉醒的野性",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "三千留": {
   "idx": 146,
   "ex_name": "三千留流忍法！！",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "三森": {
   "idx": 147,
   "ex_name": "赏花的好天气呢",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "三森泳装": {
   "idx": 148,
   "ex_name": "是夏天呢！",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "乃爱": {
   "idx": 149,
   "ex_name": "纪录的关键在于速度",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "乃爱睡衣": {
   "idx": 150,
   "ex_name": "熄灯后请保持安静",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "亚伽里": {
   "idx": 151,
   "ex_name": "榴弹，大份！",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 150
  },
  "亚伽里正月": {
   "idx": 152,
   "ex_name": "暂时借用一下！",
   "cost": 5,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Vehicle",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "亚子": {
   "idx": 153,
   "ex_name": "共享侦查数据",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "亚子礼服": {
   "idx": 154,
   "ex_name": "完美的特务",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 350
  },
  "亚都梨": {
   "idx": 158,
   "ex_name": "Black Box",
   "cost": 4,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "亚都梨应援团": {
   "idx": 159,
   "ex_name": "礼砲洗礼",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 1000
  },
  "令女": {
   "idx": 160,
   "ex_name": "腿法：破片手榴弹",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "伊吹": {
   "idx": 161,
   "ex_name": "伊吹的画画时间！",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 350
  },
  "伊吕波": {
   "idx": 162,
   "ex_name": "上吧，虎丸",
   "cost": 6,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Vehicle",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "伊树菜": {
   "idx": 163,
   "ex_name": "这就是伊树菜流忍法！",
   "cost": 3,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "伊树菜泳装": {
   "idx": 164,
   "ex_name": "伊树菜流忍法．夏日版",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "伊织": {
   "idx": 165,
   "ex_name": "一网打尽",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "佳世子": {
   "idx": 167,
   "ex_name": "Panic Bringer",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 700
  },
  "佳世子正月": {
   "idx": 168,
   "ex_name": "新年的御守",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "佳世子礼服": {
   "idx": 169,
   "ex_name": "Shadow Shot",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "佳穗": {
   "idx": 170,
   "ex_name": "身为粉丝",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "优香": {
   "idx": 171,
   "ex_name": "Q.E.D",
   "cost": 3,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "优香睡衣": {
   "idx": 172,
   "ex_name": "千钧一发佩洛洛大人",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "优香体育服": {
   "idx": 173,
   "ex_name": "R.S.G！",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 600
  },
  "光": {
   "idx": 174,
   "ex_name": "验票☆时间",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "千夏": {
   "idx": 175,
   "ex_name": "战伤治疗",
   "cost": 4,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "千夏温泉": {
   "idx": 176,
   "ex_name": "战斗用A型能量剂",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "千寻": {
   "idx": 177,
   "ex_name": "Override",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "千纱": {
   "idx": 178,
   "ex_name": "Sweet Fire",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "千纱乐团": {
   "idx": 179,
   "ex_name": "歴史性的一小节",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "吹雪": {
   "idx": 180,
   "ex_name": "先从甜蜜的休息开始",
   "cost": 4,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "吹雪泳装": {
   "idx": 181,
   "ex_name": "清爽的小把戏",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 84
  },
  "和香": {
   "idx": 182,
   "ex_name": "观测支援",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "和香温泉": {
   "idx": 183,
   "ex_name": "227号温泉浴场，开始营业！",
   "cost": 4,
   "target": "other",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 350
  },
  "咲希": {
   "idx": 184,
   "ex_name": "支援射击，开始！",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 100
  },
  "咲希泳装": {
   "idx": 185,
   "ex_name": "信号弹，投掷！",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "喜美": {
   "idx": 186,
   "ex_name": "谁，谁慌了啊！？",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "喜美乐团": {
   "idx": 187,
   "ex_name": "爆炸性的高潮",
   "cost": 10,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "堇": {
   "idx": 188,
   "ex_name": "我要冲了！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "夏": {
   "idx": 189,
   "ex_name": "为了这种时候准备的",
   "cost": 3,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "妃姬": {
   "idx": 190,
   "ex_name": "诏令：格物致知",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "季": {
   "idx": 191,
   "ex_name": "System: Abi-Eshuh",
   "cost": 2,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "季兔女郎": {
   "idx": 192,
   "ex_name": "特殊武装：Arm-Gear",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "实里": {
   "idx": 193,
   "ex_name": "奋起吧！",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "小春": {
   "idx": 196,
   "ex_name": "神圣手榴弹",
   "cost": 3,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "小春泳装": {
   "idx": 197,
   "ex_name": "真的不是那样啦！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "小玉": {
   "idx": 198,
   "ex_name": "开始监听",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "小玉露营": {
   "idx": 199,
   "ex_name": "投掷熊铃",
   "cost": 6,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "小雪": {
   "idx": 200,
   "ex_name": "难以处理的变数",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "希望": {
   "idx": 201,
   "ex_name": "BOOSTER ON!!!",
   "cost": 4,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "弥香": {
   "idx": 204,
   "ex_name": "Kyrie Eleison",
   "cost": 6,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "弥香泳装": {
   "idx": 205,
   "ex_name": "难以忘怀的回忆",
   "cost": 4,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "御坂美琴": {
   "idx": 206,
   "ex_name": "常盘台的超电磁砲",
   "cost": 3,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "心菜": {
   "idx": 207,
   "ex_name": "做得非常好！",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "志美子": {
   "idx": 208,
   "ex_name": "知识之盾",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "惠": {
   "idx": 209,
   "ex_name": "喜欢热的对吧～！",
   "cost": 5,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 600
  },
  "爱莉": {
   "idx": 211,
   "ex_name": "虽然很可惜……我丢！",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "爱莉乐团": {
   "idx": 212,
   "ex_name": "幸福的旋律",
   "cost": 2,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "爱丽丝": {
   "idx": 213,
   "ex_name": "世界的法则终将崩坏！",
   "cost": 6,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "爱丽丝女仆": {
   "idx": 214,
   "ex_name": "爱丽丝，打扫！",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "敦子": {
   "idx": 217,
   "ex_name": "这也是我的力量……？",
   "cost": 4,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 500
  },
  "敦子泳装": {
   "idx": 218,
   "ex_name": "制造回忆",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "日向": {
   "idx": 219,
   "ex_name": "最终手段",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 150
  },
  "日向泳装": {
   "idx": 220,
   "ex_name": "激烈的冷水澡",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "日和": {
   "idx": 221,
   "ex_name": "我，我来支援了！",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "日和泳装": {
   "idx": 222,
   "ex_name": "目标是一等奖！",
   "cost": 4,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "日步美": {
   "idx": 223,
   "ex_name": "帮帮我，佩洛洛大人！",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "日步美泳装": {
   "idx": 224,
   "ex_name": "十字军酱，拜托你了！",
   "cost": 10,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Vehicle",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "旬": {
   "idx": 225,
   "ex_name": "坏孩子在哪里？",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "旬幼女": {
   "idx": 226,
   "ex_name": "那样子坏坏唷？",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "明日奈": {
   "idx": 227,
   "ex_name": "上啰──！",
   "cost": 2,
   "target": "self",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "明日奈兔女郎": {
   "idx": 228,
   "ex_name": "呐呐，你看这个！",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "明日奈制服": {
   "idx": 229,
   "ex_name": "这边，这边！",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "星野": {
   "idx": 230,
   "ex_name": "战术镇压",
   "cost": 4,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "星野武装": {
   "idx": 231,
   "ex_name": "集中突破",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "星野泳装": {
   "idx": 232,
   "ex_name": "水上支援",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 350
  },
  "时雨": {
   "idx": 233,
   "ex_name": "时雨特制水壶手榴弹",
   "cost": 5,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "时雨温泉": {
   "idx": 234,
   "ex_name": "时雨特制水果牛奶",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "晴": {
   "idx": 235,
   "ex_name": "EMP无人机展开",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "晴露营": {
   "idx": 236,
   "ex_name": "营火的滋味",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "智惠": {
   "idx": 237,
   "ex_name": "大家，请注意听这边！",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "智惠旗袍": {
   "idx": 238,
   "ex_name": "KOROBUSHKA",
   "cost": 3,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 510
  },
  "月夜": {
   "idx": 239,
   "ex_name": "月夜流，忍法……！",
   "cost": 3,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "朱音": {
   "idx": 240,
   "ex_name": "优雅地排除",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "朱音兔女郎": {
   "idx": 241,
   "ex_name": "精心地准备",
   "cost": 3,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "柚子": {
   "idx": 242,
   "ex_name": "Game Start!",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "柚子女仆": {
   "idx": 243,
   "ex_name": "潜入Start!",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 150
  },
  "桃井": {
   "idx": 244,
   "ex_name": "创作的痛苦",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 850
  },
  "桃井女仆": {
   "idx": 245,
   "ex_name": "虚拟女仆武器！",
   "cost": 4,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "桐乃": {
   "idx": 246,
   "ex_name": "交涉到此为止了……！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "桐乃泳装": {
   "idx": 247,
   "ex_name": "本官会密切观察！",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "桔梗": {
   "idx": 248,
   "ex_name": "神机妙算的一手",
   "cost": 5,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "梓": {
   "idx": 249,
   "ex_name": "Intulit Mortem",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "梓泳装": {
   "idx": 250,
   "ex_name": "Spicea Aqua",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "椿": {
   "idx": 251,
   "ex_name": "战斗用盾牌，装备",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 700
  },
  "椿导览员": {
   "idx": 252,
   "ex_name": "修行部长的导览",
   "cost": 6,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "枫": {
   "idx": 253,
   "ex_name": "信号弹，发射！！",
   "cost": 4,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "樱子": {
   "idx": 254,
   "ex_name": "洗礼之印",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "樱子偶像": {
   "idx": 255,
   "ex_name": "反差萌偶像",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "沙织": {
   "idx": 256,
   "ex_name": "Et Omnia Vanitas!",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "沙织泳装": {
   "idx": 257,
   "ex_name": "表演开始！",
   "cost": 7,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 850
  },
  "沙织礼服": {
   "idx": 258,
   "ex_name": "排除目击者",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "沙耶": {
   "idx": 259,
   "ex_name": "这是我的杰作！",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "沙耶私服": {
   "idx": 260,
   "ex_name": "这是我送的礼物！",
   "cost": 5,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "泉": {
   "idx": 261,
   "ex_name": "起司巧克力汉堡──！",
   "cost": 3,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "泉泳装": {
   "idx": 262,
   "ex_name": "清凉～椰子汁！",
   "cost": 4,
   "target": "enemy",
-  "radius": "Bounce",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "海花": {
   "idx": 263,
   "ex_name": "庆典开始了！",
   "cost": 3,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "淳子": {
   "idx": 264,
   "ex_name": "饥饿的焦躁",
   "cost": 5,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "淳子正月": {
   "idx": 265,
   "ex_name": "食物的悔恨",
   "cost": 2,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 100
  },
  "渚": {
   "idx": 266,
   "ex_name": "Time On Target",
   "cost": 3,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "渚泳装": {
   "idx": 267,
   "ex_name": "Teatime in Wartime",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "澪纱": {
   "idx": 270,
   "ex_name": "请收下挑战书！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 700
  },
  "无月": {
   "idx": 273,
   "ex_name": "灼热的小夜曲",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 125
  },
  "无月正月": {
   "idx": 274,
   "ex_name": "迎春交响乐",
   "cost": 2,
   "target": "enemy",
-  "radius": "Donut",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 1100
  },
  "玛丽": {
   "idx": 276,
   "ex_name": "神圣加护",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "玛丽偶像": {
   "idx": 277,
   "ex_name": "溢出的爱心",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "玛丽体育服": {
   "idx": 278,
   "ex_name": "请喝水",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "玛丽娜": {
   "idx": 279,
   "ex_name": "革命的突击！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Donut",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 1000
  },
  "玛丽娜旗袍": {
   "idx": 280,
   "ex_name": "呃，呃啊啊啊──！",
   "cost": 6,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "环奈": {
   "idx": 281,
   "ex_name": "公安局长的手腕",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "环奈泳装": {
   "idx": 282,
   "ex_name": "确保水上安全！",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "白子": {
   "idx": 283,
   "ex_name": "召唤无人机：火力支援",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "白子单车": {
   "idx": 284,
   "ex_name": "Ride & Grenade",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "白子泳装": {
   "idx": 285,
   "ex_name": "是条大鱼",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "真琴": {
   "idx": 288,
   "ex_name": "搞，搞错了！",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 500
  },
  "真纪": {
   "idx": 289,
   "ex_name": "让世界更加鲜艳！",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "知世": {
   "idx": 290,
   "ex_name": "这个可能会痛喔～",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "知世泳装": {
   "idx": 291,
   "ex_name": "夏日的海边，Fever～",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 150
  },
  "红叶": {
   "idx": 292,
   "ex_name": "伟大的沟通方式",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "紫": {
   "idx": 293,
   "ex_name": "刚直的决心",
   "cost": 7,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "绿": {
   "idx": 294,
   "ex_name": "Drawing Art",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "绿女仆": {
   "idx": 295,
   "ex_name": "虚拟女仆射击",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "绮罗罗": {
   "idx": 296,
   "ex_name": "格黑娜的名人！",
   "cost": 4,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "绫音": {
   "idx": 297,
   "ex_name": "支援快递",
   "cost": 4,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "绫音泳装": {
   "idx": 298,
   "ex_name": "雨云号，出击！",
   "cost": 4,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Vehicle",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "美优": {
   "idx": 299,
   "ex_name": "胆小者的观测",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "美优泳装": {
   "idx": 300,
   "ex_name": "海鸥的袭击",
   "cost": 5,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "美咲": {
   "idx": 301,
   "ex_name": "虚无的世界",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 25
  },
  "美奈": {
   "idx": 302,
   "ex_name": "龙争虎斗",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "美祢": {
   "idx": 303,
   "ex_name": "荣耀与信念",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "美祢偶像": {
   "idx": 304,
   "ex_name": "超级偶像落地",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 600
  },
  "羽留奈": {
   "idx": 305,
   "ex_name": "贯穿 Elegance",
   "cost": 3,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "羽留奈正月": {
   "idx": 306,
   "ex_name": "美食家的愤怒",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "羽留奈体育服": {
   "idx": 307,
   "ex_name": "美食家的提议",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 510
  },
  "圣亚": {
   "idx": 308,
   "ex_name": "拥抱的花园",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "圣亚泳装": {
   "idx": 309,
   "ex_name": "浪漫的海滩",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "良舞": {
   "idx": 310,
   "ex_name": "果然如此！",
   "cost": 4,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "花凛": {
   "idx": 311,
   "ex_name": "目标，排除",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "花凛兔女郎": {
   "idx": 312,
   "ex_name": "迅速地、准确地",
   "cost": 7,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 1000
  },
  "花凛制服": {
   "idx": 313,
   "ex_name": "危急时闪耀的向导",
   "cost": 7,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "花子": {
   "idx": 314,
   "ex_name": "让禁忌的游戏开始吧",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "花子泳装": {
   "idx": 315,
   "ex_name": "我会多洒一点的♡",
   "cost": 2,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 850
  },
  "花绘": {
   "idx": 316,
   "ex_name": "治疗时间唷～！",
   "cost": 4,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "花绘圣诞节": {
   "idx": 317,
   "ex_name": "礼物时间唷～",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "芹奈": {
   "idx": 318,
   "ex_name": "集中治疗组合A",
   "cost": 2,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 500
  },
  "芹奈圣诞节": {
   "idx": 319,
   "ex_name": "祝福的声响",
   "cost": 4,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "若藻": {
   "idx": 320,
   "ex_name": "深红的花占卜",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "若藻泳装": {
   "idx": 321,
   "ex_name": "秘色的花占卜",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "英美": {
   "idx": 322,
   "ex_name": "不屈的意志",
   "cost": 4,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "英美泳装": {
   "idx": 323,
   "ex_name": "可靠的后援",
   "cost": 4,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 510
  },
  "茜香": {
   "idx": 324,
   "ex_name": "真碍事！",
   "cost": 2,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "茜香正月": {
   "idx": 325,
   "ex_name": "妨碍到打工了！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Donut",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 900
  },
  "茜香泳装": {
   "idx": 326,
   "ex_name": "怒涛",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "莉": {
   "idx": 328,
   "ex_name": "千年的第4棒打者！",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "莉央": {
   "idx": 329,
   "ex_name": "Big Sister",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "菲娜": {
   "idx": 330,
   "ex_name": "连射模式！",
   "cost": 4,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "萌": {
   "idx": 331,
   "ex_name": "钢铁之雨",
   "cost": 4,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 0
  },
  "萌泳装": {
   "idx": 332,
   "ex_name": "弹道导弹轰炸",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "莲实": {
   "idx": 333,
   "ex_name": "穿甲弹",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "莲实泳装": {
   "idx": 334,
   "ex_name": "必中穿刺射击",
   "cost": 5,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 1150
  },
  "莲实体育服": {
   "idx": 335,
   "ex_name": "钢之意志穿甲弹",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "莲华": {
   "idx": 336,
   "ex_name": "百花缭乱式射击术",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 1100
  },
  "莲华泳装": {
   "idx": 337,
   "ex_name": "夏日大海的射击术",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "咏叶": {
   "idx": 338,
   "ex_name": "雷酱，召唤",
   "cost": 4,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "咏叶应援团": {
   "idx": 339,
   "ex_name": "雷酱MK-III，强化",
   "cost": 5,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "遥香": {
   "idx": 340,
   "ex_name": "乱射",
   "cost": 4,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": true,
+  "heal": false,
+  "radius": 450
  },
  "遥香正月": {
   "idx": 341,
   "ex_name": "有人允许你吗……！？",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "都子": {
   "idx": 342,
   "ex_name": "自走式闪光无人机",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "都子泳装": {
   "idx": 343,
   "ex_name": "启动飞行无人机",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "野乃美": {
   "idx": 344,
   "ex_name": "惩罚时间到啰～♣",
   "cost": 5,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 950
  },
  "野乃美泳装": {
   "idx": 345,
   "ex_name": "变凉快吧～♧",
   "cost": 6,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "铃美": {
   "idx": 346,
   "ex_name": "订制闪光弹",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 150
  },
  "阳奈": {
   "idx": 347,
   "ex_name": "终幕：Ish-bosheth",
   "cost": 7,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 1100
  },
  "阳奈礼服": {
   "idx": 348,
   "ex_name": "开演：Ish-bosheth",
   "cost": 6,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "阳葵": {
   "idx": 349,
   "ex_name": "见识我的实力吧",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "青叶": {
   "idx": 350,
   "ex_name": "得，得去修理才行……！",
   "cost": 3,
   "target": "enemy",
-  "radius": "Obb",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "静子": {
   "idx": 351,
   "ex_name": "百夜堂外派服务！",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "静子泳装": {
   "idx": 352,
   "ex_name": "外派，夏日百夜堂分店！",
   "cost": 3,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "响": {
   "idx": 353,
   "ex_name": "这有高机率会痛唷",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 150
  },
  "响应援团": {
   "idx": 354,
   "ex_name": "可能会有点热",
   "cost": 7,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "风华": {
   "idx": 355,
   "ex_name": "供餐时间！",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Healer",
+  "aoe": true,
+  "heal": false,
+  "radius": 400
  },
  "风华正月": {
   "idx": 356,
   "ex_name": "供给部的御节料理",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "食蜂操祈": {
   "idx": 357,
   "ex_name": "心理掌握",
   "cost": 5,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 200
  },
  "鹿江": {
   "idx": 358,
   "ex_name": "很好吃哦……",
   "cost": 3,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "麻白": {
   "idx": 359,
   "ex_name": "正义的一击",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "泉正月": {
   "idx": 360,
   "ex_name": "给大家的章鱼烧！",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "昴": {
   "idx": 361,
   "ex_name": "额外加班津贴",
   "cost": 4,
   "target": "self",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "紫泳装": {
   "idx": 362,
   "ex_name": "夏日的大海真是Dangerous～！",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 250
  },
  "冬": {
   "idx": 364,
   "ex_name": "子弹快递",
   "cost": 2,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "菲娜导览员": {
   "idx": 366,
   "ex_name": "工作模式！",
   "cost": 6,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "堇打工": {
   "idx": 367,
   "ex_name": "Catch and Pitch",
   "cost": 3,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "名草": {
   "idx": 369,
   "ex_name": "百花烂漫",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "绘梨": {
   "idx": 370,
   "ex_name": "闪光的阿尔克那",
   "cost": 5,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "三千留礼服": {
   "idx": 372,
   "ex_name": "少女忍法帖，小小三千喵啊啊！",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "麻白泳装": {
   "idx": 373,
   "ex_name": "正义的洗礼",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "真纪露营": {
   "idx": 374,
   "ex_name": "就，就差一点……！",
   "cost": 4,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "千秋": {
   "idx": 375,
   "ex_name": "那是真的吗？",
   "cost": 6,
   "target": "enemy",
-  "radius": null,
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "桔梗泳装": {
   "idx": 376,
   "ex_name": "夏日海边的睡眠法",
   "cost": 4,
   "target": "other",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "律": {
   "idx": 377,
   "ex_name": "一起吃吧！",
   "cost": 3,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "八云": {
   "idx": 380,
   "ex_name": "出版、再版、流通",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 510
  },
  "美咲泳装": {
   "idx": 386,
   "ex_name": "不徒劳的事物",
   "cost": 6,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "月夜(礼服)": {
   "idx": 387,
   "ex_name": "忍者，绝不退缩！",
   "cost": 4,
   "target": "self",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Tanker",
+  "aoe": false,
+  "heal": false,
+  "radius": 100
  },
  "美代": {
   "idx": 388,
   "ex_name": "这就是最后了……！",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Supporter",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "贵音": {
   "idx": 390,
   "ex_name": "评论家的体贴",
   "cost": 2,
   "target": "ally",
-  "radius": null,
-  "aim": "auto"
+  "aim": "auto",
+  "role": "Healer",
+  "aoe": false,
+  "heal": false,
+  "radius": 0
  },
  "初音未来": {
   "idx": 391,
   "ex_name": "诚心诚意，面对每个瞬间！",
   "cost": 5,
   "target": "ally",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "Supporter",
+  "aoe": true,
+  "heal": false,
+  "radius": 300
  },
  "阳奈泳装": {
   "idx": 392,
   "ex_name": "绝海：Ish-bosheth",
   "cost": 3,
   "target": "enemy",
-  "radius": "Fan",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 950
  },
  "伊织泳装": {
   "idx": 393,
   "ex_name": "疾风怒涛",
   "cost": 4,
   "target": "enemy",
-  "radius": "Circle",
-  "aim": "tap_target"
+  "aim": "tap_target",
+  "role": "DamageDealer",
+  "aoe": true,
+  "heal": false,
+  "radius": 100
  }
 }

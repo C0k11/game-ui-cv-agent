@@ -165,6 +165,7 @@ def main():
         t0 = time.time()
         last_play = 0.0
         last_card = None
+        self_state = {}          # 目标粘滞状态(last_tgt)
         fi = 0
         while time.time() - t0 < 300:
             fr = adb.capture_frame()
@@ -193,82 +194,123 @@ def main():
                           f" → 判败/结束", flush=True)
                     return "lose"
                 continue
-            if time.time() - last_play < 1.5:
+            # ── 选卡 v5: 亮卡=可放(游戏自己渲染的信号, 替代 cost OCR —
+            # 灰卡去饱和, HSV sat 判) → 有亮卡立即放, cost 永不顶满 ──
+            import cv2 as _c
+            hsv_full = _c.cvtColor(fr, _c.COLOR_BGR2HSV)
+            cards = []
+            for n, c, x1, y1, x2, y2, W, H in dets(avatar, fr, 0.30):
+                if (y1 + y2) / 2 / H <= 0.78:
+                    continue
+                sat = float(hsv_full[int(y1):int(y2),
+                                     int(x1):int(x2), 1].mean())
+                cards.append((n, c, (x1 + x2) / 2, (y1 + y2) / 2, sat))
+            lit = [k for k in cards if k[4] > 70]     # 亮卡阈值(日志标定)
+            if not lit:
+                if cards and time.time() - last_play > 8:
+                    print(f"    (全灰 sat={[round(k[4]) for k in cards]})",
+                          flush=True)
+                    last_play = time.time() - 6
                 continue
-            # ── cost 读数(digit-OCR, 读不出退化节奏模式 fail-safe) ──
-            cost_raw = run_digit_ocr(fr, (0.585, 0.895, 0.655, 0.968))
-            cost = int(cost_raw) if cost_raw and cost_raw.isdigit() and \
-                int(cost_raw) <= 10 else None
-            # ── 选卡: conf 0.3(1号位小卡漏检根治)+cx 排序保卡位 ──
-            cards = [(n, c, (x1 + x2) / 2, (y1 + y2) / 2)
-                     for n, c, x1, y1, x2, y2, W, H in dets(avatar, fr, 0.30)
-                     if (y1 + y2) / 2 / H > 0.78]
-            if not cards:
-                continue
-            cards.sort(key=lambda k: k[2])
-            cards.sort(key=lambda k: (k[0] == last_card,
-                                      SKILLS.get(k[0], {}).get("cost") or 9))
-            if cost is not None and cost >= 9:      # 满费防溢出: 强制最便宜
-                cards.sort(key=lambda k:
-                           SKILLS.get(k[0], {}).get("cost") or 9)
-            n, cconf, kx, ky = cards[0]
+            lit.sort(key=lambda k: k[2])
+            lit.sort(key=lambda k: (k[0] == last_card,
+                                    SKILLS.get(k[0], {}).get("cost") or 9))
+            n, cconf, kx, ky, sat = lit[0]
             info = SKILLS.get(n, {})
-            need = info.get("cost")
-            if cost is not None and need is not None and cost < need:
-                continue                            # 费不够不空点
             tgt_type = info.get("target", "enemy")
-            # ── 释放: tap卡 → 0.8s → fr2(瞄准态判定 + ⭐最新目标坐标 —
-            # 用旧帧坐标=放歪根因) → tap目标 → 卡消失=释放实锤 ──
+
+            role = info.get("role", "?")
+            aoe = info.get("aoe", False)
+
+            def ally_lowest(bdx, frx):
+                best, best_hp = None, 2.0
+                for bb in bdx:
+                    if bb[0] != "我方":
+                        continue
+                    x1, y1, x2, y2 = map(int, bb[2:6])
+                    crop = frx[y1:y2, x1:x2]
+                    if crop.size == 0:
+                        continue
+                    hh = _c.cvtColor(crop, _c.COLOR_BGR2HSV)
+                    g = ((hh[..., 0] > 35) & (hh[..., 0] < 60) &
+                         (hh[..., 1] > 110) & (hh[..., 2] > 130))
+                    cols = g.any(axis=0)
+                    hp = cols.mean() if cols.any() else 1.0
+                    if hp < best_hp:
+                        best_hp = hp
+                        best = ((x1 + x2) / 2, (y1 + y2) / 2)
+                return best, best_hp
+
+            def pick_enemy(bdx):
+                """优先级(用户): BOSS > 框面积大(精英) > 粘滞; AOE=敌群重心"""
+                bosses = [bb for bb in bdx if bb[0] in BOSS_CLS]
+                foes = [bb for bb in bdx if bb[0] == "敌方"]
+                if bosses:
+                    bb = max(bosses,
+                             key=lambda b: (b[4] - b[2]) * (b[5] - b[3]))
+                    return (((bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2),
+                            "BOSS")
+                if not foes:
+                    return None, "?"
+                if aoe and len(foes) >= 3:          # AOE→敌群重心
+                    cx = sum((b[2] + b[4]) / 2 for b in foes) / len(foes)
+                    cy = sum((b[3] + b[5]) / 2 for b in foes) / len(foes)
+                    return (cx, cy), f"敌群x{len(foes)}"
+                foes.sort(key=lambda b: -(b[4] - b[2]) * (b[5] - b[3]))
+                if self_state.get("last_tgt"):      # 粘滞: 前2大里挑近的
+                    lx, ly = self_state["last_tgt"]
+                    for bb in foes[:2]:
+                        px, py = (bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2
+                        if abs(px - lx) + abs(py - ly) < 300:
+                            return (px, py), "敌(粘滞)"
+                bb = foes[0]
+                return (((bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2), "敌(最大)")
+
+            # ── 角色策略路由(用户: 按角色特性干活) ──
+            if role == "Healer" or (tgt_type == "ally" and
+                                    info.get("heal")):
+                _, low_hp = ally_lowest(bd, fr)
+                if low_hp > 0.55:
+                    continue        # 没人残血, 奶卡留手
             base_lum = float(fr.mean())
             tap(int(kx), int(ky))
-            time.sleep(0.8)
+            time.sleep(0.7)
             fr2 = adb.capture_frame()
             if fr2 is None:
                 continue
             aimed = float(fr2.mean()) < base_lum * 0.80
             bd2 = dets(battle, fr2, 0.4)
             if tgt_type == "ally":
-                # 血量: 我方框内 HSV 绿条宽/框宽 ≈ HP%(split_stacked 设施)
-                import cv2 as _c
-                best, best_hp = None, 2.0
-                for bb in bd2:
-                    if bb[0] != "我方":
-                        continue
-                    x1, y1, x2, y2 = map(int, bb[2:6])
-                    crop = fr2[y1:y2, x1:x2]
-                    if crop.size == 0:
-                        continue
-                    hsv = _c.cvtColor(crop, _c.COLOR_BGR2HSV)
-                    g = ((hsv[..., 0] > 35) & (hsv[..., 0] < 60) &
-                         (hsv[..., 1] > 110) & (hsv[..., 2] > 130))
-                    cols = g.any(axis=0)
-                    hp = cols.mean() if cols.any() else 1.0
-                    if hp < best_hp:
-                        best_hp, best = hp, ((x1 + x2) // 2, (y1 + y2) // 2)
-                pool = [best] if best else []
-                tgt_s = f"我方(HP{best_hp:.0%})" if best else "我方?"
+                tgt, hp = ally_lowest(bd2, fr2)
+                tgt_s = f"我方HP{hp:.0%}" if tgt else "我方?"
             else:
-                bosses = [((bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2)
-                          for bb in bd2 if bb[0] in BOSS_CLS]
-                foes = [((bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2)
-                        for bb in bd2 if bb[0] == "敌方"]
-                pool = bosses or foes
-                tgt_s = "BOSS" if bosses else "敌"
-            tx, ty = pool[0] if pool else (1920, 1080)
-            tap(int(tx), int(ty))
-            time.sleep(1.0)
+                tgt, tgt_s = pick_enemy(bd2)
+            if tgt is None:
+                tgt = (1920, 1080)
+            tx, ty = int(tgt[0]), int(tgt[1])
+            # ── 闭环拖拽释放: DOWN → 抓帧修正目标 → MOVE → UP(松手前圈
+            # 一直跟到目标最新位置 — 治"松手吸到别人") ──
+            adb._shell(f"input motionevent DOWN {tx} {ty}")
             fr3 = adb.capture_frame()
-            still = fr3 is not None and any(
+            if fr3 is not None:
+                bd3 = dets(battle, fr3, 0.4)
+                if tgt_type == "ally":
+                    t2, _ = ally_lowest(bd3, fr3)
+                else:
+                    t2, _ = pick_enemy(bd3)
+                if t2 is not None and abs(t2[0] - tx) + abs(t2[1] - ty) < 500:
+                    tx, ty = int(t2[0]), int(t2[1])   # 跟到最新位置
+            adb._shell(f"input motionevent MOVE {tx} {ty} && "
+                       f"input motionevent UP {tx} {ty}")
+            self_state["last_tgt"] = (tx, ty)
+            time.sleep(0.9)
+            fr4 = adb.capture_frame()
+            still = fr4 is not None and any(
                 m == n for m, cc, x1, y1, x2, y2, W, H in
-                dets(avatar, fr3, 0.30) if (y1 + y2) / 2 / H > 0.78)
-            released = not still
-            print(f"    ⚡{n}(需{need},费{cost if cost is not None else '?'})"
-                  f"→{tgt_s} 瞄准={'Y' if aimed else 'N'} "
-                  f"释放={'✓' if released else '✗'}", flush=True)
-            if not released and aimed:
-                adb._shell(f"input swipe {int(kx)} {int(ky)} "
-                           f"{int(tx)} {int(ty)} 600")
-                print("    ↪拖拽兜底", flush=True)
+                dets(avatar, fr4, 0.30) if (y1 + y2) / 2 / H > 0.78)
+            print(f"    ⚡{n}[{role}{'|AOE' if aoe else ''}](sat{sat:.0f})"
+                  f"→{tgt_s}@({tx},{ty}) 瞄准={'Y' if aimed else 'N'} "
+                  f"释放={'✓' if not still else '✗'}", flush=True)
             last_card = n
             last_play = time.time()
         return "timeout"
