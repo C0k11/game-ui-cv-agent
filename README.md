@@ -1,8 +1,14 @@
 # Blue Archive Daily Assistant
 
-Fully-automated daily routine and a real-time battle head-lock for *Blue Archive* — running entirely on a local Windows machine. No cloud, no game modification.
+**它是什么**:一个在你自己电脑上运行的《蔚蓝档案》AI 助手。它像人一样"看"模拟器画面(AI 视觉识别按钮和角色),像人一样点击操作——每天自动帮你收咖啡厅、扫荡关卡、打竞技场、领邮件和任务奖励,新活动还能自动推图、按加成规划体力。不改游戏、不上云,纯本地。
 
-Navigation is **vision-first**. Every button, tab, popup and badge the bot acts on is located by a trained **YOLO class, never a hardcoded screen coordinate**, so the same logic survives window-size and DPI changes. OCR is scoped to numeric fields only (AP / tickets / counts). An explicit state machine drives each skill through MuMu Player 12 via DXcam capture + PostMessage / ADB input.
+**铁律**:绝不花你的青辉石或真钱——所有涉及货币的操作都有多层拦截,读不出余额就宁可不做。
+
+**它现在能做什么**(2026-07 实测):
+- ✅ 每日全套日常:收菜(免费包/社团/制造/商店/课程表/咖啡厅摸头)→ 悬赏/交流会/竞技场 → 活动优先吃光体力 → 邮件+每日任务收尾
+- ✅ 新活动开荒:自动跳剧情、推 Story/Quest 关、按"活动>双倍>普通"规划体力、盘点活动商店算 farm 计划
+- ✅ 实时战斗感知:18 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡上的角色识别(0.99 置信),为"AI 自己打战斗"打底
+- 🚧 进行中:AI 控牌打战斗(行为树决策+30fps 视频流感知)、总力战抄轴(视频轴表→自动执行)
 
 ## At a Glance
 
@@ -10,11 +16,11 @@ Navigation is **vision-first**. Every button, tab, popup and badge the bot acts 
 |---|---|
 | **Platform** | Windows 10 / 11, NVIDIA GPU |
 | **Game runtime** | MuMu Player 12 |
-| **Daily** | `DailyRoutine` (10 sub-skills) + `CampaignSweep` (bounty / arena) |
-| **Vision** | YOLO26m UI (469-cls) + YOLO26x avatar (252-cls) + YOLO26n emoticon + YOLOv8n battle head |
+| **Daily** | `DailyRoutine` (10 sub-skills) + event planner + sweep chain |
+| **Vision** | YOLO26m UI (484-cls) + YOLO26x avatar (252-cls) + YOLO26s battle (18-cls) + YOLO26n emoticon |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs — numeric fields only |
-| **Battle lock** | DXcam + ByteTrack + Kalman predict-correct (lead-aim) |
-| **Tooling** | WebView2 launcher + annotation / synth dashboard |
+| **Battle** | ByteTrack lock (ally idsw -66%) + skill-card ID + card-play (behavior tree, WIP) |
+| **Tooling** | Annotation dashboard (class mgmt / video→frames→prefill / timeline sheets) |
 
 ## How It Works
 
@@ -44,7 +50,7 @@ flowchart LR
 | Avatar ID | YOLO26x `fused_avatar_v6` (252-cls) | bbox + character ID in one pass + in-battle skill-card recognition (incl. grayed-out / charging) | ~10 ms |
 | Numeric OCR | PP-OCRv4 BA-tuned | AP / ticket / count digits only | ~50 ms |
 | Head-pat | YOLO26n `emoticon` | cafe head-pat bubble | ~2 ms |
-| Battle lock | YOLOv8n `battle_heads` | single-class head at 60+ FPS | ~2 ms |
+| Battle | YOLO26s `battle_v9` (18-cls) | ally / enemy / 5 boss forms / victory / full HUD — trained on emulator runs **+ community strategy videos** (download→frames→track-prefill→human review flywheel) | ~12 ms |
 
 Active versions are resolved at runtime from `data/model_registry.json`, so shipping a model is a one-line `active` bump — and rolling back is just as fast. Each detector infers at its training `imgsz` (960 for the UI / avatar models). `cv2.matchTemplate` / HSV survive as cheap fallbacks for a few stable glyphs.
 
