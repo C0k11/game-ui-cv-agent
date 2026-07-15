@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
-"""bot 控牌打活动 Quest (2026-07-15, combat 2.0 首个实战任务).
+"""bot 控牌打活动 Quest (combat 2.0 v7, 2026-07-15).
 
-背景: 加成满配队(自动编队 100/105)含 Lv1-36 低级角色, AUTO 打 Q10(Lv23)
-超时 DEFEAT — 用户拍板: AUTO 不可靠, bot 自己放牌; 胜利才记加成; farm
-只刷最后三关(Q10/11/12)。
+背景: 加成满配队(自动编队 100/105)含 Lv1-36 低级角色, AUTO 打 Q10
+超时 DEFEAT — 用户拍板: 70级满加成队人手随便过, 输在放牌逻辑;
+AUTO 不可靠 bot 自己放牌; 胜利才记加成; farm 只刷最后三关(Q10/11/12)。
 
-打法: AUTO 保持关闭(角色自动普攻, EX 全由 bot 控) —
-  每 ~3s: fused_avatar 检出手牌(y>0.78) → 优先 Lv90 输出卡(優香體育服/
-  陽葵/花凛) → tap 卡 → battle v9 检出敌方 → tap 最大敌方框(boss) 释放。
-  cost 不够时点卡无反应(无害), 3s 节奏 ≈ cost 回复速度。
-链路: Quest tab 正锚 → 关号 OCR 入场 → 感知编队(快速编辑→自动编辑按钮→
-  确认→出击) → 控牌战斗 → 胜利结算+台账 / DEFEAT(battle 域空+确认键)重试上限。
+v7 架构(playbook 4.8 定案): 战斗感知走 scrcpy 视频流(~25fps, 帧龄
+<150ms) → Perception 线程写黑板(全队HP/亮卡/敌表/boss) → 行为树控牌
+(急救>集火BOSS>AOE清群>辅助增益>单体循环>攒费) → 闭环拖拽释放(拖拽
+中每步读黑板跟目标)。实现在 brain/combat_brain.py。
+导航/编队仍走 ADB 干净帧链(非实时场景, 1fps 够)。
 
-用法: py -u scripts/bot_play_quest.py 10 11 12
+链路: Quest tab 双正锚 → 关号 OCR 入场 → 感知编队(快速编辑→自动编辑
+按钮→确认→出击) → v7 控牌 → 胜利结算+台账 / 判败重试上限。
+
+用法: py -u scripts/bot_play_quest.py 10 11 12   (--resume 接管战斗)
 """
 import json
 import re
@@ -24,10 +26,11 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, r"D:\Project\ai game secretary")
 from mumu_runner import AdbInput  # noqa: E402
 from brain.pipeline import run_digit_ocr  # noqa: E402
+from brain.scrcpy_feed import ScrcpyFeed  # noqa: E402
+from brain.combat_brain import Perception, CombatBrain  # noqa: E402
 
 ROOT = Path(r"D:\Project\ai game secretary")
 LEDGER = ROOT / "data" / "event_bonus_state_midnight.json"
-PRIORITY = ("体育服", "阳葵", "陽葵", "花凛", "优香", "優香")   # Lv90 输出优先
 MAX_RETRY = 2
 
 
@@ -74,35 +77,60 @@ def main():
             time.sleep(3)
         return None
 
+    def read_row_num(fr, cy_norm):
+        """OCR 辅助校验(rec-only 直读, det 在此场景 0.66 边缘抖动不可靠).
+        只在清洗出 1-2 位且 ≤12 的数字时参与判断, 否则返回 None 不挡路."""
+        try:
+            from brain.pipeline import _get_ocr
+            H, W = fr.shape[:2]
+            crop = fr[int((cy_norm - 0.028) * H):int((cy_norm + 0.028) * H),
+                      int(0.542 * W):int(0.60 * W)]
+            out = _get_ocr().text_recognizer([crop])
+            txts = out[0] if isinstance(out, tuple) else out
+            digs = re.findall(r"\d+", "".join(t for t, _ in (txts or [])))
+            if digs and len(digs[0]) <= 2 and 1 <= int(digs[0]) <= 12:
+                return int(digs[0])
+        except Exception:
+            pass
+        return None
+
     def find_and_enter(q: int) -> bool:
-        for _ in range(8):
+        """结构化定位(词表铁律: 关号无数字cls, 但列表结构有):
+        活动 Quest 固定 12 关全解锁 → 滑到底(入场键 cy 集合两帧不变)
+        → 行序=关号, Q_q = 倒数第 (13-q) 行入场键。OCR 只辅助校验。"""
+        prev_sig = None
+        for _ in range(10):
             fr = ensure_quest_tab()
             if fr is None:
                 return False
             d = dets(ui, fr, 0.5)
-            H = fr.shape[0]
-            rows = []
-            for n, c, x1, y1, x2, y2, W, Hh in d:
-                if n == "入场键":
-                    cy = (y1 + y2) / 2 / Hh
-                    num = run_digit_ocr(
-                        fr, (0.542, cy - 0.028, 0.60, cy + 0.028))
-                    rows.append((int(num) if num and num.isdigit() else None,
-                                 cy))
-            hit = next(((qq, cy) for qq, cy in rows if qq == q), None)
-            nums = [qq for qq, _ in rows if qq]
-            print(f"  找Q{q} 视野{nums}", flush=True)
-            if hit:
-                tap(3340, int(hit[1] * 2160))
+            rows = sorted(
+                ((y1 + y2) / 2 / Hh, (int((x1 + x2) / 2),
+                                      int((y1 + y2) / 2)))
+                for n, c, x1, y1, x2, y2, W, Hh in d if n == "入场键")
+            sig = tuple(round(cy, 2) for cy, _ in rows)
+            if rows and sig == prev_sig:      # 滑不动了 = 到底
+                k = 13 - q
+                if len(rows) < k:
+                    print(f"  到底但视野{len(rows)}行 < 倒数{k} — 停",
+                          flush=True)
+                    return False
+                cy, (px, py) = rows[-k]
+                num = read_row_num(fr, cy)
+                if num is not None and num != q:
+                    print(f"  行序倒数{k}=Q{q} 但OCR读{num} — 矛盾停",
+                          flush=True)
+                    return False
+                print(f"  Q{q}=倒数第{k}行 cy={cy:.2f} OCR辅证={num}",
+                      flush=True)
+                tap(px, py)                   # 入场键 box 中心
                 time.sleep(7)
-                tap(2803, 1620)          # 任務開始
+                tap(2803, 1620)               # 任務開始
                 time.sleep(9)
                 return True
-            if nums and q < min(nums):
-                adb._shell("input swipe 2760 700 2760 1500 500")
-            else:
-                adb._shell("input swipe 2760 1500 2760 700 500")
-            time.sleep(2.5)
+            prev_sig = sig
+            adb._shell("input swipe 2760 1500 2760 700 500")
+            time.sleep(2.0)
         return False
 
     def formation_and_sortie() -> bool:
@@ -150,170 +178,28 @@ def main():
 
     SKILLS = json.loads((ROOT / "data" / "skill_type_map.json")
                         .read_text(encoding="utf-8"))
-    BOSS_CLS = {"Boss", "主教", "球", "黑白", "大蛇", "塞特的愤怒"}
     fly_dir = ROOT / "data" / "raw_images" / \
         ("run_" + time.strftime("%Y%m%d_%H%M%S") + "_botplay_clean")
     fly_dir.mkdir(parents=True, exist_ok=True)
+    feed = ScrcpyFeed(log=lambda m: print(m, flush=True))
+    if not feed.start():
+        print("scrcpy feed 起不来 — 停(不盲打)", flush=True)
+        return
+    f0, _, _ = feed.latest()
+    print(f"scrcpy feed OK {f0.shape[1]}x{f0.shape[0]}", flush=True)
 
     def play_battle() -> str:
-        """控牌战斗 v2 (用户四条反馈 2026-07-15):
-        ①1.2s 节奏(cost 不顶满) ②知识库轮换选卡(不再только3号位)
-        ③点卡+点目标 adb 原子连发(一条 shell, 免中间抓帧 ~2s)
-        ④Boss 类在场=集火; aim 路由: auto点卡即放/ally点我方/enemy点敌。
-        全程 1fps 存干净帧进飞轮(补 DEFEAT 等新 cls 素材)。"""
-        import cv2
-        t0 = time.time()
-        last_play = 0.0
-        last_card = None
-        self_state = {}          # 目标粘滞状态(last_tgt)
-        fi = 0
-        while time.time() - t0 < 300:
-            fr = adb.capture_frame()
-            if fr is None:
-                continue
-            cv2.imencode(".jpg", fr, [cv2.IMWRITE_JPEG_QUALITY, 92])[1] \
-                .tofile(str(fly_dir / f"frame_{fi:05d}.jpg"))
-            fi += 1
-            bd = dets(battle, fr, 0.5)
-            bnames = {b[0] for b in bd}
-            if "战斗胜利" in bnames:
-                print(f"    ⭐胜利({time.time()-t0:.0f}s)", flush=True)
-                return "win"
-            if "自动战斗开启" in bnames:
-                tap(3621, 2023)
-                print("    AUTO→关(bot接管)", flush=True)
-                time.sleep(1)
-                continue
-            in_battle = bool(bnames & {"我方", "敌方", "战斗暂停",
-                                       "自动战斗关闭"})
-            if not in_battle:
-                du = dets(ui, fr, 0.5)
-                if any(n == "确认键" for n, *_ in du) and \
-                        time.time() - t0 > 30:
-                    print(f"    battle域空+确认键({time.time()-t0:.0f}s)"
-                          f" → 判败/结束", flush=True)
-                    return "lose"
-                continue
-            # ── 选卡 v5: 亮卡=可放(游戏自己渲染的信号, 替代 cost OCR —
-            # 灰卡去饱和, HSV sat 判) → 有亮卡立即放, cost 永不顶满 ──
-            import cv2 as _c
-            hsv_full = _c.cvtColor(fr, _c.COLOR_BGR2HSV)
-            cards = []
-            for n, c, x1, y1, x2, y2, W, H in dets(avatar, fr, 0.30):
-                if (y1 + y2) / 2 / H <= 0.78:
-                    continue
-                sat = float(hsv_full[int(y1):int(y2),
-                                     int(x1):int(x2), 1].mean())
-                cards.append((n, c, (x1 + x2) / 2, (y1 + y2) / 2, sat))
-            lit = [k for k in cards if k[4] > 70]     # 亮卡阈值(日志标定)
-            if not lit:
-                if cards and time.time() - last_play > 8:
-                    print(f"    (全灰 sat={[round(k[4]) for k in cards]})",
-                          flush=True)
-                    last_play = time.time() - 6
-                continue
-            lit.sort(key=lambda k: k[2])
-            lit.sort(key=lambda k: (k[0] == last_card,
-                                    SKILLS.get(k[0], {}).get("cost") or 9))
-            n, cconf, kx, ky, sat = lit[0]
-            info = SKILLS.get(n, {})
-            tgt_type = info.get("target", "enemy")
-
-            role = info.get("role", "?")
-            aoe = info.get("aoe", False)
-
-            def ally_lowest(bdx, frx):
-                best, best_hp = None, 2.0
-                for bb in bdx:
-                    if bb[0] != "我方":
-                        continue
-                    x1, y1, x2, y2 = map(int, bb[2:6])
-                    crop = frx[y1:y2, x1:x2]
-                    if crop.size == 0:
-                        continue
-                    hh = _c.cvtColor(crop, _c.COLOR_BGR2HSV)
-                    g = ((hh[..., 0] > 35) & (hh[..., 0] < 60) &
-                         (hh[..., 1] > 110) & (hh[..., 2] > 130))
-                    cols = g.any(axis=0)
-                    hp = cols.mean() if cols.any() else 1.0
-                    if hp < best_hp:
-                        best_hp = hp
-                        best = ((x1 + x2) / 2, (y1 + y2) / 2)
-                return best, best_hp
-
-            def pick_enemy(bdx):
-                """优先级(用户): BOSS > 框面积大(精英) > 粘滞; AOE=敌群重心"""
-                bosses = [bb for bb in bdx if bb[0] in BOSS_CLS]
-                foes = [bb for bb in bdx if bb[0] == "敌方"]
-                if bosses:
-                    bb = max(bosses,
-                             key=lambda b: (b[4] - b[2]) * (b[5] - b[3]))
-                    return (((bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2),
-                            "BOSS")
-                if not foes:
-                    return None, "?"
-                if aoe and len(foes) >= 3:          # AOE→敌群重心
-                    cx = sum((b[2] + b[4]) / 2 for b in foes) / len(foes)
-                    cy = sum((b[3] + b[5]) / 2 for b in foes) / len(foes)
-                    return (cx, cy), f"敌群x{len(foes)}"
-                foes.sort(key=lambda b: -(b[4] - b[2]) * (b[5] - b[3]))
-                if self_state.get("last_tgt"):      # 粘滞: 前2大里挑近的
-                    lx, ly = self_state["last_tgt"]
-                    for bb in foes[:2]:
-                        px, py = (bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2
-                        if abs(px - lx) + abs(py - ly) < 300:
-                            return (px, py), "敌(粘滞)"
-                bb = foes[0]
-                return (((bb[2] + bb[4]) / 2, (bb[3] + bb[5]) / 2), "敌(最大)")
-
-            # ── 角色策略路由(用户: 按角色特性干活) ──
-            if role == "Healer" or (tgt_type == "ally" and
-                                    info.get("heal")):
-                _, low_hp = ally_lowest(bd, fr)
-                if low_hp > 0.55:
-                    continue        # 没人残血, 奶卡留手
-            base_lum = float(fr.mean())
-            tap(int(kx), int(ky))
-            time.sleep(0.7)
-            fr2 = adb.capture_frame()
-            if fr2 is None:
-                continue
-            aimed = float(fr2.mean()) < base_lum * 0.80
-            bd2 = dets(battle, fr2, 0.4)
-            if tgt_type == "ally":
-                tgt, hp = ally_lowest(bd2, fr2)
-                tgt_s = f"我方HP{hp:.0%}" if tgt else "我方?"
-            else:
-                tgt, tgt_s = pick_enemy(bd2)
-            if tgt is None:
-                tgt = (1920, 1080)
-            tx, ty = int(tgt[0]), int(tgt[1])
-            # ── 闭环拖拽释放: DOWN → 抓帧修正目标 → MOVE → UP(松手前圈
-            # 一直跟到目标最新位置 — 治"松手吸到别人") ──
-            adb._shell(f"input motionevent DOWN {tx} {ty}")
-            fr3 = adb.capture_frame()
-            if fr3 is not None:
-                bd3 = dets(battle, fr3, 0.4)
-                if tgt_type == "ally":
-                    t2, _ = ally_lowest(bd3, fr3)
-                else:
-                    t2, _ = pick_enemy(bd3)
-                if t2 is not None and abs(t2[0] - tx) + abs(t2[1] - ty) < 500:
-                    tx, ty = int(t2[0]), int(t2[1])   # 跟到最新位置
-            adb._shell(f"input motionevent MOVE {tx} {ty} && "
-                       f"input motionevent UP {tx} {ty}")
-            self_state["last_tgt"] = (tx, ty)
-            time.sleep(0.9)
-            fr4 = adb.capture_frame()
-            still = fr4 is not None and any(
-                m == n for m, cc, x1, y1, x2, y2, W, H in
-                dets(avatar, fr4, 0.30) if (y1 + y2) / 2 / H > 0.78)
-            print(f"    ⚡{n}[{role}{'|AOE' if aoe else ''}](sat{sat:.0f})"
-                  f"→{tgt_s}@({tx},{ty}) 瞄准={'Y' if aimed else 'N'} "
-                  f"释放={'✓' if not still else '✗'}", flush=True)
-            last_card = n
-            last_play = time.time()
-        return "timeout"
+        """v7: 感知线程(scrcpy→黑板) + 行为树控牌(brain/combat_brain.py).
+        飞轮干净帧由感知线程 1fps 直存(scrcpy=Android 内部流, 无烧录)。"""
+        per = Perception(feed, battle, avatar, ui, flywheel_dir=fly_dir)
+        per.start()
+        try:
+            brain = CombatBrain(per, adb._shell, SKILLS,
+                                log=lambda m: print(m, flush=True))
+            return brain.run_battle(timeout_s=300)
+        finally:
+            per.stop()
+            per.join(timeout=5)
 
     led = json.loads(LEDGER.read_text(encoding="utf-8"))
     if "--resume" in sys.argv:      # 断线重连恢复的战斗: 直接接管

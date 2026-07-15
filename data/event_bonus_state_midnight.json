@@ -1,0 +1,18 @@
+{
+ "event": "秘密的午夜派對",
+ "expire": "2026-07-21",
+ "bonus_cleared": {
+  "1": true,
+  "2": true,
+  "3": true,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": true,
+  "8": true,
+  "9": true,
+  "10": "full",
+  "11": "full",
+  "12": "full"
+ }
+}
