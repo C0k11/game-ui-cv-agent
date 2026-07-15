@@ -65,9 +65,33 @@ def main():
     tap = lambda x, y: adb._shell(f"input tap {x} {y}")  # noqa: E731
     led = ledger_load()
 
+    def ensure_quest_tab():
+        """⛔Challenge 误入防线(2026-07-15 实锤: 盲 tab tap 点空停在 Challenge,
+        关号 OCR 读的是 Challenge 01-03)。正锚=「活动quest_已选择」(cls 100)
+        检出才放行; 检出「活动quest」(94, 未选中)→ 点它的 box 切换再验。
+        fail-closed: 6 次不成 → None(绝不在未知 tab 上点入场)。"""
+        for _ in range(6):
+            fr = adb.capture_frame()
+            if fr is None:
+                continue
+            d = dets(ui, fr, 0.35)
+            names = {n for n, *_ in d}
+            # 正锚①活动quest_已选择(实测在部分列表状态漏检) ②关卡得星_N:
+            # Quest 关已全3星 / Challenge 全0星(用户抄轴前不打) → 视野有
+            # 得星徽章=必在 Quest 列表。⚠此假设生命周期=Challenge 未打期间。
+            if "活动quest_已选择" in names or \
+                    any(n.startswith("关卡得星") for n in names):
+                return fr
+            tab = next((x for x in d if x[0] == "活动quest"), None)
+            if tab is not None:
+                _, _, x1, y1, x2, y2, W, H = tab
+                tap(int((x1 + x2) / 2), int((y1 + y2) / 2))
+                print("    tab≠Quest → 点「活动quest」tab 切换", flush=True)
+            time.sleep(3)
+        return None
+
     def list_rows(fr):
         """[(关号int|None, cy_norm)] 按 cy 升序"""
-        H = fr.shape[0]
         rows = []
         for n, c, x1, y1, x2, y2, W, Hh in dets(ui, fr, 0.5):
             if n == "入场键":
@@ -76,6 +100,51 @@ def main():
                 q = int(num) if num and num.isdigit() else None
                 rows.append((q, cy))
         return sorted(rows, key=lambda r: r[1])
+
+    def formation_and_sortie() -> bool:
+        """编队页感知驱动(2026-07-15 用户纠偏: 不许无脑出击):
+        逐帧 YOLO → 2部队(cls 126)未选中→点; 2部队高亮(120)→先「快速编辑」
+        (121, 自动编队保加成满配)→(确认弹窗有则点)→「出击」(124)。"""
+        auto_done = False
+        for _ in range(14):
+            fr = adb.capture_frame()
+            if fr is None:
+                continue
+            d = dets(ui, fr, 0.5)
+            names = {n for n, *_ in d}
+
+            def box(nm):
+                x = next((b for b in d if b[0] == nm), None)
+                return (int((x[2] + x[4]) / 2), int((x[3] + x[5]) / 2)) \
+                    if x else None
+
+            if "2部队高亮" in names:
+                if not auto_done:
+                    p = box("快速编辑")
+                    if p:
+                        tap(*p)
+                        auto_done = True
+                        print("    快速编辑(自动编队)", flush=True)
+                        time.sleep(3)
+                        continue
+                p = box("出击")
+                if p:
+                    tap(*p)
+                    print("    出击(部队2+自动编队)", flush=True)
+                    return True
+            elif "确认键" in names and auto_done:   # 快速编辑确认弹窗
+                p = box("确认键")
+                tap(*p)
+                time.sleep(2.5)
+                continue
+            elif "2部队" in names:
+                p = box("2部队")
+                tap(*p)
+                print("    切部队2", flush=True)
+                time.sleep(2.5)
+            time.sleep(1.2)
+        print("    ⛔编队页感知循环 14 轮未完成 — 停")
+        return False
 
     def fight_and_settle() -> bool:
         t0 = time.time()
@@ -102,7 +171,10 @@ def main():
         if not todo:
             break
         target = todo[0]
-        fr = adb.capture_frame()
+        fr = ensure_quest_tab()
+        if fr is None:
+            print("    ⛔Quest tab 正锚(活动quest_已选择)拿不到 — 停")
+            return
         rows = list_rows(fr)
         nums = [q for q, _ in rows if q]
         print(f"[A] 目标Q{target} 视野{nums}", flush=True)
@@ -121,10 +193,9 @@ def main():
         time.sleep(7)
         tap(2803, 1620)          # 任務開始
         time.sleep(9)
-        tap(215, 800)            # 2部隊(加成 farm 队, 用户规则)
-        time.sleep(3)
-        tap(3533, 1976)          # 出擊
-        print(f"    Q{target} 出击(部队2)", flush=True)
+        if not formation_and_sortie():
+            return
+        print(f"    Q{target} 已出击", flush=True)
         if fight_and_settle():
             led["bonus_cleared"][str(target)] = True
             ledger_save(led)
@@ -137,7 +208,10 @@ def main():
 
     # ── B. Q12 扫荡吃剩余 AP ──
     for _ in range(6):               # 找到 Q12 行
-        fr = adb.capture_frame()
+        fr = ensure_quest_tab()
+        if fr is None:
+            print("[B] ⛔Quest tab 正锚拿不到 — 停")
+            return
         rows = list_rows(fr)
         hit = next(((q, cy) for q, cy in rows if q == TOTAL_Q), None)
         if hit:
