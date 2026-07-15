@@ -5466,7 +5466,8 @@ function axisOpenSheet(v){
   p.src='/api/v1/axis/video_file?name='+encodeURIComponent(v.name);
   p.ontimeupdate=()=>{ $('axis_player_t').textContent='t = '+p.currentTime.toFixed(2)+'s'; };
   clsApi('/api/v1/axis/sheet?video='+encodeURIComponent(v.name))
-    .then(r=>{ AXIS.rows=r.rows||[]; axisSheetRender(); })
+    .then(r=>{ if(AXIS.cur!==v) return;  /* 竞态守卫: 慢响应不得灌错视频(审计2026-07-15) */
+      AXIS.rows=r.rows||[]; axisSheetRender(); })
     .catch(e=>{ AXIS.loadFailed=true; axisSheetRender();
       $('axis_sheet_status').textContent='⚠ 轴表加载失败, 已禁止保存(防空表覆盖): '+e.message; });
   $('axis_sheet_card').scrollIntoView({behavior:'smooth'});

@@ -279,7 +279,7 @@ def slots_demo(track_frames, chains, n_frames):
     ally.sort(key=lambda c: min(c))
     first_fi = min(min(c) for c in ally) if ally else 0
     opening = [c for c in ally if min(c) <= first_fi + 6]   # 开场2s内进场
-    opening.sort(key=lambda c: c[min(c)][1][0])              # 首帧 x 左→右
+    opening.sort(key=lambda c: (c[min(c)][1][0] + c[min(c)][1][2]) / 2)              # 首帧 x 左→右
     print(f"\n== 站位绑定(开场帧 {first_fi}, 我方链 {len(ally)} 条, "
           f"开场进场 {len(opening)} 条) ==")
     for si, ch in enumerate(opening, 1):

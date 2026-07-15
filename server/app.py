@@ -3225,7 +3225,11 @@ def axis_sheet(video: str = Query(...)) -> Dict[str, Any]:
     try:
         d = json.loads(f.read_text(encoding="utf-8")) or {}
     except Exception:
-        d = {}
+        # ⚠审计2026-07-15: 静默吞成空表会击穿前端"防空表覆盖"护栏(HTTP 200
+        # 空 rows → 用户一保存, 坏文件还被 copy2 顶掉唯一 .bak) → 改 500
+        # 走 loadFailed 通道(前端禁存)。
+        raise HTTPException(status_code=500,
+                            detail=f"轴表文件损坏, 已禁止加载: {stem}.json")
     return {"video": stem, "rows": d.get("rows") or [],
             "updated": d.get("updated")}
 
@@ -3256,14 +3260,20 @@ def axis_sheet_save(payload: Dict[str, Any]) -> Dict[str, Any]:
     f = AXIS_SHEET_DIR / (stem + ".json")
     if f.exists():          # 覆盖前留上一版(误存空表可回滚)
         try:
+            # 坏文件(解析不过)不许顶掉上一版好备份(审计 2026-07-15)
+            json.loads(f.read_text(encoding="utf-8"))
             import shutil
             shutil.copy2(f, f.with_suffix(".json.bak"))
         except Exception:
             pass
-    (AXIS_SHEET_DIR / (stem + ".json")).write_text(
+    # 原子写(tmp+replace): 半截 JSON 会触发 GET 侧 500 禁载(审计 2026-07-15)
+    out_f = AXIS_SHEET_DIR / (stem + ".json")
+    tmp = out_f.with_suffix(".json.tmp")
+    tmp.write_text(
         json.dumps({"video": stem, "rows": clean, "updated": time.time()},
                    ensure_ascii=False, indent=1),
         encoding="utf-8")
+    os.replace(tmp, out_f)
     return {"ok": True, "rows": len(clean)}
 
 

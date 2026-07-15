@@ -61,7 +61,7 @@ def main():
     ally.sort(key=lambda c: min(c))
     first_fi = min(min(c) for c in ally) if ally else 0
     opening = sorted([c for c in ally if min(c) <= first_fi + 6],
-                     key=lambda c: c[min(c)][1][0])
+                     key=lambda c: (c[min(c)][1][0] + c[min(c)][1][2]) / 2)
     slot_tid = {}
     for si, ch in enumerate(opening, 1):
         tids = []
@@ -82,7 +82,9 @@ def main():
     print(f"\n{'t':>7} {'cost':>4} {'char':<10} {'action':<16} "
           f"{'GT我方':>5} {'trk我方':>6} {'slot存活':<14} 判定")
     for r in rows:
-        fi = min(max(int(round(r["t"] * fps)), 0), n_frames - 1)
+        # floor 非 round: 播放器 pause 在 t 秒看到的画面属于 floor(t*fps) 帧
+        # (ffmpeg fps filter 取 pts≤fi/fps 的最后一帧; 审计 2026-07-15)
+        fi = min(max(int(r["t"] * fps), 0), n_frames - 1)
         gt_n = sum(1 for c in chains if fi in c and c[fi][0] == 476)
         cand = tf.get(fi, [])
         trk_ally = [(tid, b) for tid, cls, b in cand if cls == 476]
