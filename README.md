@@ -7,8 +7,9 @@
 **它现在能做什么**(2026-07 实测):
 - ✅ 每日全套日常:收菜(免费包/社团/制造/商店/课程表/咖啡厅摸头)→ 悬赏/交流会/竞技场 → 活动优先吃光体力 → 邮件+每日任务收尾
 - ✅ 新活动开荒:自动跳剧情、推 Story/Quest 关、按"活动>双倍>普通"规划体力、盘点活动商店算 farm 计划
-- ✅ 实时战斗感知:18 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡上的角色识别(0.99 置信),为"AI 自己打战斗"打底
-- 🚧 进行中:AI 控牌打战斗(行为树决策+30fps 视频流感知)、总力战抄轴(视频轴表→自动执行)
+- ✅ 实时战斗感知:scrcpy 视频流 17.9fps(帧龄 0.02 秒、不怕窗口遮挡)+ 18 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡角色识别
+- ✅ AI 自己打战斗:行为树控牌(急救>集火 Boss>AOE 清群>单体循环)+ 闭环拖拽瞄准(按住后持续跟踪目标再松手),活动 Boss 关实战 71-91 秒通关
+- 🚧 进行中:总力战抄轴(视频轴表→自动执行)、日常全链路视频流化(高频感知线程已上线)
 
 ## At a Glance
 
@@ -19,14 +20,16 @@
 | **Daily** | `DailyRoutine` (10 sub-skills) + event planner + sweep chain |
 | **Vision** | YOLO26m UI (484-cls) + YOLO26x avatar (252-cls) + YOLO26s battle (18-cls) + YOLO26n emoticon |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs — numeric fields only |
-| **Battle** | ByteTrack lock (ally idsw -66%) + skill-card ID + card-play (behavior tree, WIP) |
+| **Battle** | scrcpy feed 17.9fps (occlusion-proof) → blackboard → behavior-tree card-play (shipped: event boss 71-91s clears) + ByteTrack lock (ally idsw -66%) |
 | **Tooling** | Annotation dashboard (class mgmt / video→frames→prefill / timeline sheets) |
 
 ## How It Works
 
 ```mermaid
 flowchart LR
-    A[MuMu Player 12<br/>Blue Archive] -->|DXcam| B[Pipeline tick]
+    A[MuMu Player 12<br/>Blue Archive] -->|ADB screencap 4K| B[Pipeline tick]
+    A -->|scrcpy H.264 stream<br/>17.9fps| HF[High-freq perception<br/>blackboard]
+    HF --> B
     B --> C{Skill state machine}
     C -->|nav / click| UI[YOLO26m UI<br/>451 cls]
     C -->|character ID| AV[YOLO26x avatar<br/>252 cls]

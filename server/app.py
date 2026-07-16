@@ -1100,7 +1100,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     #   → 每 0.3s 仍强制推理一次保 fresh_ts 新鲜)
                     if _scrcpy_feed is not None:
                         _fr, _age, _seq = _scrcpy_feed.latest()
-                        if _fr is not None and (_age or 9) < 5.0:
+                        # ⚠不能写 (_age or 9): age==0.0 的最新鲜帧会被
+                        # 当 9s 旧帧拒收(审计实锤的滑稽 bug)
+                        if _fr is not None and (
+                                _age if _age is not None else 9) < 5.0:
                             if (_seq != _last_seq
                                     or t0 - _last_infer > 0.3):
                                 _last_seq = _seq

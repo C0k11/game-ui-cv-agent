@@ -87,7 +87,12 @@ class Perception(threading.Thread):
         self._stop.set()
 
     def _dets(self, model, fr, conf):
-        r = model.predict(fr, conf=conf, imgsz=960, verbose=False)[0]
+        # 护栏: 推理异常(CUDA OOM 等)返回空检出, 绝不静默杀死感知线程
+        # (daemon 线程死=黑板冻结=整局跑到超时, 2026-07-16 审计实锤)
+        try:
+            r = model.predict(fr, conf=conf, imgsz=960, verbose=False)[0]
+        except Exception:
+            return []
         H, W = fr.shape[:2]
         return [(model.names[int(b.cls[0])], float(b.conf[0]),
                  float(b.xyxy[0][0]) / W, float(b.xyxy[0][1]) / H,
@@ -133,8 +138,12 @@ class Perception(threading.Thread):
                 self.fps = 20 / max(time.time() - t_fps, 1e-6)
                 t_fps = time.time()
             if self.fly_dir and time.time() - last_fly > 1.0:  # 飞轮 1fps
-                cv2.imencode(".jpg", fr, [cv2.IMWRITE_JPEG_QUALITY, 92])[1] \
-                    .tofile(str(self.fly_dir / f"frame_{fly_i:05d}.jpg"))
+                try:      # 盘满/编码失败绝不杀感知线程(素材可弃, 感知不可)
+                    cv2.imencode(".jpg", fr,
+                                 [cv2.IMWRITE_JPEG_QUALITY, 92])[1] \
+                        .tofile(str(self.fly_dir / f"frame_{fly_i:05d}.jpg"))
+                except Exception:
+                    pass
                 fly_i += 1
                 last_fly = time.time()
             with self._lock:

@@ -33,15 +33,24 @@ import numpy as np
 _ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
 
 
+def _adb_io_lock():
+    """AdbInput 类级 _IO_LOCK — feed 的所有 adb 子进程必须与 input tap
+    串行(2026-06-15 实锤: 同 transport 并发多MB screencap 丢 MotionEvent;
+    2026-07-16 审计: watchdog screencap 绕锁 = 同根因复发路径)."""
+    from mumu_runner import AdbInput
+    return AdbInput._IO_LOCK
+
+
 def find_app_display(serial: str = "127.0.0.1:7555",
                      pkg: str = "com.nexon.bluearchive"):
     """dumpsys window 按 display 分段找 pkg 焦点窗口所在 displayId.
     找不到(BA 没起) → None: 调用方绝不能拿 display 0 凑数 — 0 是
     Android 桌面 launcher, feed 会永远盯着桌面且 watchdog 不报错."""
-    out = subprocess.run(
-        [_ADB, "-s", serial, "shell", "dumpsys", "window"],
-        capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=15).stdout
+    with _adb_io_lock():
+        out = subprocess.run(
+            [_ADB, "-s", serial, "shell", "dumpsys", "window"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=15).stdout
     cur = 0
     for line in out.splitlines():
         m = re.search(r"Display: mDisplayId=(\d+)", line)
@@ -138,7 +147,9 @@ class ScrcpyFeed:
         self._client = None
         self._stopping = False
         self._watchdog = None
+        self._restart_lock = threading.Lock()   # stop()×watchdog 重启互斥
         self.restarts = 0
+        self._fail_streak = 0
 
     def _start_client(self):
         from adbutils import adb
@@ -175,54 +186,76 @@ class ScrcpyFeed:
         """age 大时区分「画面静止」vs「真断流」: ADB screencap(独立链)
         与 feed 最后帧对比, 一致=静止(H.264 静止页天然不出帧, 不该重启
         — 2026-07-15 实锤: lobby/hub 静止页 watchdog 误判断流疯狂重启,
-        重启风暴反把流打烂)。对比失败(ADB 挂)按断流处理."""
+        重启风暴反把流打烂)。一致也意味着 feed 帧内容=当前真实屏幕,
+        刷新帧龄是语义正确的。对比失败(ADB 挂)按断流处理。
+        判据用 12x8 分块 max diff(2026-07-16 审计: 全图均值差看不见
+        按钮级变化 — 4K 按钮缩到 64x36 只占 ~10px, 贡献 ~1 << 阈值)."""
         try:
             import cv2
-            raw = subprocess.run(
-                [_ADB, "-s", self._serial, "exec-out", "screencap", "-p"],
-                capture_output=True, timeout=10).stdout
+            with _adb_io_lock():     # ⛔与 input tap 串行(丢 tap 同根因)
+                raw = subprocess.run(
+                    [_ADB, "-s", self._serial, "exec-out", "screencap",
+                     "-p"], capture_output=True, timeout=10).stdout
             adb_fr = cv2.imdecode(np.frombuffer(raw, np.uint8),
                                   cv2.IMREAD_COLOR)
             with self._lock:
                 feed_fr = self._frame
             if adb_fr is None or feed_fr is None:
                 return False
-            a = cv2.cvtColor(cv2.resize(adb_fr, (64, 36)),
+            a = cv2.cvtColor(cv2.resize(adb_fr, (96, 64)),
                              cv2.COLOR_BGR2GRAY).astype(float)
-            b = cv2.cvtColor(cv2.resize(feed_fr, (64, 36)),
+            b = cv2.cvtColor(cv2.resize(feed_fr, (96, 64)),
                              cv2.COLOR_BGR2GRAY).astype(float)
-            return float(abs(a - b).mean()) < 6.0
+            diff = abs(a - b)
+            # 12x8 块, 任一块均值差 >14 = 有局部变化(按钮/弹窗级可见)
+            blocks = diff.reshape(8, 8, 12, 8).mean(axis=(1, 3))
+            return float(blocks.max()) < 14.0
         except Exception:
             return False
 
     def _watchdog_loop(self):
+        static_streak = 0
         while not self._stopping:
             time.sleep(1.0)
             with self._lock:
                 age = time.time() - self._ts if self._ts else 0.0
             if age <= self._stale_restart_s or self._stopping:
+                static_streak = 0
                 continue
-            if self._is_static():
-                with self._lock:      # 静止验证过: 刷新时戳, 帧仍有效
+            # 连续 20 次判静止(~90s)仍无新帧 → 强制重启一次验流活性
+            # (死 socket 停在安静页会被静止判定无限续命 — 审计实锤)
+            if static_streak < 20 and self._is_static():
+                static_streak += 1
+                with self._lock:      # ADB 对比一致=帧内容就是当前屏幕
                     self._ts = time.time()
                 continue
+            static_streak = 0
             self._log(f"    [feed] 断流{age:.1f}s → 重启 scrcpy client")
-            try:
-                self._client.stop()
-            except Exception:
-                pass
-            time.sleep(0.5)
-            try:
-                # 连续重启仍断 → display id 可能变了(MuMu/BA 重启会换
-                # EXTERNAL display), 强制重新定位
-                if self.restarts % 3 == 2:
-                    self._display_id = None
-                self._start_client()
-                self.restarts += 1
-                with self._lock:      # 宽限: 给新 client 出帧窗口,
-                    self._ts = time.time()   # 防下一轮立刻再重启(风暴)
-            except Exception as e:
-                self._log(f"    [feed] 重启失败({e}), 下轮再试")
+            with self._restart_lock:
+                if self._stopping:    # stop() 竞态: 拿锁后二次确认
+                    break             # (否则孤儿 server+非daemon线程挂死)
+                try:
+                    if self._client is not None:
+                        self._client.stop()
+                except Exception:
+                    pass
+                time.sleep(0.5)
+                try:
+                    # 连续失败≥2 → display id 可能变了(MuMu/BA 重启会换
+                    # EXTERNAL display), 强制重新定位。⚠计数必须数"失败"
+                    # 而非"成功"(审计: 成功计数在失败路径冻结, %3 相位
+                    # 永不变 → 重定位永不触发)
+                    if self._fail_streak >= 2:
+                        self._display_id = None
+                    self._start_client()
+                    self.restarts += 1
+                    self._fail_streak = 0
+                    with self._lock:  # 宽限: 给新 client 出帧窗口
+                        self._ts = time.time()
+                except Exception as e:
+                    self._fail_streak += 1
+                    self._log(f"    [feed] 重启失败x{self._fail_streak}"
+                              f"({e}), 下轮再试")
 
     def _on_frame(self, frame):
         if frame is None:
@@ -241,9 +274,10 @@ class ScrcpyFeed:
 
     def stop(self):
         self._stopping = True
-        if self._client is not None:
-            try:
-                self._client.stop()
-            except Exception:
-                pass
-            self._client = None
+        with self._restart_lock:      # 等 watchdog 重启块完成再收尸
+            if self._client is not None:
+                try:
+                    self._client.stop()
+                except Exception:
+                    pass
+                self._client = None
