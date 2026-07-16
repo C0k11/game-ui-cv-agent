@@ -54,6 +54,8 @@
       ],
       "skill_order": [
         "arena",
+        "bounty",
+        "jfd",
         "daily_routine"
       ],
       "bounty_branches": [
