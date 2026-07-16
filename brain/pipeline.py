@@ -167,18 +167,31 @@ def _load_model_registry() -> dict:
     return {}
 
 def _resolve_path(model_key: str, fallback: Path) -> Path:
-    """Resolve an active model's weights path via registry, fall back to literal."""
+    """Resolve an active model's weights path via registry.
+
+    ⛔fail-closed(2026-07-16 审计): registry 存在但该 key 解析不出 →
+    raise, 绝不静默回落硬编码老路径 — 旧行为是"registry JSON 手编出错
+    /active 指错"时带着 5 月 v1(145类, 缺全部商店/confirm 钱防线类)照常
+    开跑, 正是"改了 registry 没效果、旧模型还在跑"的复现路径。
+    fallback 仅在 registry 文件整体缺失(全新环境)时使用。"""
     reg = _load_model_registry()
+    if not reg:                     # registry 文件缺失/坏 → 见下
+        if fallback.is_file():
+            print(f"[Pipeline] ⚠registry 缺失, {model_key} 回落 {fallback}")
+            return fallback
+        raise RuntimeError(f"model registry 缺失且 {model_key} fallback 不存在")
     section = reg.get(model_key)
     if not section:
-        return fallback
+        raise RuntimeError(f"registry 无 '{model_key}' 节 — 修 registry, 不回落老模型")
     active = section.get("active")
     versions = section.get("versions", {})
     info = versions.get(active, {})
     p = info.get("path")
     if p and Path(p).is_file():
         return Path(p)
-    return fallback
+    raise RuntimeError(
+        f"registry {model_key}.active='{active}' 路径无效({p}) — "
+        f"修 registry, 绝不静默回落老模型")
 
 
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
@@ -489,20 +502,25 @@ def _get_yolo():
         # battle 走 registry 最新 vN(2026-07-16 历史遗留修复: 旧代码硬编码
         # legacy battle_heads.pt 无视 registry — server 侧 Bounty/Arena/JFD
         # 一直用老模型, v9(0.989 nc18) 只有战斗脚本在用)
+        # active 优先(2026-07-16 审计: max vN 会在"先登记 v10 条目未验收"
+        # 时静默上未验收模型; active 是验收后才 bump 的正式指针), 无 active
+        # 才回退 max vN。
         _battle_path = _YOLO_BATTLE_HEADS
         try:
             import re as _re
             _bh = _load_model_registry().get("battle_heads", {})
             _vers = _bh.get("versions", {})
-            _vn = max((v for v in _vers if _re.fullmatch(r"v\d+", v)),
-                      key=lambda x: int(x[1:]), default=None)
-            if _vn:
-                _p = Path(_vers[_vn]["path"])
+            _pick = _bh.get("active")
+            if _pick not in _vers or not _re.fullmatch(r"v\d+", str(_pick)):
+                _pick = max((v for v in _vers if _re.fullmatch(r"v\d+", v)),
+                            key=lambda x: int(x[1:]), default=None)
+            if _pick:
+                _p = Path(_vers[_pick]["path"])
                 if not _p.is_absolute():
                     _p = Path("D:/Project") / str(_p).lstrip("/\\")
                 if _p.is_file():
                     _battle_path = _p
-                    print(f"[Pipeline] battle_heads → registry {_vn}")
+                    print(f"[Pipeline] battle_heads → registry {_pick}")
         except Exception as _e:
             print(f"[Pipeline] battle registry resolve failed({_e}), legacy")
         if _battle_path.is_file():
