@@ -486,8 +486,27 @@ def _get_yolo():
         #   on cafe sprites at conf 0.25-0.47)
         # emoticon: 0.15 (headpat bubbles on 2F score as low as 0.18)
         candidates = []  # (path, conf_threshold, tag)
-        if _YOLO_BATTLE_HEADS.is_file():
-            candidates.append((_YOLO_BATTLE_HEADS, 0.45, "battle"))
+        # battle 走 registry 最新 vN(2026-07-16 历史遗留修复: 旧代码硬编码
+        # legacy battle_heads.pt 无视 registry — server 侧 Bounty/Arena/JFD
+        # 一直用老模型, v9(0.989 nc18) 只有战斗脚本在用)
+        _battle_path = _YOLO_BATTLE_HEADS
+        try:
+            import re as _re
+            _bh = _load_model_registry().get("battle_heads", {})
+            _vers = _bh.get("versions", {})
+            _vn = max((v for v in _vers if _re.fullmatch(r"v\d+", v)),
+                      key=lambda x: int(x[1:]), default=None)
+            if _vn:
+                _p = Path(_vers[_vn]["path"])
+                if not _p.is_absolute():
+                    _p = Path("D:/Project") / str(_p).lstrip("/\\")
+                if _p.is_file():
+                    _battle_path = _p
+                    print(f"[Pipeline] battle_heads → registry {_vn}")
+        except Exception as _e:
+            print(f"[Pipeline] battle registry resolve failed({_e}), legacy")
+        if _battle_path.is_file():
+            candidates.append((_battle_path, 0.45, "battle"))
         if _YOLO_EMOTICON.is_file():
             # 0.50 (was 0.15→0.30 same day): live 2026-06-09 credit-card icons
             # kept firing as Emoticon_Action (0.36-0.75) even after the domain-
@@ -733,6 +752,16 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
     """
     if frame is None:
         return None
+    # 数字读数需要 4K 细节(1080p 实测伤金钱读数): 主 tick 帧换 scrcpy
+    # 1440p 后(2026-07-16 Phase2), 凡传入低于 4K 的帧自动升级 ADB 干净帧
+    # 重抓 — 一处兜底, 9 个 skill 调用点零改动。抓帧失败用原帧(降级可用)。
+    try:
+        if frame.shape[1] < 3200:
+            _cf = get_clean_frame()
+            if _cf is not None:
+                frame = _cf
+    except Exception:
+        pass
     import cv2
     import re as _re
     try:
@@ -2399,8 +2428,11 @@ class DailyPipeline:
         )
         if has_ba_ui:
             self._no_ba_ticks = 0
+            self._no_ba_since = 0.0
         else:
             self._no_ba_ticks = getattr(self, "_no_ba_ticks", 0) + 1
+            if getattr(self, "_no_ba_since", 0.0) <= 0.0:
+                self._no_ba_since = time.time()
             # Save trajectory of these wait ticks too so we can debug
             # WHY OCR didn't find any markers (was the frame black?  Did
             # OCR run at all?).  Old code skipped trajectory save which
@@ -2421,10 +2453,15 @@ class DailyPipeline:
                       "Restart the server to reload the model.")
                 self._running = False
                 return action_done("pipeline aborted: ui model load failed")
-            if self._no_ba_ticks >= 30:
+            # abort 上限改时间制(2026-07-16): tick 提速到 ~0.3-0.7s 后,
+            # 30 tick 只有 ~10-20s — 放置立绘屏(UI 自动隐藏)wake 还没生效
+            # 就 abort 了(实锤)。45s 与旧版 30x1s+ 的等效窗口一致。
+            if (self._no_ba_ticks >= 30
+                    and time.time() - self._no_ba_since > 45.0):
                 print(
                     f"[Pipeline] No Blue Archive UI detected for "
-                    f"{self._no_ba_ticks} consecutive ticks — aborting "
+                    f"{self._no_ba_ticks} ticks / "
+                    f"{time.time() - self._no_ba_since:.0f}s — aborting "
                     f"pipeline.  Check that MuMu is running, BA is "
                     f"launched, the emulator window isn't minimised, "
                     f"and the Window Title setting matches.  "

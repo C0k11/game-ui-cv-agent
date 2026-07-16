@@ -940,15 +940,9 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             threading.Thread(target=_clean_flywheel_worker, daemon=True).start()
 
         # OCR + YOLO lazy-load on first use (no pre-warm to avoid deadlocks).
-        # Florence pre-warm in background thread (needed for Lobby + Schedule avatar matching).
-        def _prewarm_florence():
-            try:
-                from vision.florence_vision import get_florence_vision
-                fv = get_florence_vision()
-                print(f"[Pipeline] Florence pre-warm: ready (device={fv.cfg.device})", flush=True)
-            except Exception as e:
-                print(f"[Pipeline] Florence pre-warm failed: {e}", flush=True)
-        threading.Thread(target=_prewarm_florence, daemon=True).start()
+        # Florence prewarm 已裁撤(2026-07-16): 仅剩的 2 个调用点都在
+        # interceptor 的 OCR 死码分支内(生产态不可达), prewarm 白吃显存与
+        # 启动时间; 真要用时 get_florence_vision() 惰性加载仍可用。
         _florence_prewarm_started = True
 
         # DXcam for fast capture (Desktop Duplication API)
@@ -1246,7 +1240,21 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             #    clean flywheel material at full res.
             frame = None
             _frame_src = ""
-            if adb is not None:
+            # ① scrcpy 首选(2026-07-16 Phase2, 用户: 全面替换): 帧龄 0.02s
+            #   vs ADB 0.77s/张 — tick 周期 0.92s→~0.3s。1440p 对 YOLO 无损
+            #   (检出与 4K 帧一致已实测); digit-OCR 由 run_digit_ocr 内部
+            #   自动升级 ADB 4K 干净帧, 钱/票读数精度不受影响。
+            if _scrcpy_feed is not None:
+                try:
+                    _fr2, _age2, _ = _scrcpy_feed.latest()
+                    if _fr2 is not None and (
+                            _age2 if _age2 is not None else 9) < 3.0:
+                        frame = _fr2
+                        _frame_src = "scrcpy"
+                except Exception:
+                    frame = None
+            # ② ADB fallback(scrcpy 断流窗口/不可用)
+            if frame is None and adb is not None:
                 try:
                     frame = adb.capture_frame()
                     _frame_src = "adb"
