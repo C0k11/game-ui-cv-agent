@@ -1030,6 +1030,27 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _log_pipeline(f"DXcam unavailable ({e}), falling back to ADB/BitBlt")
             _dxcam_camera = None
 
+        # ── scrcpy 视频流 feed (2026-07-15, combat v7 地基迁入日常) ──
+        # Android 内部 H.264 流: 帧龄 0.02s / 不怕遮挡最小化 / 天然无
+        # overlay 烧录。高频线程首选帧源, DXcam 降级为 fallback。
+        # ⚠1440p 帧: 只喂 YOLO(检出与 4K 帧一致已实测), digit-OCR 场景
+        # (钱/票读数)仍走 ADB 4K 干净帧(set_clean_frame_source 不动)。
+        _scrcpy_feed = None
+        try:
+            from brain.scrcpy_feed import ScrcpyFeed
+            _scrcpy_feed = ScrcpyFeed(log=_log_pipeline)
+            if _scrcpy_feed.start(timeout_s=8):
+                _f0, _, _ = _scrcpy_feed.latest()
+                _log_pipeline(f"scrcpy feed OK {_f0.shape[1]}x{_f0.shape[0]} "
+                              f"(display {_scrcpy_feed._display_id})")
+            else:
+                _log_pipeline("scrcpy feed no frame in 8s → DXcam fallback")
+                _scrcpy_feed.stop()
+                _scrcpy_feed = None
+        except Exception as e:
+            _log_pipeline(f"scrcpy feed unavailable ({e}) → DXcam fallback")
+            _scrcpy_feed = None
+
         # ── High-FPS YOLO detection thread (battle-grade) ──
         # Owns DXcam exclusively (not thread-safe for concurrent grab).
         # Runs YOLO at ~30 FPS, feeds overlay with ByteTrack-tracked boxes.
@@ -1069,11 +1090,25 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # (~66ms) so the overlay doesn't blink. Cleared on page switch
             # fast enough to be imperceptible; disabled in tracker mode.
             _hold_boxes: Dict[Any, Any] = {}
+            _last_seq = 0          # scrcpy 帧序号(seq 不动=画面静止, 免重复推理)
+            _last_infer = 0.0
             while _yolo_thread_running and _PIPELINE_RUNNING:
                 try:
                     t0 = time.perf_counter()
                     frame = None
-                    if _dxcam_camera is not None:
+                    # ① scrcpy 首选(帧龄 0.02s, 不怕遮挡; 静止画面 seq 不动
+                    #   → 每 0.3s 仍强制推理一次保 fresh_ts 新鲜)
+                    if _scrcpy_feed is not None:
+                        _fr, _age, _seq = _scrcpy_feed.latest()
+                        if _fr is not None and (_age or 9) < 5.0:
+                            if (_seq != _last_seq
+                                    or t0 - _last_infer > 0.3):
+                                _last_seq = _seq
+                                frame = _fr
+                    # ② DXcam fallback(scrcpy 断流窗口/不可用)
+                    if frame is None and _dxcam_camera is not None \
+                            and (_scrcpy_feed is None
+                                 or t0 - _last_infer > 1.0):
                         try:
                             import ctypes.wintypes as _wt3
                             _rc3 = _wt3.RECT()
@@ -1088,7 +1123,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         except Exception:
                             frame = None
                     if frame is None:
-                        # DXcam returned None — clear shared frame after timeout
+                        # 无帧 — clear shared frame after timeout
                         # so pipeline falls back to ADB (background mode support)
                         with _yolo_latest_lock:
                             if _yolo_latest_ts > 0 and time.perf_counter() - _yolo_latest_ts > 2.0:
@@ -1106,6 +1141,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         continue
                     h, w = frame.shape[:2]
                     yolo_boxes = _run_yolo_on_image(frame, w, h)
+                    _last_infer = t0
                     with _yolo_latest_lock:
                         _yolo_latest_boxes = yolo_boxes
                         _yolo_latest_frame = frame
@@ -1214,11 +1250,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 except Exception:
                     frame = None
             if frame is None:
+                # 高频线程共享帧 fallback(来源=scrcpy 或 DXcam, boxes 同帧)
                 with _yolo_latest_lock:
                     if (_yolo_latest_frame is not None
                             and time.perf_counter() - _yolo_latest_ts < 3.0):
                         frame = _yolo_latest_frame.copy()
-                        _frame_src = "dxcam"
+                        _frame_src = "hf"
             if frame is None:
                 try:
                     pil_img = capture_client(render_hwnd)
@@ -1249,7 +1286,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # high-FPS thread's boxes only when we actually fell back to its
             # DXcam frame (they were computed on that feed).
             _injected_yolo = None
-            if _frame_src == "dxcam" and _dxcam_camera is not None:
+            if _frame_src == "hf":
                 with _yolo_latest_lock:
                     if (_yolo_latest_frame is not None
                             and time.perf_counter() - _yolo_latest_ts < 3.0):
@@ -1402,6 +1439,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _yolo_thread_running = False
         if _yolo_hfps is not None and _yolo_hfps.is_alive():
             _yolo_hfps.join(timeout=3)
+        try:
+            if _scrcpy_feed is not None:
+                _scrcpy_feed.stop()
+        except Exception:
+            pass
         summary = ""
         progress = None
         pipe = None

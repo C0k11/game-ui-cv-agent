@@ -34,8 +34,10 @@ _ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
 
 
 def find_app_display(serial: str = "127.0.0.1:7555",
-                     pkg: str = "com.nexon.bluearchive") -> int:
-    """dumpsys window 按 display 分段找 pkg 焦点窗口所在 displayId."""
+                     pkg: str = "com.nexon.bluearchive"):
+    """dumpsys window 按 display 分段找 pkg 焦点窗口所在 displayId.
+    找不到(BA 没起) → None: 调用方绝不能拿 display 0 凑数 — 0 是
+    Android 桌面 launcher, feed 会永远盯着桌面且 watchdog 不报错."""
     out = subprocess.run(
         [_ADB, "-s", serial, "shell", "dumpsys", "window"],
         capture_output=True, text=True, encoding="utf-8",
@@ -47,7 +49,7 @@ def find_app_display(serial: str = "127.0.0.1:7555",
             cur = int(m.group(1))
         if "mCurrentFocus" in line and pkg in line:
             return cur
-    return 0
+    return None
 
 
 def _make_client(device, max_fps: int, display_id: int):
@@ -144,6 +146,9 @@ class ScrcpyFeed:
         did = self._display_id
         if did is None:
             did = find_app_display(self._serial)
+            if did is None:
+                raise RuntimeError("BA 焦点窗口不在任何 display(没起?)"
+                                   " — 拒绝回退 display 0(桌面)")
             self._display_id = did
         dev = adb.device(serial=self._serial)
         self._client = _make_client(dev, self._max_fps, did)
@@ -180,6 +185,10 @@ class ScrcpyFeed:
                 pass
             time.sleep(0.5)
             try:
+                # 连续重启仍断 → display id 可能变了(MuMu/BA 重启会换
+                # EXTERNAL display), 强制重新定位
+                if self.restarts % 3 == 2:
+                    self._display_id = None
                 self._start_client()
                 self.restarts += 1
             except Exception as e:
