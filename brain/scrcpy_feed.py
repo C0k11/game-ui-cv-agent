@@ -171,12 +171,40 @@ class ScrcpyFeed:
             self._watchdog.start()
         return ok
 
+    def _is_static(self) -> bool:
+        """age 大时区分「画面静止」vs「真断流」: ADB screencap(独立链)
+        与 feed 最后帧对比, 一致=静止(H.264 静止页天然不出帧, 不该重启
+        — 2026-07-15 实锤: lobby/hub 静止页 watchdog 误判断流疯狂重启,
+        重启风暴反把流打烂)。对比失败(ADB 挂)按断流处理."""
+        try:
+            import cv2
+            raw = subprocess.run(
+                [_ADB, "-s", self._serial, "exec-out", "screencap", "-p"],
+                capture_output=True, timeout=10).stdout
+            adb_fr = cv2.imdecode(np.frombuffer(raw, np.uint8),
+                                  cv2.IMREAD_COLOR)
+            with self._lock:
+                feed_fr = self._frame
+            if adb_fr is None or feed_fr is None:
+                return False
+            a = cv2.cvtColor(cv2.resize(adb_fr, (64, 36)),
+                             cv2.COLOR_BGR2GRAY).astype(float)
+            b = cv2.cvtColor(cv2.resize(feed_fr, (64, 36)),
+                             cv2.COLOR_BGR2GRAY).astype(float)
+            return float(abs(a - b).mean()) < 6.0
+        except Exception:
+            return False
+
     def _watchdog_loop(self):
         while not self._stopping:
             time.sleep(1.0)
             with self._lock:
                 age = time.time() - self._ts if self._ts else 0.0
             if age <= self._stale_restart_s or self._stopping:
+                continue
+            if self._is_static():
+                with self._lock:      # 静止验证过: 刷新时戳, 帧仍有效
+                    self._ts = time.time()
                 continue
             self._log(f"    [feed] 断流{age:.1f}s → 重启 scrcpy client")
             try:
@@ -191,6 +219,8 @@ class ScrcpyFeed:
                     self._display_id = None
                 self._start_client()
                 self.restarts += 1
+                with self._lock:      # 宽限: 给新 client 出帧窗口,
+                    self._ts = time.time()   # 防下一轮立刻再重启(风暴)
             except Exception as e:
                 self._log(f"    [feed] 重启失败({e}), 下轮再试")
 
