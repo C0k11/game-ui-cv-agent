@@ -72,7 +72,6 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 
     # ── 推荐 (新 profile 默认勾这 2 个) ──
     {"id": "daily_routine", "label": "[★] 日常收菜 全套 (mail/cafe/schedule/club/daily_tasks/craft/event/pass_reward/momo/story/shop/ap, 内部按 dot 判断)"},
-    {"id": "campaign_sweep", "label": "[★] 一键扫荡 悬赏/战术/活动副本 (hub 内按 dot 跳过个别)"},
 
     # 注: 旧 14 个 skill id 已从 dashboard 删除 —
     #   收菜 12 个 (cafe/schedule/club/daily_tasks/craft/pass_reward/
@@ -1409,7 +1408,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _PIPELINE_STATUS["step_pending"] = None
 
             # 3. Execute action (unless dry_run)
-            if not dry_run and action_type != "done":
+            # ⚠只放行真输入动作(2026-07-16 审计 A 级): 旧闸把最高频的
+            # wait 也送进执行函数, 落穿 ADB 分支后每 tick 执行
+            # SetForegroundWindow(MuMu) — 有前台权限时反复抢焦点。
+            if (not dry_run and action_type in
+                    ("click", "back", "swipe", "swipe_tap", "scroll")):
                 _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
 
             # 4. Sleep + OCR cache management
@@ -2463,7 +2466,7 @@ def list_datasets() -> Dict[str, Any]:
     # battle 模型 sources (build_battle_v3 直接引用原池 = 已并入永久 train 集,
     # 不再是"飞轮待标注" — 2026-07-10 用户: 飞轮区只留没用过/即将要用的)
     try:
-        from scripts.build_battle_v3 import SRCS as _battle_srcs  # noqa: PLC0415
+        from scripts.build_battle_v9 import SRCS as _battle_srcs  # noqa: PLC0415
         _train_set |= {p.name for p in _battle_srcs}
     except Exception:
         pass

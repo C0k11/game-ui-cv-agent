@@ -2263,22 +2263,10 @@ class DailyPipeline:
 
         self._total_ticks += 1
 
-        # Hard-example mining: auto-save borderline-conf detections for human
-        # review later. No-op if no detections in the noisy conf band, so cost
-        # is tiny (a list comp).  Module-level cap prevents disk spam.
-        try:
-            from brain.hard_example_mining import maybe_save_hard_example
-            cur_skill = self.current_skill
-            maybe_save_hard_example(
-                screenshot_path=screenshot_path or None,
-                yolo_boxes=screen.yolo_boxes or [],
-                run_id=_PIPELINE_SESSION_ID,
-                tick=self._total_ticks,
-                skill_name=cur_skill.name if cur_skill else "",
-                sub_state=getattr(cur_skill, "sub_state", "") if cur_skill else "",
-            )
-        except Exception:
-            pass  # mining is best-effort, never break the tick loop
+        # Hard-example mining 已停用(2026-07-16 审计 A 级): 每 tick 写盘
+        # data/hard_examples 累积 7GB/2万文件, dashboard 从未接消费入口 —
+        # 同需求由干净帧飞轮 + scripts/mine_hard_examples.py(读 trajectories
+        # 写 raw_images/_hard_examples_*) 覆盖。目录确认无用后可整体回收。
 
         # 专注模型 loadout per sub-state (user 2026-06-09: "emoticon 只在要开始
         # 摸头的时候才识别, 摸完/换楼就关"): refine the skill-level
