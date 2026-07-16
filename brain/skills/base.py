@@ -1347,26 +1347,31 @@ class BaseSkill(ABC):
         *,
         min_conf: float = 0.6,
         region: Optional[Tuple[float, float, float, float]] = None,
-    ) -> Optional[OcrBox]:
-        """Locate a 一鍵領取 / 全部領取 / Claim All button in any of its
-        Trad/Simp/English forms. Returns OcrBox or None.
+    ) -> Optional[YoloBox]:
+        """Locate a bulk-claim button (全部領取 / 一次領取 / 一鍵領取) —
+        pure YOLO cls, no OCR text matching (2026-07 YOLO migration).
 
-        NOTE: prefer self.find_ui([yolo_cls...], [...ocr_texts]) for new
-        code — YOLO ui_v1 has '全部领取_黄' (107) which is more reliable
-        than OCR for grey/yellow state.
+        Yellow (actionable) cls first so callers that click get a live
+        button; grey (already-claimed) is returned as a fallback because
+        legacy callers also used this as a "button exists here" probe.
+
+        NOTE: min_conf was the legacy OCR threshold — kept in the
+        signature for caller compatibility, NOT applied to YOLO
+        (cls conf floor 0.35, same as the other cls helpers).
         """
-        # YOLO ui_v1 has dedicated cls — try it first.
-        yolo_btn = self.find_ui(
+        from brain.skills import ui_classes as UC
+        box = self.find_cls(
             screen,
-            ["全部领取_黄", "全部领取_灰"],
-            None,
-            yolo_conf=0.35,
-            region=region,
+            [UC.CLAIM_ALL_YELLOW, UC.CLAIM_ONCE_YELLOW],  # 107 / 417
+            conf=0.35, region=region,
         )
-        if yolo_btn is not None:
-            return yolo_btn
-        return screen.find_any_text(
-            self._CLAIM_ALL_TEXTS, min_conf=min_conf, region=region,
+        if box is not None:
+            return box
+        return self.find_cls(
+            screen,
+            [UC.CLAIM_ALL_GREY, UC.CLAIM_ONCE_GREY,
+             UC.CLAIM_ONEKEY_GREY],                       # 413 / 416 / 415
+            conf=0.35, region=region,
         )
 
     def find_single_claim_button(
@@ -1375,29 +1380,46 @@ class BaseSkill(ABC):
         *,
         min_conf: float = 0.7,
         region: Optional[Tuple[float, float, float, float]] = (0.6, 0.1, 1.0, 0.9),
-    ) -> Optional[OcrBox]:
-        """Locate an individual 領取 / Claim button (default region: right
-        side where per-item rewards usually sit).
+    ) -> Optional[YoloBox]:
+        """Locate an individual per-row claim button — pure YOLO cls
+        (default region: right side where per-item rewards sit).
 
-        Substring matching on 領取 also matches the bulk-claim variants
-        全部領取 / 一鍵領取 — which is wrong here, those are handled by
-        find_claim_all_button.  Filter the candidate list to drop boxes
-        whose normalised text *contains* a bulk-claim prefix.  Without
-        this filter, daily-tasks per-row claims kept clicking the
-        bottom-right 全部領取 button instead of the tier-bonus row's
-        own 領取 (run 2026-05-13 ~21:25: 20 throttled clicks at
-        (0.90,0.93) which was 全部領取, not the 8/8 領取 at (0.55,0.93)).
+        cls: 领取_黄 (106, single-row actionable) / 领取奖励_黄 (89,
+        領取獎勵-style rows e.g. arena). Bulk variants (全部领取_黄 107 /
+        一次领取黄色 417 / grey states) are DISTINCT cls, so exact-name
+        matching already excludes them — the OCR-era substring bug (領取
+        also matching 全部領取; run 2026-05-13 ~21:25 clicked 全部領取 at
+        (0.90,0.93) instead of the row's 領取 at (0.55,0.93)) cannot
+        recur by name. Belt-and-braces: drop any candidate whose center
+        sits inside a detected bulk-claim box, guarding against the model
+        double-firing 领取_黄 on the 全部領取 button's 领取 glyphs.
+
+        Only yellow (actionable) states are returned — grey rows are not
+        click targets. NOTE: min_conf was the legacy OCR threshold —
+        kept for signature compatibility, NOT applied to YOLO (floor 0.35).
         """
-        candidates = []
-        for pat in self._SINGLE_CLAIM_TEXTS:
-            candidates.extend(screen.find_text(pat, min_conf=min_conf, region=region))
-        # Drop boxes whose text is actually a bulk-claim variant.
-        _BULK_PREFIXES = ("全部", "一鍵", "一键", "一次")
-        for box in candidates:
-            txt = (box.text or "").strip()
-            if any(p in txt for p in _BULK_PREFIXES):
+        from brain.skills import ui_classes as UC
+        candidates = self.find_all_cls(
+            screen,
+            [UC.CLAIM_YELLOW, UC.CLAIM_REWARD_YELLOW],    # 106 / 89
+            conf=0.35, region=region,
+        )
+        if not candidates:
+            return None
+        # Bulk boxes fetched WITHOUT region: the bulk button usually sits
+        # outside the per-row region, but a stray 领取_黄 double-detection
+        # on top of it would be inside — compare against all of them.
+        bulk = self.find_all_cls(
+            screen,
+            [UC.CLAIM_ALL_YELLOW, UC.CLAIM_ALL_GREY, UC.CLAIM_ONCE_YELLOW,
+             UC.CLAIM_ONCE_GREY, UC.CLAIM_ONEKEY_GREY],   # 107/413/417/416/415
+            conf=0.30,
+        )
+        for cand in candidates:  # find_all_cls: conf-desc order
+            if any(b.x1 <= cand.cx <= b.x2 and b.y1 <= cand.cy <= b.y2
+                   for b in bulk):
                 continue
-            return box
+            return cand
         return None
 
     def is_empty_reward_list(self, screen: ScreenState) -> bool:
@@ -1466,31 +1488,33 @@ class BaseSkill(ABC):
             if screen.find_any_text(texts, region=header_region, min_conf=0.6):
                 return screen_name
 
-        # Fallback: campaign hub detection via grid markers (OCR often misses 任務 header)
-        # Keep this AFTER specific header checks to avoid classifying total assault/pass as Mission.
-        hub_markers = screen.find_any_text(
-            ["懸賞通緝", "悬赏通缉", "學園交流會", "学园交流会",
-             "戰術大賽", "战术大赛", "特殊任務", "特殊任务",
-             "制約解除", "劇情", "剧情"],
-            min_conf=0.5
+        # Fallback: campaign hub / stage-select detection via YOLO cls
+        # (2026-07 YOLO migration: OCR grid markers 懸賞通緝/Area N/Normal/
+        # 入場 replaced by ui-model hub tiles + stage-select cls). >=2
+        # distinct cls required so one tile leaking into another screen
+        # can't misfire (mirrors PAGE_SIGNATURES["Mission"]). Keep this
+        # AFTER specific header checks to avoid classifying total assault/
+        # pass as Mission.
+        from brain.skills import ui_classes as UC
+        _MISSION_CLS = (
+            UC.HUB_CAMPAIGN,         # 67 任务关卡推图
+            UC.HUB_STORY,            # 68 剧情
+            UC.HUB_BOUNTY,           # 69 悬赏通缉
+            UC.HUB_SPECIAL,          # 70 特殊任务
+            UC.HUB_SCHOOL_EXCHANGE,  # 71 学院交流会
+            UC.HUB_ARENA,            # 75 战术大赛
+            "制约解除决战",           # 76 (no ui_classes constant yet)
+            UC.STAGE_ENTER,          # 79 入场键 (stage-select right panel)
+            UC.STAGE_NORMAL_SEL,     # 80 普通关卡选中
+            UC.STAGE_HARD,           # 81 困难关卡
+            UC.STAGE_HARD_SEL,       # 419 (Hard-tab-active variant of 80/81)
+            UC.STAGE_NORMAL,         # 420
         )
-        if hub_markers:
-            return "Mission"
-        area_marker = screen.find_text_one(r"Area\s*\d+", min_conf=0.5)
-        if area_marker:
-            return "Mission"
-        stage_tabs = screen.find_any_text(
-            ["Normal", "Hard"],
-            region=(0.50, 0.16, 0.98, 0.28),
-            min_conf=0.6,
+        n_hits = sum(
+            1 for c in _MISSION_CLS
+            if self.find_cls(screen, c, conf=0.30) is not None
         )
-        stage_id = screen.find_text_one(r"\d+\-\d+", min_conf=0.5)
-        entry_btn = screen.find_any_text(
-            ["入場", "入场"],
-            region=(0.78, 0.22, 0.98, 0.78),
-            min_conf=0.5,
-        )
-        if stage_tabs and (stage_id or entry_btn or area_marker):
+        if n_hits >= 2:
             return "Mission"
         return None
 
@@ -1504,229 +1528,51 @@ class BaseSkill(ABC):
         # lesson, club AP claim, event battles, etc.).  Tap anywhere
         # advances.  Run_20260516_234050 t232: bot got stuck here for
         # 29 ticks waiting because no skill-specific handler caught it.
-        # Cafe / Schedule already have local handlers; this is the
-        # global safety net for skills that don't.
-        bond_screen = screen.find_any_text(
-            ["羈絆升級", "羁绊升级", "鲜升級", "絲升級", "升級！", "升级！"],
-            min_conf=0.55,
-        )
-        if bond_screen is None:
-            # Fallback: stat-text bottom row appears even when the title
-            # OCR misreads.  Pairs with no top OCR boxes (full-screen art).
-            stat_text = screen.find_any_text(
-                ["治癒力", "治愈力", "最大體力", "最大体力"],
-                region=(0.30, 0.85, 0.75, 1.0), min_conf=0.6,
-            )
-            if stat_text and len(screen.ocr_boxes) <= 8:
-                bond_screen = stat_text
+        # 2026-07-16 纯 cls 化: 词表有专类 398羁绊升级/399地区升级,
+        # OCR 文字匹配(羈絆升級/治癒力 fallback)全删。
+        bond_screen = self.find_cls(
+            screen, ["羁绊升级", "地区升级"], conf=0.35)
         if bond_screen is not None:
-            self.log(f"bond level-up screen detected '{bond_screen.text}', tap to dismiss")
+            self.log(f"bond level-up screen detected "
+                     f"'{bond_screen.cls_name}', tap to dismiss")
             return action_click(0.5, 0.5, "dismiss bond level-up")
 
-        # Notification modal headers — anything that sits at the top of
-        # a center-screen dialog and has a 確認 button at the bottom is
-        # safe to dismiss.  Original detection was "通知" only, which
-        # missed sign-in/reward popups that use different headers:
-        #   - 社團簽到獎勵 (club daily sign-in, observed in
-        #     run_20260513_211309 t74: bot exited Club without clicking
-        #     the popup's 確認, leaving x10 AP rewards "stuck" because
-        #     the popup also describes the reward going to mail).
-        #   - 提示 (generic hint/tip dialog)
-        #   - 系統公告 (system announcement, rare)
-        notification = screen.find_any_text(
-            ["通知", "提示", "簽到獎勵", "签到奖励",
-             "系統公告", "系统公告", "公告"],
-            region=(0.20, 0.10, 0.80, 0.32), min_conf=0.55
+        # ── 通知弹窗 (pure YOLO, 2026-07-16 重构) ────────────────────────
+        # 旧版在这里用 OCR 文字给弹窗分类(通知/提示标题 + 邀.*咖啡=确认 /
+        # 更新通知+下載=确认 / 掃蕩=确认 / 訪問好友=取消 / 是否結束=取消 …),
+        # _OCR_ENABLED=False 后全是死代码, 且"读文字定动作"违反感知铁律
+        # (判断一律 cls)。新策略(用户 spec 2026-07-16):
+        #   • 语境内的"该确认"由拥有语境的 skill 自己处理, 并且必须排在调用
+        #     本 helper 之前:
+        #       - 咖啡厅邀请确认 → cafe._invite stage2 / _recover_invite_overlay
+        #       - 课程表报告确认 → schedule.tick PRIORITY 1 (调本 helper 前)
+        #       - 扫荡确认      → 各 sweep skill 的结构闸
+        #       - 强更下载确认   → pipeline._global_interceptor 启动期结构闸
+        #   • 因此能落到这个通用 helper 的「确认+取消/叉」结构弹窗, 定义上就是
+        #     当前 skill 没预期的通知弹窗 → 默认安全路径: 一律点取消/叉掉。
+        #     绝不盲点确认(2026-06-02 买票事故根因 = 盲确认, 见 money_safety)。
+        #   • 只有确认键、无取消/叉的弹窗: 这里不动 (fail-closed — 交给 skill
+        #     自己的 handler / tick 预算; 启动期强更框由 interceptor 接)。
+        from brain.skills import ui_classes as UC
+        _POPUP_BTN_BAND = (0.20, 0.45, 0.80, 0.95)  # 居中对话框按钮带
+        popup_confirm = self.find_cls(
+            screen, [UC.BTN_CONFIRM, UC.BTN_CONFIRM_GREY],
+            conf=0.30, region=_POPUP_BTN_BAND,
         )
-        if notification:
-            # Check if this notification MUST be confirmed (not canceled):
-            # 1. Cafe invite: "邀.*咖啡"
-            # 2. Game update download: title "更新通知" or body keywords
-            #    Actual body example: "需要下載遊戲所需的檔案6.27GB"
-            invite_hint = screen.find_text_one(
-                r"邀.*咖啡", region=screen.CENTER, min_conf=0.5
+        if popup_confirm is not None:
+            popup_cancel = self.find_cls(
+                screen, UC.BTN_CANCEL, conf=0.30, region=_POPUP_BTN_BAND
             )
-            # Detect "更新" in the title text itself (OCR: "更新通知")
-            update_title = "更新" in (notification.text or "")
-            update_hint = screen.find_any_text(
-                ["下載必要", "下载必要", "更新資源", "更新资源",
-                 "下載資源", "下载资源", "下載內容", "下载内容",
-                 "需要下載", "需要下载", "遊戲所需", "游戏所需",
-                 "下載遊戲", "下载游戏", "檔案"],
-                region=screen.CENTER, min_conf=0.45,
-            )
-            # Bounty/commission/event sweep confirm:
-            #   "要使用X AP掃蕩Y次嗎？"          (commission AP sweep)
-            #   "要使用6通票券6次？"              (bounty ticket sweep)
-            #   "要使用600AP30次？"               (event activity sweep)
-            # OCR drops spaces between "使用" and digits, so "使用AP"
-            # doesn't match the event variant. Use broader anchors:
-            # `要使用` is distinctive to BA sweep confirms; `次？` +
-            # digit-before-AP catch the same pattern.
-            sweep_hint = screen.find_any_text(
-                ["掃蕩", "扫荡", "捅荡", "捅蕩",
-                 "使用AP", "使用 AP", "要使用",
-                 "次？", "次?", "次嗎", "次吗",
-                 "通票券", "通缉票券", "通緝票券", "票券",
-                 # Sweep-reset prompts: "掃蕩次數設定為2次以上 / 是否重置 / 次數設定 / 重置次數"
-                 # OCR sometimes drops the leading 掃蕩, so use the
-                 # post-prefix anchors as alternates (run_20260504_224706
-                 # t322 saw "次數設定為2次以上" without the 掃蕩 prefix).
-                 "重置", "次數設定", "次數", "次数设定", "次数",
-                 "次以上", "次以下", "若想開始", "若想开始"],
-                region=screen.CENTER, min_conf=0.45,
-            )
-            # Friend-cafe visit confirm ("要訪問好友的咖啡廳嗎？") must NEVER be
-            # confirmed — we want to stay in our own cafe. Force cancel.
-            friend_hint = screen.find_any_text(
-                ["訪問好友", "访问好友", "朋友的咖啡廳", "朋友的咖啡厅",
-                 "前往好友", "前往訪問", "前往访问", "要訪問", "要访问",
-                 "指定訪問", "指定访问", "隨機訪問", "随机访问"],
-                region=screen.CENTER, min_conf=0.5,
-            )
-            # Resume-battle prompt: "有進行中的戰鬥。是否繼續活動關卡？"
-            # appears at login after a prior run abandoned mid-battle.
-            # Buttons are 中斷 (abort) and 繼續 (resume).  MUST click 繼續
-            # to resume the orphaned battle; clicking 中斷 forfeits it.
-            # OCR routinely garbles 戰鬥→門 and drops 繼 from 繼續, so
-            # match on the most stable substrings only.
-            resume_battle_hint = screen.find_any_text(
-                ["進行中", "进行中", "活動關卡", "活动关卡",
-                 "繼續活動", "继续活动", "續活動"],
-                region=screen.CENTER, min_conf=0.5,
-            )
-            # Exit-game prompt: "是否結束？" / "是否结束？" — appears when
-            # ESC is pressed on lobby OR when over-ESC'ing inside a sub-
-            # screen pops up the "exit?" confirmation.  Clicking 確認
-            # WILL CLOSE THE GAME or back out of the current sub-screen
-            # to lobby.  User feedback (2026-05-15): "经常点进一个地方
-            # 然后就喜欢退回主界面" — bot was blindly confirming exit
-            # prompts.  Force CANCEL so the bot stays where it is.
-            exit_hint = screen.find_any_text(
-                ["是否結束", "是否结束", "結束遊戲", "结束游戏",
-                 "是否退出", "退出遊戲", "退出游戏"],
-                region=screen.CENTER, min_conf=0.5,
-            )
-            must_confirm = (invite_hint or update_title or update_hint
-                            or sweep_hint or resume_battle_hint) and not (friend_hint or exit_hint)
-            must_cancel = bool(friend_hint or exit_hint)
-
-            confirm_btn = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "繼續", "继续",
-                 "確", "确", "續", "OK"],   # `續` covers OCR-dropped 繼
-                region=(0.30, 0.55, 0.74, 0.82),
-                min_conf=0.40,
-            )
-            cancel_btn = screen.find_any_text(
-                ["取消", "中斷", "中断"],
-                region=(0.28, 0.60, 0.56, 0.82),
-                min_conf=0.55,
-            )
-
-            # Must-cancel notifications: NEVER confirm.
-            #   friend_hint → don't visit friend cafe
-            #   exit_hint   → don't exit the current screen / game
-            if must_cancel:
-                tag = "exit-prompt" if exit_hint else "friend-cafe"
-                if cancel_btn:
-                    self.log(f"notification popup ({tag}): clicking cancel")
-                    return action_click_box(cancel_btn, f"cancel {tag}")
-                # OCR missed the button — hardcoded cancel position (left of confirm)
-                self.log(f"notification popup ({tag}): cancel fallback click")
-                return action_click(0.402, 0.701, f"cancel {tag} fallback")
-
-            # Must-confirm notifications: always click 確認 — UNLESS the
-            # confirm button is grayed out (insufficient resources, e.g.
-            # shop purchase without enough currency). In that case clicking
-            # does nothing → infinite loop. Sample the button color; if
-            # grayed, click cancel and give up.
-            if must_confirm and confirm_btn:
-                if screen.is_button_grey(confirm_btn.cx, confirm_btn.cy):
-                    self.log(
-                        "notification popup: confirm button is grayed "
-                        "(insufficient / disabled) — clicking cancel instead"
-                    )
-                    if cancel_btn:
-                        return action_click_box(cancel_btn, "grayed confirm → cancel")
-                    return action_click(0.402, 0.701, "grayed confirm → cancel (fallback)")
-                tag = ("invite" if invite_hint
-                       else "resume-battle" if resume_battle_hint
-                       else "update")
-                self.log(f"notification popup ({tag}): clicking confirm")
-                return action_click_box(confirm_btn, f"confirm {tag} notification")
-            if must_confirm and cancel_btn:
-                # OCR missed confirm but found cancel → use hardcoded confirm position
-                self.log("notification popup (must-confirm): confirm fallback click")
-                return action_click(0.598, 0.701, "confirm notification fallback")
-
-            # Regular notification: prefer cancel to dismiss
-            if cancel_btn:
-                self.log("notification popup: clicking cancel to close")
-                return action_click_box(cancel_btn, "dismiss notification popup (cancel)")
-
-            if confirm_btn:
-                self.log("notification popup: clicking confirm")
-                return action_click_box(confirm_btn, "dismiss notification popup (confirm)")
-
-            if must_confirm:
-                self.log("notification popup (must-confirm): no buttons, fallback click confirm area")
-                return action_click(0.598, 0.701, "confirm notification (no btn fallback)")
-
-            # No buttons detected by OCR — try template-match the cyan
-            # 確認 button before falling back to a hardcoded click.
-            # The inventory-full popup ("因持有數限制 / 請確認信箱")
-            # is a TALL popup whose 確認 button sits at y≈0.78, lower
-            # than the old hardcoded (0.50, 0.64) fallback which fell
-            # into the popup body and did nothing — burned the entire
-            # skill's tick budget (DailyTasks timeout, run_20260515_
-            # 230517 t890+).
-            try:
-                tpl = screen.find_template_one("task_fight_confirm", min_conf=0.65)
-                if tpl is None:
-                    tpl = screen.find_template_one("activity_fight_confirm", min_conf=0.65)
-                if tpl is not None:
-                    self.log(
-                        f"notification popup: OCR missed buttons, "
-                        f"template-matched 確認 at ({tpl.cx:.2f},{tpl.cy:.2f})"
-                    )
-                    return action_click(tpl.cx, tpl.cy, "dismiss notification popup (template match)")
-            except Exception:
-                pass
-            # YOLO ui_v1 bottom-up fallback: ui detector has "确认键" and
-            # "弹窗叉叉" classes — if OCR + template both miss, try YOLO
-            # boxes before the hardcoded coord (which is height-specific
-            # and gets wrong popups). Added 2026-05-28 after DailyTasks
-            # got stuck for 30+ ticks on the 因持有數限制 inventory popup
-            # because (0.50, 0.78) fell into background "TOUCH TO CONTINUE"
-            # text instead of the 確認 button at (~0.50, 0.55).
-            try:
-                yolo_confirm = None
-                yolo_x = None
-                for yb in getattr(screen, "yolo_boxes", []) or []:
-                    name = getattr(yb, "cls_name", "") or ""
-                    if yolo_confirm is None and name in ("确认键", "確認鍵", "确认按钮"):
-                        yolo_confirm = yb
-                    elif yolo_x is None and name in ("弹窗叉叉", "彈窗叉叉", "关闭键"):
-                        yolo_x = yb
-                if yolo_confirm is not None:
-                    cx = (yolo_confirm.x1 + yolo_confirm.x2) / 2
-                    cy = (yolo_confirm.y1 + yolo_confirm.y2) / 2
-                    self.log(f"notification popup: OCR missed, YOLO 确认键 at ({cx:.2f},{cy:.2f})")
-                    return action_click(cx, cy, "dismiss notification popup (YOLO 确认键)")
-                if yolo_x is not None:
-                    cx = (yolo_x.x1 + yolo_x.x2) / 2
-                    cy = (yolo_x.y1 + yolo_x.y2) / 2
-                    self.log(f"notification popup: OCR missed, YOLO 弹窗叉叉 at ({cx:.2f},{cy:.2f})")
-                    return action_click(cx, cy, "dismiss notification popup (YOLO X)")
-            except Exception:
-                pass
-            # Last-resort hardcoded fallback: BA's tall popups (inventory
-            # full, daily reward summary) put 確認 at center-bottom around
-            # (0.50, 0.78).  Shorter popups put it at (0.50, 0.64).  We
-            # try the BOTTOM coord first since the tall popup is the
-            # newer / more common failure case.
-            self.log("notification popup: no buttons detected, clicking confirm-area fallback (0.50, 0.78)")
-            return action_click(0.50, 0.78, "dismiss notification popup (bottom fallback)")
+            if popup_cancel is not None:
+                self.log("通知弹窗(确认+取消结构) → 默认安全路径: 取消")
+                return action_click_box(
+                    popup_cancel, "dismiss notification popup (取消键)")
+            popup_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
+            if popup_x is not None:
+                self.log("通知弹窗(确认+叉结构) → 默认安全路径: 叉掉")
+                return action_click_box(
+                    popup_x, "dismiss notification popup (弹窗叉叉)")
+            # 只有确认、无取消/叉 → fail-closed, 这里不碰。
 
         # Confirm dialogs: full two-char buttons (確認/確定)
         confirm = screen.find_any_text(
@@ -1761,13 +1607,22 @@ class BaseSkill(ABC):
                 self.log(f"single-char confirm popup: '{single_confirm.text}' (body: '{popup_body.text}')")
                 return action_click_box(single_confirm, f"confirm popup '{single_confirm.text}'")
 
-        # "是否跳過" (skip) dialog - always confirm
-        skip = screen.find_text_one("跳過", region=screen.CENTER, min_conf=0.8)
-        if skip:
-            confirm2 = screen.find_any_text(["確", "确"], region=screen.CENTER, min_conf=0.8)
-            if confirm2:
-                self.log("skip dialog: confirming")
-                return action_click_box(confirm2, "confirm skip dialog")
+        # "是否跳過" (story-skip confirm) — cls + context, no OCR text match.
+        # This dialog only appears right after 跳过故事键 (cls 141) was
+        # clicked, i.e. while a story scene is up.  Structural gate:
+        #   1) current page signature == "Story" (剧情menu 等 cls 仍在帧上), AND
+        #   2) CENTER shows BOTH 确认键 (cls 20) and 取消键 (cls 118).
+        # Outside a story flow a bare confirm+cancel pair is ambiguous
+        # (exit / purchase prompts) → fall through, let the branches above
+        # or the owning skill decide (fail-closed).
+        if self.detect_screen_yolo(screen) == "Story":
+            skip_confirm = self.find_cls(
+                screen, "确认键", conf=0.30, region=screen.CENTER)
+            skip_cancel = self.find_cls(
+                screen, "取消键", conf=0.30, region=screen.CENTER)
+            if skip_confirm is not None and skip_cancel is not None:
+                self.log("story skip-confirm (Story page + 确认键/取消键 cls): confirming")
+                return action_click_box(skip_confirm, "confirm story skip dialog")
 
         return None
 
@@ -1796,8 +1651,14 @@ class BaseSkill(ABC):
     }
 
     def _nav_to(self, screen: ScreenState, nav_texts: List[str]) -> Optional[Dict[str, Any]]:
-        """Click a bottom nav bar button by text — YOLO first, OCR fallback."""
-        # Gather YOLO cls candidates from the OCR text list.
+        """Click a bottom nav bar button — YOLO cls ONLY, fail-closed.
+
+        nav_texts keeps the legacy OCR vocabulary for callers; it is mapped
+        to ui-model cls names via _NAV_OCR_TO_YOLO. If the target cls is not
+        detected on this frame, return None and let the caller wait for the
+        next frame — NO OCR fallback (iron rule: navigation by cls only).
+        """
+        # Gather YOLO cls candidates from the legacy text list.
         yolo_cls: List[str] = []
         for t in nav_texts:
             yolo_cls.extend(self._NAV_OCR_TO_YOLO.get(t, []))
@@ -1809,10 +1670,4 @@ class BaseSkill(ABC):
             if hit is not None:
                 self.log(f"nav YOLO click '{hit.cls_name}'")
                 return action_click_box(hit, f"nav to '{hit.cls_name}'")
-        # OCR fallback (original behavior).
-        for t in nav_texts:
-            hit = screen.find_text_one(t, region=screen.NAV_BAR, min_conf=0.5)
-            if hit:
-                self.log(f"nav OCR click '{hit.text}'")
-                return action_click_box(hit, f"nav to '{hit.text}'")
         return None

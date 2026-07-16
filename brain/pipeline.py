@@ -634,6 +634,11 @@ _BRINGUP_EXPOSE = True
 # exempted from holding entirely in _dedup_click (see "看到目标就点").
 _CLICK_HOLD_CAP = 5
 
+# 启动期窗口(秒, 2026-07-16 强更通知重构): 强更下载确认框只在 pipeline 刚起
+# 的这段时间内自动确认(patch-day 冷启动, TOUCH TO START 前后)。窗口外出现的
+# "只有确认"弹窗一律不在 interceptor 层碰 — 交给当前 skill 的语境处理。
+_STARTUP_UPDATE_WINDOW_S = 180.0
+
 # Debug: force EVERY skill to run, bypassing the red/yellow-dot should_run gate.
 # Set via mumu_runner --force-skills. For testing a skill's internals when the
 # account has no dot on it today (e.g. cafe with nothing to collect).
@@ -1273,6 +1278,7 @@ class DailyPipeline:
         self._running: bool = False
         self._results: List[SkillResult] = []
         self._skill_start_time: float = 0.0
+        self._run_start_ts: float = 0.0  # start() 时刻 — 启动期(强更确认)窗口锚点
         self._total_ticks: int = 0
         self._max_retries: int = 1
         self._retry_count: int = 0
@@ -1330,6 +1336,7 @@ class DailyPipeline:
         self._current_idx = 0
         self._results = []
         self._total_ticks = 0
+        self._run_start_ts = time.time()
         self._retry_count = 0
         # Create trajectory directory for this run
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1618,44 +1625,58 @@ class DailyPipeline:
             print(f"[Interceptor] YOLO level-up ({levelup_y.cls_name}) → tap dismiss")
             return action_click(0.5, 0.5, "interceptor: dismiss level-up (YOLO)")
 
-        # ── P-1: Title screen ("TOUCH TO START") ──
-        # Game may restart / disconnect and land on title. All skills need this.
-        tap_start = screen.find_text_one("(?:TOUCH|TAP).*START", min_conf=0.8)
-        if tap_start:
-            print(f"[Interceptor] Title screen detected, tapping to start")
-            return action_click(0.5, 0.85, "interceptor: tap to start")
+        # ── P-1: Title screen ("TOUCH TO START") — 零 OCR 版 (2026-07-16) ──
+        # 标题页是纯艺术全屏页, 476 ui cls + battle cls 一个都不在 →
+        # 「零检出」就是它的 cls 签名(absence-based)。三重闸防误触:
+        #   ①连续 ≥3 零检出帧(转场艺术帧只持续 1-2 tick; 5s 断档重计)
+        #   ②帧均亮度 >60(标题天空亮; 加载黑场过不了)
+        #   ③6s 点击限流(误判页最多被戳一下)
+        # 生产态(_OCR_ENABLED=False)零检出帧多在 has_ba_ui 闸短路进
+        # no-BA 分支(wake-tap 顺带点透标题屏), 此块是兜底补位。
+        if not screen.yolo_boxes:
+            _now_t = time.time()
+            if _now_t - getattr(self, "_zero_det_last_ts", 0.0) > 5.0:
+                self._zero_det_streak = 0
+            self._zero_det_last_ts = _now_t
+            self._zero_det_streak = getattr(self, "_zero_det_streak", 0) + 1
+            _title_bright = False
+            try:
+                _title_bright = (screen.frame is not None
+                                 and float(screen.frame.mean()) > 60.0)
+            except Exception:
+                pass
+            if (_title_bright and self._zero_det_streak >= 3
+                    and _now_t - getattr(self, "_title_tap_ts", 0.0) > 6.0):
+                print(f"[Interceptor] zero-det bright frame "
+                      f"x{self._zero_det_streak} → title screen, tap to start")
+                self._title_tap_ts = _now_t
+                return action_click(0.5, 0.85, "interceptor: tap to start")
+        else:
+            self._zero_det_streak = 0
 
-        # ── P-1: Download / update confirmation modal ──
-        # BA first-run and patch-day show a "通知" modal:
-        #   "下載必要內容 XXX MB"  [取消] [確認]
-        # Residual "下載檔案驗證完" text from the background loading screen
-        # still renders at the bottom and would trick is_loading() into
-        # returning True, stalling the pipeline forever. Handle the modal
-        # explicitly first so the confirm click always goes through.
-        update_notice = screen.find_text_one(
-            "通知", region=(0.30, 0.12, 0.70, 0.32), min_conf=0.55
-        )
-        if update_notice:
-            update_body = screen.find_any_text(
-                ["下載必要", "下载必要", "下載遊戲", "下载游戏",
-                 "需要下載", "需要下载", "遊戲所需", "游戏所需",
-                 "更新資源", "更新资源", "下載資源", "下载资源",
-                 "下載內容", "下载内容"],
-                region=(0.25, 0.35, 0.75, 0.65), min_conf=0.45,
-            )
-            if update_body:
-                confirm_btn = screen.find_any_text(
-                    ["確認", "确认", "確定", "确定", "確", "确", "OK"],
-                    region=(0.45, 0.60, 0.75, 0.80),
-                    min_conf=0.40,
-                )
-                if confirm_btn:
-                    print(f"[Interceptor] update/download notice '{update_body.text}', clicking confirm")
-                    return action_click_box(confirm_btn, "interceptor: confirm download notice")
-                # OCR missed the button — use the notification handler's
-                # hardcoded confirm position (right half of the modal).
-                print(f"[Interceptor] update/download notice '{update_body.text}', fallback click")
-                return action_click(0.598, 0.701, "interceptor: confirm download notice (fallback)")
+        # ── P-1: 强更下载确认框 (pure YOLO, 启动期专用, 2026-07-16 重构) ──
+        # patch-day 冷启动在标题屏前后(TOUCH TO START 前后)弹"需要下載遊戲所
+        # 需的檔案 X.XX GB"强更框。旧版 OCR 文字匹配(通知标题+下載 body 词表)
+        # 已删 — 纯 相位+结构 判定:
+        #   ① 启动期: 距 pipeline start() < _STARTUP_UPDATE_WINDOW_S
+        #   ② 标题屏语境: 标题屏/强更框是未训练面, 全帧几乎零 ui cls
+        #      (大厅误判免疫: lobby 常态 10+ 框)
+        #   ③ 结构: 确认键在场, 且全帧无 取消键/弹窗叉叉/灰色确认
+        #      (用户 spec: 强更框只有確認; 可取消的框不是强更 → 不碰)
+        # 窗口外 / 结构不符: 这里一律不动(其余不动) — 只有确认的弹窗归当前
+        # skill 的语境 handler。
+        if (time.time() - getattr(self, "_run_start_ts", 0.0)
+                < _STARTUP_UPDATE_WINDOW_S):
+            _upd_confirm = find_yolo_box(screen, ["确认键"], min_conf=0.30)
+            _upd_blocker = find_yolo_box(
+                screen, ["取消键", "弹窗叉叉", "灰色确认"], min_conf=0.30)
+            if (_upd_confirm is not None and _upd_blocker is None
+                    and len(screen.yolo_boxes or []) <= 4):
+                print("[Interceptor] 启动期 confirm-only 弹窗(强更下载框结构), "
+                      "clicking 确认键")
+                return action_click_box(
+                    _upd_confirm,
+                    "interceptor: confirm force-update download (startup YOLO)")
 
         # ── P-1: Global loading / update / download ──
         # During game startup the screen shows "正在更新", "Now Loading",
@@ -1745,13 +1766,22 @@ class DailyPipeline:
         # OCR often garbles the header ("加班指南任務", "咖班指南任務") so we
         # detect structurally: "第N天" grid + "立即前往" or "全部领取" buttons.
         #
-        # Guard: skip guide mission / check-in if a notification popup (通知) is
-        # in front — the skill's _handle_common_popups will handle it instead.
-        _has_notification_popup = screen.find_text_one(
-            "通知", region=(0.30, 0.10, 0.70, 0.30), min_conf=0.55
-        )
-        if _has_notification_popup:
-            # Let skill popup handler deal with it; don't touch guide panel behind.
+        # Guard: skip guide mission / check-in if a notification modal is in
+        # front — the skill's _handle_common_popups owns it. Pure-cls 判定
+        # (2026-07-16, 旧版 OCR 匹配"通知"标题已删): 居中对话框按钮带出现
+        # 确认键/灰色确认/取消键 = 有 modal 压在最上层。
+        _has_notification_popup = None
+        for _b in (screen.yolo_boxes or []):
+            if (_b.cls_name in ("确认键", "灰色确认", "取消键")
+                    and _b.confidence >= 0.30
+                    and 0.20 <= _b.cx <= 0.80 and 0.45 <= _b.cy <= 0.95):
+                _has_notification_popup = _b
+                break
+        if _has_notification_popup is not None:
+            # Let skill popup handler deal with it; don't touch guide panel
+            # behind. Mirror the no-fire epilogue so streak state stays clean.
+            self._interceptor_streak = 0
+            self._dnsa_toggled = False
             return None
 
         # IMPORTANT: Lobby event widgets (e.g. Serenade Promenade's top-right
@@ -1836,9 +1866,12 @@ class DailyPipeline:
             or (skill.name == "DailyRoutine" and getattr(skill, "sub_state", "") == "Schedule")
         )
         if popup_titles and not _in_schedule:
-            x_btn = screen.find_text_one("X", region=(0.85, 0.05, 0.95, 0.20), min_conf=0.4)
-            if x_btn:
-                print(f"[Interceptor] P1 stale popup '{popup_titles.text}', clicking X")
+            # cls 19「弹窗叉叉」(429f trained) 替代 OCR 单字 "X" 匹配 (2026-07-16)。
+            # 位置闸沿用原 OCR region 语义(弹窗右上角: cx≥0.80, cy≤0.25; 课程表
+            # 系弹窗 X 实测 @~0.888,0.138), 防低置信 FP 点到别处。
+            x_btn = find_yolo_box(screen, ["弹窗叉叉"], min_conf=0.40)
+            if x_btn is not None and x_btn.cx >= 0.80 and x_btn.cy <= 0.25:
+                print(f"[Interceptor] P1 stale popup '{popup_titles.text}', clicking 弹窗叉叉")
                 return action_click_box(x_btn, f"interceptor: close popup X ({popup_titles.text})")
             print(f"[Interceptor] P1 stale popup '{popup_titles.text}', hardcoded X")
             return action_click(0.890, 0.142, f"interceptor: close popup ({popup_titles.text})")
@@ -1937,6 +1970,9 @@ class DailyPipeline:
 
             if popup_text:
                 # ── Universal 通知 confirm dialog handler ──
+                # 2026-07-16 默认安全路径对齐: 确认+取消结构的通知弹窗一律
+                # 取消, 绝不盲确认(旧版点确认 — 与 base._handle_common_popups
+                # 新策略矛盾, 且没有 好友咖啡厅/是否結束 的 must-cancel 保护)。
                 if popup_text.text in ("通知",):
                     cancel_btn = screen.find_any_text(
                         ["取消"],
@@ -1947,8 +1983,8 @@ class DailyPipeline:
                         region=screen.CENTER, min_conf=0.6
                     )
                     if cancel_btn and confirm_btn:
-                        print(f"[Interceptor] P1 通知 confirm dialog (取消+確認), clicking confirm")
-                        return action_click_box(confirm_btn, "interceptor: confirm 通知 dialog")
+                        print(f"[Interceptor] P1 通知 confirm dialog (取消+確認), clicking cancel (default-safe)")
+                        return action_click_box(cancel_btn, "interceptor: cancel 通知 dialog (default-safe)")
                     if cancel_btn or confirm_btn:
                         return None
 
@@ -2467,9 +2503,13 @@ class DailyPipeline:
                 # 压在 topbar 的 AP「+」按钮带上(2026-07-07 假 no-UI 时反复戳开
                 # 購買AP框)。(0.35,0.12) = topbar 下方 / 左侧图标列右侧 / 角色左侧,
                 # 两代 lobby 皮肤实测都是空背景; 真立绘屏(UI 全隐)点哪都安全。
+                # 兼职标题屏点透(2026-07-16, 零 OCR): 开屏 TOUCH TO START 页
+                # 同样是「亮帧+双模型零检出」且全屏任意点即进 — 本 tap 即点透,
+                # 接替拦截器里已改造的 OCR "(?:TOUCH|TAP).*START" 检测。
                 wake = action_click(
                     0.35, 0.12,
-                    f"wake 放置立绘屏 (reveal idle lobby UI, {self._no_ba_ticks}/30)")
+                    f"wake 放置立绘屏/点透标题屏 (zero-det bright, "
+                    f"{self._no_ba_ticks}/30)")
                 self._save_trajectory(screenshot_path, screen, None, wake)
                 self._last_act_ts = time.time()
                 return wake
