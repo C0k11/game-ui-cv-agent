@@ -1691,6 +1691,31 @@ class DailyPipeline:
 
         self._total_ticks += 1
 
+        # ── frame-settle 历史(_dedup_click 稳定门用, 2026-07-17 用户"不要
+        # 强拍"): 每 tick 记录 结构指纹+各cls质心, 连续两帧一致=页面稳定。
+        # 转场动画/列表滚动期间指纹或质心持续变化 → 导航类点击自然等待;
+        # 稳定后首帧立即放行 = 零人为延迟, 纯事件驱动。
+        _sig_now = self._screen_sig(screen)
+        _cent_now = {}
+        for _b in (getattr(screen, "yolo_boxes", None) or []):
+            if _b.confidence >= 0.50 and _b.cls_name in _sig_now:
+                _c = _cent_now.setdefault(_b.cls_name, [0.0, 0.0, 0])
+                _c[0] += _b.cx
+                _c[1] += _b.cy
+                _c[2] += 1
+        _cent_now = {k: (v[0] / v[2], v[1] / v[2])
+                     for k, v in _cent_now.items() if v[2]}
+        _sig_prev = getattr(self, "_settle_sig", None)
+        _cent_prev = getattr(self, "_settle_cent", None)
+        _stable = False
+        if _sig_prev is not None and _sig_now and _sig_now == _sig_prev:
+            _stable = all(
+                abs(_cent_now[k][0] - _cent_prev.get(k, _cent_now[k])[0]) < 0.02
+                and abs(_cent_now[k][1] - _cent_prev.get(k, _cent_now[k])[1]) < 0.02
+                for k in _cent_now)
+        self._settle_sig, self._settle_cent = _sig_now, _cent_now
+        self._frame_stable = _stable
+
         # Hard-example mining 已停用(2026-07-16 审计 A 级): 每 tick 写盘
         # data/hard_examples 累积 7GB/2万文件, dashboard 从未接消费入口 —
         # 同需求由干净帧飞轮 + scripts/mine_hard_examples.py(读 trajectories
@@ -1763,24 +1788,30 @@ class DailyPipeline:
                                       f"shrink = OCR truncation, ignored (no spend)",
                                       flush=True)
                             else:
-                                # ② Same/more digits → confirm on a CLEAN ADB
-                                #    frame (authoritative, 2026-06-10 rule)
-                                #    before aborting.
-                                _py_clean = _read_pyroxene_clean()
-                                if (_py_clean is not None and _py_clean < _prev_py
-                                        and len(str(_py_clean)) == len(str(_prev_py))):
+                                # ② Same/more digits → confirm on TWO independent
+                                #    CLEAN ADB frames that AGREE (2026-07-17: 单次
+                                #    干净帧复读被 7/4 换位误读骗过 12471→12447
+                                #    误急停; 换位型误读每次错法不同, 两次独立读
+                                #    到同一错值概率极低; 真掉钱两读同真值必抓)。
+                                _py_c1 = _read_pyroxene_clean()
+                                time.sleep(0.5)
+                                _py_c2 = _read_pyroxene_clean()
+                                if (_py_c1 is not None and _py_c1 == _py_c2
+                                        and _py_c1 < _prev_py
+                                        and len(str(_py_c1)) == len(str(_prev_py))):
                                     print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → "
-                                          f"{_py_clean} (clean-frame confirmed) — MONEY "
+                                          f"{_py_c1} (2x clean-frame confirmed) — MONEY "
                                           f"BREACH, ABORTING PIPELINE", flush=True)
                                     self._running = False
                                     return action_done("⛔ pyroxene drop detected — aborted")
-                                elif _py_clean is not None and _py_clean >= _prev_py:
+                                elif (_py_c1 is not None and _py_c2 is not None
+                                        and max(_py_c1, _py_c2) >= _prev_py):
                                     # clean frame shows balance intact → glitch
-                                    _RESOURCES["pyroxene"] = _py_clean
+                                    _RESOURCES["pyroxene"] = max(_py_c1, _py_c2)
                                 else:
                                     print(f"[Pipeline] pyroxene {_prev_py}→{_py}: clean "
-                                          f"re-read={_py_clean} unconfirmed, ignoring",
-                                          flush=True)
+                                          f"re-reads={_py_c1}/{_py_c2} disagree or "
+                                          f"unconfirmed, ignoring", flush=True)
                         else:
                             self._py_drop_pending = None
                             _RESOURCES["pyroxene"] = _py
