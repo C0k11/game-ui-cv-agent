@@ -1642,6 +1642,20 @@ class DailyPipeline:
             self._click_hold = 0
             return action
 
+        # ── frame-settle gate(2026-07-17 用户"不要强拍"): 导航/进入类点击
+        # 只在稳定帧放行 — 连续两帧结构指纹+质心一致(_tick_with_screen 每
+        # tick 记录)。转场动画/列表滚动中指纹或质心持续变化 → 自然等待;
+        # 稳定后首帧立即放行 = 零固定延迟。弹窗 dismiss/领取类在上方豁免
+        # 通道已 return(点弹窗强拍无害)。>4s 未稳定放行一次(背景动画让
+        # 某 cls 持续抖动时的死锁保险)。
+        if not getattr(self, "_frame_stable", True):
+            if not getattr(self, "_settle_block_t0", 0.0):
+                self._settle_block_t0 = time.time()
+            if time.time() - self._settle_block_t0 < 4.0:
+                return action_wait(150, f"帧未稳定(转场/滚动) — 等稳定帧: {reason}")
+            print(f"[Pipeline] settle-gate 4s 超时放行: {reason}", flush=True)
+        self._settle_block_t0 = 0.0
+
         same_target = False
         if target and last_target:
             try:
