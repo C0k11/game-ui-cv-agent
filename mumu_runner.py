@@ -1,5 +1,9 @@
 """MuMu Runner: High-FPS capture → YOLO+OCR → Pipeline → ADB click.
 
+⚠ standalone runner 已被 server/app.py 取代 — skill 行为不完整(无 swipe_tap/
+scroll), 日常请用 `py -m uvicorn server.app:app`; 本文件的 AdbInput 是全项目
+核心, 继续被 server 侧引用, 保留.
+
 Standalone runner that captures from the MuMu emulator window,
 runs the DailyPipeline skill loop, displays YOLO bounding box overlay,
 and sends click/swipe/back actions via ADB.
@@ -475,6 +479,8 @@ def execute_action(
 # ── Main Loop ───────────────────────────────────────────────────────────
 
 def main() -> None:
+    print("⚠ standalone runner 已被 server/app.py 取代, skill 行为不完整(无 swipe_tap/scroll), "
+          "建议 py -m uvicorn server.app:app")
     parser = argparse.ArgumentParser(description="MuMu Runner: BA automation via emulator")
     parser.add_argument("--title", default="MuMu", help="Window title substring (default: MuMu)")
     parser.add_argument("--adb-host", default="127.0.0.1")

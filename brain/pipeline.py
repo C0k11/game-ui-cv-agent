@@ -7,7 +7,7 @@ Usage:
     from brain.pipeline import DailyPipeline
     pipe = DailyPipeline()
     pipe.start()
-    # Each tick: pipe.tick(screenshot_path) -> action dict
+    # Each tick: pipe.tick_from_frame(frame_bgr) -> action dict
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from brain.skills.base import (
     BaseSkill, OcrBox, YoloBox, ScreenState,
@@ -196,8 +196,7 @@ def _resolve_path(model_key: str, fallback: Path) -> Path:
 
 _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
 _YOLO_EMOTICON_V26 = Path(r"D:\Project\ml_cache\models\yolo\runs\emoticon_yolo26n\weights\best.pt")
-_YOLO_EMOTICON_V8_LEGACY = Path(r"D:\Project\ml_cache\models\yolo\emoticon.pt")
-_YOLO_EMOTICON = _YOLO_EMOTICON_V26 if _YOLO_EMOTICON_V26.exists() else _YOLO_EMOTICON_V8_LEGACY
+_YOLO_EMOTICON = _YOLO_EMOTICON_V26
 
 # ── Fused avatar v4 (251-class student head detector) ──
 # Manual mAP50 = 0.9657 on hand-curated 29-frame val (vs v3 baseline 0.683).
@@ -214,35 +213,6 @@ _YOLO_FUSED_AVATAR_V4 = _resolve_path("fused_avatar", Path(
 _YOLO_UI_V1 = _resolve_path("ui", Path(
     r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v1\weights\best.pt"
 ))
-
-# ── Unified v6b (nc=455: UI + 头像 + emoticon 三域合一) ──────────────────
-# 上线策略 = 各域最强。registry unified.active 非 PENDING 且文件存在时, "ui" tag
-# 改用 v6b: 一张 455 类网的 UI-域输出替代独立 ui 模型 (v6b UI mAP50 0.892 > v5)。
-# 但 v6b 的头像域 (idx143-394) + emoticon (idx451) 输出会被 _run_yolo_on_image
-# 丢弃 —— 那两域仍由 fused_avatar v4 (0.966) / emoticon v26n (0.995) 各自专用
-# 模型提供, 它们 in-domain 远胜 v6b。active=PENDING 或文件缺失 → 回落独立 ui
-# 模型 (v5), 零影响 (秒级可回滚: 改 registry active 回 PENDING 即可)。
-def _resolve_unified() -> Optional[Path]:
-    reg = _load_model_registry()
-    section = reg.get("unified")
-    if not section:
-        return None
-    active = section.get("active", "")
-    if not active or "PENDING" in str(active):
-        return None
-    info = section.get("versions", {}).get(active, {})
-    p = info.get("path")
-    if p and Path(p).is_file():
-        return Path(p)
-    return None
-
-_YOLO_UNIFIED = _resolve_unified()            # Path 或 None
-_UI_IS_UNIFIED = _YOLO_UNIFIED is not None
-# v6b 头像域 idx 区间 + emoticon idx (实测 verify_v6b_classnames 2026-06-05:
-# idx143=佳澄 .. idx394=柚子战斗 为头像; idx451=Emoticon_Action; 与 acceptance
-# domain() 同定义)。ui tag 用 unified 时, 落在这两域的 box 丢弃。
-_UNIFIED_AVATAR_LO, _UNIFIED_AVATAR_HI = 143, 394
-_UNIFIED_EMOTICON_IDX = 451
 
 # Context-aware YOLO: controls which models run each tick.
 # Value semantics:
@@ -438,10 +408,8 @@ def _read_pyroxene_clean():
 
 # Per-skill YOLO detector loadout (module-level = single source of truth).
 # base = "ui" ONLY (FPS: avatar=fused yolo26X / battle are heavy nets, added
-# only where a skill needs them). _start_skill sets context from this at skill
-# start; CampaignSweep imports it (lazily, to avoid an import cycle) to set the
-# right context for each DELEGATED sub-skill — without this, arena run via the
-# sweep gets no avatar boxes and selects 0 opponents (H2).
+# only where a skill needs them). _start_skill sets context from this at
+# skill start.
 BASE_DETECTORS = "ui"
 SKILL_YOLO_MAP = {
     # Cafe needs avatar too: the invite list identifies each row's student via
@@ -525,26 +493,18 @@ def _get_yolo():
             print(f"[Pipeline] battle registry resolve failed({_e}), legacy")
         if _battle_path.is_file():
             candidates.append((_battle_path, 0.45, "battle"))
-        if _YOLO_EMOTICON.is_file():
-            # 0.50 (was 0.15→0.30 same day): live 2026-06-09 credit-card icons
-            # kept firing as Emoticon_Action (0.36-0.75) even after the domain-
-            # authority dedup (when ui misses the icon there's nothing to win
-            # against it). Business gate is 0.55 (cafe.py _EMOTICON_CONF) and
-            # real v26n bubbles score 0.9+, so 0.50 costs nothing and kills the
-            # remaining mid-conf FPs. Root fix = retrain v26n with icon negatives.
-            candidates.append((_YOLO_EMOTICON, 0.50, "cafe"))
+        # standalone emoticon (tag "cafe") 不在这里 append — fold-in 判定提前
+        # (2026-07-17): ui v6+ 自带 Emoticon_Action, 仅当 ui 类表缺该类时才在
+        # 加载环节末尾补载 v26n(见 load loop 之后), 省一次白加载即丢的模型。
         # Fused avatar (251 BA student heads).  conf 0.35 = balanced
         # precision/recall on manual val.  Tagged "avatar" — opt-in per skill.
         if _YOLO_FUSED_AVATAR_V4.is_file():
             candidates.append((_YOLO_FUSED_AVATAR_V4, 0.35, "avatar"))
-        # UI v1 (~145 static UI classes — buttons, dots, banners, etc).
-        # conf 0.30 = lower threshold since UI bbox quality is high but some
-        # minority classes need slack.  Tagged "ui" — most skills will need this.
-        # "ui" tag detector: unified v6b when live (UI-域输出 only — 见
-        # _resolve_unified / 域过滤 in _run_yolo_on_image), else standalone ui
-        # model (v5). 同 tag="ui", 下游 context/skill 零改 (都按 cls_name 匹配,
-        # 实测 v6b UI 域类名 ⊇ v5)。
-        _ui_path = _YOLO_UNIFIED if _UI_IS_UNIFIED else _YOLO_UI_V1
+        # UI (registry active — buttons, dots, banners, etc).  Tagged "ui" —
+        # most skills need this. (unified v6b 接线已拆除 2026-07-17: registry
+        # unified.active 恒 PENDING 从未通电, v6b nc=455 缺后续金钱防线类,
+        # 见 registry unified._deprecated 注。)
+        _ui_path = _YOLO_UI_V1
         if _ui_path is not None and _ui_path.is_file():
             # 0.20 — within the dashboard's own prefill range (server/app.py:
             # single-frame suggest 0.15, batch prefill 0.25), the settings the
@@ -553,9 +513,6 @@ def _get_yolo():
             # unaffected. Skills still gate money paths structurally (2-button
             # confirm + 免费/币种 checks), so a lower floor doesn't risk spend.
             candidates.append((_ui_path, 0.20, "ui"))
-            if _UI_IS_UNIFIED:
-                print(f"[Pipeline] ui tag → unified {_ui_path.name} "
-                      "(头像/emoticon 域过滤; 各域最强 fused v4 / v26n 仍独立加载)")
         if not candidates:
             _yolo_status = "model_not_found"
             print(f"[Pipeline] YOLO model NOT found")
@@ -565,61 +522,52 @@ def _get_yolo():
         loaded_names = []
         global _UI_LOAD_FAILED
         _UI_LOAD_FAILED = False
-        for model_path, model_conf, model_tag in candidates:
-            # ui 模型是导航的眼睛 — 加载失败(fresh-server CUDA dtype 瞬态, 2026-07-07
-            # 实锤 "float != c10::Half")就重试一次; 仍失败则打 _UI_LOAD_FAILED 旗标,
-            # tick 循环见旗标立刻 abort(绝不带着假 no-UI 去 wake-tap/blind-tap —
-            # 那次假 no-UI 让 wake-tap 反复戳开「購買AP」框, 差点碰钱)。
-            # 2026-07-07 实锤: dtype 病是随机咬(ui 加了重试后 fused_avatar 中招
-            # "float != c10::Half") → 重试扩到全模型。
-            _tries = 2
-            _ok = False
-            for _t in range(_tries):
+
+        def _load_model(model_path, model_conf, model_tag) -> bool:
+            # 加载失败(fresh-server CUDA dtype 瞬态, 2026-07-07 实锤
+            # "float != c10::Half")重试一次 — dtype 病随机咬任意模型。
+            for _t in range(2):
                 try:
                     m = YOLO(str(model_path))
                     m(np.zeros((64, 64, 3), dtype=np.uint8), verbose=False)
                     _yolo_models.append((m, model_conf, model_tag))
                     loaded_names.append(f"{model_path.stem}({len(m.names)}cls)")
                     print(f"[Pipeline] YOLO loaded from {model_path} (conf={model_conf}, tag={model_tag})")
-                    _ok = True
-                    break
+                    return True
                 except Exception as e:
-                    print(f"[Pipeline] YOLO load failed for {model_path} (try {_t+1}/{_tries}): {e}")
-            if not _ok and model_tag == "ui":
+                    print(f"[Pipeline] YOLO load failed for {model_path} (try {_t+1}/2): {e}")
+            return False
+
+        for model_path, model_conf, model_tag in candidates:
+            # ui 模型是导航的眼睛 — 加载失败(重试后仍败)打 _UI_LOAD_FAILED 旗标,
+            # tick 循环见旗标立刻 abort(绝不带着假 no-UI 去 wake-tap/blind-tap —
+            # 那次假 no-UI 让 wake-tap 反复戳开「購買AP」框, 差点碰钱)。
+            if not _load_model(model_path, model_conf, model_tag) and model_tag == "ui":
                 _UI_LOAD_FAILED = True
                 print("[Pipeline] ⛔ ui model FAILED to load after retry — pipeline will "
                       "abort immediately (fail-closed: no taps without UI eyes)")
-        # ── emoticon fold-in (ui v6+) ──────────────────────────────────────
-        # Once the active ui model carries the Emoticon_Action class, its single
-        # cafe-bubble class is served by the ui forward pass — so drop the
-        # standalone emoticon model and save one YOLO inference per cafe tick.
-        # Pre-v6 (ui lacks the class) the standalone model stays loaded so cafe
-        # headpat keeps working through the migration. Auto-switches at the next
-        # registry bump (active→v6) with no code change at cutover. cafe.py +
-        # the headpat filter below already match by cls_name ("emoticon"), so
-        # they pick the box up from whichever model carries it.
-        # ⚠️ unified(v6b) 模式下 ui 模型虽含 Emoticon_Action(idx451), 但其 emoticon
-        # 输出被域过滤丢弃 (emoticon 走 v26n 专用 0.995 >> v6b 0.764) → 绝不能
-        # fold-in 掉 v26n。仅独立 ui 模型 (非 unified) 自带 emoticon 类时才折叠。
-        # ⚠️ (2026-06-08) ui v7 实测: emoticon recall 0.71 << 独立 v26n 0.995 →
-        # 折叠会让 cafe headpat 退步~29%(省一次推理 vs 摸头质量, 不值得)。
-        # (2026-06-11 用户决策) 翻开: ui 接管摸头, v26n 退役出 live 管线, 只留
-        # dashboard 预标注 teacher (server prefill 走 registry, 不受此开关影响)。
-        # 已知代价: v8 的 451 仍弱 (val PHANTOM 71 条) — v9 专录 cafe 高帧 + 补标
-        # 451 后补齐; 在那之前漏摸头少摸几下, 用户接受。
+        # ── emoticon fold-in (ui v6+, 判定提前 2026-07-17) ────────────────
+        # ui 类表含 Emoticon_Action → 摸头泡泡由 ui forward pass 提供,
+        # standalone v26n 不再加载(旧代码先完整加载再 fold-in 丢弃 = 每次
+        # 启动白加载一个模型)。ui 缺该类(pre-v6)才补载 v26n 保 cafe headpat。
+        # cafe.py + 摸头过滤按 cls_name 匹配, box 来自哪个模型无感。
+        # (2026-06-11 用户决策) ui 接管摸头, v26n 退役出 live 管线, 只留
+        # dashboard 预标注 teacher (server prefill 走 registry, 不受影响)。
         _FOLD_IN_EMOTICON = True
-        ui_has_emoticon = _FOLD_IN_EMOTICON and (not _UI_IS_UNIFIED) and any(
+        ui_has_emoticon = _FOLD_IN_EMOTICON and any(
             "emoticon" in str(n).lower()
             for m, _c, t in _yolo_models if t == "ui"
             for n in m.names.values()
         )
         if ui_has_emoticon:
-            kept = [(m, c, t) for (m, c, t) in _yolo_models if t != "cafe"]
-            if len(kept) != len(_yolo_models):
-                print("[Pipeline] ui model carries Emoticon_Action → dropped "
-                      "standalone emoticon model (one fewer inference per cafe tick)")
-                loaded_names = [n for n in loaded_names if "emoticon" not in n.lower()]
-            _yolo_models = kept
+            print("[Pipeline] ui model carries Emoticon_Action → standalone "
+                  "emoticon model not loaded (one fewer inference per cafe tick)")
+        elif _YOLO_EMOTICON.is_file():
+            # 0.50 conf (was 0.15→0.30 same day): live 2026-06-09 credit-card
+            # icons kept firing as Emoticon_Action (0.36-0.75). Business gate is
+            # 0.55 (cafe.py _EMOTICON_CONF), real v26n bubbles score 0.9+, so
+            # 0.50 costs nothing and kills the remaining mid-conf FPs.
+            _load_model(_YOLO_EMOTICON, 0.50, "cafe")
         if _yolo_models:
             _yolo_status = f"loaded_ok: {', '.join(loaded_names)}"
             return _yolo_models[0][0]
@@ -922,13 +870,6 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                 for box in r.boxes:
                     bx1, by1, bx2, by2 = box.xyxy[0].tolist()
                     cls_id = int(box.cls[0])
-                    # Unified(v6b) as "ui": 只留 UI-域。头像 (143-394) + emoticon
-                    # (451) 交给 fused v4 / v26n 专用模型 (各域最强), 丢弃 v6b 在
-                    # 那两域的 box (否则与专用模型重复检测 + 拉低质量)。
-                    if (model_tag == "ui" and _UI_IS_UNIFIED
-                            and (_UNIFIED_AVATAR_LO <= cls_id <= _UNIFIED_AVATAR_HI
-                                 or cls_id == _UNIFIED_EMOTICON_IDX)):
-                        continue
                     cls_name = yolo.names.get(cls_id, str(cls_id))
                     cls_low = str(cls_name).lower()
                     # ui carries a folded Emoticon_Action (cls451). When the
@@ -1079,71 +1020,6 @@ def find_all_yolo_boxes(screen: ScreenState, class_names: List[str],
     return sorted(hits, key=lambda x: -x.confidence)
 
 
-def _find_florence_hit(screen: ScreenState, queries: List[str], *, region: Optional[Tuple[float, float, float, float]] = None) -> Optional[OcrBox]:
-    if not screen.screenshot_path:
-        return None
-    try:
-        import cv2
-        import numpy as np
-        from vision.florence_vision import get_florence_vision
-
-        img = cv2.imdecode(np.fromfile(screen.screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            return None
-        h, w = img.shape[:2]
-        rx1, ry1, rx2, ry2 = region or (0.0, 0.0, 1.0, 1.0)
-        x1 = max(0, int(rx1 * w))
-        y1 = max(0, int(ry1 * h))
-        x2 = min(w, int(rx2 * w))
-        y2 = min(h, int(ry2 * h))
-        if x2 <= x1 or y2 <= y1:
-            return None
-        crop = img[y1:y2, x1:x2]
-        hits = get_florence_vision().detect_open_vocabulary(crop, queries)
-        boxes: List[OcrBox] = []
-        for hit in hits:
-            bbox = hit.get("bbox")
-            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-                continue
-            bx1, by1, bx2, by2 = [float(v) for v in bbox]
-            nx1 = min(max((x1 + bx1) / w, 0.0), 1.0)
-            ny1 = min(max((y1 + by1) / h, 0.0), 1.0)
-            nx2 = min(max((x1 + bx2) / w, 0.0), 1.0)
-            ny2 = min(max((y1 + by2) / h, 0.0), 1.0)
-            if nx2 <= nx1 or ny2 <= ny1:
-                continue
-            boxes.append(OcrBox(text=str(hit.get("query") or hit.get("label") or queries[0]), confidence=float(hit.get("score") or 0.5), x1=nx1, y1=ny1, x2=nx2, y2=ny2))
-        if not boxes:
-            return None
-        screen.add_florence_boxes(boxes)
-        return max(boxes, key=lambda b: (b.confidence, b.w * b.h))
-    except Exception:
-        return None
-
-
-def _run_template_matching(frame_bgr) -> List:
-    """Run headpat bubble detection via happy_face templates. Returns list of TemplateHitBox."""
-    from brain.skills.base import TemplateHitBox
-    hits = []
-    try:
-        from vision.template_matcher import find_headpat_bubbles
-        # Restrict to cafe play area (exclude UI bars + left sidebar icons)
-        raw = find_headpat_bubbles(frame_bgr, threshold=0.75,
-                                   region=(0.12, 0.25, 0.98, 0.80))
-        for h in raw:
-            hits.append(TemplateHitBox(
-                label=h.label,
-                confidence=h.confidence,
-                x1=h.x1, y1=h.y1,
-                x2=h.x2, y2=h.y2,
-            ))
-    except Exception as e:
-        if not getattr(_run_template_matching, '_warned', False):
-            print(f"[Pipeline] Template matching error: {e}")
-            _run_template_matching._warned = True
-    return hits
-
-
 def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
                            skip_ocr: bool = False,
                            prev_ocr_boxes=None,
@@ -1178,39 +1054,13 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
         ocr_boxes = prev_ocr_boxes if prev_ocr_boxes is not None else []
     else:
         ocr_boxes = _run_ocr_on_image(frame_bgr, w, h)
-    template_hits = _run_template_matching(frame_bgr)
     return ScreenState(
         ocr_boxes=ocr_boxes,
         yolo_boxes=yolo_boxes,
-        template_hits=template_hits,
         image_w=w,
         image_h=h,
         screenshot_path=screenshot_path,
         frame=frame_bgr,   # kept for on-demand digit-OCR cropping
-    )
-
-
-def read_screen(screenshot_path: str) -> ScreenState:
-    """Run OCR on a screenshot and return a ScreenState.
-
-    This is the core perception function. It reads the screen using
-    RapidOCR and returns structured data about what text is visible.
-    All coordinates are normalized 0-1 for portability.
-    """
-    import cv2
-    import numpy as np
-
-    img = cv2.imdecode(np.fromfile(screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        return ScreenState(screenshot_path=screenshot_path)
-
-    h, w = img.shape[:2]
-    return ScreenState(
-        ocr_boxes=_run_ocr_on_image(img, w, h),
-        yolo_boxes=_run_yolo_on_image(img, w, h),
-        image_w=w,
-        image_h=h,
-        screenshot_path=screenshot_path,
     )
 
 
@@ -1237,44 +1087,20 @@ class DailyPipeline:
     6. If skill times out, retry or skip
     """
 
-    # Default skill sequence. Battle skills (bounty / jfd / arena) run first as
-    # explicit top-level entries; daily_routine bundles the dot-gated harvest
-    # sub-flows. (Old event-farming / campaign_sweep removed 2026-06-02 —
-    # probe-driven rewrite; events不测,刷体力未就绪。)
+    # Fallback skill sequence for direct DailyPipeline() use (no server).
+    # ⭐canonical 在 server/app.py _DEFAULT_SKILL_ORDER(2026-07-11 用户定死,
+    # 那边是唯一权威, 改序改那边) — 此处仅同步拷贝: 收菜攒AP → 纯票扫荡 →
+    # 学园交流会(吃AP) → 活动(剩余AP全灌) → 战术大赛 → 邮件 → 每日领奖 →
+    # 活动再跑一轮(消化 mail/任务回灌的新AP, AP<20 自动秒过)。
     DEFAULT_SKILLS = [
-        # Full daily (user canonical order 2026-06-11):
-        # ① lobby harvest, ending on cafe (its earnings GRANT AP → segue to
-        #   the hall block that spends it)
-        "daily_routine",    # 购买青辉石→社团→制造→商店→课程表→咖啡厅
-        # ② task-hall block — free-ticket activities first (no AP: bounty
-        #   never costs AP; JFD free with monthly pass, and ordered before the
-        #   AP eater regardless, for the no-pass case), then batch sweep eats
-        #   ALL remaining AP, arena (no AP) last.
-        "bounty",           # 悬赏通缉 (tickets only, never AP)
-        "jfd",              # 学院交流会 (tickets; free w/ 月卡)
-        # AP-eater = special_sweep (智能AP分配, 用户 2026-06-16 定: 替 batch_sweep 当
-        # 默认)。扫 hub 的 452 bonus badge → 特殊任务/信用货币回收/双倍三倍板块 → 纯AP扫
-        # (实测 +7.7M 信用点零青辉石)。batch_sweep(笨扫保存的普通关预设)保留为前端
-        # 可选项(_SKILL_OPTIONS), 用户想指定刷普通关时手选; 不选则默认走动态规划。
-        # ⭐活动优先 (用户 AP 铁律 2026-07-08: 活动 > 双倍三倍 > 正常关):
-        # event_quest = 活动规划器 (Bonus解锁→活動點數→货币扫荡→领奖)。无活动时
-        # enter 阶段 hub 无 405 banner → done, AP 原样留给 special/batch。
-        "event_quest",      # 活动 AP 规划器 (405 banner 有活动才跑)
-        "special_sweep",    # 智能AP分配 — 优先扫 bonus board(特殊任务/双倍三倍)
-        # no-bonus 兜底(审计 #5, 2026-06-17): special_sweep._board 在 452 不落在特殊
-        # 任务时直接 done(不扫), 当天 AP 就没人花。故跟一个 batch_sweep 兜底扫普通关
-        # 吃剩余 AP。special 扫光时 batch_sweep 自身 AP 门会跳过(AP 已低)→ 不双花。
-        "batch_sweep",      # no-bonus/剩余AP 兜底(扫保存的普通关预设, AP门自跳过)
-        "arena",            # 战术大赛 (no AP)
-        # ③ claims: hall rewards funnel into the mailbox → claim → daily
-        #   rewards (n/8 ≥ 7 gate).
+        "daily_routine",
+        "bounty",
+        "jfd",
+        "event_quest",
+        "arena",
         "mail",
         "daily_mission",
-        # ④ AP dynamic re-sweep (回马枪): mail/daily rewards GRANT fresh AP →
-        #   special_sweep 再吃一趟 + batch_sweep 兜底。体力动态规划 v1。
-        #   (special_sweep/batch_sweep 均在 server _ALLOW_DUPLICATES 才能出现两次。)
-        "special_sweep",
-        "batch_sweep",
+        "event_quest",
     ]
 
     TRAJECTORIES_DIR = Path(__file__).resolve().parents[1] / "data" / "trajectories"
@@ -1541,8 +1367,7 @@ class DailyPipeline:
         # from the base and only added back where a skill genuinely needs to
         # know WHICH student (none in the current run path). Add 'avatar' to a
         # skill's context here if/when student-id is required.
-        # Loadout map lives at module level (SKILL_YOLO_MAP) so CampaignSweep
-        # can reuse it for its delegated sub-skills. See note there.
+        # Loadout map lives at module level (SKILL_YOLO_MAP).
         yolo_ctx = SKILL_YOLO_MAP.get(skill.name, BASE_DETECTORS)
         set_yolo_context(yolo_ctx)
         print(f"[Pipeline] Starting skill '{skill.name}'")
@@ -1643,19 +1468,21 @@ class DailyPipeline:
     def _global_interceptor(self, screen: ScreenState, skill: BaseSkill) -> Optional[Dict[str, Any]]:
         """Global interceptor — runs BEFORE every skill tick.
 
-        Handles "rude" popups that can appear at any time regardless of skill:
-        P0: Disconnect / reconnect / download data
-        P1: Stale sign-in / activity popups that leaked through
-        P2: Account / student Level Up full-screen effects
+        Handles "rude" popups that can appear at any time regardless of
+        skill — pure cls: 获得奖励 / 羁绊·地区升级 / 启动期强更下载确认 /
+        加载中等待。其余弹窗归 skill 语境 + base._handle_common_popups。
         """
         # ════════════════════════════════════════════════════════════════
-        # PURE-YOLO prelude (2026-05-29). Handle the safe, unambiguous
-        # global popups via YOLO cls. EVERYTHING below this block is OCR and
-        # therefore DEAD while pipeline._OCR_ENABLED is False — kept for the
-        # digit-OCR re-enable phase. Only cls-backed popups are auto-handled
-        # here; ambiguous confirm/cancel dialogs are left to the owning skill
-        # (it knows the context) so we don't blind-confirm a 'visit friend
-        # cafe' / 'exit game' prompt.
+        # PURE-YOLO interceptor (2026-05-29; 2026-07-17 死 OCR 段整删).
+        # Only cls-backed popups are auto-handled here; ambiguous
+        # confirm/cancel dialogs are left to the owning skill /
+        # base._handle_common_popups (they know the context) so we don't
+        # blind-confirm a 'visit friend cafe' / 'exit game' prompt.
+        # 旧 OCR 分支段(P0 断线/退出框, P0.5 签到/选项/公告/指南任务,
+        # P1 通知/promo/课程表弹窗X, P2 level-up/TAP TO CONTINUE/獲得獎勵
+        # /羈絆)已整段删除(2026-07-17) — _OCR_ENABLED=False 恒假 →
+        # ocr_boxes 恒空 → find_any_text 恒 None, 全部 dead code;
+        # 活的同功能保护在 base._handle_common_popups cls 段。
         # ════════════════════════════════════════════════════════════════
         # Reward-result popup (获得奖励) — dismiss via 确认键, else tap.
         reward_y = find_yolo_box(screen, ["获得奖励"], min_conf=0.35)
@@ -1671,35 +1498,6 @@ class DailyPipeline:
         if levelup_y:
             print(f"[Interceptor] YOLO level-up ({levelup_y.cls_name}) → tap dismiss")
             return action_click(0.5, 0.5, "interceptor: dismiss level-up (YOLO)")
-
-        # ── P-1: Title screen ("TOUCH TO START") — 零 OCR 版 (2026-07-16) ──
-        # 标题页是纯艺术全屏页, 476 ui cls + battle cls 一个都不在 →
-        # 「零检出」就是它的 cls 签名(absence-based)。三重闸防误触:
-        #   ①连续 ≥3 零检出帧(转场艺术帧只持续 1-2 tick; 5s 断档重计)
-        #   ②帧均亮度 >60(标题天空亮; 加载黑场过不了)
-        #   ③6s 点击限流(误判页最多被戳一下)
-        # 生产态(_OCR_ENABLED=False)零检出帧多在 has_ba_ui 闸短路进
-        # no-BA 分支(wake-tap 顺带点透标题屏), 此块是兜底补位。
-        if not screen.yolo_boxes:
-            _now_t = time.time()
-            if _now_t - getattr(self, "_zero_det_last_ts", 0.0) > 5.0:
-                self._zero_det_streak = 0
-            self._zero_det_last_ts = _now_t
-            self._zero_det_streak = getattr(self, "_zero_det_streak", 0) + 1
-            _title_bright = False
-            try:
-                _title_bright = (screen.frame is not None
-                                 and float(screen.frame.mean()) > 60.0)
-            except Exception:
-                pass
-            if (_title_bright and self._zero_det_streak >= 3
-                    and _now_t - getattr(self, "_title_tap_ts", 0.0) > 6.0):
-                print(f"[Interceptor] zero-det bright frame "
-                      f"x{self._zero_det_streak} → title screen, tap to start")
-                self._title_tap_ts = _now_t
-                return action_click(0.5, 0.85, "interceptor: tap to start")
-        else:
-            self._zero_det_streak = 0
 
         # ── P-1: 强更下载确认框 (pure YOLO, 启动期专用, 2026-07-16 重构) ──
         # patch-day 冷启动在标题屏前后(TOUCH TO START 前后)弹"需要下載遊戲所
@@ -1741,398 +1539,10 @@ class DailyPipeline:
             self._last_loading_ts = time.time()
             return action_wait(1500, "interceptor: game loading / updating")
 
-        # ── P0: Disconnect / reconnect ──
-        disconnect = screen.find_any_text(
-            ["网络连接失败", "網絡連接失敗", "返回标题画面", "返回標題畫面",
-             "下载数据", "下載數據", "网络错误", "網絡錯誤",
-             "連線中斷", "连线中断", "重新連接", "重新连接"],
-            min_conf=0.6
-        )
-        if disconnect:
-            confirm = screen.find_any_text(
-                ["確認", "确认", "確", "确", "OK", "重試", "重试", "Retry"],
-                min_conf=0.6
-            )
-            if confirm:
-                print(f"[Interceptor] P0 disconnect: '{disconnect.text}', clicking confirm")
-                self._interceptor_streak += 1
-                # If we've been hitting disconnect for 10+ ticks, something is very wrong
-                if self._interceptor_streak > 10:
-                    print("[Interceptor] P0 disconnect persists >10 ticks, resetting to lobby")
-                    self._current_idx = 0
-                    self._start_current_skill()
-                    self._interceptor_streak = 0
-                return action_click_box(confirm, f"interceptor: confirm disconnect ({disconnect.text})")
-            return action_click(0.5, 0.7, f"interceptor: dismiss disconnect ({disconnect.text})")
-
-        # ── P0: Exit dialog ("是否結束？") — triggered by accidental ESC on lobby ──
-        exit_dialog = screen.find_any_text(
-            ["是否結束", "是否结束"],
-            region=screen.CENTER, min_conf=0.6
-        )
-        if exit_dialog:
-            cancel = screen.find_any_text(
-                ["取消"],
-                region=screen.CENTER, min_conf=0.6
-            )
-            if cancel:
-                print(f"[Interceptor] P0 exit dialog detected, clicking 取消")
-                return action_click_box(cancel, "interceptor: cancel exit dialog")
-            # Fallback: press ESC to dismiss (ESC = cancel in this dialog)
-            return action_back("interceptor: dismiss exit dialog")
-
-        # ── P0.5: Settings popup (選項) ──
-        # Accidentally opened settings. Has X at top-right. Detect "選項"/"选项" header.
-        # Must check BEFORE check-in calendar (彩奈 appears in Mail "From彩奈" too).
-        settings_popup = screen.find_any_text(
-            ["選項", "选项"],
-            region=(0.30, 0.05, 0.70, 0.18), min_conf=0.6
-        )
-        if settings_popup:
-            print(f"[Interceptor] P0.5 Settings popup: '{settings_popup.text}', clicking X")
-            self._interceptor_streak += 1
-            return action_click(0.83, 0.09, f"interceptor: close settings popup")
-
-        # ── P0.5: Updates / Patch Notes WebView ──
-        updates = screen.find_any_text(
-            ["Updates", "Patch Notes"],
-            region=(0.30, 0.04, 0.70, 0.14), min_conf=0.5
-        )
-        if updates:
-            print(f"[Interceptor] P0.5 Updates WebView: '{updates.text}', BACK to close")
-            self._interceptor_streak += 1
-            return action_back(f"interceptor: close Updates WebView ({updates.text})")
-
-        # ── P0.5: Daily check-in calendar (彩奈签到簿) ──
-        # Full-screen popup with NO close button. Just click anywhere to dismiss.
-        # IMPORTANT: "彩奈" restricted to TITLE area (top-center) to avoid matching
-        # Mail "From彩奈" text. Use "簽到/到薄/到簿" or "第N天" grid as primary.
-        #
-        # CAVEAT: "新上任指南任務" (guide mission panel) also has "第N天" grids
-        # but is NOT a check-in calendar — center-click doesn't dismiss it.
-        # OCR often garbles the header ("加班指南任務", "咖班指南任務") so we
-        # detect structurally: "第N天" grid + "立即前往" or "全部领取" buttons.
-        #
-        # Guard: skip guide mission / check-in if a notification modal is in
-        # front — the skill's _handle_common_popups owns it. Pure-cls 判定
-        # (2026-07-16, 旧版 OCR 匹配"通知"标题已删): 居中对话框按钮带出现
-        # 确认键/灰色确认/取消键 = 有 modal 压在最上层。
-        _has_notification_popup = None
-        for _b in (screen.yolo_boxes or []):
-            if (_b.cls_name in ("确认键", "灰色确认", "取消键")
-                    and _b.confidence >= 0.30
-                    and 0.20 <= _b.cx <= 0.80 and 0.45 <= _b.cy <= 0.95):
-                _has_notification_popup = _b
-                break
-        if _has_notification_popup is not None:
-            # Let skill popup handler deal with it; don't touch guide panel
-            # behind. Mirror the no-fire epilogue so streak state stays clean.
-            self._interceptor_streak = 0
-            self._dnsa_toggled = False
-            return None
-
-        # IMPORTANT: Lobby event widgets (e.g. Serenade Promenade's top-right
-        # cycler) stamp "指南任務" on the character portrait at x≈0.90, y≈0.31.
-        # A region-less match fired the interceptor on a pristine lobby,
-        # causing it to click (0.98, 0.03) — which is the event widget's
-        # fullscreen-expand button, NOT the tutorial panel's home icon. That
-        # opened a fullscreen event splash and trapped the event-entry flow.
-        # Constrain the header text search to the top-center band where the
-        # actual tutorial panel's title lives.
-        guide_mission = screen.find_any_text(
-            ["指南任務", "指南任务", "新上任指南"],
-            region=(0.20, 0.00, 0.80, 0.22),
-            min_conf=0.5
-        )
-        if not guide_mission:
-            # Structural fallback: "立即前往" + "第1天" together = guide mission
-            has_goto = screen.find_any_text(
-                ["立即前往"],
-                region=(0.30, 0.60, 0.95, 0.80), min_conf=0.7
-            )
-            has_day_grid = screen.find_any_text(
-                ["第1天", "第2天", "第3天"],
-                region=(0.25, 0.10, 0.80, 0.35), min_conf=0.6
-            )
-            if has_goto and has_day_grid:
-                guide_mission = has_goto  # use as trigger
-        if guide_mission:
-            # Panel has ← back arrow (top-left) and 🏠 home icon (top-right).
-            # ← goes to previous screen (may be Account Info, not lobby).
-            # 🏠 goes directly to lobby — safer for all callers.
-            print(f"[Interceptor] P0.5 guide mission panel: '{guide_mission.text}', clicking home icon")
-            self._interceptor_streak += 1
-            return action_click(0.98, 0.03, f"interceptor: close guide mission panel (home)")
-
-        checkin = screen.find_any_text(
-            ["簽到", "签到", "到薄", "到簿"],
-            min_conf=0.5
-        )
-        if not checkin:
-            # "彩奈" only in title area (top-center), NOT in mail list
-            checkin = screen.find_any_text(
-                ["彩奈"],
-                region=(0.35, 0.05, 0.85, 0.25), min_conf=0.6
-            )
-        if not checkin:
-            checkin = screen.find_any_text(
-                ["第1天", "第2天", "第3天"],
-                region=(0.25, 0.10, 0.80, 0.35), min_conf=0.6
-            )
-        if checkin:
-            print(f"[Interceptor] P0.5 daily check-in calendar: '{checkin.text}', clicking to dismiss")
-            self._interceptor_streak += 1
-            return action_click(0.5, 0.5, f"interceptor: dismiss check-in calendar ({checkin.text})")
-
-        # ── P1: In-game announcement popup (内嵌公告) ──
-        # Detected by "主要消息" text in lower-left area. X button at top-right (0.98, 0.04).
-        announcement = screen.find_any_text(
-            ["主要消息", "主要消息", "Maintenance Notice", "Ban Notice"],
-            region=(0.02, 0.55, 0.35, 0.70), min_conf=0.6
-        )
-        if announcement:
-            self._interceptor_streak += 1
-            # Announcement is a WebView overlay that absorbs ALL touch events.
-            # Only Android BACK key can close it. This triggers exit dialog ("是否結束"),
-            # which P0 handler catches on the NEXT tick and clicks 取消 → lobby restored.
-            print(f"[Interceptor] P1 内嵌公告 '{announcement.text}', BACK to close WebView")
-            return action_back(f"interceptor: close announcement WebView")
-
-        # ── P1: Generic popup with X close button ──
-        # Popups like 全體課程表, 通知, 課程表資訊 etc. have an X button.
-        # Exempt Schedule (legacy direct skill) AND DailyRoutine's Schedule
-        # sub-state (current default — Schedule runs as DailyRoutine's sub).
-        # Without this, Schedule opens 全體課程表 and immediately interceptor
-        # closes it → infinite reopen/close loop. (bug 2026-05-28)
-        popup_titles = screen.find_any_text(
-            ["全體課程表", "全体课程表", "課程表資訊", "课程表资讯", "課程表報告", "课程表报告"],
-            region=(0.20, 0.05, 0.80, 0.25), min_conf=0.6
-        )
-        _in_schedule = (
-            skill.name == "Schedule"
-            or (skill.name == "DailyRoutine" and getattr(skill, "sub_state", "") == "Schedule")
-        )
-        if popup_titles and not _in_schedule:
-            # cls 19「弹窗叉叉」(429f trained) 替代 OCR 单字 "X" 匹配 (2026-07-16)。
-            # 位置闸沿用原 OCR region 语义(弹窗右上角: cx≥0.80, cy≤0.25; 课程表
-            # 系弹窗 X 实测 @~0.888,0.138), 防低置信 FP 点到别处。
-            x_btn = find_yolo_box(screen, ["弹窗叉叉"], min_conf=0.40)
-            if x_btn is not None and x_btn.cx >= 0.80 and x_btn.cy <= 0.25:
-                print(f"[Interceptor] P1 stale popup '{popup_titles.text}', clicking 弹窗叉叉")
-                return action_click_box(x_btn, f"interceptor: close popup X ({popup_titles.text})")
-            print(f"[Interceptor] P1 stale popup '{popup_titles.text}', hardcoded X")
-            return action_click(0.890, 0.142, f"interceptor: close popup ({popup_titles.text})")
-
-        # ── P2: Account / Student Level Up ──
-        # Full-screen "Level Up" / "Touch to Continue" effect
-        levelup = screen.find_any_text(
-            ["Level Up", "LEVEL UP", "Touch to Continue", "Touch To Continue",
-             "タッチして続ける", "觸摸繼續", "触摸继续", "点击继续", "點擊繼續"],
-            min_conf=0.6
-        )
-        if levelup:
-            print(f"[Interceptor] P2 level-up: '{levelup.text}', blind-clicking edge")
-            self._interceptor_streak += 1
-            return action_click(0.05, 0.95, f"interceptor: dismiss level-up ({levelup.text})")
-
-        # ── P2: "TAP TO CONTINUE" full-screen overlay ──
-        # Reward popups, bond level-ups, rank-ups etc. show this prompt.
-        # OCR may read as "TAP TO CONTINUE" or "TAPTO CONTINUE" (merged).
-        tap_continue = screen.find_any_text(
-            ["TAP TO CONTINUE", "TAPTO CONTINUE", "TAP TO", "CONTINUE"],
-            region=(0.2, 0.75, 0.8, 0.98), min_conf=0.7
-        )
-        if tap_continue:
-            self._interceptor_streak += 1
-            # Click on the TAP TO CONTINUE text itself — NOT center (0.5,0.5)
-            # which lands on reward cards that absorb clicks without dismissing.
-            if self._interceptor_streak > 5:
-                close_btn = _find_florence_hit(
-                    screen,
-                    ["close button icon", "close dialog x button", "x close icon"],
-                    region=(0.62, 0.06, 0.94, 0.28),
-                )
-                if close_btn:
-                    print(f"[Interceptor] P2 TAP TO CONTINUE stuck, clicking X")
-                    return action_click_box(close_btn, "interceptor: close reward X")
-                # Fallback: click bottom-left corner (outside cards)
-                print(f"[Interceptor] P2 TAP TO CONTINUE stuck, clicking corner")
-                return action_click(0.15, 0.85, f"interceptor: tap corner ({tap_continue.text})")
-            print(f"[Interceptor] P2 TAP TO CONTINUE: '{tap_continue.text}', clicking text")
-            return action_click_box(tap_continue, f"interceptor: tap to continue ({tap_continue.text})")
-
-        # ── P2: Reward popup (獲得獎勵!) ──
-        # Shows after cafe earnings, sweep, etc. Has 領取 button or TAP TO CONTINUE.
-        reward = screen.find_any_text(
-            ["獲得獎勵", "获得奖励", "獲得奖", "獲得獎"],
-            min_conf=0.6
-        )
-        if reward:
-            # Try clicking 領取/确认/確認 button first
-            dismiss_btn = screen.find_any_text(
-                ["確認", "确认", "確定", "确定", "領取", "领取", "確", "确", "OK"],
-                region=(0.25, 0.80, 0.80, 0.98), min_conf=0.6
-            )
-            if dismiss_btn:
-                print(f"[Interceptor] P2 reward popup, clicking {dismiss_btn.text}")
-                self._interceptor_streak += 1
-                return action_click_box(dismiss_btn, f"interceptor: claim reward ({reward.text})")
-            # Fallback: tap 確認 button area (right-side button on Battle Complete reward)
-            print(f"[Interceptor] P2 reward popup '{reward.text}', tapping confirm area")
-            self._interceptor_streak += 1
-            return action_click(0.60, 0.92, f"interceptor: dismiss reward ({reward.text})")
-
-        # ── P2: Bond / Rank-up popups (好感度升級, 羈絆升級, Rank Up) ──
-        bond_popup = screen.find_any_text(
-            ["好感度", "羈絆升級", "羁绊升级", "Rank Up"],
-            min_conf=0.6
-        )
-        if bond_popup:
-            # These are full-screen dismiss-by-tapping popups
-            if not screen.is_lobby():
-                print(f"[Interceptor] P2 bond/rank popup: '{bond_popup.text}', tapping to dismiss")
-                self._interceptor_streak += 1
-                return action_click(0.5, 0.5, f"interceptor: dismiss bond/rank ({bond_popup.text})")
-
-        # ── P1: Stale popups (only fire if current skill is NOT lobby) ──
-        # Lobby already handles its own popups thoroughly.
-        if skill.name != "Lobby":
-            # "Strong" indicators: only appear in popup overlays, never on
-            # the normal lobby.  One strong match is enough to fire.
-            _STRONG_POPUP = [
-                "今日不再", "Main News", "Patch Notes", "Pick-Up",
-                "到簿", "签到", "簽到", "Maintenance", "Webpage",
-            ]
-            # "Weak" indicators: can appear on normal screens too
-            # (公告 = lobby sidebar, 通知 = dialog header, Events = banner,
-            #  Discord/Forum = Club UI shows "社团DISCORD群" as normal text).
-            # A weak match alone MUST NOT fire the hardcoded X fallback.
-            _WEAK_POPUP = ["公告", "通知", "Official", "Events", "Update",
-                           "My Office", "Sensei", "Discord", "Forum"]
-
-            strong_hit = screen.find_any_text(_STRONG_POPUP, min_conf=0.7)
-            weak_hit = screen.find_any_text(_WEAK_POPUP, min_conf=0.7)
-            popup_text = strong_hit or weak_hit
-            is_strong = strong_hit is not None
-
-            if popup_text:
-                # ── Universal 通知 confirm dialog handler ──
-                # 2026-07-16 默认安全路径对齐: 确认+取消结构的通知弹窗一律
-                # 取消, 绝不盲确认(旧版点确认 — 与 base._handle_common_popups
-                # 新策略矛盾, 且没有 好友咖啡厅/是否結束 的 must-cancel 保护)。
-                if popup_text.text in ("通知",):
-                    cancel_btn = screen.find_any_text(
-                        ["取消"],
-                        region=screen.CENTER, min_conf=0.6
-                    )
-                    confirm_btn = screen.find_any_text(
-                        ["確認", "确认", "確定", "确定", "確", "确"],
-                        region=screen.CENTER, min_conf=0.6
-                    )
-                    if cancel_btn and confirm_btn:
-                        print(f"[Interceptor] P1 通知 confirm dialog (取消+確認), clicking cancel (default-safe)")
-                        return action_click_box(cancel_btn, "interceptor: cancel 通知 dialog (default-safe)")
-                    if cancel_btn or confirm_btn:
-                        return None
-
-                # 今日不再顯示 checkbox: the OCR text label is the only
-                # OCR-detectable anchor, but clicking the label itself
-                # doesn't toggle the checkbox (it sits to the LEFT of the
-                # label, not on it).  Old code clicked the label and
-                # looped forever (run_20260504_215753 burned 160 ticks).
-                # Click the checkbox spot once (text.x1 - small offset),
-                # then PROCEED to the X close button.  One-shot via
-                # _dnsa_toggled flag — don't re-toggle every tick.
-                do_not_show = screen.find_any_text(
-                    ["今日不再", "今日不再提示", "今日不再顯示", "今日不再显示"],
-                    min_conf=0.7
-                )
-                if do_not_show and not getattr(self, "_dnsa_toggled", False):
-                    self._dnsa_toggled = True
-                    # Checkbox sits to the LEFT of the text label.  Click
-                    # at ~text.x1 - 0.025 to hit the box itself (BA's
-                    # checkbox is ~0.02-0.03 wide).
-                    cx_left = max(0.005, do_not_show.x1 - 0.025)
-                    print(f"[Interceptor] P1 popup: clicking 今日不再 checkbox (left of label)")
-                    return action_click(
-                        cx_left, do_not_show.cy,
-                        "interceptor: toggle do-not-show-again checkbox"
-                    )
-                # If do_not_show isn't on screen anymore, the promo
-                # popup has closed — reset toggle so a future popup
-                # gets a fresh attempt.
-                if not do_not_show:
-                    self._dnsa_toggled = False
-
-                # After toggling the do-not-show checkbox, close the popup
-                # via top-right X.  ONLY fire when we previously detected
-                # a real promo (do_not_show was found on a prior tick →
-                # _dnsa_toggled set).  Without this gate, ANY weak popup
-                # hit (e.g. "公告" on lobby) would fall here and click
-                # empty space at (0.955, 0.065) forever
-                # (run_20260504_221135 burned 86 ticks doing exactly that).
-                if getattr(self, "_dnsa_toggled", False) and is_strong:
-                    self._interceptor_streak += 1
-                    if self._interceptor_streak > 8:
-                        self._interceptor_streak = 0
-                        self._dnsa_toggled = False
-                        return action_back("interceptor: ESC burst (promo popup stuck)")
-                    _PROMO_X_POSITIONS = [(0.955, 0.065), (0.95, 0.07), (0.97, 0.05)]
-                    px, py = _PROMO_X_POSITIONS[
-                        (self._interceptor_streak - 1) % len(_PROMO_X_POSITIONS)
-                    ]
-                    print(f"[Interceptor] P1 promo popup: hardcoded X at ({px},{py})")
-                    return action_click(
-                        px, py,
-                        f"interceptor: close promo popup X (streak={self._interceptor_streak})"
-                    )
-
-                close_btn = _find_florence_hit(
-                    screen,
-                    ["close button icon", "close dialog x button", "x close icon"],
-                    region=(0.0, 0.0, 0.93, 0.35),
-                )
-                if close_btn:
-                    self._interceptor_streak += 1
-                    print(f"[Interceptor] P1 stale popup: '{popup_text.text}' + Florence X, clicking X")
-                    if self._interceptor_streak > 8:
-                        print("[Interceptor] P1 popup won't close after 8 attempts, ESC burst")
-                        self._interceptor_streak = 0
-                        return action_back("interceptor: ESC burst (popup stuck)")
-                    return action_click_box(close_btn, f"interceptor: close stale popup ({popup_text.text})")
-
-                # No YOLO X detected — hardcoded X fallback.
-                # ONLY use hardcoded fallback for STRONG indicators.
-                # Weak indicators (e.g. "公告" on lobby sidebar) must NOT
-                # trigger hardcoded clicks — that hits the "1/2" page counter.
-                if is_strong:
-                    self._interceptor_streak += 1
-                    _ANNOUNCE_X_POSITIONS = [
-                        (0.8735, 0.1575),
-                        (0.87, 0.16),
-                        (0.88, 0.15),
-                    ]
-                    idx = (self._interceptor_streak - 1) % len(_ANNOUNCE_X_POSITIONS)
-                    px, py = _ANNOUNCE_X_POSITIONS[idx]
-                    print(f"[Interceptor] P1 popup: '{popup_text.text}' (strong, no YOLO X), hardcoded X at ({px},{py})")
-                    if self._interceptor_streak > 10:
-                        self._interceptor_streak = 0
-                        return action_back("interceptor: ESC burst (popup stuck, no X)")
-                    return action_click(px, py, f"interceptor: close popup X hardcoded ({popup_text.text})")
-
         # No interceptor fired — reset streak + do-not-show-again flag
         self._interceptor_streak = 0
         self._dnsa_toggled = False
         return None
-
-    def tick(self, screenshot_path: str) -> Dict[str, Any]:
-        """Process one frame. Returns an action dict for the executor.
-
-        Call this every frame with a fresh screenshot path.
-        The returned action should be executed by the input system.
-        """
-        screen = read_screen(screenshot_path)
-        return self._tick_with_screen(screen, screenshot_path=screenshot_path)
 
     def tick_from_frame(self, frame_bgr, *, screenshot_path: str = "",
                         skip_ocr: bool = False,
@@ -2274,7 +1684,7 @@ class DailyPipeline:
         return action
 
     def _tick_with_screen(self, screen: ScreenState, *, screenshot_path: str = "") -> Dict[str, Any]:
-        """Internal tick logic shared by tick() and tick_from_frame()."""
+        """Internal tick logic for tick_from_frame()."""
         self._last_screen = screen
         if not self._running:
             return action_done("pipeline not running")

@@ -129,7 +129,9 @@ class ShopSkill(BaseSkill):
         read_count anchors on the highest-conf box → a GRID PRICE, not the
         balance (live 2026-06-02: read 40000 instead of ~141M → wrongly
         cancelled). So we anchor on the TOP-BAR 信用点 only (cy<0.10) and OCR the
-        digit strip to its right (verified: span 0.11 → 141,602,561)."""
+        digit strip to its right (verified: span 0.11 → 141,602,561).
+        病历: 该 top-bar 信用点 cls 曾在 grid 帧上很飘 (live 2026-06-09 每帧都漏检
+        → balance=None → 误取消)，clean ADB frame 路径即为此而加。"""
         if self._balance is not None or screen.frame is None:
             return
         # Prefer a CLEAN ADB frame (2026-06-11): the in-shop top bar read on the
@@ -239,24 +241,6 @@ class ShopSkill(BaseSkill):
             return None
         except Exception:
             return None
-
-    def _balance_from_snapshot(self) -> None:
-        """Fallback: the shop grid's top-bar 信用点 cls is FLAKY (live 2026-06-09:
-        missed on every grid frame → balance=None → wrongly cancelled). The
-        LOBBY snapshot read seconds earlier is authoritative — use it when the
-        in-shop read failed and the snapshot is fresh (<10 min)."""
-        if self._balance is not None:
-            return
-        try:
-            import time as _t
-            from brain.pipeline import get_resource_snapshot
-            snap = get_resource_snapshot()
-            cr, ts = snap.get("credits"), snap.get("ts", 0.0)
-            if cr is not None and (_t.time() - ts) < 600:
-                self._balance = int(cr)
-                self.log(f"balance from LOBBY snapshot = {self._balance:,} (in-shop read failed)")
-        except Exception:
-            pass
 
     def _affordable(self) -> bool:
         """Buy only when the grid-read balance stays above reserve even after a

@@ -76,7 +76,6 @@ _SELECT_MAX = 24
 _BUY_MAX = 12
 _CONFIRM_MAX = 12
 _EXIT_MAX = 14
-_MAX_SWIPES = 6
 # Tap-once selection (live 2026-06-13: the per-tick 绿勾 re-check + the gate's
 # cap re-click TOGGLED 下级 on/off forever — never reached 一般). Tap a drink
 # ONCE, then WAIT (not re-tap) for its 绿勾 to render; re-tap only if the tap was

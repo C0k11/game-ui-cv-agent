@@ -44,9 +44,7 @@ _RESULT_MAX = 16
 _SWEEP_ROUNDS_MAX = 12  # safety cap on re-sweep loops
 
 # Fixed-pos fallbacks (from the 2026-06-15 live walk frames special1/2/3.png).
-_POS_SPECIAL_TAB = (0.550, 0.677)   # 特殊任务 tile on hub
 _POS_CREDIT = (0.88, 0.40)          # 信用货币回收 commission (cls454)
-_POS_MAX = (0.84, 0.42)             # MAX in 任務資訊 sweep panel (right of 加号)
 _POS_SWEEP_START = (0.73, 0.56)     # 扫荡开始 (cls108)
 # 452 must sit within this radius of the 特殊任务 tile to count as "bonus here".
 _BONUS_NEAR = 0.13
@@ -243,6 +241,7 @@ class SpecialSweepSkill(BaseSkill):
             # 事故同款链。根治: **只在正向检到 QTY_MAX(资源确认够)才设 _maxed→才扫**;
             # 两个 MAX cls 全闪 → 等→超时 close, 绝不盲扫触发买体力框。漏扫的 AP 由编排
             # 里紧跟的 batch_sweep 兜底(no-bonus 日同理)。宁可漏扫一次, 绝不碰青辉石风险。
+            # (旧盲点兜底对应的 _POS_SPECIAL_TAB/_POS_MAX 固定位常量已删, 2026-07-17 死码清理。)
             if self._phase_ticks > _PHASE_MAX:
                 self.log(f"QTY_MAX cls 没正向检到(AP={ap}) → close (不盲扫, money fail-closed)")
                 self._goto("close")

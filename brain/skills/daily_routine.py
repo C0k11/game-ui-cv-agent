@@ -2,12 +2,16 @@
 
 Replaces the old "skill_order has 12 separate harvest skills" UX where the
 user had to toggle each one. This single skill cycles through the daily
-HARVEST sub-flows in fixed order:
+HARVEST sub-flows in fixed order (= `_full` in __init__, in_default subs):
 
-    buy_pyroxene → club → craft → shop → cafe → schedule → mail → daily_mission
+    buy_pyroxene → club → craft → shop → arena_shop → schedule → cafe
 
-momo_talk / story_mining are registered but NOT in the default harvest
-(user 2026-06-11: bond-story grinding ≠ 收菜) — run them via sub_only.
+cafe runs LAST — its earnings grant AP, segueing into the task-hall block.
+mail / daily_mission moved OUT to the TOP-LEVEL skill_order (they run after
+the hall block so hall rewards are in the mailbox; daily_mission gates on
+n/8≥7). momo_talk / story_mining are registered but NOT in the default
+harvest (user 2026-06-11: bond-story grinding ≠ 收菜) — run them via
+sub_only.
 
 Per sub-flow:
 - Check sub.should_run(screen) (most have a red/yellow dot check on the
@@ -21,21 +25,13 @@ their own entries in skill_order because user wants explicit control
 over battle skills (different AP budgets, ticket priorities, etc.).
 """
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple
 
 from brain.skills.base import BaseSkill, ScreenState, action_done
 
 
 class DailyRoutineSkill(BaseSkill):
     """Single skill bundling all daily harvest sub-flows."""
-
-    # (sub_skill_class, force_run_even_without_dot)
-    # force_run=True for sub-flows that should ALWAYS enter (no dot check):
-    #   - craft: 快速制造 may need to be triggered even when no dot
-    #     (per user spec)
-    # The dot check itself is encapsulated in each sub-skill's should_run()
-    # override (set in commit 9eb9aa0).
-    SUB_PLAN: List[Tuple[Type[BaseSkill], bool]] = []  # populated lazily below
 
     def __init__(self, sub_only=None):
         super().__init__("DailyRoutine")

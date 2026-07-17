@@ -30,26 +30,17 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from brain.skills import ui_classes as UC
+# Batch-sweep dialog classes (master 455-468) live in ui_classes now; re-export
+# here — consumers import them from brain.screens (batch_sweep.py). 453/454 are
+# UC.SPECIAL_DEFENSE / UC.SPECIAL_CREDIT.
+from brain.skills.ui_classes import (
+    SWEEP_BATCH, SWEEP_BATCH_START, SWEEP_BATCH_START_GREY,
+    SWEEP_GEAR_SMALL, SWEEP_GEAR_SMALL_SEL, SWEEP_GEAR_BIG, SWEEP_GEAR_BIG_SEL,
+    SWEEP_PLAN1, SWEEP_PLAN1_SEL, SWEEP_PLAN2, SWEEP_PLAN2_SEL,
+    SWEEP_PLAN2_SEL_B, BATTLE_COMPLETE, GOTO_NOW,
+)
 
 MIN_CONF = 0.45
-
-# ── v8 batch-sweep dialog classes (master 453-468; not yet in ui_classes) ──
-KICKBACK_DEFENSE = "据点防御"          # 453  hall tile
-CREDIT_RECYCLE = "信用货币回收"         # 454  hall tile
-SWEEP_BATCH = "批量扫荡"               # 455  button on the 任務 stage screen
-SWEEP_BATCH_START = "批量扫荡开始"      # 456  dialog confirm (active)
-SWEEP_BATCH_START_GREY = "批量扫荡开始灰色"  # 457  dialog confirm (disabled)
-SWEEP_GEAR_SMALL_SEL = "前置小装备已选中"    # 458
-SWEEP_PLAN1 = "困难关卡刷取方案一"       # 459
-SWEEP_PLAN2 = "困难关卡刷取方案二"       # 460
-SWEEP_GEAR_SMALL = "前置小装备"          # 461
-SWEEP_GEAR_BIG_SEL = "大装备已选中"      # 462
-SWEEP_GEAR_BIG = "大装备"               # 463
-SWEEP_PLAN1_SEL = "困难关卡刷去方案一已选中"  # 464 (typo in master: 刷去)
-SWEEP_PLAN2_SEL_B = "困难方案刷取方案二已选中"  # 465 (label variant)
-SWEEP_PLAN2_SEL = "困难关卡刷取方案二已选中"   # 466
-BATTLE_COMPLETE = "战斗完成"            # 467  sweep/battle result header
-GOTO_NOW = "立即前往"                  # 468
 
 
 # screen_id → signature. Order matters only for documentation; matching is
@@ -150,7 +141,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     "task_hall": {
         "need": [],
         "any_of": ["任务关卡推图", "悬赏通缉", "学院交流会", "战术大赛",
-                   "特殊任务", "剧情", KICKBACK_DEFENSE, CREDIT_RECYCLE],
+                   "特殊任务", "剧情", UC.SPECIAL_DEFENSE, UC.SPECIAL_CREDIT],
         "min_any": 3,
         "forbid": [UC.NAV_CAFE],
     },

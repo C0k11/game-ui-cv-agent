@@ -68,7 +68,6 @@ _ENTER_MAX = 22
 _COMBO_MAX = 16
 _BUY_MAX = 16
 _CONFIRM_MAX = 10            # poll the dialog for the FREE cls before bailing
-_REWARD_MAX = 18
 _EXIT_MAX = 14
 
 

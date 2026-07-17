@@ -303,7 +303,8 @@
     "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
   },
   "unified": {
-    "_doc": "v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
+    "_deprecated": "2026-07-17 死码清理: pipeline 侧 unified 接线已整体拆除(_resolve_unified/_YOLO_UNIFIED/_UI_IS_UNIFIED/域过滤全删) — 改本节 active 不再有任何效果, 不可复活。v6b nc=455 训练于 2026-06-04, 缺此后新增的金钱防线类(购买/确认/价格条等, ui 现役 nc=476), 直接通电会瞎掉金钱闸。要合一模型须按当前全类表重训新版并重新接线。本节仅作历史存档。",
+    "_doc":"v6b (nc=455). 上线=各域最强(非全替代三模型): pipeline _get_yolo 已接线(2026-06-05), ui tag 用 v6b 但只取 UI 域(域过滤丢弃头像143-394+emoticon451), 头像保 fused v4 / 摸头保 v26n 各自独立加载. 全局开关 _UI_IS_UNIFIED 读本 active: 现 PENDING-LIVE-VERIFY = 未通电(日常仍 ui v5/fused v4/v26n, 零影响); 改成 'v6b' 即通电, 改回 PENDING 秒回滚. 离线铁证已过(scripts/verify_filter_realframes.py: 60真实帧 UI 域零损 / 头像emoticon过滤干净 / v26n+fused v4 fold-in 未误杀), 待 MuMu live 验证(⛔优先 money 防线 cls 实战检出)才正式切 v6b.",
     "active": "PENDING-LIVE-VERIFY",
     "_active_note": "用户决策(2026-06-06): 分域跑(UI=ui v5 / 头像=fused v4 / 摸头=emoticon v26n 三独立模型), unified 等 v7 全域无敌再上线。PENDING = pipeline._resolve_unified 返 None → _UI_IS_UNIFIED=False → 日常 UI 用 ui v5(零影响)。v6c 仅借作 prefill teacher(见 ui.versions.v6c), 不影响 live。改成具体版本号(如 'v6c')即通电, 秒级回滚。",
     "task": "detect",

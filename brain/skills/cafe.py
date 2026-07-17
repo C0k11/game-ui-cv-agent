@@ -405,7 +405,7 @@ class CafeSkill(BaseSkill):
         if self._phase_ticks > _ENTER_MAX:
             self.log("enter budget exhausted, giving up on cafe")
             return action_done("could not reach cafe")
-        if screen.is_loading() or len(screen.yolo_boxes or []) < 2:
+        if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI detected, likely loading")
         if self._enter_attempts > 8:
             return self.nav_home(screen, "cafe recover")
@@ -1034,8 +1034,6 @@ class CafeSkill(BaseSkill):
             self._begin_invite(floor_2=True)
             return action_click_box(switch, "switch to cafe 2F")
 
-        if screen.is_loading():
-            return action_wait(700, "cafe switch loading")
         if self._phase_ticks > _SWITCH_MAX:
             self.log("switch budget exhausted, exiting cafe")
             self._goto("exit")

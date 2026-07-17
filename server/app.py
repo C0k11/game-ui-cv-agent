@@ -5,7 +5,6 @@ import sys
 import socket
 import subprocess
 import time
-import hashlib
 import threading
 import ctypes
 import traceback
@@ -65,7 +64,7 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 2026-05-28 unification: 12 个收菜 skill 全部并入 daily_routine 单一入口
     # (mail/cafe/schedule/club/daily_tasks/craft/event_activity/pass_reward/
     #  momo_talk/story_mining/shop/ap_planning, 内部按 dot 自动判断 + craft
-    #  强制进入). 战斗/扫荡类 skill (campaign_sweep/bounty/arena) 保留独立条目
+    #  强制进入). 战斗/扫荡类 skill (bounty/arena) 保留独立条目
     # 因为用户要对 AP / 票券消耗有显式控制.
     #
     # 旧 skill id 保留兼容老 profile, 标 [已并入 daily_routine] + 默认不勾选.
@@ -73,14 +72,13 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # ── 推荐 (新 profile 默认勾这 2 个) ──
     {"id": "daily_routine", "label": "[★] 日常收菜 全套 (mail/cafe/schedule/club/daily_tasks/craft/event/pass_reward/momo/story/shop/ap, 内部按 dot 判断)"},
 
-    # 注: 旧 14 个 skill id 已从 dashboard 删除 —
-    #   收菜 12 个 (cafe/schedule/club/daily_tasks/craft/pass_reward/
-    #     event_activity/mail/shop/ap_planning/momo_talk/story_mining)
-    #     全部并入 daily_routine.
-    #   战斗扫荡 2 个 (bounty / arena) 全部并入 campaign_sweep.
+    # 注: 旧收菜 12 个 skill id (cafe/schedule/club/daily_tasks/craft/
+    #     pass_reward/event_activity/mail/shop/ap_planning/momo_talk/
+    #     story_mining) 全部并入 daily_routine.
     # 它们仍在 brain/pipeline.py 的 _skill_registry 里 (因为 daily_routine
-    # 和 campaign_sweep 内部需要实例化), 但 dashboard 不再让用户单独勾选.
-    # 老 profile 里残留的这些 id 会在 app.py 校验时被过滤掉, 用户重新
+    # 内部需要实例化); 部分带 [测试] 单跑条目见下.
+    # (campaign_sweep 已于 2026-06-02 从 pipeline 删除, bounty/arena 恢复独立条目.)
+    # 老 profile 里残留的已删 id 会在 app.py 校验时被过滤掉, 用户重新
     # save profile 即可清理.
 
     # 战斗扫荡单跑入口 (live 单 skill 测试用 — 2026-06-09: 传 "bounty" 被过滤
@@ -109,6 +107,9 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     {"id": "shop", "label": "[测试] 信用点商店 单跑"},
     {"id": "craft", "label": "[测试] 制造 单跑"},
     {"id": "momo_talk", "label": "[测试] MomoTalk挖矿 单跑(手动)"},
+    # story_mining 与 momo_talk 同为手动单跑入口(陷阱第9次预防: 不在白名单
+    # 会被 _normalize_skill_order 静默过滤 → fallback 全套 daily_routine 真跑).
+    {"id": "story_mining", "label": "[测试] 剧情挖矿 单跑(手动)"},
     # club = 社團签到(社交入口红点的真主人, 10AP进邮箱). 单跑验证.
     {"id": "club", "label": "[测试] 社團签到 单跑"},
     # buy_pyroxene = 每日免费组合包(只领免费, 绝不买付费). 单跑验证(陷阱第8次).
@@ -159,8 +160,6 @@ def _box_iou_n(a, b) -> float:
     ua = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter
     return inter / ua if ua > 0 else 0.0
 
-OCR_CACHE_VERSION = 2
-
 # ── Pipeline state ─────────────────────────────────────────────────────
 _PIPELINE_LOCK = threading.Lock()
 _PIPELINE = None          # brain.pipeline.DailyPipeline instance
@@ -169,7 +168,6 @@ _PIPELINE_RUNNING = False
 _PIPELINE_STATUS = {"running": False, "error": "", "ticks": 0}
 _LAST_PIPELINE_ERROR = ""
 _DISPLAY_SYNC_HZ = 240.0
-_INPUT_POLL_HZ = 8000.0
 _TIMER_RES_ENABLED = False
 _PIPELINE_RUN_META: Dict[str, Any] = {}
 
@@ -211,6 +209,11 @@ def _normalize_skill_order(values: Any) -> List[str]:
         for item in values:
             skill_id = str(item or "").strip()
             if skill_id not in _VALID_SKILL_IDS:
+                # 静默过滤 = 同型陷阱家族根因(第3/5/6/7/8次): 未知 id 被丢掉后
+                # 空单 fallback 全套 daily_routine 真跑。留痕根治。
+                if skill_id:
+                    _log_pipeline(f"skill_order: unknown skill id '{skill_id}' filtered "
+                                  f"(not in _SKILL_OPTIONS whitelist)")
                 continue
             if skill_id in seen and skill_id not in _ALLOW_DUPLICATES:
                 continue
@@ -839,9 +842,6 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         except Exception:
             pass
 
-        # Store top-level hwnd for SetForegroundWindow (child windows can't be foregrounded)
-        _set_parent_hwnd(int(hwnd))
-
         # Overlay policy (2026-06-11, user rule): boxes ONLY in battle mode.
         # The daily loop's overlay lags detection by a tick on static UI
         # (drift / flicker / size-jitter) and burns into window-captured
@@ -942,10 +942,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             threading.Thread(target=_clean_flywheel_worker, daemon=True).start()
 
         # OCR + YOLO lazy-load on first use (no pre-warm to avoid deadlocks).
-        # Florence prewarm 已裁撤(2026-07-16): 仅剩的 2 个调用点都在
-        # interceptor 的 OCR 死码分支内(生产态不可达), prewarm 白吃显存与
-        # 启动时间; 真要用时 get_florence_vision() 惰性加载仍可用。
-        _florence_prewarm_started = True
+        # Florence prewarm 已裁撤(2026-07-16); 真要用时 get_florence_vision() 惰性加载仍可用。
 
         # DXcam for fast capture (Desktop Duplication API)
         # Detect which monitor the MuMu window is on for multi-monitor support
@@ -1217,8 +1214,6 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _yolo_hfps = threading.Thread(target=_yolo_highfps_thread, daemon=True)
         _yolo_hfps.start()
 
-        _OCR_INTERVAL = 3  # run OCR every 3rd tick
-        _prev_ocr_boxes = None
         _tick_counter = 0
         _inline_yolo_logged = False
 
@@ -1316,13 +1311,9 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _fresh_t = _yolo_latest_ts
             action = pipe.tick_from_frame(frame, screenshot_path=tmp_path,
                                           skip_ocr=skip_ocr,
-                                          prev_ocr_boxes=_prev_ocr_boxes,
                                           injected_yolo_boxes=_injected_yolo,
                                           fresh_boxes=_fresh_b,
                                           fresh_frame=_fresh_f, fresh_ts=_fresh_t)
-            # Cache OCR boxes for reuse on OCR-skip ticks
-            if not skip_ocr and pipe.last_screen:
-                _prev_ocr_boxes = pipe.last_screen.ocr_boxes
             action_type = action.get("action", "")
             reason = action.get("reason", "")
             # Loading gate (稳定规则 2026-06-11): 加载中 visible → never act this
@@ -1342,44 +1333,9 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             _log_pipeline(f"tick={pipe._total_ticks} action={action_type} reason={reason}")
 
-            # Model pre-warm threads already started at worker init (above main loop)
-
             # Overlay YOLO boxes are updated by the high-FPS YOLO thread above.
-            # Here we only inject Florence + template boxes (these run at tick rate).
-            if _overlay and _overlay.is_alive:
-                screen = pipe.last_screen
-                if screen and (screen.florence_boxes or screen.template_hits):
-                    current_skill_name = pipe.current_skill.name if pipe.current_skill else ""
-                    in_cafe = current_skill_name == "Cafe"
-                    extra_boxes: List[Any] = []
-                    extra_boxes.extend(
-                        {
-                            "cls": f"Florence:{box.text}",
-                            "conf": box.confidence,
-                            "x1": box.x1,
-                            "y1": box.y1,
-                            "x2": box.x2,
-                            "y2": box.y2,
-                        }
-                        for box in screen.florence_boxes
-                    )
-                    if in_cafe:
-                        extra_boxes.extend(
-                            {
-                                "cls": h.label,
-                                "conf": h.confidence,
-                                "x1": h.x1,
-                                "y1": h.y1,
-                                "x2": h.x2,
-                                "y2": h.y2,
-                            }
-                            for h in screen.template_hits
-                        )
-                    if extra_boxes:
-                        # Merge with current YOLO boxes in overlay
-                        with _yolo_latest_lock:
-                            merged = list(_yolo_latest_boxes) + extra_boxes
-                        _overlay.update(merged)
+            # (Florence/template overlay 注入已删 2026-07-17 — 生产者
+            #  florence_boxes/template_hits 已随 OCR 死码一并裁撤。)
 
             # 3a. Single-step approval gate — pause before each click/back/swipe,
             # expose the pending action, block until POST /api/v1/step/go.
@@ -1418,7 +1374,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     ("click", "back", "swipe", "swipe_tap", "scroll")):
                 _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
 
-            # 4. Sleep + OCR cache management
+            # 4. Sleep
             # ── ZERO-WAIT policy (user 2026-06-14: 不要有wait time — 出现目标就点 /
             # 没目标pass / 只有"加载中"cls在时才硬wait, wait时长=加载中存在时长). All
             # the per-skill settle/re-scan/render-wait counters are squashed to a
@@ -1437,12 +1393,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     # non-loading wait → fast re-poll (≈one capture+infer cycle)
                     _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, 0.12))
             elif action_type in ("click", "back", "swipe_tap"):
-                # invalidate OCR cache so the next tick OCRs the fresh screen.
                 # 0.4→0.15s (user 2026-07-11 二次: "不要给等待时间, 极限测试,
                 # 模拟人眼有就点没有就不点")。过点防护三层兜: 加载中 gate +
                 # _dedup_click same-target hold + skill 侧 cls 证据制 wait。
                 # (历史: 1.6→0.4→0614回调1.0→0711压0.4→0711极限0.15)
-                _prev_ocr_boxes = None
                 _high_res_sleep(0.15)
             else:
                 _high_res_sleep(max(1.0 / _DISPLAY_SYNC_HZ, step_sleep))
@@ -1494,41 +1448,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _log_pipeline("Pipeline worker stopped.")
 
 
-_dpi_set = False
-_parent_hwnd: Optional[int] = None  # top-level window (for SetForegroundWindow)
-
-
-def _set_parent_hwnd(hwnd: int) -> None:
-    """Store the top-level parent hwnd for SetForegroundWindow."""
-    global _parent_hwnd
-    _parent_hwnd = hwnd
-
-
-def _MAKELPARAM(x: int, y: int) -> int:
-    """Pack two 16-bit values into a 32-bit LPARAM."""
-    return (int(y) << 16) | (int(x) & 0xFFFF)
-
-
 def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_h: int, adb: Any = None, android_w: int = 0, android_h: int = 0) -> None:
-    """Convert normalized pipeline action to real input.
+    """Convert normalized pipeline action to real input. ADB input only.
 
-    Uses PostMessage to the render child window for reliable emulator input.
-    Falls back to SetCursorPos + mouse_event if PostMessage fails.
+    调用点闸(worker loop)保证 not dry_run ⇒ adb 已连接(连不上必转 dry_run),
+    win32 fallback(SetForegroundWindow/SetCursorPos/mouse_event/PostMessage)
+    永不可达, 已删(2026-07-17 死码清理)。
     """
-    global _dpi_set
-    import random
-    from scripts.win_capture import get_client_rect_on_screen, _dpi_aware_context
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    _enable_high_resolution_timer()
-
-    # Set DPI awareness once so coordinates are in physical pixels
-    if not _dpi_set:
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-        except Exception:
-            pass
-        _dpi_set = True
-
     action_type = action.get("action", "")
 
     if adb is not None and android_w > 0 and android_h > 0:
@@ -1573,125 +1499,6 @@ def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_
             y2 = max(0, min(android_h - 1, y - delta if clicks < 0 else y + delta))
             adb.swipe(x, y1, x, y2, max(250, min(900, 120 + abs(clicks) * 40)))
             return
-
-    # Bring top-level parent window to foreground
-    fg_hwnd = _parent_hwnd if _parent_hwnd else hwnd
-    try:
-        user32.SetForegroundWindow(fg_hwnd)
-    except Exception:
-        pass
-    _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
-
-    # Get client rect for coordinate conversion
-    try:
-        rect = get_client_rect_on_screen(hwnd)
-        cw = rect.right - rect.left
-        ch = rect.bottom - rect.top
-    except Exception:
-        rect = None
-        cw = ch = 0
-
-    # DPI safety: if _dpi_aware_context failed silently, cw/ch may be in
-    # logical pixels while frame (screenshot) is physical. Detect and fix.
-    _dpi_scale = 1.0
-    if cw > 0 and img_w > 0 and abs(img_w - cw) > 20:
-        _dpi_scale = img_w / cw
-        if not getattr(_execute_pipeline_action, '_dpi_warned', False):
-            print(f"[DPI] Scale mismatch detected: frame={img_w}x{img_h} "
-                  f"client={cw}x{ch} scale={_dpi_scale:.2f}")
-            _execute_pipeline_action._dpi_warned = True
-
-    WM_LBUTTONDOWN = 0x0201
-    WM_LBUTTONUP = 0x0202
-    WM_MOUSEMOVE = 0x0200
-    MK_LBUTTON = 0x0001
-    MOUSEEVENTF_LEFTDOWN = 0x0002
-    MOUSEEVENTF_LEFTUP = 0x0004
-    MOUSEEVENTF_WHEEL = 0x0800
-
-    def _screen_xy(nx: float, ny: float):
-        if not rect or cw <= 0 or ch <= 0:
-            return None
-        # Use frame (physical) dimensions for pixel calculation when DPI
-        # mismatch is detected; otherwise use client rect directly.
-        pw = img_w if _dpi_scale > 1.01 else cw
-        ph = img_h if _dpi_scale > 1.01 else ch
-        cx = int(nx * pw) + random.randint(-2, 2)
-        cy = int(ny * ph) + random.randint(-2, 2)
-        # Adjust screen origin: if DPI scale active, rect coords are logical
-        # and SetCursorPos (inside _dpi_aware_context) expects physical.
-        ox = int(rect.left * _dpi_scale) if _dpi_scale > 1.01 else rect.left
-        oy = int(rect.top * _dpi_scale) if _dpi_scale > 1.01 else rect.top
-        sx = ox + cx
-        sy = oy + cy
-        return cx, cy, sx, sy
-
-    if action_type == "click":
-        nx, ny = action.get("target", [0.5, 0.5])
-        coords = _screen_xy(nx, ny)
-        if coords:
-            cx, cy, sx, sy = coords
-            print(f"[Click] norm=({nx:.3f},{ny:.3f}) client=({cx},{cy}) screen=({sx},{sy}) cw={cw} ch={ch}")
-            with _dpi_aware_context():
-                user32.SetCursorPos(sx, sy)
-                _high_res_sleep(1.0 / _INPUT_POLL_HZ)
-                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                _high_res_sleep(max(1.0 / _INPUT_POLL_HZ, 1.0 / (_DISPLAY_SYNC_HZ * 2.0)))
-                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-    elif action_type == "back":
-        # Send Escape key via PostMessage
-        WM_KEYDOWN = 0x0100
-        WM_KEYUP = 0x0101
-        VK_ESCAPE = 0x1B
-        user32.PostMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE, 0x00010001)
-        _high_res_sleep(max(1.0 / _INPUT_POLL_HZ, 1.0 / _DISPLAY_SYNC_HZ))
-        user32.PostMessageW(hwnd, WM_KEYUP, VK_ESCAPE, 0xC0010001)
-
-    elif action_type == "swipe":
-        frm = action.get("from", [0.5, 0.5])
-        to = action.get("to", [0.5, 0.5])
-        dur_ms = action.get("duration_ms", 400)
-        coords1 = _screen_xy(frm[0], frm[1])
-        coords2 = _screen_xy(to[0], to[1])
-        if coords1 and coords2:
-            cx1, cy1, sx1, sy1 = coords1
-            cx2, cy2, sx2, sy2 = coords2
-            steps = max(12, int((dur_ms / 1000.0) * _DISPLAY_SYNC_HZ))
-            print(f"[Swipe] from=({frm[0]:.3f},{frm[1]:.3f}) to=({to[0]:.3f},{to[1]:.3f}) steps={steps}")
-
-            with _dpi_aware_context():
-                user32.SetCursorPos(sx1, sy1)
-                _high_res_sleep(1.0 / _INPUT_POLL_HZ)
-                user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                for i in range(1, steps + 1):
-                    t = i / steps
-                    mx = int(sx1 + (sx2 - sx1) * t)
-                    my = int(sy1 + (sy2 - sy1) * t)
-                    user32.SetCursorPos(mx, my)
-                    _high_res_sleep(dur_ms / 1000.0 / steps)
-                user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-    elif action_type == "scroll":
-        nx, ny = action.get("target", [0.5, 0.5])
-        clicks = action.get("clicks", -3)
-        with_ctrl = bool(action.get("with_ctrl", False))
-        coords = _screen_xy(nx, ny)
-        if coords:
-            _, _, sx, sy = coords
-            # Ctrl key constants for emulator pinch-zoom (MuMu/LDPlayer)
-            VK_CONTROL = 0x11
-            KEYEVENTF_KEYUP = 0x0002
-            with _dpi_aware_context():
-                user32.SetCursorPos(sx, sy)
-                _high_res_sleep(1.0 / _DISPLAY_SYNC_HZ)
-                if with_ctrl:
-                    user32.keybd_event(VK_CONTROL, 0, 0, 0)
-                    _high_res_sleep(0.02)
-                user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, int(clicks * 120), 0)
-                if with_ctrl:
-                    _high_res_sleep(0.02)
-                    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
 
 def _log_pipeline(msg: str) -> None:
@@ -1805,14 +1612,6 @@ def _safe_capture_path(rel: str) -> Path:
     if not str(p).startswith(str(base)):
         raise HTTPException(status_code=400, detail="invalid path")
     return p
-
-
-def _ocr_cache_path(rel: str) -> Path:
-    key = f"v{OCR_CACHE_VERSION}:{rel}"
-    h = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-    cache_dir = CAPTURES_DIR / "_cache" / "ocr"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{h}.json"
 
 
 # ── Config / Favorites ────────────────────────────────────────────────

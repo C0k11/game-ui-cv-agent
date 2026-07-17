@@ -592,10 +592,11 @@ class ScheduleSkill(BaseSkill):
             self._goto("open_room")
             return action_click_box(start, "start schedule")
 
-        # Generic / ticket-shortage popups — base helper resolves confirm/cancel
-        # via OCR+YOLO bottom-up. NOTE: SCHED_ALL is the WORK surface, never a
-        # popup — the base helper keys off dialog headers/buttons, not SCHED_ALL,
-        # so it won't touch the popout (task #3 dead-loop guard).
+        # Generic / ticket-shortage popups — base helper is pure cls now
+        # (确认+取消/叉 结构 → 默认点取消/叉掉, 绝不盲确认). NOTE: SCHED_ALL is the
+        # WORK surface, never a popup — the helper keys off dialog buttons (确认
+        # 键/取消键 cls), not SCHED_ALL, so it won't touch the popout (task #3
+        # dead-loop guard).
         popup = self._handle_common_popups(screen)
         if popup:
             return popup

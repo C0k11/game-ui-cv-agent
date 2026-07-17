@@ -132,6 +132,22 @@ SWEEP_START = "扫荡开始"             # 108 (39f)
 TASK_START = "任务开始"              # 109 (27f)
 SORTIE = "出击"                     # 124 (44f)
 
+# ── 批量扫荡 dialog (master 455-468; 453/454 见 特殊任务 section) ────
+SWEEP_BATCH = "批量扫荡"             # 455  button on the 任務 stage screen
+SWEEP_BATCH_START = "批量扫荡开始"    # 456  dialog confirm (active)
+SWEEP_BATCH_START_GREY = "批量扫荡开始灰色"  # 457  dialog confirm (disabled)
+SWEEP_GEAR_SMALL_SEL = "前置小装备已选中"    # 458
+SWEEP_PLAN1 = "困难关卡刷取方案一"    # 459
+SWEEP_PLAN2 = "困难关卡刷取方案二"    # 460
+SWEEP_GEAR_SMALL = "前置小装备"       # 461
+SWEEP_GEAR_BIG_SEL = "大装备已选中"   # 462
+SWEEP_GEAR_BIG = "大装备"            # 463
+SWEEP_PLAN1_SEL = "困难关卡刷去方案一已选中"   # 464 (typo in master: 刷去)
+SWEEP_PLAN2_SEL_B = "困难方案刷取方案二已选中"  # 465 (label variant)
+SWEEP_PLAN2_SEL = "困难关卡刷取方案二已选中"   # 466
+BATTLE_COMPLETE = "战斗完成"          # 467  sweep/battle result header
+GOTO_NOW = "立即前往"                # 468
+
 # ── 票券 ─────────────────────────────────────────────────────────────
 TICKET_BOUNTY = "悬赏通缉票"          # 85  (20f)
 TICKET_ARENA = "战术大赛票"           # 91  (41f)
