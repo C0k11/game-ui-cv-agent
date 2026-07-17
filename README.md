@@ -143,8 +143,8 @@ pip install -r requirements.txt
 py -m uvicorn server.app:app --host 127.0.0.1 --port 8000
 # then open http://127.0.0.1:8000/dashboard.html
 
-# Battle-lock demo (--lead-ms ≈ end-to-end latency to predict ahead):
-py scripts/battle_overlay_demo.py --fps 240 --conf 0.05 --lead-ms 40
+# Combat 2.0 (scrcpy blackboard + behavior-tree card play):
+py -u scripts/bot_play_quest.py 10 11 12
 ```
 
 ### Train / iterate a model
@@ -165,13 +165,13 @@ ai-game-secretary/
 ├── brain/
 │   ├── pipeline.py          # interceptors, model-registry resolve, async trajectory writer
 │   └── skills/              # one module per skill
-├── vision/                  # OCR, avatar matcher, YOLO wrappers
+├── vision/                  # OCR normalize, florence (dashboard tooling)
 ├── server/                  # FastAPI app + dashboard.html
-├── scripts/                 # train / build / eval / battle-overlay
+├── scripts/                 # train / build / eval / sweep / shop
 │   ├── train_yolo26.py
 │   ├── build_fused_avatar_dataset.py
 │   ├── build_ui_v2.py
-│   ├── battle_overlay_demo.py
+│   ├── bot_play_quest.py
 │   └── ocr_training/
 ├── data/
 │   ├── model_registry.json  # active model versions (single source of truth)
