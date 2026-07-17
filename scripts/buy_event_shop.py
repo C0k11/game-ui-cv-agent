@@ -42,6 +42,26 @@ def main():
     tap = lambda x, y: adb._shell(f"input tap {x} {y}")  # noqa: E731
     ocr = _get_ocr()
 
+    # 飞轮: 商店帧=购买按钮/价格条/确认框补标素材(task#18), ADB 干净帧
+    import cv2, time as _t
+    fly_dir = ROOT / "data" / "raw_images" / \
+        f"flywheel_event_shop_{_t.strftime('%Y%m%d')}"
+    fly_dir.mkdir(parents=True, exist_ok=True)
+    _fly_i = [0]
+    _raw_cap = adb.capture_frame
+
+    def _cap():
+        fr = _raw_cap()
+        if fr is not None:
+            try:
+                cv2.imencode(".jpg", fr, [cv2.IMWRITE_JPEG_QUALITY, 92])[1] \
+                    .tofile(str(fly_dir / f"frame_{_fly_i[0]:04d}.jpg"))
+                _fly_i[0] += 1
+            except Exception:
+                pass
+        return fr
+    adb.capture_frame = _cap
+
     def dets(fr, conf=0.5):
         r = ui.predict(fr, conf=conf, imgsz=960, verbose=False)[0]
         return [(ui.names[int(b.cls[0])], float(b.conf[0]),

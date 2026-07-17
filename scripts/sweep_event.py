@@ -54,8 +54,11 @@ def main():
                 continue
             d = dets(fr, 0.35)
             names = {n for n, *_ in d}
-            if "活动quest_已选择" in names or \
-                    any(n.startswith("关卡得星") for n in names):
+            # 正锚必须是「关卡得星_3」精确匹配: Challenge 行的灰星是
+            # 独立类「关卡得星_0」(idx83), startswith 会在 Challenge tab
+            # 误通过→点入场=踩"Challenge 绝不自动进"铁律(2026-07-17
+            # nav 目检实锤, 差点重蹈 07-15 误入坑)
+            if "活动quest_已选择" in names or "关卡得星_3" in names:
                 return fr
             p = box_center(d, "活动quest")
             if p:

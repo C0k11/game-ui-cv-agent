@@ -148,7 +148,10 @@ class ArenaSkill(BaseSkill):
         # offline on the live frame ('4/5' → (4,5)) with margin both sides.
         x1 = max(0.0, icon.x2 + 0.050)
         x2 = min(1.0, x1 + 0.08)
-        raw = run_digit_ocr(frame, (x1, icon.y1 - bh * 0.4, x2, icon.y2 + bh * 0.4))
+        # strip 高 ±0.8bh: ±0.4bh 是临界高度, icon 检测框轻微抖动就把
+        # 分母/整串裁没(2026-07-17 live 12 连 None 实锤; ±0.8bh 变体
+        # 同帧完整读出 '3/5', 上邻活动框/下邻重新开始键都够不着)
+        raw = run_digit_ocr(frame, (x1, icon.y1 - bh * 0.8, x2, icon.y2 + bh * 0.8))
         res = parse_count(raw)
         if res is None or res[0] is None:
             return None

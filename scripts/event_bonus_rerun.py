@@ -76,11 +76,11 @@ def main():
                 continue
             d = dets(ui, fr, 0.35)
             names = {n for n, *_ in d}
-            # 正锚①活动quest_已选择(实测在部分列表状态漏检) ②关卡得星_N:
-            # Quest 关已全3星 / Challenge 全0星(用户抄轴前不打) → 视野有
-            # 得星徽章=必在 Quest 列表。⚠此假设生命周期=Challenge 未打期间。
-            if "活动quest_已选择" in names or \
-                    any(n.startswith("关卡得星") for n in names):
+            # 正锚①活动quest_已选择(实测在部分列表状态漏检) ②关卡得星_3
+            # 精确匹配 — ⚠Challenge 行灰星是独立类「关卡得星_0」(idx83),
+            # 旧 startswith 在 Challenge tab 会误通过(2026-07-17 实锤,
+            # "视野有得星徽章=必在 Quest"的旧假设错误)
+            if "活动quest_已选择" in names or "关卡得星_3" in names:
                 return fr
             tab = next((x for x in d if x[0] == "活动quest"), None)
             if tab is not None:
