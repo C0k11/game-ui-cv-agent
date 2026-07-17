@@ -51,15 +51,17 @@ class Snapshot:
         return [c for c in self.cards if c[3] > LIT_SAT]
 
 
-def _hp_of(crop_bgr) -> float:
-    """我方框内绿血条宽比 ≈ HP%. 绿=HSV(35-60, S>110, V>130)."""
+def _hp_of(crop_bgr):
+    """我方框内绿血条宽比 ≈ HP%. 绿=HSV(35-60, S>110, V>130).
+    读不出(空crop/无绿像素=遮挡/特效盖条)返回 None 哨兵 —
+    回退 1.0 会把残血读成满血, 急救规则失灵."""
     if crop_bgr.size == 0:
-        return 1.0
+        return None
     h = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
     g = ((h[..., 0] > 35) & (h[..., 0] < 60) &
          (h[..., 1] > 110) & (h[..., 2] > 130))
     cols = g.any(axis=0)
-    return float(cols.mean()) if cols.any() else 1.0
+    return float(cols.mean()) if cols.any() else None
 
 
 class Perception(threading.Thread):
@@ -99,9 +101,15 @@ class Perception(threading.Thread):
                  float(b.xyxy[0][2]) / W, float(b.xyxy[0][3]) / H)
                 for b in (r.boxes or [])]
 
+    def clear_victory(self):
+        """胜利误报重置(run_battle ADB 二次确认判定误报时调)."""
+        with self._lock:
+            self._snap.victory = False
+
     def run(self):
         n_frames, t_fps, last_seq, last_fly = 0, time.time(), 0, 0.0
         ui_names, fly_i = set(), 0
+        vic_n = 0        # 「战斗胜利」连续帧计数(单帧误检不锁存)
         while not self._stop.is_set():
             fr, age, seq = self.feed.latest()
             if fr is None or seq == last_seq:
@@ -146,11 +154,14 @@ class Perception(threading.Thread):
                     pass
                 fly_i += 1
                 last_fly = time.time()
+            vic_n = vic_n + 1 if "战斗胜利" in bnames else 0
             with self._lock:
                 s = self._snap
                 s.ts, s.seq = time.time(), seq
                 s.lum = float(fr[::8, ::8].mean())
-                s.victory = s.victory or "战斗胜利" in bnames
+                # 连续 2 帧才锁存(单帧误检=特效/结算过场闪烁, 误判胜
+                # 会提前退战斗循环; 胜利横幅持续数秒, 2 帧@18fps 不漏)
+                s.victory = s.victory or vic_n >= 2
                 s.auto_on = "自动战斗开启" in bnames
                 s.in_battle = bool(bnames & BATTLE_HUD)
                 s.allies, s.enemies, s.cards = allies, enemies, cards
@@ -202,7 +213,10 @@ class CombatBrain:
     def tgt_ally_low(self, s: Snapshot):
         if not s.allies:
             return None, "我方?"
-        a = min(s.allies, key=lambda x: x[2])
+        readable = [a for a in s.allies if a[2] is not None]
+        if not readable:                  # 全员血条被遮 → 退我方群心
+            return self.tgt_ally_center(s)
+        a = min(readable, key=lambda x: x[2])
         return (a[0], a[1]), f"我方HP{a[2]:.0%}"
 
     def tgt_ally_center(self, s: Snapshot):
@@ -227,7 +241,7 @@ class CombatBrain:
 
         heal = [c for c in lit if info(c).get("heal") or
                 info(c).get("role") == "Healer"]
-        low = min((a[2] for a in s.allies), default=1.0)
+        low = min((a[2] for a in s.allies if a[2] is not None), default=1.0)
         if heal and low < 0.55:
             return "急救", heal[0], self.tgt_ally_low
         # enemy 卡只在有敌检出时选(空场放 EX = 纯浪费, 屏心兜底只留给
@@ -308,12 +322,19 @@ class CombatBrain:
             self.fail_n[name] = 0
 
     def _card_gone(self, name: str) -> bool:
-        """释放实锤 = 卡从手牌消失(等黑板出新帧再判)."""
-        seq0 = self.p.snapshot().seq
-        for _ in range(12):
+        """释放实锤 = 卡从手牌消失, 连续 2 个新帧确认.
+        单帧判定会被特效遮挡漏检骗成"释放成功"击穿失败退避
+        (2026-07-16 审计); 任一帧见卡 = 没放出去, 立即 False."""
+        last, gone_n = self.p.snapshot().seq, 0
+        for _ in range(24):               # ≤1.2s 窗口(断流时拿不满2帧)
             s = self.p.snapshot()
-            if s.seq > seq0:
-                return all(c[0] != name for c in s.cards)
+            if s.seq > last:
+                last = s.seq
+                if any(c[0] == name for c in s.cards):
+                    return False
+                gone_n += 1
+                if gone_n >= 2:
+                    return True
             time.sleep(0.05)
         return False
 
@@ -332,6 +353,19 @@ class CombatBrain:
                 time.sleep(1.0)
                 continue
             if s.victory:
+                # 胜利侧 ADB 干净帧二次确认(与判败侧对称): ADB 帧仍
+                # 检出战斗 HUD = scrcpy 侧误报 → 重置锁存继续打;
+                # 抓不到帧/横幅已过场 → 信连续2帧检出
+                if self.adb_capture is not None:
+                    fr = self.adb_capture()
+                    if fr is not None:
+                        bn = {d[0] for d in self.p._dets(
+                            self.p.battle, fr, 0.5)}
+                        if "战斗胜利" not in bn and bn & BATTLE_HUD:
+                            self.log("    (victory ADB 复核: 仍在战斗"
+                                     " — 误报重置, 继续)")
+                            self.p.clear_victory()
+                            continue
                 self.log(f"    ⭐胜利({time.time() - t0:.0f}s)")
                 return "win"
             if s.auto_on:                     # 状态门: 检出开启才点(接管)

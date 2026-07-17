@@ -59,10 +59,26 @@ def main():
         try:
             out = ocr.text_recognizer([crop])
             txts = out[0] if isinstance(out, tuple) else out
-            digs = re.findall(r"\d+", "".join(t for t, _ in (txts or [])))
+            # 千分位防线: "1,200"经findall拆成["1","200"]取[0]=1 →
+            # 1200家具穿过FURNITURE_PRICE过滤被当1块钱买(审计⑧) —
+            # 先剥分隔符再取第一段完整数字
+            raw = "".join(t for t, _ in (txts or []))
+            raw = raw.replace(",", "").replace(".", "").replace(" ", "")
+            digs = re.findall(r"\d+", raw)
             return int(digs[0]) if digs else None
         except Exception:
             return None
+
+    def _body_close_btn(d):
+        """对话框 body 区(0.15<cy<0.80)内的 取消键/叉叉 — 商店页自身
+        右上返回X(cy~0.05)绝不点(点=退出商店整页, 审计⑥)。
+        关闭是清理动作非守卫: conf≥0.5 防误检点到商品误开购买框."""
+        for n in ("取消键", "叉叉"):
+            b = next((x for x in d if x[0] == n and x[1] >= 0.5
+                      and 0.15 < (x[3] + x[5]) / 2 / x[7] < 0.80), None)
+            if b:
+                return b
+        return None
 
     def buy_one(px, py) -> str:
         """点购买 → MAX → 白名单闸确认。返回 bought/blocked/no_dialog."""
@@ -72,12 +88,11 @@ def main():
         d = dets(fr, 0.20)
         names = {x[0] for x in d}
         if "确认键" not in names:          # 没弹框 = 买不起/售罄
-            # 兜底: 若有取消/叉能关就关
-            for n in ("取消键", "叉叉"):
-                b = next((x for x in d if x[0] == n), None)
-                if b:
-                    tap(int((b[2] + b[4]) / 2), int((b[3] + b[5]) / 2))
-                    time.sleep(1.5)
+            # 兜底: 只关 body 内的残留框(位置过滤, 审计⑥)
+            b = _body_close_btn(d)
+            if b:
+                tap(int((b[2] + b[4]) / 2), int((b[3] + b[5]) / 2))
+                time.sleep(1.5)
             return "no_dialog"
         mx = next((b for b in d if b[0] == "MAX_可点击"
                    and (b[3] + b[5]) / 2 / b[7] > 0.12), None)
@@ -93,19 +108,25 @@ def main():
         if "确认键" in names and "取消键" in names and not pyx_body:
             ck = next(b for b in d if b[0] == "确认键")
             tap(int((ck[2] + ck[4]) / 2), int((ck[3] + ck[5]) / 2))
-            time.sleep(2.5)
+            time.sleep(2.0)
             # 「獲得獎勵! TOUCH TO CONTINUE」全屏弹窗(2026-07-15 实锤
-            # 挡死后续检出) → 点屏中清掉; 再有确认/叉也收
-            tap(1920, 1750)
-            time.sleep(1.5)
-            fr = adb.capture_frame()
-            d = dets(fr, 0.5)
-            for n in ("确认键", "叉叉"):
-                b = next((x for x in d if x[0] == n), None)
-                if b:
-                    tap(int((b[2] + b[4]) / 2), int((b[3] + b[5]) / 2))
+            # 挡死后续检出) → **先 cls 验证横幅在场才点屏中**——
+            # 盲点(1920,1750)在横幅缺席时会点进商店网格误开购买框,
+            # 后面无闸点确认=白名单闸旁路(审计⑤根治)
+            for _ in range(3):
+                fr = adb.capture_frame()
+                d = dets(fr, 0.30)
+                if any(x[0] in ("獲得獎勵", "获得奖励", "点击继续字样")
+                       for x in d):
+                    tap(1920, 1750)
                     time.sleep(1.5)
-                    break
+                    continue
+                break
+            # 残留框只走关闭语义(取消/叉, body 位置过滤), 绝不点确认
+            b = _body_close_btn(d)
+            if b:
+                tap(int((b[2] + b[4]) / 2), int((b[3] + b[5]) / 2))
+                time.sleep(1.5)
             return "bought"
         if pyx_body:
             print("    ⛔body 检出青辉石 — 取消!", flush=True)
@@ -134,7 +155,9 @@ def main():
             row_ys = set()
             for ay in anchor_ys:
                 for ry in (ay - ROW_DY, ay, ay + ROW_DY):
-                    if 700 < ry < 2050 and not any(
+                    # 行闸 850: ry<850 时 read_price 读区(ry-150 起)伸进
+                    # 头部货币栏, 余额数字被当单价(审计⑦)
+                    if 850 < ry < 2050 and not any(
                             abs(ry - e) < 200 for e in row_ys):
                         row_ys.add(ry)
             items = []
@@ -148,7 +171,11 @@ def main():
             if not items:
                 return bought
             items.sort(key=lambda t: -t[0])   # 单价降序
-            items = [t for t in items if (t[1], t[2]) not in _dead]
+            # 拉黑距离匹配: ry 来自检出锚, ±5px 帧间抖动会击穿精确
+            # tuple 匹配 → 售罄位被反复点(审计⑨)
+            items = [t for t in items
+                     if not any(abs(t[1] - dx) < 40 and abs(t[2] - dy) < 40
+                                for dx, dy in _dead)]
             if not items:
                 return bought
             price, px, py = items[0]

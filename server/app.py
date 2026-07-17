@@ -814,9 +814,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
         _enable_high_resolution_timer()
         # Predefine so the `finally` cleanup never hits UnboundLocalError when we
-        # early-return before the high-FPS thread is created (e.g. window not
-        # found) — otherwise the real "Window not found" error gets masked.
+        # early-return before these are created (e.g. window not found) —
+        # otherwise finally dies mid-way: the real error gets masked AND
+        # _PIPELINE_RUNNING never resets → all later starts rejected.
         _yolo_hfps = None
+        _overlay = None
+        _scrcpy_feed = None
 
         hwnd = find_window_by_title_substring(window_title)
         if not hwnd:
@@ -4711,6 +4714,19 @@ def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         if _PIPELINE_RUNNING:
             _stop_pipeline()
+    except Exception:
+        pass
+    # Join the old worker OUTSIDE _PIPELINE_LOCK (its finally takes the
+    # lock — joining inside would deadlock). Without this, stop→start
+    # runs two workers concurrently ticking taps into the game (审计⑩).
+    try:
+        _old = _PIPELINE_THREAD
+        if _old is not None and _old.is_alive():
+            _old.join(timeout=15)
+            if _old.is_alive():
+                _LAST_PIPELINE_ERROR = ("previous pipeline worker did not "
+                                        "exit within 15s; start rejected")
+                return status()
     except Exception:
         pass
     # --- start new pipeline ---
