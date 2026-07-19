@@ -55,7 +55,11 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 # master layout: [0,142]=UI-A, [143,393]=avatars(251), [394,450]=UI-B,
 # 451=Emoticon_Action. A pass keeps ONLY boxes inside its span so the ui model
 # can't stamp a spurious avatar class onto a cafe sprite (and vice-versa).
-def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i != 451 and i < 476  # UI=非头像非emoticon非战斗身份段(476+)
+# 2026-07-17: ui 域含 451 Emoticon_Action — ui v6+ 已兼职摸头(live 管线
+# fold-in 正是靠它, emoticon 独立模型已退役), 旧表把 451 划给 emoticon
+# teacher 导致 ui 预标漏摸头框(用户抓)。⚠451 同时在 emoticon teacher 域
+# (dashboard 补标仍可用): 两域重叠, overwrite 模式二者都会重写 451 框。
+def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i < 476  # UI=非头像非战斗身份段(476+), 含451摸头
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
 # battle 静态 span — 只供 UI datalist 展示/校验; **写路径一律用
