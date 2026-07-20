@@ -25,15 +25,18 @@ SRCS = [RAW / n for n in [
     "axis_碧蓝档案_大决战_28_赫赛德_作业考古合集_p08_8_弹甲_4003w_BV19XFNzHEup_p8",
     "axis_碧蓝档案_大决战_32_白_黑_作业考古合集_p02_2_特甲_妹爱黑子3984w_BV1PtLn6zEF4_p2",
     "axis_碧蓝档案_大决战_27_薇娜_作业考古合集_p05_5_弹甲_国家队3949w_BV1giiYBeELr_p5",
-    # v10 增量: DEFEAT 池(cls484 战斗失败×28, 用户人审) + combat2.0 botplay 实战池
+    # v10 增量: DEFEAT 池(cls484 战斗失败×28, 用户人审✓)
     "defeat_candidates_v10",
-    "run_20260715_024743_botplay_clean",
-    "run_20260715_025638_botplay_clean",
-    "run_20260715_030821_botplay_clean",
-    "run_20260715_031051_botplay_clean",
-    "run_20260715_031909_botplay_clean",
-    "run_20260715_042334_botplay_clean",
-    "run_20260715_042834_botplay_clean",
+    # ⛔botplay×7(498帧)撤出 v10(2026-07-20 用户抓): battle 域框=battle v9 自己预标,
+    # 未过人审 — 自蒸馏会固化 v9 系统性误检。待用户审完(flywheel_review 清单②:
+    # DEFEAT 口径/瞄准态/技能卡抽查)再进 v11。
+    # "run_20260715_024743_botplay_clean",
+    # "run_20260715_025638_botplay_clean",
+    # "run_20260715_030821_botplay_clean",
+    # "run_20260715_031051_botplay_clean",
+    # "run_20260715_031909_botplay_clean",
+    # "run_20260715_042334_botplay_clean",
+    # "run_20260715_042834_botplay_clean",
 ]]
 OUT = Path(r"D:\Project\ml_cache\models\yolo\dataset\battle_v10")
 REMAP = {476: 0, 477: 1, 128: 2, 129: 3, 130: 4, 134: 5, 136: 6,
