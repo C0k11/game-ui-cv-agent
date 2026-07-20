@@ -204,7 +204,7 @@
     }
   },
   "battle_heads": {
-    "active": "v9",
+    "active": "v10",
     "task": "detect",
     "n_classes": 4,
     "versions": {
@@ -298,6 +298,15 @@
         "map50": 0.989,
         "map5095": 0.942,
         "note": "2026-07-14 大蛇池(薇娜1080p60)入库: 新类大蛇local17 AP50=0.950; 倍速投票毒100框修正(track_prefill HUD改单帧直写)+白亮底1倍速新形态; 战斗胜利分层切分val=2首次验收0.995; warm v8, ep113; cache=False+workers4定稿(cache RAM+workers8炸1455 commit峰值, 第二次实锤)"
+      },
+      "v10": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v10/weights/best.pt",
+        "arch": "yolo26s",
+        "imgsz": 960,
+        "nc": 19,
+        "map50": 0.992,
+        "map5095": 0.9564,
+        "note": "2026-07-20 新类战斗失败local18(defeat_candidates_v10 28帧用户人审, DEFEAT红横幅口径): val P0.952/R1.0/AP50 0.995 — 根治'判败靠兜底'。训练源=v9九池+defeat28净料(botplay×7预标未人审被用户叫停撤出, 审完进v11 — 自蒸馏纪律)。warm v9 best, ep66早停best=ep26, train2001/val353(战斗失败23/5+胜利17/2分层)。同卷对比(battle_v10卷353帧): v9剔cls18后≈0.993 vs v10=0.992 持平, 无类退步>0.01, mAP50-95 0.942→0.956。regression battle 1/1。"
       }
     },
     "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
