@@ -168,6 +168,16 @@ REAL_SOURCES = [
     # / 96活动任务锚定补标(+485) / 475奖励资讯改名清洗 / 战斗帧已分离(battle池,
     # 另训战斗模型) / 147空帧已删。新类: 474距离奖励获得结束 / 475奖励资讯。
     "run_20260617_merged_clean",
+    # ── v14 素材 (2026-07-17, 用户 dashboard 人审 + 误标四类批量清零) ────────
+    # 0711 大合并池: 7/11 daily 全链(战术大赛/悬赏/信用商店/青辉石商店/momo)。
+    # 103 灰态清理过(5 灰暗删, 亮蓝 124 保留)。
+    "run_20260711_merged_clean",
+    # 0717 大合并池(16 源池, 帧名前缀溯源 evshop/0709m/0717a…): 午夜派对活动商店
+    # (evshop 77帧: 103 OCR辅助标注165亮态/101_已选择30/102x150/104x19, 灰态遮罩全剔)
+    # + 7/09-7/17 daily 走线 dHash 稀疏后 distinct 帧 + idx77 当期活动入口(用户手标)
+    # + cls451 摸头(prefill span 修复后补标53框)。误标清零: Challenge 语义框/405↔474
+    # 混淆(2框)/灰确认 20→23(41框)。
+    "run_20260717_merged_ui_clean",
 ]
 SYNTH_SOURCES = []   # v7: 砍头像 synth(头像归 fused v6 专精; rehearsal 仅 unified 才需要) → ui v7 纯 UI+emoticon 真实帧
                  # ⚠️ v6c (2026-06-06 用户决策): 砍 _synth_ui_swap — UI 只用真实帧根治 synth 过拟合

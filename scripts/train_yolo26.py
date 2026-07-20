@@ -846,6 +846,54 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v14": {
+        # v14 (2026-07-17) = v13 warm + 0711 大合并池(1624) + 0717 大合并池(442,
+        #  16源池: 午夜派对活动商店 evshop 77帧[103 OCR辅助165亮态/101已选择30/
+        #  102x150/104x19] + idx77当期活动入口用户手标 + 451摸头span修复补标53)。
+        #  误标四类批量清零: Challenge语义框/405↔474混淆/灰购买/灰确认20→23。
+        #  配方 = v13 args.yaml 复刻(cache=False, v13 爆盘教训后 disk 永不再用)。
+        #  验收闸: by-cls 对比 v13, momo 四类+剧情类群任何一类退步不上 registry。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v13" / "weights" / "last.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v14",
+        "cache": False,
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "battle_yolo26s_v10": {
+        # 战斗 v10 (2026-07-17) = v9 warm + DEFEAT 池(cls484 战斗失败×28 用户人审,
+        #  local18, nc=19) + botplay 实战7池(combat2.0 scrcpy 飞轮 498帧, battle 域
+        #  框 REMAP 自取)。战斗胜利+失败双稀缺类分层切分(train23/val5)。
+        #  botplay 侧 DEFEAT 同帧副本已清(_defeat_dedup_backup, 矛盾标签防线)。
+        #  配方 = v9(cache=False+workers4 定稿, batch16 本机上限)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v10" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v9" / "weights" / "best.pt"),
+        "epochs": 150,
+        "patience": 40,
+        "save_period": 10,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "battle_yolo26s_v10",
+        "cache": False,
+        "workers": 4,
+        "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
