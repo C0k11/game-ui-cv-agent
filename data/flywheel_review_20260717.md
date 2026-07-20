@@ -44,6 +44,19 @@ evshop=活动商店 / 0709m=7月9日大池 / 0717a=今天daily走线 / 其余日
 - ✅ 格式: label 全 5 列 master 索引(yolo_prefill_run 保证), classes.txt=master 副本
 - ⚠ val 纪律: 这批全部是连续 live 录制 → **审完只进 train, 不切 val**(近邻泄漏铁律); 新 val 仍需独立走查 session
 
+## 405/474 混淆审计(2026-07-17, 用户抓误标后全量核查)
+
+- 两池(merged_ui + 0711_merged)全部 405/474 框 OCR 复核(判定键=「獲得」474专属 vs「還剩」405专属 —
+  ⚠ba_rec 系统性吞「獎勵」二字, 第一版"无獎勵判405"规则差点反向改错 73 框, dry-run 拦下):
+  **ok405=184 / ok474=75 / 修正 2 框**(405→474: `0715c__frame_000004` + `0717a__frame_000006`,
+  hub 左上「距離獎勵獲得結束」上期领奖 banner 被标当期入口 — 不修 v14 会把领奖倒计时学成活动入口, 7/15 进错活动坑复活)。
+- 人工 1 帧: `run_20260711_merged_clean/144712_frame_000002` cls405 框内 OCR 零字(目检定 405/474)。
+
+## 本次迭代训练源(用户 2026-07-17 定稿)
+
+**ui v14 = 现有 REAL_SOURCES + `run_20260717_merged_ui_clean`(442) + `run_20260711_merged_clean`(1,624)**(两池人审完就 build);
+battle v10 = v9 九池 + defeat_candidates_v10 + botplay×7(battle 域框)。
+
 ## 训练顺位建议(审完后)
 
 1. **ui v14**: build_ui_v2 REAL_SOURCES += 本批 UI 池+event_shop → 修商店盲区+idx77+购买按钮/价格条
