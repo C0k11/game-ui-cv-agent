@@ -860,10 +860,13 @@ TRAIN_CONFIGS = {
         "patience": 30,
         "save_period": 5,
         "imgsz": 960,
-        "batch": 12,
+        # batch 12→10 (2026-07-20): nc485 下 batch12 steady 19.2G+桌面2G 贴 23G 顶,
+        # ep5 密集实例尖峰 CUDA OOM 实锤。nbs=64 累积: 12×5=60 vs 10×6=60 有效
+        # batch 一致, 训练动力学不变。workers 8→6 同理给 32G RAM 留余量(4K解码)。
+        "batch": 10,
         "out_name": "ui_yolo26m_v14",
         "cache": False,
-        "workers": 8,
+        "workers": 6,
         "lr0": 0.005,
         "weight_decay": 0.0005,
         "dropout": 0.0,
