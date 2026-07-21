@@ -176,6 +176,7 @@ class ScheduleSkill(BaseSkill):
         self._jumped_to_last: bool = False  # done the initial ARROW_LEFT jump?
         self._regions_seen: int = 0         # regions whose popout we've opened
         self._full_circle: bool = False     # traversed all regions → fallback
+        self._circle_start_dispatch: int = 0  # _dispatch_count at circle start(空转退出用)
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
         # per-region (reset on each region switch)
         self._region_locked: Optional[bool] = None   # case A (True) / B (False)
@@ -874,19 +875,25 @@ class ScheduleSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "tickets exhausted → exit")
 
-        # Full circle: traversed every region. If targets weren't found and
-        # tickets remain, flip the fallback so the next popouts spend leftovers;
-        # otherwise we're done.
+        # Full circle: traversed every region. 2026-07-21 逐帧审修: 一整圈**没派出
+        # 任何学生**(_dispatch_count 没增 = 无可派对象)就直接退出, 不再因 tickets>0
+        # 硬撑 fallback 空转(旧码: 学生排完但剩票时绕 ~28 区到 max_ticks=320 才退,
+        # 中断的 autonomous 重跑复现 tick 201 空转)。只有本圈真派出过学生+还剩票, 才
+        # 值得再扫一圈捡漏。
         if self._regions_seen >= _MAX_REGIONS:
-            if (self._tickets is None or self._tickets > 0) and not self._full_circle:
-                self.log("full circle done, tickets remain → fallback "
-                         "(spend leftover on any room)")
+            _dispatched_this_circle = self._dispatch_count > self._circle_start_dispatch
+            if ((self._tickets is None or self._tickets > 0)
+                    and not self._full_circle and _dispatched_this_circle):
+                self.log("full circle: 本圈派出过+剩票 → fallback 再扫一圈捡漏")
                 self._full_circle = True
-                self._regions_seen = 0  # one more pass to spend leftovers
+                self._regions_seen = 0
+                self._circle_start_dispatch = self._dispatch_count
             else:
-                self.log(f"full circle done ({self._regions_seen} regions) → exit")
+                _why = ("本圈零派出(无可派对象)" if not _dispatched_this_circle
+                        else f"full circle done ({self._regions_seen} regions)")
+                self.log(f"{_why} → exit")
                 self._goto("exit")
-                return action_wait(300, "full circle → exit")
+                return action_wait(300, "schedule circle done → exit")
 
         # Close a lingering popout first. Pace it (稳定规则 2026-06-11): a
         # double-fired X/ESC lands on the region screen behind and exits to
