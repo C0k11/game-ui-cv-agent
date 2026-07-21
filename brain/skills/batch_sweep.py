@@ -220,8 +220,12 @@ class BatchSweepSkill(BaseSkill):
         if not self._maxed:
             max_btn = self.find_cls(screen, UC.QTY_MAX, conf=_CLS_CONF)
             if max_btn is not None:
-                self._maxed = True
-                self.log("click MAX (count → AP ceiling)")
+                # 双发 latch(2026-07-21 mutate-before-ack: MAX 首发被吞时旧码已
+                # _maxed=True → MAX 没点上只扫默认次数)。连发两 tick 再 latch。
+                self._max_fires = getattr(self, "_max_fires", 0) + 1
+                if self._max_fires >= 2:
+                    self._maxed = True
+                self.log(f"click MAX (fire {self._max_fires}, count → AP ceiling)")
                 return action_click_box(max_btn, "sweep count MAX")
             # MAX already grey? count may already be capped — proceed.
             if self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF) is not None:
@@ -273,9 +277,11 @@ class BatchSweepSkill(BaseSkill):
         if confirm is not None and cancel is not None:
             if self._phase_ticks % 3 != 1:
                 return action_wait(700, "confirm clicked — settling")
+            # reason 加"確認键"(2026-07-21 mutate-before-ack: 渲染好的确认框属
+            # "看到就点", 稳定门豁免立即点 → 不被吞 → goto running 前置安全)。
             self.log("掃蕩內容 confirm (AP only, verified)")
             self._goto("running")
-            return action_click_box(confirm, "confirm batch sweep (AP)")
+            return action_click_box(confirm, "confirm batch sweep (AP, 確認键)")
         sid, _, _ = self._screen(screen)
         if sid == "sweep_running":
             self._goto("running")

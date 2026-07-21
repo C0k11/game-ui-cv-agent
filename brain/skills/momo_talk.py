@@ -206,7 +206,9 @@ class MomoTalkSkill(BaseSkill):
             self._goto("scan")
             return action_wait(250, "unread list ready → scan")
 
-        if not self._tab_opened:
+        # or action_suppressed(2026-07-21 mutate-before-ack 缓解): tab 点击被吞时
+        # _tab_opened 已 True 会跳过重点 → 干等到 _TAB_MAX。被吞则重检重点。
+        if not self._tab_opened or self.action_suppressed:
             tab = self.find_cls(screen, UC.MOMO_CHAT_TAB, conf=_CLS_CONF)
             if tab is not None:
                 self._tab_opened = True
@@ -280,6 +282,15 @@ class MomoTalkSkill(BaseSkill):
         return action_wait(300, "scan complete → exit")
 
     def _dialogue(self, screen: ScreenState) -> Dict[str, Any]:
+        # open-student 点击被吞回弹(2026-07-21 mutate-before-ack 缓解): scan 提前
+        # goto dialogue, 若开启点击被吞且未进会话 → 回 scan 重开(_bump_open 多计
+        # 1 无害, fresh 过滤仍会重开)。
+        if (self.action_suppressed and self._phase_ticks <= 1
+                and not self._in_conversation(screen)
+                and not self._in_story(screen)):
+            self.log("open-student 点击被吞 → 回 scan 重开")
+            self._goto("scan")
+            return action_wait(300, "open swallowed → rescan")
         if self._phase_ticks > _DIALOGUE_MAX:
             self.log("dialogue timeout → scan")
             self._goto("scan")
@@ -328,7 +339,10 @@ class MomoTalkSkill(BaseSkill):
         if reply is not None:
             self._reply_gone = 0
             rpos = (round(reply.cx, 2), round(reply.cy, 2))
-            if rpos not in self._reply_positions:
+            # or action_suppressed(2026-07-21 mutate-before-ack 缓解): reply 点击
+            # 被吞时 rpos 已进 dedup → 同位被跳过 → 学生半途弃聊(横跳 bug 类)。
+            # 被吞则重点同位。
+            if rpos not in self._reply_positions or self.action_suppressed:
                 self._reply_positions.add(rpos)
                 self._empty_streak = 0
                 self._sending_streak = 0

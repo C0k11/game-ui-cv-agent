@@ -575,11 +575,15 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"⛔ 已排课{self._dispatch_count}次 >= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
                 self._goto("exit")
                 return action_wait(300, "at ticket cap → EXIT, do NOT confirm")
-            self._dispatch_count += 1
+            # 被吞的确认不虚增票计数(2026-07-21 mutate-before-ack: 虚高→假触
+            # _MAX_TICKETS 早退, 排课没做完; 方向 fail-safe 不会多买票)。reason
+            # 加"確認键"稳定门豁免立即点(渲染好的确认框=看到就点)。
+            if not self.action_suppressed:
+                self._dispatch_count += 1
             self.log(f"schedule report → confirm (#{self._dispatch_count}, YOLO 确认键)")
             self._ticket_read_pending = True  # re-read count back on the popout
             self._goto("roster")
-            return action_click_box(report_confirm, "confirm schedule report")
+            return action_click_box(report_confirm, "confirm schedule report (確認键)")
 
         # PRIORITY 2: 課程表資訊 info popup — click 課程表開始 (SCHED_START).
         start = self.find_cls(
@@ -588,9 +592,11 @@ class ScheduleSkill(BaseSkill):
         if start is None:  # SCHED_START sometimes mid-frame outside the band
             start = self.find_cls(screen, UC.SCHED_START, conf=_CLS_CONF)
         if start is not None:
+            # reason 加"確認键"(2026-07-21 mutate-before-ack: 課程表開始 渲染好即
+            # 可点, 稳定门豁免立即点 → 不被吞 → goto open_room 前置安全)。
             self.log("schedule info → start (YOLO 课程表开始)")
             self._goto("open_room")
-            return action_click_box(start, "start schedule")
+            return action_click_box(start, "start schedule (確認键)")
 
         # Generic / ticket-shortage popups — base helper is pure cls now
         # (确认+取消/叉 结构 → 默认点取消/叉掉, 绝不盲确认). NOTE: SCHED_ALL is the

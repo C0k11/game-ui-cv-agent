@@ -70,6 +70,7 @@ class CraftSkill(BaseSkill):
         self._quick_settle: int = 0
         self._started: bool = False
         self._start_clicked: bool = False  # we pressed 开始制造 → confirm is ours
+        self._craft_confirm_clicked: bool = False  # 点過確認; latch _started 仅凭到达证据
         self._start_taps: int = 0          # 开始制造 clicks w/o resulting confirm
         self._claims: int = 0
 
@@ -247,15 +248,26 @@ class CraftSkill(BaseSkill):
         dlg = self._confirm_dialog(screen)
         if dlg is not None:
             if self._start_clicked:
+                # 不提前 latch _started(2026-07-21 mutate-before-ack 根治: reason
+                # 无"確認"被稳定门吞时旧码已 _started=True+goto exit → craft 没开始
+                # 却报 done)。latch 延迟到确认框消失(到达证据, 下方); reason 加
+                # "確認键"稳定门豁免立即点。
                 self.log("confirming craft start (確定製造N次, 耗信用点 — safe)")
-                self._started = True
-                self._goto("exit")
-                return action_click_box(dlg, "confirm craft start (credits)")
+                self._craft_confirm_clicked = True
+                return action_click_box(dlg, "confirm craft start (credits, 確認键)")
             self.log("⛔ unexpected confirm dialog in start state (开始制造 not clicked) → cancel (券-safe)")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
             if cancel is not None:
                 return action_click_box(cancel, "cancel unexpected dialog (券-safe)")
             return action_back("dismiss unexpected dialog (券-safe)")
+
+        # 到达证据: 已点過確認 且确认框现已消失 → craft 已开始 → latch _started
+        # (post-ack, 绝不在点击前)。
+        if self._craft_confirm_clicked:
+            self.log("确认框消失 → craft 已开始 → exit")
+            self._started = True
+            self._goto("exit")
+            return action_wait(300, "craft started → exit")
 
         # In the 快速制造 dialog? MAX_可点击 / 开始制造 present.
         # max_btn 找 可点击 或 灰色(已到顶) — 后者也是"在 dialog 里"的锚点。

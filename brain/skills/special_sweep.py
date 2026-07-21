@@ -163,6 +163,14 @@ class SpecialSweepSkill(BaseSkill):
         return action_wait(400, "scanning hub for 2x/3x bonus board")
 
     def _commission(self, screen: ScreenState) -> Dict[str, Any]:
+        # 被吞回弹(2026-07-21 mutate-before-ack 缓解): _board 提前 goto commission,
+        # 若 特殊任务 点击被吞且未进委托列表(无 STAGE_ENTER/SPECIAL_CREDIT)→ 回
+        # board 重点, 不在旧屏上 fixed-pos 乱点。
+        if (self.action_suppressed and self._phase_ticks <= 1
+                and self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF) is None
+                and self.find_cls(screen, UC.SPECIAL_CREDIT, conf=_CLS_CONF) is None):
+            self._goto("board")
+            return action_wait(300, "特殊任务 open 被吞 → 回 board")
         # On the 据点防御 stage list already? (re-entry) → stage.
         if self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF) is not None:
             self._goto("stage")
@@ -181,6 +189,14 @@ class SpecialSweepSkill(BaseSkill):
         return action_wait(400, "waiting for 委托 select (信用货币回收)")
 
     def _stage(self, screen: ScreenState) -> Dict[str, Any]:
+        # 被吞回弹(2026-07-21 mutate-before-ack 缓解): _commission 提前 goto stage,
+        # 若 信用货币回收 点击被吞且未进关卡列表/扫荡面板 → 回 commission 重点。
+        if (self.action_suppressed and self._phase_ticks <= 1
+                and self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX,
+                                           UC.QTY_MAX_GREY], conf=_CLS_CONF) is None
+                and self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF) is None):
+            self._goto("commission")
+            return action_wait(300, "commission open 被吞 → 回 commission")
         # In the sweep popup already (re-entry)? MAX/start visible → sweep.
         if self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX, UC.QTY_MAX_GREY],
                          conf=_CLS_CONF) is not None:
@@ -231,8 +247,13 @@ class SpecialSweepSkill(BaseSkill):
                 self._goto("close")
                 return action_wait(250, "MAX grey (insufficient) → close (money-safe)")
             if max_ok is not None:
-                self._maxed = True
-                self.log(f"click MAX (可点 c≥0.20 = 资源够); AP={ap}")
+                # 双发 latch(2026-07-21 mutate-before-ack: MAX 首发被吞时旧码已
+                # _maxed=True → MAX 没点上只扫默认次数)。连发两 tick 再 latch;
+                # 同目标 hold 缓冲无连射, MAX 幂等再点无害。
+                self._max_fires = getattr(self, "_max_fires", 0) + 1
+                if self._max_fires >= 2:
+                    self._maxed = True
+                self.log(f"click MAX (fire {self._max_fires}, 可点 c≥0.20); AP={ap}")
                 return action_click_box(max_ok, "sweep count MAX")
             # ⛔⛔ 2026-06-17 fail-closed 加固(多agent审计 #1/#2 核实后): 删掉旧的
             # "AP≥成本就固定位盲点 MAX" 兜底。它在 QTY_MAX cls 全闪时凭 AP 读数盲设 MAX

@@ -179,7 +179,11 @@ class MailSkill(BaseSkill):
             # Pace re-claims (稳定规则): reward / 通知 popup takes a beat.
             if self._phase_ticks % 3 != 1:
                 return action_wait(500, "claim clicked — settling")
-            self._claims += 1
+            # 被吞的点击不虚增计数(2026-07-21 mutate-before-ack 防御: 否则
+            # _claims 虚高 → 假触 _CLAIM_STUCK bag-full 早退, mail 没领完)。
+            # "claim" 本在稳定门豁免词表, 此防御主要覆盖 ADB 丢 tap 边缘。
+            if not self.action_suppressed:
+                self._claims += 1
             self.log(f"claim all mail (#{self._claims}, YOLO 一次领取黄色)")
             return action_click_box(claim_all, "claim all mail")
 
