@@ -98,6 +98,8 @@ class ShopSkill(BaseSkill):
         self._balance: Optional[int] = None   # credit balance read on the GRID
         self._purchased: bool = False
         self._budget_logged: bool = False
+        self._confirm_clicks: int = 0     # ack-loop: confirm 实际点击次数
+        self._dialog_gone: int = 0        # 点击后弹窗连续消失帧计数(=落地确认)
 
     def reset(self) -> None:
         super().reset()
@@ -449,11 +451,17 @@ class ShopSkill(BaseSkill):
             return action_back("cancel (pyroxene tab, ESC)")
         confirm = self._confirm_dialog(screen)
         if confirm is None:
-            # Dialog gone — purchased (reward) or dismissed → exit.
-            if self._phase_ticks > _CONFIRM_MAX:
+            # Dialog gone — purchased (reward) or dismissed → exit. 点过 confirm
+            # 后连续 2 帧无弹窗 = 点击已落地(容忍 1 帧 YOLO 闪断), 立即收尾
+            # (2026-07-21 live: mutate-before-ack 让 confirm 被稳定门吞后状态机
+            # 带假 _purchased 退出, 遗留弹窗被 stuck-20 点了取消 = 24件购买作废)。
+            self._dialog_gone += 1
+            if ((self._confirm_clicks > 0 and self._dialog_gone >= 2)
+                    or self._phase_ticks > _CONFIRM_MAX):
                 self._goto("exit")
                 return action_wait(300, "confirm dialog gone → exit")
             return action_wait(300, "waiting for confirm dialog")
+        self._dialog_gone = 0
 
         # ★ PRIMARY budget source (2026-06-12): the confirm dialog itself shows
         # 持有數量 (balance) and 總購買價格 (total) in large clear text — read
@@ -503,8 +511,17 @@ class ShopSkill(BaseSkill):
             tot = _DIALOG_CEILING
         self.log(f"dialog budget: 持有={bal:,} 總價={tot:,} reserve={self._reserve:,}")
         if bal - tot >= self._reserve:
+            # 2026-07-21 live 实锤: confirm 点击可能被 pipeline 帧稳定门吞成
+            # wait / ADB 丢 tap — 先 _goto("exit") 会让 confirm 永远不落地。
+            # 停在 confirm, 以"对话框消失"为点击落地的唯一确认(上方 dialog-gone
+            # 分支 → exit)。dedup 同目标 hold 限频不会连射; >4 次仍在 →
+            # fail-closed 退(绝不无限重试购买点击)。
+            self._confirm_clicks += 1
+            if self._confirm_clicks > 4:
+                self.log("confirm clicked 4x, dialog still up → exit (fail-closed)")
+                self._goto("exit")
+                return action_wait(300, "confirm stuck → exit")
             self._purchased = True
-            self._goto("exit")
             return action_click_box(confirm, "confirm shop purchase (within budget)")
         self.log("⛔ dialog budget: balance-total < reserve → cancel")
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)

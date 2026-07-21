@@ -113,9 +113,11 @@ class TicketSweepSkill(BaseSkill):
         self._maxed: bool = False
         self._safe_to_max: bool = False
         self._max_wait: int = 0
+        self._max_fires: int = 0          # MAX 双发 latch(稳定门吞首发防线)
         self._branch_clicks: int = 0
         self._branch_settle: int = 0
         self._sortie_retries: int = 0
+        self._zero_sweep_retried: bool = False   # 0-sweep 对账回炉只做一次
 
     def reset(self) -> None:
         super().reset()
@@ -436,8 +438,13 @@ class TicketSweepSkill(BaseSkill):
             # 不弹买票框, 且 _confirm 青辉石防线兜底 → 安全。固定位 fallback 仍保留兜底。
             max_btn = self.find_cls(screen, UC.QTY_MAX, conf=0.20)
             if max_btn is not None:
-                self._maxed = True
-                self.log("set sweep MAX (affordable)")
+                # 幂等钮: 首发可能被稳定门吞(2026-07-21 tick638/667 实锤,
+                # _maxed 先置位 → MAX 从没点到只扫1票), 连发两 tick 再落 latch。
+                # 第二发同目标被 same-target hold 缓冲, 无连射; 已生效再点无害。
+                self._max_fires = getattr(self, "_max_fires", 0) + 1
+                if self._max_fires >= 2:
+                    self._maxed = True
+                self.log(f"set sweep MAX (fire {self._max_fires})")
                 return action_click_box(max_btn, "set sweep MAX")
             # No SOLID MAX yet. During the 任務資訊 popup open-animation the MAX
             # button renders grey-then-solid; abandoning on the first miss (live
@@ -484,6 +491,21 @@ class TicketSweepSkill(BaseSkill):
             # Could be the 掃蕩完成 reward popup (确认键 lower at ~0.81).
             self._goto("result")
             return action_wait(150, "sweep done popup → result")
+
+        # ⛔⭐帧龄防误杀(2026-07-21 live tick640/669 实锤): 点完 扫荡开始 的下一
+        # tick 帧仍是未变暗的 任務資訊(扫荡开始+stepper 可见, 无确认键) —
+        # _purchase_structure 会把 popup 自带 stepper 当购买框 X 掉整个弹窗
+        # (0 票扫出+假报完成)。确认框 cls 证据出现前不跑 abort 判定; 真购买框
+        # 下 扫荡开始 被 dim 压掉检不出(t46 同源实证), 不会误放行。
+        # _phase_ticks<=8 时限: 丢 tap 时不无限遮蔽 L511 的 result 兜底。
+        if (self._phase_ticks <= 8
+                and self.find_cls(screen, UC.SWEEP_START, conf=_CLS_CONF) is not None
+                and self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
+                                  region=_CONFIRM_BAND) is None
+                and self.find_cls(screen, UC.BTN_CONFIRM_GREY, conf=_CLS_CONF,
+                                  region=_CONFIRM_BAND) is None
+                and not self._pyroxene_buy_dialog(screen)):
+            return action_wait(350, "confirm: 帧仍停任務資訊(pre-transition) — 等确认框")
 
         # ⛔ pyroxene buy dialog → cancel + exit.
         if self._pyroxene_buy_dialog(screen):
@@ -542,6 +564,7 @@ class TicketSweepSkill(BaseSkill):
             # Single-sweep path (JFD low-AP) leaves tickets → sweep again.
             self._tickets = tickets
             self._maxed = self._safe_to_max  # keep MAX state if we maxed
+            self._max_fires = 0              # 双发 latch 随轮次复位
             self.log(f"{tickets} tickets remain → sortie again")
             self._goto("sortie")
             return action_wait(300, "more tickets → sortie")
@@ -569,9 +592,21 @@ class TicketSweepSkill(BaseSkill):
             self.log(f"done ({self._sweep_cycles} sweeps)")
             return action_done(f"{self.name} complete")
         if page == "Mission":
+            # ⭐0-sweep 对账(2026-07-21 实锤: 误 abort 后 0 票扫出仍报 complete):
+            # 入场读到票>0 却一次没扫 → 一次性回炉重走(全部金钱防线重跑, 最坏
+            # =再 abort 收工, 绝不多点确认); 仍 0 则 done reason 亮明供对账。
+            if (self._sweep_cycles == 0 and (self._tickets or 0) > 0
+                    and not self._zero_sweep_retried):
+                self._zero_sweep_retried = True
+                self.log(f"⚠ tickets={self._tickets} but 0 sweeps → re-enter once")
+                self._goto("enter")
+                self._enter_ticks = 0
+                return action_wait(300, "0-sweep 对账不平 → 回炉重试")
             # Stay on the hub — the next campaign skill re-uses it.
             self.log(f"done on hub ({self._sweep_cycles} sweeps)")
-            return action_done(f"{self.name} complete (on hub)")
+            _tag = (" [⚠0 sweeps, tickets unspent]"
+                    if (self._sweep_cycles == 0 and (self._tickets or 0) > 0) else "")
+            return action_done(f"{self.name} complete (on hub){_tag}")
         if self._phase_ticks > 16:
             return action_done(f"{self.name} exit timeout")
         # A leftover 掃蕩完成 / dialog blocks ESC — dismiss its 确认键/X first.

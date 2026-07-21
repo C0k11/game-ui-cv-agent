@@ -395,6 +395,18 @@ class EventQuestSkill(BaseSkill):
         if banner is not None:
             if src_frame is not None and self._banner_blacklisted(screen, src_frame):
                 return action_wait(400, "405=已拉黑实例 — 等轮播下一项")
+            if self._blind_landing:
+                # fresh 分支同样吃相位修正(2026-07-21 三连同点 miss 实锤:
+                # verify 置 _blind_landing 后 fresh 分支从不读 = 死码, 三次
+                # 一模一样直点零自适应)。miss 后改 swipe-back 拉停轮播再点。
+                self._blind_landing = False
+                self._pending_hash = None
+                self._set("verify")
+                bcx = (banner.x1 + banner.x2) / 2
+                bcy = (banner.y1 + banner.y2) / 2
+                return action_swipe_tap(
+                    0.035, 0.185, 0.11, 0.185, bcx, bcy, duration_ms=150,
+                    reason="banner swipe-back tap (fresh, miss后回滑对齐)")
             # pHash 记账只在 fresh 模式有意义(tick 错位下"帧上项"≠"落点项",
             # 拉黑会反噬正确项)
             self._pending_hash = (self._banner_phash(screen, src_frame)

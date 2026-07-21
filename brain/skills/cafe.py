@@ -67,7 +67,8 @@ _EMOTICON_CONF = 0.40       # headpat marker. 0.55→0.40 STOPGAP (user 2026-06-
 #   v26n set + new frames) to restore 0.99-grade detection, then raise floor back.
 _AVATAR_CONF = 0.25         # fused_avatar row-head confidence (registry default)
 _HEADPAT_DX = 0.025         # click this much right of the bubble = student body
-_HEADPAT_DEDUP_DIST = 0.06  # skip clicks within this of a recent headpat
+_HEADPAT_DEDUP_DIST = 0.035  # skip clicks within this of a recent headpat
+                             # (0.06 过肥: 2026-07-21 实锤 0.05 间距两真学生被并)
 _HEADPAT_DEDUP_KEEP = 4     # remember the last N headpat coords for dedup
 _HEADPAT_DRY_FRAMES = 7     # consecutive empty frames ⇒ current view cleared
 #   3 (840ms) was too eager — emoticon bubbles render 400-600ms late after a
@@ -178,7 +179,8 @@ class CafeSkill(BaseSkill):
         super().__init__("Cafe")
         # 1F invite(~12)+headpat(~25)+switch(~5)+2F invite(~25)+headpat(~25)
         # ≈ 95 ticks worst-case; 160 leaves slack for retries/loads.
-        self.max_ticks = 160
+        self.max_ticks = 240   # 160 于 2026-07-21 在 2F pan 后精确超时, 帧上
+                               # 2 泡泡未拍; invite 空滚修复后仍留 ~80 tick 余量
         self._init_state()
 
     # ── state init / reset ────────────────────────────────────────────────
@@ -194,6 +196,7 @@ class CafeSkill(BaseSkill):
         self._invited: Set[str] = set()      # cls_names invited this run
         self._invite_floor_done: bool = False  # this floor's invite finished
         self._invite_stage: int = 0          # 0=open ticket 1=list 2=confirm
+        self._invite_pending_name: Optional[str] = None  # 落账延迟到确认发出
         self._invite_scrolls: int = 0
         self._invite_settle: int = 0         # post-swipe settle countdown
         self._invite_last_sig: str = ""
@@ -674,6 +677,7 @@ class CafeSkill(BaseSkill):
             confirm = self._confirm_btn(screen)
             if confirm is not None:
                 self.log("confirming invite (YOLO 确认键)")
+                self._commit_pending_invite()   # 确认动作发出 = 邀请落账
                 self._invite_stage = 0
                 self._invite_floor_done = True
                 return action_click_box(confirm, "confirm invite")
@@ -691,6 +695,7 @@ class CafeSkill(BaseSkill):
                 return action_wait(300, "re-pick invite row")
             if self._is_cafe(screen):
                 self.log("invite dialog gone, back on cafe → invite done")
+                self._commit_pending_invite()   # 经此路成功的邀请也落账(防跨楼重复)
                 self._invite_floor_done = True
                 return action_wait(300, "invite done (dialog dismissed)")
             return action_wait(350, "waiting for invite confirm dialog")
@@ -821,19 +826,29 @@ class CafeSkill(BaseSkill):
 
     def _fire_invite(self, btn: YoloBox, name: str, floor: int, tag: str
                      ) -> Dict[str, Any]:
-        if name and name != "?":
-            self._invited.add(name)
-            self._save_invited()
+        # ⭐fire 只记 pending, 确认框真被点掉才落账(2026-07-21 tick483 实锤:
+        # 邀请点击被 pipeline 稳定门吞掉, 凯伊 已进 _invited+落盘 → 榜单永久
+        # 跳过她 → 空滚 8 次到预算耗尽, 1F 邀请券整张未用+盘上状态毒化到04:00)。
+        self._invite_pending_name = name if (name and name != "?") else None
         self._invite_retry_btn = (btn.cx, btn.cy)
         self._invite_stage = 2
         self.log(f"inviting {tag} '{name}' at ({btn.cx:.2f},{btn.cy:.2f}) floor={floor}")
         return action_click_box(btn, f"invite {tag} {name}")
+
+    def _commit_pending_invite(self) -> None:
+        """确认动作真发出时才把 pending 邀请落账+落盘(phantom-action 防线)。"""
+        _n = getattr(self, "_invite_pending_name", None)
+        if _n:
+            self._invited.add(_n)
+            self._save_invited()
+        self._invite_pending_name = None
 
     def _recover_invite_overlay(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         """Dismiss a lingering invite confirm / list before leaving invite."""
         confirm = self._confirm_btn(screen)
         if confirm is not None:
             self.log("invite confirm still up, clicking confirm")
+            self._commit_pending_invite()   # 2F 实走路径(2026-07-21): 这里落账
             return action_click_box(confirm, "confirm lingering invite")
         if self._invite_list_open(screen):
             close = self._close_x(screen, region=(0.56, 0.04, 0.90, 0.24))
@@ -936,6 +951,14 @@ class CafeSkill(BaseSkill):
         self._empty_frames += 1
         if self._empty_frames < _HEADPAT_DRY_FRAMES:
             return action_wait(280, f"scanning headpat (empty={self._empty_frames}, pan={self._pan_dir})")
+        # ⭐dry 前最后一扫: 清 dedup 残留(2026-07-21 tick595 实锤: 被吞的 pat
+        # 毒化 _recent_pats, 4 泡泡在屏仍判 empty×6)。真拍过的泡泡已消失,
+        # 清账无害; 假拍的(点击被吞)泡泡还在 → 捡回。
+        if self._recent_pats:
+            self._recent_pats = []
+            mark = self._emoticon_mark(screen)
+            if mark is not None:
+                return self._do_headpat(mark)
 
         # Current view is dry → pan to the next region.
         if self._pan_count >= _MAX_PANS_PER_FLOOR:

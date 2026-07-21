@@ -1606,10 +1606,45 @@ class DailyPipeline:
         Different-target clicks (multi-select cards, room heads) always pass.
         """
         action_type = action.get("action", "")
+        if action_type == "wait":
+            # wait 不清锁(2026-07-21 walk 实锤: skill 的 settle-wait 每次把同
+            # 目标锁抹掉 → (click,wait,wait) 节拍重点击全部裸放行,
+            # BuyPyroxene/enter ×12)。锁跨越 skill 自身节拍存活, 释放路径
+            # 只有两条: 指纹变化(页面真进了) 或 2.5s 墙钟(丢 tap 重试)。
+            return action
+        if action_type == "back":
+            # back 与 click 同等限流(2026-07-21 walk: Arena/enter back×7/3.2s):
+            # 同一屏(指纹未变/空指纹转场)只放一发, 其余 hold 到指纹变化或
+            # 2.5s。金钱逃逸类 back(购买框疑现) 豁免不 hold — fail-closed
+            # 时效优先。状态独立于 click 锁, 避免交替互污。
+            _r = str(action.get("reason", "") or "")
+            if any(k in _r for k in ("PURCHASE", "購買", "购买", "interceptor",
+                                     "dismiss", "ESC")):
+                self._last_back_sig = None
+                self._back_hold_t0 = 0.0
+                return action
+            sig = self._screen_sig(screen) if screen is not None else frozenset()
+            last_sig = getattr(self, "_last_back_sig", None)
+            if last_sig is not None:
+                if sig and last_sig:
+                    _u = sig | last_sig
+                    _changed = (len(sig & last_sig) / len(_u) if _u else 1.0) < 0.5
+                else:
+                    _changed = False  # 空指纹=转场/盲区帧, 不算已变屏
+                if not _changed:
+                    if not getattr(self, "_back_hold_t0", 0.0):
+                        self._back_hold_t0 = time.time()
+                    if time.time() - self._back_hold_t0 < 2.5:
+                        return action_wait(450, f"back 已发未变屏 — hold: {_r}")
+            self._back_hold_t0 = 0.0
+            self._last_back_sig = sig
+            return action
         if action_type != "click":
+            # swipe/swipe_tap/scroll 真移动画面 → 位置锁语义失效, 才清锁
             self._last_click_target = None
             self._last_click_sig = None
             self._click_hold = 0
+            self._last_back_sig = None
             return action
 
         # ── universal loading gate: never tap mid-transition ──
@@ -1635,7 +1670,9 @@ class DailyPipeline:
         if any(k in _r for k in (
                 "interceptor", "dismiss", "reward", "獎勵", "奖励", "result",
                 "結果", "结果", "确认键", "確認", "continue", "繼續", "領取",
-                "领取", "claim", "close", "关闭", "關閉", "叉叉")):
+                "领取", "claim", "close", "关闭", "關閉", "叉叉",
+                "headpat")):  # 走动学生永不"稳定" — 摸头必须抢最新帧
+                              # (2026-07-21 tick595 实锤: #1 被稳定门吞掉漏摸)
             self._last_click_target = target
             self._last_click_reason = reason
             self._last_click_sig = sig
@@ -1729,6 +1766,11 @@ class DailyPipeline:
                 for k in _cent_now)
         self._settle_sig, self._settle_cent = _sig_now, _cent_now
         self._frame_stable = _stable
+        if _stable:
+            # 4s 超时窗语义=连续不稳定时长(2026-07-21 审计: t0 在豁免通道/非
+            # click 动作路径都不清零 → 陈旧携带 100s+ 后下一个导航点击可在
+            # 不稳定帧上被"秒放行")。每个稳定 tick 清零 → 纯收紧。
+            self._settle_block_t0 = 0.0
 
         # Hard-example mining 已停用(2026-07-16 审计 A 级): 每 tick 写盘
         # data/hard_examples 累积 7GB/2万文件, dashboard 从未接消费入口 —
