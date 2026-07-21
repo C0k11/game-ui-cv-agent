@@ -364,6 +364,10 @@ class BaseSkill(ABC):
         self.ticks: int = 0
         self.max_ticks: int = 60  # timeout per skill
         self._log_lines: List[str] = []
+        # pipeline 置位(2026-07-21): 上一 tick 本 skill 的 click/back/swipe 被
+        # _dedup_click 稳定门/hold 转成 wait(未落地) → True。skill 可据此避免
+        # 假前进(mutate-before-ack 防线的 root 信号)。
+        self.action_suppressed: bool = False
 
     def reset(self) -> None:
         """Reset skill state for a fresh run."""

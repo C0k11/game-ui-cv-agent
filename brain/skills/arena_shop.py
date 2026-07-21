@@ -116,6 +116,7 @@ class ArenaShopSkill(BaseSkill):
         self._tap_count: Dict[str, int] = {} # cls_name → times tapped
         self._last_tap_tick: Dict[str, int] = {}  # per-drink last-tap tick (render-wait)
         self._purchased: bool = False
+        self._confirm_clicked: bool = False  # 点過確認键; latch _purchased 仅凭到达证据
 
     def reset(self) -> None:
         super().reset()
@@ -382,8 +383,10 @@ class ArenaShopSkill(BaseSkill):
             return action_wait(400, "waiting in buy")
         buy = self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF)
         if buy is not None:
+            # 不提前 goto confirm(2026-07-21 mutate-before-ack 根治): 点击被吞时
+            # 旧码已进 confirm 但无对话框 → confirm 干等超时退, 选择购买永不重试。
+            # 让下方 BTN_CONFIRM cls 证据驱动转 confirm; 被吞则本 tick 重检 buy 重点。
             self.log("click 选择购买")
-            self._goto("confirm")
             return action_click_box(buy, "buy selected drinks")
         if self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
                          region=_DIALOG_BAND) is not None:
@@ -411,6 +414,13 @@ class ArenaShopSkill(BaseSkill):
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
                                 region=_DIALOG_BAND)
         if confirm is None:
+            # 到达证据: 已点過 確認键 且确认框现已消失 → 购买落地。此处 latch
+            # _purchased(post-ack, 绝不在点击前), 供 _exit 对账完成度。
+            if self._confirm_clicked:
+                self.log(f"确认框消失 → 购买落地 (balance was {self._balance})")
+                self._purchased = True
+                self._goto("exit")
+                return action_wait(300, "purchase committed → exit")
             # grey (insufficient) confirm = can't afford after all → cancel out.
             grey = self.find_cls(screen, UC.BTN_CONFIRM_GREY, conf=_CLS_CONF,
                                  region=_DIALOG_BAND)
@@ -446,11 +456,13 @@ class ArenaShopSkill(BaseSkill):
             return action_back("cancel (no drink anchor, ESC)")
 
         # Budget gated in _select; currency non-premium; pyroxene firewall passed;
-        # drink anchor present → confirm (spends 战术大赛货币 only).
-        self.log(f"confirm purchase (战术大赛货币, balance was {self._balance})")
-        self._purchased = True
-        self._goto("exit")
-        return action_click_box(confirm, "confirm energy-drink purchase")
+        # drink anchor present → click 確認. 不提前 latch _purchased(2026-07-21
+        # mutate-before-ack 根治: reason 无"確認"被稳定门吞时旧码已 _purchased=True
+        # +goto exit → _exit 关掉对话框假报 purchased 实际没买)。latch 延迟到
+        # 对话框消失(到达证据, 上方 confirm is None 分支); reason 加"確認键"豁免。
+        self.log(f"click 確認键 (战术大赛货币, balance was {self._balance})")
+        self._confirm_clicked = True
+        return action_click_box(confirm, "confirm energy-drink purchase (確認键)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():

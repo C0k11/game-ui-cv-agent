@@ -65,6 +65,7 @@ class ClubSkill(BaseSkill):
         self._nav_cooldown: int = 0      # ticks to wait after a navigation tap
         self._card_taps: int = 0
         self._checked_in: bool = False
+        self._checkin_clicked: bool = False  # 点過確認键; latch _checked_in 仅凭到达证据
         # badge-verified one-shot re-entry (cafe 同款, deep-dive r2 M3)
         self._verify_reentered: bool = False
         self._exit_lobby_ticks: int = 0
@@ -179,16 +180,23 @@ class ClubSkill(BaseSkill):
     def _checkin(self, screen: ScreenState) -> Dict[str, Any]:
         confirm = self._checkin_dialog(screen)
         if confirm is not None:
-            self._checked_in = True
-            self.log("社團簽到 → 确认键 (10AP to mailbox)")
-            self._goto("exit")
-            return action_click_box(confirm, "confirm club sign-in")
+            # 不提前 latch _checked_in(2026-07-21 mutate-before-ack 根治: 点击被吞
+            # 时旧码已置 _checked_in=True → _exit 的 badge-verify 兜底(L202 not
+            # _checked_in)被骗过, 签到没成仍报 done)。reason 加"確認键"稳定门豁免。
+            self._checkin_clicked = True
+            self.log("社團簽到 → 確認键 (10AP to mailbox)")
+            return action_click_box(confirm, "confirm club sign-in (確認键)")
 
-        # Dialog gone already (confirm registered) → exit.
-        if self._phase_ticks > _CHECKIN_MAX:
-            self.log("checkin dialog gone → exit")
+        # Dialog gone. 若点過確認 → 签到落地 latch(到达证据, post-ack)。
+        if self._checkin_clicked:
+            self._checked_in = True
+            self.log("确认框消失 → 签到落地 → exit")
             self._goto("exit")
-            return action_wait(300, "checkin done → exit")
+            return action_wait(300, "checkin committed → exit")
+        if self._phase_ticks > _CHECKIN_MAX:
+            self.log("checkin dialog never appeared → exit")
+            self._goto("exit")
+            return action_wait(300, "no checkin dialog → exit")
         return action_wait(300, "waiting for 社團簽到 dialog")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:

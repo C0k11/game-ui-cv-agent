@@ -2177,10 +2177,26 @@ class DailyPipeline:
 
         # Let skill decide
         action = skill.tick(screen)
+        _raw_type = action.get("action", "")
         action = self._dedup_click(action, screen)
         action_type = action.get("action", "")
         action_reason = str(action.get("reason", "") or "")
         self._last_action_reason = action_reason
+
+        # ⭐mutate-before-ack 防线 root 信号(2026-07-21): _dedup_click 把 skill 的
+        # click/back/swipe 静默转成 wait(稳定门/hold) — 之前无痕迹, 是幻影动作
+        # bug 藏这么久的原因。置 skill.action_suppressed + 打日志: skill 可据此
+        # 判定"我上个动作没落地"避免假前进; 且一切 suppression 可见可调试。
+        _suppressed = (_raw_type in ("click", "back", "swipe", "swipe_tap")
+                       and action_type == "wait")
+        try:
+            skill.action_suppressed = _suppressed
+        except Exception:
+            pass
+        if _suppressed:
+            print(f"[Pipeline] ⚠ action suppressed (settle/hold): "
+                  f"{getattr(skill, 'name', '?')} '{action_reason[:60]}'",
+                  flush=True)
 
         # ── State lockout: detect truly stuck repeated waits ──
         same_wait = (
