@@ -102,6 +102,7 @@ class BuyPyroxeneSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._bought: bool = False         # set once the free pack is confirmed
         self._buy_retry: Optional[tuple] = None  # (cx,cy) to re-press on drop
+        self._confirm_clicks: int = 0      # ack-loop: 確認 实际点击次数(防幻影)
 
     def reset(self) -> None:
         super().reset()
@@ -328,10 +329,19 @@ class BuyPyroxeneSkill(BaseSkill):
             screen, UC.FREE, conf=_CLS_CONF, region=_DIALOG_PRICE_REGION
         )
         if free_in_dialog is not None:
-            self.log("dialog shows 免费 → confirming purchase (YOLO 确认键)")
-            self._bought = True
-            self._goto("reward")
-            return action_click_box(confirm_btn, "confirm FREE purchase")
+            # 2026-07-21 逐帧审实锤 mutate-before-ack: 旧码先 _bought=True+
+            # _goto("reward") 再返回 確認 点击 — 点击被稳定门吞(reason 无"確認"
+            # 不豁免)/丢 tap 时状态已跳 reward → pipeline 以为领了实际每日免費
+            # 包没领(信用点未+10K)。修: 不提前跳状态, 停在 confirm, 顶部
+            # reward-popup 检查=落地唯一确认; reason 含"確認键"→ 稳定门豁免立即
+            # 点(渲染好的确认键=看到就点); 计数 cap fail-closed。
+            self._confirm_clicks += 1
+            if self._confirm_clicks > 6:
+                self.log("⛔ 確認 点了6次仍无 reward 弹窗 → exit (fail-closed)")
+                self._goto("exit")
+                return action_wait(300, "confirm stuck → exit")
+            self.log(f"dialog shows 免费 → 確認 (fire {self._confirm_clicks})")
+            return action_click_box(confirm_btn, "confirm FREE purchase (確認键)")
 
         # Dialog up but no FREE yet. FREE is static here, so poll a few frames
         # (rule #5). If it never shows, this is NOT a free pack → cancel.
