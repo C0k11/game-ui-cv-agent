@@ -1491,8 +1491,20 @@ class DailyPipeline:
             if confirm_y:
                 print("[Interceptor] YOLO reward popup → 确认键")
                 return action_click_box(confirm_y, "interceptor: confirm reward (YOLO)")
-            print("[Interceptor] YOLO reward popup → tap dismiss")
-            return action_click(0.5, 0.92, "interceptor: dismiss reward (YOLO)")
+            # 2026-07-21 逐帧审实锤: 旧码 确认键 没检出就盲拍 (0.5,0.92) — 那是
+            # 屏幕底栏空白/模态遮罩, 关不掉弹窗。獲得獎勵弹窗的关闭控件本就有
+            # cls: 点击继续字样(TAP TO CONTINUE) / 弹窗叉叉(X)。优先点 cls,
+            # 全没有才盲拍, 且盲拍点改 0.88(点击继续字样典型位)而非底栏 0.92。
+            cont_y = find_yolo_box(screen, ["点击继续字样"], min_conf=0.30)
+            if cont_y:
+                print("[Interceptor] YOLO reward popup → 点击继续字样")
+                return action_click_box(cont_y, "interceptor: reward TAP-CONTINUE (YOLO)")
+            x_y = find_yolo_box(screen, ["弹窗叉叉"], min_conf=0.30)
+            if x_y:
+                print("[Interceptor] YOLO reward popup → 弹窗叉叉")
+                return action_click_box(x_y, "interceptor: reward X-close (YOLO)")
+            print("[Interceptor] YOLO reward popup → blind tap (no cls)")
+            return action_click(0.5, 0.88, "interceptor: dismiss reward (blind, no cls)")
         # Full-screen bond / region level-up — tap anywhere to advance.
         levelup_y = find_yolo_box(screen, ["羁绊升级", "地区升级"], min_conf=0.35)
         if levelup_y:
