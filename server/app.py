@@ -1241,13 +1241,29 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             #   vs ADB 0.77s/张 — tick 周期 0.92s→~0.3s。1440p 对 YOLO 无损
             #   (检出与 4K 帧一致已实测); digit-OCR 由 run_digit_ocr 内部
             #   自动升级 ADB 4K 干净帧, 钱/票读数精度不受影响。
+            _tick_frame_age = None
+            _tick_frame_seq_new = None
+            # ⭐task#17 断流窗口防抖(2026-07-21 帧龄埋点实锤): 正常 scrcpy 帧龄
+            # 8-10ms, 但每 ~20s 断流 3.5s — 断流期 latest() 返回冻结旧帧。旧码
+            # 接受 3.0s 内的帧 → 断流窗口拿 3s 前冻结帧决策 = BuyPyroxene ×12
+            # 连点/"抢拍"真凶。降到 1.0s: 断流(age 爬升)→ 落 ADB 新鲜抓帧
+            # (0.77s 但真实当前)。静止页 seq 不动但内容==当前屏, age 未超阈
+            # 仍走 scrcpy; 超阈落 ADB 也只是多一次 screencap(内容一样正确)。
+            _SCRCPY_MAX_AGE = 1.0
             if _scrcpy_feed is not None:
                 try:
-                    _fr2, _age2, _ = _scrcpy_feed.latest()
+                    _fr2, _age2, _seq2 = _scrcpy_feed.latest()
                     if _fr2 is not None and (
-                            _age2 if _age2 is not None else 9) < 3.0:
+                            _age2 if _age2 is not None else 9) < _SCRCPY_MAX_AGE:
                         frame = _fr2
                         _frame_src = "scrcpy"
+                        _tick_frame_age = _age2
+                        _prev_seq = globals().get("_LAST_TICK_SCRCPY_SEQ", -1)
+                        _tick_frame_seq_new = (_seq2 != _prev_seq)
+                        globals()["_LAST_TICK_SCRCPY_SEQ"] = _seq2
+                    elif _fr2 is not None:
+                        # 断流/静止 age 超阈: 记录供日志, 落 ADB 新鲜帧
+                        _tick_frame_age = _age2
                 except Exception:
                     frame = None
             # ② ADB fallback(scrcpy 断流窗口/不可用)
@@ -1331,7 +1347,17 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _PIPELINE_STATUS["ticks"] = pipe._total_ticks
             _PIPELINE_STATUS["progress"] = pipe.progress
 
-            _log_pipeline(f"tick={pipe._total_ticks} action={action_type} reason={reason}")
+            if _frame_src == "scrcpy" and _tick_frame_age is not None:
+                _age_tag = (f" [frame=scrcpy age={_tick_frame_age*1000:.0f}ms"
+                            f" seq_new={_tick_frame_seq_new}]")
+            elif _frame_src == "adb" and _tick_frame_age is not None:
+                _age_tag = f" [frame=adb (scrcpy stalled {_tick_frame_age*1000:.0f}ms)]"
+            elif _frame_src:
+                _age_tag = f" [frame={_frame_src}]"
+            else:
+                _age_tag = ""
+            _log_pipeline(f"tick={pipe._total_ticks} action={action_type} "
+                          f"reason={reason}{_age_tag}")
 
             # Overlay YOLO boxes are updated by the high-FPS YOLO thread above.
             # (Florence/template overlay 注入已删 2026-07-17 — 生产者
