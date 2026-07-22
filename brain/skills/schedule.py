@@ -577,12 +577,12 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"⛔ 已排课{self._dispatch_count}次 >= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
                 self._goto("exit")
                 return action_wait(300, "at ticket cap → EXIT, do NOT confirm")
-            # 被吞的确认不虚增票计数(2026-07-21 mutate-before-ack: 虚高→假触
-            # _MAX_TICKETS 早退, 排课没做完; 方向 fail-safe 不会多买票)。reason
-            # 加"確認键"稳定门豁免立即点(渲染好的确认框=看到就点)。
-            if not self.action_suppressed:
-                self._dispatch_count += 1
-            self.log(f"schedule report → confirm (#{self._dispatch_count}, YOLO 确认键)")
+            # ⭐dispatch 计数不再在此提前 +1(2026-07-22 实锤): 旧码
+            # `if not action_suppressed: +=1` 信号语义错位 — suppressed 反映
+            # **上一 tick** 的吞, 预知不了本次点击; 上一 tick 吞标志挂着 →
+            # 派了1票计数=0 → 圈末误判"本圈零派出"退出剩6票。计数移到
+            # _roster 的票数重读处(票实际减少=报告确认真落地, after-ack)。
+            self.log(f"schedule report → confirm (count={self._dispatch_count}, YOLO 确认键)")
             self._ticket_read_pending = True  # re-read count back on the popout
             self._goto("roster")
             return action_click_box(report_confirm, "confirm schedule report (確認键)")
@@ -794,7 +794,19 @@ class ScheduleSkill(BaseSkill):
         # Re-read ticket after a dispatch (confirms it actually decremented).
         if self._ticket_read_pending:
             self._ticket_read_pending = False
+            _prev = self._tickets
             self._read_tickets(screen)
+            # ⭐dispatch 落账(after-ack, 2026-07-22): 票数实际减少=报告确认
+            # 真落地, 按扣减量计数。旧码在点确认前看 action_suppressed 预判
+            # — 信号反映的是上一 tick 的吞, 语义错位: 上一 tick 吞标志挂着
+            # → 真派了 1 票计数=0 → 圈末误判"本圈零派出"退出剩 6 票(实锤)。
+            # 读不出(_prev/-1/None)不计 — 计数偏低最多多绕一圈, cap 防线仍在。
+            if (_prev is not None and _prev > 0
+                    and self._tickets is not None
+                    and 0 <= self._tickets < _prev):
+                self._dispatch_count += (_prev - self._tickets)
+                self.log(f"dispatch 落账: 票 {_prev}→{self._tickets}, "
+                         f"count={self._dispatch_count}")
             if self._tickets == 0:
                 self.log("tickets exhausted → exit")
                 self._goto("exit")
@@ -894,7 +906,11 @@ class ScheduleSkill(BaseSkill):
         # 硬撑 fallback 空转(旧码: 学生排完但剩票时绕 ~28 区到 max_ticks=320 才退,
         # 中断的 autonomous 重跑复现 tick 201 空转)。只有本圈真派出过学生+还剩票, 才
         # 值得再扫一圈捡漏。
-        _circle_size = self._region_count or _MAX_REGIONS   # 动态区数(列表帧实测)
+        # 动态区数(列表帧实测)。没探测到(sub_only/中途恢复没经过区域列表帧)
+        # 时用保守下限 5(BA 满解锁 5 区; 少区账号多绕几次无害)——绝不回落
+        # _MAX_REGIONS=14: 2026-07-22 实锤恢复路径 fallback 永远够不到, 零派出
+        # 绕到 max_ticks 死, 6 票滞留。
+        _circle_size = self._region_count or 5
         if self._regions_seen >= _circle_size:
             _dispatched_this_circle = self._dispatch_count > self._circle_start_dispatch
             if ((self._tickets is None or self._tickets > 0)

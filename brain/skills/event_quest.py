@@ -98,6 +98,15 @@ class EventQuestSkill(BaseSkill):
         # banner 实例记账(pHash): 点错的轮播项拉黑防复点(情人節同为405)
         self._banner_bad_hashes: list = []
         self._pending_hash = None
+        # ev_marker(活动商店/任务 cls)命中但一直上不了 quest 列表的计数 —
+        # **上期活动(领奖期)主页同样检出这些 cls**(误入午夜派對三连实锤
+        # 2026-07-22), 连续 3 次 → 判 wrong event → 拉黑 banner+back。
+        self._ev_marker_hits = 0
+        # wrong-event back 后跳过下一次 405 检出。误入根因(20帧@0.45s 实测
+        # 钉死 2026-07-22): 轮播 ~2.5s/页, 405@0.97/474@0.93 逐帧交替从不
+        # 共存(v14 训练没问题) — 检出405→tap 落屏有 1-2s 延迟, 点下去时轮播
+        # 已切到 474 卡。back 后立即再点大概率复现同样时序碰撞 → 跳一次错相。
+        self._skip_next_405 = 0
         # 上次落点是否盲区页(no-UI escape 逃生回 hub) — 决定下次 tap 相位修正
         self._blind_landing = False
         # ⭐加成台账(用户 2026-07-11: 本地记录哪些关打过加成, 记过的不再挨个
@@ -366,47 +375,34 @@ class EventQuestSkill(BaseSkill):
                         self.log("fresh source DISTRUSTED (tick sees banner, "
                                  "fresh blind) — pure tick mode")
         if banner is None and not fresh_usable:
-            # ⭐轮播时序全模型(2026-07-11 下午 6+6 落点反推钉死):
-            # 项周期≈5s(0709 实测对, 早上 2.6s 估计错), hub 每次进入/back 返回
-            # 都重置到 item0=遊戲開發部(目标); 循环序[遊→情→特殊/鋼474→遊]。
-            # 两条确定性路径, tap 相位修正按来路选:
-            # ① **快节奏**(cls 证据页 back 秒回 / 首次进 hub): enter 下一 tick
-            #    就开火, 动作落 item0 的 5s 窗口内 → live==帧上项 → **直点**。
-            #    (下午 5/5 落"帧上项的上一项"实锤 = 回滑画蛇添足的反证)
-            # ② **慢节奏**(盲区页 no-UI escape ~30s 逃生, verify 多插一个
-            #    "still on hub" tick): 动作压过 5s 边界 → live=帧+1 →
-            #    **原子回滑一格&&tap** 退回帧上项(swipe 拉停轮播, 静止期内
-            #    tap 必落; 下午实锤回滑翻页机制本身 5/5 生效)。
+            # ⭐轮播时序(2026-07-22 20帧@0.45s 实测钉死, 推翻 0711 5s 模型):
+            # 项周期≈**2.5s/页**, 405 与 474 逐帧交替从不共存, conf 稳定分离
+            # (405@0.96-0.97 / 474@0.93-0.94 → v14 训练没问题)。可点窗口极窄:
+            # 检出405→tap 落屏延迟 >1.5s 就点到切页后的 474 卡。策略=检出即
+            # 直点(零人为延迟) + verify wrong-event 自愈闭环兜底。
             # 帧上=474 → wait(直点会落到 474 项自己, 等轮播转到 405)。
             b405 = self.find_cls(screen, UC.EVENT_END_LEFT, conf=0.5)
             if b405 is not None:
-                # tick 模式不记 pHash("帧上项"≠"落点项"时拉黑反噬)
+                # wrong-event back 后第一次 405 → 跳过一次错开时序相位
+                # (轮播 2.5s/页 + tap 延迟 1-2s, 立即再点大概率复现碰撞)。
+                if self._skip_next_405 > 0:
+                    self._skip_next_405 -= 1
+                    return action_wait(2500, "405=刚误入过 — 跳一次错开相位")
+                # ⭐检出即直点一次(用户 2026-07-22 定死)。落点=405 气泡下方
+                # +0.10 徽章本体(卡整体可点, ev_enter cy+0.10 实证)。⚠轮播
+                # 2.5s/页: 检出→tap 延迟 >1.5s 会点到切页后的 474 卡(误入
+                # 午夜派對三连根因), 延迟必须压最短 + verify 自愈闭环兜底。
                 self._pending_hash = None
+                self._blind_landing = False
                 self._set("verify")
-                if self._blind_landing:
-                    self._blind_landing = False
-                    bcx = (b405.x1 + b405.x2) / 2
-                    bcy = (b405.y1 + b405.y2) / 2
-                    return action_swipe_tap(
-                        0.035, 0.185, 0.11, 0.185, bcx, bcy, duration_ms=150,
-                        reason="banner swipe-back tap (盲区退回慢路径, live=帧+1 → 回滑对齐)")
-                return action_click_box(
-                    b405, "banner tap (快节奏, live==帧上项 → 直点)")
+                bcx = (b405.x1 + b405.x2) / 2
+                bcy = (b405.y1 + b405.y2) / 2 + 0.10
+                return action_click(bcx, bcy, "banner tap (405→徽章本体 cy+0.10)")
         if banner is not None:
             if src_frame is not None and self._banner_blacklisted(screen, src_frame):
                 return action_wait(400, "405=已拉黑实例 — 等轮播下一项")
-            if self._blind_landing:
-                # fresh 分支同样吃相位修正(2026-07-21 三连同点 miss 实锤:
-                # verify 置 _blind_landing 后 fresh 分支从不读 = 死码, 三次
-                # 一模一样直点零自适应)。miss 后改 swipe-back 拉停轮播再点。
-                self._blind_landing = False
-                self._pending_hash = None
-                self._set("verify")
-                bcx = (banner.x1 + banner.x2) / 2
-                bcy = (banner.y1 + banner.y2) / 2
-                return action_swipe_tap(
-                    0.035, 0.185, 0.11, 0.185, bcx, bcy, duration_ms=150,
-                    reason="banner swipe-back tap (fresh, miss后回滑对齐)")
+            # ⭐检出即直点一次(用户 2026-07-22 定死), swipe_tap 相位修正已删。
+            self._blind_landing = False
             # pHash 记账只在 fresh 模式有意义(tick 错位下"帧上项"≠"落点项",
             # 拉黑会反噬正确项)
             self._pending_hash = (self._banner_phash(screen, src_frame)
@@ -420,8 +416,10 @@ class EventQuestSkill(BaseSkill):
             return action_click_box(hub, "lobby → task hub")
         # 无锁定: hub 轮播转在 474/卡池项 或 lobby 未识别 — wait 等目标出现;
         # 久等不出(2 个轮播周期+)才 nav_home 重置。
-        if self._phase_ticks % 8 == 7:
-            return self.nav_home(screen, "no 405 for 8 ticks — reset")
+        # 等满一个完整轮播周期(2 页×~5s≈24 tick)再 reset — 8 tick(~3s)等不完
+        # 一轮就回大厅重进 = 低效循环(2026-07-22 实锤连续两轮 reset)。
+        if self._phase_ticks % 24 == 23:
+            return self.nav_home(screen, "no 405 full carousel — reset")
         return action_wait(400, "no target cls — wait (carousel)")
 
     def _verify(self, screen: ScreenState) -> Dict[str, Any]:
@@ -431,6 +429,7 @@ class EventQuestSkill(BaseSkill):
             self.log("verify OK — on event quest list")
             self._pending_hash = None            # 点对了, 不拉黑
             self._verify_retries = 0
+            self._ev_marker_hits = 0
             self._set("survey")
             return action_wait(300, "verified event")
         if screen.is_loading():
@@ -461,7 +460,22 @@ class EventQuestSkill(BaseSkill):
             screen, [UC.EVENT_REWARD_INFO, UC.EVENT_SHOP, UC.EVENT_TASK,
                      UC.EVENT_QUEST, UC.EVENT_QUEST_SEL], conf=_WEAK_CONF)
         if ev_marker is not None and self._phase_ticks <= _PHASE_MAX * 2:
-            self._pending_hash = None
+            # ⛔上期活动陷阱(2026-07-22 三连实锤): 检出405→tap 延迟撞轮播
+            # 2.5s 切页 → 点在 474 卡上进了午夜派對, 其主页同样检出 活动商店/
+            # 活动任务/Quest tab → 本分支误判"已在目标活动"死循环点 Quest tab
+            # (活動期間已結束空页, 永远上不了 quest 列表)。连续 3 次仍没
+            # verify OK = wrong event → 拉黑 banner 实例+back 重扫轮播。
+            self._ev_marker_hits += 1
+            if self._ev_marker_hits >= 3:
+                self._ev_marker_hits = 0
+                self._blacklist_pending("stale event (marker页循环, 活動期間已結束?)")
+                self._skip_next_405 = 1     # 下一次 405=同一张嫌疑卡, 跳过等翻页
+                self._verify_retries += 1
+                if self._verify_retries > _VERIFY_RETRY_MAX:
+                    return action_done("event_quest: carousel retries exhausted")
+                self._set("enter")
+                self._blind_landing = False
+                return action_back("wrong event(上期领奖页) → back, rescan carousel")
             qtab = self.find_cls(screen, UC.EVENT_QUEST, conf=_WEAK_CONF)
             if qtab is not None:
                 return action_click_box(
@@ -477,17 +491,20 @@ class EventQuestSkill(BaseSkill):
             self._set("enter")
             self._blind_landing = False   # cls 页秒回 = 快节奏路径
             return action_back("wrong: 特殊作戰 → back, rescan")
-        # 证据3: 仍在 hub(hub tile 可见) = tap 落空/轮播翻走 → 直接重扫
+        # 证据3: 仍在 hub(hub tile 可见) = tap 落空/轮播翻走 → 直接重扫。
+        # ⚠转场等待窗(2026-07-22 实锤): 点击后第一帧转场尚未启动, hub tile
+        # 还在 → 秒判"tap missed"回 enter, 而真实转场 ~1s 后才完成 → skill
+        # 在活动页里以为自己在 hub 等 405。≥6 tick(~1s) 才允许判。
         if self.find_cls(screen, [UC.HUB_BOUNTY, "学院交流会", "战术大赛"],
                          conf=0.5) is not None:
+            if self._phase_ticks < 6:
+                return action_wait(300, "hub 仍在屏 — 转场等待窗, 未判 miss")
             self._pending_hash = None            # 没点进任何页, 不拉黑
             self._verify_retries += 1
             if self._verify_retries > _VERIFY_RETRY_MAX:
                 return action_done("event_quest: carousel retries exhausted")
             self._set("enter")
-            # 回到 hub 却没经过 cls 证据页 = 盲区页 no-UI escape 逃生(慢路径,
-            # verify 已多吃一个 tick, 下次动作会压过项边界) → 相位修正=回滑
-            self._blind_landing = True
+            self._blind_landing = False
             return action_wait(300, "still on hub (tap missed) — rescan")
         # 证据4: Challenge tab 落点(活动底栏在, 无入场键) → 切 Quest tab
         if self.find_cls(screen, [UC.EVENT_SHOP, UC.EVENT_TASK],
