@@ -1618,6 +1618,12 @@ class DailyPipeline:
         Different-target clicks (multi-select cards, room heads) always pass.
         """
         action_type = action.get("action", "")
+        # ⭐原子零延迟通道(2026-07-22): 轮播类目标(hub 活动卡 ~2.5s/页切换)
+        # 检出→tap 必须同 tick 落屏, 任何 hold/pend 都会撞切页点错卡(误入
+        # 午夜派對三连根因)。skill 打 _atomic_no_gate 标记的动作稳定门直接
+        # 放行(step 门在 server 侧同标记豁免)。仅限时序敏感且金钱安全的点击。
+        if action.get("_atomic_no_gate"):
+            return action
         if action_type == "wait":
             # wait 不清锁(2026-07-21 walk 实锤: skill 的 settle-wait 每次把同
             # 目标锁抹掉 → (click,wait,wait) 节拍重点击全部裸放行,

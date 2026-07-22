@@ -1365,7 +1365,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             # 3a. Single-step approval gate — pause before each click/back/swipe,
             # expose the pending action, block until POST /api/v1/step/go.
-            if _STEP_MODE and not dry_run and action_type in ("click", "back", "swipe", "swipe_tap"):
+            # _atomic_no_gate: 轮播时序敏感点击(hub 活动卡 2.5s/页), pend 等
+            # 人工放行必然撞切页 → 豁免 step 门同 tick 落屏(skill 侧限定
+            # 金钱安全的 banner tap, 2026-07-22)。
+            if (_STEP_MODE and not dry_run
+                    and action_type in ("click", "back", "swipe", "swipe_tap")
+                    and not action.get("_atomic_no_gate")):
                 _cur = pipe.current_skill
                 _aname = getattr(_cur, "name", "") if _cur else ""
                 _asub = getattr(_cur, "sub_state", "") if _cur else ""

@@ -102,6 +102,8 @@ class EventQuestSkill(BaseSkill):
         # **上期活动(领奖期)主页同样检出这些 cls**(误入午夜派對三连实锤
         # 2026-07-22), 连续 3 次 → 判 wrong event → 拉黑 banner+back。
         self._ev_marker_hits = 0
+        # Quest tab 点击后的渲染冷却(tick 数): 冷却中不计 hits 不重点
+        self._marker_click_cooldown = 0
         # wrong-event back 后跳过下一次 405 检出。误入根因(20帧@0.45s 实测
         # 钉死 2026-07-22): 轮播 ~2.5s/页, 405@0.97/474@0.93 逐帧交替从不
         # 共存(v14 训练没问题) — 检出405→tap 落屏有 1-2s 延迟, 点下去时轮播
@@ -397,7 +399,9 @@ class EventQuestSkill(BaseSkill):
                 self._set("verify")
                 bcx = (b405.x1 + b405.x2) / 2
                 bcy = (b405.y1 + b405.y2) / 2 + 0.10
-                return action_click(bcx, bcy, "banner tap (405→徽章本体 cy+0.10)")
+                act = action_click(bcx, bcy, "banner tap (405 atomic 零延迟)")
+                act["_atomic_no_gate"] = True   # 2.5s 窗口, 同 tick 落屏
+                return act
         if banner is not None:
             if src_frame is not None and self._banner_blacklisted(screen, src_frame):
                 return action_wait(400, "405=已拉黑实例 — 等轮播下一项")
@@ -409,8 +413,10 @@ class EventQuestSkill(BaseSkill):
                                   if src_frame is not None else None)
             self._set("verify")
             tag = "fresh" if src_frame is not None else "tick+1"
-            return action_click_box(banner, f"banner tap ({tag}, "
-                                            f"帧上={banner.cls_name})")
+            act = action_click_box(banner, f"banner tap ({tag} atomic, "
+                                           f"帧上={banner.cls_name})")
+            act["_atomic_no_gate"] = True       # 2.5s 窗口, 同 tick 落屏
+            return act
         hub = self.find_cls(screen, UC.NAV_TASKS, conf=_CLS_CONF)
         if hub is not None:
             return action_click_box(hub, "lobby → task hub")
@@ -430,6 +436,7 @@ class EventQuestSkill(BaseSkill):
             self._pending_hash = None            # 点对了, 不拉黑
             self._verify_retries = 0
             self._ev_marker_hits = 0
+            self._marker_click_cooldown = 0
             self._set("survey")
             return action_wait(300, "verified event")
         if screen.is_loading():
@@ -465,17 +472,29 @@ class EventQuestSkill(BaseSkill):
             # 活动任务/Quest tab → 本分支误判"已在目标活动"死循环点 Quest tab
             # (活動期間已結束空页, 永远上不了 quest 列表)。连续 3 次仍没
             # verify OK = wrong event → 拉黑 banner 实例+back 重扫轮播。
+            # ⚠hits=Quest tab 切换**尝试**数, 不是 tick 数(2026-07-22 live
+            # 假阳性实锤: 点 Quest tab 后列表渲染 ~1s, 3 个 tick(~1s)就把
+            # hits 打满 → 把**正确活动**误判 wrong event back 出去)。点击后
+            # 冷却 8 tick 等渲染, 冷却中不计数不重点。
+            if self._marker_click_cooldown > 0:
+                self._marker_click_cooldown -= 1
+                return action_wait(300, "Quest tab 已点 — 等列表渲染")
             self._ev_marker_hits += 1
             if self._ev_marker_hits >= 3:
                 self._ev_marker_hits = 0
-                self._blacklist_pending("stale event (marker页循环, 活動期間已結束?)")
-                self._skip_next_405 = 1     # 下一次 405=同一张嫌疑卡, 跳过等翻页
+                # ⛔不 pHash 拉黑(2026-07-22 live 实锤): 误入=tap 延迟撞轮播
+                # 切页, fresh 分支记的 hash 是**帧上 405 卡=正确卡**, 拉黑会
+                # 反噬正确项 → enter fresh 模式永远跳过真活动死锁。只清 hash
+                # + skip 一次错开相位, 靠 verify 闭环反复自愈。
+                self._pending_hash = None
+                self._skip_next_405 = 1     # 跳过下一次 405 检出错开时序相位
                 self._verify_retries += 1
                 if self._verify_retries > _VERIFY_RETRY_MAX:
                     return action_done("event_quest: carousel retries exhausted")
                 self._set("enter")
                 self._blind_landing = False
                 return action_back("wrong event(上期领奖页) → back, rescan carousel")
+            self._marker_click_cooldown = 8
             qtab = self.find_cls(screen, UC.EVENT_QUEST, conf=_WEAK_CONF)
             if qtab is not None:
                 return action_click_box(
@@ -644,6 +663,39 @@ class EventQuestSkill(BaseSkill):
     def _unlock(self, screen: ScreenState) -> Dict[str, Any]:
         if self._phase_ticks > _BATTLE_MAX + _PHASE_MAX:
             return action_done("event_quest unlock timeout")
+        # ⭐mutate-before-ack 对账(2026-07-22 live 实锤: 任務開始 点击被稳定门
+        # 吞(scrcpy 断流 ADB 帧源翻转→帧未稳定), stage 已进 "edit" → 弹窗仍
+        # 开却死等编队页, stuck20 差点被叉掉弹窗)。信号只活一个 tick, 入口先
+        # 对账; 证据分流: 屏上仍是上一子步锚 cls = 推进那下没落地 → 回滚一级
+        # 重打。非推进类点击(切队/AUTO/结算連点)被吞不满足锚条件, 不误伤。
+        if self.action_suppressed:
+            _s = self._formation_step
+            if (_s == "edit"
+                    and self.find_cls(screen, UC.TASK_START, conf=0.5) is not None):
+                self._formation_step = ""
+                self.log("unlock: 任務開始被吞(popup 仍开) → 回滚重点")
+            elif (_s == "auto"
+                    and self.find_cls(screen, UC.SQUAD_QUICK_EDIT,
+                                      conf=_CLS_CONF) is not None
+                    and self.find_cls(screen, UC.SQUAD_AUTO_EDIT,
+                                      conf=_CLS_CONF) is None):
+                self._formation_step = "edit"
+                self.log("unlock: 快速編輯被吞 → 回滚")
+            elif (_s == "confirm"
+                    and self.find_cls(screen, UC.SQUAD_AUTO_EDIT,
+                                      conf=_CLS_CONF) is not None
+                    and self.find_cls(screen, UC.BTN_CONFIRM, conf=0.5) is None):
+                self._formation_step = "auto"
+                self.log("unlock: 自動被吞 → 回滚")
+            elif (_s == "sortie"
+                    and self.find_cls(screen, UC.BTN_CONFIRM, conf=0.5) is not None
+                    and self.find_cls(screen, UC.SORTIE, conf=_CLS_CONF) is None):
+                self._formation_step = "confirm"
+                self.log("unlock: 確認被吞 → 回滚")
+            elif (_s == "battle" and self._battle_ticks <= 1
+                    and self.find_cls(screen, UC.SORTIE, conf=_CLS_CONF) is not None):
+                self._formation_step = "sortie"
+                self.log("unlock: 出击被吞 → 回滚")
         # 找下一个未解锁的关
         while self._unlock_idx < len(self._quests) and self._quests[self._unlock_idx][1]:
             self._unlock_idx += 1
