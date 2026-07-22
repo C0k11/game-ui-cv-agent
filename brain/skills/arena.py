@@ -461,6 +461,16 @@ class ArenaSkill(BaseSkill):
         return action_click_box(top, "select top opponent")
 
     def _fight(self, screen: ScreenState) -> Dict[str, Any]:
+        # ⭐被吞回退(root 信号, 2026-07-22 tick26 实锤): 攻击编制/出击 click 被
+        # 稳定门吞时 stage 已提前推进(mutate-before-ack) → 编队页从没出击却
+        # "auto-battle in progress" 干等到 fight timeout(两连实锤, 5 票 0 打)。
+        # 必须在 settle 检查之前对账 — settle 的 wait 会把下一 tick 的
+        # action_suppressed 刷成 False, 信号只活一个 tick。
+        if self.action_suppressed and self._fight_stage in (1, 2):
+            self._fight_stage -= 1
+            self._stage_settle = 0
+            self.log(f"fight click 被稳定门吞 → stage 回退到 {self._fight_stage}")
+
         # ★ Blind settle after every click — give the page time to transition
         # before reading it. Without this we act on a stale/animating frame and
         # the click looks like it "did nothing" (点了没反应 → 误判重选/空点).

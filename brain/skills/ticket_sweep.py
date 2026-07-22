@@ -441,6 +441,12 @@ class TicketSweepSkill(BaseSkill):
                 # 幂等钮: 首发可能被稳定门吞(2026-07-21 tick638/667 实锤,
                 # _maxed 先置位 → MAX 从没点到只扫1票), 连发两 tick 再落 latch。
                 # 第二发同目标被 same-target hold 缓冲, 无连射; 已生效再点无害。
+                # ⭐被吞不计发(root 信号, 2026-07-22 tick18/19 实锤): fire1/fire2
+                # 连续被稳定门吞 → 两发都没出手 double 额度却耗尽 → _maxed=True
+                # 只扫1票。上一发被吞就回滚计数, 直到真点出去两发才落 latch。
+                if self.action_suppressed and self._max_fires > 0:
+                    self._max_fires -= 1
+                    self.log("MAX fire 被稳定门吞 — 回滚计数")
                 self._max_fires = getattr(self, "_max_fires", 0) + 1
                 if self._max_fires >= 2:
                     self._maxed = True
@@ -485,10 +491,35 @@ class TicketSweepSkill(BaseSkill):
         return action_wait(400, "waiting for 扫荡开始")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
+        # ⭐被吞对账(root 信号, 2026-07-21 tick338 实锤): 上 tick 的 扫荡开始
+        # click 被稳定门吞 → 实际没点出去, 屏仍是任務資訊, 但 _goto("confirm")
+        # 已提前发生(mutate-before-ack) → pre-transition 闸 8 tick 过期后
+        # _purchase_structure 把 popup 自带 stepper 误判成购买框 → cancel+exit
+        # 白弃扫(tickets=6 全丢)。回 sortie 重点; confirm/cancel 自身被吞走这
+        # 条也只是安全绕行(sortie 会重找 扫荡开始 → 回 confirm)。
+        if self.action_suppressed:
+            # ⭐吞的是哪个 click 由屏上证据分流(2026-07-22 tick25 实锤: 确认键
+            # click 被吞时无条件回 sortie 会在 dim 帧上找不到 扫荡开始 → 假
+            # exit): 任務資訊仍在(扫荡开始可见+无确认键) → 回 sortie 重点
+            # 扫荡开始; 确认框已开 → 留在 confirm, 本 tick 判定链会再检出
+            # 确认键重点。
+            if (self.find_cls(screen, UC.SWEEP_START, conf=_CLS_CONF) is not None
+                    and self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
+                                      region=_CONFIRM_BAND) is None):
+                self.log("扫荡开始 click 被稳定门吞 → 回 sortie 重点")
+                self._goto("sortie")
+                return action_wait(250, "suppressed click → re-run sortie")
+            self.log("confirm click 被稳定门吞 → 留在 confirm 重点")
+
         # Sweep done already (掃蕩完成 popped) → result.
         if self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None \
                 or self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None:
             # Could be the 掃蕩完成 reward popup (确认键 lower at ~0.81).
+            # ⭐sweep_cycles 落账移到这里(到达证据=掃蕩完成弹窗) — 旧码在点
+            # 确认键前 +1+goto result, 确认被吞时假报 cycle 完成(JFD"没去"
+            # 真相, 2026-07-22 用户抓)。goto 一次性, 不会重复计。
+            self._sweep_cycles += 1
+            self.log(f"sweep done popup (cycle {self._sweep_cycles} 落地)")
             self._goto("result")
             return action_wait(150, "sweep done popup → result")
 
@@ -497,8 +528,10 @@ class TicketSweepSkill(BaseSkill):
         # _purchase_structure 会把 popup 自带 stepper 当购买框 X 掉整个弹窗
         # (0 票扫出+假报完成)。确认框 cls 证据出现前不跑 abort 判定; 真购买框
         # 下 扫荡开始 被 dim 压掉检不出(t46 同源实证), 不会误放行。
-        # _phase_ticks<=8 时限: 丢 tap 时不无限遮蔽 L511 的 result 兜底。
-        if (self._phase_ticks <= 8
+        # 时限: 丢 tap 时不无限遮蔽 result 兜底。⚠2026-07-22 实锤: 7 tick/s 化
+        # 后 8 tick≈1.1s < 确认框渲染 1-2s → 闸必过期误判自家 stepper 为购买框
+        # (bounty 两连 cancel+exit 弃 6 票) → 提到 18(≈2.5s), result 兜底同步 24。
+        if (self._phase_ticks <= 18
                 and self.find_cls(screen, UC.SWEEP_START, conf=_CLS_CONF) is not None
                 and self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
                                   region=_CONFIRM_BAND) is None
@@ -514,7 +547,16 @@ class TicketSweepSkill(BaseSkill):
 
         # ⛔ 购买框结构闸(青辉石漏检兜底, 2026-07-11): stepper/体力在 body
         # = 購買AP/購買票券框 → 取消收工, 绝不点确认。
-        if self._purchase_structure(screen):
+        # ⚠语境前置(2026-07-22 三连误判实锤): 确认框弹出的过渡 dim 帧上
+        # SWEEP_START 被压检不出(闸不 hold)而 stepper 在 conf 0.20 地板下仍
+        # 检出 → 自家任務資訊被判购买框 cancel+exit 弃扫。购买框必有确认/取消
+        # 大按钮(conf 0.97+ 稳定) → 无按钮=过渡态, 不判定只 wait(不点=安全);
+        # 有按钮才跑结构闸。真购买框语境不变, fail-closed 方向不变。
+        _dialog_btn_up = (
+            self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_CONFIRM_BAND) is not None
+            or self.find_cls(screen, UC.BTN_CONFIRM_GREY, conf=_CLS_CONF, region=_CONFIRM_BAND) is not None
+            or self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None)
+        if _dialog_btn_up and self._purchase_structure(screen):
             self.log("⛔ purchase-dialog structure at confirm — cancel + exit")
             return self._cancel_and_exit(screen)
 
@@ -525,12 +567,13 @@ class TicketSweepSkill(BaseSkill):
 
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_CONFIRM_BAND)
         if confirm is not None:
-            self._sweep_cycles += 1
-            self.log(f"confirm sweep (cycle {self._sweep_cycles}) — currency verified (票券)")
-            self._goto("result")
+            # ⭐after-ack(2026-07-22): 不提前 goto result / 不提前计 cycle —
+            # 点击被吞时留在 confirm(入口对账 fall-through 会重点); 真点上后
+            # 掃蕩完成弹窗出现 → 顶部 sweep-done 分支落账+进 result。
+            self.log("confirm sweep — currency verified (票券), 等掃蕩完成落地")
             return action_click_box(confirm, "confirm sweep (tickets, not pyroxene)")
 
-        if self._phase_ticks > 10:
+        if self._phase_ticks > 24:
             self._goto("result")
             return action_wait(300, "no confirm dialog → result")
         return action_wait(350, "waiting for sweep-confirm dialog")

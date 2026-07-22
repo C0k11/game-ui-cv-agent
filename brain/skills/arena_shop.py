@@ -115,6 +115,7 @@ class ArenaShopSkill(BaseSkill):
         self._skipped: set = set()           # cls_names we gave up selecting
         self._tap_count: Dict[str, int] = {} # cls_name → times tapped
         self._last_tap_tick: Dict[str, int] = {}  # per-drink last-tap tick (render-wait)
+        self._last_select_name: Optional[str] = None  # 上一 tick 点的哪瓶(被吞对账用)
         self._purchased: bool = False
         self._confirm_clicked: bool = False  # 点過確認键; latch _purchased 仅凭到达证据
 
@@ -311,6 +312,17 @@ class ArenaShopSkill(BaseSkill):
             self._want = want
             self.log(f"buying {list(want)} total={total} 货币, balance={bal} — ok")
 
+        # 被吞对账 (mutate-before-ack 残留, 逐帧审 2026-07-21 实锤): tap 计数在
+        # return click 前突变, select-click 被稳定门吞时点击没发出去却已计账 →
+        # 虚耗 _MAX_TAP → 提前"放弃"漏买 (一般能量饮料 2 次被吞后被 skip)。
+        # action_suppressed 只在被吞后的第一个 tick 为 True → 在此回滚该 tap。
+        if self.action_suppressed and self._last_select_name:
+            n = self._last_select_name
+            self._tap_count[n] = max(0, self._tap_count.get(n, 1) - 1)
+            self._last_tap_tick.pop(n, None)
+            self.log(f"select {n} 被稳定门吞 — 回滚 tap 计数")
+        self._last_select_name = None
+
         # Tap each wanted drink ONCE; confirm via its 绿勾; NEVER re-tap a card
         # that already shows 绿勾 (that would deselect it — the toggle bug).
         for name in self._want:
@@ -340,6 +352,7 @@ class ArenaShopSkill(BaseSkill):
                     continue
             self._tap_count[name] = tapped + 1
             self._last_tap_tick[name] = self._phase_ticks
+            self._last_select_name = name   # 供下一 tick 被吞对账回滚
             self.log(f"select {name} (tap {tapped + 1})")
             return action_click_box(card, f"select {name}")
 

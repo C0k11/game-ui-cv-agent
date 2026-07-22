@@ -177,6 +177,7 @@ class ScheduleSkill(BaseSkill):
         self._regions_seen: int = 0         # regions whose popout we've opened
         self._full_circle: bool = False     # traversed all regions → fallback
         self._circle_start_dispatch: int = 0  # _dispatch_count at circle start(空转退出用)
+        self._region_count: int = 0         # 区域列表帧实测区数(0=没测到, 回落 _MAX_REGIONS)
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
         # per-region (reset on each region switch)
         self._region_locked: Optional[bool] = None   # case A (True) / B (False)
@@ -687,6 +688,19 @@ class ScheduleSkill(BaseSkill):
 
         # Step 1: first click 夏莱办公室 (region-select list row 0).
         if not self._office_clicked:
+            # ⭐动态区域数(2026-07-21 逐帧审修): 区域列表帧数区域名 cls (36-40) →
+            # 一圈判定用真实区数, 不再用 _MAX_REGIONS=14 兜底 — 5 区账号旧码要
+            # 绕近 3 圈才触发 full-circle/exit, live 抓到 200+ tick 开关 popout
+            # 空转。检出 <2 (列表帧没抓全) → 保守回落 _MAX_REGIONS。
+            # ⚠新校区上线要加词表重训, 否则计数偏低 → fallback 提前(策略损失,
+            # 非金钱风险)。
+            _region_cls = (UC.SCHOOL_OFFICE, UC.SCHOOL_DORM, UC.SCHOOL_GEHENNA,
+                           UC.SCHOOL_ABYDOS, UC.SCHOOL_MILLENNIUM)
+            _n = sum(1 for c in _region_cls
+                     if self.find_cls(screen, c, conf=_CLS_CONF) is not None)
+            if _n >= 2:
+                self._region_count = _n
+                self.log(f"region list: {_n} regions detected (dynamic circle size)")
             office = self.find_cls(screen, UC.SCHOOL_OFFICE, conf=_CLS_CONF)
             if office is not None:
                 self.log("entering 夏莱办公室 (YOLO 夏莱办公室)")
@@ -880,7 +894,8 @@ class ScheduleSkill(BaseSkill):
         # 硬撑 fallback 空转(旧码: 学生排完但剩票时绕 ~28 区到 max_ticks=320 才退,
         # 中断的 autonomous 重跑复现 tick 201 空转)。只有本圈真派出过学生+还剩票, 才
         # 值得再扫一圈捡漏。
-        if self._regions_seen >= _MAX_REGIONS:
+        _circle_size = self._region_count or _MAX_REGIONS   # 动态区数(列表帧实测)
+        if self._regions_seen >= _circle_size:
             _dispatched_this_circle = self._dispatch_count > self._circle_start_dispatch
             if ((self._tickets is None or self._tickets > 0)
                     and not self._full_circle and _dispatched_this_circle):

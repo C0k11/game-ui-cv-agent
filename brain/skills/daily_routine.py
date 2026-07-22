@@ -161,6 +161,11 @@ class DailyRoutineSkill(BaseSkill):
 
             # Delegate the tick to the current sub-skill
             try:
+                # root 信号传导: pipeline 把 action_suppressed(上一 tick 的点击
+                # 被稳定门吞) 置在 DailyRoutine 身上, sub 读自己的永远 False →
+                # 所有 sub 的被吞对账(mutate-before-ack 修复)形同虚设(2026-07-21
+                # 逐帧审实锤: arena_shop select 回滚从未触发)。委托前传导。
+                sub.action_suppressed = self.action_suppressed
                 action = sub.tick(screen)
             except Exception as e:
                 self.log(f"sub '{sub.name}' tick error: {e}; advancing")
