@@ -252,6 +252,19 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"tickets 读拒: parse_count fail (raw {raw!r})")
             return None
         cur, _tot = parsed
+        # ⭐首位复读修复(2026-07-25 live 实锤): run_digit_ocr 碎片拼接会复读首位
+        # 数字 —— 实测 raw '55/7'(真值 5/7), memory 早记过 1/7→11/7 同款。
+        # 旧码只会"读拒"→ _tickets 停在 -1 → _pick_room 的兜底闸
+        # (self._tickets is not None and > 0) 永远挡住 → **空房间+剩票全废**。
+        # 只在**已经越界**(cur>上限, 本来就要丢弃)时尝试去掉重复的首位, 且结果
+        # 必须 <= 上限才接受。方向保守: 修出来的值只会更小 = 派得更少, 不会多花。
+        if cur is not None and cur > _MAX_TICKETS:
+            s = str(cur)
+            if len(s) >= 2 and s[0] == s[1]:
+                fixed = int(s[1:])
+                if 0 <= fixed <= _MAX_TICKETS:
+                    self.log(f"tickets 首位复读修正: {cur}→{fixed} (raw {raw!r})")
+                    cur = fixed
         if cur is None or cur < 0 or cur > _MAX_TICKETS:
             self.log(f"tickets 读拒: cur={cur} 越界/复读伪值 (raw {raw!r})")
             return None
@@ -942,9 +955,17 @@ class ScheduleSkill(BaseSkill):
             # 正确规则: **只要这圈还派出过人且还剩票就继续下一圈**; 收敛性由
             # "某圈零派出即退" 保证(每圈必须至少派 1 人才有资格续圈), 外加
             # tickets==0 与 max_ticks 两道硬闸, 不会空转。
+            # ⛔2026-07-25 第二轮实锤(第一版没修够): 兜底 fallback spend-leftover
+            # 要求 _full_circle=True, 而 _full_circle 又要求"某圈派出过人" ——
+            # 学生已在上一轮派完时**第1圈必然零派出 → 兜底永远够不着**, 亮着的
+            # 空房间(实测 7 间里 4 间无目标学生但可派)+剩票全废。
+            # 正解: **第1圈结束无条件开兜底模式**; 之后只要这圈还在派就续圈。
+            # 收敛: 兜底圈零派出即退 → 最坏只多绕 1 圈, 外加 tickets==0 与
+            # max_ticks 两道硬闸。
             if ((self._tickets is None or self._tickets > 0)
-                    and _dispatched_this_circle):
-                self.log(f"full circle: 本圈派出过+剩 {self._tickets} 票 → 再扫一圈捡漏")
+                    and (not self._full_circle or _dispatched_this_circle)):
+                self.log(f"full circle: 剩 {self._tickets} 票 → "
+                         f"{'开' if not self._full_circle else '续'}捡漏圈")
                 self._full_circle = True
                 self._regions_seen = 0
                 self._circle_start_dispatch = self._dispatch_count
