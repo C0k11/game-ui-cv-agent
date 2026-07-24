@@ -58,6 +58,8 @@ _BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wai
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
 _BATTLE_MAX_SEC = 300      # 单场战斗墙钟上限(实测活动关 70-90s, 5min 极宽松)
 _AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP, 别把整轮判死)
+_SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
+                           # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
 
 # 固定位 (live 实测, 帧目检):
@@ -146,6 +148,7 @@ class EventQuestSkill(BaseSkill):
         self._battle_ticks = 0
         self._battle_t0 = 0.0         # 战斗墙钟起点(0=未开打)
         self._ap_fail_t0 = 0.0        # AP 连续读不出的墙钟起点(0=未失败)
+        self._popup_stuck_t0 = 0.0    # 掃蕩開始 不出现的墙钟起点(0=未计时)
         self._sweep_rounds = 0
         self._points_done = False
         self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
@@ -953,11 +956,27 @@ class EventQuestSkill(BaseSkill):
                     self._sweep_rounds += 1
                     return action_click_box(ss, f"{label}: 掃蕩開始 (round "
                                                 f"{self._sweep_rounds}, AP={ap})")
+                # ⛔2026-07-25 实锤: 这条旁路**从头到尾没读过 AP**, 却对外宣布
+                # "AP exhausted"。8 tick 在 ZERO-WAIT 下 ≈1.6s(server/app.py:1424
+                # 非 loading wait 一律压 0.12s), **比同文件 _AP_READ_RETRY_SEC=6.0
+                # 还短** —— AP 读不出时的重试返回 action_wait, _phase_ticks 照涨,
+                # 重试到第 9 tick 就被这里抢先关窗 = 我的重试修复被直接架空,
+                # 840 AP 就是这么没的。
+                # 收紧两点: ①掃蕩開始 必须**不在屏**才允许判"开不出来"(在屏说明
+                # 还能扫, 只是 AP 没读到) ②改墙钟, 且必须长于 AP 重试窗
+                # ③log 不再冒充资源结论(没读过 AP 就不许说 exhausted)。
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
-                if self._phase_ticks > 8 and close is not None:
-                    self.log(f"{label}: sweep not opening (AP exhausted) → done")
-                    self._set(phase_after)
-                    return action_click_box(close, f"{label}: close popup, AP done")
+                if ss is None and close is not None:
+                    if not self._popup_stuck_t0:
+                        self._popup_stuck_t0 = time.time()
+                    _el = time.time() - self._popup_stuck_t0
+                    if _el > _SWEEP_OPEN_SEC:
+                        self.log(f"{label}: 掃蕩開始 {_el:.1f}s 未出现 → 关窗收工"
+                                 f"(⚠未读到 AP, 不做资源结论)")
+                        self._set(phase_after)
+                        return action_click_box(close, f"{label}: close popup")
+                else:
+                    self._popup_stuck_t0 = 0.0
             return action_wait(600, f"{label}: popup settling")
         # 确认框 (要使用NAP掃蕩N次嗎?)
         conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
