@@ -160,9 +160,11 @@ class ScheduleSkill(BaseSkill):
 
     def __init__(self):
         super().__init__("Schedule")
-        # Worst case: ~10 regions × (open popout + a few rooms + transitions).
-        # 300 gives comfortable slack for multi-region traversal + retries.
-        self.max_ticks = 320
+        # 一圈 ≈ 5 区 × ~25 tick ≈ 125。放开捡漏圈次数后(2026-07-25 修), 花光
+        # 7 张票最坏要 3-4 圈 = 375-500 tick → 旧值 320 会在第 3 圈被 pipeline
+        # 判超时 reset(与 event_quest 400 同款: 上限卡在工作量之下, 活没干完
+        # 就被砍)。给到 900 留足余量; 真跑飞由"某圈零派出即退"+tickets==0 收敛。
+        self.max_ticks = 900
         self._init_state()
 
     # ── state init / reset ────────────────────────────────────────────────
@@ -933,9 +935,16 @@ class ScheduleSkill(BaseSkill):
         _circle_size = self._region_count or 5
         if self._regions_seen >= _circle_size:
             _dispatched_this_circle = self._dispatch_count > self._circle_start_dispatch
+            # ⛔2026-07-25 实锤: 旧闸带 `not self._full_circle`, 捡漏圈**只准跑
+            # 一次** —— 今天第1圈派1人→开捡漏→第2圈又派1人→但 _full_circle 已
+            # True → 直接退出, **5 张票原地作废**。而同一设施能派多人(教室一格
+            # 上 2 个绿勾实证), 7 设施十几个位置, 7 张票本该花得完。
+            # 正确规则: **只要这圈还派出过人且还剩票就继续下一圈**; 收敛性由
+            # "某圈零派出即退" 保证(每圈必须至少派 1 人才有资格续圈), 外加
+            # tickets==0 与 max_ticks 两道硬闸, 不会空转。
             if ((self._tickets is None or self._tickets > 0)
-                    and not self._full_circle and _dispatched_this_circle):
-                self.log("full circle: 本圈派出过+剩票 → fallback 再扫一圈捡漏")
+                    and _dispatched_this_circle):
+                self.log(f"full circle: 本圈派出过+剩 {self._tickets} 票 → 再扫一圈捡漏")
                 self._full_circle = True
                 self._regions_seen = 0
                 self._circle_start_dispatch = self._dispatch_count
