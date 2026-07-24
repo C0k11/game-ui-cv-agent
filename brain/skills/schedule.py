@@ -239,9 +239,14 @@ class ScheduleSkill(BaseSkill):
         raw = run_digit_ocr(screen.frame, self._TICKET_REGION)
         parsed = parse_count(raw)
         if parsed is None:
+            if raw:
+                # ⭐拒绝必留痕(2026-07-24 workflow[30]): 静默 None 使 tickets=-1
+                # 的根因不可见, 今天 5 区全 -1 只能帧考古
+                self.log(f"tickets 读拒: parse_count fail (raw {raw!r})")
             return None
         cur, _tot = parsed
         if cur is None or cur < 0 or cur > _MAX_TICKETS:
+            self.log(f"tickets 读拒: cur={cur} 越界/复读伪值 (raw {raw!r})")
             return None
         if cur != self._tickets:
             self.log(f"tickets: {cur}/{_MAX_TICKETS} (raw {raw!r})")
