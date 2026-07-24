@@ -36,6 +36,7 @@ Flow:
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from brain.skills.base import (
@@ -55,6 +56,7 @@ _BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wai
                            # 战斗 70-90s → 必超时 done → derail 二连根因
                            # (2026-07-24 workflow 深挖实锤)。500≈5min 上限。
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
+_BATTLE_MAX_SEC = 300      # 单场战斗墙钟上限(实测活动关 70-90s, 5min 极宽松)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
 
 # 固定位 (live 实测, 帧目检):
@@ -89,7 +91,17 @@ class EventQuestSkill(BaseSkill):
     def __init__(self, points_target: int = _POINTS_TARGET_DEFAULT,
                  tail_quests: int = _TAIL_QUESTS):
         super().__init__("EventQuest")
-        self.max_ticks = 400          # 长跑 skill: battle + 多轮扫荡
+        # 长跑 skill 的**整体**上限(pipeline.py:2403 `skill.ticks >= max_ticks`
+        # → skill.reset() 重来)。⚠与 _BATTLE_MAX 不是一个计数器: 后者是
+        # self._battle_ticks(每场战斗归零), 这里是 skill 全程累计。
+        # 400 的账: 新活动开荒一轮 = enter/verify(实测峰值 126) + survey(~60)
+        # + unlock 4 场解锁战(每场 编队~30 + 战斗~140 + 结算~20 ≈ 190) 760
+        # + points 30 轮扫(~240) + currency(~240) + milestone/tasks(~80)
+        # ≈ 1500 → 400 必在解锁战中途被砍, reset 后重新 survey(台账保证不会
+        # 重复打已解锁的关, 所以不烧 AP, 但白跑一遍)。
+        # 7 月实测从没撞上是因为三关早有 Best Record, 全程只扫荡不解锁
+        # (skill_ticks 峰值 126, scratchpad/check_maxticks.py)。下个活动开荒必撞。
+        self.max_ticks = 1600
         self._points_target = points_target
         self._tail_quests = tail_quests
         self._init_state()
@@ -131,6 +143,7 @@ class EventQuestSkill(BaseSkill):
         self._survey_swiped = False
         self._unlock_idx = 0
         self._battle_ticks = 0
+        self._battle_t0 = 0.0         # 战斗墙钟起点(0=未开打)
         self._sweep_rounds = 0
         self._points_done = False
         self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
@@ -800,10 +813,20 @@ class EventQuestSkill(BaseSkill):
                 self.log(f"unlock: sortie w/ squad-2 (bonus%={pct_raw!r})")
                 self._formation_step = "battle"
                 self._battle_ticks = 0
+                self._battle_t0 = time.time()
                 return action_click_box(sortie, "unlock: 出击 (bonus run)")
             return action_wait(600, "unlock: waiting 出击")
         if step == "battle":
             self._battle_ticks += 1
+            # ⭐墙钟兜底(2026-07-25): tick 数在 ZERO-WAIT 后不再等价于时间, 而
+            # 真实 tick 速率**测不出来** —— 7 月 39 个 run 全是 step_mode 逐帧
+            # 门控的, per-run 0.65~8.7 s/tick 全是人工停顿的指纹(实测
+            # scratchpad/tick_rate.py)。所以别再拿 tick 当计时器: 战斗超时以
+            # 墙钟为准, 与 tick 速率无关。_BATTLE_MAX 保留为轮询次数上限。
+            _bt0 = getattr(self, "_battle_t0", 0.0)
+            if _bt0 and time.time() - _bt0 > _BATTLE_MAX_SEC:
+                self.log(f"battle 墙钟超时 {time.time() - _bt0:.0f}s")
+                return action_done("event_quest battle timeout (wall clock)")
             if self._battle_ticks > _BATTLE_MAX:
                 return action_done("event_quest battle timeout")
             # AUTO gate (灰 → 点亮)
