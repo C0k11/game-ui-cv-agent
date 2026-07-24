@@ -2450,10 +2450,28 @@ class DailyPipeline:
             }
             for b in screen.yolo_boxes
         ]
+        # ⭐子 skill 的真实 sub_state(2026-07-25): DailyRoutine 是委托壳, 它的
+        # sub_state 只是子 skill 的名字("Schedule"), 子 skill 自己的状态机位置
+        # 从没落过盘 → 7 月全部 Schedule/Cafe/Shop... tick 都无法离线重放。
+        # 实锤: 想给 schedule 票数 fail-closed 建 replay fixture 时, 48 个 7 月
+        # run 里 Schedule 的 tick 数 = 0(全被记成 DailyRoutine)。
+        inner = ""
+        try:
+            _sub = getattr(skill, "current_sub", None) if skill else None
+            if _sub is None and skill is not None:
+                _plan = getattr(skill, "_plan", None)
+                _idx = getattr(skill, "_cur_idx", None)
+                if _plan and isinstance(_idx, int) and 0 <= _idx < len(_plan):
+                    _sub = _plan[_idx][0]
+            if _sub is not None:
+                inner = f"{_sub.name}/{getattr(_sub, 'sub_state', '')}"
+        except Exception:
+            inner = ""
         record = {
             "tick": self._total_ticks,
             "skill": skill.name if skill else "(no-ba-ui-wait)",
             "sub_state": skill.sub_state if skill else "",
+            "inner_sub_state": inner,
             "skill_ticks": skill.ticks if skill else 0,
             "action": action,
             "ocr_boxes": ocr_data,
@@ -2464,6 +2482,9 @@ class DailyPipeline:
             "image_w": screen.image_w,
             "image_h": screen.image_h,
             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            # ts 只有 1 秒精度, 而 tick ≈0.6s → 相邻 tick 常同秒, _dedup_click
+            # 的 2.5s 稳定窗在离线重放里复现不出来。补一个浮点时钟。
+            "ts_f": round(time.time(), 3),
         }
         job = (screenshot_path, str(self._traj_dir), tick_id, record)
         try:

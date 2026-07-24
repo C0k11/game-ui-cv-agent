@@ -374,6 +374,11 @@ class BaseSkill(ABC):
         self.sub_state = ""
         self.ticks = 0
         self._log_lines = []
+        # 被吞信号是"上一个动作没落地", 全新一轮没有上一个动作 —— 不清会让刚
+        # 进场的 skill 继承别人的信号: daily_routine 委托链上 sub.reset() 后紧接
+        # 着 sub.action_suppressed = self.action_suppressed, 于是新 sub 第 1 tick
+        # 就拿前一个 sub 被吞的点击去做入口对账, 回滚一个它从没推进过的状态。
+        self.action_suppressed = False
 
     # ── Dot-driven skip check (overridden by daily-harvest skills) ──
     # When pipeline is about to start this skill, it first calls should_run()

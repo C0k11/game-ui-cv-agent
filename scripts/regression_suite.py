@@ -80,10 +80,26 @@ CHECKS = {"purchase_dialog": check_purchase_dialog,
           "speed_1x": check_speed_1x}
 
 
+def _run_logic_layer() -> int:
+    """逻辑层回归(tests/replay/fixtures.py): 给定检出框看 skill 判得对不对。
+    不跑 YOLO、不要 GPU、秒级。与本文件的模型层用例是两层, 都过才叫没回归。"""
+    from tests.replay.fixtures import run as _run
+    return _run()
+
+
 def main():
     want = None
     if "--domain" in sys.argv:
         want = sys.argv[sys.argv.index("--domain") + 1]
+
+    if want == "logic":
+        sys.exit(_run_logic_layer())
+
+    logic_rc = 0
+    if want is None:
+        logic_rc = _run_logic_layer()
+        print()
+
     manifest = json.loads((REG / "manifest.json").read_text(encoding="utf-8"))
     cases = [c for c in manifest["cases"]
              if want is None or c["domain"] == want]
@@ -112,10 +128,10 @@ def main():
               f"{'  (known_overblock)' if c.get('known_overblock') else ''}")
     print(f"\nveto失败 {veto_fail} | 功能失败 {warn_fail} | "
           f"通过 {len(cases) - veto_fail - warn_fail}/{len(cases)}")
-    if veto_fail:
+    if veto_fail or logic_rc == 2:
         print("⛔ 金钱防线回归失败 — 一票否决, 禁止出货!")
         sys.exit(2)
-    if warn_fail:
+    if warn_fail or logic_rc:
         sys.exit(1)
 
 

@@ -835,6 +835,15 @@ class EventQuestSkill(BaseSkill):
 
     def _points(self, screen: ScreenState) -> Dict[str, Any]:
         """尾关(点数关) MAX 扫直到 目标 / AP尽."""
+        # fail-closed: survey 没产出任何关就进了 points → quest_idx = -1, 会被
+        # _sweep_quest 的 `quest_idx < len()` 守卫放行(负数恒小于长度)然后
+        # self._quests[-1] 崩在 tick 里。live 走不到(reset 同时清 _quests 和
+        # _surveyed_cys, survey 完成必有条目), 但 replay 台上 302 tick 复现 7 次,
+        # 是真实的崩溃路径 — 堵死比留着强。
+        if not self._quests:
+            self.log("points: _quests 为空(survey 未产出) — 跳过扫荡转 milestone")
+            self._set("milestone")
+            return action_wait(300, "points: no surveyed quest to sweep")
         pts = self._read_points(screen)
         if pts is not None:
             self.log(f"活動點數 {pts[0]}/{pts[1]}")
@@ -933,7 +942,8 @@ class EventQuestSkill(BaseSkill):
             return action_click_box(conf_btn, f"{label}: 掃蕩完成 確認")
         # 列表页 → 开目标关 popup
         keys = self._enter_keys(screen)
-        if keys and quest_idx < len(self._quests):
+        # 0 <= 而不是只 < : 负 idx 会从尾部静默取关(空表则直接 IndexError)
+        if keys and 0 <= quest_idx < len(self._quests):
             cy = self._quests[quest_idx][0]
             box = min(keys, key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
             # cy 容差防呆 (同 survey/unlock): 目标关不在视野绝不点最近邻

@@ -131,6 +131,7 @@ class DailyRoutineSkill(BaseSkill):
         # should_run, so we don't waste a tick per skip.
         while self._cur_idx < len(self._plan):
             sub, force_run = self._plan[self._cur_idx]
+            just_entered = False
 
             # First time we touch this sub — decide whether to enter
             if not self._cur_started:
@@ -144,6 +145,7 @@ class DailyRoutineSkill(BaseSkill):
                         self.log(f"should_run({sub.name}) error: {e}; entering anyway")
                 # Enter sub: reset its state, expose its name in our sub_state
                 sub.reset()
+                just_entered = True
                 self._cur_started = True
                 self.sub_state = sub.name
                 self.log(f"→ entering '{sub.name}'")
@@ -165,7 +167,11 @@ class DailyRoutineSkill(BaseSkill):
                 # 被稳定门吞) 置在 DailyRoutine 身上, sub 读自己的永远 False →
                 # 所有 sub 的被吞对账(mutate-before-ack 修复)形同虚设(2026-07-21
                 # 逐帧审实锤: arena_shop select 回滚从未触发)。委托前传导。
-                sub.action_suppressed = self.action_suppressed
+                # ⛔只传给"本轮之前就在跑"的 sub。刚 reset 进场的 sub 没有上一个
+                # 动作可言, 传进去就是拿前一个 sub 被吞的点击去对账(第 1 tick 就
+                # 误回滚)。reset() 已把它清 False, 这里不再覆盖。
+                if not just_entered:
+                    sub.action_suppressed = self.action_suppressed
                 action = sub.tick(screen)
             except Exception as e:
                 self.log(f"sub '{sub.name}' tick error: {e}; advancing")
