@@ -684,6 +684,23 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
 # capture function here once the pipeline's ADB connection is up.
 _CLEAN_FRAME_SOURCE = None
 
+# ── 同 tick 干净帧复用 (2026-07-25) ────────────────────────────────────
+# 实测: run_digit_ocr 每次调用都重抓一张 ADB 4K 帧 ~770ms, 而 OCR 本体只要
+# 19.6ms(scratchpad/bench_digit.py)。一个 tick 内 skill 不可能改变屏幕 —
+# skill.tick() 只返回 action dict, 点击在 tick 返回之后才由 server 落屏 —
+# 所以同一 tick 内的多次数字读数看到的必然是同一屏, 抓一次就够。
+# ticket_sweep._read_tickets 一个 tick 最多读 3 次 = 白等 1.5s。
+#
+# ⛔默认 max_age=0 不缓存, 语义与旧版逐字节相同。原因: _read_topbar_clean /
+# _read_topbar_clean_multi 的多帧投票**靠每次拿到不同帧**才有意义, 一旦缓存
+# 就塌成"同一帧读 5 遍"的复读, 直接废掉金钱读数的投票防线。只有显式传
+# max_age 的调用方(run_digit_ocr)才走缓存。
+_CF_LOCK = threading.Lock()
+_CF_CACHE = {"frame": None, "ts": 0.0, "epoch": -1}
+_CF_EPOCH = 0                      # 每 tick +1, 跨 tick 复用物理上不可能
+_CF_STATS = {"grab": 0, "hit": 0}  # 只统计走缓存的调用方(digit 读数)
+_DIGIT_FRAME_MAX_AGE = 1.5         # 兜底 TTL(epoch 已挡跨 tick, 这道防 tick 外调用)
+
 
 def set_clean_frame_source(fn) -> None:
     """Register a zero-arg callable returning a clean BGR frame (or None)."""
@@ -691,14 +708,52 @@ def set_clean_frame_source(fn) -> None:
     _CLEAN_FRAME_SOURCE = fn
 
 
-def get_clean_frame():
-    """A fresh overlay-free frame via the registered source, or None."""
+def invalidate_clean_frame_cache() -> None:
+    """新 tick 开始 / 动作落屏后调用: 让上一 tick 的干净帧彻底失效。"""
+    global _CF_EPOCH
+    with _CF_LOCK:
+        _CF_EPOCH += 1
+        _CF_CACHE["frame"] = None
+        _CF_CACHE["ts"] = 0.0
+        _CF_CACHE["epoch"] = -1
+
+
+def clean_frame_cache_stats() -> Dict[str, int]:
+    """{'grab': 真抓次数, 'hit': 同 tick 复用次数} — 用于实测收益。"""
+    with _CF_LOCK:
+        return dict(_CF_STATS)
+
+
+def get_clean_frame(max_age: float = 0.0):
+    """A fresh overlay-free frame via the registered source, or None.
+
+    max_age > 0 → 允许复用 **本 tick 内** max_age 秒以内抓过的帧。
+    max_age = 0(默认) → 每次真抓, 老调用方语义不变。
+    """
     if _CLEAN_FRAME_SOURCE is None:
         return None
+    if max_age > 0:
+        now = time.time()
+        with _CF_LOCK:
+            if (_CF_CACHE["frame"] is not None
+                    and _CF_CACHE["epoch"] == _CF_EPOCH
+                    and (now - _CF_CACHE["ts"]) <= max_age):
+                _CF_STATS["hit"] += 1
+                return _CF_CACHE["frame"]
+    # 时间戳取抓帧**开始**时刻(保守: ADB screencap 本身要 0.77s, 按结束
+    # 时刻记会低估帧龄)。
+    t0 = time.time()
     try:
-        return _CLEAN_FRAME_SOURCE()
+        fr = _CLEAN_FRAME_SOURCE()
     except Exception:
         return None
+    if fr is not None and max_age > 0:
+        with _CF_LOCK:
+            _CF_CACHE["frame"] = fr
+            _CF_CACHE["ts"] = t0
+            _CF_CACHE["epoch"] = _CF_EPOCH
+            _CF_STATS["grab"] += 1
+    return fr
 
 
 def run_digit_ocr(frame, region_norm) -> Optional[str]:
@@ -721,9 +776,11 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
     # 数字读数需要 4K 细节(1080p 实测伤金钱读数): 主 tick 帧换 scrcpy
     # 1440p 后(2026-07-16 Phase2), 凡传入低于 4K 的帧自动升级 ADB 干净帧
     # 重抓 — 一处兜底, 9 个 skill 调用点零改动。抓帧失败用原帧(降级可用)。
+    # ⭐同 tick 复用(2026-07-25): 一个 tick 内屏幕不会变(点击在 tick 返回后
+    # 才落屏), 所以第 2..N 次读数直接吃缓存, 每次省 ~770ms。
     try:
         if frame.shape[1] < 3200:
-            _cf = get_clean_frame()
+            _cf = get_clean_frame(max_age=_DIGIT_FRAME_MAX_AGE)
             if _cf is not None:
                 frame = _cf
     except Exception:
@@ -1759,6 +1816,14 @@ class DailyPipeline:
             return action_done("pipeline not running")
 
         self._total_ticks += 1
+
+        # 新 tick = 新一屏: 干掉上一 tick 缓存的 ADB 干净帧(digit 读数复用用)。
+        invalidate_clean_frame_cache()
+        if self._total_ticks % 300 == 0:
+            _cfs = clean_frame_cache_stats()
+            if _cfs["grab"] or _cfs["hit"]:
+                print(f"[Pipeline] digit 帧缓存: 真抓 {_cfs['grab']} / 复用 "
+                      f"{_cfs['hit']} → 省 ≈{_cfs['hit'] * 0.77:.1f}s", flush=True)
 
         # ── frame-settle 历史(_dedup_click 稳定门用, 2026-07-17 用户"不要
         # 强拍"): 每 tick 记录 结构指纹+各cls质心, 连续两帧一致=页面稳定。
