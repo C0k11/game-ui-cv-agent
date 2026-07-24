@@ -269,7 +269,7 @@ class BatchSweepSkill(BaseSkill):
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
             self._goto("close")
             if cancel is not None:
-                return action_click_box(cancel, "cancel (pyroxene dialog)")
+                return action_click_box(cancel, "cancel dismiss (pyroxene dialog)")
             return action_back("dismiss pyroxene dialog")
 
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF)

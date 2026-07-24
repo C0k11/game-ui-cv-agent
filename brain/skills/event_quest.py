@@ -50,7 +50,10 @@ _WEAK_CONF = 0.20          # 活动皮肤弱类 (活动商店/活动任务/活�
 _ENTER_MAX = 24
 _VERIFY_RETRY_MAX = 10     # 405 轮播重试上限 (双相位修正后期望 ≤3 轮命中)
 _PHASE_MAX = 18
-_BATTLE_MAX = 46           # battle poll ticks (pipeline tick ~5s → ~230s)
+_BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wait
+                           # 被压 0.12s), 46 时代假设 5s/tick 已失效: 46≈28s <
+                           # 战斗 70-90s → 必超时 done → derail 二连根因
+                           # (2026-07-24 workflow 深挖实锤)。500≈5min 上限。
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
 
@@ -104,6 +107,8 @@ class EventQuestSkill(BaseSkill):
         self._ev_marker_hits = 0
         # Quest tab 点击后的渲染冷却(tick 数): 冷却中不计 hits 不重点
         self._marker_click_cooldown = 0
+        # unlock confirm 阶段的自動保险补点一次性标记(方案C, 每关重置)
+        self._auto_insurance = False
         # wrong-event back 后跳过下一次 405 检出。误入根因(20帧@0.45s 实测
         # 钉死 2026-07-22): 轮播 ~2.5s/页, 405@0.97/474@0.93 逐帧交替从不
         # 共存(v14 训练没问题) — 检出405→tap 落屏有 1-2s 延迟, 点下去时轮播
@@ -762,6 +767,16 @@ class EventQuestSkill(BaseSkill):
                 return action_click_box(auto, "unlock: 自動 (event-optimal)")
             return action_wait(500, "unlock: waiting 自動 btn")
         if step == "confirm":
+            # ⭐自動保险(2026-07-24 方案C, workflow实锤[41]): 快速編輯面板上
+            # 自動+確認同屏共存 → "自動被吞"回滚锚(BTN_CONFIRM is None)永不
+            # 成立, 自動点击被稳定门吞两次 live 实锤跳过自動出击烂队(15%场)。
+            # 確認前无条件补点一次自動(自動=重算最优填充, 幂等), 不依赖锚。
+            if not self._auto_insurance:
+                auto = self.find_cls(screen, UC.SQUAD_AUTO_EDIT, conf=_CLS_CONF)
+                if auto is not None:
+                    self._auto_insurance = True
+                    return action_click_box(
+                        auto, "unlock: 自動保险补点 (幂等, 防被吞漏网)")
             conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.5)
             if conf_btn is not None:
                 self._formation_step = "sortie"
@@ -811,6 +826,7 @@ class EventQuestSkill(BaseSkill):
                 self._mark_bonus_done(self._quests[self._unlock_idx][0])
                 self._unlock_idx += 1
                 self._formation_step = ""
+                self._auto_insurance = False   # 下一关重新补点
                 return action_wait(500, "back on list after unlock")
             return action_click(*_POS_TOUCH_CONTINUE, "settle: TOUCH continue")
         return action_wait(500, f"unlock: step {step}")

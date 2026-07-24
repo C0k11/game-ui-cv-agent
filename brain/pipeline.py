@@ -2224,6 +2224,9 @@ class DailyPipeline:
         # the same wait reason for many ticks while combat is in progress.
         _battle_wait_keywords = (
             "battle in progress", "battle speed", "loading/battle",
+            # event_quest unlock 战斗等待词(2026-07-24): 缺这词时 stuck 网在
+            # 战斗中 blind-tap@9/ESC@20 捣乱
+            "battling",
             # event phase scanning: legitimate waits between popup/reward
             # cycles, ESC here drops us out of the event page to lobby
             "event quest scanning", "event story scanning", "event challenge scanning",
