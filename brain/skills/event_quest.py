@@ -166,7 +166,18 @@ class EventQuestSkill(BaseSkill):
         # 地板 0.20 兜底)。得星不再单独放行 — 它对特殊作戰无区分度。
         has_bottom = self.find_cls(
             screen, [UC.EVENT_SHOP, UC.EVENT_TASK], conf=_WEAK_CONF) is not None
-        return has_bottom
+        # ⛔Challenge tab 假阳性(2026-07-23 实锤): Challenge 列表同样有 ≥2
+        # 入场键+活动底栏 — 切 Quest tab 点击被稳定门吞后 verify 假 OK →
+        # survey 在 Challenge 3 关上死等 4 keys 超时, 全天 swept=0 两连。
+        # 正锚: 活动quest_已选择 在屏(Quest tab 真选中); 兜底: 未选中态
+        # 活动quest 不在屏 且 检出 关卡得星_3(Challenge 全 0 星/Story 无星)。
+        qsel = self.find_cls(screen, UC.EVENT_QUEST_SEL,
+                             conf=_WEAK_CONF) is not None
+        qunsel = self.find_cls(screen, UC.EVENT_QUEST,
+                               conf=_WEAK_CONF) is not None
+        star3 = any(b.cls_name == "关卡得星_3" and b.confidence >= 0.5
+                    for b in (screen.yolo_boxes or []))
+        return has_bottom and (qsel or (not qunsel and star3))
 
     def _on_popup(self, screen: ScreenState) -> bool:
         """任務資訊 popup 特征: 扫荡开始 + 任务开始 同屏."""
