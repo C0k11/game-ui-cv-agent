@@ -302,7 +302,10 @@ class BuyPyroxeneSkill(BaseSkill):
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
         # Reward popup already showing (confirm registered) → reward state.
         if (self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF) is not None
-                or self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF) is not None):
+                or self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF) is not None
+                # interceptor 上一 tick 替我们关掉了奖励弹窗 → 那**就是**落地证据
+                # (2026-07-25 live: 不认这条会去重按已消失的免費購買键)
+                or self.interceptor_handled == "reward"):
             self._bought = True
             self._goto("reward")
             return action_wait(200, "reward popup up → reward")

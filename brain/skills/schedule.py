@@ -45,6 +45,7 @@ Detectors (pipeline.SKILL_YOLO_MAP["Schedule"] = "ui+avatar"):
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -96,7 +97,8 @@ _OPEN_ROOM_MAX = 12
 # Reaction time: after clicking a room head, the 課程表資訊 info popup takes
 # ~1-2s to open. Wait this many ticks for it (tick() PRIORITY 2 catches
 # SCHED_START) before concluding the click failed (user: 给点击反应时间).
-_OPEN_ROOM_SETTLE = 4
+_OPEN_ROOM_SETTLE = 4          # (保留: 其他处引用) — 开房等待已改墙钟, 见下
+_OPEN_ROOM_SETTLE_SEC = 3.0    # 課程表資訊 弹窗渲染实测 1-2s, 3s 宽松兜底
 _SWITCH_MAX = 12
 _EXIT_MAX = 14
 # Reaction time: before concluding a region has "no room/target", re-scan this
@@ -167,6 +169,7 @@ class ScheduleSkill(BaseSkill):
 
     def _init_state(self) -> None:
         self._phase_ticks: int = 0          # ticks spent in current sub_state
+        self._open_room_t0: float = 0.0     # 開房等待墙钟起点(0=未开始计时)
         self._enter_attempts: int = 0
         self._targets: List[str] = []
         self._tickets: int = -1             # -1 = unknown; 0 = exhausted
@@ -200,6 +203,7 @@ class ScheduleSkill(BaseSkill):
         """Switch sub_state and reset the per-phase tick counter."""
         self.sub_state = sub_state
         self._phase_ticks = 0
+        self._open_room_t0 = 0.0      # 墙钟计时随状态切换归零
 
     def _reset_region(self) -> None:
         """Clear per-region state on entering a fresh region's popout."""
@@ -211,6 +215,7 @@ class ScheduleSkill(BaseSkill):
         self._ticket_read_pending = False
         self._barren_scans = 0          # consecutive no-room scans this region
         self._head_settle = _HEAD_RENDER_SETTLE  # let heads render before 1st pick
+        self._open_room_t0 = 0.0     # 開房等待墙钟起点(0=未开始计时)
 
     # ── ticket digit-OCR ──────────────────────────────────────────────────
 
@@ -873,9 +878,19 @@ class ScheduleSkill(BaseSkill):
         # bot deduped 6 rooms but only 1 actually opened its info popup (live
         # 2026-06-02: clicked 6 heads, 1 start). (user: 给点击反应时间)
         if self._roster_open(screen):
-            if self._phase_ticks < _OPEN_ROOM_SETTLE:
-                return action_wait(450, f"waiting for 課程表資訊 popup ({self._phase_ticks}/{_OPEN_ROOM_SETTLE})")
-            self.log("info popup never opened after head click → back to roster")
+            # ⭐墙钟而非 tick 计数(2026-07-25 live 实锤): 上面注释写的是"弹窗要
+            # ~1-2s", 但实现在数 tick —— 而非 loading 的 action_wait 被 server
+            # 压到 0.12s, 4 tick 可能只有 0.5-1s, 窗口在弹窗渲染完之前就过期,
+            # skill 判"没开"退回 roster 另挑一间 → 正是本常量当初要修的
+            # "clicked 6 heads, 1 start"(2026-06-02)重现。tick 速率不可依赖
+            # (7月录像全是 step 门控, 0.65~8.7 s/tick), 计时就得用墙钟。
+            if not self._open_room_t0:
+                self._open_room_t0 = time.time()
+            _el = time.time() - self._open_room_t0
+            if _el < _OPEN_ROOM_SETTLE_SEC:
+                return action_wait(450, f"waiting for 課程表資訊 popup "
+                                        f"({_el:.1f}s/{_OPEN_ROOM_SETTLE_SEC}s)")
+            self.log(f"info popup never opened after head click ({_el:.1f}s) → back to roster")
             self._goto("roster")
             return action_wait(300, "back to roster")
 

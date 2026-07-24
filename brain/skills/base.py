@@ -368,6 +368,15 @@ class BaseSkill(ABC):
         # _dedup_click 稳定门/hold 转成 wait(未落地) → True。skill 可据此避免
         # 假前进(mutate-before-ack 防线的 root 信号)。
         self.action_suppressed: bool = False
+        # ⭐pipeline 置位(2026-07-25): 上一 tick 全局 interceptor 抢先接管了本帧
+        # (skill.tick 那一帧**根本没被调用**), 这里记它处理掉了什么。
+        # 为什么需要: 很多 skill 的"落地证据"就是奖励弹窗本身(buy_pyroxene
+        # `看到 获得奖励 → _bought=True`), 而 interceptor 的职责恰恰是关掉奖励
+        # 弹窗 —— **证据被截胡**, skill 永远等不到, 于是回退去重按购买键。
+        # live 实锤 2026-07-25: 每日免費包已买成(信用点+10K/AP+10 已到账), 但
+        # _bought 仍 False → 下一 tick "re-press FREE buy"。这次无害(免費键已
+        # 消失), 但同形状落在 shop/ticket_sweep 上就是对着仍可点的付费键重复购买。
+        self.interceptor_handled: str = ""
 
     def reset(self) -> None:
         """Reset skill state for a fresh run."""
@@ -379,6 +388,7 @@ class BaseSkill(ABC):
         # 着 sub.action_suppressed = self.action_suppressed, 于是新 sub 第 1 tick
         # 就拿前一个 sub 被吞的点击去做入口对账, 回滚一个它从没推进过的状态。
         self.action_suppressed = False
+        self.interceptor_handled = ""
 
     # ── Dot-driven skip check (overridden by daily-harvest skills) ──
     # When pipeline is about to start this skill, it first calls should_run()

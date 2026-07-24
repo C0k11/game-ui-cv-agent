@@ -2186,6 +2186,22 @@ class DailyPipeline:
         intercept = self._global_interceptor(screen, skill)
         if intercept:
             intercept = self._dedup_click(intercept)
+            # ⭐证据截胡防线(2026-07-25 live 实锤): interceptor 命中时 skill.tick()
+            # 这一帧被完全跳过, 而不少 skill 的"落地证据"正是 interceptor 要关掉
+            # 的那个弹窗(奖励/升级)。把 interceptor 处理了什么告诉 skill, 让它能
+            # 把"interceptor 替我关了奖励弹窗"当作到达证据 —— 否则它会以为动作没
+            # 成功, 回头重按购买键。语义同 action_suppressed: 只活到 skill 下一次
+            # 真正 tick(在那之后由 skill.tick 调用处清掉)。
+            try:
+                _r = str(intercept.get("reason", "") or "")
+                if "reward" in _r:
+                    skill.interceptor_handled = "reward"
+                elif "level-up" in _r:
+                    skill.interceptor_handled = "levelup"
+                else:
+                    skill.interceptor_handled = "other"
+            except Exception:
+                pass
             self._save_trajectory(screenshot_path, screen, skill, intercept)
             return intercept
 
@@ -2248,6 +2264,12 @@ class DailyPipeline:
 
         # Let skill decide
         action = skill.tick(screen)
+        # 信号已被本次 tick 消费(与 action_suppressed 同寿命: 只活到 skill 下一次
+        # 真正 tick)。清在 tick 之后, 保证 skill 读得到、且不会跨两次决策。
+        try:
+            skill.interceptor_handled = ""
+        except Exception:
+            pass
         _raw_type = action.get("action", "")
         action = self._dedup_click(action, screen)
         action_type = action.get("action", "")
