@@ -29,6 +29,8 @@ Detectors: base "ui" + "battle" (SKILL_YOLO_MAP).
 """
 from __future__ import annotations
 
+import time
+
 from typing import Any, Dict, Optional
 
 from brain.skills.base import (
@@ -62,6 +64,9 @@ _COOLDOWN_REGION = (0.12, 0.71, 0.27, 0.77)
 
 _ENTER_MAX = 24
 _CLAIM_MAX = 12
+# 领完一个黄钮后 toast 动画期间下一个检不出 —— 用墙钟等, 别数 tick
+# (2026-07-25: 旧的 "2 tick" ≈0.24s 盖不住动画, 每日獎勵 直接漏领)。
+_CLAIM_SETTLE_SEC = 2.5
 _EXIT_MAX = 16
 
 
@@ -81,6 +86,8 @@ class ArenaSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._enter_ticks: int = 0
         self._claim_clicks: int = 0
+        self._claim_pending: bool = False   # 上一 tick 发了 claim 点击, 等落账
+        self._claim_t0: float = 0.0         # 无新黄钮的墙钟起点(0=未计时)
         self._fights_done: int = 0
         self._cooldown: int = 0
         self._fight_stage: int = 0          # 0=對戰對象 1=编队 2=battle
@@ -329,7 +336,18 @@ class ArenaSkill(BaseSkill):
         if got is not None:
             return action_click_box(got, "dismiss reward (header)")
 
-        if self._claim_clicks >= 4 or self._phase_ticks > _CLAIM_MAX:
+        # ⭐after-ack 落账(2026-07-25): 旧码在 return action_click_box 之前就
+        # _claim_clicks += 1 —— 点击被稳定门吞时计数照加, 上限被虚耗, 真黄钮
+        # 还没领就判 "claim done"。改成上一 tick 的点击**确认没被吞**才计数。
+        if getattr(self, "_claim_pending", False):
+            if self.action_suppressed:
+                self.log("claim 点击被吞 — 计数不落账, 重试")
+            else:
+                self._claim_clicks += 1
+                self.log(f"claim arena reward #{self._claim_clicks} 已落账")
+            self._claim_pending = False
+
+        if self._claim_clicks >= 6 or self._phase_ticks > _CLAIM_MAX:
             self.log(f"claim done ({self._claim_clicks})")
             self._goto("fight_check")
             return action_wait(250, "claim done → fight_check")
@@ -337,17 +355,22 @@ class ArenaSkill(BaseSkill):
         # Click any active 领取奖励_黄 (灰 = already claimed, ignore).
         claim = self.find_cls(screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW], conf=_CLS_CONF)
         if claim is not None:
-            self._claim_clicks += 1
-            self._claim_settle = 0
-            self.log(f"claim arena reward #{self._claim_clicks} ({claim.cls_name})")
+            self._claim_pending = True
+            self._claim_t0 = 0.0
+            self.log(f"claim arena reward ({claim.cls_name})")
             return action_click_box(claim, "claim arena reward")
 
-        # 2026-07-09: 领完第1个的toast动画期间第2个黄钮检不出 → settle 2 tick
-        # 再确认(今天live: 時間獎勵+每日獎勵两黄钮只领了1个就过)。
-        self._claim_settle = getattr(self, "_claim_settle", 0) + 1
-        if self._claim_settle <= 2:
-            return action_wait(600, f"claim settle re-check ({self._claim_settle}/2)")
-        self.log("no 领取奖励_黄 → fight_check")
+        # ⭐墙钟而非 tick(2026-07-25 live 实锤: 每日獎勵 漏领):
+        # 领完一个后 toast 动画期间下一个黄钮检不出, 旧码等 "2 tick" —— 而非
+        # loading 的 action_wait 被 server 压到 0.12s, 2 tick ≈ 0.24s, 盖不住
+        # 动画 → 直接判 "no 领取奖励_黄" 去打架, 每日獎勵 那个黄钮就丢了
+        # (2026-07-09 注释记的同款事故, 当时的修法 2 tick 标定失准)。
+        if not getattr(self, "_claim_t0", 0.0):
+            self._claim_t0 = time.time()
+        _el = time.time() - self._claim_t0
+        if _el < _CLAIM_SETTLE_SEC:
+            return action_wait(600, f"claim settle re-check ({_el:.1f}s/{_CLAIM_SETTLE_SEC}s)")
+        self.log(f"no 领取奖励_黄 ({_el:.1f}s 无新黄钮) → fight_check")
         self._goto("fight_check")
         return action_wait(250, "no active rewards → fight_check")
 

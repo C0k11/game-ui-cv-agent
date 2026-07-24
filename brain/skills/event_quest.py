@@ -57,6 +57,7 @@ _BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wai
                            # (2026-07-24 workflow 深挖实锤)。500≈5min 上限。
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
 _BATTLE_MAX_SEC = 300      # 单场战斗墙钟上限(实测活动关 70-90s, 5min 极宽松)
+_AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP, 别把整轮判死)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
 
 # 固定位 (live 实测, 帧目检):
@@ -144,6 +145,7 @@ class EventQuestSkill(BaseSkill):
         self._unlock_idx = 0
         self._battle_ticks = 0
         self._battle_t0 = 0.0         # 战斗墙钟起点(0=未开打)
+        self._ap_fail_t0 = 0.0        # AP 连续读不出的墙钟起点(0=未失败)
         self._sweep_rounds = 0
         self._points_done = False
         self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
@@ -922,9 +924,25 @@ class EventQuestSkill(BaseSkill):
                 # 同 special_sweep 0615 教训: 耗尽型扫荡必先读余额)。
                 if ss is not None and self._phase_ticks % 3 == 1:
                     ap = self._read_ap(screen)
-                    if ap is None or ap < 20:
-                        self.log(f"{label}: AP={ap} <单次成本/读不出 → "
+                    # ⭐区分"读失败"与"真的不够"(2026-07-25 live 实锤: 一次读
+                    # 不出就收工, **840 AP 原地作废**)。金钱防线一分不松 ——
+                    # 仍然只在读到有效值 ≥20 时才点掃蕩開始; 但读失败属于感知
+                    # 抖动, 该在墙钟窗口内重试, 而不是把整轮资源判死。
+                    if ap is None:
+                        if not self._ap_fail_t0:
+                            self._ap_fail_t0 = time.time()
+                        _el = time.time() - self._ap_fail_t0
+                        if _el < _AP_READ_RETRY_SEC:
+                            return action_wait(
+                                400, f"{label}: AP 读不出, 重试中 "
+                                     f"({_el:.1f}s/{_AP_READ_RETRY_SEC}s)")
+                        self.log(f"{label}: AP 连续 {_el:.1f}s 读不出 → "
                                  f"fail-closed 收工(绝不碰購買AP框)")
+                    else:
+                        self._ap_fail_t0 = 0.0
+                    if ap is None or ap < 20:
+                        if ap is not None:
+                            self.log(f"{label}: AP={ap} <单次成本 → 收工")
                         close = self.find_cls(screen, UC.BTN_CLOSE_X,
                                               conf=_CLS_CONF)
                         self._set(phase_after)
