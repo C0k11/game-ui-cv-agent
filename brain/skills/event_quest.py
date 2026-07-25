@@ -137,11 +137,19 @@ class EventQuestSkill(BaseSkill):
         self._bonus_created = 0.0
         self._load_bonus_ledger()
         # survey 结果: [(cy_of_入场键, bonus_unlocked)] 自上而下
-        self._quests: List[Tuple[float, bool]] = []
-        # cy 记账 (2026-07-10 同关反复开合 bug 修): 点过的 cy±0.03 不再点。
-        # 旧 _survey_idx 索引制病灶: 关 popup 后过渡帧入场键检出不全 →
-        # keys[-4:] tail 切片错位 → 同一关反复开合 + Bonus 状态记错关。
+        # L1-②: 每项 = {"num": int|None, "cy": float, "unlocked": bool}
+        # num=关号(唯一身份, 跨帧有效) / cy=当帧坐标(只用于点击与帧内去重)
+        self._quests: List[Dict[str, Any]] = []
+        # 本轮 survey 已看过的关。**两套并存, 用途严格分工**(L1-②):
+        #   _surveyed_nums = 关号 → 真身份, 跨帧/跨滚动都成立, 优先用它
+        #   _surveyed_cys  = 坐标 → 只在关号读不出时兜底; 仅因为"同一次 survey
+        #                    里列表不滚动"这一条前提才勉强成立, **绝不落台账**
+        # (2026-07-10 同关反复开合 bug 修: 点过的 cy±0.03 不再点。旧 _survey_idx
+        #  索引制病灶: 关 popup 后过渡帧入场键检出不全 → keys[-4:] tail 切片
+        #  错位 → 同一关反复开合 + Bonus 状态记错关。)
         self._surveyed_cys: List[float] = []
+        self._surveyed_nums: List[Optional[int]] = []
+        self._survey_num: Optional[int] = None
         self._popup_wait = 0
         self._survey_swiped = False
         self._unlock_idx = 0
@@ -260,9 +268,71 @@ class EventQuestSkill(BaseSkill):
             self.log(f"banner instance blacklisted ({why}), "
                      f"total={len(self._banner_bad_hashes)}")
 
+    # ── L1-② 列表结构化解析 (2026-07-25) ──────────────────────────────
+    # ⛔为什么必须做: 台账主键一直是 **cy**(归一化屏幕纵坐标)。列表一滚动 cy
+    # 全变, 台账整个失效 —— data/event_bonus_state.json 落盘的就是
+    # {"0.397": true, "0.871": true, ...} 这种东西。"坐标不是身份"。
+    #
+    # 关号锚定方式(符合感知铁律: YOLO cls 主导定位, OCR 只读数字):
+    #   关号数字条 = 已训 cls `关卡得星_3` box **正上方**, x 同宽,
+    #   y ∈ [y1 - 2.4h, y1]  (h = 得星 box 高)
+    # 实测(scratchpad/qnum_probe2.py, 全 92,855 tick 扫出 **479 帧真活动
+    # Quest 列表**, 16 进程并行):
+    #   单格读出率 **100.0%** / 整帧全对率 **100.0%** / 错 0
+    # 验收判据用**结构自洽**当 ground truth(不靠人工标): 同帧自上而下关号
+    # 必须是连续递增整数, 满足才算这一帧全对。参数扫了 5 组, 2.4h 最稳
+    # (2.0h 那组会把 08 切成 30 —— 切太紧比切太松危险得多)。
+    _QNUM_STRIP_UP = 2.4        # 关号条上边界 = 得星 y1 - 2.4 * 得星高
+    _ROW_PAIR_DY = 0.05         # 入场键 ↔ 得星 同行的最大 cy 差(实测 ~0.024)
+
+    def parse_quest_rows(self, screen: ScreenState) -> List[Dict[str, Any]]:
+        """把 quest 列表帧解析成**结构化行**, 自上而下。
+
+        返回 [{"num": int|None, "cy": float, "enter": YoloBox,
+               "star": YoloBox|None}, ...]
+        num=None 表示这一行关号没读出来 —— 调用方必须 fail-closed 处理,
+        **绝不允许退回用 cy 当身份**(那正是要消灭的东西)。
+        """
+        stars = [b for b in (screen.yolo_boxes or [])
+                 if b.cls_name == UC.STAGE_STAR_3 and b.confidence >= 0.30]
+        rows: List[Dict[str, Any]] = []
+        for enter in self._enter_keys(screen):
+            ecy = (enter.y1 + enter.y2) / 2
+            star = None
+            for s in stars:
+                if abs((s.y1 + s.y2) / 2 - ecy) <= self._ROW_PAIR_DY:
+                    if star is None or abs((s.y1 + s.y2) / 2 - ecy) < abs(
+                            (star.y1 + star.y2) / 2 - ecy):
+                        star = s
+            rows.append({"num": self._read_quest_num(screen, star),
+                         "cy": ecy, "enter": enter, "star": star})
+        rows.sort(key=lambda r: r["cy"])
+        return rows
+
+    def _read_quest_num(self, screen: ScreenState,
+                        star: Optional[YoloBox]) -> Optional[int]:
+        """得星 box 正上方的关号(两位数)。读不出 → None(调用方 fail-closed)。"""
+        if star is None or screen.frame is None:
+            return None
+        bh = star.y2 - star.y1
+        raw = _read_digits(screen.frame,
+                           (star.x1, max(0.0, star.y1 - self._QNUM_STRIP_UP * bh),
+                            star.x2, star.y1))
+        d = "".join(ch for ch in (raw or "") if ch.isdigit())
+        if not d:
+            return None
+        n = int(d)
+        # 活动 Quest 关号实际范围 1-30(尾三关 Q10-12); 越界 = 误读, 宁可 None
+        return n if 1 <= n <= 30 else None
+
     # ── 加成台账 (persistent, data/event_bonus_state.json) ────────────
     _BONUS_STATE_PATH = "data/event_bonus_state.json"
 
+    # ⛔2026-07-25 主键迁移 cy → 关号(L1-②)。旧盘上的 {"0.397": true} 这种
+    # **坐标当身份**的记录一律作废: 列表一滚动 cy 就变, 它们既不可信也无法
+    # 翻译成关号(当时的滚动位置早没了)。作废的代价 = 最多重扫一次尾关(免费,
+    # 因为 survey 本来就会重开 popup 核对 Bonus 状态); 留着的代价 = 台账错位
+    # 去解锁错的关(要花 20AP)。所以宁可丢。
     def _load_bonus_ledger(self) -> None:
         try:
             import json, os, time as _t
@@ -271,27 +341,46 @@ class EventQuestSkill(BaseSkill):
                 created = float(d.get("created", 0))
                 if _t.time() - created < 10 * 86400:   # 超10天=新活动, 作废
                     self._bonus_created = created
-                    self._bonus_ledger = {
-                        round(float(k), 3): True
-                        for k, v in (d.get("quests") or {}).items() if v}
+                    _q = d.get("quests") or {}
+                    _kept, _dropped = {}, 0
+                    for k, v in _q.items():
+                        if not v:
+                            continue
+                        # 新格式: 纯整数关号字符串("10"); 旧格式: 小数 cy("0.397")
+                        if "." in str(k):
+                            _dropped += 1
+                            continue
+                        try:
+                            _kept[int(k)] = True
+                        except ValueError:
+                            _dropped += 1
+                    self._bonus_ledger = _kept
+                    if _dropped:
+                        self.log(f"⚠台账里 {_dropped} 条是旧的 cy 主键(坐标当身份) "
+                                 f"— 已作废, 本轮重新核对")
         except Exception:
             self._bonus_ledger = {}
 
-    def _mark_bonus_done(self, cy: float) -> None:
-        self._bonus_ledger[round(cy, 3)] = True
+    def _mark_bonus_done(self, num: Optional[int]) -> None:
+        """按**关号**落账。num=None(关号没读出) → 不落账, 宁可下次重扫。"""
+        if num is None:
+            self.log("⚠关号未读出 → 不落台账(绝不退回用 cy 当身份)")
+            return
+        self._bonus_ledger[int(num)] = True
         try:
             import json, time as _t
             if not self._bonus_created:
                 self._bonus_created = _t.time()
             with open(self._BONUS_STATE_PATH, "w", encoding="utf-8") as f:
                 json.dump({"created": self._bonus_created,
-                           "quests": {f"{k:.3f}": True
+                           "quests": {str(k): True
                                       for k in self._bonus_ledger}}, f)
         except Exception:
             pass
 
-    def _bonus_recorded(self, cy: float) -> bool:
-        return any(abs(cy - k) <= 0.03 for k in self._bonus_ledger)
+    def _bonus_recorded(self, num: Optional[int]) -> bool:
+        """关号已落账? 关号未知 → False(当没做过, 重扫是免费的; 误判做过要花 AP)。"""
+        return num is not None and int(num) in self._bonus_ledger
 
     def _pyroxene_in_body(self, screen: ScreenState) -> bool:
         """money backstop: 对话框 body(y>0.12) 出现青辉石 = 绝不是纯AP扫荡框."""
@@ -689,12 +778,15 @@ class EventQuestSkill(BaseSkill):
                             unlocked = bn * 5 >= fn * 4
                             self.log(f"survey: 固定x{fn} vs Bonus x{bn} → "
                                      f"{'满加成' if unlocked else '烂加成需重打'}")
-                    self._quests.append((self._survey_cy, unlocked))
+                    self._quests.append({"num": self._survey_num,
+                                         "cy": self._survey_cy,
+                                         "unlocked": unlocked})
                     self._surveyed_cys.append(self._survey_cy)
+                    self._surveyed_nums.append(self._survey_num)
                     if unlocked and numeric_ok:
-                        self._mark_bonus_done(self._survey_cy)
+                        self._mark_bonus_done(self._survey_num)
                     self.log(f"survey quest#{len(self._quests)} "
-                             f"(cy={self._survey_cy:.3f})"
+                             f"Q{self._survey_num} (cy={self._survey_cy:.3f})"
                              f" bonus_unlocked={unlocked}")
                 else:
                     self.log("survey: duplicate popup (already recorded) — close")
@@ -716,34 +808,48 @@ class EventQuestSkill(BaseSkill):
             # popup 迟到 (开窗动画慢于重选判定) — 续用上次点击的 cy 记账
             self._popup_open = True
             return action_wait(300, "survey: popup appeared late")
-        keys = self._enter_keys(screen)
+        # ⭐L1-② 结构化行: 每行 = 入场键 + 得星 + **关号**。
+        # ⛔坐标与身份的分工写死在这里, 以后别再混:
+        #   cy   → 只用来**点击**和**同一帧内去重**(当帧有效, 合法)
+        #   num  → 唯一的**身份**(跨帧/跨 run 有效), 台账只认它
+        rows = self.parse_quest_rows(screen)
         # 过渡帧检出不全 → tail 错位, 必须看到完整尾部才动手
-        if len(keys) < self._tail_quests:
-            return action_wait(600, f"survey: partial list ({len(keys)} keys)")
-        tail = keys[-self._tail_quests:]
-        # cy 记账: 点过(±0.03)的关不再点
-        todo = [b for b in tail
-                if all(abs((b.y1 + b.y2) / 2 - c) > 0.03
-                       for c in self._surveyed_cys)]
+        if len(rows) < self._tail_quests:
+            return action_wait(600, f"survey: partial list ({len(rows)} rows)")
+        tail = rows[-self._tail_quests:]
+        todo = [r for r in tail if not self._surveyed(r)]
         if not todo:
             # survey 完毕 → unlock 队列 = 未解锁的关 (自底向上: 点数关优先解锁)
-            self._quests.sort(key=lambda q: q[0])
+            self._quests.sort(key=lambda q: q["cy"])
             self._quests = self._quests[-self._tail_quests:]
+            _nums = [q["num"] for q in self._quests]
             self._set("unlock")
-            return action_wait(300, f"survey done ({len(self._quests)} tail quests)")
-        box = todo[0]
-        _cy = (box.y1 + box.y2) / 2
-        # ⭐台账命中 = 该关加成已打过, 不再开 popup 复查(用户 2026-07-11)
-        if self._bonus_recorded(_cy):
-            self._quests.append((_cy, True))
+            return action_wait(300, f"survey done (tail quests {_nums})")
+        r = todo[0]
+        _cy, _num = r["cy"], r["num"]
+        # ⭐台账命中 = 该关加成已打过, 不再开 popup 复查(用户 2026-07-11)。
+        # 关号读不出 → _bonus_recorded 必 False → 老老实实开 popup 复查。
+        # 方向保守: 多开一次 popup 是免费的, 误判"做过了"要多花 20AP 去解锁别的关。
+        if self._bonus_recorded(_num):
+            self._quests.append({"num": _num, "cy": _cy, "unlocked": True})
             self._surveyed_cys.append(_cy)
-            self.log(f"survey: cy={_cy:.3f} 台账已记加成解锁 — skip popup")
+            self._surveyed_nums.append(_num)
+            self.log(f"survey: Q{_num} 台账已记加成解锁 — skip popup")
             return action_wait(200, "survey: ledger hit, next")
         self._survey_cy = _cy
+        self._survey_num = _num
         self._popup_open = True
         self._popup_wait = 0
         return action_click_box(
-            box, f"survey open quest popup cy={self._survey_cy:.3f}")
+            box=r["enter"],
+            reason=f"survey open quest popup Q{_num} (cy={_cy:.3f})")
+
+    def _surveyed(self, row: Dict[str, Any]) -> bool:
+        """这一行本轮 survey 过了没。关号已知就按关号(身份), 否则退回 cy
+        (**仅**因为同一次 survey 里列表没滚动, cy 在这段时间内还稳)。"""
+        if row["num"] is not None and row["num"] in self._surveyed_nums:
+            return True
+        return any(abs(row["cy"] - c) <= 0.03 for c in self._surveyed_cys)
 
     # ── unlock (加成解锁: 自动编队 + 真打一次) ────────────────────────
 
@@ -784,7 +890,8 @@ class EventQuestSkill(BaseSkill):
                 self._formation_step = "sortie"
                 self.log("unlock: 出击被吞 → 回滚")
         # 找下一个未解锁的关
-        while self._unlock_idx < len(self._quests) and self._quests[self._unlock_idx][1]:
+        while (self._unlock_idx < len(self._quests)
+               and self._quests[self._unlock_idx]["unlocked"]):
             self._unlock_idx += 1
         if self._unlock_idx >= len(self._quests):
             self._set("points")
@@ -831,12 +938,25 @@ class EventQuestSkill(BaseSkill):
                     self._formation_step = "edit"
                     return action_click_box(ts, "unlock: 任務開始 → formation")
                 return action_wait(500, "unlock: waiting 任務開始")
-            keys = self._enter_keys(screen)
-            if keys:
-                cy = self._quests[self._unlock_idx][0]
-                box = min(keys, key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
-                # cy 容差防呆: 目标关不在视野 (过渡帧/列表被复位) 绝不点最近邻
+            rows = self.parse_quest_rows(screen)
+            if rows:
+                _t = self._quests[self._unlock_idx]
+                _num, cy = _t["num"], _t["cy"]
+                # ⭐L1-② 收益点: **先按关号找**。旧码只有 cy 最近邻 —— 列表
+                # 一滚动(或过渡帧复位), 同一个 cy 就落在**另一关**上, 于是拿着
+                # 20AP 去解锁了错的关, 而且台账还记成对的那关做过了。
+                hit = next((r for r in rows
+                            if _num is not None and r["num"] == _num), None)
+                if hit is not None:
+                    return action_click_box(
+                        hit["enter"], f"unlock: open quest Q{_num} (按关号锚定)")
+                # 关号通道不可用(本帧没读出/目标关号未知) → 退回 cy 最近邻,
+                # 但保留原来的 ±0.04 容差防呆: 目标不在视野绝不点最近邻。
+                box = min((r["enter"] for r in rows),
+                          key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
                 if abs((box.y1 + box.y2) / 2 - cy) <= 0.04:
+                    if _num is not None:
+                        self.log(f"⚠unlock: Q{_num} 关号本帧没读出 — 退回 cy 锚定")
                     return action_click_box(box, f"unlock: open quest cy={cy:.3f}")
                 if self._phase_ticks % 3 == 0:
                     return action_swipe(0.75, 0.72, 0.75, 0.42, duration_ms=400,
@@ -890,9 +1010,9 @@ class EventQuestSkill(BaseSkill):
                     if digits.isdigit() and int(digits) == 0:
                         self.log("unlock: 0% event bonus (no bonus students) — "
                                  "skip sortie, mark unlocked")
-                        self._quests[self._unlock_idx] = (
-                            self._quests[self._unlock_idx][0], True)
-                        self._mark_bonus_done(self._quests[self._unlock_idx][0])
+                        self._quests[self._unlock_idx]["unlocked"] = True
+                        self._mark_bonus_done(
+                            self._quests[self._unlock_idx]["num"])
                         self._formation_step = ""
                         return action_back("0% bonus — leave formation")
                 # ⛔点 出擊 前**就地复核 AP**(2026-07-25 审计 #1③): 上面那个闸
@@ -957,10 +1077,10 @@ class EventQuestSkill(BaseSkill):
                     return _veto
                 return action_click_box(conf_btn, "settle: 確認 (total reward)")
             if self._on_quest_list(screen):
-                self.log(f"unlock: quest#{self._unlock_idx} bonus run DONE")
-                self._quests[self._unlock_idx] = (
-                    self._quests[self._unlock_idx][0], True)
-                self._mark_bonus_done(self._quests[self._unlock_idx][0])
+                _q = self._quests[self._unlock_idx]
+                self.log(f"unlock: Q{_q['num']} bonus run DONE")
+                _q["unlocked"] = True
+                self._mark_bonus_done(_q["num"])
                 self._unlock_idx += 1
                 self._formation_step = ""
                 self._auto_insurance = False   # 下一关重新补点
@@ -1110,12 +1230,19 @@ class EventQuestSkill(BaseSkill):
                 return action_back("PURCHASE DIALOG suspected — back!")
             return action_click_box(conf_btn, f"{label}: 掃蕩完成 確認")
         # 列表页 → 开目标关 popup
-        keys = self._enter_keys(screen)
+        rows = self.parse_quest_rows(screen)
         # 0 <= 而不是只 < : 负 idx 会从尾部静默取关(空表则直接 IndexError)
-        if keys and 0 <= quest_idx < len(self._quests):
-            cy = self._quests[quest_idx][0]
-            box = min(keys, key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
-            # cy 容差防呆 (同 survey/unlock): 目标关不在视野绝不点最近邻
+        if rows and 0 <= quest_idx < len(self._quests):
+            _t = self._quests[quest_idx]
+            _num, cy = _t["num"], _t["cy"]
+            # ⭐先按关号锚(L1-②); 关号不可用才退回 cy 最近邻 + 容差防呆
+            hit = next((r for r in rows
+                        if _num is not None and r["num"] == _num), None)
+            if hit is not None:
+                return action_click_box(hit["enter"],
+                                        f"{label}: open quest Q{_num} (按关号锚定)")
+            box = min((r["enter"] for r in rows),
+                      key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
             if abs((box.y1 + box.y2) / 2 - cy) <= 0.04:
                 return action_click_box(box, f"{label}: open quest cy={cy:.3f}")
             if self._phase_ticks % 3 == 0:

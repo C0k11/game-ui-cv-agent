@@ -224,7 +224,7 @@ def fx_event_unlock_never_confirm_buy_ap():
             continue
         sk.sub_state = "unlock"
         sk._formation_step = step
-        sk._quests = [(0.5, False)]
+        sk._quests = [{"num": 10, "cy": 0.5, "unlocked": False}]
         sk._unlock_idx = 0
         act = sk._unlock(screen)
         r = str(act.get("reason", "")).replace("確認", "确认")
@@ -241,7 +241,7 @@ def fx_event_unlock_ap_gate_fail_closed():
     sk = EventQuestSkill()
     sk.reset()
     sk.sub_state = "unlock"
-    sk._quests = [(0.5, False)]
+    sk._quests = [{"num": 10, "cy": 0.5, "unlocked": False}]
     sk._unlock_idx = 0
     sk._formation_step = ""
     screen = _sched_screen(_yb("入场键", 0.75, 0.50), _yb("入场键", 0.75, 0.62))
@@ -286,6 +286,65 @@ def fx_schedule_popout_close_no_double_fire():
             f"动作={[a.get('action') for a in acts]}")
 
 
+# ── ⑥ L1-② 列表结构化解析: 关号是身份, 坐标不是 ────────────────────────
+def fx_quest_rows_numbers():
+    """run_20260724_204934/t0056 真帧: 5 行 Q08-Q12。
+
+    ⛔这条钉的是 L1-② 的地基 —— 台账主键从 cy 换成关号。旧盘上落的是
+    {"0.397": true, "0.871": true, ...} 这种**坐标当身份**的记录, 列表一滚动
+    全部失效。关号条 = 已训 cls `关卡得星_3` box 正上方 [y1-2.4h, y1]
+    (全语料 479 帧活动列表实测: 单格读出率 100%, 整帧连续递增 100%)。
+
+    需要真 jpg 才能跑 OCR — 没有就 skip(不算失败, 但会说出来)。
+    """
+    import os
+    import cv2
+    from brain.skills.event_quest import EventQuestSkill
+    jpg = os.path.join(FX_DIR, "quest_rows_5.jpg")
+    if not os.path.exists(jpg):
+        return (True, "SKIP: 缺 quest_rows_5.jpg")
+    raw = _load("quest_rows_5.json")
+    screen = screen_from_tick(raw, jpg_path=jpg)
+    if screen.frame is None:
+        return (True, "SKIP: 帧读不出")
+    sk = EventQuestSkill()
+    sk.reset()
+    rows = sk.parse_quest_rows(screen)
+    nums = [r["num"] for r in rows]
+    if nums != [8, 9, 10, 11, 12]:
+        return (False, f"关号解析={nums} (期望 [8,9,10,11,12])")
+    # 行内配对: 每行都要有 star, 且 cy 自上而下递增
+    if any(r["star"] is None for r in rows):
+        return (False, f"有行没配到得星: {[r['star'] is None for r in rows]}")
+    cys = [r["cy"] for r in rows]
+    if cys != sorted(cys):
+        return (False, f"行未按 cy 排序: {cys}")
+    return (True, f"5 行解析正确 Q{nums} (关号=身份, cy 仅用于点击)")
+
+
+def fx_bonus_ledger_rejects_cy_keys():
+    """旧的 cy 主键台账必须被**作废**而不是当成关号读进来。
+    `{"0.397": true}` 若被 int() 或误当关号, 会让 bot 以为某关做过了 →
+    跳过真正该解锁的关(而解锁一关要 20AP)。"""
+    import json as _j
+    import os
+    import tempfile
+    from brain.skills.event_quest import EventQuestSkill
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    import time as _t
+    _j.dump({"created": _t.time(),
+             "quests": {"0.397": True, "0.871": True, "10": True}},
+            open(path, "w", encoding="utf-8"))
+    sk = EventQuestSkill()
+    sk._BONUS_STATE_PATH = path
+    sk.reset()
+    led = dict(sk._bonus_ledger)
+    os.unlink(path)
+    ok = (led == {10: True})
+    return (ok, f"台账={led} (期望 {{10: True}} — 两条 cy 主键必须作废)")
+
+
 CASES = [
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
     ("quest_list_真阳性(反向锚)", fx_quest_list_true_positive, True),
@@ -296,6 +355,8 @@ CASES = [
     ("⛔unlock链_購買AP框绝不確認", fx_event_unlock_never_confirm_buy_ap, True),
     ("⛔unlock_AP读不出_fail-closed", fx_event_unlock_ap_gate_fail_closed, True),
     ("关popout不连发(after-ack)", fx_schedule_popout_close_no_double_fire, False),
+    ("L1②_关号解析Q08-12", fx_quest_rows_numbers, True),
+    ("L1②_旧cy主键台账必作废", fx_bonus_ledger_rejects_cy_keys, True),
 ]
 
 
