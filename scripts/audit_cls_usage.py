@@ -43,12 +43,27 @@ def load_master() -> list:
         return [ln.strip() for ln in f if ln.strip()]
 
 
-def count_label_boxes() -> Counter:
-    """raw_images 标注池里每个 master cls_id 的真实框数。"""
+# ⛔val 池必须排除(2026-07-25 第二次"审计工具自身有 bug"):
+# 旧版把 raw_images 下**所有** txt 都当训练标注统计, 包括 `_val_v8flywheel`
+# `_val_v12flywheel_0616` `_val_v15_gap` 这些**held-out val 池**。后果不只是
+# 框数虚高 —— 一个类若**只在 val 里有框、train 里没有**, 就会被误判成"有标注",
+# 于是**该报的死判据不报了**(漏报, 比多报危险)。
+_VAL_DIR_MARKERS = ("_val", "val_pool")
+
+
+def _is_val_pool(path: str) -> bool:
+    parts = os.path.normpath(path).split(os.sep)
+    return any(any(m in p for m in _VAL_DIR_MARKERS) for p in parts)
+
+
+def count_label_boxes(include_val: bool = False) -> Counter:
+    """raw_images 标注池里每个 master cls_id 的真实框数（默认**只算 train**）。"""
     cnt = Counter()
     for lf in glob.glob(os.path.join(_ROOT, "data/raw_images", "**", "*.txt"),
                         recursive=True):
         if os.path.basename(lf).startswith("_"):
+            continue
+        if not include_val and _is_val_pool(lf):
             continue
         try:
             with open(lf, encoding="utf-8") as f:
@@ -113,7 +128,7 @@ def main() -> int:
     a = ap.parse_args()
 
     master = load_master()
-    boxes = count_label_boxes()
+    boxes = count_label_boxes()          # 只算 train, 不含 val 池
     code = scan_code()
     det = scan_detections() if a.with_det else Counter()
 
@@ -142,7 +157,9 @@ def main() -> int:
             n += len(re.findall(r"'" + q + r"'", code))
         return n
 
-    print(f"master {len(master)} 类  |  标注池 {sum(boxes.values())} 框")
+    val_boxes = count_label_boxes(include_val=True)
+    print(f"master {len(master)} 类  |  **train** 标注 {sum(boxes.values())} 框"
+          f"  (含 val 池共 {sum(val_boxes.values())})")
     agg = {}
     for i, n in enumerate(master):
         d = agg.setdefault(domain(i), [0, 0])
