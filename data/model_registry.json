@@ -318,6 +318,16 @@
         "map50": 0.992,
         "map5095": 0.9564,
         "note": "2026-07-20 新类战斗失败local18(defeat_candidates_v10 28帧用户人审, DEFEAT红横幅口径): val P0.952/R1.0/AP50 0.995 — 根治'判败靠兜底'。训练源=v9九池+defeat28净料(botplay×7预标未人审被用户叫停撤出, 审完进v11 — 自蒸馏纪律)。warm v9 best, ep66早停best=ep26, train2001/val353(战斗失败23/5+胜利17/2分层)。同卷对比(battle_v10卷353帧): v9剔cls18后≈0.993 vs v10=0.992 持平, 无类退步>0.01, mAP50-95 0.942→0.956。regression battle 1/1。"
+      },
+      "v10s": {
+        "arch": "yolo26s",
+        "imgsz": 960,
+        "nc": 19,
+        "map50": 0.9948,
+        "map5095": 0.9823,
+        "path": "D:/Project/ml_cache/models/yolo/runs/battle_yolo26s_v10s/weights/best.pt",
+        "role": "labeling-assistant-only",
+        "note": "2026-07-25 **标注助手, 不上线**(用户提的种子模型法): v10 warm + 人审 025638 种子(54帧, 我方164:敌方226 比例是反的) x8 过采样 -> train 我方12448:敌方3659=3.40:1, 新增1264框全是黄色量産型机甲(v10没见过)。种子 holdout(帧号>=48, 16帧, 时间切零重叠): 敌方召回 32.4%->85.3%, 敌->友(匹配分母) 22.7%->0.0%(0/58), 友->敌 0/41, Boss 0/15(该类全在holdout, 没训过)。battle_v10 val 353帧全19类无退步(mAP50 0.992->0.9948, 50-95 0.956->0.982) —— 但该 val 有96%相邻帧泄漏, 只能当'没忘'检查不能当泛化指标。5个没训过的池: 敌方检出 742->1389(+87%), 我方@cx>=0.55 153->21 且抽检18/18全是真学生 => cx 位置规则可弃用。**过拟合是设计内的**(目标域=同session同张图), active 保持 v10, 正式 v11 等 6 池人审完重训。"
       }
     },
     "_v2_note": "v3 已训好(见versions.v3)。pipeline._YOLO_BATTLE_HEADS(pipeline.py:184)与battle_overlay_demo.py仍硬路径指legacy — 接线combat AI 2.0时切。"
