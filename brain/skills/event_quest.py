@@ -331,11 +331,16 @@ class EventQuestSkill(BaseSkill):
     def _read_ap(self, screen: ScreenState) -> Optional[int]:
         """topbar AP 读数(体力icon cls锚定 + 右侧数字strip, span 0.06 只读
         斜杠前; 主tick帧=ADB干净帧)。读不出 → None(调用方 fail-closed)."""
-        icon = self.find_cls(screen, UC.TOPBAR_AP, conf=0.5)
+        # ⛔2026-07-25 实锤(840 AP 全废的直接原因): 旧码 find_cls 不带 region,
+        # 而 find_cls 取的是**全屏 conf 最高**那个框。掃蕩弹窗一开, 对话框体内
+        # 的两个体力图标(cy 0.506/0.681)就跟顶栏那个抢锚点 —— 实测体内 0.94 >
+        # 顶栏 0.93, 于是选中体内的, 紧接着撞上下面 cy>0.12 的门直接 return None。
+        # 表现: 弹窗没开时读得出(t041-43), 弹窗一开就"AP 连续 7.7s 读不出 →
+        # fail-closed 收工", 840 AP 原地报废。
+        # 修: 锚点直接约束在 topbar 带内, 不再让体内图标参与竞争。
+        icon = self.find_cls(screen, UC.TOPBAR_AP, conf=0.5,
+                             region=(0.0, 0.0, 1.0, 0.12))
         if icon is None or screen.frame is None:
-            return None
-        cy = (icon.y1 + icon.y2) / 2
-        if cy > 0.12:          # body 里的体力图标(如購買AP框)不是 topbar
             return None
         raw = _read_digits(screen.frame,
                            (icon.x2 + 0.002, max(0.0, icon.y1 - 0.012),
