@@ -223,7 +223,15 @@ class ScheduleSkill(BaseSkill):
         self._open_room_t0: float = 0.0     # 開房等待墙钟起点(0=未开始计时)
         self._enter_attempts: int = 0
         self._targets: List[str] = []
-        self._tickets: int = -1             # -1 = unknown; 0 = exhausted
+        # ⛔2026-07-25 三态化: 旧值是 `int = -1` 的**假三态 sentinel**, 一个 bug
+        # 两头出血 —— ①金钱侧几道闸写的是 `_tickets == 0`, -1 不等于 0 于是
+        # 源头闸哑火; ②资源侧的兜底闸写的是 `_tickets is not None and > 0`,
+        # -1 既不是 None 也不 >0, 于是**捡漏永远够不着**, 剩票全废。同一个变量
+        # 被两批代码按两套语义读, 因为 -1 到底算"未知"还是算"一个数"从没定义过。
+        # 改成真三态: None=未知 / 0=用光 / >0=还有。语义写死在这里:
+        #   花钱类判断 → 必须 `_tickets == 0` 或 `is not None and > 0`(未知不放行)
+        #   找活类判断 → 可以 `is None or > 0`(未知时继续找, 反正花不出去)
+        self._tickets: Optional[int] = None   # None=未知 / 0=用光 / >0=还有
         self._dispatch_count: int = 0       # confirmed reports = tickets spent (hard cap)
         # 今日累计派遣(跨 run 持久, 硬上限真正的依据)
         self._day_dispatched: int = int(_load_sched_state().get("dispatched", 0))
@@ -235,6 +243,8 @@ class ScheduleSkill(BaseSkill):
         self._circle_start_dispatch: int = 0  # _dispatch_count at circle start(空转退出用)
         self._circle_start_switches: int = 0  # _verified_switches at circle start(假圈检测)
         self._region_count: int = 0         # 区域列表帧实测区数(0=没测到, 回落 _MAX_REGIONS)
+        self._circle_first_sig = None       # 本圈起点区域的标题指纹(None=还没锚)
+        self._circle_closed: bool = False   # 标题指纹已转回起点 = 一圈走完
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
         # ⭐区域切换到达态验证(2026-07-25): 点 ARROW_LEFT 前的标题指纹 / 起点墙钟 /
         # 已发 tap 数。标题真变了才算切成功 —— 绝不用"我发过点击"当证据。
@@ -296,6 +306,25 @@ class ScheduleSkill(BaseSkill):
     # cleanly. screen.frame is the raw full-res BGR array (run_digit_ocr crops +
     # upscales).
     _TICKET_REGION = (0.48, 0.185, 0.67, 0.25)
+
+    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    def exit_report(self):
+        """课程表的竣工判据 = 票用干净了没。
+
+        ⛔用户原话: "为什么不把课程表票用干净" —— 昨天剩 7 张、今天剩 5 张,
+        两次都是**用户肉眼**发现的, 因为 skill 的出口只问"转完一圈没"。"""
+        _day = self._day_dispatched
+        if self._tickets == 0:
+            return ("CLEAN", f"票已用光(今日累计派 {_day} 次)")
+        if self._tickets is None:
+            return ("UNKNOWN", f"票数从未读出(今日累计派 {_day} 次) — "
+                               f"**不知道**还剩几张")
+        if self._tickets > 0:
+            return ("LEFTOVER",
+                    f"还剩 {self._tickets}/{_MAX_TICKETS} 张票没花掉"
+                    f"(今日累计派 {_day} 次, 走过 {self._regions_seen} 个区, "
+                    f"帧证实换区 {self._verified_switches} 次)")
+        return ("UNKNOWN", f"票数异常 {self._tickets}")
 
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """Read 持有票券 X/7 via digit-OCR. Returns current count, or None.
@@ -963,7 +992,7 @@ class ScheduleSkill(BaseSkill):
             if not self._lock_seen and self._lock_scan_frames < 3:
                 return action_wait(300, f"lock scan ({self._lock_scan_frames}/3)")
             self._regions_seen += 1
-            self._tickets = -1  # force a fresh read on this popout
+            self._tickets = None  # 强制本 popout 重读一次(None = 未知)
             self._read_tickets(screen)
             self._region_locked = self._lock_seen
             self._lock_seen = False
@@ -1109,18 +1138,41 @@ class ScheduleSkill(BaseSkill):
         # 时用保守下限 5(BA 满解锁 5 区; 少区账号多绕几次无害)——绝不回落
         # _MAX_REGIONS=14: 2026-07-22 实锤恢复路径 fallback 永远够不到, 零派出
         # 绕到 max_ticks 死, 6 票滞留。
+        # ⛔2026-07-25 实测: 区域数**远大于 5**。Location Select 列表可滚动, 可见
+        # 5 行只是第一页(帐号 `地區等級總和 RANK 142`), ADB 逐个切实测至少 9 个:
+        # 夏萊辦公室/夏萊居住區/格黑娜學園中央區/阿拜多斯高中/千年研究區域/
+        # 狂獵綜合藝術區/春葉原/山海經中央特區/D.U.白鳥區。而上面数 SCHOOL_* cls
+        # 只认得头 5 个 → 走满 5 个就宣布 full circle, 后 4 个区里的目标学生
+        # **从来没被排过课**(策略损失, 非金钱风险)。
+        # 正解: 别数 cls, 用**回到起点**判一圈 —— _region_sig 已经能把区认出来
+        # (标定见 [[region-switch-truth]])。_circle_closed 在 _switch 的到达确认
+        # 处置位: 那里 SCHED_ALL 正锚在场(popout 已关、RANK 标题没被遮), 是唯一
+        # 测得准的时刻。cls 计数退居"指纹不可用时的兜底", _MAX_REGIONS 是硬上限。
         _circle_size = self._region_count or 5
-        if self._regions_seen >= _circle_size:
+        if self._circle_closed:
+            self.log(f"一圈完成: 标题指纹已转回起点(走过 {self._regions_seen} 个区)")
+        elif self._regions_seen >= _MAX_REGIONS:
+            self.log(f"⚠走满硬上限 {_MAX_REGIONS} 个区仍没转回起点 — 当一圈处理")
+            self._circle_closed = True
+        elif self._regions_seen >= _circle_size and self._circle_first_sig is None:
+            # 指纹通道整趟没工作过(帧拿不到/cv2 缺席) → 退回旧的 cls 计数判据,
+            # 保持老行为, 不至于一路绕到硬上限。
+            self.log(f"指纹通道不可用 → 回退 cls 计数判一圈 ({_circle_size} 区)")
+            self._circle_closed = True
+        if self._circle_closed:
             # ⛔防空转真闸(2026-07-25, 取代原来那个数圈数的 `not _full_circle`):
             # 一圈 N 个区必须伴随 N-1 次**帧证据确认的换区**。对不上 = 我们其实
             # 在原地反复开关同一个区的 popout(2026-07-25 那 200 tick 的形状) →
             # 立刻大声收工, 绝不靠"日志说我切过"续命。
+            # 需要的换区次数按**本圈实际扫过的 popout 数**算(_regions_seen-1),
+            # 不再按 cls 猜的 _circle_size —— 一圈现在可能是 9 个区而不是 5 个。
             _switches_this_circle = (self._verified_switches
                                      - self._circle_start_switches)
-            if _switches_this_circle < _circle_size - 1:
+            _need_switches = max(0, self._regions_seen - 1)
+            if _switches_this_circle < _need_switches:
                 self.log(f"⚠假圈: 扫了 {self._regions_seen} 个 popout 但只有 "
                          f"{_switches_this_circle} 次帧证实换区(需 "
-                         f"{_circle_size - 1}) — 原地空转, 收工"
+                         f"{_need_switches}) — 原地空转, 收工"
                          f"(剩 {self._tickets} 票)")
                 self._goto("exit")
                 return action_wait(300, "假圈(换区未落地) → exit")
@@ -1147,6 +1199,9 @@ class ScheduleSkill(BaseSkill):
                 self._regions_seen = 0
                 self._circle_start_dispatch = self._dispatch_count
                 self._circle_start_switches = self._verified_switches
+                # 新一圈重新锚起点(否则第 2 圈开局就"已经在起点"= 立刻假完成)
+                self._circle_closed = False
+                self._circle_first_sig = None
             else:
                 _why = ("本圈零派出(无可派对象)" if not _dispatched_this_circle
                         else f"full circle done ({self._regions_seen} regions)")
@@ -1219,6 +1274,12 @@ class ScheduleSkill(BaseSkill):
                 self._switch_t0 = time.time()
                 self._switch_taps = 0
                 self._sig_pending = None
+                # ⭐一圈的"起点"就在这里记 —— 这是**唯一**能测准的时刻:
+                # SCHED_ALL 正锚在场(popout 已关, RANK 标题没被盖住) + 指纹已
+                # 连续两帧一致。popout 开着时标题被遮, 在别处取指纹必然错。
+                if self._circle_first_sig is None:
+                    self._circle_first_sig = _sig
+                    self.log("记下本圈起点区域指纹")
             else:
                 self._sig_pending = _sig
                 return action_wait(200, "锁定区域指纹(需连续两帧一致)")
@@ -1234,6 +1295,14 @@ class ScheduleSkill(BaseSkill):
             self._verified_switches += 1
             self.log(f"✔区域切换到达确认(标题变了, {self._switch_taps} 次 tap, "
                      f"累计 {self._verified_switches} 次真切换)")
+            # ⭐转回起点 = 一圈走完。这比"数了几个 SCHOOL_* cls"可靠得多:
+            # cls 只认得头 5 个区, 实测账号至少 9 个(Location Select 可滚动),
+            # 按 cls 计数会在第 5 个区就宣布 full circle, 后面几个区里的目标
+            # 学生**一次都没被排过课**。见 [[region-switch-truth]]。
+            if (self._circle_first_sig is not None
+                    and self._sig_same(_sig, self._circle_first_sig)):
+                self._circle_closed = True
+                self.log(f"↩标题指纹转回起点 = 一圈走完(共 {self._regions_seen} 个区)")
             self._switch_from_sig = None
             self._reset_region()
             self._goto("navigate")

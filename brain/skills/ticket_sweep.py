@@ -49,6 +49,9 @@ _CLS_CONF = 0.30
 _CONFIRM_BAND = (0.28, 0.60, 0.72, 0.82)
 # 掃蕩完成 reward popup 确认键 sits LOWER (probe: ~0.5, 0.81).
 _DONE_CONFIRM_BAND = (0.30, 0.74, 0.70, 0.90)
+# 扫完重读票数的墙钟窗(旧值是 `_phase_ticks > 8` = 真实仅 1.2-2.0s, 一次
+# OCR 抖动就够把整轮票判死; 单位口径见 BaseSkill.mark)
+_POST_SWEEP_READ_SEC = 6.0
 # A 青辉石 icon inside THIS band = a buy dialog (NOT the top-bar balance at cy<0.10).
 # Deep-dive C5 (2026-06-09): aligned to schedule's LIVE-VERIFIED region (icon
 # at cy≈0.577 > old 0.48 bound — same miss risk as arena C4).
@@ -118,6 +121,7 @@ class TicketSweepSkill(BaseSkill):
         self._branch_settle: int = 0
         self._sortie_retries: int = 0
         self._zero_sweep_retried: bool = False   # 0-sweep 对账回炉只做一次
+        self._post_sweep_unread: bool = False    # 收尾时票数读不出(竣工判据用)
 
     def reset(self) -> None:
         super().reset()
@@ -128,6 +132,33 @@ class TicketSweepSkill(BaseSkill):
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
         self._phase_ticks = 0
+        self.mark("phase")                 # _phase_ticks 的墙钟版
+        self.clear_timer("post_sweep")     # 重读票数窗随阶段重置
+
+    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    def exit_report(self):
+        """票券型 skill 的竣工判据 = 票扫光了没。
+
+        ⛔[[completion-gap]] 里"悬赏票 剩多少=未知"那一格就是这里缺判据造成的:
+        旧码票数读不出时直接 log "MAX likely drained" 走人, 对外看起来干干净净,
+        实际没人知道剩几张。UNKNOWN 必须与 CLEAN 严格分开。"""
+        if self._sweep_cycles == 0:
+            if (self._tickets or 0) > 0:
+                return ("LEFTOVER",
+                        f"入场读到 {self._tickets} 张票但一次都没扫出去")
+            if self._tickets == 0:
+                return ("CLEAN", "入场票数就是 0, 无事可做")
+            return ("UNKNOWN", "票数从未读出, 且 0 次扫荡")
+        if getattr(self, "_post_sweep_unread", False):
+            return ("UNKNOWN",
+                    f"扫了 {self._sweep_cycles} 轮, 但收尾时票数读不出 —— "
+                    f"**不知道**是否扫光")
+        if self._tickets is None:
+            return ("UNKNOWN", f"扫了 {self._sweep_cycles} 轮, 票数未知")
+        if self._tickets > 0:
+            return ("LEFTOVER",
+                    f"扫了 {self._sweep_cycles} 轮, 仍剩 {self._tickets} 张票")
+        return ("CLEAN", f"{self._sweep_cycles} 轮扫光, 票 0")
 
     # ── subclass hooks ───────────────────────────────────────────────────
     def _click_branch(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
@@ -612,12 +643,22 @@ class TicketSweepSkill(BaseSkill):
             self._goto("sortie")
             return action_wait(300, "more tickets → sortie")
 
-        # Ticket unreadable after a MAX sweep → assume drained → exit.
-        if self._phase_ticks > 8:
-            self.log("post-sweep ticket unread (MAX likely drained) → exit")
+        # 票数读不出 → 不再"假设扫光了"就走人。
+        # ⛔2026-07-25 双重问题, 一起修:
+        #  ① 单位错: `_phase_ticks > 8` 是 **tick**, zero-wait 后自主跑
+        #     0.15-0.25 s/tick(口径见 BaseSkill.mark) ⇒ 真实只有 **1.2-2.0s**,
+        #     一次 OCR 抖动就够把整轮票判死。改墙钟 6s 重读窗。
+        #  ② 结论错: "读不出" 被写成 "MAX likely drained" —— 这就是
+        #     [[completion-gap]] 里"悬赏票剩多少 未知"那一格的来源。**没读到
+        #     就不许下资源结论**, 改成 UNKNOWN 并落进竣工判据供出口审计。
+        if self.since("post_sweep") > _POST_SWEEP_READ_SEC:
+            self._post_sweep_unread = True
+            self.log(f"⚠post-sweep 票数连续 {_POST_SWEEP_READ_SEC:.0f}s 读不出 "
+                     f"→ 收工(⚠**未读到票数, 不做'已扫光'结论**; "
+                     f"入场时 {self._tickets} 张)")
             self._goto("exit")
-            return action_wait(300, "post-sweep → exit")
-        return action_wait(350, "settling after sweep")
+            return action_wait(300, "post-sweep 票数未知 → exit")
+        return action_wait(350, "settling after sweep (重读票数中)")
 
     def _cancel_and_exit(self, screen: ScreenState) -> Dict[str, Any]:
         self._goto("exit")

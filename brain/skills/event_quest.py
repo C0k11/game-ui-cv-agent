@@ -153,6 +153,7 @@ class EventQuestSkill(BaseSkill):
         self._points_done = False
         self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
         self._swept = 0
+        self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
         self._popup_open = False
         self._formation_step = ""     # unlock 子步: '', 'edit', 'auto', 'confirm', 'sortie'
         self._tasks_done = False
@@ -328,6 +329,23 @@ class EventQuestSkill(BaseSkill):
                 return True
         return False
 
+    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    def exit_report(self):
+        """活动的竣工判据 = AP 灌完了没(单关 20AP, 所以 <20 才叫干净)。
+
+        ⛔2026-07-25 那次 840 AP 原地报废, skill 出口报的是 "complete" ——
+        流程确实走完了, 活一点没干。两件事必须分开报。"""
+        _ap = self._last_ap_read
+        _swept = getattr(self, "_swept", 0)
+        if _ap is None:
+            return ("UNKNOWN",
+                    f"AP 从未成功读出(本轮 swept={_swept}) — **不知道**灌完没")
+        if _ap >= 20:
+            return ("LEFTOVER",
+                    f"还剩 {_ap} AP 没灌进活动(≥20 = 至少还能扫一次), "
+                    f"本轮 swept={_swept}")
+        return ("CLEAN", f"AP={_ap} <20 单次成本, 本轮 swept={_swept}")
+
     def _purchase_veto(self, screen: ScreenState, where: str):
         """确认键 点击前的**通用**购买框否决闸。返回非 None 就必须原样 return。
 
@@ -380,7 +398,10 @@ class EventQuestSkill(BaseSkill):
                 num += ch
             elif num:
                 break
-        return int(num) if num else None
+        if not num:
+            return None
+        self._last_ap_read = int(num)   # 竣工判据用: 最后一次**成功**读到的 AP
+        return self._last_ap_read
 
     # ── tick ───────────────────────────────────────────────────────
 

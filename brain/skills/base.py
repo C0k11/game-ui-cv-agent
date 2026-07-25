@@ -447,6 +447,26 @@ class BaseSkill(ABC):
                 return True
         return False
 
+    # ── 竣工判据 exit assertion (2026-07-25 v1: 只观测不干预) ──────────────
+    # ⛔用户 2026-07-25 点破全项目最贵的盲区: "为什么不把课程表票用干净, 咖啡厅
+    # 为什么干活也不干干净, 你这测试没有意义啊" —— 我们一直在验**代码路径跑通**,
+    # 从来没有验过**活干完了**。每个 skill 按自己内部循环条件退出(Schedule 问
+    # "转完一圈没", Bounty 问"还有红点没", EventQuest 问"阶段走完没"), **没有
+    # 一个在出口处问"我该消耗的资源归零了没"** —— 所以 7 票 / 5 票 / 253 AP /
+    # swept=0 两连, 全是靠用户肉眼发现的。
+    #
+    # v1 故意**只观测不干预**: 出口处报三态, 写进日志和 SkillResult, 先攒真实
+    # 分布再谈自动补跑。UNKNOWN 与 LEFTOVER 必须分开 —— "读不出" 和 "确实没干完"
+    # 是两种病(前者是感知, 后者是策略), 混成一个 bool 就永远查不出是哪个。
+    #
+    # 子类覆写它, 返回 (verdict, detail):
+    #   "CLEAN"    该消耗的都消耗干净了
+    #   "LEFTOVER" 确认还有剩(detail 写清剩多少)  ← 要人看的
+    #   "UNKNOWN"  读不出/没测量, 不知道           ← 也要人看的
+    # 默认 UNKNOWN: 没声明判据 = 没人审计, 如实说不知道, 绝不默认 CLEAN。
+    def exit_report(self) -> Tuple[str, str]:
+        return ("UNKNOWN", "未声明竣工判据")
+
     def reset(self) -> None:
         """Reset skill state for a fresh run."""
         self.sub_state = ""

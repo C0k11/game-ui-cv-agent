@@ -1130,6 +1130,11 @@ class SkillResult:
     ticks: int
     duration_s: float
     reason: str = ""
+    # 竣工判据(BaseSkill.exit_report): "CLEAN" / "LEFTOVER" / "UNKNOWN"。
+    # status 回答"流程走完没", exit_verdict 回答"活干完没" —— 两件事,
+    # 而我们过去只有前者。
+    exit_verdict: str = "UNKNOWN"
+    exit_detail: str = ""
 
 
 class DailyPipeline:
@@ -1165,6 +1170,11 @@ class DailyPipeline:
     def __init__(self, skill_names: Optional[List[str]] = None,
                  profile_options: Optional[Dict[str, Any]] = None):
         opts = dict(profile_options or {})  # reserved for future per-skill config
+        # ⛔必须在 __init__ 里初始化: 青辉石掉钱哨兵读它。整段 kill-switch 包在
+        # `except Exception: pass` 里 —— 少这一行, 非大厅哨兵第一次跑就
+        # AttributeError, 被静默吞掉 = **整个金钱守卫悄悄死掉且零日志**。
+        # (原来它只在大厅分支里被赋值, 非大厅路径根本够不到。)
+        self._py_drop_pending: Optional[int] = None
 
         self._skill_registry: Dict[str, BaseSkill] = {
             "buy_pyroxene": BuyPyroxeneSkill(),
@@ -1436,6 +1446,16 @@ class DailyPipeline:
             self._running = False
             return
         duration_s = max(0.0, time.time() - self._skill_start_time)
+        # ⭐竣工判据 (2026-07-25): status 只说"流程走完没", 这里问"活干完没"。
+        # 出口处大声报, 不满足就带 ⚠ —— 5 票 / 253 AP 那种事, 早有这一行就会在
+        # skill 退出那一刻自己喊出来, 而不是等用户肉眼发现。
+        try:
+            _verdict, _detail = skill.exit_report()
+        except Exception as _e:                                   # noqa: BLE001
+            _verdict, _detail = "UNKNOWN", f"exit_report 异常 {type(_e).__name__}: {_e}"
+        _mark = {"CLEAN": "✔", "LEFTOVER": "⚠", "UNKNOWN": "?"}.get(_verdict, "?")
+        print(f"[Pipeline] {_mark} 竣工判据 {skill.name}: {_verdict} — {_detail}",
+              flush=True)
         self._results.append(
             SkillResult(
                 skill_name=skill.name,
@@ -1443,6 +1463,8 @@ class DailyPipeline:
                 ticks=skill.ticks,
                 duration_s=duration_s,
                 reason=str(reason or ""),
+                exit_verdict=_verdict,
+                exit_detail=str(_detail or ""),
             )
         )
         if status == "timeout":
@@ -1978,8 +2000,70 @@ class DailyPipeline:
                         print(f"[Pipeline] resources: AP={_RESOURCES['ap']} "
                               f"credits={_RESOURCES['credits']} pyroxene={_RESOURCES['pyroxene']}",
                               flush=True)
-        except Exception:
-            pass
+                elif _now - _RESOURCES.get("watch_ts", 0.0) > 20:
+                    # ⛔非 lobby 掉钱盲区(2026-07-25 自查, 30 青辉石事故的
+                    # 「为什么守卫没响」): kill-switch 整块挂在 `_navs >= 2`
+                    # 也就是**只在大厅采样**。而 schedule 那一整趟 run 从头到尾
+                    # 没回过大厅 —— 钱是在这个盲区里花掉的, 守卫一次都没跑。
+                    # 不能把大厅那套 5 帧 clean 连拍搬到全程(每 30s 阻塞数秒),
+                    # 所以做成两级:
+                    #   ① 廉价哨兵: 直接用本 tick **已经算好**的 YOLO 框读顶栏
+                    #      青辉石(零额外抓帧/推理; 没有顶栏图标时 OCR 都不跑)。
+                    #   ② 只有"疑似掉了"才升级到原来那套 2 次独立 clean 帧确认。
+                    # ⚠基线**绝不由 live 读写入**: live 帧在过渡时会左截断/超读,
+                    # 一次超读把基线抬高, 下一次正确读数就成了"掉钱"。基线只能
+                    # 由大厅快照或 clean 复读更新。同样保留位数收缩过滤(位数变少
+                    # = 截断误读, 我们的 skill 不会 30s 内花掉 90% 余额)。
+                    # ⚠live 顶栏读数**很脏**(离线实测 scratchpad/watch_replay.py:
+                    # 事故 run 104 帧, 读出 97, 与真值一致仅 **56%** —— 14061 被
+                    # 读成 14006 ×19 / 14906 ×2 / 截断成 61 ×13 / 4061 ×4)。
+                    # 所以它只能当**触发器**, 绝不能当判据; 而且单次可疑不算数:
+                    # 真花钱是**持久**的(余额一直低下去), OCR 噪声是**瞬时**的。
+                    # ⇒ 连续两次哨兵采样(相隔 ≥20s)都读到"位数相同且低于基线"
+                    #   才升级到昂贵的 2×clean 复核。代价是最多 20s 检测延迟 ——
+                    #   无所谓, 这道闸本来就是事后急停, 不是事前拦截(事前拦截
+                    #   是各 skill 的购买框结构闸)。
+                    _RESOURCES["watch_ts"] = _now
+                    _prev_py = _RESOURCES.get("pyroxene")
+                    _live_py = _read_topbar_count(screen, TOPBAR_PYROXENE)
+                    _suspect = (_prev_py is not None and _live_py is not None
+                                and _live_py < _prev_py
+                                and len(str(_live_py)) == len(str(_prev_py)))
+                    if _suspect and self._py_drop_pending is None:
+                        self._py_drop_pending = _live_py
+                        print(f"[Pipeline] ⚠非大厅哨兵: 青辉石 {_prev_py}→"
+                              f"{_live_py}(live, 单次) — 记疑, 等下一次采样复现",
+                              flush=True)
+                        _suspect = False
+                    elif not _suspect:
+                        self._py_drop_pending = None
+                    if _suspect:
+                        print(f"[Pipeline] ⚠非大厅哨兵: 青辉石 {_prev_py}→"
+                              f"{_live_py}(live, 连续两次) — 升级 clean 复核",
+                              flush=True)
+                        _c1 = _read_pyroxene_clean()
+                        time.sleep(0.5)
+                        _c2 = _read_pyroxene_clean()
+                        if (_c1 is not None and _c1 == _c2 and _c1 < _prev_py
+                                and len(str(_c1)) == len(str(_prev_py))):
+                            print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → "
+                                  f"{_c1} (非大厅哨兵, 2x clean-frame confirmed) — "
+                                  f"MONEY BREACH, ABORTING PIPELINE", flush=True)
+                            self._running = False
+                            return action_done("⛔ pyroxene drop detected — aborted")
+                        if (_c1 is not None and _c2 is not None
+                                and max(_c1, _c2) >= _prev_py):
+                            _RESOURCES["pyroxene"] = max(_c1, _c2)
+                        else:
+                            print(f"[Pipeline] 非大厅哨兵: clean 复读 {_c1}/{_c2} "
+                                  f"不一致或未确认, 忽略(基线不动)", flush=True)
+        except Exception as _e:
+            # ⛔绝不静默: 这里包着的是**金钱急停闸**。旧码 `except: pass` 意味着
+            # 任何一处 AttributeError/import 失败都会让整个守卫悄悄死掉, 而日志
+            # 上一个字都不会有 —— 事后翻日志只会看到"守卫从没报过警", 完全无法
+            # 区分"没掉钱"和"守卫根本没跑"。这正是 [[log-is-not-truth]] 那类坑。
+            print(f"[Pipeline] ⚠⚠ 青辉石 kill-switch 本 tick 异常(守卫未生效): "
+                  f"{type(_e).__name__}: {_e}", flush=True)
 
         # Early bail-out: BA / MuMu not actually visible.  Wide set of
         # markers so legitimate BA states (title screen, loading, login,
