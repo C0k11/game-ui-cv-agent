@@ -10,7 +10,7 @@
 - ✅ 实时战斗感知:scrcpy 视频流 17.9fps(帧龄 0.02 秒、不怕窗口遮挡)+ 19 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡角色识别
 - ✅ AI 自己打战斗:行为树控牌(急救>集火 Boss>AOE 清群>单体循环)+ 闭环拖拽瞄准(按住后持续跟踪目标再松手),活动 Boss 关实战 71-91 秒通关
 - 🧱 架构升级中(L1→L3):列表结构化解析已上线(台账主键从**屏幕坐标**改成**关号**)、页面图 + BFS 路径规划已上线但**只观测不接管**(实测覆盖率还不够,不敢交导航)、竣工判据 `CLEAN/LEFTOVER/UNKNOWN` 三态已上线——bot 现在会在每个 skill 出口自己喊“活没干干净”,不用等人肉眼发现
-- 🚧 进行中:总力战抄轴(视频轴表→自动执行)、日常全链路视频流化(高频感知线程已上线)、UI 模型 val 集重建(实测只覆盖 129/485 类,量尺不够用)
+- 🚧 进行中:总力战抄轴(视频轴表→自动执行)、日常全链路视频流化(高频感知线程已上线)、UI 模型 val 补齐(184 个已学会的类里有 55 类没 val 量尺)
 
 ## At a Glance
 
@@ -19,7 +19,7 @@
 | **Platform** | Windows 10 / 11, NVIDIA GPU |
 | **Game runtime** | MuMu Player 12 |
 | **Daily** | `DailyRoutine` (10 sub-skills) + event planner + sweep chain |
-| **Vision** | YOLO26m UI `v14` (485-cls head, 184 trained) + YOLO26x avatar `v6` (252-cls) + YOLO26s battle `v10` (19-cls) + YOLO26n emoticon |
+| **Vision** | YOLO26m UI `v14` (485-wide head, **184 classes learned**) + YOLO26x avatar `v6` (252-cls) + YOLO26s battle `v10` (19-cls) + YOLO26n emoticon |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs — numeric fields only (all page/button *decisions* are pure YOLO cls as of 2026-07) |
 | **Battle** | scrcpy feed 17.9fps (occlusion-proof) → blackboard → behavior-tree card-play (shipped: event boss 71-91s clears) + ByteTrack lock (ally idsw -66%) |
 | **Safety** | structural purchase-dialog gate (quantity-stepper signal, orthogonal to icon detection) + non-lobby pyroxene sentinel + per-game-day dispatch ledger |
@@ -34,7 +34,7 @@ flowchart LR
     A -->|scrcpy H.264 stream<br/>17.9fps| HF[High-freq perception<br/>blackboard]
     HF --> B
     B --> C{Skill state machine}
-    C -->|nav / click| UI[YOLO26m UI<br/>485-cls head]
+    C -->|nav / click| UI[YOLO26m UI<br/>184 learned cls]
     C -->|character ID| AV[YOLO26x avatar<br/>252 cls]
     C -->|numbers| O[PP-OCRv4]
     C -->|head-pat| EM[YOLO26n emoticon]
@@ -52,7 +52,7 @@ flowchart LR
 
 | Tier | Model | Job | Latency |
 |---|---|---|---|
-| **UI** (primary) | YOLO26m `ui_v14` (485-cls head, **184 with samples**) | every button / tab / popup / badge → drives all nav + clicks; in-game flywheel-trained | ~6 ms |
+| **UI** (primary) | YOLO26m `ui_v14` (**184 learned classes**, 485-wide head) | every button / tab / popup / badge → drives all nav + clicks; in-game flywheel-trained | ~6 ms |
 | Avatar ID | YOLO26x `fused_avatar_v6` (252-cls) | bbox + character ID in one pass + in-battle skill-card recognition (incl. grayed-out / charging) | ~10 ms |
 | Numeric OCR | PP-OCRv4 BA-tuned | AP / ticket / count digits only | ~50 ms |
 | Head-pat | YOLO26n `emoticon` | cafe head-pat bubble | ~2 ms |
@@ -114,28 +114,31 @@ What actually moved the needle, learned across UI v1→v5 and avatar v1→v4:
 
 ### Measured model health (2026-07-25)
 
-Counted straight off the real training sets, not off a training log. The honest
-picture is lopsided, and the weakest model is the one everything depends on:
+Counted off the real training sets. **The denominator is "classes that actually
+have training boxes", not `nc`** — the UI head is 485 wide only because it is
+laid out against the master class list so label files never need id remapping;
+301 of those slots have never seen a positive sample. Dividing by 485 makes
+every ratio wrong (an error this table's first version shipped with).
 
-| Model | nc | train-covered | **val-covered** | boxes/class (min · p10 · median) |
-|---|---|---|---|---|
-| **UI** `v14` | 485 | 184 | **129 (26.6%)** | 1 · 38 · 344 |
-| avatar `v6` | 252 | 252 | **252 (100%)** | 181 · 191 · 198 |
-| battle `v10` | 19 | 19 | **19 (100%)** | 17 · 21 · 171 |
+| Model | nc | **classes with samples** | val-covered | boxes/class (min · p10 · median) | under 30 boxes |
+|---|---|---|---|---|---|
+| **UI** `v14` | 485 | **184** | **129 = 70.1%** | 1 · 38 · 344 | 6 (3.3%) |
+| avatar `v6` | 252 | 252 | 252 = 100% | 181 · 191 · 198 | 0 |
+| battle `v10` | 19 | 19 | 19 = 100% | 17 · 21 · 171 | **5 (26.3%)** |
 
-- **UI is the bottleneck.** Its val set covers 129 classes — so the headline
-  mAP is measured on roughly half the UI vocabulary, and **55 classes that carry
-  real traffic have no val instances at all** (`入场键没解锁` 2141 boxes,
-  `关卡得星_0` 1282, `战斗暂停` 1158 …). You cannot detect a regression in
-  something you never measure. 63% of classes sit under 30 boxes.
-- **avatar is healthy** — full val coverage and a near-flat 181–336 boxes/class
-  distribution (the synth pipeline paying off). Nothing to do here.
-- **battle is fine but young** — 5 of 19 classes are under 30 boxes, all of them
-  the ones added across v7→v10 (主教 / 球 / 黑白 / 大蛇).
-- The 485-wide UI head carries **301 classes that have never seen a positive
-  sample** (252 avatar + 9 battle + 40 unlabeled UI). Wasted head, not a bug —
-  changing `nc` means a retrain plus a repo-wide class-id remap, so it is
-  logged as debt rather than fixed.
+Read by dimension rather than as one ranking:
+
+- **Measurement gap → UI.** 55 classes that carry real traffic have **no val
+  instances at all** (`入场键没解锁` 2141 boxes, `关卡得星_0` 1282, `战斗暂停`
+  1158 …). You cannot catch a regression in something you never measure — and
+  UI is the only model the daily chain depends on, so this is the one to fix.
+- **Sample scarcity → battle**, not UI. 26.3% of its classes sit under 30 boxes
+  (all added across v7→v10); UI's figure is 3.3% with a median of 344.
+- **avatar is healthy** — full val coverage, a near-flat 181–336 boxes/class
+  spread. Nothing to do.
+- The 301 empty head slots are waste, not a defect: they cost a retrain plus a
+  repo-wide class-id remap to remove, and they do not affect the 184 learned
+  classes. Logged as debt.
 
 `py scripts/audit_cls_usage.py --with-det --fail-on-dead` is the standing check:
 it cross-references every class against training boxes, code references and live
