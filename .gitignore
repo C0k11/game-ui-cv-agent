@@ -161,3 +161,4 @@ scripts/dedup_*.py
 /_*
 data/axis_videos/
 data/axis_cookies.txt
+data/raw_images/_val_v15_gap/
