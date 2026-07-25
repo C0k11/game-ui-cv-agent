@@ -136,6 +136,45 @@ def main() -> int:
     print(f"可覆盖的 gap 类: {len(avail)}/{len(gap)}   "
           f"(零出现 {len(gap) - len(avail)} 类, 需定向补录)")
 
+    # ⭐族感知(2026-07-25 用户点破 "有的是某些 cls 的变种/未点击前的状态"):
+    # 同一物件的不同状态(领取_黄/_灰、关卡得星_3/_0、全部选择/全部选择灰…)
+    # **必须成对进 val**, 否则测不出**状态混淆** —— 而那是最贵的一类 bug:
+    # 把不可点当可点=空点卡流程, 把可点当不可点=漏活。
+    # 实测最刺眼: `关卡得星_3` val 794 实例, `关卡得星_0` val **0**, 而
+    # Challenge 假阳性事故的根因正是这两类混淆 → 那个回归现在根本测不到。
+    # ⇒ ①同族里已有 val 的成员, 其**缺 val 的兄弟**配额翻倍(优先补齐)
+    #   ②贪心打分时, 一帧若**同时含同族多态**加权(一帧顶两个, 且天然是最能
+    #     暴露混淆的样本)
+    try:
+        # 直接按文件路径加载, 不引入 scripts/__init__.py(避免把 scripts
+        # 变成 package 影响其它脚本的相对导入)
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "_cls_fam", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "audit_cls_families.py"))
+        _mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        build_families = _mod.build_families
+        _n, _tr, _va, fams = build_families(only_ui=True)
+        root_of, sibling_has_val = {}, {}
+        for root, mem in fams.items():
+            any_val = any(m["val"] > 0 for m in mem)
+            for m in mem:
+                root_of[m["name"]] = root
+                sibling_has_val[m["name"]] = any_val
+        boosted = []
+        for c in list(quota):
+            if sibling_has_val.get(c) and c in gap:
+                quota[c] = min(avail[c], quota[c] * 2)
+                boosted.append(c)
+        if boosted:
+            print(f"⭐族感知: {len(boosted)} 个类的配额翻倍(同族兄弟已有 val, "
+                  f"这一态必须补上才测得出状态混淆): "
+                  + ", ".join(boosted[:8]) + ("…" if len(boosted) > 8 else ""))
+    except Exception as e:                                    # noqa: BLE001
+        root_of = {}
+        print(f"⚠族感知不可用({type(e).__name__}), 退回单类配额")
+
     # 覆盖贪心 + 同 run 间隔。
     # ⚠两轮: 稀有类往往只在少数**连续** tick 出现, 严格间隔会把它们整类滤掉
     # (实测 MIN_GAP=10 一轮时 `跳过战斗未选` 拿到 0/5)。所以第 1 轮用严间隔
@@ -156,6 +195,11 @@ def main() -> int:
                 if t - last_tick[r] < min_gap:
                     continue
                 gain = sum(1 for c in hits if need.get(c, 0) > 0)
+                # 族加权: 同一帧里出现**同族多个状态**的, 是最能暴露状态混淆
+                # 的样本(模型必须在同一张图上把两态分开), 优先选。
+                if gain > 0 and root_of:
+                    roots = Counter(root_of[c] for c in hits if c in root_of)
+                    gain += sum(v - 1 for v in roots.values() if v > 1)
                 if gain > best_gain:
                     best, best_gain = (r, p, t, hits), gain
             if not best or best_gain <= 0:
@@ -234,7 +278,7 @@ def main() -> int:
                  encoding="utf-8").write("\n".join(lines) + "\n")
             n_box += len(lines)
         print(f"→ v14 预标 {n_box} 框 (⛔仅供人审起点, 未审不得进 val)")
-    print("\n下一步: dashboard → Annotate → 打开 _val_v15_gap 人审, "
+    print("\n下一步: dashboard 侧栏 **L(标注中心)** → 打开 _val_v15_gap 人审, "
           "审完并入 ui_v3 的 val split")
     return 0
 
