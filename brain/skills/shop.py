@@ -5,10 +5,14 @@ skill blindly confirmed ANY purchase. The user requires DYNAMIC budget planning:
 read the credit balance and only buy when we stay above a configured reserve.
 
 ★★ HARD RULES ★★
-- NEVER touch the 青辉石商店 tab (SHOP_TAB_PYROXENE_SEL) — that spends pyroxene.
-  We stay on the default 一般(信用点) tab; if we ever detect the pyroxene tab
-  selected, abort. The 一般 tab is 100% credits, so this skill cannot spend
+- NEVER touch the 青辉石商店 tab — that spends pyroxene. We stay on the default
+  一般(信用点) tab, which is 100% credits, so this skill cannot spend
   pyroxene/real money by construction.
+  ⛔2026-07-25 全量 cls 审计纠正: 旧版靠"检出 `青辉石商店_已选择` 就 abort"的
+  **黑名单**把关, 而那个 cls **训练 0 框 / 92k tick 实战 0 检出** —— 4 道守卫
+  全是死码, 却在注释里显得防护森严。现改为 **fail-closed 白名单**:
+  `_on_credit_tab()` 正向确认 `信用点商店_已选中`(613 训练框/644 实战检出),
+  看不见就退/取消。黑名单只在"坏东西认得出"时才有意义。
 - Dynamic budget: read top-bar credit balance (reliable anchor) + best-effort
   the dialog 總購買價格. Buy only if balance − total ≥ reserve (or, when the
   total can't be read, only when balance is comfortably above reserve+ceiling).
@@ -114,6 +118,25 @@ class ShopSkill(BaseSkill):
     # ── helpers ──────────────────────────────────────────────────────────
     def _on_shop(self, screen: ScreenState) -> bool:
         return self.find_cls(screen, self._SHOP_PAGE_CLS, conf=0.25) is not None
+
+    def _on_credit_tab(self, screen: ScreenState) -> bool:
+        """⛔**正向**确认当前在信用点(一般)tab —— 花钱前唯一可信的通行证。
+
+        2026-07-25 全量 cls 审计实锤: 原来那 4 道 pyroxene-tab 守卫全都写成
+        「检出 `青辉石商店_已选择` 就退」的 **fail-OPEN 黑名单**, 而这个 cls
+        **训练框 = 0 / 92k tick 实战检出 = 0** —— 模型从来就不认识它,
+        4 道守卫(注释还标着 deep-dive C8 / r2 C4)**从加上那天起一次都没生效过**,
+        却让人以为有四层保护。零点防线伪装成四道, 比单点防线更危险。
+        同批零标注的还有 青辉石商店/信用点商店/总力战商店/大决战商店/
+        神名文字碎片商店1&2 —— **所有商店 tab 类只有 `信用点商店_已选中`
+        真被标注过**(613 框 / 实战检出 644)。
+        ⇒ 改成 fail-closed 白名单: 正向检到信用点 tab 才允许继续, 读不出就退。
+        与 2026-06-14 arena_shop 定下的原则一致("正向证明这是我要的那笔才点,
+        不是没看到坏东西就点") —— 那次定了原则却没迁到 shop.py, 又一次
+        "一处修了同形没迁"。
+        """
+        return self.find_cls(screen, UC.SHOP_TAB_CREDIT_SEL,
+                             conf=_CLS_CONF) is not None
 
     def _confirm_dialog(self, screen: ScreenState) -> Optional[YoloBox]:
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DIALOG_BAND)
@@ -287,12 +310,11 @@ class ShopSkill(BaseSkill):
         return handler(screen)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ pyroxene-tab guard: never operate on the 青辉石 shop.
-        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
-            self.log("⛔ on 青辉石商店 tab — never buy pyroxene, exiting")
-            self._goto("exit")
-            return action_wait(300, "pyroxene tab → exit")
-
+        # 【2026-07-25 删了这里的 pyroxene-tab 黑名单闸】它检的
+        # `青辉石商店_已选择` 训练 0 框 / 实战 0 检出 = **永不触发的死码**,
+        # 而且留着会让人以为导航阶段有把关。真正的把关已改成 fail-closed
+        # 白名单放在 _buy / _confirm(挨着钱的那两处, 见 _on_credit_tab)。
+        # 导航阶段本来就有 _on_shop 正锚在下一行判, 不需要再加黑名单。
         if self._on_shop(screen):
             self.log("inside shop (一般 tab) → select")
             self._goto("select")
@@ -312,10 +334,7 @@ class ShopSkill(BaseSkill):
         return self.nav_home(screen, "shop recover")
 
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
-        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
-            self._goto("exit")
-            return action_wait(300, "pyroxene tab → exit")
-
+        # 同上: 删掉永不触发的 pyroxene-tab 黑名单死码, 把关在 _buy/_confirm。
         if not self._on_shop(screen):
             if screen.is_lobby():
                 self._goto("enter")
@@ -383,13 +402,15 @@ class ShopSkill(BaseSkill):
         return action_wait(400, "waiting for 全部选择 cls")
 
     def _buy(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ Pyroxene-tab guard (deep-dive C8, 2026-06-09): the tab was only
-        # checked in _enter/_select — if the view drifted onto the 青辉石 tab
-        # by the time we're buying, a confirm here would spend pyroxene.
-        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
-            self.log("⛔ pyroxene tab selected at buy stage — abort shop")
+        # ⛔ Tab guard (deep-dive C8, 2026-06-09; **2026-07-25 改 fail-closed**):
+        # 旧版是「检出 青辉石商店_已选择 就退」, 而那个 cls 训练 0 框 / 实战
+        # 0 检出 —— 这道守卫从来没生效过(详见 _on_credit_tab 注释)。
+        # 现在改成正向白名单: 花钱前必须看见 信用点商店_已选中。
+        if not self._on_credit_tab(screen):
+            self.log("⛔ 买入阶段看不到「信用点商店_已选中」正锚 — "
+                     "fail-closed 退出(绝不在 tab 身份未知时确认购买)")
             self._goto("exit")
-            return action_wait(300, "pyroxene tab at buy → exit")
+            return action_wait(300, "credit-tab anchor missing at buy → exit")
         # Confirm dialog already up → budget decision.
         if self._confirm_dialog(screen) is not None:
             self._goto("confirm")
@@ -439,16 +460,18 @@ class ShopSkill(BaseSkill):
         return action_wait(400, "waiting for 选择购买 cls")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ Pyroxene-tab guard (deep-dive r2 C4): _affordable() only checks the
-        # CREDIT balance — on the 青辉石 tab it would happily "afford" a
-        # pyroxene purchase. Never confirm while that tab is selected.
-        if self.find_cls(screen, UC.SHOP_TAB_PYROXENE_SEL, conf=_CLS_CONF) is not None:
-            self.log("⛔ pyroxene tab at confirm — cancelling, never buy")
+        # ⛔ Tab guard (deep-dive r2 C4; **2026-07-25 改 fail-closed**):
+        # _affordable() 只看**信用点**余额 —— 在青辉石 tab 上它会开开心心地
+        # 判"买得起"然后花青辉石。这是全流程最后一道、也是唯一挨着"確認"
+        # 按钮的闸, 所以必须正向白名单: 看不见信用点 tab 正锚 = 取消。
+        if not self._on_credit_tab(screen):
+            self.log("⛔ 确认阶段看不到「信用点商店_已选中」正锚 — "
+                     "取消, 绝不确认(fail-closed)")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
             self._goto("exit")
             if cancel is not None:
-                return action_click_box(cancel, "cancel (pyroxene tab)")
-            return action_back("cancel (pyroxene tab, ESC)")
+                return action_click_box(cancel, "cancel (credit-tab anchor missing)")
+            return action_back("cancel (credit-tab anchor missing, ESC)")
         confirm = self._confirm_dialog(screen)
         if confirm is None:
             # Dialog gone — purchased (reward) or dismissed → exit. 点过 confirm

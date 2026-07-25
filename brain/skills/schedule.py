@@ -391,8 +391,13 @@ class ScheduleSkill(BaseSkill):
           B 取消键与确认键同屏 —— 報告框只有孤零零一个 確認, 没有取消。
           C 旧的 body 青辉石(保留, 多一路零成本)。
         """
-        # C: 旧路(+清辉石 idx2 同物异名遗留类, 2026-07-11 cls审计)
-        if self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"],
+        # C: 旧路(body 青辉石)
+# ⛔2026-07-25 全量 cls 审计删除: 原来这里还并了一路 "清辉石"(master idx2),
+        # 注释写着"危险检测器多收一路零成本" —— 实测**训练 0 框 / 92k tick 实战
+        # 0 检出**, 那一路从来没收到过任何东西, 只是制造"有两路信号"的假象。
+        # idx2 是 idx30「青辉石」的错别字重复类(BA 官方写作 青輝石), 本就不该
+        # 被标注。真正有效的正交第二路是**结构信号** has_qty_stepper。
+        if self.find_cls(screen, UC.TOPBAR_PYROXENE,
                          conf=_CLS_CONF,
                          region=_PYROXENE_BODY_REGION) is not None:
             return True

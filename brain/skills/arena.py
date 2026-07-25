@@ -204,7 +204,7 @@ class ArenaSkill(BaseSkill):
         arena 这里是逐字同型, 只是还没轮到它出事。
         改成**析取的正交多信号**(任一命中即判买票框):
           A 数量步进器在 body(has_qty_stepper, 与图标识别完全独立)
-          B body 里有青辉石/清辉石(原判据, 保留)
+          B body 里有青辉石(原判据, 保留)
         取消键 不再当必要条件 —— 它漏检时正是最危险的时刻(下面 result-dismiss
         分支唯一的拦阻就是"取消键还在", 那个单点信号一旦丢, 购买框的確認
         就落在 _RESULT_BAND 里被当成战斗结算点掉)。
@@ -212,8 +212,12 @@ class ArenaSkill(BaseSkill):
         """
         if self.has_qty_stepper(screen):
             return True
-        # +清辉石(idx2 同物异名遗留类, 2026-07-11 cls审计): 危险检测器多收一路零成本
-        return self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"], conf=0.20,
+# ⛔2026-07-25 全量 cls 审计删除: 原来这里还并了一路 "清辉石"(master idx2),
+        # 注释写着"危险检测器多收一路零成本" —— 实测**训练 0 框 / 92k tick 实战
+        # 0 检出**, 那一路从来没收到过任何东西, 只是制造"有两路信号"的假象。
+        # idx2 是 idx30「青辉石」的错别字重复类(BA 官方写作 青輝石), 本就不该
+        # 被标注。真正有效的正交第二路是**结构信号** has_qty_stepper。
+        return self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.20,
                              region=_PYROXENE_BODY_REGION) is not None
 
     # ── tick ────────────────────────────────────────────────────────────────

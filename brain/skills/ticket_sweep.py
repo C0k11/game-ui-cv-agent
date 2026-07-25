@@ -241,7 +241,7 @@ class TicketSweepSkill(BaseSkill):
     def _pyroxene_buy_dialog(self, screen: ScreenState) -> bool:
         """A 青辉石 icon in the dialog body = a buy-ticket/buy-AP dialog."""
         return self.find_cls(
-            screen, [UC.TOPBAR_PYROXENE, "清辉石"], conf=_CLS_CONF,
+            screen, UC.TOPBAR_PYROXENE, conf=_CLS_CONF,
             region=_PYROXENE_BODY_REGION
         ) is not None
 
