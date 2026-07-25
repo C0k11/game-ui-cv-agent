@@ -1,0 +1,12 @@
+{
+  "_doc": "人审过的标注池注册表 —— scripts/yolo_prefill_run.py 的 fail-closed 保护闸读它。登记在此的池, 预标(mode=merge/overwrite)一律拒绝, 除非显式 --allow-audited。⛔为什么需要: data/raw_images/ 在 .gitignore:40, 人审标注是全盘唯一副本、零 VCS 兜底; 而预标是整池覆盖(实测对 025638 跑一次 overwrite 会用 361 个模型框顶掉 559 个人审框)。人审完一个池就往这里加一条。",
+  "pools": {
+    "run_20260715_025638_botplay_clean": {
+      "reviewed_at": "2026-07-25",
+      "reviewer": "C0k11",
+      "frames": 68,
+      "note": "battle 域人审(敌我/Boss)。v9 预标 449 框中 49 个被改, 全部是 敌方→我方 的反向修正 —— 该池是当前唯一的 botplay 域 GT。backup: _backups/20260725_humanreview_botplay_025638",
+      "known_issues": "frame_00012-15 有 4 个「敌方」标在左上角静态八角形场景台座上(cx0.074/cy0.081), 是误标, 下次人审顺手删"
+    }
+  }
+}

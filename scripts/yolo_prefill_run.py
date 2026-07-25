@@ -43,6 +43,84 @@ RAW = REPO / "data" / "raw_images"
 TRAJ = REPO / "data" / "trajectories"
 MASTER_FILE = RAW / "_classes.txt"
 
+# ⛔人审资产保护注册表(2026-07-25 建)。data/raw_images/ 在 .gitignore:40 —— 人审
+# 标注**全盘唯一副本, 零 VCS 兜底**。而预标是整池覆盖: 实测若对已人审的
+# run_20260715_025638_botplay_clean 跑一次 overwrite, 559 个人审 battle 框会被
+# 361 个模型框顶替。这里登记的池, prefill 默认**直接拒绝**, 除非显式
+# allow_audited=True(API 端点永不传, 只有人在命令行才能给)。
+AUDIT_FILE = REPO / "data" / "label_audit.json"
+
+
+def audited_pools() -> dict:
+    try:
+        return json.loads(AUDIT_FILE.read_text(encoding="utf-8")).get("pools", {})
+    except Exception:
+        return {}
+
+
+def _guard_audited(img_dir: Path, mode: str, allow_audited: bool) -> None:
+    """fail-closed: 人审池默认不许被预标覆盖。"""
+    if mode == "skip" or allow_audited:
+        return
+    info = audited_pools().get(img_dir.name)
+    if info:
+        raise SystemExit(
+            f"⛔ {img_dir.name} 已登记为**人审池**({info.get('reviewed_at','?')}, "
+            f"{info.get('note','')}) — 拒绝 mode={mode} 覆盖。\n"
+            f"   人审标注在 .gitignore 内, 覆盖=永久丢失。确实要重标请显式传 "
+            f"allow_audited=True(CLI: --allow-audited), 并先自行备份。")
+
+
+def _backup_labels(img_dir: Path, stamp: str) -> int:
+    """写盘前快照将被改写的 label, **保池名目录结构**(7 个 botplay 池的文件名
+    全是 frame_00000.txt, 扁平备份无法区分来源 —— 磁盘上那两个 0 文件的
+    *_trackprefill 备份目录就是缺这条的实证)。返回备份文件数。"""
+    import shutil
+    srcs = sorted(img_dir.glob("*.txt"))
+    srcs = [p for p in srcs if p.name != "classes.txt"]
+    if not srcs:
+        return 0
+    dst = RAW / "_backups" / f"{stamp}_prefill" / img_dir.name
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for p in srcs:
+        shutil.copy2(p, dst / p.name)
+        n += 1
+    got = len(list(dst.glob("*.txt")))
+    if got != len(srcs):     # ⛔断言非空且完整, 半备份半覆盖是最坏情况
+        raise SystemExit(f"⛔ 备份不完整 {got}/{len(srcs)} → {dst}, 中止预标")
+    return n
+
+
+# ⭐cx 位置规则(2026-07-25 实测): 「模型判我方 且 cx>=阈值 → 改判敌方」。
+# ⛔**严格池级门控, 绝不能默认开**: battle v10 训练集 我方:敌方=4.7:1 且 10 个
+# 源池里 6 个敌方框=0 → 模型先验"战场小人=我方", 实测敌方→我方 22.5%/反向 0%。
+# 该规则在**固定横版镜头**的活动关(botplay)上把类错 43→4; 但在**大决战**上是
+# 灾难: 耶罗尼姆斯池人审 GT 里 我方 2483 框中 1689 个(68.0%)cx>=0.50、白_黑
+# 27.5% —— 那边镜头跟随平移, "我方在左"根本不成立, 无门控套用会灌 1682 条毒标签。
+# 阈值取 0.55 而非 0.50: 人审池上扫阈值 0.45→8误伤 / 0.50→3 / 0.55→3 / 0.60→4,
+# 底部平坦, 0.55 给"推进到中线的学生"留余量(实测边界误伤集中在 0.50-0.55)。
+# ⚠这条规则**永远只能活在后处理里**: 实测把整帧水平平移 ±25% 帧宽(外观一个像素
+# 没动), v10 判定保持 98.4% —— 全卷积 end2end head 架构上就学不到绝对 x 坐标,
+# 指望"训练进去"是没有的事。
+CX_RULE_THRESHOLD = 0.55
+CX_RULE_ALLOWED_POOLS = ("botplay_clean",)   # 池名子串白名单
+
+
+def cx_rule_applies(pool_name: str) -> bool:
+    return any(k in pool_name for k in CX_RULE_ALLOWED_POOLS)
+
+
+_CLS_ALLY = _CLS_ENEMY = -1      # 按名字解析, 别硬编码 476/477(master 会增删)
+
+
+def _resolve_side_ids() -> None:
+    global _CLS_ALLY, _CLS_ENEMY
+    idx = master_idx()
+    _CLS_ALLY, _CLS_ENEMY = idx.get("我方", -1), idx.get("敌方", -1)
+    if _CLS_ALLY < 0 or _CLS_ENEMY < 0:
+        raise SystemExit("⛔ master 词表里找不到 我方/敌方 — cx 规则无法启用")
+
 # Per-tag inference imgsz — mirrors brain/pipeline.py _IMGSZ_BY_TAG. Wrong imgsz
 # silently yields 0 detections (ui @1920 = nothing), so pin it per model.
 _IMGSZ_BY_TAG = {"ui": 960, "avatar": 960, "battle": 960, "cafe": 640}
@@ -198,14 +276,30 @@ def _read_existing(lp: Path, w: float, h: float):
 
 def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 conf: float = 0.25, imgsz: "int | None" = None, mode: str = "merge",
-                overwrite: bool = False, target_classes=None, progress=None) -> dict:
+                overwrite: bool = False, target_classes=None, progress=None,
+                allow_audited: bool = False, cx_rule: bool = False) -> dict:
     """Prefill every *.jpg under img_dir with ONE model. See module docstring
     for modes. `overwrite=True` is a back-compat alias for mode='overwrite'.
     version=None → registry active; 指定版本可选不同 teacher 权重 (见 get_model)。
-    Returns {written, skipped, total, model, version, mode}."""
+
+    allow_audited: 突破人审池保护闸(API 端点**永不传**, 只给命令行的人)。
+    cx_rule: 开启 cx 位置规则改判(见 CX_RULE_* 注释), 仅白名单池生效。
+    Returns {written, skipped, total, model, version, mode, backed_up, cx_flipped}."""
     if overwrite:
         mode = "overwrite"
     img_dir = Path(img_dir)
+    _guard_audited(img_dir, mode, allow_audited)
+    n_bak = 0
+    if mode != "skip":
+        import time as _t
+        n_bak = _backup_labels(img_dir, _t.strftime("%Y%m%d_%H%M%S"))
+    _cx_on = cx_rule and cx_rule_applies(img_dir.name)
+    if _cx_on:
+        _resolve_side_ids()
+    if cx_rule and not _cx_on:
+        print(f"⚠cx 规则已请求但 {img_dir.name} 不在白名单 "
+              f"{CX_RULE_ALLOWED_POOLS} — **不启用**(大决战等跟随镜头域套用会灌毒标签)")
+    n_flip = 0
     m, remap, tag = get_model(model_key, version)
     owns = owns_for(tag, remap)
     # 只标目标 cls (飞轮补单个/几个弱类时, 不用标全部, 大幅提效)。空=标该模型全 span。
@@ -244,6 +338,10 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 x1, y1, x2, y2 = [float(v) for v in b.xyxy[0].tolist()]
                 if x2 <= x1 or y2 <= y1:
                     continue
+                if _cx_on and mi == _CLS_ALLY:
+                    if ((x1 + x2) / 2) / w >= CX_RULE_THRESHOLD:
+                        mi = _CLS_ENEMY      # 见 CX_RULE_* 注释
+                        n_flip += 1
                 new.append((float(b.conf[0]), mi, [x1, y1, x2, y2]))
             new.sort(key=lambda t: -t[0])
             lp = Path(p).with_suffix(".txt")
@@ -268,8 +366,12 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
             written += 1
             if progress and written % 50 == 0:
                 progress(written, len(imgs))
+    if _cx_on:
+        print(f"⭐cx 规则(>={CX_RULE_THRESHOLD}) 把 {n_flip} 个「我方」改判敌方 "
+              f"— 人审时优先复查这些框(阈值边界 0.50-0.55 有真学生误伤)")
     return {"written": written, "skipped": skipped, "total": len(imgs),
-            "model": model_key, "version": version, "mode": mode}
+            "model": model_key, "version": version, "mode": mode,
+            "backed_up": n_bak, "cx_flipped": n_flip}
 
 
 def main():
@@ -277,10 +379,13 @@ def main():
     if not argv:
         print("usage: yolo_prefill_run.py <dataset> "
               "[--model ui|fused_avatar|emoticon|battle_heads] "
-              "[--conf 0.25] [--mode merge|overwrite|skip]")
+              "[--conf 0.25] [--mode merge|overwrite|skip] [--imgsz 960]\n"
+              "  [--cx-rule]        battle 敌我位置规则(仅 botplay 白名单池生效)\n"
+              "  [--allow-audited]  突破人审池保护闸(会覆盖人工标注, 想清楚再用)")
         return
     dataset = argv[0]
     model_key = "ui"; conf = 0.25; mode = "merge"; version = None
+    imgsz = None; cx_rule = False; allow_audited = False
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -290,19 +395,28 @@ def main():
             version = argv[i + 1]; i += 2; continue
         if a == "--conf":
             conf = float(argv[i + 1]); i += 2; continue
+        if a == "--imgsz":
+            imgsz = int(argv[i + 1]); i += 2; continue
         if a == "--mode":
             mode = argv[i + 1]; i += 2; continue
         if a == "--overwrite":
             mode = "overwrite"; i += 1; continue
+        if a == "--cx-rule":
+            cx_rule = True; i += 1; continue
+        if a == "--allow-audited":
+            allow_audited = True; i += 1; continue
         i += 1
     img_dir = resolve_img_dir(dataset)
     if not img_dir.is_dir():
         print(f"dataset dir not found: {img_dir}")
         return
     print(f"prefill {img_dir}  model={model_key}  version={version or 'active'}  "
-          f"conf={conf}  mode={mode}")
+          f"conf={conf}  mode={mode}  imgsz={imgsz or 'by-tag'}  "
+          f"cx_rule={cx_rule}")
     res = prefill_run(img_dir, model_key=model_key, version=version, conf=conf,
-                      mode=mode, progress=lambda w, t: print(f"  ...{w}/{t}"))
+                      imgsz=imgsz, mode=mode, cx_rule=cx_rule,
+                      allow_audited=allow_audited,
+                      progress=lambda w, t: print(f"  ...{w}/{t}"))
     print(res)
 
 
