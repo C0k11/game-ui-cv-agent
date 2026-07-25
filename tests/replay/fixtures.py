@@ -304,9 +304,10 @@ def fx_quest_rows_numbers():
     if not os.path.exists(jpg):
         return (True, "SKIP: 缺 quest_rows_5.jpg")
     raw = _load("quest_rows_5.json")
-    screen = screen_from_tick(raw, jpg_path=jpg)
+    # ⚠load_frame 默认 False — 漏传过一次导致本用例永远 SKIP 还计成 PASS
+    screen = screen_from_tick(raw, jpg_path=jpg, load_frame=True)
     if screen.frame is None:
-        return (True, "SKIP: 帧读不出")
+        return (False, "帧读不出(jpg 在但解码失败) — 不许再当 SKIP 混过去")
     sk = EventQuestSkill()
     sk.reset()
     rows = sk.parse_quest_rows(screen)

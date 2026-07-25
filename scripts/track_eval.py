@@ -36,7 +36,9 @@ from vision.io_utils import imread_any  # noqa: E402
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 CACHE_DIR = RAW / "_detcache"
-IDENTITY_MASTER = {476, 477, 478, 479, 480, 481, 482}  # 我方/敌方/塞特/Boss/主教/球/黑白
+# 身份类=会移动的作战单位(484战斗失败是横幅不算)。⚠模型加类这里必须跟着加 —
+# 2026-07-25 实锤漏过 483 大蛇(v10 已训, 薇娜池=大蛇素材, 漏了=该池 GT 链全丢)
+IDENTITY_MASTER = {476, 477, 478, 479, 480, 481, 482, 483}
 GT_MIN_CHAIN = 5          # 短于此的 GT 链不评(开场淡入/结算残帧)
 GT_LINK_IOU = 0.30        # GT 帧间串链阈值(3fps 位移大, 放宽)
 GT_LINK_GAP = 2           # GT 链断档保活帧数(遮挡/漏标容忍)
