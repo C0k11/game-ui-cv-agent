@@ -1175,6 +1175,7 @@ class DailyPipeline:
         # AttributeError, 被静默吞掉 = **整个金钱守卫悄悄死掉且零日志**。
         # (原来它只在大厅分支里被赋值, 非大厅路径根本够不到。)
         self._py_drop_pending: Optional[int] = None
+        self._last_page: Optional[str] = "__init__"   # L2 页面图观测去重
 
         self._skill_registry: Dict[str, BaseSkill] = {
             "buy_pyroxene": BuyPyroxeneSkill(),
@@ -2355,6 +2356,24 @@ class DailyPipeline:
                 return {"action": "wait", "duration_ms": 600,
                         "reason": "加载中 → 暂停等待", "_pipeline": True,
                         "_skill": skill.name, "_tick": skill.ticks}
+        except Exception:
+            pass
+
+        # ── L2 页面图 · v1 只观测不接管 (2026-07-25) ────────────────────
+        # 每 tick 认一次"我在哪个画面", **只在页面变化时**打印(否则刷屏)。
+        # ⛔现在绝不让它接管导航 —— 全语料实测(scratchpad/pg_eval.py, 92,855
+        # 帧): 覆盖率 26.6% / 矛盾率 1.33% / 时序自洽 67.1%。覆盖率低是因为
+        # 大量画面还没进图(Mail/DailyMission/MomoTalk/Craft/Story/战斗内 ——
+        # screen_flow_draft 当天就没录到那些帧)。先跟 skill 的 sub_state 对账
+        # 攒真实分布, 够格了再谈让 skill 声明目标、BFS 规划路径。
+        try:
+            from brain.nav.page_graph import identify as _pg_identify
+            _pg, _pg_why = _pg_identify(screen)
+            if _pg != getattr(self, "_last_page", "__init__"):
+                _sub = getattr(skill, "sub_state", "")
+                print(f"[PageGraph] {_pg or 'UNKNOWN'} ({_pg_why}) "
+                      f"| skill={skill.name}/{_sub}", flush=True)
+                self._last_page = _pg
         except Exception:
             pass
 

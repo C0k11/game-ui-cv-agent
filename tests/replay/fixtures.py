@@ -345,6 +345,62 @@ def fx_bonus_ledger_rejects_cy_keys():
     return (ok, f"台账={led} (期望 {{10: True}} — 两条 cy 主键必须作废)")
 
 
+
+
+# ── ⑦ L2 页面图 ────────────────────────────────────────────────────────
+def fx_page_graph_vocab_and_routes():
+    """页面图的 cls 名必须全在模型词表里 —— 拼错一个字就是一条**永不命中**
+    的死判据(实测逮到过 格黑娜学园中央区/千年研究区域 两个错名)。
+    另钉几条关键路径, 防止改图时把边改断。"""
+    import pathlib as _pl
+    from brain.nav import page_graph as PG
+    mf = _pl.Path("data/raw_images/_classes.txt")
+    if not mf.exists():
+        return (True, "SKIP: 缺 master 词表")
+    master = [l.strip() for l in mf.read_text(encoding="utf-8").splitlines()
+              if l.strip()]
+    bad = PG.validate_vocab(master)
+    if bad:
+        return (False, f"页面图引用了词表里没有的 cls: {bad}")
+    want = {
+        ("Lobby", "Bounty_SweepPanel"): 4,
+        ("Cafe_Hall2", "Arena_Opponents"): 3,
+        ("Formation_Attack", "Lobby"): 1,
+    }
+    for (a, b), n in want.items():
+        r = PG.route(a, b)
+        if r is None or len(r) != n:
+            return (False, f"route {a}→{b} = {r} (期望 {n} 跳)")
+    return (True, f"{len(PG.PAGES)} 页 / {len(PG.EDGES)} 边, 词表全对, 路径通")
+
+
+def fx_page_graph_sweep_panels_not_confused():
+    """⛔悬赏/交流会/活动 三家扫荡面板 cls 集合几乎一样, 只有票据不同。
+    实测 219 帧活动扫荡面板被判成悬赏的(min_core 让票种没参与判定) →
+    票据必须进 require。这条钉死那次修复。"""
+    from brain.nav.page_graph import identify
+    from brain.skills.base import ScreenState, YoloBox
+
+    def scr(*names):
+        return ScreenState(
+            ocr_boxes=[], image_w=2560, image_h=1440, frame=None,
+            yolo_boxes=[YoloBox(cls_id=-1, cls_name=n, confidence=0.95,
+                                x1=0.4, y1=0.4, x2=0.5, y2=0.5,
+                                model_tag="ui") for n in names])
+
+    cases = [
+        (("扫荡开始", "任务开始", "弹窗叉叉", "悬赏通缉票"), "Bounty_SweepPanel"),
+        (("扫荡开始", "任务开始", "弹窗叉叉", "学院交流会票"), "Exchange_SweepPanel"),
+        (("扫荡开始", "任务开始", "弹窗叉叉"), "EventSweepPanel"),
+    ]
+    bad = []
+    for names, want in cases:
+        got, why = identify(scr(*names))
+        if got != want:
+            bad.append(f"{names} → {got} (期望 {want})")
+    return (not bad, f"误判={bad or '无'}")
+
+
 CASES = [
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
     ("quest_list_真阳性(反向锚)", fx_quest_list_true_positive, True),
@@ -357,6 +413,8 @@ CASES = [
     ("关popout不连发(after-ack)", fx_schedule_popout_close_no_double_fire, False),
     ("L1②_关号解析Q08-12", fx_quest_rows_numbers, True),
     ("L1②_旧cy主键台账必作废", fx_bonus_ledger_rejects_cy_keys, True),
+    ("L2_页面图词表+路径", fx_page_graph_vocab_and_routes, True),
+    ("L2_三家扫荡面板不混淆", fx_page_graph_sweep_panels_not_confused, True),
 ]
 
 
