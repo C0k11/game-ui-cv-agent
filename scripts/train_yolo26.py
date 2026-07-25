@@ -897,6 +897,46 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "battle_yolo26s_v10s": {
+        # ⭐**标注助手**, 不是 v11 上线模型 (2026-07-25, 用户: "可以先拿我人工审核的
+        #  升级一波模型然后再去给那几个标注啊, 都是黄色机器人")。
+        #  病灶: v10 敌方 87% 来自赫赛德池黑白机器人, botplay 的黄色量産型**没见过**
+        #  → 先验"战场小人=我方" → 敌方→我方 22.5% / 反向 0.0%。
+        #  解: 用户人审的 025638 里 我方164:敌方226(比例是反的) 当种子, ×8 过采样
+        #  (54帧只占 2001帧的 2.7%, 不放大动不了先验)。敌方 2395→3659, 比例 4.72→3.40:1,
+        #  新增 1264 框全是黄机甲。
+        #  ⚠**过拟合是设计内的**: 目标就是标注同一 session/同一张图的其余 423 帧,
+        #  泛化距离≈0。**绝不能拿它上线** —— 正式 v11 等 6 池人审完再重训。
+        #  ⚠val = 种子 holdout 16帧(帧号>=48, 时间切分零重叠)。不用随机切:
+        #  实测 battle_v10 的 val **96.0% 有 ±1 帧邻居在 train**, 那种 mAP 测的是记忆。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "battle_v10s" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v10" / "weights" / "best.pt"),
+        "epochs": 40,
+        # ⛔patience 必须 >= epochs: v8/v9/v10 三代都在 close_mosaic 触发点(ep135)
+        #  之前就被 patience=40 早停了, 那三代**从没真正关过 mosaic**。
+        #  触发点 = epochs - close_mosaic = 40-10 = ep30。
+        "patience": 40,
+        "close_mosaic": 10,
+        "save_period": 10,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "battle_yolo26s_v10s",
+        "cache": False,
+        "workers": 4,
+        # ⛔**不写 optimizer**: trainer.py:983 的 `warmup_bias_lr = 0.0` 只在
+        #  `if name == "auto":` 分支里执行。显式锁死 optimizer 会跳过该分支 →
+        #  warmup 前 3 轮 bias 按 **0.1** 跑而 body 是 ~0.0004(差 250 倍),
+        #  正好打在稀有类(战斗胜利19/失败28/暂停菜单各27框)最怕的地方。
+        #  而 warmup_bias_lr 不在下面 :1142 的白名单里, 写了也会被静默丢掉。
+        #  v8/v9/v10 全走 auto, 保持一致。
+        "mosaic": 0.3, "copy_paste": 0.0, "mixup": 0.0,
+        "scale": 0.2, "translate": 0.1,
+        "hsv_h": 0.01, "hsv_s": 0.1, "hsv_v": 0.25,
+        # fliplr=0 铁律: 护的是**朝向语义**(角色面朝哪边), 不是绝对屏幕位置 ——
+        # 后者实测模型压根学不到(整帧平移 ±25% 判定不变 98.4%)。
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
         #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
