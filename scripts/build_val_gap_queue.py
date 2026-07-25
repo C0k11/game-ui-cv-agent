@@ -38,6 +38,21 @@ _DS = r"D:\Project\ml_cache\models\yolo\dataset\ui_v2"
 _TRAJ = os.path.join(_ROOT, "data", "trajectories")
 _OUT = os.path.join(_ROOT, "data", "raw_images", "_val_v15_gap")
 
+# ⛔帧源白名单 —— 只收**Android 内部取流**的尺寸(overlay 物理进不去)。
+# 背景: server/app.py:2330 有条 2026-06-05 的纪律"trajectory 因 overlay 烧录
+# 风险退役, 不再进 label 队列"(2026-05-28 删过 11 个烧录 run)。那条纪律是
+# **DXcam/窗口抓取当主力**时定的; 现在主 tick 帧源已是 scrcpy → ADB
+# (server/app.py:1255-1275), 但 fallback 链里的 `hf`(可能 DXcam)/`bitblt`
+# 仍会烧, 而 **trajectory json 不记 frame_src**, 无法逐帧回溯来源。
+# ⇒ 用**尺寸**当帧源指纹(实测 val 候选里的分布, 与帧源升级时间线严丝合缝):
+#     3840x2160 = ADB screencap 4K        ✅ Android 内部
+#     2560x1440 = scrcpy max_size          ✅ Android 内部
+#     3612x2033 / 2364x1331 = 窗口抓取的非标准尺寸(随显示缩放漂移),
+#                             且集中在 06-01~06-10 —— **正是烧录事故期** ⛔
+# 代价: 少 51 帧候选。收益: 素材源纯度有**硬保证**, 不靠目检也不靠
+# detect_overlay_burn.py(那个在战斗帧上误报严重, 见该文件说明)。
+SAFE_FRAME_SIZES = {(3840, 2160), (2560, 1440)}
+
 QUOTA_RICH = 12      # 出现 ≥20 帧的类: 每类挑这么多
 MIN_GAP = 10        # 同 run 内两帧最小 tick 间隔(防近重复)
 MIN_GAP_TIGHT = 2   # 第 2 轮补稀有类时放宽到这个间隔
@@ -113,6 +128,7 @@ def main() -> int:
 
     # 扫每帧含哪些 gap 类
     frame_cls = {}
+    n_unsafe = 0
     for r in runs:
         for p in sorted(glob.glob(os.path.join(_TRAJ, r, "tick_*.json"))):
             jpg = p[:-5] + ".jpg"
@@ -121,6 +137,10 @@ def main() -> int:
             try:
                 j = json.load(open(p, encoding="utf-8"))
             except Exception:
+                continue
+            # 帧源闸: 尺寸不在白名单 = 窗口抓取源, 有 overlay 烧录风险, 直接丢
+            if (j.get("image_w"), j.get("image_h")) not in SAFE_FRAME_SIZES:
+                n_unsafe += 1
                 continue
             hit = {b["cls"] for b in (j.get("yolo_boxes") or [])
                    if b.get("conf", 0) >= CONF and b["cls"] in gap}
@@ -132,6 +152,7 @@ def main() -> int:
         for c in h:
             avail[c] += 1
     quota = {c: (QUOTA_RICH if avail[c] >= 20 else avail[c]) for c in avail}
+    print(f"⛔帧源闸丢弃(尺寸非 Android 内部取流, 有 overlay 烧录风险): {n_unsafe} 帧")
     print(f"候选帧(含至少一个 gap 类): {len(frame_cls)}")
     print(f"可覆盖的 gap 类: {len(avail)}/{len(gap)}   "
           f"(零出现 {len(gap) - len(avail)} 类, 需定向补录)")
