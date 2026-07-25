@@ -196,15 +196,25 @@ class ArenaSkill(BaseSkill):
             return None
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
-        """A 青辉石 icon in the body AND a 取消键 = a buy-ticket cost dialog
-        (distinct from the cancel-less 達成賽季最高紀錄 reward popup).
-        conf 0.20 (model floor, deep-dive C4): a DANGER detector must be as
-        sensitive as the model allows — a false positive merely cancels+exits."""
+        """买票花费框 = 结构上"要你选数量并付费"的框。
+
+        ⛔2026-07-25 全仓金钱审计: 旧版是 `body青辉石 AND 取消键` —— 一条
+        **合取的单点链**, 任一环漏检整条防线哑火。schedule 那起 30 青辉石事故
+        的帧就是反例: 屏上明写「單價💎30」而 YOLO body **零青辉石检出**。
+        arena 这里是逐字同型, 只是还没轮到它出事。
+        改成**析取的正交多信号**(任一命中即判买票框):
+          A 数量步进器在 body(has_qty_stepper, 与图标识别完全独立)
+          B body 里有青辉石/清辉石(原判据, 保留)
+        取消键 不再当必要条件 —— 它漏检时正是最危险的时刻(下面 result-dismiss
+        分支唯一的拦阻就是"取消键还在", 那个单点信号一旦丢, 购买框的確認
+        就落在 _RESULT_BAND 里被当成战斗结算点掉)。
+        conf 0.20 = 模型下限: 危险检测器要尽可能灵敏, 误报代价只是取消+退出。
+        """
+        if self.has_qty_stepper(screen):
+            return True
         # +清辉石(idx2 同物异名遗留类, 2026-07-11 cls审计): 危险检测器多收一路零成本
-        if self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"], conf=0.20,
-                         region=_PYROXENE_BODY_REGION) is None:
-            return False
-        return self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None
+        return self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"], conf=0.20,
+                             region=_PYROXENE_BODY_REGION) is not None
 
     # ── tick ────────────────────────────────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:

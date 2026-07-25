@@ -328,6 +328,33 @@ class EventQuestSkill(BaseSkill):
                 return True
         return False
 
+    def _purchase_veto(self, screen: ScreenState, where: str):
+        """确认键 点击前的**通用**购买框否决闸。返回非 None 就必须原样 return。
+
+        ⛔2026-07-25 全仓金钱审计实锤: `_dialog_is_purchase` 只挂在 _sweep_quest
+        的两处(993/1003), 而 unlock 链上三处 確認 点击(编队確認 / battle settle /
+        settle)**一个闸都没有** —— 与 schedule.py 那起 30 青辉石事故完全同型:
+        上层把「購買AP」框的確認当成结算報告的確認点掉。而 unlock 的 battle 子步
+        在长达 _BATTLE_MAX_SEC=300s 的窗口里持续武装 `find_cls(BTN_CONFIRM,0.6)`,
+        期间冒出来的任何確認都会被收下 —— 購買AP 框的確認实测 0.961, 稳稳进门。
+
+        误伤实测(scratchpad/fp_scan.py, 全 790 run 语料):
+          编队/出击屏 2734 帧(其中 272 帧確認在屏) → 命中 **0**
+          unlock 链真实点击帧(confirm auto-formation 2 + 出击 4) → 命中 **0**
+        真购买框侧: run_20260711_144712/t30 stepper@0.96 + body体力@0.92 稳定命中
+        (那一帧 body **青辉石一个都没检出** —— 所以绝不能只靠青辉石黑名单)。
+        代价方向: 误伤 = 少解锁一关加成(策略损失, 明天可补); 漏检 = 花青辉石。
+        """
+        if not self._dialog_is_purchase(screen):
+            return None
+        self.log(f"⛔ 购买框结构出现在 {where} — 绝不点確認, 取消/退出")
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.5)
+        self._formation_step = ""     # 放弃本关解锁, 不留半截子步
+        self._set("close")
+        if cancel is not None:
+            return action_click_box(cancel, f"PURCHASE DIALOG @{where} — cancel!")
+        return action_back(f"PURCHASE DIALOG @{where} — back!")
+
     def _read_ap(self, screen: ScreenState) -> Optional[int]:
         """topbar AP 读数(体力icon cls锚定 + 右侧数字strip, span 0.06 只读
         斜杠前; 主tick帧=ADB干净帧)。读不出 → None(调用方 fail-closed)."""
@@ -744,12 +771,36 @@ class EventQuestSkill(BaseSkill):
         # ⛔AP 闸(2026-07-11): 解锁=加成队真出击一场(消耗关卡 AP ~20)。
         # AP<20 → 跳过解锁直接 points(台账不记, 明天带 AP 优先补打), 绝不
         # 在 AP 不足时往出击链里走。
+        # ⛔2026-07-25 极性对齐(全仓金钱审计 #1, 逐条核实属实): 这个闸原来写的是
+        # `if _ap is not None and _ap < 20` = **fail-OPEN** —— AP 读不出(None)
+        # 直接放行进出击链。而同一文件 978 行那个孪生闸(掃蕩)对**同一个函数的
+        # 同一种失败**写的是 `if ap is None or ap < 20`(fail-CLOSED + 6s 墙钟
+        # 重试窗), 两个闸极性相反。_read_ap→None 是已被 live 反复证实的常态
+        # (见 _read_ap 上面那段 840 AP 事故注释), 不是理论风险。
+        # AP 不足时点 出擊 → BA 弹「購買AP」框 → 下游 battle 子步无条件点走屏上
+        # 任何確認(已在 _purchase_veto 补闸, 但防线不能只有一层) = 花青辉石。
+        # 修成 fail-closed + 复用 _ap_fail_t0 的 6s 重试窗(读失败≠没 AP, 别一次
+        # 抖动就把整个解锁判死 —— 那正是 840 AP 那次的错法)。
+        # 实测支撑(scratchpad): quest 列表屏 1787 帧顶栏体力可锚定 96.0%,
+        # 6s 窗口足以吃掉 4% 的瞬时漏检。
         if self._formation_step == "":
             _ap = self._read_ap(screen)
-            if _ap is not None and _ap < 20:
-                self.log(f"unlock: AP={_ap} <20 无法出击解锁 — 留待明日补打")
+            if _ap is None:
+                if not self._ap_fail_t0:
+                    self._ap_fail_t0 = time.time()
+                _el = time.time() - self._ap_fail_t0
+                if _el < _AP_READ_RETRY_SEC:
+                    return action_wait(400, f"unlock: AP 读不出, 重试中 "
+                                            f"({_el:.1f}s/{_AP_READ_RETRY_SEC}s)")
+                self.log(f"unlock: AP 连续 {_el:.1f}s 读不出 → fail-closed "
+                         f"跳过解锁(绝不在 AP 未知时进出击链)")
+            else:
+                self._ap_fail_t0 = 0.0
+            if _ap is None or _ap < 20:
+                if _ap is not None:
+                    self.log(f"unlock: AP={_ap} <20 无法出击解锁 — 留待明日补打")
                 self._set("points")
-                return action_wait(300, "unlock deferred (AP insufficient)")
+                return action_wait(300, "unlock deferred (AP unknown/insufficient)")
         step = self._formation_step
         # 子步机: popup → 任務開始 → 编队 → 快速編輯 → 自動 → 確認 → 出击 → battle
         if step == "":
@@ -802,6 +853,9 @@ class EventQuestSkill(BaseSkill):
                         auto, "unlock: 自動保险补点 (幂等, 防被吞漏网)")
             conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.5)
             if conf_btn is not None:
+                _veto = self._purchase_veto(screen, "unlock/编队確認")
+                if _veto is not None:
+                    return _veto
                 self._formation_step = "sortie"
                 return action_click_box(conf_btn, "unlock: confirm auto-formation")
             return action_wait(500, "unlock: waiting 確認")
@@ -820,7 +874,28 @@ class EventQuestSkill(BaseSkill):
                         self._mark_bonus_done(self._quests[self._unlock_idx][0])
                         self._formation_step = ""
                         return action_back("0% bonus — leave formation")
-                self.log(f"unlock: sortie w/ squad-2 (bonus%={pct_raw!r})")
+                # ⛔点 出擊 前**就地复核 AP**(2026-07-25 审计 #1③): 上面那个闸
+                # 只在 _formation_step=="" 评估一次, 之后经过 edit→auto→confirm
+                # 四个子步、几十个 tick 才走到这里 —— 真正花 AP 的是这一下点击,
+                # 判据就得贴着它。fail-closed: 读不出/不够一律不点, 绝不靠
+                # "点了看弹什么框" 来试探(那正是 30 青辉石事故的思路)。
+                # 实测: 出击屏 1162 帧顶栏体力可锚定 96.0%(scratchpad/fp_scan 同批)。
+                _ap_now = self._read_ap(screen)
+                if _ap_now is None or _ap_now < 20:
+                    if not self._ap_fail_t0:
+                        self._ap_fail_t0 = time.time()
+                    _el = time.time() - self._ap_fail_t0
+                    if _ap_now is None and _el < _AP_READ_RETRY_SEC:
+                        return action_wait(400, f"unlock/出击前: AP 读不出, 重试中 "
+                                                f"({_el:.1f}s/{_AP_READ_RETRY_SEC}s)")
+                    self.log(f"⛔ unlock: 出击前复核 AP={_ap_now} → 不点出击"
+                             f"(fail-closed, 绝不触发購買AP框)")
+                    self._formation_step = ""
+                    self._set("points")
+                    return action_back("unlock: AP 不足/未知 → 离开编队")
+                self._ap_fail_t0 = 0.0
+                self.log(f"unlock: sortie w/ squad-2 (bonus%={pct_raw!r}, "
+                         f"AP={_ap_now})")
                 self._formation_step = "battle"
                 self._battle_ticks = 0
                 self._battle_t0 = time.time()
@@ -845,12 +920,20 @@ class EventQuestSkill(BaseSkill):
                 return action_click_box(auto_off, "battle: AUTO on (gate)")
             conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
             if conf_btn is not None:
+                # ⛔这个 find_cls 在长达 _BATTLE_MAX_SEC=300s 的窗口里一直武装,
+                # 期间屏上冒出的任何確認都会被当成"战斗结算的確認"点掉。
+                _veto = self._purchase_veto(screen, "unlock/battle结算")
+                if _veto is not None:
+                    return _veto
                 self._formation_step = "settle"
                 return action_click_box(conf_btn, "battle: settle 確認")
             return action_wait(4000, "battling (AUTO gate armed)")
         if step == "settle":
             conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
             if conf_btn is not None:
+                _veto = self._purchase_veto(screen, "unlock/settle")
+                if _veto is not None:
+                    return _veto
                 return action_click_box(conf_btn, "settle: 確認 (total reward)")
             if self._on_quest_list(screen):
                 self.log(f"unlock: quest#{self._unlock_idx} bonus run DONE")

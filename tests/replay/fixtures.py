@@ -189,6 +189,73 @@ def fx_schedule_buy_dialog_no_pyroxene_cls():
     return (not bad, f"违规確認点击={bad or '无'} (期望: 只取消/退出)")
 
 
+# ── ④ event_quest unlock 链: 購買AP 框绝不点確認 ────────────────────────
+def _eq_buy_ap_screen():
+    """run_20260711_144712/tick_0030 的**逐条实检出**(那一帧就是「購買AP」框)。
+    ⚠body 里 **一个青辉石都没有** —— 单靠青辉石黑名单的闸在这一帧全盲。"""
+    return _sched_screen(
+        _yb("取消键", 0.402, 0.699, 0.976),
+        _yb("返回键", 0.045, 0.051, 0.970),
+        _yb("加号", 0.630, 0.480, 0.963),
+        _yb("MAX_可点击", 0.687, 0.480, 0.962),
+        _yb("确认键", 0.598, 0.699, 0.961),
+        _yb("弹窗叉叉", 0.727, 0.242, 0.959),
+        _yb("MIN_灰色", 0.313, 0.479, 0.957),
+        _yb("体力", 0.820, 0.680, 0.916),
+        _yb("信用点", 0.564, 0.033, 0.467),
+    )
+
+
+def fx_event_unlock_never_confirm_buy_ap():
+    """⛔2026-07-25 全仓金钱审计 #1/#2: unlock 链上三处 確認 点击原本**零金钱闸**
+    (编队確認 / battle settle / settle), 而同文件 _sweep_quest 的两处早就过
+    `_dialog_is_purchase`。battle 子步的 `find_cls(BTN_CONFIRM, 0.6)` 在 300s
+    窗口里持续武装 → 購買AP 框的確認@0.961 会被稳稳收下 = schedule 30 青辉石
+    事故逐字复刻。本用例把三个子步逐个摆到这一帧上, 任何一个点確認 = 事故重演。
+    """
+    from brain.skills.event_quest import EventQuestSkill
+    screen = _eq_buy_ap_screen()
+    bad = []
+    for step in ("confirm", "battle", "settle"):
+        sk = EventQuestSkill()
+        sk.reset()
+        if sk._purchase_veto(screen, "test") is None:
+            bad.append(f"{step}: _purchase_veto 没认出購買AP框")
+            continue
+        sk.sub_state = "unlock"
+        sk._formation_step = step
+        sk._quests = [(0.5, False)]
+        sk._unlock_idx = 0
+        act = sk._unlock(screen)
+        r = str(act.get("reason", "")).replace("確認", "确认")
+        if act.get("action") == "click" and "PURCHASE" not in r and "cancel" not in r:
+            bad.append(f"{step}: {r[:60]}")
+    return (not bad, f"违规点击={bad or '无'} (期望: 三个子步都 veto)")
+
+
+def fx_event_unlock_ap_gate_fail_closed():
+    """AP 读不出(None)时 unlock **绝不进出击链**。旧码 `_ap is not None and
+    _ap < 20` 是 fail-OPEN — 读不出直接放行, 而 _read_ap→None 是 live 常态。"""
+    from brain.skills.event_quest import EventQuestSkill
+    import brain.skills.event_quest as eq
+    sk = EventQuestSkill()
+    sk.reset()
+    sk.sub_state = "unlock"
+    sk._quests = [(0.5, False)]
+    sk._unlock_idx = 0
+    sk._formation_step = ""
+    screen = _sched_screen(_yb("入场键", 0.75, 0.50), _yb("入场键", 0.75, 0.62))
+    # frame=None → _read_ap 必 None(数字 strip 读不了)
+    acts = []
+    for _ in range(int(eq._AP_READ_RETRY_SEC) + 30):
+        acts.append(sk._unlock(screen))
+        if sk.sub_state != "unlock":
+            break
+    clicked = [str(a.get("reason", "")) for a in acts if a.get("action") == "click"]
+    return (not clicked,
+            f"AP 未知却点击={clicked[:2] or '无'} (期望零点击, 最终 defer)")
+
+
 CASES = [
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
     ("quest_list_真阳性(反向锚)", fx_quest_list_true_positive, True),
@@ -196,6 +263,8 @@ CASES = [
     ("⛔买票框_绝不確認", fx_schedule_buy_dialog_never_confirm, True),
     ("⛔票到顶_零点击", fx_schedule_ticket_cap_stops, True),
     ("⛔真实事故帧_购买框无青辉石cls", fx_schedule_buy_dialog_no_pyroxene_cls, True),
+    ("⛔unlock链_購買AP框绝不確認", fx_event_unlock_never_confirm_buy_ap, True),
+    ("⛔unlock_AP读不出_fail-closed", fx_event_unlock_ap_gate_fail_closed, True),
 ]
 
 

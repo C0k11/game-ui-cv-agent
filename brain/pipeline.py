@@ -1584,10 +1584,22 @@ class DailyPipeline:
             _upd_confirm = find_yolo_box(screen, ["确认键"], min_conf=0.30)
             _upd_blocker = find_yolo_box(
                 screen, ["取消键", "弹窗叉叉", "灰色确认"], min_conf=0.30)
+            # ⛔2026-07-25 收紧(全仓金钱审计 #3, 有帧实锤): 旧闸放行到
+            # `len(yolo_boxes) <= 4`, 而 4 个框**放得进一整屏游戏内 UI** ——
+            # run_20260717_054026/tick_0054 实锤误触发: 那帧是**战术大赛结算屏**
+            # (确认键0.97 + 回大厅按钮0.97 + 返回键0.96 + 战术大赛票0.66), 恰好
+            # 4 框、无取消键、在 180s 启动窗内 → 闸放行, 盲点了那个確認。
+            # 这条闸的立论是"标题屏/强更框是**未训练面**, 全帧几乎零 ui cls",
+            # 那 4 个全是**已训练的游戏内 cls**, 直接证伪了那个前提。
+            # 收紧成: 確認键必须是全帧**唯一**的检出框。少放行的代价 = patch 日
+            # 冷启动停在更新框等人处理(可见、可恢复); 多放行的代价 = 在任意
+            # 游戏内弹窗上盲点確認(可能是购买框)。fail-closed 取前者。
+            _others = [b for b in (screen.yolo_boxes or [])
+                       if b.confidence >= 0.25 and b.cls_name != "确认键"]
             if (_upd_confirm is not None and _upd_blocker is None
-                    and len(screen.yolo_boxes or []) <= 4):
-                print("[Interceptor] 启动期 confirm-only 弹窗(强更下载框结构), "
-                      "clicking 确认键")
+                    and not _others):
+                print("[Interceptor] 启动期 confirm-only 弹窗(强更下载框结构: "
+                      "確認键是全帧唯一检出), clicking 确认键")
                 return action_click_box(
                     _upd_confirm,
                     "interceptor: confirm force-update download (startup YOLO)")

@@ -377,12 +377,82 @@ class BaseSkill(ABC):
         # _bought 仍 False → 下一 tick "re-press FREE buy"。这次无害(免費键已
         # 消失), 但同形状落在 shop/ticket_sweep 上就是对着仍可点的付费键重复购买。
         self.interceptor_handled: str = ""
+        self._timers: Dict[str, float] = {}
+
+    # ── 墙钟计时器 (2026-07-25) ────────────────────────────────────────────
+    # ⛔为什么必须有: 全仓大量超时写成 `self._phase_ticks > N` / `_hold = N`
+    # 这类 **tick 计数**, 但 tick 的墙钟长度不是常量 —— 2026-06-14 zero-wait
+    # 改造把非 loading wait 的 sleep 压到 0.12s(server/app.py:1425), 那批按
+    # ~1.6 s/tick 年代写的常量集体缩水。
+    #
+    # ⭐实测口径(scratchpad/tickclock3.py, 28 个 run / 2646 个连续 wait tick,
+    #   取每段 (t_end-t_start)/(n-1) 摊薄整秒量化误差):
+    #     per-run s/tick  min 0.154 / median 0.379 / max 2.294
+    #   **高位那几个是 step_mode 人工停顿的指纹**(最慢段 32s = 我在按 go),
+    #   不是链路真实速度 —— 所以**绝不能用均值**(0.563, 已被污染; 我第一版
+    #   就是这么算错的, 还据此错误驳回了 workflow 的正确结论)。自主跑真实
+    #   区间 **0.15-0.25 s/tick**。
+    #   ⇒ 估算 tick 超时的墙钟, 必须用**最快**那一端 0.15 s/tick:
+    #     超时是"最早什么时候会触发", 快 tick 让它提前到期, 那才是事故面。
+    #     N=4 → 0.6s;  N=8 → 1.2s;  N=30 → 4.5s;  N=120 → 18s。
+    # 而且这个速率还会随帧源(scrcpy/ADB)、模型、分辨率、是否录轨迹继续漂,
+    # 换句话说 **tick 数根本不是时间单位**。
+    # ⇒ 凡是"等真实世界发生某事"(动画/弹窗/战斗/网络/OCR 稳定)的超时一律
+    #   走这里。仍适合 tick 计数的只有"扫了几帧都没看到东西"这种纯感知计数。
+    def mark(self, key: str) -> None:
+        """给 key 打时间点(重复调用 = 重新计时)。"""
+        self._timers[key] = time.time()
+
+    def since(self, key: str) -> float:
+        """距上次 mark(key) 的秒数。没打过点 → 就地打点并返回 0.0
+        (让 `if self.since(k) > T` 在首次调用时天然不触发)。"""
+        t = self._timers.get(key)
+        if t is None:
+            self._timers[key] = time.time()
+            return 0.0
+        return time.time() - t
+
+    def expired(self, key: str, secs: float) -> bool:
+        """墙钟超时判据。首次调用必为 False(见 since)。"""
+        return self.since(key) >= secs
+
+    def clear_timer(self, key: str) -> None:
+        self._timers.pop(key, None)
+
+    # ── 购买框结构判据(全仓共用) ─────────────────────────────────────────
+    # ⛔2026-07-25 全仓金钱审计的共同结论: 各 skill 各写一份 `_buy_dialog`,
+    # 而它们**全都单点依赖"body 里有青辉石 cls"**。schedule 那起 30 青辉石
+    # 事故的帧(run_20260724_201229 t0101)实锤: 屏上写着「購買課程表票券 單價
+    # 💎30」, YOLO **body 一个青辉石都没检出**(小图标压在深色价格条上) →
+    # 整条防线哑火。**单点防线 = 没有防线**。
+    #
+    # 这里给全仓一个正交的**结构**通道: 数量步进器(MIN/MAX/加减号)。
+    # 它是"要你选购买数量"这件事的物理必然, 与图标识别完全独立:
+    #   購買AP 框    run_20260711_144712/t30: 加号0.963 MAX0.962 MIN_灰0.957
+    #   購買课程表票框 run_20260724_201229/t0101: MAX0.97 减号灰0.97 加号0.96
+    # 顶栏那排 加号(TOPBAR_PLUS, 货币旁的"+")必须排除 → 只看 cy > 0.12。
+    # 阈值 0.20 = 模型下限: 危险检测器要尽可能灵敏, 误报的代价只是取消+退出。
+    _QTY_STEPPER_CLS = ("MAX_可点击", "MAX_灰色", "MIN_可点击", "MIN_灰色",
+                        "加号", "加号灰色", "减号", "减号灰色")
+
+    def has_qty_stepper(self, screen: "ScreenState",
+                        body_top: float = 0.12, conf: float = 0.20) -> bool:
+        """body(cy>body_top)里出现数量步进器 = 这是个"要花钱选数量"的框。"""
+        for b in (getattr(screen, "yolo_boxes", None) or []):
+            if b.confidence < conf:
+                continue
+            if (b.y1 + b.y2) / 2 <= body_top:
+                continue                      # 顶栏货币旁的 "+" 不算
+            if b.cls_name in self._QTY_STEPPER_CLS:
+                return True
+        return False
 
     def reset(self) -> None:
         """Reset skill state for a fresh run."""
         self.sub_state = ""
         self.ticks = 0
         self._log_lines = []
+        self._timers = {}
         # 被吞信号是"上一个动作没落地", 全新一轮没有上一个动作 —— 不清会让刚
         # 进场的 skill 继承别人的信号: daily_routine 委托链上 sub.reset() 后紧接
         # 着 sub.action_suppressed = self.action_suppressed, 于是新 sub 第 1 tick

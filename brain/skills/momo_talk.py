@@ -54,7 +54,12 @@ _STABLE_EMPTY = 14         # weak cls (sending 28f / reply 32f) misses a few fra
 _ROW_OPEN_CAP = 2          # re-open a still-badged row at most this many times
                            # (badge = ground truth; the cap only guards the 一花
                            # class of badges that never clear).
-_MAX_SENDING = 30          # sending stuck this long = mis-detect (a real msg types <13s)
+# ⛔2026-07-25 墙钟化: 旧值 `_MAX_SENDING = 30` **ticks**。自主跑实测
+# 0.15-0.25 s/tick(口径见 BaseSkill.mark) ⇒ 真实只有 **4.5-7.5s**, 而注释自己
+# 写着"真实打字 <13s" —— 判据比它要判的现象还短, 学生打字打到一半就被当成
+# 误检当空聊天放弃。(我第一版用被 step_mode 停顿污染的均值算成 17.5s, 据此
+# 错误地驳回了 workflow 这一条; 见 BaseSkill.mark 的口径说明。)
+_MAX_SENDING_SEC = 18.0    # sending stuck this long = mis-detect (a real msg types <13s)
 # Lowered detection floors for the two weak chat cls so a faint reply/sending
 # frame still registers (was missing → false "done"). v6 should add samples.
 _SENDING_CONF = 0.15
@@ -316,16 +321,21 @@ class MomoTalkSkill(BaseSkill):
         # "typing" lasts a few frames; if it sticks (mis-detect) treat it as empty
         # so the student can finish instead of waiting forever.
         if self.find_cls(screen, UC.MOMO_SENDING, conf=_SENDING_CONF) is not None:
+            if self._sending_streak == 0:
+                self.mark("sending")       # 本波打字的起点(连续段第一帧)
             self._sending_streak += 1
-            if self._sending_streak <= _MAX_SENDING:
+            _w = self.since("sending")
+            if _w < _MAX_SENDING_SEC:
                 self._empty_streak = 0
                 # A new message wave makes previously-tapped reply spots STALE —
                 # the next option legitimately renders at the SAME fixed spot.
                 self._reply_positions.clear()
-                return action_wait(450, f"学生发送信息中 — waiting ({self._sending_streak}/{_MAX_SENDING})")
+                return action_wait(450, f"学生发送信息中 — waiting "
+                                        f"({_w:.1f}/{_MAX_SENDING_SEC:.0f}s)")
             # sending stuck → mis-detect; fall through to empty handling.
         else:
             self._sending_streak = 0
+            self.clear_timer("sending")
 
         # Reply option → tap, with DYNAMIC position-dedup. ⚠️ The 回覆 box
         # renders at a FIXED spot, so consecutive turns reuse the same position

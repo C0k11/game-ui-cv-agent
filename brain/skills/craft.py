@@ -46,6 +46,9 @@ _ENTER_MAX = 20
 _COLLECT_MAX = 16
 _START_MAX = 18
 _EXIT_MAX = 14
+# 等**真实动画**的超时一律墙钟(tick 数不是时间单位, 见 BaseSkill.mark 注释)
+_COLLECT_SETTLE_SEC = 3.2   # 一次领取 → GOT_REWARD 弹窗实测 2.5-3s
+_QUICK_SETTLE_SEC = 2.0     # 立即完成(券)对话框渲染
 
 
 class CraftSkill(BaseSkill):
@@ -65,9 +68,9 @@ class CraftSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._entered: bool = False
         self._collect_done: bool = False
-        self._collect_settle: int = 0
+        self._collect_settle: bool = False   # 墙钟 timer "collect_settle" 计时
         self._maxed_clicks: int = 0
-        self._quick_settle: int = 0
+        self._quick_settle: bool = False     # 墙钟 timer "quick_settle" 计时
         self._started: bool = False
         self._start_clicked: bool = False  # we pressed 开始制造 → confirm is ours
         self._craft_confirm_clicked: bool = False  # 点過確認; latch _started 仅凭到达证据
@@ -205,9 +208,11 @@ class CraftSkill(BaseSkill):
                 return action_click_box(cancel, "cancel 立即完成 (keep券)")
             return action_back("cancel 立即完成 (ESC)")
 
-        if self._collect_settle > 0:
-            self._collect_settle -= 1
-            return action_wait(400, f"collect settle ({self._collect_settle})")
+        if self._collect_settle:
+            _w = self.since("collect_settle")
+            if _w < _COLLECT_SETTLE_SEC:
+                return action_wait(400, f"collect settle ({_w:.1f}s)")
+            self._collect_settle = False
 
         if self._collect_done:
             self._goto("start")
@@ -218,12 +223,16 @@ class CraftSkill(BaseSkill):
         yellow = self.find_cls(screen, UC.CLAIM_ONCE_YELLOW, conf=_CLS_CONF)
         if yellow is not None:
             self.log("tapping 一次领取黄色 (collect finished crafts)")
-            # 4 (was 2): the GOT_REWARD popup renders ~2.5-3s after the tap —
-            # with 2 the skill reached start, saw a covered screen, and exited
-            # "nothing startable" BEFORE the popup even appeared (live
-            # 2026-06-12 t0134-0139: collected yesterday's crafts but never
-            # started new ones).
-            self._collect_settle = 4
+            # GOT_REWARD popup renders ~2.5-3s after the tap — 2026-06-12
+            # (t0134-0139) 用 2 tick 时, skill 在弹窗出现**之前**就回到 start、
+            # 看到被遮住的屏、判 "nothing startable" 退出 = 收了昨天的制造却
+            # 一个新的都没开。当时改成 4 tick。
+            # ⛔2026-07-25: 那个 4 是**tick**。zero-wait 后自主跑 0.15-0.25
+            # s/tick(口径见 BaseSkill.mark) ⇒ 真实只剩 **0.6-1.0s**, 远低于
+            # 2.5-3s 需求 —— **2026-06-12 那次修复在 zero-wait 上线后已被悄悄
+            # 作废**, 同一个 bug 修过又复活。改墙钟, 直接对着现象的真实时长写。
+            self._collect_settle = True
+            self.mark("collect_settle")
             return action_click_box(yellow, "collect finished crafts")
 
         # Grey claim-all or nothing → nothing (free) to collect.
@@ -314,13 +323,16 @@ class CraftSkill(BaseSkill):
         quick = self.find_cls(screen, UC.CRAFT_QUICK, conf=_CLS_CONF)
         if quick is not None and self._phase_ticks <= _START_MAX:
             self.log("opening 快速制造 dialog")
-            self._quick_settle = 3
+            self._quick_settle = True
+            self.mark("quick_settle")
             return action_click_box(quick, "open quick-craft")
         # 刚点过快速制造 → 等 dialog 渲染再判 (防点后下一 tick dialog 没好就误判
         # nothing startable 立即 exit, live 2026-06-06 t0011→t0012 就是这样挂的)。
-        if self._quick_settle > 0:
-            self._quick_settle -= 1
-            return action_wait(350, f"quick-craft dialog settle ({self._quick_settle})")
+        if self._quick_settle:
+            _w = self.since("quick_settle")
+            if _w < _QUICK_SETTLE_SEC:
+                return action_wait(350, f"quick-craft dialog settle ({_w:.1f}s)")
+            self._quick_settle = False
 
         # Patience window (live 2026-06-12): right after a collect the screen
         # is mid-transition / covered by the incoming reward popup — 快速制造

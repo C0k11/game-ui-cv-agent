@@ -41,7 +41,14 @@ _MAX_PAGE_TURNS = 6      # 右切换 paging cap per category (short/side grids)
 _MAX_MAIN_SWIPES = 5     # 卷-list swipe-left cap (main)
 _BARREN_LIMIT = 5        # empty scans before exhausting a category
 _RESULT_BAND = (0.32, 0.55, 0.68, 0.85)  # centered battle-result 确认键 band
-_FIGHT_HOLD = 120        # ticks to hold for a story auto-battle (~2min)
+# ⛔2026-07-25 墙钟化: 旧值 `_FIGHT_HOLD = 120` **ticks**, 注释自称 "~2min" ——
+# 那是 ~1.6s/tick 年代的账。zero-wait 后自主跑实测 0.15-0.25 s/tick(口径见
+# BaseSkill.mark 注释) ⇒ 真实只有 **18-30s**, 而剧情自动战斗常跑 1.5-3 分钟
+# → 超时那一下是 `action_back` = **在战斗里盲按返回**(开暂停菜单, 状态机随后
+# 在暂停菜单上乱走)。改墙钟 240s: 战斗真结束时靠结算框/剧情 cls 立刻释放
+# (下面 P0.6/P1), 这个数只是"什么 cls 都认不出"的兜底上限 —— 放宽近乎零代价,
+# 放窄却直接毁掉一个节点的进度。
+_FIGHT_HOLD_SEC = 240.0
 
 
 class StoryMiningSkill(BaseSkill):
@@ -76,9 +83,10 @@ class StoryMiningSkill(BaseSkill):
         self._card_misses: int = 0             # consecutive hub frames missing the
                                                # next category's card cls (3 → skip;
                                                # 1-frame flicker must NOT skip a cat)
-        self._fighting: int = 0                # >0 = story battle in progress (hold
-                                               # ticks; battle frames carry no known
-                                               # ui cls → would otherwise nav-lose)
+        self._fighting: bool = False           # True = story battle in progress
+                                               # (battle frames carry no known ui cls
+                                               # → would otherwise nav-lose). 到期靠
+                                               # 墙钟 timer "fight" 判, 不再数 tick。
         self._cat_opened_tick: int = -99       # tick when current category was opened
                                                # (hub-re-reach exhaust needs >6 ticks
                                                # gap; transition lag false-exhausted
@@ -155,7 +163,7 @@ class StoryMiningSkill(BaseSkill):
                                         region=(0.78, 0.78, 1.0, 0.98))
         if res_confirm is not None:
             if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is None:
-                self._fighting = 0
+                self._fighting = False
                 self._cooldown = 2
                 return action_click_box(res_confirm, "dismiss battle/result dialog (确认键)")
             # confirm+cancel together = the story SKIP-CONFIRM dialog (是否略過
@@ -175,7 +183,8 @@ class StoryMiningSkill(BaseSkill):
             if sortie is not None:
                 self._cut_ticks = 0
                 self._barren = 0
-                self._fighting = _FIGHT_HOLD
+                self._fighting = True
+                self.mark("fight")
                 self._cooldown = 3
                 self.log("story battle node → 出击 (free, no AP)")
                 return action_click_box(sortie, "story battle 出击 (no AP)")
@@ -185,17 +194,22 @@ class StoryMiningSkill(BaseSkill):
         # instead of nav-wandering. Result/reward popups are caught by P0/P0.6
         # above; a post-battle story resume (menu/skip/continue cls) releases
         # the hold so the P1 skip chain takes over.
-        if self._fighting > 0:
+        if self._fighting:
             if (self._on_any_story_page(screen)
                     or self.find_cls(screen, [UC.STORY_SKIP, UC.STORY_TAP_CONTINUE],
                                      conf=0.30) is not None):
-                self._fighting = 0
+                self._fighting = False
+                self.clear_timer("fight")
             else:
-                self._fighting -= 1
-                if self._fighting == 0:
-                    self.log("battle hold expired → back out")
+                _held = self.since("fight")
+                if _held >= _FIGHT_HOLD_SEC:
+                    self._fighting = False
+                    self.clear_timer("fight")
+                    self.log(f"⚠battle hold expired ({_held:.0f}s ≥ "
+                             f"{_FIGHT_HOLD_SEC:.0f}s) → back out")
                     return action_back("battle hold expired")
-                return action_wait(1000, f"story battle in progress ({self._fighting})")
+                return action_wait(1000,
+                                   f"story battle in progress ({_held:.0f}s)")
 
         # P0.9: a dialog offering NAVIGATION-AWAY (取消键 present, 确认键
         # absent — e.g. 獲得新收藏!是否立即移動? 取消/立即前往, live

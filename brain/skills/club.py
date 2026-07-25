@@ -80,12 +80,22 @@ class ClubSkill(BaseSkill):
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _checkin_dialog(self, screen: ScreenState):
-        """社團簽到獎勵 = a centered 确认键 with NO 取消键 (single-button)."""
+        """社團簽到獎勵 = a centered 确认键 with NO 取消键 (single-button).
+
+        ⛔2026-07-25 全仓金钱审计 #4: 排除项原本**只有 取消键 一个 cls**(47f
+        训练样本, 本来就是弱类) —— 它一漏检, 任何双键代价框都会被当成簽到奖励
+        直接点確認。schedule 那起 30 青辉石事故证明了"单点排除信号会整条哑火"。
+        补一路正交的结构信号: body 里出现数量步进器 = 这是个要选数量付费的框,
+        绝不是簽到奖励(簽到框 body 只有奖励图标 + 一个確認)。
+        """
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_CHECKIN_REGION)
         if confirm is None:
             return None
         if self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None:
             return None  # 2-button dialog = not the checkin (don't mishandle)
+        if self.has_qty_stepper(screen):
+            self.log("⛔ 数量步进器在屏 = 付费框, 不是社團簽到 — 不点確認")
+            return None
         return confirm
 
     def _card_dot(self, screen: ScreenState):
