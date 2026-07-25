@@ -86,6 +86,7 @@ data/schedule_avatar_regions.json
 data/_roster_replay/
 data/harvest_per_image/
 data/cafe_state.json
+data/schedule_state.json
 data/event_shop_state.json
 data/event_progress.json
 data/story_progress.json

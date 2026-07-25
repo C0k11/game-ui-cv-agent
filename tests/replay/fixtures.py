@@ -149,12 +149,53 @@ def fx_schedule_ticket_cap_stops():
             f"到顶({_MAX_TICKETS})后仍点击={bad or '无'} (期望: 零点击)")
 
 
+def fx_schedule_buy_dialog_no_pyroxene_cls():
+    """⛔2026-07-25 真实事故帧回归 —— 30 青辉石就是这么花掉的。
+
+    run_20260724_201229 tick_0101: 屏上明明是「購買課程表票券 單價💎30
+    總購買價格💎30」, 但 YOLO **对话框体内一个青辉石都没检出**(小图标压在深色
+    价格条上), 只检出顶栏余额那个 → 旧版 _buy_dialog 单点依赖 body 青辉石 →
+    返回 False → 防线整条哑火 → PRIORITY 1 把购买框的「確認」当成報告框的
+    「確認」点掉 = 亲手买票。
+
+    本 fixture 用的正是那一帧的真实检出清单(逐条抄自 tick_0101.json), 一个
+    body 青辉石都没有。判据必须靠结构特征(数量步进器 / 取消+确认同屏)兜住。
+    """
+    from brain.skills.schedule import ScheduleSkill
+    screen = _sched_screen(
+        _yb("取消键", 0.402, 0.699, 0.98),
+        _yb("确认键", 0.598, 0.699, 0.97),
+        _yb("MAX_可点击", 0.687, 0.480, 0.97),   # ★ 数量步进器 = 购买框铁证
+        _yb("减号灰色", 0.370, 0.480, 0.97),
+        _yb("加号", 0.630, 0.480, 0.96),
+        _yb("MIN_灰色", 0.315, 0.479, 0.94),
+        _yb("弹窗叉叉", 0.889, 0.140, 0.96),
+        _yb("课程表票", 0.054, 0.142, 0.96),
+        _yb("返回键", 0.045, 0.051, 0.95),
+        _yb("体力", 0.403, 0.032, 0.93),
+        _yb("信用点", 0.564, 0.033, 0.88),
+        _yb("青辉石", 0.740, 0.034, 0.51),        # 仅顶栏余额 — body 没有!
+    )
+    sk = ScheduleSkill()
+    sk.reset()
+    if not sk._buy_dialog(screen):
+        return (False, "_buy_dialog 没认出真实购买框(事故重演)")
+    bad = []
+    for _ in range(6):
+        act = sk.tick(screen)
+        r = str(act.get("reason", "")).replace("確認", "确认")
+        if act.get("action") == "click" and "确认键" in r:
+            bad.append(r[:70])
+    return (not bad, f"违规確認点击={bad or '无'} (期望: 只取消/退出)")
+
+
 CASES = [
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
     ("quest_list_真阳性(反向锚)", fx_quest_list_true_positive, True),
     ("上期活动474_不点", fx_prev_event_banner_no_tap, True),
     ("⛔买票框_绝不確認", fx_schedule_buy_dialog_never_confirm, True),
     ("⛔票到顶_零点击", fx_schedule_ticket_cap_stops, True),
+    ("⛔真实事故帧_购买框无青辉石cls", fx_schedule_buy_dialog_no_pyroxene_cls, True),
 ]
 
 

@@ -58,6 +58,36 @@ from brain.skills import ui_classes as UC
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
+# ⛔按游戏日累计的派遣台账(2026-07-25 事故后新增)。旧的 _dispatch_count 是
+# **per-run** 的: 事故当天早些 session 已派 4 次, 本跑只数到 3, 于是 >=7 的硬
+# 上限形同虚设, 票早已耗尽却照点「課程表開始」→ 弹出青辉石购买框。
+_SCHED_STATE_FILE = _DATA_DIR / "schedule_state.json"
+
+
+def _game_day() -> str:
+    """BA 游戏日(04:00 刷新) ISO 日期 —— 日累计台账的 key。"""
+    from datetime import datetime, timedelta
+    return (datetime.now() - timedelta(hours=4)).date().isoformat()
+
+
+def _load_sched_state() -> dict:
+    try:
+        if _SCHED_STATE_FILE.exists():
+            s = json.loads(_SCHED_STATE_FILE.read_text(encoding="utf-8"))
+            if s.get("game_day") == _game_day():
+                return s
+    except Exception:
+        pass
+    return {"game_day": _game_day(), "dispatched": 0}
+
+
+def _save_sched_state(state: dict) -> None:
+    try:
+        _SCHED_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SCHED_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False),
+                                     encoding="utf-8")
+    except Exception:
+        pass
 
 # ── tuning knobs ──────────────────────────────────────────────────────────
 _CLS_CONF = 0.30            # default UI cls confidence floor
@@ -80,6 +110,12 @@ _DIALOG_BAND = (0.30, 0.66, 0.70, 0.90)
 # band covers it with margin and stays clear of the report's _DIALOG_BAND (cy
 # 0.66+), so it never false-fires on a normal 课程表报告.
 _PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
+# ⛔购买框结构判据(2026-07-25 事故后新增, 坐标取自 run_20260724_201229
+# tick_0101 实测): 数量步进器一排在 cy≈0.480, 覆盖带留足余量。
+# 課程表報告 弹窗**没有**这排控件, 所以不会误伤正常派遣流程。
+_QTY_STEPPER_CLS = (UC.QTY_MIN, UC.QTY_MIN_GREY, UC.QTY_MAX, UC.QTY_MAX_GREY,
+                    UC.QTY_MINUS, UC.QTY_MINUS_GREY, UC.TOPBAR_PLUS)
+_QTY_STEPPER_REGION = (0.22, 0.30, 0.80, 0.62)
 
 # ── GAP fallbacks (under-trained cls — documented in probe log) ───────────
 # Region tiles (SCHOOL_*) are ~3-12 frames each and routinely missed (v6 gap
@@ -101,6 +137,19 @@ _OPEN_ROOM_SETTLE = 4          # (保留: 其他处引用) — 开房等待已�
 _OPEN_ROOM_SETTLE_SEC = 3.0    # 課程表資訊 弹窗渲染实测 1-2s, 3s 宽松兜底
 _SWITCH_MAX = 12
 _EXIT_MAX = 14
+# ⭐区域身份指纹(2026-07-25 帧证据修): 5 个区域的**区域内屏 cls 集合完全一样**
+# (全体课程表/左右切换/顶栏), YOLO 分不出谁是谁 —— 唯一区分是右上「RANK N 区域名」
+# 横幅。用感知哈希当到达态判据(纯图像变化, 不是 OCR 文字匹配)。
+# 实测(run_20260724_185527, 228 tick): 同区域哈希恒定成一簇, 换区汉明距远大于 6。
+# 只裁标题那一行, 不含下方会动的奖励进度条。
+_REGION_TITLE_BAND = (0.705, 0.125, 0.995, 0.178)
+# 标定(2026-07-25, 实测 6 屏目检过标题 + trajectory 231 帧):
+#   同区最大 MAD = 4.41(含背景不同/右箭头退回同一区)
+#   异区最小 MAD = 12.05
+# 取 8.0 居中。⚠popout 淡出转场帧 MAD 可达 77 → 到达判定必须**连续两帧**确认。
+_REGION_DIFF_MAD = 8.0
+_SWITCH_GAP_SEC = 5.0          # 这么久标题还没变 → 改用坐标 GAP 落点
+_SWITCH_VERIFY_SEC = 14.0      # 再等不到 → 大声报警 fail-closed, 绝不假装切过
 # Reaction time: before concluding a region has "no room/target", re-scan this
 # many frames so fused_avatar (flickery per-frame on the small popout heads) and
 # the layout have time to settle (user: 给点击和模型识别一些反应时间).
@@ -176,14 +225,26 @@ class ScheduleSkill(BaseSkill):
         self._targets: List[str] = []
         self._tickets: int = -1             # -1 = unknown; 0 = exhausted
         self._dispatch_count: int = 0       # confirmed reports = tickets spent (hard cap)
+        # 今日累计派遣(跨 run 持久, 硬上限真正的依据)
+        self._day_dispatched: int = int(_load_sched_state().get("dispatched", 0))
         # traversal bookkeeping
         self._office_clicked: bool = False  # clicked 夏莱办公室 yet?
         self._jumped_to_last: bool = False  # done the initial ARROW_LEFT jump?
         self._regions_seen: int = 0         # regions whose popout we've opened
         self._full_circle: bool = False     # traversed all regions → fallback
         self._circle_start_dispatch: int = 0  # _dispatch_count at circle start(空转退出用)
+        self._circle_start_switches: int = 0  # _verified_switches at circle start(假圈检测)
         self._region_count: int = 0         # 区域列表帧实测区数(0=没测到, 回落 _MAX_REGIONS)
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
+        # ⭐区域切换到达态验证(2026-07-25): 点 ARROW_LEFT 前的标题指纹 / 起点墙钟 /
+        # 已发 tap 数。标题真变了才算切成功 —— 绝不用"我发过点击"当证据。
+        self._switch_from_sig = None          # 起点标题缩略图(np.ndarray|None)
+        self._sig_pending = None              # 基线候选(需连续两帧一致)
+        self._arrive_pending = None           # 到达候选(需连续两帧一致)
+        self._switch_t0: float = 0.0
+        self._switch_taps: int = 0
+        self._verified_switches: int = 0    # 帧证据确认的真实换区次数
+        self._jump_issued: bool = False     # jump-to-last 的点击已发出(等 ack)
         # per-region (reset on each region switch)
         self._region_locked: Optional[bool] = None   # case A (True) / B (False)
         self._clicked_heads: List[Tuple[float, float]] = []  # heads dispatched here
@@ -206,6 +267,13 @@ class ScheduleSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
         self._open_room_t0 = 0.0      # 墙钟计时随状态切换归零
+        if sub_state == "switch":
+            # 每次重新进入 switch 都要重新取起点指纹(上一次的已作废)
+            self._switch_from_sig = None
+            self._sig_pending = None
+            self._arrive_pending = None
+            self._switch_t0 = 0.0
+            self._switch_taps = 0
 
     def _reset_region(self) -> None:
         """Clear per-region state on entering a fresh region's popout."""
@@ -276,15 +344,37 @@ class ScheduleSkill(BaseSkill):
     # ── screen-state helpers (pure YOLO) ──────────────────────────────────
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
-        """青辉石 in the dialog body = a buy-ticket (青辉石) cost dialog. ★ HARD
-        money stop. The ticket digit-OCR is unreliable (region miscalib →
-        tickets=-1 the whole run, so the ==0 gates never fire); this catches the
-        0-ticket 购买课程表券 popup regardless of the count. The top-bar pyroxene
-        balance (cy<0.10) is excluded by the body region."""
-        # +清辉石(idx2 同物异名遗留类, 2026-07-11 cls审计): 多收一路零成本
-        return self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"],
-                             conf=_CLS_CONF,
-                             region=_PYROXENE_BODY_REGION) is not None
+        """购买/数量选择对话框判据。★ HARD money stop。
+
+        ⛔2026-07-25 实锤事故(30 青辉石被花掉): 旧版**单点**依赖"对话框体内检出
+        青辉石 cls"。那一帧(run_20260724_201229 tick_0101)屏上明明是
+        「購買課程表票券 單價💎30 總購買價格💎30」, 但 YOLO **一个 body 青辉石
+        都没检出**(小图标压在深色价格条上), 只检出顶栏余额那个 —— 判据返回
+        False, 防线整条哑火, PRIORITY 1 把购买框的「確認」当成報告框的「確認」
+        点了下去 = 亲手买票。**单点防线 = 没有防线。**
+
+        改成正交多信号, 任一命中即判购买框(全部取自那一帧的实测检出, conf
+        0.94-0.98, 远比那个检不出的 💎 可靠):
+          A 数量步进器: MIN/MAX/减号/加号 出现在对话框体内(cy 0.30-0.62)
+            —— 只有"选数量再买"的框才有, 課程表報告 绝无。
+          B 取消键与确认键同屏 —— 報告框只有孤零零一个 確認, 没有取消。
+          C 旧的 body 青辉石(保留, 多一路零成本)。
+        """
+        # C: 旧路(+清辉石 idx2 同物异名遗留类, 2026-07-11 cls审计)
+        if self.find_cls(screen, [UC.TOPBAR_PYROXENE, "清辉石"],
+                         conf=_CLS_CONF,
+                         region=_PYROXENE_BODY_REGION) is not None:
+            return True
+        # A: 数量步进器在对话框体内
+        if self.find_cls(screen, _QTY_STEPPER_CLS, conf=_CLS_CONF,
+                         region=_QTY_STEPPER_REGION) is not None:
+            return True
+        # B: 取消键 + 确认键 同屏 = 有代价的确认框
+        if (self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None
+                and self.find_cls(screen, UC.BTN_CONFIRM,
+                                  conf=_CLS_CONF) is not None):
+            return True
+        return False
 
     def _is_schedule(self, screen: ScreenState) -> bool:
         """Any schedule surface: detect_screen_yolo()=='Schedule' OR a region
@@ -345,6 +435,47 @@ class ScheduleSkill(BaseSkill):
         return self.find_cls(
             screen, UC.ARROW_LEFT, conf=_CLS_CONF, region=(0.0, 0.30, 0.12, 0.70)
         )
+
+    # ── 区域身份(到达态判据) ────────────────────────────────────────────────
+
+    def _region_sig(self, screen: ScreenState):
+        """区域内屏「RANK N 区域名」横幅的 96x24 灰度缩略图; 拿不到返回 None。
+
+        为什么需要: 区域内屏各区 cls 集合一模一样(全体课程表/左右切换/顶栏),
+        YOLO 无从判断"我到底在哪个区" —— 于是 2026-07-25 那次 5 条 ARROW_LEFT
+        日志全是空头支票也没人发现。popout 开着时标题被弹窗盖住, 所以只在
+        SCHED_ALL 锚在场(popout 已关)的帧上比。
+        ⚠试过 DCT 感知哈希, **判据不成立**: 1050x115 的窄横幅压成 32x32 文字糊
+        掉, 实测同区 d=24-34 / 异区 d=4-16 完全混叠。改用缩略图 MAD 后干净可分
+        (标定见下方 _REGION_DIFF_MAD)。
+        """
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return None
+        try:
+            import cv2
+            import numpy as np
+            h, w = frame.shape[:2]
+            x1, y1, x2, y2 = _REGION_TITLE_BAND
+            crop = frame[int(y1 * h):int(y2 * h), int(x1 * w):int(x2 * w)]
+            if crop.size == 0:
+                return None
+            g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            return cv2.resize(g, (96, 24),
+                              interpolation=cv2.INTER_AREA).astype(np.float32)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _sig_same(a, b) -> bool:
+        """两张标题缩略图是否同一个区域(任一为 None 时保守判 True = 没换)。"""
+        if a is None or b is None:
+            return True
+        try:
+            import numpy as np
+            return float(np.mean(np.abs(a - b))) < _REGION_DIFF_MAD
+        except Exception:
+            return True
 
     # ── roster head clustering ────────────────────────────────────────────
 
@@ -598,8 +729,11 @@ class ScheduleSkill(BaseSkill):
             # (7>7 False), and the cap-hit path还 action_click_box(confirm) —
             # 第8次那个"确认"可能正是买票框的确认键 = 亲手买票. Cap hit ⇒ wait
             # out, click NOTHING.
-            if self._dispatch_count >= _MAX_TICKETS:
-                self.log(f"⛔ 已排课{self._dispatch_count}次 >= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
+            # 上限用**今日累计**(持久台账), 不是本跑计数 —— 2026-07-25 事故当天
+            # 早些 session 已派 4 次, 本跑只数到 3, 旧的 per-run 上限完全没兜住。
+            if max(self._dispatch_count, self._day_dispatched) >= _MAX_TICKETS:
+                self.log(f"⛔ 今日已排课{max(self._dispatch_count, self._day_dispatched)}次 "
+                         f">= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
                 self._goto("exit")
                 return action_wait(300, "at ticket cap → EXIT, do NOT confirm")
             # ⭐dispatch 计数不再在此提前 +1(2026-07-22 实锤): 旧码
@@ -619,6 +753,18 @@ class ScheduleSkill(BaseSkill):
         if start is None:  # SCHED_START sometimes mid-frame outside the band
             start = self.find_cls(screen, UC.SCHED_START, conf=_CLS_CONF)
         if start is not None:
+            # ⛔⛔ 源头闸(2026-07-25 事故后新增): 票 == 0 时**绝不点課程表開始**。
+            # 事故链证据(run_20260724_201229): 票已 0 → 仍点開始 → 游戏弹
+            # 「購買課程表票券 單價💎30」→ 那个框的「確認」被 PRIORITY 1 当成
+            # 報告框的確認点掉 = 花了 30 青辉石。**不点開始, 购买框根本不会出现**
+            # —— 这是比"识别购买框"更靠前、更便宜的一道闸。
+            # 读不出(-1/None)时不拦(fail-open)会重蹈覆辙, 但读不出就全停也会让
+            # 正常日子干不了活 —— 折中: 读不出时交给 _buy_dialog + 硬上限兜底,
+            # 这里只拦**确知为 0** 的情形(确知 0 还点 = 必然弹购买框)。
+            if self._tickets == 0:
+                self.log("⛔ 票券已 0 — 绝不点課程表開始(点了必弹青辉石购买框)")
+                self._goto("exit")
+                return action_wait(300, "tickets 0 → 不点開始, 退出")
             # reason 加"確認键"(2026-07-21 mutate-before-ack: 課程表開始 渲染好即
             # 可点, 稳定门豁免立即点 → 不被吞 → goto open_room 前置安全)。
             self.log("schedule info → start (YOLO 课程表开始)")
@@ -742,8 +888,19 @@ class ScheduleSkill(BaseSkill):
             # SCHED_ALL bottom-right button is present there).
             if self._sched_all_btn(screen) is None and self._phase_ticks < 4:
                 return action_wait(400, "waiting for region-internal screen")
+            # ⭐after-ack(2026-07-25, 与 _switch 同族): 旧码点之前就置
+            # _jumped_to_last, 稳定门一吞就永远跳不成。后果比 _switch 轻(遍历
+            # 本身是环, 只是没从最新区起步), 但同一个 mutate-before-ack 形状,
+            # 一并按"发出→下一 tick 看 action_suppressed 再落账"修。
+            if self._jump_issued:
+                if self.action_suppressed:
+                    self.log("jump-to-last 被稳定门吞(未落屏) — 重发")
+                    self._jump_issued = False
+                else:
+                    self._jumped_to_last = True
+                    return action_wait(250, "jump-to-last landed")
             arrow = self._arrow_left(screen)
-            self._jumped_to_last = True
+            self._jump_issued = True
             if arrow is not None:
                 self.log("ARROW_LEFT → jump to last (newest) region (YOLO 左切换)")
                 return action_click_box(arrow, "jump to last region")
@@ -829,9 +986,16 @@ class ScheduleSkill(BaseSkill):
             if (_prev is not None and _prev > 0
                     and self._tickets is not None
                     and 0 <= self._tickets < _prev):
-                self._dispatch_count += (_prev - self._tickets)
+                _spent = _prev - self._tickets
+                self._dispatch_count += _spent
+                # ⛔同步写按游戏日的持久台账 —— per-run 计数跨 session 归零,
+                # 那正是 2026-07-25 硬上限没兜住 30 青辉石那次的原因之一。
+                self._day_dispatched += _spent
+                _save_sched_state({"game_day": _game_day(),
+                                   "dispatched": self._day_dispatched})
                 self.log(f"dispatch 落账: 票 {_prev}→{self._tickets}, "
-                         f"count={self._dispatch_count}")
+                         f"count={self._dispatch_count} "
+                         f"(今日累计 {self._day_dispatched})")
             if self._tickets == 0:
                 self.log("tickets exhausted → exit")
                 self._goto("exit")
@@ -947,6 +1111,19 @@ class ScheduleSkill(BaseSkill):
         # 绕到 max_ticks 死, 6 票滞留。
         _circle_size = self._region_count or 5
         if self._regions_seen >= _circle_size:
+            # ⛔防空转真闸(2026-07-25, 取代原来那个数圈数的 `not _full_circle`):
+            # 一圈 N 个区必须伴随 N-1 次**帧证据确认的换区**。对不上 = 我们其实
+            # 在原地反复开关同一个区的 popout(2026-07-25 那 200 tick 的形状) →
+            # 立刻大声收工, 绝不靠"日志说我切过"续命。
+            _switches_this_circle = (self._verified_switches
+                                     - self._circle_start_switches)
+            if _switches_this_circle < _circle_size - 1:
+                self.log(f"⚠假圈: 扫了 {self._regions_seen} 个 popout 但只有 "
+                         f"{_switches_this_circle} 次帧证实换区(需 "
+                         f"{_circle_size - 1}) — 原地空转, 收工"
+                         f"(剩 {self._tickets} 票)")
+                self._goto("exit")
+                return action_wait(300, "假圈(换区未落地) → exit")
             _dispatched_this_circle = self._dispatch_count > self._circle_start_dispatch
             # ⛔2026-07-25 实锤: 旧闸带 `not self._full_circle`, 捡漏圈**只准跑
             # 一次** —— 今天第1圈派1人→开捡漏→第2圈又派1人→但 _full_circle 已
@@ -969,6 +1146,7 @@ class ScheduleSkill(BaseSkill):
                 self._full_circle = True
                 self._regions_seen = 0
                 self._circle_start_dispatch = self._dispatch_count
+                self._circle_start_switches = self._verified_switches
             else:
                 _why = ("本圈零派出(无可派对象)" if not _dispatched_this_circle
                         else f"full circle done ({self._regions_seen} regions)")
@@ -987,20 +1165,15 @@ class ScheduleSkill(BaseSkill):
                 return action_click_box(close, "close popout before switch")
             return action_back("close popout before switch (no X cls)")
 
-        # ARROW_LEFT to the next region.
-        arrow = self._arrow_left(screen)
-        if arrow is not None:
-            self.log("ARROW_LEFT → next region (YOLO 左切换)")
-            self._reset_region()
-            self._goto("navigate")
-            return action_click_box(arrow, "ARROW_LEFT next region")
-
         # Location Select recovery v2 (live 2026-06-11): closing a popout can
         # bounce us to the region LIST (no ARROW_LEFT/SCHED_ALL there). v1
         # re-entered row 0 every time → infinite loop on a fully-dispatched
         # first region. v2 turns the bounce INTO the traversal: each bounce
         # enters the NEXT list row directly (rows sit at fixed y), capped.
+        # ⚠必须排在到达态验证**之前**: LS 屏没有 RANK 标题, 指纹一定跟区域内屏
+        # 不同 → 会被误判成"切换成功"。
         if self.find_cls(screen, UC.SCHOOL_OFFICE, conf=_CLS_CONF) is not None:
+            self._switch_from_sig = None
             self._ls_recoveries += 1
             if self._ls_recoveries > 8:
                 self.log("Location Select bounce cap (8) → exit with leftovers")
@@ -1016,12 +1189,85 @@ class ScheduleSkill(BaseSkill):
             self._goto("navigate")
             return action_click(0.70, rows_y[row], f"enter region list row {row}")
 
-        # GAP: arrow cls not seen → symmetric left-edge coord, then navigate.
-        if self._phase_ticks > _SWITCH_MAX:
-            self.log("ARROW_LEFT cls missing — symmetric coord (GAP)")
+        # ⭐到达态验证(2026-07-25 帧证据实锤 — 见 memory log_is_not_truth)
+        # 旧码在 click **之前**就 _reset_region()+_goto("navigate") = mutate-
+        # before-ack。而 _switch 必然先关 popout, **紧接的那一 tick 结构指纹必然
+        # 剧变**(-16 个 popout/头像 cls, +4 个区域屏 cls) → _dedup_click 的
+        # frame-settle 稳定门 100% 把 ARROW_LEFT 转成 wait。点击从来没发出去,
+        # skill 却已经"前进"到 navigate → 重开同一个区域的 popout → 200 tick
+        # 空转, 日志刷 5 条 ARROW_LEFT 一次也没生效, _regions_seen 假计数凑出
+        # 假 full-circle。(实证: run_20260724_185527 标题哈希 228 tick 只在
+        # 「夏萊辦公室」与「popout 遮挡」两簇间摆动。)
+        # 现在: 点之前记标题指纹, **点完留在 switch**, 标题真变了才算切成功。
+        # 正锚: SCHED_ALL(全體課程表) 只在 popout 关掉的区域内屏渲染(帧实测
+        # t0078 popout 开时无此 cls, t0079 关掉才出现) —— 有它才说明标题带没被
+        # 弹窗盖住, 指纹才可信。
+        if self._sched_all_btn(screen) is None:
+            if self._phase_ticks > _SWITCH_MAX:
+                # 锚一直不出现 = 既不在区域内屏也不在 LS(转场卡住/UI 变了)。
+                # 不许在这儿盲点箭头, 退回 navigate 让它重新认屏。
+                self.log("SCHED_ALL 锚迟迟不出现 — 回 navigate 重认屏")
+                self._goto("navigate")
+                return action_wait(300, "no SCHED_ALL anchor → navigate")
+            return action_wait(250, "等区域内屏渲染(SCHED_ALL 锚)")
+        _sig = self._region_sig(screen)
+        if self._switch_from_sig is None:
+            # 基线要连续两帧一致才锁 —— popout 淡出中途的混合帧会让下一帧"看起来
+            # 变了", 那是假到达。
+            if self._sig_pending is not None and self._sig_same(_sig, self._sig_pending):
+                self._switch_from_sig = _sig
+                self._switch_t0 = time.time()
+                self._switch_taps = 0
+                self._sig_pending = None
+            else:
+                self._sig_pending = _sig
+                return action_wait(200, "锁定区域指纹(需连续两帧一致)")
+        elif not self._sig_same(_sig, self._switch_from_sig):
+            # 到达也要连续两帧确认: popout 淡出的转场残影帧(SCHED_ALL 已渲染但
+            # 标题带还糊着)实测 MAD 高达 77, 单帧判据会假宣布"切成功"——
+            # 那就退化成另一种"拿自己的动作当证据"。
+            if (self._arrive_pending is None
+                    or not self._sig_same(_sig, self._arrive_pending)):
+                self._arrive_pending = _sig
+                return action_wait(200, "疑似换区 — 等第二帧确认")
+            self._arrive_pending = None
+            self._verified_switches += 1
+            self.log(f"✔区域切换到达确认(标题变了, {self._switch_taps} 次 tap, "
+                     f"累计 {self._verified_switches} 次真切换)")
+            self._switch_from_sig = None
             self._reset_region()
             self._goto("navigate")
+            return action_wait(250, "region switched (verified) → navigate")
+        else:
+            self._arrive_pending = None
+
+        _waited = time.time() - (self._switch_t0 or time.time())
+        if _waited > _SWITCH_VERIFY_SEC:
+            # 绝不假装切过: 读不出/切不动就大声收工, 把剩票如实报出来。
+            self.log(f"⚠区域切换失效: {self._switch_taps} 次 ARROW_LEFT / "
+                     f"{_waited:.1f}s 标题始终未变 — 收工(剩 {self._tickets} 票)")
+            self._goto("exit")
+            return action_wait(300, "region switch 验证失败 → exit")
+
+        if self.action_suppressed:
+            # 稳定门吞掉了上一发 —— 留痕, 下一稳定帧自然重发(不计 tap)。
+            self.log("ARROW_LEFT 被稳定门吞(未落屏) — 等稳定帧重发")
+            return action_wait(200, "ARROW_LEFT suppressed → 重发")
+
+        # ARROW_LEFT to the next region.
+        arrow = self._arrow_left(screen)
+        if arrow is not None and _waited <= _SWITCH_GAP_SEC:
+            self._switch_taps += 1
+            self.log(f"ARROW_LEFT → next region (YOLO 左切换, tap "
+                     f"#{self._switch_taps}, 等到达)")
+            return action_click_box(arrow, "ARROW_LEFT next region")
+        if arrow is not None or _waited > _SWITCH_GAP_SEC:
+            # cls 在但迟迟不生效 → 换坐标 GAP 落点(实测 ADB tap 0.023/0.502 有效)
+            self._switch_taps += 1
+            self.log(f"ARROW_LEFT 坐标 GAP 落点 (tap #{self._switch_taps}, "
+                     f"{_waited:.1f}s 未到达)")
             return action_click(*_ARROW_LEFT_POS, "ARROW_LEFT next region (GAP)")
+
         return action_wait(400, "waiting for ARROW_LEFT cls")
 
     # ── exit ──────────────────────────────────────────────────────────────
