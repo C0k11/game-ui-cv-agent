@@ -1781,6 +1781,8 @@ class DailyPipeline:
                 "interceptor", "dismiss", "reward", "獎勵", "奖励", "result",
                 "結果", "结果", "确认键", "確認", "continue", "繼續", "領取",
                 "领取", "claim", "close", "关闭", "關閉", "叉叉",
+                "PURCHASE", "cancel",  # 金钱逃逸: 购买框 veto/取消绝不 hold
+                                       # (与 back 分支 :1731 同理, 2026-07-25)
                 "headpat")):  # 走动学生永不"稳定" — 摸头必须抢最新帧
                               # (2026-07-21 tick595 实锤: #1 被稳定门吞掉漏摸)
             self._last_click_target = target
@@ -1978,10 +1980,14 @@ class DailyPipeline:
                                           f"BREACH, ABORTING PIPELINE", flush=True)
                                     self._running = False
                                     return action_done("⛔ pyroxene drop detected — aborted")
-                                elif (_py_c1 is not None and _py_c2 is not None
-                                        and max(_py_c1, _py_c2) >= _prev_py):
-                                    # clean frame shows balance intact → glitch
-                                    _RESOURCES["pyroxene"] = max(_py_c1, _py_c2)
+                                elif (_py_c1 is not None and _py_c1 == _py_c2
+                                        and _py_c1 >= _prev_py):
+                                    # clean frame shows balance intact → glitch。
+                                    # ⚠抬基线与判掉钱同标准: 两读必须**一致**
+                                    # (2026-07-25 审计: 原 max(_c1,_c2) 让单次
+                                    # 超读抬高基线 → 之后真值两读一致 < 假基线
+                                    # = 假 MONEY BREACH 全线急停, 且无自愈路径)
+                                    _RESOURCES["pyroxene"] = _py_c1
                                 else:
                                     print(f"[Pipeline] pyroxene {_prev_py}→{_py}: clean "
                                           f"re-reads={_py_c1}/{_py_c2} disagree or "
@@ -2052,9 +2058,10 @@ class DailyPipeline:
                                   f"MONEY BREACH, ABORTING PIPELINE", flush=True)
                             self._running = False
                             return action_done("⛔ pyroxene drop detected — aborted")
-                        if (_c1 is not None and _c2 is not None
-                                and max(_c1, _c2) >= _prev_py):
-                            _RESOURCES["pyroxene"] = max(_c1, _c2)
+                        if (_c1 is not None and _c1 == _c2
+                                and _c1 >= _prev_py):
+                            # ⚠两读一致才准抬基线(同上大厅分支, 2026-07-25)
+                            _RESOURCES["pyroxene"] = _c1
                         else:
                             print(f"[Pipeline] 非大厅哨兵: clean 复读 {_c1}/{_c2} "
                                   f"不一致或未确认, 忽略(基线不动)", flush=True)

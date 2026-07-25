@@ -626,11 +626,17 @@ class TicketSweepSkill(BaseSkill):
         # Reward dismissed → re-read tickets. MAX drains all → usually 0 now.
         if self._sweep_cycles >= self._MAX_SWEEP_CYCLES:
             self.log("sweep cycle cap → exit")
+            # 帽退时票数没重读过 — 报 UNKNOWN, 不带入场陈旧值假报 LEFTOVER
+            self._post_sweep_unread = True
             self._goto("exit")
             return action_wait(300, "sweep cap → exit")
 
         tickets = self._read_tickets(screen)
         if tickets is not None and tickets <= 0:
+            # ⚠必须回写 _tickets(2026-07-25 workflow 实锤): 主成功路径原先不回写,
+            # exit_report 拿着入场旧值(如 6)把每一次"扫光收工"误报成 LEFTOVER —
+            # 且 exit_report 的 CLEAN-after-sweep 分支因此成了不可达死码。
+            self._tickets = tickets
             self.log("tickets drained (0) → exit")
             self._goto("exit")
             return action_wait(300, "tickets 0 → exit")

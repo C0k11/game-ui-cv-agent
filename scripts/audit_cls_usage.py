@@ -51,9 +51,32 @@ def load_master() -> list:
 _VAL_DIR_MARKERS = ("_val", "val_pool")
 
 
+def _val_source_names() -> set:
+    """build_ui_v2.VAL_SOURCES 的目录名(文本抠取, 不 exec 避免顶层副作用)。
+
+    ⛔2026-07-25 第三修: run_20260606_flywheel 这类 **v7 主 val 源**名字不带
+    `_val` 字样, 光靠 _VAL_DIR_MARKERS 认不出 → 同款"val 当 train"漏报向量
+    没堵死; 另有 4 个 `_labels_bak` 备份目录被双份计数(虚高 ~17%)。
+    别再用目录名子串猜 val — 直接对齐构建脚本的真相。"""
+    try:
+        src = open(os.path.join(_ROOT, "scripts", "build_ui_v2.py"),
+                   encoding="utf-8").read()
+        m = re.search(r"VAL_SOURCES\s*=\s*\[([\s\S]*?)\]", src)
+        return set(re.findall(r'"([^"]+)"', m.group(1))) if m else set()
+    except Exception:
+        return set()
+
+
+_VAL_SRC_NAMES = _val_source_names()
+
+
 def _is_val_pool(path: str) -> bool:
     parts = os.path.normpath(path).split(os.sep)
-    return any(any(m in p for m in _VAL_DIR_MARKERS) for p in parts)
+    if any(any(m in p for m in _VAL_DIR_MARKERS) for p in parts):
+        return True
+    if any("_labels_bak" in p or p == "_backups" for p in parts):
+        return True
+    return any(p in _VAL_SRC_NAMES for p in parts)
 
 
 def count_label_boxes(include_val: bool = False) -> Counter:
@@ -89,12 +112,14 @@ def _strip_comments(text: str) -> str:
     return "\n".join(ln.split("#", 1)[0] for ln in text.splitlines())
 
 
-def scan_code() -> str:
+def scan_code(exclude_basenames: tuple = ()) -> str:
     src = []
     for sub in ("brain", "server", "scripts", "tests"):
         for f in glob.glob(os.path.join(_ROOT, sub, "**", "*.py"),
                            recursive=True):
             if os.path.basename(f) == os.path.basename(__file__):
+                continue
+            if os.path.basename(f) in exclude_basenames:
                 continue
             try:
                 src.append(_strip_comments(open(f, encoding="utf-8").read()))
@@ -130,6 +155,12 @@ def main() -> int:
     master = load_master()
     boxes = count_label_boxes()          # 只算 train, 不含 val 池
     code = scan_code()
+    # bare 引用语料(2026-07-25 第三修): 剔除 ui_classes.py 本体(定义行会让每个
+    # 常量自带 1 次假引用)与 import 行(import 本身不是使用)
+    _code_ex_uc = scan_code(exclude_basenames=("ui_classes.py",))
+    code_bare = "\n".join(
+        ln for ln in _code_ex_uc.splitlines()
+        if not ln.lstrip().startswith(("from ", "import ")))
     det = scan_detections() if a.with_det else Counter()
 
     # ui_classes 常量名 → 值, 用来判断"是不是真被 skill 逻辑引用"
@@ -141,20 +172,23 @@ def main() -> int:
     def referenced(name: str) -> int:
         """该 cls 被**代码**引用的次数。
 
-        常量类走 `UC.XXX`; 无常量的走**带引号的完整字面量** —— 绝不用裸子串
+        常量类走 `UC.XXX`; 字面量走**带引号的完整匹配** —— 绝不用裸子串
         匹配: `房间区域` 是 `房间区域未解锁` 的子串, 裸匹配会把后者算成前者
         的引用(第一版就这么误报了 11 处)。
+        ⛔2026-07-25 第三修(workflow 审计): 原版两类引用全盲 —
+        ① `from ui_classes import X` 后**裸用 X**(不带 UC. 前缀);
+        ② **有常量但代码写字面量**(原版 has_const 就不数字面量了)。
+        两类漏数都把真死判据归进"废案", --fail-on-dead 假绿(漏报比多报危险)。
+        裸名与字面量都在剔除 ui_classes.py 的语料上数(定义行不算引用)。
         """
         n = 0
-        has_const = False
         for k, v in const.items():
             if v == name:
-                has_const = True
                 n += len(re.findall(r"UC\." + k + r"\b", code))
-        if not has_const:
-            q = re.escape(name)
-            n += len(re.findall(r'"' + q + r'"', code))
-            n += len(re.findall(r"'" + q + r"'", code))
+                n += len(re.findall(r"(?<![\w.])" + k + r"\b", code_bare))
+        q = re.escape(name)
+        n += len(re.findall(r'"' + q + r'"', _code_ex_uc))
+        n += len(re.findall(r"'" + q + r"'", _code_ex_uc))
         return n
 
     val_boxes = count_label_boxes(include_val=True)

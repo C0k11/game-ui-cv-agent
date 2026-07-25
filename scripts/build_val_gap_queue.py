@@ -64,21 +64,50 @@ def _stamp(name: str):
     return f"{m.group(1)}_{m.group(2)}" if m else None
 
 
-def tainted_stamps() -> set:
-    """所有已进过训练/标注池的 run 时间戳 —— 一律不许当 val。"""
-    out = set()
+def tainted_stamps() -> tuple:
+    """已进过训练/标注池的 run 时间戳 + **整天拉黑**的日期, 一律不许当 val。
+
+    ⛔2026-07-25 workflow 审计实锤(v1 的防泄漏承诺没兑现):
+    merge_flywheel_pools 把 run_<date>_<HHMMSS>_clean 合成
+    run_<date>_merged_clean 后 rmtree 源目录 — 目录名时间戳被抹掉, 文件只剩
+    143655_/0717a_ 这类前缀, _stamp() 全部 None → 这些 train 池的源 run 一个
+    都进不了污染集。已落盘的 _val_v15_gap 实锤混进 ≥12 帧与 ui_v2 train 同
+    session 的帧(20260711 的 143655/144712/162423 等)。
+    逐前缀恢复不可靠(±1s 改名秒漂 + 0709m_/v8queue 前缀根本不带 HHMMSS)
+    ⇒ **fail-closed: 凡名字带日期但没有完整时间戳的池, 整天拉黑**。
+    代价是这几天的干净 run 也进不了 val — 溯源已被 merge 销毁, 宁缺勿泄。
+    """
+    stamps, days = set(), set()
+
+    def _eat(name: str) -> None:
+        s = _stamp(name)
+        if s:
+            stamps.add(s)
+            return
+        m = re.search(r"(\d{8})", name)
+        if m:
+            days.add(m.group(1))
+
     build = open(os.path.join(_ROOT, "scripts", "build_ui_v2.py"),
                  encoding="utf-8").read()
     for n in re.findall(r'"([A-Za-z_0-9]+)"', build):
-        s = _stamp(n)
-        if s:
-            out.add(s)
+        _eat(n)
     for d in glob.glob(os.path.join(_ROOT, "data/raw_images/*")):
-        if os.path.isdir(d):
-            s = _stamp(os.path.basename(d))
-            if s:
-                out.add(s)
-    return out
+        if not os.path.isdir(d):
+            continue
+        base = os.path.basename(d)
+        _eat(base)
+        if _stamp(base) is None and re.search(r"\d{8}", base):
+            # ⚠跨天合并池(实测 run_20260717_merged_ui_clean 内含 0708p/0709m/
+            # 0714a/0715a-c/0716a-b/0717a-g 批次) — 池名只透出一天, 其余天要从
+            # **文件批次前缀** MMDD[a-z]_ 恢复, 每个批次天整天拉黑。
+            my = re.search(r"(\d{4})\d{4}", base)
+            year = my.group(1) if my else "2026"
+            for f in os.listdir(d):
+                m = re.match(r"(\d{4})[a-z]_", f)
+                if m:
+                    days.add(year + m.group(1))
+    return stamps, days
 
 
 def label_counts(split: str) -> Counter:
@@ -113,7 +142,7 @@ def main() -> int:
     gap = {names[i] for i in tr if tr[i] > 0 and va.get(i, 0) == 0}
     print(f"缺 val 的类: {len(gap)}")
 
-    bad = tainted_stamps()
+    bad, bad_days = tainted_stamps()
     months = set(a.months.split(","))
     runs = []
     for d in sorted(glob.glob(os.path.join(_TRAJ, "run_2026*"))):
@@ -121,10 +150,12 @@ def main() -> int:
             continue
         n = os.path.basename(d)
         s = _stamp(n)
-        if not s or s[:6] not in months or s in bad:
+        if (not s or s[:6] not in months or s in bad
+                or s[:8] in bad_days):
             continue
         runs.append(n)
-    print(f"干净候选 run: {len(runs)} (已按时间戳排除 {len(bad)} 个受污染源)")
+    print(f"干净候选 run: {len(runs)} (排除 {len(bad)} 个受污染时间戳 + "
+          f"整天拉黑 {len(bad_days)} 天: {sorted(bad_days)})")
 
     # 扫每帧含哪些 gap 类
     frame_cls = {}

@@ -162,6 +162,7 @@ class EventQuestSkill(BaseSkill):
         self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
         self._swept = 0
         self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
+        self._ap_spend_after_read = False  # 读数之后又扫荡/出击过 → 读数已陈旧
         self._popup_open = False
         self._formation_step = ""     # unlock 子步: '', 'edit', 'auto', 'confirm', 'sortie'
         self._tasks_done = False
@@ -293,8 +294,15 @@ class EventQuestSkill(BaseSkill):
         num=None 表示这一行关号没读出来 —— 调用方必须 fail-closed 处理,
         **绝不允许退回用 cy 当身份**(那正是要消灭的东西)。
         """
+        # ⚠行内配对必须收整个得星族(2026-07-25 审计): 未通关行显示的是
+        # `关卡得星_0`(已训独立类), 只配 _3 会让开荒期/未通关尾关整行 num=None
+        # → 关号锚定静默退回 cy 老路, 恰好败在最需要它的 20AP 解锁场景。
+        # (sweep/verify 用 _3 当页面身份锚防 Challenge 假阳性的那些点**不改**,
+        # 那是不同用途。⚠_0 的 val 实例=0, 关号条几何只在 _3 行标定过 ——
+        # 首个未通关活动期 live 时要盯读出率。)
         stars = [b for b in (screen.yolo_boxes or [])
-                 if b.cls_name == UC.STAGE_STAR_3 and b.confidence >= 0.30]
+                 if b.cls_name in (UC.STAGE_STAR_3, UC.STAGE_STAR_0)
+                 and b.confidence >= 0.30]
         rows: List[Dict[str, Any]] = []
         for enter in self._enter_keys(screen):
             ecy = (enter.y1 + enter.y2) / 2
@@ -307,6 +315,25 @@ class EventQuestSkill(BaseSkill):
             rows.append({"num": self._read_quest_num(screen, star),
                          "cy": ecy, "enter": enter, "star": star})
         rows.sort(key=lambda r: r["cy"])
+        # ⭐运行时结构自洽校验(2026-07-25 审计): 与离线验收同款判据 — 同帧关号
+        # 自上而下必须严格递增。相邻误读(11→12)在 1-30 范围闸内完全合法, 一旦
+        # 带错号落账 = 真关整个活动期被跳过加成核对。取最长严格递增子序列,
+        # 序外的 num 判误读置 None(fail-closed 回 popup/cy 兜底, 绝不带错号行动)。
+        seq = [(i, r["num"]) for i, r in enumerate(rows) if r["num"] is not None]
+        if len(seq) >= 2:
+            chains: List[List[int]] = []
+            for j in range(len(seq)):
+                best = None
+                for k in range(j):
+                    if seq[k][1] < seq[j][1] and (
+                            best is None or len(chains[k]) > len(chains[best])):
+                        best = k
+                chains.append((chains[best] if best is not None else []) + [j])
+            keep = {seq[j][0] for j in max(chains, key=len)}
+            for i, r in enumerate(rows):
+                if r["num"] is not None and i not in keep:
+                    self.log(f"⚠关号 {r['num']} 破坏同帧递增序 — 判误读, 置 None")
+                    r["num"] = None
         return rows
 
     def _read_quest_num(self, screen: ScreenState,
@@ -430,6 +457,13 @@ class EventQuestSkill(BaseSkill):
             return ("UNKNOWN",
                     f"AP 从未成功读出(本轮 swept={_swept}) — **不知道**灌完没")
         if _ap >= 20:
+            # ⚠陈旧读数降级(2026-07-25 审计): AP 读点在掃蕩開始/出击**之前**,
+            # rounds-cap/phase-timeout 出口不再重读 — 读数后一轮 MAX 扫最多
+            # 花 ~240AP 都不反映。读数后有过消耗就不许拿它报 LEFTOVER。
+            if getattr(self, "_ap_spend_after_read", False):
+                return ("UNKNOWN",
+                        f"最后读数 AP={_ap} 但之后还有扫荡/出击消耗未反映 — "
+                        f"真实剩余未知, 本轮 swept={_swept}")
             return ("LEFTOVER",
                     f"还剩 {_ap} AP 没灌进活动(≥20 = 至少还能扫一次), "
                     f"本轮 swept={_swept}")
@@ -490,6 +524,7 @@ class EventQuestSkill(BaseSkill):
         if not num:
             return None
         self._last_ap_read = int(num)   # 竣工判据用: 最后一次**成功**读到的 AP
+        self._ap_spend_after_read = False   # 新读数 → 陈旧标记清零
         return self._last_ap_read
 
     # ── tick ───────────────────────────────────────────────────────
@@ -927,6 +962,10 @@ class EventQuestSkill(BaseSkill):
             if _ap is None or _ap < 20:
                 if _ap is not None:
                     self.log(f"unlock: AP={_ap} <20 无法出击解锁 — 留待明日补打")
+                # ⚠清计时器(2026-07-25 审计): 泄漏进 points 阶段会让 sweep 的
+                # 第一次读失败拿陈旧 t0 算出 _el>6s, 6s 重试窗被整个跳过 —
+                # 单次感知抖动即收工, 复刻 840AP 式整轮报废。
+                self._ap_fail_t0 = 0.0
                 self._set("points")
                 return action_wait(300, "unlock deferred (AP unknown/insufficient)")
         step = self._formation_step
@@ -955,8 +994,9 @@ class EventQuestSkill(BaseSkill):
                 box = min((r["enter"] for r in rows),
                           key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
                 if abs((box.y1 + box.y2) / 2 - cy) <= 0.04:
-                    if _num is not None:
-                        self.log(f"⚠unlock: Q{_num} 关号本帧没读出 — 退回 cy 锚定")
+                    # cy 兜底必须留痕(2026-07-25: 原日志被 _num 门住, 目标关号
+                    # 未知时静默退化 — 与 docstring"绝不坐标当身份"自相矛盾却看不见)
+                    self.log(f"⚠unlock: 关号通道不可用(target={_num}) — 退回 cy 锚定")
                     return action_click_box(box, f"unlock: open quest cy={cy:.3f}")
                 if self._phase_ticks % 3 == 0:
                     return action_swipe(0.75, 0.72, 0.75, 0.42, duration_ms=400,
@@ -1023,14 +1063,18 @@ class EventQuestSkill(BaseSkill):
                 # 实测: 出击屏 1162 帧顶栏体力可锚定 96.0%(scratchpad/fp_scan 同批)。
                 _ap_now = self._read_ap(screen)
                 if _ap_now is None or _ap_now < 20:
-                    if not self._ap_fail_t0:
+                    # ⚠计时器只在**读失败**时起表(2026-07-25 审计: 原来读到
+                    # <20 的成功读数也起表, 违反字段定义"连续读不出的起点")
+                    if _ap_now is None and not self._ap_fail_t0:
                         self._ap_fail_t0 = time.time()
-                    _el = time.time() - self._ap_fail_t0
+                    _el = (time.time() - self._ap_fail_t0
+                           if self._ap_fail_t0 else 0.0)
                     if _ap_now is None and _el < _AP_READ_RETRY_SEC:
                         return action_wait(400, f"unlock/出击前: AP 读不出, 重试中 "
                                                 f"({_el:.1f}s/{_AP_READ_RETRY_SEC}s)")
                     self.log(f"⛔ unlock: 出击前复核 AP={_ap_now} → 不点出击"
                              f"(fail-closed, 绝不触发購買AP框)")
+                    self._ap_fail_t0 = 0.0   # 同上: 别把计时器泄漏给 points 阶段
                     self._formation_step = ""
                     self._set("points")
                     return action_back("unlock: AP 不足/未知 → 离开编队")
@@ -1040,6 +1084,7 @@ class EventQuestSkill(BaseSkill):
                 self._formation_step = "battle"
                 self._battle_ticks = 0
                 self._battle_t0 = time.time()
+                self._ap_spend_after_read = True   # 出击花 AP → 上次读数作废
                 return action_click_box(sortie, "unlock: 出击 (bonus run)")
             return action_wait(600, "unlock: waiting 出击")
         if step == "battle":
@@ -1220,6 +1265,7 @@ class EventQuestSkill(BaseSkill):
                 self._set("close")
                 return action_click_box(cancel_btn, "PURCHASE DIALOG — cancel!")
             self._swept += 1
+            self._ap_spend_after_read = True   # 扫荡花 AP → 上次读数作废
             return action_click_box(conf_btn, f"{label}: confirm sweep (pure AP)")
         if conf_btn is not None and cancel_btn is None:
             # 掃蕩完成框 (确认键无取消): tooltip 坑 → 连点两次由 tick 自然完成

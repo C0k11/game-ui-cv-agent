@@ -18,6 +18,11 @@ import json
 import os
 import sys
 
+# 直跑入口在 GBK 控制台打印 '⛔' 会 UnicodeEncodeError 中断(后面用例全没跑,
+# exit=1 走的是 traceback 不是 veto 契约) — 与 regression_suite.py:20 对齐。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(_HERE)))
 
@@ -251,9 +256,19 @@ def fx_event_unlock_ap_gate_fail_closed():
         acts.append(sk._unlock(screen))
         if sk.sub_state != "unlock":
             break
+    # ⚠原版把迭代次数当秒数用: 紧凑调用只耗毫秒, 6s 重试窗内全是 wait,
+    # "最终 defer" 分支从没被执行过(断言永真)。回拨墙钟, 真走到过期分支。
+    import time as _t
+    if sk.sub_state == "unlock":
+        sk._ap_fail_t0 = _t.time() - (eq._AP_READ_RETRY_SEC + 1.0)
+        acts.append(sk._unlock(screen))
     clicked = [str(a.get("reason", "")) for a in acts if a.get("action") == "click"]
-    return (not clicked,
-            f"AP 未知却点击={clicked[:2] or '无'} (期望零点击, 最终 defer)")
+    deferred = sk.sub_state == "points"
+    timer_clean = getattr(sk, "_ap_fail_t0", -1.0) == 0.0
+    ok = (not clicked) and deferred and timer_clean
+    return (ok,
+            f"AP 未知却点击={clicked[:2] or '无'}, defer到points={deferred}, "
+            f"计时器清零={timer_clean} (期望: 零点击+defer+计时器不泄漏)")
 
 
 # ── ⑤ schedule 关 popout 不许连发(after-ack) ───────────────────────────
@@ -355,9 +370,11 @@ def fx_page_graph_vocab_and_routes():
     另钉几条关键路径, 防止改图时把边改断。"""
     import pathlib as _pl
     from brain.nav import page_graph as PG
-    mf = _pl.Path("data/raw_images/_classes.txt")
+    # ⚠路径必须锚仓库根(2026-07-25 审计): cwd 相对路径 + "缺文件→SKIP 计 PASS"
+    # = 不从仓库根启动时整条词表校验静默消失 — 与 quest_rows load_frame 同族假验证。
+    mf = _pl.Path(_HERE).parents[1] / "data" / "raw_images" / "_classes.txt"
     if not mf.exists():
-        return (True, "SKIP: 缺 master 词表")
+        return (False, "master 词表缺失 — 词表校验没跑, 不许计 PASS")
     master = [l.strip() for l in mf.read_text(encoding="utf-8").splitlines()
               if l.strip()]
     bad = PG.validate_vocab(master)
@@ -367,6 +384,8 @@ def fx_page_graph_vocab_and_routes():
         ("Lobby", "Bounty_SweepPanel"): 4,
         ("Cafe_Hall2", "Arena_Opponents"): 3,
         ("Formation_Attack", "Lobby"): 1,
+        ("Lobby", "EventQuestList"): 2,      # 钉死 2026-07-25 补的活动入边
+        ("Lobby", "EventSweepPanel"): 3,
     }
     for (a, b), n in want.items():
         r = PG.route(a, b)

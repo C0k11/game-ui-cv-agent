@@ -198,6 +198,12 @@ EDGES: List[Tuple[str, str, str]] = [
     ("MissionHub", "战术大赛", "Arena_Opponents"),
     ("MissionHub", "悬赏通缉", "Bounty_SceneSelect"),
     ("MissionHub", "学院交流会", "Exchange_SchoolSelect"),
+    # ⚠2026-07-25 审计补边: EventQuestList/EventSweepPanel 原先**零入边** —
+    # 文件头旗舰用例 route(...,'EventQuestList') 永远 None, 而 event_quest 是
+    # 当前 skill_order 唯一主链。banner cls 取 live 实际点击的 405(event_quest
+    # _enter 点「距离结束还剩」进活动, 不是 idx77 那个入口框)。
+    ("MissionHub", "距离结束还剩", "EventQuestList"),
+    ("EventQuestList", "入场键", "EventSweepPanel"),
     ("Schedule_RegionSelect", "夏莱办公室", "Schedule_RoomCarousel"),
     ("Schedule_RoomCarousel", "全体课程表", "Schedule_RosterPopout"),
     ("Schedule_RosterPopout", "课程表开始", "Schedule_Report"),
@@ -300,7 +306,11 @@ def validate_vocab(master: List[str]) -> List[str]:
     返回不存在的名字列表(空 = 全对)。"""
     used = set()
     for p in PAGES.values():
-        used |= set(p["core"]) | set(p.get("neg", ()))
+        # require 必须进校验(2026-07-25 审计): 它语义是"少一个直接否决", 拼错
+        # 不是死判据而是**永久否决该页** — 比 core 拼错更静默。之前只是碰巧
+        # 3 个 require 名都出现在别页 neg 里才被盖到。
+        used |= (set(p["core"]) | set(p.get("neg", ()))
+                 | set(p.get("require", ())))
     for _f, c, _t in EDGES:
         used.add(c)
     used |= set(CONFIRM_SHAPE) | {_GLOBAL_BACK, _GLOBAL_HOME}

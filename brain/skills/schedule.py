@@ -1231,6 +1231,13 @@ class ScheduleSkill(BaseSkill):
                 self.log(f"⚠popout {_POPOUT_CLOSE_SEC:.1f}s 还没关掉 — 重发关闭")
             elif self._popout_close_issued:
                 self.log("关 popout 被稳定门吞(未落屏) — 立刻重发")
+            elif ("popout_close" in getattr(self, "_timers", {})
+                    and self.since("popout_close") < _POPOUT_CLOSE_SEC
+                    and not self.action_suppressed):
+                # ⚠单帧 roster-negative 闪断(popout 淡出中)会把 _popout_close_issued
+                # 清掉 — 但墙钟 mark 不受闪断影响: 冷却期内绝不二次发射(2026-07-25
+                # 审计: 原来闪断一次即重置 refractory, 双发洞没堵死)。
+                return action_wait(300, "popout close 冷却中(闪断防双发)")
             self._popout_close_issued = True
             self.mark("popout_close")
             close = self._popout_close(screen)

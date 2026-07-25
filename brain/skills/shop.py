@@ -103,7 +103,9 @@ class ShopSkill(BaseSkill):
         self._purchased: bool = False
         self._budget_logged: bool = False
         self._confirm_clicks: int = 0     # ack-loop: confirm 实际点击次数
+        self._cancel_clicks: int = 0      # ack-loop: cancel 实际点击次数
         self._dialog_gone: int = 0        # 点击后弹窗连续消失帧计数(=落地确认)
+        self._tab_miss: int = 0           # 信用点正锚连续漏检帧计数(容错闪断)
 
     def reset(self) -> None:
         super().reset()
@@ -135,8 +137,13 @@ class ShopSkill(BaseSkill):
         不是没看到坏东西就点") —— 那次定了原则却没迁到 shop.py, 又一次
         "一处修了同形没迁"。
         """
-        return self.find_cls(screen, UC.SHOP_TAB_CREDIT_SEL,
-                             conf=_CLS_CONF) is not None
+        # ⚠必须带 region(2026-07-25 全语料复核): 92,855 tick 里该 cls 581 次
+        # 真阳性全部落在左栏 tab 位(cx 0.050/cy 0.19-0.30), 但有 3 次屏中央
+        # conf 0.877-0.903 的幻觉(Cafe 转场/EventQuest verify 帧) — 不带 region
+        # 的全屏 argmax 会放行伪造通行证(840AP 事故同根因: 角落锚定必须带 region)。
+        # region 保留 581/581 真阳性, 灭掉全部 3 个伪造位点。
+        return self.find_cls(screen, UC.SHOP_TAB_CREDIT_SEL, conf=_CLS_CONF,
+                             region=(0.0, 0.10, 0.15, 0.40)) is not None
 
     def _confirm_dialog(self, screen: ScreenState) -> Optional[YoloBox]:
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DIALOG_BAND)
@@ -144,6 +151,24 @@ class ShopSkill(BaseSkill):
         if confirm is not None and cancel is not None:
             return confirm
         return None
+
+    def _cancel_dialog(self, screen: ScreenState, why: str) -> Dict[str, Any]:
+        """fail-closed 取消购买框 — **after-ack**(2026-07-25 workflow 审计):
+        原三处 cancel 分支都是先 _goto("exit") 再 return 点击, 点击被稳定门吞时
+        _exit 以 done-in-shop 收工, 活着的购买框遗留给 arena_shop(当天战术大赛
+        采购全丢 + 账面假 CLEAN)。现在停在 confirm, 由 dialog-gone 分支(连续
+        2 帧无弹窗)确认落地后才退; cap 防无限重试。reason 带 "cancel" 命中
+        pipeline 点击豁免词, 稳定门吞不掉。"""
+        self._cancel_clicks += 1
+        if self._cancel_clicks > 4:
+            self.log("cancel clicked 4x, dialog still up → exit (fail-closed)")
+            self._goto("exit")
+            return action_wait(300, "cancel stuck → exit")
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF,
+                               region=_DIALOG_BAND)
+        if cancel is not None:
+            return action_click_box(cancel, f"cancel purchase ({why})")
+        return action_back(f"cancel purchase ({why}, ESC)")
 
     def _capture_balance(self, screen: ScreenState) -> None:
         """Read + cache the credit balance from the TOP-BAR — must be on the GRID
@@ -406,11 +431,20 @@ class ShopSkill(BaseSkill):
         # 旧版是「检出 青辉石商店_已选择 就退」, 而那个 cls 训练 0 框 / 实战
         # 0 检出 —— 这道守卫从来没生效过(详见 _on_credit_tab 注释)。
         # 现在改成正向白名单: 花钱前必须看见 信用点商店_已选中。
+        # ⚠一击退出会误杀(2026-07-25 v14 回放实锤): 正锚在健康商店网格帧上有
+        # 单帧漏检(run_20260616 t07 conf 0.216 → t08 恢复 0.971), 一击退=当天
+        # 信用点采购整单静默跳过。miss 期间只 wait 绝不点(方向仍 fail-closed),
+        # 连续 3 帧才退 — 与本文件 _dialog_gone"容忍 1 帧 YOLO 闪断"同款容错。
         if not self._on_credit_tab(screen):
-            self.log("⛔ 买入阶段看不到「信用点商店_已选中」正锚 — "
+            self._tab_miss += 1
+            if self._tab_miss < 3:
+                return action_wait(350, f"credit-tab anchor miss "
+                                        f"{self._tab_miss}/3 — hold (no click)")
+            self.log("⛔ 买入阶段连续3帧看不到「信用点商店_已选中」正锚 — "
                      "fail-closed 退出(绝不在 tab 身份未知时确认购买)")
             self._goto("exit")
             return action_wait(300, "credit-tab anchor missing at buy → exit")
+        self._tab_miss = 0
         # Confirm dialog already up → budget decision.
         if self._confirm_dialog(screen) is not None:
             self._goto("confirm")
@@ -460,31 +494,36 @@ class ShopSkill(BaseSkill):
         return action_wait(400, "waiting for 选择购买 cls")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ Tab guard (deep-dive r2 C4; **2026-07-25 改 fail-closed**):
-        # _affordable() 只看**信用点**余额 —— 在青辉石 tab 上它会开开心心地
-        # 判"买得起"然后花青辉石。这是全流程最后一道、也是唯一挨着"確認"
-        # 按钮的闸, 所以必须正向白名单: 看不见信用点 tab 正锚 = 取消。
-        if not self._on_credit_tab(screen):
-            self.log("⛔ 确认阶段看不到「信用点商店_已选中」正锚 — "
-                     "取消, 绝不确认(fail-closed)")
-            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
-            self._goto("exit")
-            if cancel is not None:
-                return action_click_box(cancel, "cancel (credit-tab anchor missing)")
-            return action_back("cancel (credit-tab anchor missing, ESC)")
+        # 弹窗在场判定放最前(2026-07-25 重排): 点过 confirm/**cancel** 后连续
+        # 2 帧无弹窗 = 点击已落地(容忍 1 帧 YOLO 闪断) → exit。cancel 也必须走
+        # 这条落地确认 — 见 _cancel_dialog 注释。
+        # (2026-07-21 live: mutate-before-ack 让 confirm 被稳定门吞后状态机
+        # 带假 _purchased 退出, 遗留弹窗被 stuck-20 点了取消 = 24件购买作废)。
         confirm = self._confirm_dialog(screen)
         if confirm is None:
-            # Dialog gone — purchased (reward) or dismissed → exit. 点过 confirm
-            # 后连续 2 帧无弹窗 = 点击已落地(容忍 1 帧 YOLO 闪断), 立即收尾
-            # (2026-07-21 live: mutate-before-ack 让 confirm 被稳定门吞后状态机
-            # 带假 _purchased 退出, 遗留弹窗被 stuck-20 点了取消 = 24件购买作废)。
             self._dialog_gone += 1
-            if ((self._confirm_clicks > 0 and self._dialog_gone >= 2)
+            if (((self._confirm_clicks + self._cancel_clicks) > 0
+                    and self._dialog_gone >= 2)
                     or self._phase_ticks > _CONFIRM_MAX):
                 self._goto("exit")
                 return action_wait(300, "confirm dialog gone → exit")
             return action_wait(300, "waiting for confirm dialog")
         self._dialog_gone = 0
+
+        # ⛔ Tab guard (deep-dive r2 C4; **2026-07-25 改 fail-closed**):
+        # _affordable() 只看**信用点**余额 —— 在青辉石 tab 上它会开开心心地
+        # 判"买得起"然后花青辉石。这是全流程最后一道、也是唯一挨着"確認"
+        # 按钮的闸, 所以必须正向白名单: 看不见信用点 tab 正锚 = 取消。
+        # miss 容错同 _buy(单帧闪断不误杀); miss 期间绝不点確認, 方向 fail-closed。
+        if not self._on_credit_tab(screen):
+            self._tab_miss += 1
+            if self._tab_miss < 3:
+                return action_wait(350, f"credit-tab anchor miss "
+                                        f"{self._tab_miss}/3 — hold (no confirm)")
+            self.log("⛔ 确认阶段连续3帧看不到「信用点商店_已选中」正锚 — "
+                     "取消, 绝不确认(fail-closed)")
+            return self._cancel_dialog(screen, "credit-tab anchor missing")
+        self._tab_miss = 0
 
         # ★ PRIMARY budget source (2026-06-12): the confirm dialog itself shows
         # 持有數量 (balance) and 總購買價格 (total) in large clear text — read
@@ -512,11 +551,7 @@ class ShopSkill(BaseSkill):
             # Exhausted retries → fail-CLOSED cancel (never blind-buy on an
             # unread balance). Don't fall through to the truncated topbar.
             self.log("⛔ 持有數量 unreadable after retries → cancel (fail-closed)")
-            cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
-            self._goto("exit")
-            if cancel is not None:
-                return action_click_box(cancel, "cancel purchase (unread balance)")
-            return action_back("cancel purchase (unread, ESC)")
+            return self._cancel_dialog(screen, "unread balance")
 
         # 總購買價格 sits on a DARK band — det fragments the digits beyond
         # repair (offline 2026-06-12: raw/invert/otsu/threshold all chop
@@ -547,11 +582,7 @@ class ShopSkill(BaseSkill):
             self._purchased = True
             return action_click_box(confirm, "confirm shop purchase (within budget)")
         self.log("⛔ dialog budget: balance-total < reserve → cancel")
-        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
-        self._goto("exit")
-        if cancel is not None:
-            return action_click_box(cancel, "cancel purchase (budget)")
-        return action_back("cancel purchase (budget, ESC)")
+        return self._cancel_dialog(screen, "budget")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         # ── shop统一 (用户 2026-06-16: 信用点商店 + 战术大赛商店是同一个商店, 左栏
@@ -561,6 +592,14 @@ class ShopSkill(BaseSkill):
         # → 直接 swipe 到战术大赛 tab, 无需从大厅重进)。复用 arena_shop 全部钱防线。
         # 仅在确实回到大厅(已被别处导走)或超时才正常收尾。
         if self.chain_in_shop and self._on_shop(screen):
+            # ⛔绝不带着活购买框交棒(2026-07-25): cancel 被吞/漏点时兜底关掉,
+            # arena_shop 在模态下点不动 swipe 会整段空转。
+            if self._confirm_dialog(screen) is not None:
+                stray = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF,
+                                      region=_DIALOG_BAND)
+                if stray is not None:
+                    return action_click_box(
+                        stray, "cancel stray purchase dialog before handoff")
             status = "purchased" if self._purchased else "no purchase"
             self.log(f"done ON shop grid ({status}) → 留在店内, arena_shop 接力切战术大赛 tab")
             return action_done(f"shop complete in-shop ({status}) → arena tab next")
