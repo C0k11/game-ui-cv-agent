@@ -256,6 +256,36 @@ def fx_event_unlock_ap_gate_fail_closed():
             f"AP 未知却点击={clicked[:2] or '无'} (期望零点击, 最终 defer)")
 
 
+# ── ⑤ schedule 关 popout 不许连发(after-ack) ───────────────────────────
+def fx_schedule_popout_close_no_double_fire():
+    """⛔2026-07-25: `close popout before switch` 连发两次, 第二发落在后面的
+    区域屏上误开了一个设施。旧节流是 `_phase_ticks % 2` —— **tick 奇偶既不是
+    时间也不是证据**, 而帧滞后让 `_roster_open` 在点击后仍为 True, `_dedup_click`
+    又因为结构指纹变了而放行重复点击。
+
+    ⚠这条**必须写成 fixture**: tests/replay 默认 `--mode stateless` 每 tick 新建
+    skill, 结构上测不到任何跨 tick 状态; 而 sequential 模式下录制帧不会响应我们的
+    点击, 状态机立刻发散 —— 两种回放都逮不到这一族。
+    """
+    from brain.skills.schedule import ScheduleSkill
+    # popout 开着: 右上关闭叉(_popout_close 的 region) + 顶部居中课程表票
+    screen = _sched_screen(
+        _yb("弹窗叉叉", 0.888, 0.138, 0.96),
+        _yb("课程表票", 0.450, 0.210, 0.95),
+    )
+    sk = ScheduleSkill()
+    sk.reset()
+    if not sk._roster_open(screen):
+        return (False, "构造的 popout-open 帧没被 _roster_open 认出(用例失效)")
+    sk.sub_state = "switch"
+    acts = [sk._switch(screen) for _ in range(6)]
+    clicks = [i for i, a in enumerate(acts)
+              if a.get("action") in ("click", "back")]
+    return (len(clicks) == 1,
+            f"关 popout 发了 {len(clicks)} 次(期望 1, 其余等帧证据); "
+            f"动作={[a.get('action') for a in acts]}")
+
+
 CASES = [
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
     ("quest_list_真阳性(反向锚)", fx_quest_list_true_positive, True),
@@ -265,6 +295,7 @@ CASES = [
     ("⛔真实事故帧_购买框无青辉石cls", fx_schedule_buy_dialog_no_pyroxene_cls, True),
     ("⛔unlock链_購買AP框绝不確認", fx_event_unlock_never_confirm_buy_ap, True),
     ("⛔unlock_AP读不出_fail-closed", fx_event_unlock_ap_gate_fail_closed, True),
+    ("关popout不连发(after-ack)", fx_schedule_popout_close_no_double_fire, False),
 ]
 
 

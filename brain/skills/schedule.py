@@ -150,6 +150,7 @@ _REGION_TITLE_BAND = (0.705, 0.125, 0.995, 0.178)
 _REGION_DIFF_MAD = 8.0
 _SWITCH_GAP_SEC = 5.0          # 这么久标题还没变 → 改用坐标 GAP 落点
 _SWITCH_VERIFY_SEC = 14.0      # 再等不到 → 大声报警 fail-closed, 绝不假装切过
+_POPOUT_CLOSE_SEC = 1.6        # 关 popout 后等它真关掉的墙钟(到期才允许重发)
 # Reaction time: before concluding a region has "no room/target", re-scan this
 # many frames so fused_avatar (flickery per-frame on the small popout heads) and
 # the layout have time to settle (user: 给点击和模型识别一些反应时间).
@@ -245,6 +246,7 @@ class ScheduleSkill(BaseSkill):
         self._region_count: int = 0         # 区域列表帧实测区数(0=没测到, 回落 _MAX_REGIONS)
         self._circle_first_sig = None       # 本圈起点区域的标题指纹(None=还没锚)
         self._circle_closed: bool = False   # 标题指纹已转回起点 = 一圈走完
+        self._popout_close_issued: bool = False  # 关 popout 已发出, 等帧证据(after-ack)
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
         # ⭐区域切换到达态验证(2026-07-25): 点 ARROW_LEFT 前的标题指纹 / 起点墙钟 /
         # 已发 tap 数。标题真变了才算切成功 —— 绝不用"我发过点击"当证据。
@@ -1209,16 +1211,28 @@ class ScheduleSkill(BaseSkill):
                 self._goto("exit")
                 return action_wait(300, "schedule circle done → exit")
 
-        # Close a lingering popout first. Pace it (稳定规则 2026-06-11): a
-        # double-fired X/ESC lands on the region screen behind and exits to
-        # Location Select — the very bounce that strands tickets.
+        # Close a lingering popout first. 双发的 X/ESC 会落到后面的区域屏上,
+        # 弹回 Location Select —— 正是那个把票扣在半路的 bounce。
+        # ⛔2026-07-25 实锤: 旧的 `_phase_ticks % 2` 节流**拦不住** —— 帧滞后使
+        # `_roster_open` 在点击后仍为 True, 而 `_dedup_click` 看到结构指纹变了
+        # 就放行重复点击, 于是 `close popout before switch` 连发两次, 第二发
+        # 落在区域屏上误开了一个设施。tick 奇偶不是时间, 也不是证据。
+        # 改 after-ack: 发过一次就等**帧证据**(popout 真关掉)或墙钟到期才重发;
+        # 被稳定门吞了(action_suppressed)则立刻重发 —— 那次根本没落屏。
         if self._roster_open(screen):
-            if self._phase_ticks % 2 == 0:
-                return action_wait(450, "popout closing — settle")
+            if self._popout_close_issued and not self.action_suppressed:
+                if self.since("popout_close") < _POPOUT_CLOSE_SEC:
+                    return action_wait(300, "popout closing — 等它真关掉(after-ack)")
+                self.log(f"⚠popout {_POPOUT_CLOSE_SEC:.1f}s 还没关掉 — 重发关闭")
+            elif self._popout_close_issued:
+                self.log("关 popout 被稳定门吞(未落屏) — 立刻重发")
+            self._popout_close_issued = True
+            self.mark("popout_close")
             close = self._popout_close(screen)
             if close is not None:
                 return action_click_box(close, "close popout before switch")
             return action_back("close popout before switch (no X cls)")
+        self._popout_close_issued = False
 
         # Location Select recovery v2 (live 2026-06-11): closing a popout can
         # bounce us to the region LIST (no ARROW_LEFT/SCHED_ALL there). v1
