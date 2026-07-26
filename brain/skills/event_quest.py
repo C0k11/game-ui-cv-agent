@@ -87,7 +87,18 @@ _R_POINTS = (0.55, 0.93, 0.82, 0.985)   # quest列表底部 活動點數 "2676/1
 # 任務資訊 popup 獲得期待獎勵 行的 xN 数字带 (2026-07-11 双帧标定:
 # Q09 固定36/Bonus6, Q12 固定36/Bonus35 全中)
 _R_SLOT_FIRST_XN = (0.126, 0.780, 0.172, 0.818)   # 首槽固定掉落 xN
-_R_SLOT_BONUS_XN = (0.338, 0.780, 0.394, 0.818)   # Bonus 槽 xN(徽章正下)
+# ⛔_R_SLOT_BONUS_XN 是**固定位**, 而 Bonus 道具是**接在固定道具后面**排的 ——
+# 槽位随道具数左右漂, 固定位标定天生活不过一次改版/一次 Best Record 刷新。
+# 2026-07-25 实锤: 刚给 Q09 打完 Best Record(結算屏白纸黑字 28(+26)→最終 54),
+# survey 却读出 `固定x28 vs Bonus x1` 判"烂加成需重打" —— 那个 x1 是第 6 格
+# 「稀有」道具的数量, Bonus 已经漂到第 7 格(cx 0.463)去了。再打一次 = 白烧 20AP。
+# ⇒ 改**按 cls 锚定**(词表里现成就有 `活动关卡产出额外加成`, 同帧检出 0.97/0.95),
+#   固定位只作降级兜底。这就是"先 grep 词表再发明检测"。
+_BONUS_TAG_CLS = "活动关卡产出额外加成"
+# 数字带相对 Bonus 标签框的外推系数(同帧 6 组参数全读出真值 26, 取最宽容那组)
+_BONUS_XN_DY = (3.1, 5.4)      # ×标签高, 自标签 y1 起算
+_BONUS_XN_PX = (0.30, 0.60)    # ×标签宽, 分别向左/右扩
+_R_SLOT_BONUS_XN = (0.338, 0.780, 0.394, 0.818)   # 兜底: 旧固定位
 _R_SQUAD_PCT = (0.005, 0.92, 0.085, 0.99)  # 编队屏左下 活動編輯效果 第一格 "100%"
 
 _POINTS_TARGET_DEFAULT = 15000
@@ -216,6 +227,32 @@ class EventQuestSkill(BaseSkill):
         if state != self.sub_state:
             self.sub_state = state
             self._phase_ticks = 0
+
+    def _read_bonus_xn(self, screen) -> Tuple[Optional[str], str]:
+        """读 Bonus 槽的 xN。返回 (数字串|None, 来源标签)。
+
+        主路径 = 按 `活动关卡产出额外加成` cls 框外推数字带(槽位会随道具数左右
+        漂, 固定位标定活不长); 检不到标签才退回旧固定位。
+        多个 Bonus 槽时取**最左**那个 —— 首个 Bonus 道具与首槽固定道具是同一种
+        (实测 Q09: 固定 謎樣的痕跡 x28 / Bonus 謎樣的痕跡 x26, 结算屏 28(+26)=54),
+        比例判据必须拿同一种道具比, 否则拿"兽爪 vs 卡带"比是无意义的。
+        """
+        if screen.frame is None:
+            return None, "无帧"
+        tags = [b for b in (getattr(screen, "yolo_boxes", None) or [])
+                if b.cls_name == _BONUS_TAG_CLS and b.confidence >= 0.5]
+        if tags:
+            t = min(tags, key=lambda b: b.x1)
+            tw, th = (t.x2 - t.x1), (t.y2 - t.y1)
+            if tw > 0 and th > 0:
+                region = (max(0.0, t.x1 - _BONUS_XN_PX[0] * tw),
+                          t.y1 + _BONUS_XN_DY[0] * th,
+                          min(1.0, t.x2 + _BONUS_XN_PX[1] * tw),
+                          t.y1 + _BONUS_XN_DY[1] * th)
+                got = _read_digits(screen.frame, region)
+                if got:
+                    return got, f"cls锚定 n={len(tags)}"
+        return _read_digits(screen.frame, _R_SLOT_BONUS_XN), "固定位兜底"
 
     def _on_quest_list(self, screen: ScreenState) -> bool:
         """活动 quest 列表页特征: ≥2 入场键 + (关卡得星 或 活动商店/活动任务底栏)."""
@@ -922,13 +959,14 @@ class EventQuestSkill(BaseSkill):
                     numeric_ok = False
                     if unlocked and screen.frame is not None:
                         fn_raw = _read_digits(screen.frame, _R_SLOT_FIRST_XN)
-                        bn_raw = _read_digits(screen.frame, _R_SLOT_BONUS_XN)
+                        bn_raw, bn_src = self._read_bonus_xn(screen)
                         fn = int(fn_raw) if fn_raw and fn_raw.isdigit() else None
                         bn = int(bn_raw) if bn_raw and bn_raw.isdigit() else None
                         if fn and bn is not None:
                             numeric_ok = True
                             unlocked = bn * 5 >= fn * 4
-                            self.log(f"survey: 固定x{fn} vs Bonus x{bn} → "
+                            self.log(f"survey: 固定x{fn} vs Bonus x{bn}"
+                                     f"({bn_src}) → "
                                      f"{'满加成' if unlocked else '烂加成需重打'}")
                     self._quests.append({"num": self._survey_num,
                                          "cy": self._survey_cy,
