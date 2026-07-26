@@ -1783,6 +1783,14 @@ class DailyPipeline:
                 "领取", "claim", "close", "关闭", "關閉", "叉叉",
                 "PURCHASE", "cancel",  # 金钱逃逸: 购买框 veto/取消绝不 hold
                                        # (与 back 分支 :1731 同理, 2026-07-25)
+                # ⛔tab 切换必须豁免(2026-07-25 live 实锤, 与 region_switch_truth
+                # 的 ARROW_LEFT 同一根因第二次): 活动页背景有角色待机动画+对话
+                # 气泡, 帧几乎**永远不"稳定"** → 「Challenge tab → Quest tab」的
+                # 点击被连吞, event_quest 据此误判"上期领奖页"退出 + FREEZE 20 tick。
+                # 切 tab 是**幂等**动作(重复点同一 tab 无副作用), 与"导航进关卡"
+                # 风险完全不同, 不该受这道为防"点在移动按钮上"而设的闸约束。
+                "Quest tab", "tab (cls锚定)", "tab (fixed)",
+
                 "headpat")):  # 走动学生永不"稳定" — 摸头必须抢最新帧
                               # (2026-07-21 tick595 实锤: #1 被稳定门吞掉漏摸)
             self._last_click_target = target

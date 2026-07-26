@@ -58,6 +58,11 @@ _BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wai
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
 _BATTLE_MAX_SEC = 300      # 单场战斗墙钟上限(实测活动关 70-90s, 5min 极宽松)
 _AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP, 别把整轮判死)
+# survey 墙钟预算(2026-07-25 live 定): 开/关 4 关 popup = 8 次点击, 而活动页背景
+# 常驻动画让帧几乎永不"稳定" → 每次点击最坏要等帧稳定门 4s 超时逃生 = 32s 下限。
+# 90s 给足余量。⚠**绝不能用 tick 计**: 等待期间 _phase_ticks 照涨, 旧的 36 tick
+# 预算全被"等稳定"吃光 → survey 没做完就 timeout → 跳过 sweep → AP 一点没灌。
+_SURVEY_MAX_SEC = 90.0
 _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
                            # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
@@ -152,6 +157,7 @@ class EventQuestSkill(BaseSkill):
         self._survey_num: Optional[int] = None
         self._popup_wait = 0
         self._survey_swiped = False
+        self._survey_t0 = 0.0         # survey 阶段墙钟起点(0=未开始)
         self._unlock_idx = 0
         self._battle_ticks = 0
         self._battle_t0 = 0.0         # 战斗墙钟起点(0=未开打)
@@ -690,7 +696,20 @@ class EventQuestSkill(BaseSkill):
             if self._marker_click_cooldown > 0:
                 self._marker_click_cooldown -= 1
                 return action_wait(300, "Quest tab 已点 — 等列表渲染")
-            self._ev_marker_hits += 1
+            # ⛔计数只在**上一次动作真落地**后才涨(2026-07-25 live 实锤):
+            # 旧码无条件 +1, 而下面返回的「切 Quest tab」点击会被 pipeline 帧稳定门
+            # 吞掉(活动页有角色待机动画+对话气泡, 帧几乎永远不"稳定")。
+            # 实测日志三连:
+            #   suppressed: 'in event, Challenge tab → Quest tab (cls锚定)'   hits=1
+            #   suppressed: 'in event → Quest tab (fixed)'                    hits=2
+            #   → hits>=3 → back "wrong event(上期领奖页)" → BRINGUP FREEZE 20 ticks
+            # **点击一次都没落地, 却记了三次账**, 于是把**当期活动**误判成上期领奖页
+            # 退出去 —— 与 [[region-switch-truth]] 的 ARROW_LEFT 同一根因(同一道闸、
+            # 同类按钮、第二次犯)。mutate-before-ack 的计数器版本。
+            if not self.action_suppressed:
+                self._ev_marker_hits += 1
+            else:
+                self.log("切 Quest tab 被稳定门吞 — 不记账, 重发")
             if self._ev_marker_hits >= 3:
                 self._ev_marker_hits = 0
                 # ⛔不 pHash 拉黑(2026-07-22 live 实锤): 误入=tap 延迟撞轮播
@@ -705,8 +724,14 @@ class EventQuestSkill(BaseSkill):
                 self._set("enter")
                 self._blind_landing = False
                 return action_back("wrong event(上期领奖页) → back, rescan carousel")
-            self._marker_click_cooldown = 8
+            # 冷却同理: 点击被吞时别空等 8 tick, 立刻重发
+            if not self.action_suppressed:
+                self._marker_click_cooldown = 8
             qtab = self.find_cls(screen, UC.EVENT_QUEST, conf=_WEAK_CONF)
+            # ⚠reason 带 "Quest tab" —— 已加进 pipeline `_dedup_click` 的点击豁免
+            # 词表(见那里的注释): 切 tab 是**幂等**动作(重复点同一个 tab 无副作用),
+            # 与"导航进关卡"不同, 不该受帧稳定门约束; 而活动页背景动画让帧几乎永
+            # 不稳定, 不豁免就是死锁。
             if qtab is not None:
                 return action_click_box(
                     qtab, "in event, Challenge tab → Quest tab (cls锚定)")
@@ -756,8 +781,20 @@ class EventQuestSkill(BaseSkill):
 
     def _survey(self, screen: ScreenState) -> Dict[str, Any]:
         """列表滑到底, 自底向上开尾部 N 关 popup 记录 Bonus 状态."""
-        if self._phase_ticks > _PHASE_MAX * 2:
-            self.log("survey timeout → close (do NOT retry blind)")
+        # ⛔墙钟不是 tick(2026-07-25 live 实锤, "tick 当计时器"第三次咬人):
+        # 旧码 `_phase_ticks > _PHASE_MAX*2` = 36 tick。survey 要开/关 4 关 popup
+        # = 8 次点击, 而**每次点击都被帧稳定门拦到 4s 超时才放行**(活动页背景有
+        # 角色待机动画+对话气泡, 帧几乎永不"稳定"; 日志实锤 `action suppressed:
+        # survey open quest popup Q10/Q11`)。等待期间 _phase_ticks 照涨 →
+        # 36 tick 全耗在等稳定上 → `survey timeout → close` → **skill 根本没进
+        # sweep 阶段** → _read_ap 一次都没调用 → 竣工判据报 "AP 从未成功读出",
+        # 而 AP 909 一点没灌(840AP 失败模式复发)。
+        # ⚠注意 AP 读数本身是好的: 同帧实测 raw='909/24' → 909。别修错地方。
+        if not self._survey_t0:
+            self._survey_t0 = time.time()
+        _el = time.time() - self._survey_t0
+        if _el > _SURVEY_MAX_SEC:
+            self.log(f"survey 墙钟超时 {_el:.0f}s → close (do NOT retry blind)")
             self._set("close")
             return action_wait(300, "survey timeout")
         # ⭐页面丢失自愈(2026-07-11 live: 点入場后 1s 内被弹回 hub, 无我方
