@@ -1211,16 +1211,26 @@ class EventQuestSkill(BaseSkill):
             if sortie is not None:
                 # 加成% 读数 (>0 才值得打; 读不出保守出击)
                 pct_raw = _read_digits(screen.frame, _R_SQUAD_PCT)
-                if pct_raw:
-                    digits = "".join(ch for ch in pct_raw if ch.isdigit())
-                    if digits.isdigit() and int(digits) == 0:
-                        self.log("unlock: 0% event bonus (no bonus students) — "
-                                 "skip sortie, mark unlocked")
-                        self._quests[self._unlock_idx]["unlocked"] = True
-                        self._mark_bonus_done(
-                            self._quests[self._unlock_idx]["num"])
-                        self._formation_step = ""
-                        return action_back("0% bonus — leave formation")
+                # ⛔2026-07-25 收紧: 这个读数**是个闸**(读到 0 就跳过出击),
+                # 而它读得很脏 —— 同帧屏上白纸黑字「90%」, 实测读出 `'06'`
+                # (region 0.005-0.085 卡在徽章边上)。差一个字符就会当成 0。
+                # 两处 fail-closed:
+                #  ① 只认**干干净净的 0**(整串就是 "0"/"0%"), 脏读一律当读不出
+                #     → 保守出击(多花 20-30AP), 而不是跳过。
+                #  ② **绝不写永久台账** —— 台账按关号永久生效, 一旦把有加成的关
+                #     记成"做过了", 那关**再也不会**被解锁(自我修复不了)。
+                #     只在本轮内存里标记, 下一轮 survey 用 popup 的真数字重判。
+                _clean = (pct_raw or "").strip().rstrip("%")
+                if _clean == "0":
+                    self.log("unlock: 0% event bonus (raw=%r, 干净读数) — "
+                             "本轮跳过出击, **不写台账**(下轮 survey 重判)"
+                             % pct_raw)
+                    self._quests[self._unlock_idx]["unlocked"] = True
+                    self._formation_step = ""
+                    return action_back("0% bonus — leave formation")
+                if pct_raw and _clean.isdigit() and int(_clean) == 0:
+                    self.log(f"unlock: bonus% 读到 {pct_raw!r} 像 0 但不干净 "
+                             f"— 当读不出, 保守出击")
                 # ⛔点 出擊 前**就地复核 AP**(2026-07-25 审计 #1③): 上面那个闸
                 # 只在 _formation_step=="" 评估一次, 之后经过 edit→auto→confirm
                 # 四个子步、几十个 tick 才走到这里 —— 真正花 AP 的是这一下点击,
