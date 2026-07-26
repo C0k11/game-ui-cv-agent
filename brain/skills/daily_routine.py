@@ -172,6 +172,16 @@ class DailyRoutineSkill(BaseSkill):
                 # 误回滚)。reset() 已把它清 False, 这里不再覆盖。
                 if not just_entered:
                     sub.action_suppressed = self.action_suppressed
+                    # ⛔同形第二次(2026-07-25 live 实锤): interceptor_handled 也是
+                    # pipeline 置在 **DailyRoutine** 身上的 root 信号, 当时只迁了
+                    # action_suppressed, 这条漏了 → sub 读自己的永远 "" →
+                    # buy_pyroxene.py:308 那道"interceptor 替我关了奖励弹窗=到达证据"
+                    # 的闸**从写下那天起就是死码**。
+                    # 实锤日志: `dialog shows 免費 → 確認` → `Interceptor: YOLO reward
+                    # popup → blind tap` → `confirm dialog absent, re-pressing buy`
+                    # —— 免費包已到账却回头重按已消失的購買键。本次无害(键没了),
+                    # 但同形状落在 shop/ticket_sweep 上 = 对着**仍可点的付费键**重复购买。
+                    sub.interceptor_handled = self.interceptor_handled
                 action = sub.tick(screen)
             except Exception as e:
                 self.log(f"sub '{sub.name}' tick error: {e}; advancing")
