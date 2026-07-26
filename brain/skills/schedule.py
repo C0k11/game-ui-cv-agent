@@ -1100,8 +1100,8 @@ class ScheduleSkill(BaseSkill):
             # "clicked 6 heads, 1 start"(2026-06-02)重现。tick 速率不可依赖
             # (7月录像全是 step 门控, 0.65~8.7 s/tick), 计时就得用墙钟。
             if not self._open_room_t0:
-                self._open_room_t0 = time.time()
-            _el = time.time() - self._open_room_t0
+                self._open_room_t0 = self.clock()
+            _el = self.clock() - self._open_room_t0
             if _el < _OPEN_ROOM_SETTLE_SEC:
                 return action_wait(450, f"waiting for 課程表資訊 popup "
                                         f"({_el:.1f}s/{_OPEN_ROOM_SETTLE_SEC}s)")
@@ -1297,7 +1297,7 @@ class ScheduleSkill(BaseSkill):
             # 变了", 那是假到达。
             if self._sig_pending is not None and self._sig_same(_sig, self._sig_pending):
                 self._switch_from_sig = _sig
-                self._switch_t0 = time.time()
+                self._switch_t0 = self.clock()
                 self._switch_taps = 0
                 self._sig_pending = None
                 # ⭐一圈的"起点"就在这里记 —— 这是**唯一**能测准的时刻:
@@ -1336,7 +1336,7 @@ class ScheduleSkill(BaseSkill):
         else:
             self._arrive_pending = None
 
-        _waited = time.time() - (self._switch_t0 or time.time())
+        _waited = self.clock() - (self._switch_t0 or self.clock())
         if _waited > _SWITCH_VERIFY_SEC:
             # 绝不假装切过: 读不出/切不动就大声收工, 把剩票如实报出来。
             self.log(f"⚠区域切换失效: {self._switch_taps} 次 ARROW_LEFT / "

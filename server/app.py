@@ -1267,9 +1267,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 except Exception:
                     frame = None
             # ② ADB fallback(scrcpy 断流窗口/不可用)
+            _adb_cap_s = None
             if frame is None and adb is not None:
                 try:
+                    _t_cap = time.time()
                     frame = adb.capture_frame()
+                    _adb_cap_s = time.time() - _t_cap
                     _frame_src = "adb"
                 except Exception:
                     frame = None
@@ -1329,7 +1332,22 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                                           skip_ocr=skip_ocr,
                                           injected_yolo_boxes=_injected_yolo,
                                           fresh_boxes=_fresh_b,
-                                          fresh_frame=_fresh_f, fresh_ts=_fresh_t)
+                                          fresh_frame=_fresh_f, fresh_ts=_fresh_t,
+                                          frame_meta={
+                                              "src": _frame_src,
+                                              # ⚠age 必须是**这张帧**的龄:
+                                              # 落 ADB 时 _tick_frame_age 存的是
+                                              # scrcpy 的陈旧值(诊断用), 真实龄
+                                              # ≈ screencap 自身耗时。
+                                              "age": (_adb_cap_s
+                                                      if _frame_src == "adb"
+                                                      else _tick_frame_age),
+                                              "stalled_age": (_tick_frame_age
+                                                              if _frame_src == "adb"
+                                                              else None),
+                                              "seq_new": _tick_frame_seq_new,
+                                          })
+            _t_decided = time.time()
             action_type = action.get("action", "")
             reason = action.get("reason", "")
             # Loading gate (稳定规则 2026-06-11): 加载中 visible → never act this
@@ -1390,7 +1408,17 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _PIPELINE_STATUS["step_pending"] = _STEP_PENDING
                 _log_pipeline(f"STEP PAUSE [{_aname}/{_asub}] {action_type} @ {action.get('target') or action.get('from')} — {reason}")
                 _STEP_GO.clear()
-                if not _STEP_GO.wait(timeout=900):
+                _t_pause0 = time.time()
+                _got_go = _STEP_GO.wait(timeout=900)
+                # ⛔人工审核的这段时间必须从 skill 的超时预算里扣掉, 否则逐帧
+                # 门控本身会把每个 skill 的墙钟预算烧光(实测每步 ~60s, survey
+                # 预算才 90s) —— 门控工具反过来制造故障。
+                try:
+                    from brain.skills.base import add_harness_pause
+                    add_harness_pause(time.time() - _t_pause0)
+                except Exception as _e:
+                    _log_pipeline(f"[step] harness pause accounting failed: {_e}")
+                if not _got_go:
                     continue  # approval timeout: stay paused, re-pend next loop
                 if not _PIPELINE_RUNNING:
                     break  # stopped while paused → exit without executing
@@ -1403,7 +1431,41 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # SetForegroundWindow(MuMu) — 有前台权限时反复抢焦点。
             if (not dry_run and action_type in
                     ("click", "back", "swipe", "swipe_tap", "scroll")):
+                _t_exec0 = time.time()
                 _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
+                _t_exec1 = time.time()
+                # ⭐链路延迟埋点: 帧被摄取 → tap 真的下发完。以前只有"帧龄"
+                # 这一段, 中间的推理/决策/step门/ADB 下发全是黑箱, 复盘分不清
+                # "点晚了"还是"看的是旧画面"。
+                try:
+                    pipe.note_dispatch(pipe._total_ticks, _t_exec1,
+                                       (_t_exec1 - _t_exec0) * 1000,
+                                       decided_ts=_t_decided)
+                    _fm_age = (_adb_cap_s if _frame_src == "adb"
+                               else _tick_frame_age)
+                    _tin = getattr(pipe, "_t_frame_in", 0.0)
+                    _ds = getattr(pipe, "_t_decide_start", 0.0)
+                    if _tin and isinstance(_fm_age, (int, float)):
+                        _cap = _tin - _fm_age          # 帧被摄取的墙钟
+                        _parts = [
+                            f"age={_fm_age * 1000:.0f}",
+                            f"read={getattr(pipe, '_t_read_ms', -1)}",
+                            f"decide={(_t_decided - _ds) * 1000:.0f}" if _ds else "decide=?",
+                            f"exec={(_t_exec1 - _t_exec0) * 1000:.0f}",
+                            # ⚠step 门的人工等待必须单列, 否则 cap->tap 在
+                            # 逐帧门控下全是分钟级, 数字直接作废。
+                            f"stepwait={(_t_exec0 - _t_decided) * 1000:.0f}",
+                            f"cap->decide={(_t_decided - _cap) * 1000:.0f}",
+                            f"cap->tap={(_t_exec1 - _cap) * 1000:.0f}",
+                        ]
+                        _log_pipeline(f"[lat] tick={pipe._total_ticks} "
+                                      + " ".join(_parts) + " (ms)")
+                    else:
+                        _log_pipeline(f"[lat] tick={pipe._total_ticks} "
+                                      f"age unavailable (src={_frame_src})")
+                except Exception as _e:
+                    # 埋点绝不许拖垮主链 —— 但也绝不静默(money_safety 教训)。
+                    _log_pipeline(f"[lat] instrumentation error: {_e}")
 
             # 4. Sleep
             # ── ZERO-WAIT policy (user 2026-06-14: 不要有wait time — 出现目标就点 /

@@ -64,11 +64,16 @@ _AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP
 # 预算全被"等稳定"吃光 → survey 没做完就 timeout → 跳过 sweep → AP 一点没灌。
 _SURVEY_MAX_SEC = 90.0
 # ⭐时敏目标(hub 活动 banner)的观测新鲜度约定 —— 2026-07-25 用户点破后定死。
-# 轮播实测 2-2.5s/页, 405(当期)与 474(上期)交替占**同一槽位**, 从不共存。
+# 405(当期)与 474(上期)交替占**同一槽位**, 从不共存。
 # "看到目标就点"要成立, **"看到"必须是现在**: 观测年龄必须远小于窗口, 否则
 # 你点的是"过去那一帧里的东西", 落到现在的屏幕上就是另一张卡。
-# 0.35s ≈ 窗口的 1/6, 给推理+ADB tap 留足余量; 够不到就等下一拍(最多 ~0.5s)。
-_BANNER_CYCLE_SEC = 2.0
+# ⭐窗口实测(2026-07-25, ADB 8 连拍 1.55s 间隔, scratchpad/slotstrip.py):
+#   紫(上期)/橙(当期)交替, 切换点落在 +3.4~4.9 / +6.4~8.0 / +9.6~11.2 →
+#   **每张停留 ~3.2s**(旧注释写的 2-2.5s 偏小, 按小的定更安全但会白等)。
+# 全链实测(server [lat] 埋点): 帧龄 14ms + 推理 35ms + 决策 3ms = 看到→决定
+#   **52ms**; ADB tap 下发 564ms; cap→tap **616ms** ≈ 窗口的 19%。
+# ⇒ 0.35s 门槛留下 3.2-0.35-0.62 ≈ 2.2s 的安全余量, 且够不到只等 ~0.5s。
+_BANNER_CYCLE_SEC = 3.2
 _BANNER_FRESH_SEC = 0.35
 _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
                            # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
@@ -101,7 +106,21 @@ class EventQuestSkill(BaseSkill):
 
     # no-UI 逃生 (2026-07-09): 405 轮播可能落进模型盲区页(特殊作戰運輸船主页
     # v13 全零检出) — pipeline no-UI 时按 back 回已知页, 本 skill 恢复重试。
-    no_ui_escape = "back"
+    # ⛔2026-07-25 live 实锤必须**限定在入口阶段**: 它是类属性 = 全程武装, 而
+    # 战斗一打就是 60-140s **零动作零「加载中」**, pipeline 那三道护栏
+    # (亮帧 / 距上次动作<8s / 距加载中<30s) 全部自然过期 → 结算动画那几个
+    # ui 域零框帧凑到 3 个就发 back。当场抓到: 「Battle Complete」屏(01:09
+    # 通关, 屏上就一个 確認@0.97)上 pipeline 挂起了 `no-UI escape: back`。
+    # 那一按会把结算/Best Record 注册流程拆掉 —— 而这一整场真打的唯一目的
+    # 就是注册 Best Record。
+    # ⇒ 逃生只在**它被发明出来要救的那个阶段**(入口导航 enter/verify)武装;
+    #   其余阶段(战斗/编队/扫荡/领奖)一律不逃 —— 那些地方的零框帧是动画,
+    #   不是盲区页, 等就对了(no_ba 30-tick abort 兜底仍在)。
+    _ESCAPE_PHASES = ("enter", "verify")
+
+    @property
+    def no_ui_escape(self):
+        return "back" if self.sub_state in self._ESCAPE_PHASES else None
 
     def __init__(self, points_target: int = _POINTS_TARGET_DEFAULT,
                  tail_quests: int = _TAIL_QUESTS):
@@ -162,6 +181,12 @@ class EventQuestSkill(BaseSkill):
         self._surveyed_cys: List[float] = []
         self._surveyed_nums: List[Optional[int]] = []
         self._survey_num: Optional[int] = None
+        # ⛔2026-07-25 live 崩溃: `_survey_cy` 以前只在"要开 popup 之前"那一行才
+        # 首次赋值 —— 而 `survey: popup appeared late` 分支(屏上**已经**有 popup,
+        # 比如 pipeline 在 popup 开着时重启)会直接置 _popup_open=True 走去记账,
+        # 于是 `self._survey_cy` AttributeError。与 [[money-safety]] 记的
+        # `_py_drop_pending` 同一类"从没在 __init__ 初始化"的静默杀手。
+        self._survey_cy: Optional[float] = None
         self._popup_wait = 0
         self._survey_swiped = False
         self._survey_t0 = 0.0         # survey 阶段墙钟起点(0=未开始)
@@ -580,6 +605,7 @@ class EventQuestSkill(BaseSkill):
             screen, [UC.EVENT_END_LEFT, UC.EVENT_REWARD_END], conf=0.5)
         banner = None
         src_frame = None
+        src_tag = ""
         # ⛔⛔时敏目标的"新鲜"必须按**目标自己的窗口**定义(2026-07-25 用户点破:
         # "banner轮换有两秒, 怎么可能来不及点… 我要的是逻辑上不打架的看到目标就点,
         # 就和人类一样")。
@@ -590,13 +616,33 @@ class EventQuestSkill(BaseSkill):
         # 最终进了「秘密的午夜派對」。
         # ⇒ 阈值改成窗口的一小部分。够不到就**等下一次新鲜观测**, 绝不拿旧数据开火
         #   —— 等一拍最多损失 ~0.5s, 而误入的代价是整个 verify→back→rescan 循环。
+        # ⛔2026-07-25 实测订正: 旧码(含我昨天写的注释)**假设** fresh 通道一定比
+        # 主 tick 帧新, 于是只在 fresh 上开火。埋点数据推翻了这个假设 ——
+        #   主 tick 帧(scrcpy) 帧龄中位 13.8ms / ADB 兜底 1495ms
+        #   fresh 通道         帧龄中位 399ms(最大 3366ms)
+        #   两者同时可得的 32 个 tick 里, **17 个(53.1%) fresh 反而更旧**。
+        # 原因: overlay 关掉后高频线程降到 2 FPS(app.py 低功耗模式), 而主 tick
+        # 每次都现抓一张 scrcpy 帧现推理。
+        # ⇒ 不再"钦定"哪条通道快, 改成**按实测帧龄二选一**, 谁新用谁。
+        tick_age = getattr(screen, "frame_age", None)
+        tick_usable = (tick_banner is not None
+                       and isinstance(tick_age, (int, float))
+                       and tick_age < _BANNER_FRESH_SEC)
         fresh_usable = (fresh is not None and fresh_age < _BANNER_FRESH_SEC
                         and not getattr(self, "_fresh_distrust", False))
+        # 两条都够新时用更新的那条(帧龄小者); tick 更新就直接走 tick。
+        if (tick_usable and (not fresh_usable or tick_age <= fresh_age)
+                and tick_banner.cls_name == UC.EVENT_END_LEFT):
+            banner = tick_banner
+            src_frame = screen.frame
+            src_tag = f"tick {tick_age*1000:.0f}ms"
+            fresh_usable = False          # 本次走 tick 通道, 别再进 fresh 分支
         if fresh_usable:
             for b in fresh:
                 if b.cls_name == UC.EVENT_END_LEFT and b.confidence >= 0.5:
                     banner = b
                     src_frame = fresh_frame
+                    src_tag = f"fresh {fresh_age*1000:.0f}ms"
                     break
             # 失信裁决(2026-07-11: DXcam 桌面遮挡/窗口错位时 fresh 内容错 —
             # 主 tick 帧看得见 banner 而 fresh 完全没有 = 源不可信, 2 次即弃)
@@ -618,8 +664,13 @@ class EventQuestSkill(BaseSkill):
         if (banner is None and not fresh_usable
                 and fresh is not None
                 and not getattr(self, "_fresh_distrust", False)):
-            return action_wait(120, f"banner 观测 {fresh_age:.2f}s 前 — 太旧"
-                                    f"(轮播 {_BANNER_CYCLE_SEC}s), 等新鲜一拍再点")
+            _ta = (f"{tick_age:.2f}s" if isinstance(tick_age, (int, float))
+                   else "?")
+            _on = (tick_banner.cls_name if tick_banner is not None else "无")
+            return action_wait(120,
+                               f"banner 观测太旧/非当期 — tick帧龄 {_ta}(帧上={_on}) "
+                               f"/ fresh帧龄 {fresh_age:.2f}s, 轮播窗口 "
+                               f"{_BANNER_CYCLE_SEC}s, 等新鲜一拍再点")
         if banner is None and not fresh_usable:
             # ⭐轮播时序(2026-07-22 20帧@0.45s 实测钉死, 推翻 0711 5s 模型):
             # 项周期≈**2.5s/页**, 405 与 474 逐帧交替从不共存, conf 稳定分离
@@ -656,7 +707,9 @@ class EventQuestSkill(BaseSkill):
             self._pending_hash = (self._banner_phash(screen, src_frame)
                                   if src_frame is not None else None)
             self._set("verify")
-            tag = "fresh" if src_frame is not None else "tick+1"
+            # ⚠标签必须说清**真实**来源与帧龄 —— 旧码不管走哪条都写 "fresh",
+            # 复盘时看到 'fresh atomic' 会以为观测是新的(实测中位 399ms)。
+            tag = src_tag or ("tick+1" if src_frame is None else "?")
             act = action_click_box(banner, f"banner tap ({tag} atomic, "
                                            f"帧上={banner.cls_name})")
             act["_atomic_no_gate"] = True       # 2.5s 窗口, 同 tick 落屏
@@ -818,8 +871,8 @@ class EventQuestSkill(BaseSkill):
         # 而 AP 909 一点没灌(840AP 失败模式复发)。
         # ⚠注意 AP 读数本身是好的: 同帧实测 raw='909/24' → 909。别修错地方。
         if not self._survey_t0:
-            self._survey_t0 = time.time()
-        _el = time.time() - self._survey_t0
+            self._survey_t0 = self.clock()
+        _el = self.clock() - self._survey_t0
         if _el > _SURVEY_MAX_SEC:
             self.log(f"survey 墙钟超时 {_el:.0f}s → close (do NOT retry blind)")
             self._set("close")
@@ -905,6 +958,17 @@ class EventQuestSkill(BaseSkill):
             return action_wait(600, "waiting survey popup")
         if self._on_popup(screen):
             # popup 迟到 (开窗动画慢于重选判定) — 续用上次点击的 cy 记账
+            # ⛔但"上次点击"必须真的存在: pipeline 在 popup 已开着时启动/重启
+            # 时本轮从没点过任何关, _survey_num/_survey_cy 都是 None ——
+            # 那样记账等于把一个来路不明的 popup 的加成结论**扣到某个关号头上**,
+            # 台账一旦写错, 那关的加成解锁会被永久跳过。fail-closed: 关掉重来。
+            if self._survey_num is None or self._survey_cy is None:
+                close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
+                self.log("survey: 屏上已有来路不明的 popup(本轮没点过任何关) "
+                         "— 关掉重选, 绝不记账")
+                if close is not None:
+                    return action_click_box(close, "close survey popup")
+                return action_back("close survey popup (back)")
             self._popup_open = True
             return action_wait(300, "survey: popup appeared late")
         # ⭐L1-② 结构化行: 每行 = 入场键 + 得星 + **关号**。
@@ -1014,8 +1078,8 @@ class EventQuestSkill(BaseSkill):
             _ap = self._read_ap(screen)
             if _ap is None:
                 if not self._ap_fail_t0:
-                    self._ap_fail_t0 = time.time()
-                _el = time.time() - self._ap_fail_t0
+                    self._ap_fail_t0 = self.clock()
+                _el = self.clock() - self._ap_fail_t0
                 if _el < _AP_READ_RETRY_SEC:
                     return action_wait(400, f"unlock: AP 读不出, 重试中 "
                                             f"({_el:.1f}s/{_AP_READ_RETRY_SEC}s)")
@@ -1130,8 +1194,8 @@ class EventQuestSkill(BaseSkill):
                     # ⚠计时器只在**读失败**时起表(2026-07-25 审计: 原来读到
                     # <20 的成功读数也起表, 违反字段定义"连续读不出的起点")
                     if _ap_now is None and not self._ap_fail_t0:
-                        self._ap_fail_t0 = time.time()
-                    _el = (time.time() - self._ap_fail_t0
+                        self._ap_fail_t0 = self.clock()
+                    _el = (self.clock() - self._ap_fail_t0
                            if self._ap_fail_t0 else 0.0)
                     if _ap_now is None and _el < _AP_READ_RETRY_SEC:
                         return action_wait(400, f"unlock/出击前: AP 读不出, 重试中 "
@@ -1147,7 +1211,7 @@ class EventQuestSkill(BaseSkill):
                          f"AP={_ap_now})")
                 self._formation_step = "battle"
                 self._battle_ticks = 0
-                self._battle_t0 = time.time()
+                self._battle_t0 = self.clock()
                 self._ap_spend_after_read = True   # 出击花 AP → 上次读数作废
                 return action_click_box(sortie, "unlock: 出击 (bonus run)")
             return action_wait(600, "unlock: waiting 出击")
@@ -1159,8 +1223,8 @@ class EventQuestSkill(BaseSkill):
             # scratchpad/tick_rate.py)。所以别再拿 tick 当计时器: 战斗超时以
             # 墙钟为准, 与 tick 速率无关。_BATTLE_MAX 保留为轮询次数上限。
             _bt0 = getattr(self, "_battle_t0", 0.0)
-            if _bt0 and time.time() - _bt0 > _BATTLE_MAX_SEC:
-                self.log(f"battle 墙钟超时 {time.time() - _bt0:.0f}s")
+            if _bt0 and self.clock() - _bt0 > _BATTLE_MAX_SEC:
+                self.log(f"battle 墙钟超时 {self.clock() - _bt0:.0f}s")
                 return action_done("event_quest battle timeout (wall clock)")
             if self._battle_ticks > _BATTLE_MAX:
                 return action_done("event_quest battle timeout")
@@ -1271,8 +1335,8 @@ class EventQuestSkill(BaseSkill):
                     # 抖动, 该在墙钟窗口内重试, 而不是把整轮资源判死。
                     if ap is None:
                         if not self._ap_fail_t0:
-                            self._ap_fail_t0 = time.time()
-                        _el = time.time() - self._ap_fail_t0
+                            self._ap_fail_t0 = self.clock()
+                        _el = self.clock() - self._ap_fail_t0
                         if _el < _AP_READ_RETRY_SEC:
                             return action_wait(
                                 400, f"{label}: AP 读不出, 重试中 "
@@ -1306,8 +1370,8 @@ class EventQuestSkill(BaseSkill):
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 if ss is None and close is not None:
                     if not self._popup_stuck_t0:
-                        self._popup_stuck_t0 = time.time()
-                    _el = time.time() - self._popup_stuck_t0
+                        self._popup_stuck_t0 = self.clock()
+                    _el = self.clock() - self._popup_stuck_t0
                     if _el > _SWEEP_OPEN_SEC:
                         self.log(f"{label}: 掃蕩開始 {_el:.1f}s 未出现 → 关窗收工"
                                  f"(⚠未读到 AP, 不做资源结论)")

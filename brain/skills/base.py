@@ -343,6 +343,32 @@ def action_done(reason: str = "") -> Dict[str, Any]:
     return {"action": "done", "reason": reason}
 
 
+# ── harness-aware 墙钟 (2026-07-25) ──────────────────────────────────────
+# ⛔为什么不能直接用 time.time(): 昨天把 survey 超时从 tick 计数改成墙钟
+# (_SURVEY_MAX_SEC=90) 是对的, 但**逐帧门控时我每步审核要 ~60s**, 那 60s
+# 也算进了 skill 的预算 → survey 必然假超时收工 = 我自己把"AP 一点没灌"
+# 的故障重新造出来一遍。step 门的停顿是 harness 偷走的时间, 不是游戏时间。
+# ⇒ 一切 skill 超时预算走 game_clock(); 只有"真实世界过了多久"(录制时间戳/
+#   日志时间)才用 time.time()。
+_HARNESS_PAUSED: float = 0.0
+
+
+def add_harness_pause(secs: float) -> None:
+    """执行层告知: 刚刚有 `secs` 秒是 harness 停顿(step 门等人放行)。"""
+    global _HARNESS_PAUSED
+    if secs and secs > 0:
+        _HARNESS_PAUSED += secs
+
+
+def harness_paused_total() -> float:
+    return _HARNESS_PAUSED
+
+
+def game_clock() -> float:
+    """墙钟, 扣掉 harness 停顿。所有 skill 超时预算的唯一时间源。"""
+    return time.time() - _HARNESS_PAUSED
+
+
 # ── Base Skill ──────────────────────────────────────────────────────────
 
 class BaseSkill(ABC):
@@ -399,18 +425,24 @@ class BaseSkill(ABC):
     # 换句话说 **tick 数根本不是时间单位**。
     # ⇒ 凡是"等真实世界发生某事"(动画/弹窗/战斗/网络/OCR 稳定)的超时一律
     #   走这里。仍适合 tick 计数的只有"扫了几帧都没看到东西"这种纯感知计数。
+    # ⚠时间源一律 game_clock() 而非 time.time() —— step 门的人工停顿必须扣掉,
+    # 否则逐帧门控本身会把每个 skill 的超时预算烧光(见模块顶部注释)。
+    def clock(self) -> float:
+        """skill 可见的墙钟(已扣 harness 停顿)。"""
+        return game_clock()
+
     def mark(self, key: str) -> None:
         """给 key 打时间点(重复调用 = 重新计时)。"""
-        self._timers[key] = time.time()
+        self._timers[key] = game_clock()
 
     def since(self, key: str) -> float:
         """距上次 mark(key) 的秒数。没打过点 → 就地打点并返回 0.0
         (让 `if self.since(k) > T` 在首次调用时天然不触发)。"""
         t = self._timers.get(key)
         if t is None:
-            self._timers[key] = time.time()
+            self._timers[key] = game_clock()
             return 0.0
-        return time.time() - t
+        return game_clock() - t
 
     def expired(self, key: str, secs: float) -> bool:
         """墙钟超时判据。首次调用必为 False(见 since)。"""

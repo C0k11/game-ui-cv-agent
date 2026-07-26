@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import threading
@@ -623,6 +624,19 @@ _CLICK_HOLD_CAP = 5
 # 的这段时间内自动确认(patch-day 冷启动, TOUCH TO START 前后)。窗口外出现的
 # "只有确认"弹窗一律不在 interceptor 层碰 — 交给当前 skill 的语境处理。
 _STARTUP_UPDATE_WINDOW_S = 180.0
+# ⛔⛔默认 OFF (2026-07-25 第二次帧实锤误触发后定): 这条闸是 **fail-OPEN 黑名单**
+# ——「没看到取消键/叉叉 → 就点確認」, 而铁律要求碰確認必须**正向白名单**。
+# 它的立论"强更框是未训练面, 全帧几乎零 ui cls"已被**两帧**证伪:
+#   ① run_20260717_054026/t0054 战术大赛结算屏(4 框) → 旧闸放行盲点確認
+#   ② 2026-07-25 22:36 「Battle Complete」屏 —— 收紧成"確認是全帧唯一检出"之后
+#      **依然命中**(结算屏 ui 域就只暴露一个 確認@0.97), 当场被 step 门拦下
+# 迄今 **0 次记录在案的正确触发, 2 次误触发**。少放行的代价 = patch 日冷启动停在
+# 更新框等人点一下(可见、可恢复); 多放行的代价 = 每次重启后 180s 内, 在任意
+# "只剩一个確認"的游戏内屏上盲点確認。
+# ⇒ 默认关闭, 只在 patch 日由人显式打开(BA_AUTO_UPDATE_CONFIRM=1)。
+# 正解(待做, 不是 papering over): **给强更框训一个 cls**, 正向检出才点 ——
+# 与 pipeline 里"undetected overlay is a HOLE to fix (train a cls)"同一条纪律。
+_AUTO_UPDATE_CONFIRM = os.environ.get("BA_AUTO_UPDATE_CONFIRM", "") == "1"
 
 # Debug: force EVERY skill to run, bypassing the red/yellow-dot should_run gate.
 # Set via mumu_runner --force-skills. For testing a skill's internals when the
@@ -1621,11 +1635,20 @@ class DailyPipeline:
                        if b.confidence >= 0.25 and b.cls_name != "确认键"]
             if (_upd_confirm is not None and _upd_blocker is None
                     and not _others):
-                print("[Interceptor] 启动期 confirm-only 弹窗(强更下载框结构: "
-                      "確認键是全帧唯一检出), clicking 确认键")
-                return action_click_box(
-                    _upd_confirm,
-                    "interceptor: confirm force-update download (startup YOLO)")
+                if not _AUTO_UPDATE_CONFIRM:
+                    # fail-closed: 只报不点。日志必须说清"我本来会点哪里",
+                    # 否则以后没人知道这条闸到底有没有在正确的场合触发过
+                    # (money_safety: 包着防线的 except/分支绝不许静默)。
+                    print("[Interceptor] ⛔启动期 confirm-only 弹窗 —— **不点**"
+                          f"(BA_AUTO_UPDATE_CONFIRM 未开启)。若这是强更框请手动"
+                          f"点確認 @({(_upd_confirm.x1 + _upd_confirm.x2) / 2:.3f},"
+                          f"{(_upd_confirm.y1 + _upd_confirm.y2) / 2:.3f})")
+                else:
+                    print("[Interceptor] 启动期 confirm-only 弹窗(强更下载框结构: "
+                          "確認键是全帧唯一检出), clicking 确认键")
+                    return action_click_box(
+                        _upd_confirm,
+                        "interceptor: confirm force-update download (startup YOLO)")
 
         # ── P-1: Global loading / update / download ──
         # During game startup the screen shows "正在更新", "Now Loading",
@@ -1653,7 +1676,8 @@ class DailyPipeline:
                         prev_ocr_boxes=None,
                         injected_yolo_boxes=None,
                         fresh_boxes=None, fresh_frame=None,
-                        fresh_ts: float = 0.0) -> Dict[str, Any]:
+                        fresh_ts: float = 0.0,
+                        frame_meta=None) -> Dict[str, Any]:
         """Process one in-memory BGR frame. Returns an action dict.
 
         Args:
@@ -1664,15 +1688,45 @@ class DailyPipeline:
             fresh_boxes/fresh_ts: 高频 DXcam 线程的最新检出+时间戳(2026-07-11
                 工业级链路: 主 tick 帧龄 ~2.2s 对轮播类时敏目标必错位, skill
                 可读 screen.fresh_boxes(帧龄≤0.5s@2FPS)做"有目标就点"判定)。
+            frame_meta: {"src","age","seq_new"} — 抓帧那一层知道帧多旧, 但
+                以前只打日志不落盘, 复盘时**无法区分"tap 慢"和"帧旧"**
+                (2026-07-25 banner 误入上期活动查了一整晚的直接代价)。
         """
+        _t0 = time.time()
+        self._frame_meta = dict(frame_meta) if frame_meta else {}
         screen = read_screen_from_frame(frame_bgr, screenshot_path=screenshot_path,
                                         skip_ocr=skip_ocr,
                                         prev_ocr_boxes=prev_ocr_boxes,
                                         injected_yolo_boxes=injected_yolo_boxes)
+        _t1 = time.time()
         screen.fresh_boxes = fresh_boxes
         screen.fresh_frame = fresh_frame
         screen.fresh_ts = fresh_ts
+        # ⭐主 tick 帧自己的帧龄(秒)。以前只有 fresh 通道有帧龄, skill 于是只能
+        # **假设** tick 帧更旧 —— 2026-07-25 实测推翻: scrcpy tick 帧中位 13.8ms,
+        # fresh 通道中位 399ms, 32 个同时有两者的 tick 里 **17 个(53.1%) fresh 更旧**。
+        # 时敏判定要"用更新的那个", 就必须两边都能量。
+        _fa = (frame_meta or {}).get("age")
+        screen.frame_age = _fa if isinstance(_fa, (int, float)) else None
+        self._t_read_ms = round((_t1 - _t0) * 1000, 1)
+        self._t_frame_in = _t0
+        # _save_trajectory 在 _tick_with_screen **内部**落盘, 所以 decide 耗时
+        # 只能在落盘那一刻现算(存开始时刻, 别存"上一 tick 的结果")。
+        self._t_decide_start = _t1
         return self._tick_with_screen(screen, screenshot_path=screenshot_path)
+
+    def note_dispatch(self, tick: int, sent_ts: float, exec_ms: float,
+                      decided_ts: float = 0.0) -> None:
+        """执行层回填: 这一 tick 的动作真正下发完成的墙钟 + 下发耗时。
+
+        trajectory 记录在**决策时**就写盘了, 拿不到之后才发生的 tap;
+        所以下发信息回填进**下一条**记录的 `dispatch_prev`。
+        decided_ts 单列, 让离线分析能把 step 门的人工等待剔掉。
+        """
+        self._dispatch_prev = {"tick": tick, "sent_ts": round(sent_ts, 3),
+                               "exec_ms": round(exec_ms, 1)}
+        if decided_ts:
+            self._dispatch_prev["decided_ts"] = round(decided_ts, 3)
 
     @property
     def last_screen(self) -> Optional[ScreenState]:
@@ -2638,6 +2692,39 @@ class DailyPipeline:
             # 的 2.5s 稳定窗在离线重放里复现不出来。补一个浮点时钟。
             "ts_f": round(time.time(), 3),
         }
+        # ⭐帧龄埋点(2026-07-25): 没有这几个字段, 复盘时"点晚了"和"帧太旧"
+        # 长得一模一样 —— banner 误入上期活动就是这么查了一整晚。
+        _fm = getattr(self, "_frame_meta", None) or {}
+        _t_in = getattr(self, "_t_frame_in", 0.0)
+        _age = _fm.get("age")
+        _frame_rec = {
+            "src": _fm.get("src", ""),
+            "age_ms": round(_age * 1000, 1) if isinstance(_age, (int, float)) else None,
+            "seq_new": _fm.get("seq_new"),
+            # 这张帧被**摄取**的墙钟(= tick 入口时刻 - 帧龄), 与 ts_f(决策落盘
+            # 时刻)之差就是"看到"到"决定"的全部开销。
+            "cap_ts": (round(_t_in - _age, 3)
+                       if (isinstance(_age, (int, float)) and _t_in) else None),
+            "tick_in_ts": round(_t_in, 3) if _t_in else None,
+        }
+        _fts = getattr(screen, "fresh_ts", 0.0) or 0.0
+        if _fts:
+            # fresh 通道用 perf_counter 计时, 与墙钟不同源 → 只记相对帧龄。
+            try:
+                _frame_rec["fresh_age_ms"] = round(
+                    (time.perf_counter() - _fts) * 1000, 1)
+            except Exception:
+                pass
+            _frame_rec["fresh_n"] = len(getattr(screen, "fresh_boxes", None) or [])
+        record["frame"] = _frame_rec
+        _ds = getattr(self, "_t_decide_start", 0.0)
+        record["timing"] = {
+            "read_ms": getattr(self, "_t_read_ms", None),
+            "decide_ms": (round((time.time() - _ds) * 1000, 1) if _ds else None),
+        }
+        _dp = getattr(self, "_dispatch_prev", None)
+        if _dp:
+            record["dispatch_prev"] = _dp
         job = (screenshot_path, str(self._traj_dir), tick_id, record)
         try:
             self._traj_writer_queue.put_nowait(job)

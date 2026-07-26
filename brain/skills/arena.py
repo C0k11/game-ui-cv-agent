@@ -380,8 +380,8 @@ class ArenaSkill(BaseSkill):
         # 动画 → 直接判 "no 领取奖励_黄" 去打架, 每日獎勵 那个黄钮就丢了
         # (2026-07-09 注释记的同款事故, 当时的修法 2 tick 标定失准)。
         if not getattr(self, "_claim_t0", 0.0):
-            self._claim_t0 = time.time()
-        _el = time.time() - self._claim_t0
+            self._claim_t0 = self.clock()
+        _el = self.clock() - self._claim_t0
         if _el < _CLAIM_SETTLE_SEC:
             return action_wait(600, f"claim settle re-check ({_el:.1f}s/{_CLAIM_SETTLE_SEC}s)")
         self.log(f"no 领取奖励_黄 ({_el:.1f}s 无新黄钮) → fight_check")
