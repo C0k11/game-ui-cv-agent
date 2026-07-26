@@ -207,6 +207,10 @@ class EventQuestSkill(BaseSkill):
         self._ap_fail_t0 = 0.0        # AP 连续读不出的墙钟起点(0=未失败)
         self._popup_stuck_t0 = 0.0    # 掃蕩開始 不出现的墙钟起点(0=未计时)
         self._sweep_rounds = 0
+        # 活動點數缓存(见 _points 里的长注释: 读一次要阻塞 770-900ms 抓 ADB 4K 帧,
+        # 绝不能每 tick 挡在点击前面)。-1 = 本轮还没读过, 保证首次必读。
+        self._pts_cache: Optional[Tuple[int, int]] = None
+        self._pts_read_round: int = -1
         self._points_done = False
         self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
         self._swept = 0
@@ -1339,7 +1343,24 @@ class EventQuestSkill(BaseSkill):
             self.log("points: _quests 为空(survey 未产出) — 跳过扫荡转 milestone")
             self._set("milestone")
             return action_wait(300, "points: no surveyed quest to sweep")
-        pts = self._read_points(screen)
+        # ⛔⛔别把慢 IO 放在点击热路径上(2026-07-26, 帧龄埋点查出来的第二类错):
+        # `_read_points` → run_digit_ocr, 而 run_digit_ocr 在**帧宽<3200 时会
+        # get_clean_frame() 重抓一张 ADB 4K 帧**(pipeline.py:794-799) —— 主 tick
+        # 帧是 scrcpy 1440p(宽 2560), 所以**每次都触发**, 实测阻塞 770-900ms。
+        # 实锤 run_20260725_225503/tick_0289: 帧龄 **21.2ms** 一点不旧, 落点上
+        # 也确实有 `skip键@0.987` —— 但决策链中途插了这一下 898ms, 等 tap 下发时
+        # 掃蕩动画早放完, 那一拍落在结果页的奖励图标上, 弹出道具说明浮窗挡住
+        # 確認, skill 卡到 `stuck 20` 才救回来。
+        # ⇒ 与感知铁律"目标 cls 出现→立即点, 零人为延迟"直接冲突。
+        # 点数只在**扫荡完成后**才变, 每 tick 读纯属浪费 ⇒ 按扫荡轮次 + 墙钟节流。
+        # (⚠两个缓存字段都在 _init_state 初始化 — 见 [[money-safety]] 记的
+        #  `_py_drop_pending` 从没初始化导致整条守卫静默死掉那种静默杀手。)
+        if (self._sweep_rounds != self._pts_read_round
+                or self.since("pts_read") > 20.0):
+            self._pts_cache = self._read_points(screen)
+            self._pts_read_round = self._sweep_rounds
+            self.mark("pts_read")
+        pts = self._pts_cache
         if pts is not None:
             self.log(f"活動點數 {pts[0]}/{pts[1]}")
             if pts[0] >= min(self._points_target, pts[1]):

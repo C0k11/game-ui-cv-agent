@@ -1250,10 +1250,25 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # (0.77s 但真实当前)。静止页 seq 不动但内容==当前屏, age 未超阈
             # 仍走 scrcpy; 超阈落 ADB 也只是多一次 screencap(内容一样正确)。
             _SCRCPY_MAX_AGE = 1.0
+            # ⭐⭐因果闸(2026-07-26, 靠帧龄埋点才查得出来的一类错):
+            # **帧的摄取时刻必须晚于上一次 tap 的下发时刻**, 否则 skill 就是在
+            # "上一发点击还没落下去的那一屏"上重算 —— 这不是"帧旧", 是**因果倒置**。
+            # 实锤 run_20260725_225503/tick_0268:
+            #   frame.cap_ts = 1785034938.928
+            #   dispatch_prev.sent_ts = 1785034939.624   → cap_ts 比 tap 早 **696ms**
+            #   帧龄 886.7ms **在 1.0s 闸内**, 所以旧闸放行了
+            #   于是 settle 確認 在那张帧上仍是 (0.914,0.921)@0.971, 照着点 → 拍空;
+            #   下一 tick 落 ADB(cap_ts 晚于 tap +0.238s)立刻算出真值 (0.501,0.927)。
+            # ⚠这类错**JIT 复验治不了** —— 复验会读到同一张冻结帧, 反而"确认"错误落点。
+            # 静止页不会被误伤: tap 后画面真变了 scrcpy 就产新帧; 画面没变说明
+            # tap 没生效, 这时落 ADB 抓一张真·当前帧正是要的。
+            _last_tap_ts = globals().get("_LAST_TAP_SENT_TS", 0.0)
             if _scrcpy_feed is not None:
                 try:
                     _fr2, _age2, _seq2 = _scrcpy_feed.latest()
-                    if _fr2 is not None and (
+                    _cap_ok = (_age2 is None or
+                               time.time() - _age2 > _last_tap_ts)
+                    if _fr2 is not None and _cap_ok and (
                             _age2 if _age2 is not None else 9) < _SCRCPY_MAX_AGE:
                         frame = _fr2
                         _frame_src = "scrcpy"
@@ -1278,9 +1293,14 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     frame = None
             if frame is None:
                 # 高频线程共享帧 fallback(来源=scrcpy 或 DXcam, boxes 同帧)
+                # ⚠同样吃因果闸 —— 实测那 27 个过期帧里有 6 个来自 hf。
+                # _yolo_latest_ts 用 perf_counter, 所以 tap 时刻也要记一份同源的
+                # (墙钟和 perf_counter 混比是 2026-07-11 踩过的坑: age 恒大)。
+                _last_tap_perf = globals().get("_LAST_TAP_SENT_PERF", 0.0)
                 with _yolo_latest_lock:
                     if (_yolo_latest_frame is not None
-                            and time.perf_counter() - _yolo_latest_ts < 3.0):
+                            and time.perf_counter() - _yolo_latest_ts < 3.0
+                            and _yolo_latest_ts > _last_tap_perf):
                         frame = _yolo_latest_frame.copy()
                         _frame_src = "hf"
             if frame is None:
@@ -1434,6 +1454,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _t_exec0 = time.time()
                 _execute_pipeline_action(action, render_hwnd, frame.shape[1], frame.shape[0], adb, android_w, android_h)
                 _t_exec1 = time.time()
+                # 因果闸的写入点: 下一 tick 起, 任何**摄取时刻早于这一刻**的帧
+                # 都不许用来决策(见上面 _SCRCPY_MAX_AGE 处的长注释)。
+                globals()["_LAST_TAP_SENT_TS"] = _t_exec1
+                globals()["_LAST_TAP_SENT_PERF"] = time.perf_counter()
                 # ⭐链路延迟埋点: 帧被摄取 → tap 真的下发完。以前只有"帧龄"
                 # 这一段, 中间的推理/决策/step门/ADB 下发全是黑箱, 复盘分不清
                 # "点晚了"还是"看的是旧画面"。
