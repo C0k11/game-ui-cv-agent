@@ -98,11 +98,41 @@ class ArenaSkill(BaseSkill):
         self._select_rounds: int = 0        # extra-cooldown retries when select spins
         self._result_pending: bool = False
         self._tickets: Optional[int] = None
+        # ⛔2026-07-26: "到底进没进过战术大赛页"。_exit 的 Lobby 分支原来完全
+        # 不看这个, 把"从别的页逃回大厅"也报成 arena complete(见 _exit 注释)。
+        self._reached: bool = False
         self._ticket_misses: int = 0        # consecutive failed ticket reads
 
     def reset(self) -> None:
         super().reset()
         self._init_state()
+
+    def exit_report(self):
+        """战术大赛的竣工判据 = 票打光了没。
+
+        ⛔为什么必须有: 2026-07-25 晚 Arena 报了 `done (0 fights, 0 rewards)`,
+        而当天票 5/5 满 + 2 个未领奖励(重跑后 5 场全打完, 排名 37→32)。
+        它是 7 次收工里 5 个 "UNKNOWN — 未声明竣工判据" 之一 —— **没有判据
+        就没人审计出口**, 假成功只能靠用户肉眼发现([[completion-gap]])。
+        ⚠`self._tickets`(arena.py:100/424) 是离开 fight_check 前最后一次成功
+        读数: 正常收工路径读到 0 才 exit ⇒ CLEAN 成立; select 失败那条路留下
+        陈旧非零值 ⇒ 正确地报 LEFTOVER。
+        """
+        if not self._reached:
+            return ("UNKNOWN",
+                    f"从未进到战术大赛页(enter 走了 {self._enter_ticks} tick) "
+                    f"— 票/奖励状态**完全未知**")
+        if self._tickets is None:
+            return ("UNKNOWN",
+                    f"打了 {self._fights_done} 场、领了 {self._claim_clicks} 个"
+                    f"奖励, 但票数从未读出 — 不知道打光没")
+        if self._tickets > 0:
+            return ("LEFTOVER",
+                    f"还剩 {self._tickets} 张票没打(已打 {self._fights_done} 场, "
+                    f"领 {self._claim_clicks} 个奖励)")
+        return ("CLEAN",
+                f"票 0, 打了 {self._fights_done} 场, "
+                f"领了 {self._claim_clicks} 个奖励")
 
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
@@ -300,6 +330,7 @@ class ArenaSkill(BaseSkill):
         self._enter_ticks += 1
         if self._on_arena(screen):
             self.log("inside arena → claim")
+            self._reached = True          # 唯一置位点: 正锚确认真的到了
             self._goto("claim")
             return action_wait(400, "entered arena")
 
@@ -567,12 +598,29 @@ class ArenaSkill(BaseSkill):
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         page = self.detect_screen_yolo(screen)
-        if page == "Lobby":
-            self.log(f"done ({self._fights_done} fights, {self._claim_clicks} rewards)")
-            return action_done("arena complete")
-        if page == "Mission":
-            self.log(f"done on hub ({self._fights_done} fights)")
-            return action_done("arena complete (on hub)")
+        # ⛔⛔2026-07-25 live 实锤的假成功(run_20260725_231337):
+        #   t0015 DailyRoutine done(收在**信用点商店**里, 因为 shop.chain_in_shop
+        #         默认 True 要给 arena_shop 接力, 而 sub_only 路径下 arena_shop
+        #         根本不在 plan 里 —— 见 daily_routine.__init__ 的修复)
+        #   t0016..0039 Arena/enter 干等 24 tick(屏上 cls = 信用点商店_已选中/
+        #         全部选择/回大厅按钮0.97, PAGE_SIGNATURES 没收录商店 ⇒ page=None,
+        #         上面那条 `if page is not None: action_back` 根本够不到)
+        #   t0040 enter timeout → t0041 back key → 回到大厅
+        #   t0044 **`done (0 fights, 0 rewards)` + action_done("arena complete")**
+        # 而当天真有活: 重跑后票 5/5 满 + 2 个未领奖励, 5 场全打完、排名 37→32。
+        # ⇒ 这条分支**与打完 5 场的成功路径共用**, 从不问"到底进没进去过"。
+        #   "从别的页逃回大厅" ≠ "干完了"。
+        if page in ("Lobby", "Mission"):
+            if not self._reached:
+                self.log(f"⚠ 从未进到战术大赛页(enter {self._enter_ticks} tick) "
+                         f"→ 报 timeout, **不是完成**")
+                # reason 带 timeout ⇒ pipeline 走重试分支(_max_retries=1),
+                # 从大厅重进一次; 再失败记 status=timeout 而不是 done。
+                return action_done("arena never reached (enter timeout)")
+            _where = "" if page == "Lobby" else " (on hub)"
+            self.log(f"done ({self._fights_done} fights, "
+                     f"{self._claim_clicks} rewards){_where}")
+            return action_done(f"arena complete{_where}")
         if self._phase_ticks > _EXIT_MAX:
             return action_done("arena exit timeout")
         # ⛔ A 取消键 on screen while exiting = some cost/choice dialog is up

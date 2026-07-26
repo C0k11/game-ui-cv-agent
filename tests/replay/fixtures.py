@@ -421,7 +421,75 @@ def fx_page_graph_sweep_panels_not_confused():
     return (not bad, f"误判={bad or '无'}")
 
 
+def fx_arena_never_reached_not_complete():
+    """⛔2026-07-25 假成功回归(run_20260725_231337 帧实锤):
+
+    Arena 被丢在信用点商店页, enter 干等 24 tick 超时, 从商店退回大厅, 然后
+    `_exit` 的 Lobby 分支报了 `done (0 fights, 0 rewards)` + "arena complete"。
+    而当天真有活: 票 5/5 满 + 2 个未领奖励(重跑后 5 场全打完, 排名 37→32)。
+    钉死两件事: ①没到达过就绝不许 reason 里出现 complete ②exit_report 三态正确。
+    """
+    from brain.skills.arena import ArenaSkill
+    bad = []
+    a = ArenaSkill(); a.reset()
+
+    # ① 没到达 → done 的 reason 必须是 timeout 而不是 complete
+    class _Scr:
+        yolo_boxes: list = []
+        frame = None
+    a._goto("exit")
+    a._enter_ticks = 25
+    orig = a.detect_screen_yolo
+    a.detect_screen_yolo = lambda s: "Lobby"        # 装成"已退回大厅"
+    try:
+        act = a._exit(_Scr())
+    finally:
+        a.detect_screen_yolo = orig
+    r = str(act.get("reason", ""))
+    if act.get("action") != "done":
+        bad.append(f"未到达时 action={act.get('action')} (期望 done)")
+    if "complete" in r.lower():
+        bad.append(f"⛔未到达却报完成: {r!r}")
+    if "timeout" not in r.lower():
+        bad.append(f"reason 不含 timeout(拿不到 pipeline 重试): {r!r}")
+
+    # ② 三态
+    v0, _ = a.exit_report()
+    a._reached = True; a._tickets = None
+    v1, _ = a.exit_report()
+    a._tickets = 3
+    v2, _ = a.exit_report()
+    a._tickets = 0
+    v3, _ = a.exit_report()
+    for got, want, lab in ((v0, "UNKNOWN", "未到达"), (v1, "UNKNOWN", "票数未读出"),
+                           (v2, "LEFTOVER", "剩3张"), (v3, "CLEAN", "票0")):
+        if got != want:
+            bad.append(f"exit_report[{lab}]={got} (期望 {want})")
+    return (not bad, f"违规={bad or '无'}; 未到达时 reason={r!r}")
+
+
+def fx_shop_chain_flag_follows_plan():
+    """⛔上游触发点回归: sub_only 路径下 shop 不该"留在店里等 arena_shop 接力"。
+
+    2026-07-25 事故链的第一环 —— pipeline.py:1228 只给 top-level 那个 ShopSkill
+    置了 chain_in_shop=False, daily_routine 内部 new 的那个没人管, 于是
+    sub_only=["shop"] 跑完收在商店网格上, 把下一个 skill 丢在了未知页面。
+    """
+    from brain.skills.daily_routine import DailyRoutineSkill
+    from brain.skills.shop import ShopSkill
+    bad = []
+    for so, want in ((["shop"], False), (["shop", "arena_shop"], True), (None, True)):
+        d = DailyRoutineSkill(sub_only=so)
+        for sk, _ in d._plan:
+            if isinstance(sk, ShopSkill) and sk.chain_in_shop != want:
+                bad.append(f"sub_only={so}: chain_in_shop={sk.chain_in_shop} "
+                           f"(期望 {want})")
+    return (not bad, f"违规={bad or '无'}")
+
+
 CASES = [
+    ("⛔arena未到达_绝不报完成", fx_arena_never_reached_not_complete, True),
+    ("⛔shop留店标志跟随plan", fx_shop_chain_flag_follows_plan, True),
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
     ("quest_list_真阳性(反向锚)", fx_quest_list_true_positive, True),
     ("上期活动474_不点", fx_prev_event_banner_no_tap, True),

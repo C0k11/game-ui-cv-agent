@@ -101,6 +101,21 @@ class DailyRoutineSkill(BaseSkill):
             self._sub_only = None
             # Default unattended daily = harvest subs only (in_default=True).
             self._plan = [(sk, fr) for (_sid, sk, fr, d) in _full if d]
+        # ⛔2026-07-25 事故的**直接触发点**(run_20260725_231337 帧实锤):
+        # shop.chain_in_shop 默认 True = "买完留在店里, 让 arena_shop 接力切
+        # 战术大赛 tab"(shop.py:607/617)。pipeline.py:1228 已经给 top-level 那个
+        # ShopSkill 置了 False, 但**daily_routine 内部自己 new 的这个没人管** ——
+        # 于是 `sub_only=["shop"]` 跑完后 DailyRoutine 收在**信用点商店网格**上,
+        # 而 arena_shop 根本不在 plan 里, 没人来接力。下一个 skill(Arena)被丢在
+        # 商店页, enter 干等 24 tick 超时, 最后报成 `arena complete`(假成功)。
+        # ⇒ 判据 = 本次 plan 里到底有没有 arena_shop 来接力。语义精确, 顺带把
+        #   "shop 出现在任何 sub_only 组合里"这一族同形全修了。
+        _plan_ids = (set(self._sub_only) if self._sub_only
+                     else {sid for (sid, _sk, _fr, d) in _full if d})
+        if "arena_shop" not in _plan_ids:
+            for (_sid, _sk, _fr, _d) in _full:
+                if isinstance(_sk, ShopSkill):
+                    _sk.chain_in_shop = False
         self._cur_idx: int = 0
         self._cur_started: bool = False
 
