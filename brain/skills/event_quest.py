@@ -63,6 +63,13 @@ _AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP
 # 90s 给足余量。⚠**绝不能用 tick 计**: 等待期间 _phase_ticks 照涨, 旧的 36 tick
 # 预算全被"等稳定"吃光 → survey 没做完就 timeout → 跳过 sweep → AP 一点没灌。
 _SURVEY_MAX_SEC = 90.0
+# ⭐时敏目标(hub 活动 banner)的观测新鲜度约定 —— 2026-07-25 用户点破后定死。
+# 轮播实测 2-2.5s/页, 405(当期)与 474(上期)交替占**同一槽位**, 从不共存。
+# "看到目标就点"要成立, **"看到"必须是现在**: 观测年龄必须远小于窗口, 否则
+# 你点的是"过去那一帧里的东西", 落到现在的屏幕上就是另一张卡。
+# 0.35s ≈ 窗口的 1/6, 给推理+ADB tap 留足余量; 够不到就等下一拍(最多 ~0.5s)。
+_BANNER_CYCLE_SEC = 2.0
+_BANNER_FRESH_SEC = 0.35
 _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
                            # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
@@ -573,7 +580,17 @@ class EventQuestSkill(BaseSkill):
             screen, [UC.EVENT_END_LEFT, UC.EVENT_REWARD_END], conf=0.5)
         banner = None
         src_frame = None
-        fresh_usable = (fresh is not None and fresh_age < 1.2
+        # ⛔⛔时敏目标的"新鲜"必须按**目标自己的窗口**定义(2026-07-25 用户点破:
+        # "banner轮换有两秒, 怎么可能来不及点… 我要的是逻辑上不打架的看到目标就点,
+        # 就和人类一样")。
+        # 旧码 `fresh_age < 1.2` —— 通道名叫 fresh, 却接受 **1.2s 前**的数据, 而
+        # banner **2s 一换**: 观测本身已用掉 60% 窗口, 再加推理+tap 延迟必然撞换页。
+        # 人类是"现在看→现在点"(视觉延迟 ~50ms); bot 却拿 1.2s 前的画面点现在的屏。
+        # 实锤: tick_0775 帧上 405@0.96 → 开火 → 0777(1s后)同坐标已是 474@0.70,
+        # 最终进了「秘密的午夜派對」。
+        # ⇒ 阈值改成窗口的一小部分。够不到就**等下一次新鲜观测**, 绝不拿旧数据开火
+        #   —— 等一拍最多损失 ~0.5s, 而误入的代价是整个 verify→back→rescan 循环。
+        fresh_usable = (fresh is not None and fresh_age < _BANNER_FRESH_SEC
                         and not getattr(self, "_fresh_distrust", False))
         if fresh_usable:
             for b in fresh:
@@ -593,6 +610,16 @@ class EventQuestSkill(BaseSkill):
                         self._fresh_distrust = True
                         self.log("fresh source DISTRUSTED (tick sees banner, "
                                  "fresh blind) — pure tick mode")
+        # ⛔fresh 不够新时**绝不回落到 tick 帧**: tick 帧允许 _SCRCPY_MAX_AGE=1.0s
+        # 陈旧(server/app.py:1252), 比 fresh 通道**更旧** —— 旧码的兜底路径反而是
+        # 更差的数据源。时敏目标上这等于"看不清就闭眼点"。改成: 等下一拍。
+        # (仅当 fresh 源被判定失信时才允许纯 tick 模式 —— 那是 DXcam 桌面遮挡
+        #  一类的源故障, 此时 tick 帧是唯一可信源, 与"数据太旧"是两回事。)
+        if (banner is None and not fresh_usable
+                and fresh is not None
+                and not getattr(self, "_fresh_distrust", False)):
+            return action_wait(120, f"banner 观测 {fresh_age:.2f}s 前 — 太旧"
+                                    f"(轮播 {_BANNER_CYCLE_SEC}s), 等新鲜一拍再点")
         if banner is None and not fresh_usable:
             # ⭐轮播时序(2026-07-22 20帧@0.45s 实测钉死, 推翻 0711 5s 模型):
             # 项周期≈**2.5s/页**, 405 与 474 逐帧交替从不共存, conf 稳定分离
