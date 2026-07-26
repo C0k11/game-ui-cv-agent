@@ -44,10 +44,31 @@ DEV = "127.0.0.1:7555"
 API = "http://127.0.0.1:8000/api/v1"
 TMP = Path(os.environ.get("TEMP", ".")) / "_walk.png"
 
-# ⛔碰钱词 —— 命中一律停, 不进白名单。宁可多停, 绝不放过一次花钱。
-MONEY = ("購買", "购买", "PURCHASE", "確認", "确认", "青辉石", "青輝石",
-         "免費", "免费", "pyroxene", "buy", "BUY", "confirm", "CONFIRM",
-         "票", "ticket", "sweep", "掃蕩", "扫荡")
+# ⛔硬碰钱词 —— 命中一律停。只留**真会掏钱**的那几个。
+# 早先把 確認/扫荡/票 也塞进来了, 结果掃蕩確認一天几十次全卡住 = 跑不完。
+MONEY = ("購買", "购买", "PURCHASE", "青辉石", "青輝石", "pyroxene",
+         "免費", "免费", "buy", "BUY")
+
+# ⭐结构判据(比字符串可靠, 与 skill 内 _dialog_is_purchase 同源):
+# **确认框在屏 且 框体内有数量步进器/体力/青辉石** = 购买框 → 停。
+# 纯 AP 扫荡确认框体内只有 取消/确认/叉, 不会命中 → 不卡流程。
+_DLG_BTN = ("确认键", "取消键")
+_DLG_BODY = ("加号", "加号灰色", "减号", "减号灰色", "MAX_可点击", "MAX_灰色",
+             "MIN_可点击", "MIN_灰色", "体力", "青辉石")
+
+
+def purchase_dialog_structure(boxes) -> str:
+    """返回非空字符串 = 这一帧有购买框结构(该停)。"""
+    names = {b.cls_name for b in boxes}
+    if not all(n in names for n in _DLG_BTN):
+        return ""
+    # 框体 = 确认/取消按钮上方的区域
+    ys = [(b.y1 + b.y2) / 2 for b in boxes if b.cls_name in _DLG_BTN]
+    btn_y = min(ys) if ys else 1.0
+    body = [b for b in boxes
+            if b.cls_name in _DLG_BODY and 0.12 < (b.y1 + b.y2) / 2 < btn_y]
+    return ("购买框结构: 确认+取消 且体内有 "
+            + ",".join(sorted({b.cls_name for b in body}))) if body else ""
 CLS_RADIUS = 0.06      # 落点多远内要有检出框才算"有 cls 支撑"
 REPEAT_CAP = 4         # 同一 (reason,落点) 连续几次算空转
 
@@ -87,9 +108,18 @@ def main() -> int:
     ap.add_argument("--log", default="")
     a = ap.parse_args()
 
-    from brain.pipeline import _run_yolo_on_image
+    from brain.pipeline import (BASE_DETECTORS, SKILL_YOLO_MAP,
+                                _run_yolo_on_image)
     from brain.nav.page_graph import identify
     from brain.skills.base import ScreenState
+
+    def ctx_for(skill_name: str) -> str:
+        """⛔必须跟 pipeline 用**同一套检测器**(2026-07-25 当场踩): 探针写死
+        context="ui" 时, Schedule/Cafe 的**学生头像框(avatar 域 143-394)**
+        我根本看不见 → 把有 cls 支撑的落点判成"盲拍" = 假警报, 差点据此报 bug。
+        SKILL_YOLO_MAP: Schedule=ui+avatar / DailyRoutine=ui+cafe+avatar /
+        Bounty·Arena·JFD=ui+battle。"""
+        return SKILL_YOLO_MAP.get(skill_name or "", BASE_DETECTORS)
 
     logp = Path(a.log) if a.log else (
         _ROOT / "data" / f"walk_{time.strftime('%Y%m%d_%H%M%S')}.jsonl")
@@ -118,7 +148,8 @@ def main() -> int:
             print("⛔ 抓帧失败 — 停")
             return 1
         h, w = img.shape[:2]
-        boxes = [b for b in _run_yolo_on_image(img, w, h, context="ui")
+        _ctx = ctx_for(str(pend.get("skill") or ""))
+        boxes = [b for b in _run_yolo_on_image(img, w, h, context=_ctx)
                  if b.confidence >= a.conf]
         boxes.sort(key=lambda b: -b.confidence)
         try:
@@ -152,12 +183,30 @@ def main() -> int:
         stop = None
         _money = any(k in reason for k in MONEY)
         _money_ok = any(k in reason for k in a.money_ok) if a.money_ok else False
-        if _money and not _money_ok:
+        _struct = purchase_dialog_structure(boxes)
+        rec["purchase_struct"] = _struct
+        if _struct and act == "click":
+            # ⛔结构闸不吃白名单: 屏上真有购买框还去点, 一律人审
+            stop = f"⛔{_struct} —— 屏上有购买框还要点, 人审"
+        elif _money and not _money_ok:
             stop = f"碰钱词 → 人审(reason={reason!r})"
         elif repeats >= REPEAT_CAP:
             stop = f"同一目标连发 {repeats + 1} 次 = 空转/被吞"
         elif act == "click" and not near:
-            stop = f"落点 {tgt} 半径{CLS_RADIUS} 内**无任何 cls 支撑** = 盲拍"
+            # ⚠盲拍按危害分级(2026-07-25 live 定): 关弹窗/確認 这类**尾发**是已知
+            # 良性形态 —— skill 在它自己那帧上确实看得见按钮(两次落点坐标不同=新检出),
+            # 只是弹窗在关闭动画里, 到我探针时已消失(铁律#17 探针帧永远比 pending 新)。
+            # 这类放行但**大声记账 + 连发上限**; **导航/进入类**盲拍一律停(点歪=进错页,
+            # schedule 那次 popout 尾发就误开过设施)。
+            _dismissy = any(k in reason for k in (
+                "close", "dismiss", "確認", "确认", "取消", "叉叉", "reward",
+                "continue", "領取", "领取"))
+            if _dismissy and repeats < 2:
+                rec["note"] = "弹窗尾发(落点已无cls, 良性形态)"
+                print("      ⚠尾发: 落点已无 cls(弹窗关闭动画) — 放行但记账")
+            else:
+                stop = (f"落点 {tgt} 半径{CLS_RADIUS} 内**无任何 cls 支撑** = 盲拍"
+                        + ("(尾发但已连发)" if _dismissy else "(导航类, 危险)"))
         elif not any(k in reason for k in approved):
             stop = "新 reason, 没被人批准过"
 
@@ -166,7 +215,7 @@ def main() -> int:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
         print(f"[{n:>3}] {pend.get('skill')}/{pend.get('sub_state')} "
-              f"{act} · {reason[:52]}")
+              f"{act} · {reason[:52]}  [det={_ctx}]")
         print(f"      落点={tgt} 附近cls={near or '无'} | 页面={page}")
         if stop:
             print(f"      ⛔停: {stop}")

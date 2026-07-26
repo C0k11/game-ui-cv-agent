@@ -106,6 +106,8 @@ class ShopSkill(BaseSkill):
         self._cancel_clicks: int = 0      # ack-loop: cancel 实际点击次数
         self._dialog_gone: int = 0        # 点击后弹窗连续消失帧计数(=落地确认)
         self._tab_miss: int = 0           # 信用点正锚连续漏检帧计数(容错闪断)
+        # ⛔tab 身份闩锁(2026-07-25 live 实锤后加): 见 _on_credit_tab 注释。
+        self._credit_tab_latched: bool = False
 
     def reset(self) -> None:
         super().reset()
@@ -142,8 +144,19 @@ class ShopSkill(BaseSkill):
         # conf 0.877-0.903 的幻觉(Cafe 转场/EventQuest verify 帧) — 不带 region
         # 的全屏 argmax 会放行伪造通行证(840AP 事故同根因: 角落锚定必须带 region)。
         # region 保留 581/581 真阳性, 灭掉全部 3 个伪造位点。
-        return self.find_cls(screen, UC.SHOP_TAB_CREDIT_SEL, conf=_CLS_CONF,
-                             region=(0.0, 0.10, 0.15, 0.40)) is not None
+        if self.find_cls(screen, UC.SHOP_TAB_CREDIT_SEL, conf=_CLS_CONF,
+                         region=(0.0, 0.10, 0.15, 0.40)) is not None:
+            self._credit_tab_latched = True
+            return True
+        # ⛔身份闩锁(2026-07-25 live 实锤后加 —— 我当天的"3 帧容错"仍误杀了采购):
+        # 日志 `inside shop (一般 tab) → select` 正锚**确认过**, 但全选后网格变忙
+        # (5 个绿勾+价格条), 左栏 tab 正锚掉到 conf 阈下 → 连续 3 帧看不到 →
+        # fail-closed 退出 → **当天信用点采购一件没买**。
+        # 加帧数是治标。正解: **tab 身份不会自己变** —— 只有显式点左栏/滑动才换 tab,
+        # 而那是本 skill 自己的动作。所以一旦正向确认过, 本次店内访问期间就成立;
+        # 闩锁只在 reset()(重新进店)清零。仍然是 fail-closed: **没确认过就不给锁**,
+        # 首次进入必须真看见正锚。
+        return self._credit_tab_latched
 
     def _confirm_dialog(self, screen: ScreenState) -> Optional[YoloBox]:
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DIALOG_BAND)

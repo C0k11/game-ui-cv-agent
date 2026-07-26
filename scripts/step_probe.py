@@ -129,12 +129,17 @@ def main() -> int:
         print("⛔抓帧失败")
         return 1
     h, w = img.shape[:2]
-    from brain.pipeline import _run_yolo_on_image
-    boxes = sorted(_run_yolo_on_image(img, w, h, context="ui"),
+    # ⛔跟 pipeline 用同一套检测器(2026-07-25 踩): 写死 "ui" 会看不见
+    # Schedule/Cafe 的**学生头像框(avatar 域)** → 把有支撑的落点误判成盲拍。
+    from brain.pipeline import (BASE_DETECTORS, SKILL_YOLO_MAP,
+                                _run_yolo_on_image)
+    _ctx = SKILL_YOLO_MAP.get(str(pend.get("skill") or ""), BASE_DETECTORS)
+    boxes = sorted(_run_yolo_on_image(img, w, h, context=_ctx),
                    key=lambda b: -b.confidence)
     boxes = [b for b in boxes if b.confidence >= a.conf]
     print("-" * 78)
-    print(f"帧 {w}x{h}  YOLO 检出 {len(boxes)} 框 (conf>={a.conf}):")
+    print(f"帧 {w}x{h}  检测器={_ctx}  YOLO 检出 {len(boxes)} 框 "
+          f"(conf>={a.conf}):")
     for b in boxes[:a.top]:
         print(f"  {b.confidence:.2f}  {b.cls_name:<26} "
               f"cx={(b.x1 + b.x2) / 2:.3f} cy={(b.y1 + b.y2) / 2:.3f}")
@@ -152,12 +157,41 @@ def main() -> int:
     except Exception as e:                                    # noqa: BLE001
         print(f"[PageGraph] 不可用: {type(e).__name__}: {e}")
 
-    if a.shot:
-        for b in boxes[:a.top]:
-            cv2.rectangle(img, (int(b.x1 * w), int(b.y1 * h)),
-                          (int(b.x2 * w), int(b.y2 * h)), (0, 0, 255), 3)
-        cv2.imwrite(a.shot, cv2.resize(img, (w // 2, h // 2)))
-        print(f"→ {a.shot}")
+    # ── 对照图: 左=原始游戏画面, 右=YOLO 框 + 落点十字 ──────────────────
+    # 用户 2026-07-25: "走一步你就看一下游戏画面然后再看一下带有yolo框的画面"。
+    # 拼成一张是为了一次 Read 就能同时看到两边(逐帧审时每多一次调用都是成本)。
+    out = a.shot or str(Path(os.environ.get("TEMP", ".")) / "_step_view.png")
+    SW = 1100                       # 每半边宽度
+    sc = SW / w
+    raw = cv2.resize(img, (SW, int(h * sc)))
+    ann = raw.copy()
+    # ⚠cv2.putText 画不了中文(渲染成 ??????, 2026-07-25 当场发现) → 框上只标
+    # **编号**, 编号↔类名的对照在上面的文字清单里(已按 conf 降序打印)。
+    for i, b in enumerate(boxes):
+        x1, y1 = int(b.x1 * w * sc), int(b.y1 * h * sc)
+        x2, y2 = int(b.x2 * w * sc), int(b.y2 * h * sc)
+        cv2.rectangle(ann, (x1, y1), (x2, y2), (0, 200, 255), 2)
+        cv2.rectangle(ann, (x1, max(0, y1 - 15)), (x1 + 26, y1),
+                      (0, 200, 255), -1)
+        cv2.putText(ann, str(i), (x1 + 3, max(11, y1 - 3)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+    # 落点十字(红) —— 一眼看出 bot 要点哪
+    if isinstance(pend.get("target"), (list, tuple)) and len(pend["target"]) == 2:
+        tx, ty = pend["target"]
+        px, py = int(float(tx) * SW), int(float(ty) * h * sc)
+        for canvas in (raw, ann):
+            cv2.drawMarker(canvas, (px, py), (0, 0, 255),
+                           cv2.MARKER_CROSS, 46, 4)
+            cv2.circle(canvas, (px, py), 30, (0, 0, 255), 3)
+    hh = raw.shape[0]
+    sheet = cv2.hconcat([raw, ann])
+    cv2.line(sheet, (SW, 0), (SW, hh), (255, 255, 255), 2)
+    cv2.putText(sheet, "RAW", (12, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                0.9, (255, 255, 255), 2)
+    cv2.putText(sheet, "YOLO", (SW + 12, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                0.9, (0, 255, 255), 2)
+    cv2.imwrite(out, sheet)
+    print(f"→ 对照图 {out}")
     return 0
 
 
