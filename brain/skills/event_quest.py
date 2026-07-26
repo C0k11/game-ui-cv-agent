@@ -501,13 +501,32 @@ class EventQuestSkill(BaseSkill):
                            "减号", "加号灰色", "减号灰色")
 
     def _dialog_is_purchase(self, screen: ScreenState) -> bool:
-        """确认+取消同屏语境下: body 出现数量stepper/体力/青辉石 = 购买框.
+        """确认+取消同屏语境下: body 出现数量 stepper / 青辉石 = 购买框。
 
-        阈值分层(2026-07-11 二次校准): 纯AP扫荡确认框正文"要使用NAP掃蕩N次嗎"
-        会在(0.78,0.68)冒 体力@0.38 弱检出(t46 误杀实锤, swept=0); 真購買AP框
-        的体力图标@0.92 → 体力通道阈值 0.60 干净分离。stepper 通道保持 0.20
-        (确认框上 dim 盖住底层 popup, stepper 零检出=t46 实证; 真購買AP框
-        stepper@0.96)。青辉石保持 0.20 最大灵敏(body 内青辉石永远不合法)。"""
+        ⛔⛔**体力通道已删除(2026-07-26, 全语料实测证伪)**。
+        旧码是 `体力 in body and conf>=0.60 → 购买框`, 注释宣称
+        "纯AP框体力@0.38 vs 真購買AP框@0.92 干净分离" —— **那个标定是错的**,
+        样本太少。全语料重测(分母=798 帧"确认+取消同屏", 即本判据的生效语境):
+
+          只靠体力通道判出购买框的帧 = **6**, 逐条人审 **6/6 全是纯AP扫荡确认框**
+          (reason 全是 confirm sweep (pure AP) / confirm special sweep (AP)),
+          **一个真购买框都没有**;
+          这 6 帧的体力框 x1 全部 = **0.778-0.779**(同一位置), conf 0.67~**0.92**;
+          而两帧真購買AP框(run_20260615_182657/t18, run_20260711_144712/t30,
+          正是两起 30 青辉石事故现场)的体力 x1 = **0.808 / 0.816**, conf 0.77/0.92。
+        ⇒ conf 分布**完全重叠**(纯AP框能到 0.92, 真框有 0.77), 阈值分层不可能成立;
+          那个"体力"根本是**弹窗外面**底层扫荡面板的 `AP→AP` 标签
+          (目检 run_20260711_144712/t30: 弹窗右界≈0.74, 体力在 0.82 = 框外)。
+        ⇒ 体力通道 = **零区分度 + 100% 误伤**, 删掉是纯收益:
+          真购买框召回 2/2 不变(两帧都被 stepper 抓住), 误伤 6→0。
+        实锤代价: 2026-07-25 晚它误杀了一轮 240AP 扫荡(12 次)。
+
+        保留的两条通道都正交且实测有效:
+          ① stepper(MIN/MAX/加减号) 在 body —— 真購買AP框 @0.96/0.97 稳定检出,
+             纯AP确认框 **零检出**(dim 盖住底层 popup)。这是最可靠的购买框铁证。
+          ② 青辉石 在 body —— 常漏检(小图标压深色价格条), 但**检到即铁证**,
+             阈值保持 0.20 最大灵敏。
+        """
         if self._pyroxene_in_body(screen):
             return True
         for b in (screen.yolo_boxes or []):
@@ -515,8 +534,6 @@ class EventQuestSkill(BaseSkill):
             if cy <= 0.12 or b.confidence < 0.20:
                 continue
             if b.cls_name in self._BUY_DIALOG_MARKERS:
-                return True
-            if b.cls_name == UC.TOPBAR_AP and cy > 0.12 and b.confidence >= 0.60:
                 return True
         return False
 

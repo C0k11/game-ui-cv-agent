@@ -246,11 +246,19 @@ class TicketSweepSkill(BaseSkill):
         ) is not None
 
     def _purchase_structure(self, screen: ScreenState) -> bool:
-        """⛔结构白名单闸(2026-07-11 cls审计移植 event_quest 同款): 青辉石
-        黑名单在購買AP框上被 v13 漏检实锤打穿(30青辉石事故), 需要第二判据 —
-        确认框语境下 body(y>0.12) 出现数量 stepper(購買框@0.96)或体力图标
-        @≥0.60(真購買AP框@0.92, 纯AP/票确认框正文弱检出@0.38 以下) = 购买框。
-        扫荡确认框被 dim 盖住底层 popup, stepper 零检出(t46 实证)不误伤。"""
+        """⛔结构白名单闸: 确认框语境下 body(y>0.12) 出现数量 stepper = 购买框。
+        (青辉石黑名单在購買AP框上被 v13 漏检打穿过 = 30 青辉石事故, 需要这条
+         正交的结构判据兜底; 真購買AP框 stepper@0.96/0.97, 纯AP/票确认框被 dim
+         盖住底层 popup → stepper 零检出, 不误伤。)
+
+        ⛔**体力通道已删除(2026-07-26)** —— 与 event_quest._dialog_is_purchase
+        同形, 一起改(铁律: 任何一处金钱判据被证伪, 当天 grep 全仓同形一起改;
+        2026-07-11 就是因为只改了 event_quest 没迁 schedule, 同一个洞留了两周
+        才铸成 30 青辉石课程表票事故)。
+        全语料实测(798 帧"确认+取消同屏"): 只靠体力通道判出来的 6 帧
+        **6/6 全是纯AP扫荡确认框**, 零真购买框依赖它; 纯AP框体力 conf 可达 0.92,
+        与真框 0.77 完全重叠 ⇒ 阈值分层不成立。详见 event_quest 那边的长注释。
+        """
         _markers = ("MAX_可点击", "MIN_灰色", "MIN_可点击", "加号",
                     "减号", "加号灰色", "减号灰色")
         for b in (screen.yolo_boxes or []):
@@ -258,8 +266,6 @@ class TicketSweepSkill(BaseSkill):
             if cy <= 0.12 or b.confidence < 0.20:
                 continue
             if b.cls_name in _markers:
-                return True
-            if b.cls_name == UC.TOPBAR_AP and b.confidence >= 0.60:
                 return True
         return False
 
