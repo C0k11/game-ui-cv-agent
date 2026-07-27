@@ -432,7 +432,20 @@ class TicketSweepSkill(BaseSkill):
             # 0 tickets swept; manual same-pos tap opened it). Root-fixed by the
             # AdbInput I/O lock; self-healing backstop here — re-click the 入場键
             # (bounded) instead of giving up with tickets unspent.
-            if self._phase_ticks > 7:
+            # ⛔2026-07-27 live 实锤: 旧判据是 `_phase_ticks > 7`(**tick 当计时器**)。
+            # tick 速率实测跨度极大(memory frame_age/completion_gap: 自主跑
+            # 0.15-0.25 s/tick, 慢 run 到 2.294 s/tick) ⇒ 同一个 "7 tick" 实际
+            # 是 **1.05s ~ 16s，差 15 倍**。太短就把"游戏还在加载"误判成"tap 丢了"，
+            # 白重试甚至耗尽退出(本轮实测: 连点 3 次入場 → retries 用尽 → exit，
+            # **6 张悬赏票一张没花**)。
+            # 改墙钟, 且走 `since()`(= game_clock, 会扣掉 step 门的人工停顿) ——
+            # 否则逐帧门控时人审一慢就必然触发这条误判。
+            # ⚠️3.0s 这个值**没有"入場→任務資訊"的实测支撑**, 是按"比自主跑 7tick
+            #   的 1.75s 宽、比慢 run 的 16s 严"取的折中。待用飞轮帧量准后再定。
+            #   (仍留 `_phase_ticks >= 2`: 至少观察两帧再判, 防第一帧就误触。)
+            # ⚠️同文件还有 4 处 tick-as-timer 未改(L363 >8 / L385 >12 / L399 >10 /
+            #   L571 <=18) —— 它们今天没有实锤, 按"不修没坏的判据"暂不动。
+            if self._phase_ticks >= 2 and self.since("phase") > 3.0:
                 if self._sortie_retries < _SORTIE_MAX_RETRIES:
                     self._sortie_retries += 1
                     self.log(f"任務資訊 未开 (入場 tap 可能丢失) → 回 stage 重点入場键 "
