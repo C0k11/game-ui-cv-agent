@@ -1,4 +1,33 @@
-# Blue Archive Daily Assistant
+# Game-UI CV Agent — Blue Archive Daily Assistant
+
+A computer-vision agent that plays a mobile game's daily routine by *looking* at the
+screen and clicking, with no game-file modification and no cloud calls. The interesting
+part isn't the automation — it's the **self-built data pipeline** behind it.
+
+**Data pipeline.** 47,057 raw frames captured from live runs (Android-internal
+`screencap`, so no overlay contamination) → automated dedup (pHash), train/val
+**leakage screening** (same-session frames are excluded by timestamp prefix, not by
+filename — renamed pools would otherwise slip through), and per-class label audits →
+**33,912 labeled images / 432,276 boxes** in the three active training sets.
+
+**Models.** Three specialized YOLO detectors, **455 classes** with real training
+samples: a 184-class game-UI detector (98.2% mAP50), a 252-class character-portrait
+detector (99.3%), and a 19-class battle-unit detector (99.2%). Digit-OCR is used only
+for reading numbers (currency, tickets, stamina) — never for deciding *what* is on
+screen; that is always the detector's job.
+
+**Safety.** Every action that could spend the game's paid currency passes fail-closed
+interlocks: the purchase-dialog predicate is structural (quantity-stepper detection),
+and if a balance can't be read, the bot does nothing rather than guess. Each gate's
+false-positive rate was measured over the full 798-frame corpus of confirm dialogs
+before shipping, not reasoned about.
+
+**Known limits (stated deliberately).** The 98.2% mAP50 is measured on a validation
+set that covers **129 of the 184 learned UI classes (70%)** — 55 classes have no
+val instances at all, so their regressions are currently untestable. The val pool
+also predates the most recent event UI. Rebuilding it is the top open item.
+
+---
 
 **它是什么**:一个在你自己电脑上运行的《蔚蓝档案》AI 助手。它像人一样"看"模拟器画面(AI 视觉识别按钮和角色),像人一样点击操作——每天自动帮你收咖啡厅、扫荡关卡、打竞技场、领邮件和任务奖励,新活动还能自动推图、按加成规划体力。不改游戏、不上云,纯本地。
 
@@ -255,8 +284,8 @@ Windows 10/11 · Python 3.11+ · [MuMu Player 12](https://mumu.163.com/) running
 ### Install
 
 ```powershell
-git clone https://github.com/C0k11/blue-archive-assistant.git
-cd blue-archive-assistant
+git clone https://github.com/C0k11/game-ui-cv-agent.git
+cd game-ui-cv-agent
 pip install -r requirements.txt
 ```
 
