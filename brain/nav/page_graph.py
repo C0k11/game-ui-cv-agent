@@ -69,6 +69,16 @@ PAGES: Dict[str, P] = {
     },
     "Schedule_RoomCarousel": {
         "core": ["全体课程表", "左切换", "右切换", "课程表票"],
+        # ⛔2026-07-27 live 实锤: 只有 min_core=2 时, **社交页**(社團/好友/幫手
+        # 三卡)靠通用的 左切换+右切换 就凑够 2 → 被判成课程表轮播, 而它同帧的
+        # 「社团」0.99 让 Club(core 1/1) 只拿到 1 分, 打分按**绝对命中数**排序 →
+        # 通用 chrome 打赢专属物件。这正是 memory 经验① "靠专属物件区分的同构
+        # 页面, 那个物件必须进 require" 的第二次复发。
+        # 两帧验证: 真轮播帧 全体课程表=0.98 在; 社交页帧无此 cls。
+        # ⛔用 require_any(OR) 不是 require(AND): 全语料实测 AND 会误伤 65 帧
+        # 真课程表页(那些帧只检出 课程表票、没检出 全体课程表)。两个都是课程表
+        # **域专属**, 社交页两个都不带 → OR 既挡住误判又不误伤。
+        "require_any": ["全体课程表", "课程表票"],
         "min_core": 2, "neg": ["扫荡开始", "任务开始", "悬赏通缉票", "学院交流会票", "取消键", "弹窗叉叉"],
         "parent": "Schedule_RegionSelect",
     },
@@ -247,6 +257,16 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
             continue
         req = p.get("require", ())
         if req and not all(n in ns for n in req):
+            continue
+        # ⭐require_any(2026-07-27): "这一页必须至少带一个**本域专属**物件"。
+        # 与 require(AND) 的分工: AND 适合"只有一个专属锚且必现"的页; 域里有
+        # **多个专属锚、但每帧只保证出现其中之一**时只能用 OR。
+        # ⛔实测逼出来的(全语料 44,177 有检出帧): Schedule_RoomCarousel 用
+        # AND require=[全体课程表] 翻 182 帧 —— 修正 117(社交页误判 57/咖啡厅 4/
+        # 纯"左切换+右切换"凑数垃圾 56), 但**误伤 65 帧真课程表页**(那些帧
+        # 全体课程表 没检出、只检出 课程表票)。改 OR 后误伤归零。
+        req_any = p.get("require_any", ())
+        if req_any and not any(n in ns for n in req_any):
             continue
         k = sum(1 for c in p["core"] if c in ns)
         if k >= p["min_core"]:
