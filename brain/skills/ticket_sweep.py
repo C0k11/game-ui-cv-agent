@@ -284,8 +284,10 @@ class TicketSweepSkill(BaseSkill):
         except Exception:
             pass
         # span 单位 = 图标宽(2026-07-27): 旧 `span=0.10` 是屏幕宽度比例, 换分辨率/
-        # 窗口大小就失准。AP 数字串实测右界 5.44 iw(含 "/240"), 取 4.1 只吃分子。
-        res = self.read_count(screen, UC.TOPBAR_AP, side="right", span_iw=4.1)
+        # 窗口大小就失准。参数与 `_topbar_strip_map()[体力]` 对齐(网格标定 88.1%,
+        # y 留白 1.6bh —— AP 要**松**, 与信用点的 0.5 方向相反)。
+        res = self.read_count(screen, UC.TOPBAR_AP, side="right",
+                              span_iw=4.9, y_pad_bh=1.60)
         return res[0] if res is not None else None
 
     def _pyroxene_buy_dialog(self, screen: ScreenState) -> bool:
