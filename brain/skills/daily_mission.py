@@ -64,9 +64,15 @@ class DailyMissionSkill(BaseSkill):
         live lobby: entry@(0.046,0.360), badge OCR raw '4/8'). None = unread."""
         try:
             from brain.pipeline import run_digit_ocr
+            # ⛔2026-07-27 单位换成**入口框自身尺寸**(原来 0.02/0.055/0.035/0.005
+            # 都是屏幕比例)。每日领奖 框实测 iw 0.0252 / ih 0.0231 (n=2207) ⇒
+            # 0.02→0.79 框宽, 0.055→2.38 框高, 0.035→1.39 框宽, 0.005→0.22 框高。
+            # 16:9 下几何等价, 换分辨率/窗口不再漂(见 brain.pipeline.icon_strip)。
+            _bw = max(1e-6, entry.x2 - entry.x1)
+            _bh = max(1e-6, entry.y2 - entry.y1)
             raw = run_digit_ocr(screen.frame, (
-                max(0.0, entry.x1 - 0.02), max(0.0, entry.y1 - 0.055),
-                min(1.0, entry.x2 + 0.035), min(1.0, entry.y1 + 0.005)))
+                max(0.0, entry.x1 - 0.79 * _bw), max(0.0, entry.y1 - 2.38 * _bh),
+                min(1.0, entry.x2 + 1.39 * _bw), min(1.0, entry.y1 + 0.22 * _bh)))
             if raw and "/" in raw and raw.split("/")[0].isdigit():
                 return int(raw.split("/")[0])
         except Exception:

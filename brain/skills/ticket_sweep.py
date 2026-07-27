@@ -233,20 +233,38 @@ class TicketSweepSkill(BaseSkill):
         bh = icon.y2 - icon.y1
         y1s = max(0.0, icon.y1 - bh * self._TICKET_YPAD)
         y2s = min(1.0, icon.y2 + bh * self._TICKET_YPAD)
-        last_raw = None
-        for xl, xr in self._TICKET_WINDOWS:
-            last_raw = run_digit_ocr(screen.frame, (min(1.0, icon.x2 + xl * iw), y1s,
-                                                    min(1.0, icon.x2 + xr * iw), y2s))
-            res = parse_count(last_raw)
-            if res is None or res[0] is None:
-                continue
+        def _read(xl, xr):
+            raw = run_digit_ocr(screen.frame, (min(1.0, icon.x2 + xl * iw), y1s,
+                                               min(1.0, icon.x2 + xr * iw), y2s))
+            r = parse_count(raw)
+            if r is None or r[0] is None:
+                return raw, None
             # ⛔ 分母为 0 的读数一律丢弃: 计数器的分母是**上限**, 永远不会是 0。
             # `9/0` 就是零票屏被读大的那个形状(实测 15 次, 真值全是 0/6)。
             # ⚠反过来 `cur > tot` **不能**当无效 —— 帧上确凿存在 `14/6`/`15/6`,
             # 票是可以超出每日回满上限的。拿它当闸会误杀合法读数。
-            if res[1] == 0:
+            if r[1] == 0:
+                return raw, None
+            return raw, r[0]
+
+        last_raw = None
+        for xl, xr in self._TICKET_WINDOWS:
+            last_raw, v = _read(xl, xr)
+            if v is None:
                 continue
-            return res[0]
+            # ⭐交叉复核(2026-07-27): 同一串数字换一个**位移过的**窗口再读一次,
+            # 两次必须给出同一个 cur 才采信。单窗口 OCR 会把斜体 6 认成 9
+            # (实测: 语料 4K 帧 1/139, 低分辨率与形变帧上更高) —— 而票数**读大**
+            # 意味着 0 票时仍去出击, 撞的正是青辉石買票框。位移窗口的 crop 内容
+            # 不同, 识别错误不完全相关, 所以"两窗独立同意"能滤掉相当一部分。
+            # ⚠不一致时**跳过这个窗口继续试**而不是直接 None: 直接 None 会把
+            # 读出率打回去, 那正是本次修复要解决的浪费票问题。
+            _r2, v2 = _read(xl - 0.5, xr + 0.5)
+            if v2 != v:
+                self.log(f"[tkdbg] 交叉复核不一致 win({xl},{xr})={v} "
+                         f"vs 位移窗={v2} (raw {last_raw!r} / {_r2!r}) — 弃这个窗口")
+                continue
+            return v
         self.log(f"[tkdbg] icon@({icon.x1:.3f},{icon.y1:.3f},{icon.x2:.3f},"
                  f"{icon.y2:.3f}) conf={icon.confidence:.2f} all "
                  f"{len(self._TICKET_WINDOWS)} strips unread (last raw={last_raw!r})")
@@ -265,7 +283,9 @@ class TicketSweepSkill(BaseSkill):
                 return ap
         except Exception:
             pass
-        res = self.read_count(screen, UC.TOPBAR_AP, side="right", span=0.10)
+        # span 单位 = 图标宽(2026-07-27): 旧 `span=0.10` 是屏幕宽度比例, 换分辨率/
+        # 窗口大小就失准。AP 数字串实测右界 5.44 iw(含 "/240"), 取 4.1 只吃分子。
+        res = self.read_count(screen, UC.TOPBAR_AP, side="right", span_iw=4.1)
         return res[0] if res is not None else None
 
     def _pyroxene_buy_dialog(self, screen: ScreenState) -> bool:

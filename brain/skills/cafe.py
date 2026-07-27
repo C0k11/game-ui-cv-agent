@@ -265,10 +265,16 @@ class CafeSkill(BaseSkill):
             # The 咖啡厅收益 cls box covers ONLY the title text (h≈0.025);
             # the X.X% value renders BELOW it (offline-verified 2026-06-09:
             # in-box crops → None, below-box crop → '0' on a 0.0% frame).
-            x1 = max(0.0, earn_box.x1 - 0.01)
+            # ⛔2026-07-27 改成**框自身尺寸**为单位(原来是屏幕比例 0.01/0.05)。
+            # 咖啡厅收益 框实测 iw 0.0793 / ih 0.0247 (n=3100, 四分位很紧),
+            # 故 0.01→0.126 框宽, 0.05→2.02 框高 —— 16:9 下等价, 换分辨率/
+            # 窗口大小不再漂(理由见 brain.pipeline.icon_strip)。
+            _bw = max(1e-6, earn_box.x2 - earn_box.x1)
+            _bh = max(1e-6, earn_box.y2 - earn_box.y1)
+            x1 = max(0.0, earn_box.x1 - 0.126 * _bw)
             y1 = earn_box.y2
-            x2 = min(1.0, earn_box.x2 + 0.01)
-            y2 = min(1.0, earn_box.y2 + 0.05)
+            x2 = min(1.0, earn_box.x2 + 0.126 * _bw)
+            y2 = min(1.0, earn_box.y2 + 2.02 * _bh)
             raw = run_digit_ocr(screen.frame, (x1, y1, x2, y2)) or ""
             m = re.search(r"(\d+(?:\.\d+)?)", str(raw))
             if not m:

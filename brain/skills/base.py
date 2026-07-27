@@ -663,7 +663,8 @@ class BaseSkill(ABC):
         return best
 
     def read_count(self, screen: ScreenState, icon_cls, *, conf: float = 0.30,
-                   side: str = "right", span: float = 0.10, pad: float = 0.005):
+                   side: str = "right", span_iw: float = 5.0,
+                   pad_iw: float = 0.10, y_pad_bh: float = 0.80):
         """DIGIT-ONLY read of the number next to a currency/count icon.
 
         YOLO locates the icon (e.g. TICKET_BOUNTY, TOPBAR_AP); we crop the
@@ -671,12 +672,20 @@ class BaseSkill(ABC):
         OCR is used (per spec: YOLO for everything, OCR for digits) and works
         regardless of the global _OCR_ENABLED nav-OCR switch.
 
+        ⛔2026-07-27 单位换成**图标自身尺寸**(原来是屏幕宽度比例)。屏幕比例
+        只在标定它的那个分辨率/宽高比上成立, 而本系统的帧有 scrcpy/ADB/DXcam
+        三条来路、语料实测 19 种分辨率、宽高比 1.48~1.79。理由与实测见
+        `brain.pipeline.icon_strip` 的注释。
+        y 留白默认 0.80bh 而不是原来的 0.25bh —— DB 文本检测器要行外留白才
+        肯出框, 0.25 会整条返回空(arena 2026-07-17 已实锤过一次, 当时没传导)。
+
         Args:
             icon_cls: cls name(s) of the icon box to anchor on.
             side: which side the number sits — "right" (top-bar currencies,
                   tickets) or "left".
-            span: width of the digit strip as a fraction of screen width.
-            pad: gap between icon edge and strip start (fraction of width).
+            span_iw: strip width in ICON WIDTHS.
+            pad_iw: gap between icon edge and strip start, in icon widths.
+            y_pad_bh: vertical margin above/below the icon box, in icon heights.
         Returns:
             (current, total) from pipeline.parse_count — total may be None;
             or None if the icon isn't found / nothing read. Caller decides.
@@ -684,16 +693,16 @@ class BaseSkill(ABC):
         box = self.find_cls(screen, icon_cls, conf=conf)
         if box is None or screen.frame is None:
             return None
-        # vertical band aligned to the icon (a touch taller for glyph margin)
-        bh = box.y2 - box.y1
-        y1 = max(0.0, box.y1 - bh * 0.25)
-        y2 = min(1.0, box.y2 + bh * 0.25)
+        iw = max(1e-6, box.x2 - box.x1)
+        bh = max(1e-6, box.y2 - box.y1)
+        y1 = max(0.0, box.y1 - bh * y_pad_bh)
+        y2 = min(1.0, box.y2 + bh * y_pad_bh)
         if side == "right":
-            x1 = min(1.0, box.x2 + pad)
-            x2 = min(1.0, x1 + span)
+            x1 = min(1.0, box.x2 + pad_iw * iw)
+            x2 = min(1.0, x1 + span_iw * iw)
         else:  # left
-            x2 = max(0.0, box.x1 - pad)
-            x1 = max(0.0, x2 - span)
+            x2 = max(0.0, box.x1 - pad_iw * iw)
+            x1 = max(0.0, x2 - span_iw * iw)
         try:
             from brain.pipeline import run_digit_ocr, parse_count
         except Exception:

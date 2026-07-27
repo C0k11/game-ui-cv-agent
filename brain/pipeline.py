@@ -261,24 +261,59 @@ def get_resource_snapshot() -> Dict[str, Any]:
     return dict(_RESOURCES)
 
 
-# Per-currency digit-field span (fraction of frame width) right of the icon.
-# Calibrated 2026-06-11 from the live top-bar layout (体力→加号 gap 0.084,
-# 信用点→青辉石 0.141, 青辉石→加号 0.082). AP/pyrox narrow, credit wide.
-def _topbar_span_map():
-    # Calibrated 12-sample live 2026-06-11:
-    #   AP 0.06   → "999" only (excludes "/240"; 0.078 caught the slash → 9999)
-    #   credit 0.118 → reads ~1.8B (a stable +1-digit OCR over-read of the
-    #                  9-digit 1.8亿; good enough for shop's "rich enough?" gate.
-    #                  wider spans → None). Exact credit is an OCR-model limit.
-    #   pyrox 0.078 → "6587" reliably (6587 ×12).
+# ── 数字 strip 几何: 一律用「锚点图标自身尺寸」当单位 ──────────────────────
+# ⛔2026-07-27 定死, 起因是 bounty 票数在关卡列表页 **0/211 帧**读得出。
+#
+# 为什么不能用屏幕比例(0.078 这种):
+#   屏幕比例只在**标定它的那个分辨率+宽高比**上成立。这个系统的帧至少有三条
+#   来路 —— scrcpy(设备分辨率) / ADB screencap(设备分辨率) / DXcam(**窗口**大小,
+#   窗口随便拖多大都行, 还可能带边框) —— 语料里实测出 **19 种分辨率、宽高比
+#   1.4812~1.7927**。UI 是整体等比缩放的, 所以"数字串相对图标的位置"是**布局
+#   常数**, 而"数字串占屏幕宽度的百分之几"不是。
+#
+# 9 种分辨率(2363x1331 ~ 3840x2160)实测数字串右界, 单位=图标宽:
+#   青辉石 med 4.11 iw (各分辨率 3.43~4.31) / 信用点 4.99 (4.63~5.13)
+#   体力 5.44 (4.68~5.72, 含 "/240" 尾巴)
+# 同一批数据换算成屏幕比例则随分辨率漂 —— 这就是差别。
+#
+# ⚠y 留白同样关键, 而且这条**教训在仓库里躺了 10 天没传导**:
+# `arena.py:188` 2026-07-17 就写过"±0.4bh 是临界高度, icon 框轻微抖动就把整串
+# 裁没(live 12 连 None 实锤), ±0.8bh 同帧完整读出" —— 但 ticket_sweep(0.4)
+# 和这里的顶栏(0.25)都没跟着改。DB 文本检测器需要行外留白才肯出框。
+def icon_strip(box, x_from: float, x_to: float, y_pad: float):
+    """锚点图标右侧的数字 strip, 单位 = 图标自身宽/高(分辨率与宽高比无关)。
+
+    x_from / x_to: 从 `box.x2` 起算, 单位为图标宽度 iw。
+    y_pad:         图标框上下各外扩多少个图标高度 bh。
+    """
+    iw = max(1e-6, box.x2 - box.x1)
+    bh = max(1e-6, box.y2 - box.y1)
+    return (min(1.0, box.x2 + x_from * iw),
+            max(0.0, box.y1 - y_pad * bh),
+            min(1.0, box.x2 + x_to * iw),
+            min(1.0, box.y2 + y_pad * bh))
+
+
+# Per-currency digit strip in ICON units: (x_from, x_to, y_pad).
+# 语义保留自 2026-06-11 的标定意图:
+#   AP    → 只要 "999" 不碰 "/240"(旧 0.078 屏宽吃到斜杠 → 读成 9999);
+#           parse_count 取分子, 所以右界宁短勿长。
+#   credit→ 9 位长数, 需要最宽的窗口。
+#   pyrox → 中等。
+def _topbar_strip_map():
     from brain.skills.ui_classes import TOPBAR_AP, TOPBAR_CREDIT, TOPBAR_PYROXENE
-    return {TOPBAR_AP: 0.06, TOPBAR_CREDIT: 0.118, TOPBAR_PYROXENE: 0.078}
+    return {
+        TOPBAR_AP: (0.10, 4.2, 0.80),
+        TOPBAR_CREDIT: (0.10, 5.3, 0.80),
+        TOPBAR_PYROXENE: (0.10, 4.8, 0.80),
+    }
 
 
 try:
-    _TOPBAR_SPAN = _topbar_span_map()
+    _TOPBAR_STRIP = _topbar_strip_map()
 except Exception:
-    _TOPBAR_SPAN = {}
+    _TOPBAR_STRIP = {}
+_TOPBAR_STRIP_DEFAULT = (0.10, 4.8, 0.80)
 
 
 def _read_topbar_count(screen, cls_name: str):
@@ -293,20 +328,14 @@ def _read_topbar_count(screen, cls_name: str):
             best = b
     if best is None or screen.frame is None:
         return None
-    bh = best.y2 - best.y1
-    # Right edge = a per-currency FIXED span from the icon. The old
-    # neighbour-clip (clip at the next 加号/icon) was the bug: the neighbour
-    # flickers frame-to-frame, and when AP's 加号 dropped the span over-reached
-    # into credit and read 999→9999 (systematic, sampled 12× live 2026-06-11).
-    # The top bar is a fixed layout, so a per-field span is deterministic and
-    # frame-independent: AP/pyrox fields are narrow (~0.078), credit is a wide
-    # 9-digit field (~0.135). (parse_count takes the numerator of AP's
-    # "999/240", so a touch of slack on AP is harmless.)
-    _span = _TOPBAR_SPAN.get(cls_name, 0.078)
-    x_right = min(1.0, best.x2 + _span)
-    raw = run_digit_ocr(screen.frame, (
-        min(1.0, best.x2 + 0.003), max(0.0, best.y1 - bh * 0.25),
-        x_right, min(1.0, best.y2 + bh * 0.25)))
+    # Right edge = a per-currency span from the icon, in ICON WIDTHS. History:
+    # the neighbour-clip (clip at the next 加号/icon) was the first bug — the
+    # neighbour flickers frame-to-frame, and when AP's 加号 dropped the span
+    # over-reached into credit and read 999→9999 (12× live 2026-06-11). It was
+    # replaced by a fixed SCREEN FRACTION, which killed the flicker but pinned
+    # the read to one resolution — see `icon_strip` above for why that breaks.
+    x_from, x_to, y_pad = _TOPBAR_STRIP.get(cls_name, _TOPBAR_STRIP_DEFAULT)
+    raw = run_digit_ocr(screen.frame, icon_strip(best, x_from, x_to, y_pad))
     res = parse_count(raw)
     return res[0] if (res is not None and res[0] is not None) else None
 

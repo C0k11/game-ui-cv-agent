@@ -217,9 +217,12 @@ class ShopSkill(BaseSkill):
             from brain.pipeline import run_digit_ocr, parse_count
         except Exception:
             return
-        x1 = min(1.0, icon.x2 + 0.003)
-        x2 = min(1.0, x1 + 0.115)
-        raw = run_digit_ocr(screen.frame, (x1, icon.y1 - 0.012, x2, icon.y2 + 0.012))
+        # ⛔2026-07-27: 这里原本是 `_read_topbar_count` 的手抄版(x 0.003/0.115、
+        # y ±0.012 全是屏幕比例)。改成共用 `icon_strip` + 顶栏同一套图标单位常数,
+        # 既去掉重复实现, 也一并吃到 y 留白修正(±0.012 ≈ 0.35bh, 偏紧)。
+        from brain.pipeline import icon_strip, _TOPBAR_STRIP, _TOPBAR_STRIP_DEFAULT
+        _xf, _xt, _yp = _TOPBAR_STRIP.get(UC.TOPBAR_CREDIT, _TOPBAR_STRIP_DEFAULT)
+        raw = run_digit_ocr(screen.frame, icon_strip(icon, _xf, _xt, _yp))
         res = parse_count(raw)
         if res is not None and res[0] is not None:
             self._balance = res[0]
