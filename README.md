@@ -292,10 +292,13 @@ pip install -r requirements.txt
 ### Run
 
 ```powershell
-# Launcher (recommended): download GameSecretaryApp.exe from Releases and double-click.
-# Terminal:
+# Start the backend + dashboard:
 py -m uvicorn server.app:app --host 127.0.0.1 --port 8000
 # then open http://127.0.0.1:8000/dashboard.html
+
+# Optional: a .NET WebView2 launcher lives in windows_app/. No prebuilt binary is
+# published — build it from source if you want a double-click entry point:
+#   scripts\publish_windows_app.bat
 
 # Combat 2.0 (scrcpy blackboard + behavior-tree card play):
 py -u scripts/bot_play_quest.py 10 11 12
@@ -335,7 +338,9 @@ game-ui-cv-agent/
 └── windows_app/             # .NET 8 WebView2 launcher
 ```
 
-Models, datasets and the HF cache live outside the repo under `D:/Project/ml_cache/` (gitignored).
+Model weights, datasets and the HF cache live **outside the repo** in a separate cache
+directory (gitignored) — set its location via `HF_HOME` / the paths in
+`data/model_registry.json`, so the checkout stays small and no binaries are committed.
 
 ## License & Disclaimer
 
