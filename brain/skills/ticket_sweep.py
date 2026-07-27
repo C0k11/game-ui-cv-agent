@@ -612,8 +612,26 @@ class TicketSweepSkill(BaseSkill):
             self.log("confirm click 被稳定门吞 → 留在 confirm 重点")
 
         # Sweep done already (掃蕩完成 popped) → result.
-        if self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None \
-                or self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None:
+        # ⛔2026-07-27 live 实锤(bounty 6 张票 + 2 倍奖励差点又白丢): 这条分支在
+        # **掃蕩前的确认框**上误触发 —— 「要使用6懸賞通緝票券掃蕩6次嗎?」弹出时,
+        # 確認键从下往上**弹入动画**, 途中扫过 _DONE_CONFIRM_BAND(y 0.74-0.90),
+        # 而它的终值在 cy 0.699(带外)。于是: 假计一次 cycle → goto result →
+        # **真正的確認从没点过** → result 里票数被弹窗挡住读不出 → exit → 点叉叉
+        # = 取消 = 6 张票一张没花。与今早 cafe「領取」在弹入动画帧上锚点是**同一
+        # 个机制**(0.825→0.733), 只是这里错的是判定不是落点。
+        #
+        # 负门禁: **结果弹窗永远没有取消键**。全语料 44,669 有检出帧实测:
+        #   获得奖励在屏 494 帧 → 其中带取消键 **0 帧**(规则 0 反例)
+        #   確認键落在 DONE 带内 588 帧 → **其中 252 帧同屏有取消键**(全是确认框)
+        #   且这 588 帧**没有一帧**带 获得奖励
+        # ⇒ 只加负门禁, 不删裸 確認 信号(剩下 336 帧无取消键的可能是 获得奖励
+        #   漏检的真完成弹窗, 那正是这条裸信号存在的理由)。
+        # 这条规则 money_safety 2026-06-10 就写过("確認+取消同帧 = 不是结果弹窗"),
+        # 一直没传导到这里 —— 与 y 留白同款"修一处没 grep 全仓"。
+        _cancel_up = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None
+        if (not _cancel_up) and (
+                self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None
+                or self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None):
             # Could be the 掃蕩完成 reward popup (确认键 lower at ~0.81).
             # ⭐sweep_cycles 落账移到这里(到达证据=掃蕩完成弹窗) — 旧码在点
             # 确认键前 +1+goto result, 确认被吞时假报 cycle 完成(JFD"没去"
@@ -681,6 +699,15 @@ class TicketSweepSkill(BaseSkill):
     def _result(self, screen: ScreenState) -> Dict[str, Any]:
         # 掃蕩完成 reward popup — re-detect (WGC transition frames). Dismiss via
         # the lower 确认键, or GOT_REWARD header / 点击继续字样.
+        # ⛔2026-07-27: 取消键在屏 ⇒ 这**不是**结果弹窗, 是个确认框(全语料 494 帧
+        # 结果弹窗里带取消键的 **0 帧**)。走到这里说明上游误判了 —— 不能拿"关奖励"
+        # 的手去点确认框的確認(那是不受控消费), 也不能干等到票数读不出就收工
+        # (今天 bounty 就是这么把 6 张票 + 2 倍奖励丢掉的)。退回 confirm, 交给带
+        # 全部金钱闸的正规 handler 判定。
+        if self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None:
+            self.log("result 见取消键 ⇒ 不是结果弹窗(是确认框) — 退回 confirm")
+            self._goto("confirm")
+            return action_wait(200, "result 误入 → 回 confirm")
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
             return action_click_box(cont, "dismiss sweep reward (continue)")

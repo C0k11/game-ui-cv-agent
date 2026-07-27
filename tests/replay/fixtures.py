@@ -542,6 +542,47 @@ def fx_bounty_zero_tickets_never_overread():
             f"读出 {got} (屏上 0/6; 期望 0 或 None, 绝不能是正数)")
 
 
+def fx_sweep_confirm_not_mistaken_for_done():
+    """run_20260602_182826/t0010 真帧: 掃蕩确认框 — 確認@cy0.792 + 取消@cy0.796,
+    **无 获得奖励**。
+
+    ⛔2026-07-27 live 实锤(bounty 6 票 + 2 倍奖励): `_confirm` 的"掃蕩完成了"
+    分支只看「確認键落在 _DONE_CONFIRM_BAND(y 0.74-0.90)」, 而**确认框弹入
+    动画**里確認键正好从下往上扫过这条带(终值 cy 0.699 在带外) ⇒ 假计一次
+    cycle → goto result → **真正的確認从没点过** → 票数被弹窗挡住读不出 →
+    exit → 点叉叉 = 取消 = 6 张票一张没花。
+
+    负门禁(全语料 44,669 有检出帧实测): 结果弹窗在屏 494 帧, **带取消键 0 帧**;
+    確認键落 DONE 带 588 帧, **其中 252 帧同屏有取消键**(全是确认框), 且这 588
+    帧一帧都没有 获得奖励。
+
+    本用例判"进了 result / 计了 cycle" = 同款事故重演。
+    """
+    import os
+    from brain.skills.bounty import BountySkill
+    jpg = os.path.join(FX_DIR, "sweep_confirm_dialog.jpg")
+    if not os.path.exists(jpg):
+        return (True, "SKIP: 缺 sweep_confirm_dialog.jpg")
+    screen = screen_from_tick(_load("sweep_confirm_dialog.json"),
+                              jpg_path=jpg, load_frame=True)
+    sk = BountySkill()
+    sk.reset()
+    sk._goto("confirm")
+    sk._phase_ticks = 30          # 越过 pre-transition 等待窗, 直接考判定
+    act = sk._confirm(screen)
+    bad = []
+    if sk.sub_state == "result":
+        bad.append("进了 result")
+    if sk._sweep_cycles != 0:
+        bad.append(f"假计 cycle={sk._sweep_cycles}")
+    if act.get("action") != "click":
+        bad.append(f"没去点確認(action={act.get('action')})")
+    return (not bad,
+            f"{'/'.join(bad) if bad else '未误判'} — "
+            f"sub={sk.sub_state} cycles={sk._sweep_cycles} "
+            f"action={act.get('action')} reason={act.get('reason')!r}")
+
+
 CASES = [
     ("⛔arena未到达_绝不报完成", fx_arena_never_reached_not_complete, True),
     ("⛔shop留店标志跟随plan", fx_shop_chain_flag_follows_plan, True),
@@ -560,6 +601,7 @@ CASES = [
     ("L2_三家扫荡面板不混淆", fx_page_graph_sweep_panels_not_confused, True),
     ("悬赏票数_关卡列表页读得出", fx_bounty_tickets_stagelist_readable, False),
     ("⛔悬赏零票_绝不读成非零", fx_bounty_zero_tickets_never_overread, True),
+    ("⛔掃蕩确认框_绝不当成完成弹窗", fx_sweep_confirm_not_mistaken_for_done, True),
 ]
 
 
