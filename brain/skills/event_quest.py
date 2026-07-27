@@ -51,6 +51,9 @@ _WEAK_CONF = 0.20          # 活动皮肤弱类 (活动商店/活动任务/活�
 _ENTER_MAX = 24
 _VERIFY_RETRY_MAX = 10     # 405 轮播重试上限 (双相位修正后期望 ≤3 轮命中)
 _PHASE_MAX = 18
+# ⚠`_PHASE_MAX` 是 **tick** 不是秒 —— 实测 tick 速率 0.15~2.3 s/tick, 同一个 "18"
+# 落在 2.7s ~ 41s 之间。凡"等某个东西出现"的地方一律另用墙钟, 别复用它。
+_MILESTONE_ANCHOR_SEC = 4.0   # 等「獎勵資訊」入口渲染的墙钟窗口
 _BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wait
                            # 被压 0.12s), 46 时代假设 5s/tick 已失效: 46≈28s <
                            # 战斗 70-90s → 必超时 done → derail 二连根因
@@ -220,6 +223,7 @@ class EventQuestSkill(BaseSkill):
         self._formation_step = ""     # unlock 子步: '', 'edit', 'auto', 'confirm', 'sortie'
         self._tasks_done = False
         self._milestone_done = False  # 里程碑(獎勵資訊)领奖阶段
+        self._milestone_wait_t0 = 0.0  # 等「獎勵資訊」入口渲染的墙钟起点(0=未计时)
 
     def reset(self) -> None:
         super().reset()
@@ -1539,6 +1543,7 @@ class EventQuestSkill(BaseSkill):
             return action_back("milestone: 领完(灰) → back")
         info = self.find_cls(screen, UC.EVENT_REWARD_INFO, conf=_WEAK_CONF)
         if info is not None:
+            self._milestone_wait_t0 = 0.0
             region = (info.x1 - 0.02, info.y1 - 0.05,
                       info.x2 + 0.04, info.y2 + 0.02)
             if self.dot_in_region(screen, region, dot_classes=("红点",)):
@@ -1547,7 +1552,25 @@ class EventQuestSkill(BaseSkill):
             self._milestone_done = True
             self._set("tasks")
             return action_wait(200, "no milestone rewards")
-        return action_wait(600, "milestone: waiting")
+        # ⛔2026-07-27 live 实锤(logs tick 151-167): 旧码在这里是
+        # `action_wait(600, "milestone: waiting")` —— 一路等到 `_PHASE_MAX`
+        # (=18 **tick**, 又一个 tick 当计时器) 超时, 实测空转 17 tick ≈ **30s**。
+        # 问题不只是慢: 它把「这一页压根没有獎勵資訊入口」和「入口还没渲染」
+        # **混为一谈**, 于是"到底有没有里程碑奖励可领"这个问题被超时吞掉,
+        # 出口(exit_report)也报不出真相 —— 典型的"活干没干净还没人知道"。
+        # 改: 短墙钟只等渲染; 窗口过后**明确判定 + 留痕**, 不再空转。
+        # ⚠措辞要诚实 —— 判的是"没找到入口", **不是**"没有奖励"。
+        if not self._milestone_wait_t0:
+            self._milestone_wait_t0 = self.clock()
+        _el = self.clock() - self._milestone_wait_t0
+        if _el > _MILESTONE_ANCHOR_SEC:
+            self.log(f"milestone: {_el:.1f}s 内未见「獎勵資訊」入口 → 判定"
+                     f"**本页无该入口**(注意: 这不等于'没有奖励'。若这条反复出现, "
+                     f"查是不是活动页版式变了 / cls 漏检)")
+            self._milestone_done = True
+            self._set("tasks")
+            return action_wait(200, "milestone: 无獎勵資訊入口 → tasks")
+        return action_wait(300, f"milestone: 等獎勵資訊入口 ({_el:.1f}s)")
 
     # ── tasks (活动任務领奖) / close ──────────────────────────────────
 
