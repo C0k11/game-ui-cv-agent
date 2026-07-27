@@ -58,15 +58,42 @@ _DLG_BODY = ("加号", "加号灰色", "减号", "减号灰色", "MAX_可点击"
 
 
 def purchase_dialog_structure(boxes) -> str:
-    """返回非空字符串 = 这一帧有购买框结构(该停)。"""
+    """返回非空字符串 = 这一帧有购买框结构(该停)。
+
+    ⛔2026-07-27 live 修: 旧版判"体内"**只卡 y 不卡 x**, 于是信用点商店的
+    純信用点确认框(總購買價格 3,121,500 C)被判成"体内有青辉石" —— 那个青辉石
+    在 cx=0.030, 是**被弹窗遮住的左侧栏「青輝石」tab**, 弹窗左界≈0.09。
+    这跟 2026-07-25 全语料实测删掉的「体内体力」误伤(体力在弹窗右界 0.74 外的
+    0.82, 是底层扫荡面板图标)是**同一个病**: 缺横向定界。
+
+    横向定界几何(两个已知案例上都验过):
+      中心 = (确认.cx + 取消.cx)/2      —— 按钮对称居中于弹窗
+      右界 = 弹窗叉叉.cx + 0.02        —— 叉叉在弹窗右上角
+      左界 = 中心 - (右界 - 中心)       —— 对称
+    本帧实测: 中心 0.4995 / 叉叉 0.883 → 左界 0.096, 与目检的 0.09 吻合;
+    青辉石 0.030 < 0.096 被正确排除。旧的体力案例 0.82 > 右界 0.74 也排除。
+
+    ⛔**没有叉叉就定不出界 → fail-closed 照旧全宽判定**(宁可误报停下人审,
+    不可漏掉真购买框)。
+    """
     names = {b.cls_name for b in boxes}
     if not all(n in names for n in _DLG_BTN):
         return ""
     # 框体 = 确认/取消按钮上方的区域
     ys = [(b.y1 + b.y2) / 2 for b in boxes if b.cls_name in _DLG_BTN]
     btn_y = min(ys) if ys else 1.0
+    btn_xs = [(b.x1 + b.x2) / 2 for b in boxes if b.cls_name in _DLG_BTN]
+    x_lo, x_hi = 0.0, 1.0
+    _xx = [(b.x1 + b.x2) / 2 for b in boxes if b.cls_name == "弹窗叉叉"]
+    if btn_xs and _xx:
+        _c = sum(btn_xs) / len(btn_xs)
+        _r = max(_xx) + 0.02
+        if _r > _c:                       # 叉叉必须在中心右侧才是同一个弹窗
+            x_lo, x_hi = _c - (_r - _c), _r
     body = [b for b in boxes
-            if b.cls_name in _DLG_BODY and 0.12 < (b.y1 + b.y2) / 2 < btn_y]
+            if b.cls_name in _DLG_BODY
+            and 0.12 < (b.y1 + b.y2) / 2 < btn_y
+            and x_lo <= (b.x1 + b.x2) / 2 <= x_hi]
     return ("购买框结构: 确认+取消 且体内有 "
             + ",".join(sorted({b.cls_name for b in body}))) if body else ""
 CLS_RADIUS = 0.06      # 落点多远内要有检出框才算"有 cls 支撑"
@@ -104,8 +131,19 @@ def main() -> int:
     # 普通白名单顺带批过去。写进命令行 = 我确实逐帧看过那一步的落点与检出。
     ap.add_argument("--money-ok", action="append", default=[],
                     help="已人审过的**金钱**步 reason 子串, 精确点名才放行")
+    # 一次 daily 全链有几十种 reason, 每停一次就往命令行再拼一个 --allow,
+    # 到后面命令行长到看不清**已批过什么** —— 那本身就是审核失效的开始。
+    # 改成一个"人审台账"文件, 一行一条(# 开头是注释)。⛔碰钱词仍然一律停,
+    # 金钱步只认 --money-ok, 台账文件放不进去。
+    ap.add_argument("--allow-file", default="",
+                    help="已人审通过的 reason 子串清单文件(一行一条)")
     ap.add_argument("--conf", type=float, default=0.30)
     ap.add_argument("--log", default="")
+    # ⛔用户 2026-07-27: "要看和分析 yolo 识别帧" —— 只留 jsonl 是**事后无法目检**的
+    # (jsonl 里是 cls 名+conf, 不是画面)。判断"这一帧该不该这么点"必须回到画面本身,
+    # 而 grab() 原来只写同一个 TMP, 走一步覆盖一步 = 帧证据当场就没了。
+    ap.add_argument("--frames", default="",
+                    help="每步的干净帧另存到该目录(缺省=与日志同名的 _frames 目录)")
     a = ap.parse_args()
 
     from brain.pipeline import (BASE_DETECTORS, SKILL_YOLO_MAP,
@@ -123,9 +161,18 @@ def main() -> int:
 
     logp = Path(a.log) if a.log else (
         _ROOT / "data" / f"walk_{time.strftime('%Y%m%d_%H%M%S')}.jsonl")
+    framedir = Path(a.frames) if a.frames else logp.with_name(
+        logp.stem + "_frames")
+    framedir.mkdir(parents=True, exist_ok=True)
     # money_ok 同时算作"已人审过的 reason" —— 否则两道闸串成死结:
     # 金钱闸放行了, 新-reason 闸又拦下来, 而 --allow 里加它又会削弱金钱闸的语义。
     approved: set = set(a.allow) | set(a.money_ok)
+    if a.allow_file:
+        for _ln in Path(a.allow_file).read_text(encoding="utf-8").splitlines():
+            _ln = _ln.strip()
+            if _ln and not _ln.startswith("#"):
+                approved.add(_ln)
+        print(f"[allow-file] 已人审台账 {len(approved)} 条 ← {a.allow_file}")
     last_sig = None
     repeats = 0
     n = 0
@@ -172,12 +219,46 @@ def main() -> int:
         repeats = repeats + 1 if sig == last_sig else 0
         last_sig = sig
 
+        # ── 存帧: 原图 + 标注图(全部检出框 + 落点十字) ──
+        # 判断"这一步安排得对不对"必须回到画面: cls 名对了不代表点的是对的东西
+        # (Bonus 固定位漂那次, jsonl 里一切正常, 是看图才发现槽位错了)。
+        # ⛔文件名必须带墙钟: walk 是"停一次改一次 --allow 再起一次"的用法,
+        # n 每次从 0 重来 —— 只用 n 命名会**把上一段的帧证据覆盖掉**。
+        _stem = f"{time.strftime('%H%M%S')}_{n:03d}"
+        _raw_p = framedir / f"{_stem}_raw.png"
+        _ann_p = framedir / f"{_stem}_ann.png"
+        import cv2
+        cv2.imwrite(str(_raw_p), img)
+        _ann = img.copy()
+        for b in boxes:
+            p1 = (int(b.x1 * w), int(b.y1 * h))
+            p2 = (int(b.x2 * w), int(b.y2 * h))
+            cv2.rectangle(_ann, p1, p2, (0, 255, 0), 3)
+            cv2.putText(_ann, f"{b.cls_name} {b.confidence:.2f}",
+                        (p1[0], max(24, p1[1] - 8)), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.9, (0, 255, 255), 2, cv2.LINE_AA)
+        if act == "click" and isinstance(tgt, (list, tuple)) and len(tgt) == 2:
+            cx_, cy_ = int(float(tgt[0]) * w), int(float(tgt[1]) * h)
+            cv2.drawMarker(_ann, (cx_, cy_), (0, 0, 255),
+                           cv2.MARKER_CROSS, 90, 6)
+            cv2.circle(_ann, (cx_, cy_), int(CLS_RADIUS * w), (0, 0, 255), 3)
+        cv2.imwrite(str(_ann_p), _ann)
+
         rec = {"i": n, "tick": pend.get("tick"), "skill": pend.get("skill"),
                "sub": pend.get("sub_state"), "action": act, "reason": reason,
-               "target": tgt, "page": page, "near_cls": near,
+               "target": tgt, "page": page, "page_why": why, "near_cls": near,
+               "raw": str(_raw_p), "ann": str(_ann_p),
+               "n_boxes": len(boxes),
+               # ⛔全量存, 不再 [:14] —— 截断过的检出表没法回答"漏检了什么"
                "boxes": [(b.cls_name, round(b.confidence, 2),
                           round((b.x1 + b.x2) / 2, 3),
-                          round((b.y1 + b.y2) / 2, 3)) for b in boxes[:14]]}
+                          round((b.y1 + b.y2) / 2, 3)) for b in boxes],
+               # ⛔只存中心点是不够的(2026-07-27 当场卡住): 想事后复算
+               # purchase_dialog_structure 这类**用到 x1/x2/y1/y2 的几何判据**时,
+               # 中心点重建不出框 → 只能回去重跑 YOLO。存全 bbox, 一次到位。
+               "bboxes": [[b.cls_name, round(b.confidence, 3),
+                           round(b.x1, 4), round(b.y1, 4),
+                           round(b.x2, 4), round(b.y2, 4)] for b in boxes]}
 
         # ── 守卫 ──
         stop = None
@@ -201,7 +282,32 @@ def main() -> int:
             _dismissy = any(k in reason for k in (
                 "close", "dismiss", "確認", "确认", "取消", "叉叉", "reward",
                 "continue", "領取", "领取"))
-            if _dismissy and repeats < 2:
+            # ⭐zero-det wake 是**定义上**无 cls 支撑的动作, 盲拍闸对它永远误报
+            # (2026-07-27 第一步就撞上)。与"危险盲拍"的本质区别:
+            #   危险盲拍 = skill **以为**屏上有按钮 → 点歪进错页;
+            #   zero-det wake = pipeline **明知**零检出, 故意点一个标定过的空白点。
+            # 落点 (0.35,0.12) 经两代 lobby 皮肤实测且特意避开 topbar 的 AP「+」
+            # (pipeline.py 那段注释: 旧点 0.5,0.05 压在 + 上, 反复戳开購買AP框)。
+            # ⛔放行但大声记账, 且**不吃 repeats 豁免** —— 连发仍由 REPEAT_CAP 拦。
+            _zero_wake = ("zero-det" in reason or "放置立绘屏" in reason)
+            if _zero_wake and not boxes:
+                rec["note"] = "zero-det wake(全帧零检出, 落点为标定空白区)"
+                print("      ⚠zero-det wake: 全帧零检出, 落点是标定过的安全空白区 — 放行但记账")
+            elif _zero_wake:
+                # ⛔帧上其实有 UI 却还在发 wake = pending 已跨画面陈旧, 必须人审:
+                # 落点在**新画面**上压着什么, 只能看这一帧才知道。
+                stop = (f"zero-det wake 但探针帧有 {len(boxes)} 个检出 = pending 跨画面陈旧, "
+                        f"人工确认落点 {tgt} 在当前画面上是空白")
+            # ⭐摸头(2026-07-27): 落点锚在 `Emoticon_Action` 上, 而这个 cls
+            # **实测就是弱的**(cafe_flow_spec: 650 帧录制, mean conf 0.65,
+            # 18/51=35% < 0.55) 且**学生在走动**位置一直变。探针帧永远比 pending
+            # 新(铁律#17) → 到我抓帧时 marker 常已闪没/移位 = 必然"无 cls 支撑"。
+            # pipeline 那边 headpat 也在稳定门豁免里, 注释写明"走动学生永不稳定,
+            # 摸头必须抢最新帧" —— 那个豁免是对的。⛔放行但记账 + 仍受 REPEAT_CAP。
+            elif "headpat" in reason and repeats < 3:
+                rec["note"] = "摸头(Emoticon_Action 弱cls+学生走动, 探针帧必已变)"
+                print("      ⚠摸头: 落点 marker 已闪没/移位 — 放行但记账")
+            elif _dismissy and repeats < 2:
                 rec["note"] = "弹窗尾发(落点已无cls, 良性形态)"
                 print("      ⚠尾发: 落点已无 cls(弹窗关闭动画) — 放行但记账")
             else:
