@@ -15,7 +15,11 @@
         "manual_mAP50": 0.989,
         "manual_R": 0.995,
         "notes": "纯252头像 + 战斗技能牌(复用头像名,无新类) + 灰牌识别(扇形充能/暗灰/低饱和 synth)。冻结 epoch5=真实峰(GPU选峰 vs last 0.805/best 0.810: ep6+ 过拟合 synth、真实灰牌反降)。数据集 build 四修: load_character_names 纯252(排 UI-B 395-454)/灰牌明度暗灰/扇形12点顺时针扩张/val泄漏排除。技能牌 recall 0.557(v5)→0.854。names=v4 完全一致, pipeline 按 cls_name 零改兼容。MUST infer @imgsz960。⚠️技能牌检测能力 ready 但战斗目前 auto 无读牌 skill 消费(combat AI 2.0 地基)。",
-        "warning": "训练后期(ep6+)过拟合 synth 致真实灰牌降 → 必须 save_period 存中间 ckpt + 真实 val(eval_v6_pick.py)选峰, 不能用 nominal best.pt"
+        "warning": "训练后期(ep6+)过拟合 synth 致真实灰牌降 → 必须 save_period 存中间 ckpt + 真实 val(eval_v6_pick.py)选峰, 不能用 nominal best.pt",
+        "frozen_val_mAP50": 0.9927,
+        "frozen_val_mAP50_95": 0.98518,
+        "val_classes_with_gt": 252,
+        "frozen_val_measured_on": "2026-07-26 (deployed weights, imgsz from args.yaml)"
       },
       "v4": {
         "path": "D:/Project/ml_cache/models/yolo/runs/fused_avatar_yolo26x_v4/weights/best_manual.pt",
@@ -182,10 +186,12 @@
         "trained_on": "2026-07-21",
         "n_classes": 485,
         "epoch_deployed": 33,
-        "frozen_val_mAP50": 0.9812,
-        "frozen_val_mAP50_95": 0.9725,
+        "frozen_val_mAP50": 0.98123,
+        "frozen_val_mAP50_95": 0.97249,
         "notes": "warm v13 last, nc 476→485, train 22,283(+0711大合并1624+0717大合并442, 老池一致性大审计后 --clean 重建)。部署 best.pt(ep33, ep63早停) — 与 v13 剧本相反: best 已深入训练学会新类, last 反而多类塌方(39阿拜多斯0.695/452 0.905)。by-cls vs v13: momo四类全持平0.989-0.995, 405 R 0.51→0.805, 新类抽查 貨幣101/102 conf0.98 / 余额条104 0.98 / 購買103 13/16@0.89 / 摸头451 0.97 / 474 0.96。⚠142点击继续 val AP50 0.99→0.956=F1阈值artifact(24GT帧23帧检出conf0.38-0.78>业务地板0.30, 唯一硬漏=英文TOUCH TO CONTINUE变体且有获得奖励header兜底)。⚠idx77当期活动入口 train 0实例(人审时框未画)=本版未上, 待v15。batch10/workers6定稿(batch12 OOM三连实锤)。",
-        "known_gap": "①idx77 未训(0 GT) ②142 conf带整体下移0.93→0.70(高于地板, live无实质影响, 盯) ③103 購買 3/16 miss@conf0.30(灰态清理后阳性更严, 待live验) ④75战术大赛/413全部领取_灰 val小跌(非否决类, 盯live)"
+        "known_gap": "①idx77 未训(0 GT) ②142 conf带整体下移0.93→0.70(高于地板, live无实质影响, 盯) ③103 購買 3/16 miss@conf0.30(灰态清理后阳性更严, 待live验) ④75战术大赛/413全部领取_灰 val小跌(非否决类, 盯live)",
+        "val_classes_with_gt": 129,
+        "frozen_val_measured_on": "2026-07-26 (deployed weights, imgsz from args.yaml)"
       },
       "v13": {
         "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v13/weights/last.pt",
@@ -317,7 +323,11 @@
         "nc": 19,
         "map50": 0.992,
         "map5095": 0.9564,
-        "note": "2026-07-20 新类战斗失败local18(defeat_candidates_v10 28帧用户人审, DEFEAT红横幅口径): val P0.952/R1.0/AP50 0.995 — 根治'判败靠兜底'。训练源=v9九池+defeat28净料(botplay×7预标未人审被用户叫停撤出, 审完进v11 — 自蒸馏纪律)。warm v9 best, ep66早停best=ep26, train2001/val353(战斗失败23/5+胜利17/2分层)。同卷对比(battle_v10卷353帧): v9剔cls18后≈0.993 vs v10=0.992 持平, 无类退步>0.01, mAP50-95 0.942→0.956。regression battle 1/1。"
+        "note": "2026-07-20 新类战斗失败local18(defeat_candidates_v10 28帧用户人审, DEFEAT红横幅口径): val P0.952/R1.0/AP50 0.995 — 根治'判败靠兜底'。训练源=v9九池+defeat28净料(botplay×7预标未人审被用户叫停撤出, 审完进v11 — 自蒸馏纪律)。warm v9 best, ep66早停best=ep26, train2001/val353(战斗失败23/5+胜利17/2分层)。同卷对比(battle_v10卷353帧): v9剔cls18后≈0.993 vs v10=0.992 持平, 无类退步>0.01, mAP50-95 0.942→0.956。regression battle 1/1。",
+        "frozen_val_mAP50": 0.99198,
+        "frozen_val_mAP50_95": 0.95643,
+        "val_classes_with_gt": 19,
+        "frozen_val_measured_on": "2026-07-26 (deployed weights, imgsz from args.yaml)"
       },
       "v10s": {
         "arch": "yolo26s",

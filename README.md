@@ -11,7 +11,7 @@ filename — renamed pools would otherwise slip through), and per-class label au
 **33,912 labeled images / 432,276 boxes** in the three active training sets.
 
 **Models.** Three specialized YOLO detectors, **455 classes** with real training
-samples: a 184-class game-UI detector (98.2% mAP50), a 252-class character-portrait
+samples: a 184-class game-UI detector (98.1% mAP50), a 252-class character-portrait
 detector (99.3%), and a 19-class battle-unit detector (99.2%). Digit-OCR is used only
 for reading numbers (currency, tickets, stamina) — never for deciding *what* is on
 screen; that is always the detector's job.
@@ -22,7 +22,7 @@ and if a balance can't be read, the bot does nothing rather than guess. Each gat
 false-positive rate was measured over the full 798-frame corpus of confirm dialogs
 before shipping, not reasoned about.
 
-**Known limits (stated deliberately).** The 98.2% mAP50 is measured on a validation
+**Known limits (stated deliberately).** The 98.1% mAP50 is measured on a validation
 set that covers **129 of the 184 learned UI classes (70%)** — 55 classes have no
 val instances at all, so their regressions are currently untestable. The val pool
 also predates the most recent event UI. Rebuilding it is the top open item.
