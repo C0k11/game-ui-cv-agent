@@ -487,6 +487,61 @@ def fx_shop_chain_flag_follows_plan():
     return (not bad, f"违规={bad or '无'}")
 
 
+# ── ⑦ 悬赏票数 strip: 关卡列表页读得出 + 零票绝不读成非零 ─────────────────
+def _bounty_read_tickets(json_name: str, jpg_name: str):
+    """跑真 Bounty skill 的 `_read_tickets` —— 不是复刻算法, 是调它本人。"""
+    import os
+    from brain.skills.bounty import BountySkill
+    jpg = os.path.join(FX_DIR, jpg_name)
+    if not os.path.exists(jpg):
+        return None, f"SKIP: 缺 {jpg_name}"
+    screen = screen_from_tick(_load(json_name), jpg_path=jpg, load_frame=True)
+    if screen.frame is None:
+        return None, "帧读不出(jpg 在但解码失败)"
+    # ⚠这两张 fixture 都是 >=3200 宽的真 4K/准 4K 帧, 所以 run_digit_ocr 里
+    # "帧太窄就换 ADB 干净帧重抓"那条路**不会触发** —— 离线跑得到的就是 live 值。
+    if screen.frame.shape[1] < 3200:
+        return None, f"fixture 帧宽 {screen.frame.shape[1]} <3200, 会走 ADB 升级路径"
+    sk = BountySkill()
+    sk.reset()
+    return sk._read_tickets(screen), ""
+
+
+def fx_bounty_tickets_stagelist_readable():
+    """run_20260727_042153/t0339 真帧: 关卡列表页, 屏上「懸賞通緝票券 6/6」。
+
+    ⛔旧 strip 在**这一整个页面**上从来读不出 —— 全语料 4K 实测 **0/211 帧**。
+    根因不是切太紧也不是对比度: 两个页面的标签字数不同(持有票券 4 字 /
+    懸賞通緝票券 6 字), 数字被推到 icon.x2+6.1~7.3 个 icon 宽, 而旧右界只到
+    +0.112 绝对宽; 更要命的是 y 留白 0.4*bh 让 DB 检测器整条返回空
+    (同帧放到 1.2*bh 立刻检出 '6/6' score 0.75)。
+    读不出 ⇒ fail-closed ⇒ **6 张票 + 当天 2 倍奖励整轮弃掉**。
+    """
+    got, err = _bounty_read_tickets("bounty_stagelist_6.json",
+                                    "bounty_stagelist_6.jpg")
+    if err:
+        return (err.startswith("SKIP"), err)
+    return (got == 6, f"读出 {got} (期望 6 — 屏上「懸賞通緝票券 6/6」)")
+
+
+def fx_bounty_zero_tickets_never_overread():
+    """run_20260612_211617/t0199 真帧: 屏上「持有票券 **0/6**」。
+
+    ⛔旧 strip 把它读成 `'9/0'` → `_read_tickets` 返回 **9** → `_ticket_check`
+    以为有票 → 出击 → 0 票出击弹出的正是**青辉石買票框**。
+    `tickets == 0 → exit` 是 money_safety 的**源头闸**, 被读数直接架空。
+    全语料 4K 实测: 114 张零票屏里旧逻辑有 **18 张**读成 >0。
+    ⚠fail-closed 只挡 None, **挡不住读大** —— 所以这条用例判的是"绝不 >0",
+    读成 None 也算过(安全), 读成正数就是事故重演。
+    """
+    got, err = _bounty_read_tickets("bounty_zero_tickets.json",
+                                    "bounty_zero_tickets.jpg")
+    if err:
+        return (err.startswith("SKIP"), err)
+    return (got is None or got == 0,
+            f"读出 {got} (屏上 0/6; 期望 0 或 None, 绝不能是正数)")
+
+
 CASES = [
     ("⛔arena未到达_绝不报完成", fx_arena_never_reached_not_complete, True),
     ("⛔shop留店标志跟随plan", fx_shop_chain_flag_follows_plan, True),
@@ -503,6 +558,8 @@ CASES = [
     ("L1②_旧cy主键台账必作废", fx_bonus_ledger_rejects_cy_keys, True),
     ("L2_页面图词表+路径", fx_page_graph_vocab_and_routes, True),
     ("L2_三家扫荡面板不混淆", fx_page_graph_sweep_panels_not_confused, True),
+    ("悬赏票数_关卡列表页读得出", fx_bounty_tickets_stagelist_readable, False),
+    ("⛔悬赏零票_绝不读成非零", fx_bounty_zero_tickets_never_overread, True),
 ]
 
 

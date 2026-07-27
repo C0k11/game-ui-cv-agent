@@ -174,14 +174,37 @@ class TicketSweepSkill(BaseSkill):
             return True
         return False
 
+    # Counter strips, anchored on the YOLO ticket badge and measured in ICON
+    # WIDTHS so they track the badge instead of hard-coded screen fractions.
+    # ⛔2026-07-27 全语料标定(579 帧, `scratchpad/tk_*.py`): the counter has TWO
+    # layouts and the old single strip only ever covered one of them —
+    #   cy~0.14 分支页  「持有票券   X/Y」 4 字标签 → 数字在 4.19–5.39 iw
+    #   cy~0.28 关卡列表「懸賞通緝票券 X/Y」6 字标签 → 数字在 6.12–7.31 iw
+    # 多两个汉字就把数字推出了旧 strip 的右界(icon.x2+0.112) ⇒ **关卡列表页的
+    # 票数 0/211 帧读得出, 0.0%** —— 不是"这一次读不出", 是从来没读出来过。
+    _TICKET_WINDOWS = ((4.0, 6.4), (6.0, 8.4), (4.0, 8.0))
+    # ⛔y 留白是真正的开关: 旧值 0.4*bh 让 DB 检测器在关卡列表页**整条返回空**
+    # (同一张帧把上下留白放到 1.2*bh 立刻检出 '6/6' score 0.75)。加宽 x、放大、
+    # 拉对比度全部无效 —— 试过, 全线 None, 拉对比度还把本来能读的那条弄坏了。
+    _TICKET_YPAD = 1.2
+
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """digit-OCR the 持有票券 X/Y next to the ticket icon. ★ money defense #1
         (0 tickets ⇒ never sortie → never the buy-pyroxene trap), so the read
-        must be robust. read_count's generic strip (x-start = icon.x2 + 0.005)
-        clipped the first digit on live frames → None (live 2026-06-02: bounty
-        read None 8× then fell through to the guarded path). Anchor on the
-        top-left ticket badge + OCR a tighter-left, wider strip (verified: span
-        0.11 from icon.x2+0.002 → '6/6')."""
+        must be robust — and "robust" cuts both ways: an over-read is worse than
+        no read, because `tickets == 0 → exit` is the SOURCE gate that keeps the
+        buy-ticket dialog from ever appearing.
+
+        ⛔2026-07-27 全语料实测(4K 帧 351 张 = live 口径, 低分辨率帧 live 不会
+        走到 —— run_digit_ocr 对 <3200 宽的帧自动换 ADB 4K 干净帧重抓):
+        | 方案  | cy0.14 分支页 | cy0.28 关卡列表 | 零票屏读成 >0 |
+        | 旧    | 139/140 99.3% | **0/211 0.0%**  | **18/114 = 15.8%** |
+        | 现    | 139/140 99.3% | **211/211 100%**| **0/114** |
+        那 18 次是旧 strip 把屏幕上明明白白的「持有票券 0/6」读成 `'9/0'`(8 张
+        逐张目检过真值全是 0/6) ⇒ `_ticket_check` 拿到 9 → 出击 → 0 票出击弹出的
+        正是青辉石買票框。**fail-closed 只挡 None, 挡不住读大** —— 这是旧代码里
+        真实存在的掉钱路径, 不是本次改动引入的。
+        """
         if screen.frame is None:
             return None
         try:
@@ -196,31 +219,38 @@ class TicketSweepSkill(BaseSkill):
             # plainly top-left). The counter is a stable page fixture →
             # fixed-region OCR fallback on the DIGITS zone only (0708 新皮肤
             # 「持有票券 6/6」布局, 两页帧离线验证 '6/6' ✓)。
+            # ⚠这条没有 YOLO 锚, 所以要求 raw 里必须有 '/' —— 不带斜杠的裸数字
+            # 可能是页面标题/别的读数蹭进来的, 宁可 None。
             raw = run_digit_ocr(screen.frame, (0.115, 0.121, 0.185, 0.163))
             res = parse_count(raw)
-            if res is not None and res[0] is not None:
+            if res is not None and res[0] is not None and raw and "/" in raw \
+                    and res[1] != 0:
                 self.log(f"tickets via fixed-region fallback: {res[0]} (raw {raw!r})")
                 return res[0]
             self.log(f"[tkdbg] no icon anchor; fallback raw={raw!r}")
             return None
+        iw = icon.x2 - icon.x1
         bh = icon.y2 - icon.y1
-        x1 = max(0.0, icon.x2 + 0.002)
-        x2 = min(1.0, x1 + 0.11)
-        y1s, y2s = icon.y1 - bh * 0.4, icon.y2 + bh * 0.4
-        raw = run_digit_ocr(screen.frame, (x1, y1s, x2, y2s))
-        res = parse_count(raw)
-        if res is None or res[0] is None:
-            # 0708 更新换皮:「持有票券 6/6」斜体数字在含中文标签的整条 strip 上
-            # 被 det 漏检(live 实锤 raw=None ×8 → fail-closed 0 sweeps; 同帧
-            # 去掉标签只留数字区就读出)。数字区 = 标签右侧 x1+0.055 起。
-            raw = run_digit_ocr(screen.frame, (min(1.0, x1 + 0.055), y1s, x2, y2s))
-            res = parse_count(raw)
-        if res is None or res[0] is None:
-            self.log(f"[tkdbg] icon@({icon.x1:.3f},{icon.y1:.3f},{icon.x2:.3f},"
-                     f"{icon.y2:.3f}) conf={icon.confidence:.2f} both strips "
-                     f"unread (last raw={raw!r})")
-            return None
-        return res[0]
+        y1s = max(0.0, icon.y1 - bh * self._TICKET_YPAD)
+        y2s = min(1.0, icon.y2 + bh * self._TICKET_YPAD)
+        last_raw = None
+        for xl, xr in self._TICKET_WINDOWS:
+            last_raw = run_digit_ocr(screen.frame, (min(1.0, icon.x2 + xl * iw), y1s,
+                                                    min(1.0, icon.x2 + xr * iw), y2s))
+            res = parse_count(last_raw)
+            if res is None or res[0] is None:
+                continue
+            # ⛔ 分母为 0 的读数一律丢弃: 计数器的分母是**上限**, 永远不会是 0。
+            # `9/0` 就是零票屏被读大的那个形状(实测 15 次, 真值全是 0/6)。
+            # ⚠反过来 `cur > tot` **不能**当无效 —— 帧上确凿存在 `14/6`/`15/6`,
+            # 票是可以超出每日回满上限的。拿它当闸会误杀合法读数。
+            if res[1] == 0:
+                continue
+            return res[0]
+        self.log(f"[tkdbg] icon@({icon.x1:.3f},{icon.y1:.3f},{icon.x2:.3f},"
+                 f"{icon.y2:.3f}) conf={icon.confidence:.2f} all "
+                 f"{len(self._TICKET_WINDOWS)} strips unread (last raw={last_raw!r})")
+        return None
 
     def _read_ap(self, screen: ScreenState) -> Optional[int]:
         # Calibrated clean-frame read (2026-06-11): the generic read_count span
