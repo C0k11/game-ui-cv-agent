@@ -315,7 +315,7 @@ py scripts/eval_fused_avatar_report.py          # per-frame HTML eval
 ## Repository Layout
 
 ```
-ai-game-secretary/
+game-ui-cv-agent/
 ├── brain/
 │   ├── pipeline.py          # interceptors, model-registry resolve, async trajectory writer
 │   └── skills/              # one module per skill
