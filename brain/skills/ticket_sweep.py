@@ -797,6 +797,17 @@ class TicketSweepSkill(BaseSkill):
             return action_done(f"{self.name} complete (on hub){_tag}")
         if self._phase_ticks > 16:
             return action_done(f"{self.name} exit timeout")
+        # ⛔取消键优先(money_safety 2026-06-10 定的"exit 阶段见取消键永远先点取消",
+        # 一直没传导到这里)。2026-07-27 live 实锤为什么必须这样:
+        # 停在「要使用6票掃蕩6次嗎? 取消/確認」这种**模态**上时, 旧顺序先找
+        # BTN_CLOSE_X, 而屏上那个被检成 弹窗叉叉(0.96) 的小 ✕ **根本不吃点击**
+        # —— 连点 6 次画面纹丝不动(帧证据 data/walk_20260727_e7_frames/)。
+        # 模态框的唯一正解是它自己的「取消」。
+        # 顺序: 取消 > 完成弹窗的確認 > X > 返回键。
+        cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
+        if cancel is not None:
+            self.log("exit: 模态框有取消键 → 点取消(绝不点確認)")
+            return action_click_box(cancel, "exit: cancel dialog")
         # A leftover 掃蕩完成 / dialog blocks ESC — dismiss its 确认键/X first.
         done_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND)
         if done_confirm is not None:

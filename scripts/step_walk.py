@@ -215,7 +215,17 @@ def main() -> int:
                 if abs(cx - tx) <= CLS_RADIUS and abs(cy - ty) <= CLS_RADIUS:
                     near.append((b.cls_name, round(b.confidence, 2)))
 
-        sig = (reason, tuple(tgt) if isinstance(tgt, (list, tuple)) else tgt)
+        # ⛔落点必须**量化后**再比(2026-07-27 live 实锤): 旧码用浮点精确相等,
+        # 而 YOLO 框每帧有亚像素抖动 —— 实测同一个「弹窗叉叉」连点 6 次, 其中
+        # 一次落点是 0.6920320749 而其余是 0.6920148213, 差在小数第 5 位就把
+        # repeats 清零, REPEAT_CAP=4 永远够不到 ⇒ **连点守卫被抖动架空**,
+        # 眼睁睁看着 bot 对着一个无效目标点了 6 次没人喊停。
+        # 这就是 memory live_gating_2026_07_25 里记的"关X连发(坐标不同=新检出)
+        # 未定性"那条 —— 现在定性了。量化到 0.01(4K 上约 38px, 远小于任何按钮)。
+        def _q(v):
+            return round(float(v) / 0.01)
+        sig = (reason, (_q(tgt[0]), _q(tgt[1]))
+               if isinstance(tgt, (list, tuple)) and len(tgt) == 2 else tgt)
         repeats = repeats + 1 if sig == last_sig else 0
         last_sig = sig
 
