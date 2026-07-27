@@ -65,9 +65,25 @@ _SCHED_STATE_FILE = _DATA_DIR / "schedule_state.json"
 
 
 def _game_day() -> str:
-    """BA 游戏日(04:00 刷新) ISO 日期 —— 日累计台账的 key。"""
-    from datetime import datetime, timedelta
-    return (datetime.now() - timedelta(hours=4)).date().isoformat()
+    """BA 游戏日(04:00 刷新) ISO 日期 —— 日累计台账的 key。
+
+    ⛔2026-07-27 实测事故: 旧版用**裸 `datetime.now()`(host 本地时钟)**, 而游戏
+    日界锚在**设备/服务器时区**。实测 host=UTC-4 / device=Asia/Shanghai(UTC+8)
+    → **device = host + 12h**:
+        host 03:15 → _game_day() = 2026-07-26
+        host 04:32 → _game_day() = 2026-07-27     (同一个游戏日内翻了天)
+    后果: 台账 key 一翻, `_load_sched_state()` 判 game_day 不匹配 → 返回
+    `dispatched=0` → **单日上限闸(_day_dispatched >= 7)从零重新计数**。
+    今晚实况: 台账 = {"game_day":"2026-07-26","dispatched":4}, 而当天真实派遣
+    **7** 次(票 7→0) —— 闸已经被打断, 而票=0 还去点開始正是弹青辉石购买框的路。
+
+    改成锚在**服务器时区**(繁中服 UTC+8), 与 host 在哪个时区无关。
+    (不用 adb 读设备时钟: 那是每次调用一次 IPC, 挡在热路径上; 服务器时区是
+     常量, 不会因为换机器而变。)
+    """
+    from datetime import datetime, timedelta, timezone
+    _SERVER_TZ = timezone(timedelta(hours=8))       # BA 繁中服
+    return (datetime.now(_SERVER_TZ) - timedelta(hours=4)).date().isoformat()
 
 
 def _load_sched_state() -> dict:
@@ -801,11 +817,20 @@ class ScheduleSkill(BaseSkill):
                 self.log("⛔ 票券已 0 — 绝不点課程表開始(点了必弹青辉石购买框)")
                 self._goto("exit")
                 return action_wait(300, "tickets 0 → 不点開始, 退出")
-            # reason 加"確認键"(2026-07-21 mutate-before-ack: 課程表開始 渲染好即
-            # 可点, 稳定门豁免立即点 → 不被吞 → goto open_room 前置安全)。
+            # ⛔2026-07-27 改: 旧版靠**在 reason 里塞"確認键"**去命中 _dedup_click
+            # 的关键词豁免(为了让 課程表開始 渲染好就能点、不被稳定门吞)。代价是
+            # 那条豁免 `return action` 把 **dedup hold 也一起跳过** → 本动作每次
+            # 连发两发, 第二发落在**下一屏**上。实测第二发撞过「購買課程表票券」
+            # (青辉石 30/张)的确認键旁 Δx=0.097 —— 只差一点就是真掏钱。
+            # 现在改成显式 `_settle_exempt`: 稳定门照旧豁免(不被吞), same-target
+            # hold 恢复生效(第二发被 hold 成 wait, 等指纹变化后 skill 重新看帧 →
+            # 那时若是购买框, _buy_dialog 三路防线接管取消)。
+            # reason 也改回**如实描述点的是什么** —— 措辞不该再兼任控制信号。
             self.log("schedule info → start (YOLO 课程表开始)")
             self._goto("open_room")
-            return action_click_box(start, "start schedule (確認键)")
+            act = action_click_box(start, "start schedule (課程表開始)")
+            act["_settle_exempt"] = True
+            return act
 
         # Generic / ticket-shortage popups — base helper is pure cls now
         # (确认+取消/叉 结构 → 默认点取消/叉掉, 绝不盲确认). NOTE: SCHED_ALL is the

@@ -1831,7 +1831,16 @@ class DailyPipeline:
         # clicked → deadlock until the cap (the ~22s "无端等待"). These act on a
         # popup that IS on screen right now → click it immediately, never hold.
         _r = reason
-        if any(k in _r for k in (
+        # ⭐`_force_settle`(2026-07-27 live): 反向 opt-out —— 打了这个标记的动作
+        # **不吃**下面这条关键词豁免, 老老实实走稳定门 + same-target hold。
+        # ⛔为什么需要: 这条豁免按 **reason 子串**命中, 而"claim/領取/確認"这类词
+        # 会误伤**位置会动**的按钮。实测(cafe 收益): 弹窗弹出动画里「領取」在
+        # cy≈0.825, 稳定后升到 cy≈0.733; skill 在动画帧上 action_click_box 锚到
+        # 0.825 → 豁免让它立刻拍下去 → **点在按钮下方空白, 收益领不到**
+        # (memory cafe_flow_spec 记的"收益第1次没领"就是这个)。
+        # 不动关键词列表(那会波及全部 interceptor/dismiss 路径), 让个别调用点
+        # 显式声明"我这个按钮会动, 必须等稳定帧"。
+        if (not action.get("_force_settle")) and any(k in _r for k in (
                 "interceptor", "dismiss", "reward", "獎勵", "奖励", "result",
                 "結果", "结果", "确认键", "確認", "continue", "繼續", "領取",
                 "领取", "claim", "close", "关闭", "關閉", "叉叉",
@@ -1859,7 +1868,17 @@ class DailyPipeline:
         # 稳定后首帧立即放行 = 零固定延迟。弹窗 dismiss/领取类在上方豁免
         # 通道已 return(点弹窗强拍无害)。>4s 未稳定放行一次(背景动画让
         # 某 cls 持续抖动时的死锁保险)。
-        if not getattr(self, "_frame_stable", True):
+        # ⭐`_settle_exempt`(2026-07-27 live 逼出来): 只豁免**稳定门**, 下面的
+        # same-target hold 照常生效。
+        # 为什么必须拆开: 上面那条 reason 关键词豁免是 `return action` —— 它把
+        # 「稳定门」和「dedup hold」**一起**跳过了。schedule 为了让「課程表開始」
+        # 不被稳定门吞, 在 reason 里塞了"確認键"三个字去命中它(schedule.py 注释
+        # 自认), 于是 dedup hold 也被顺带绕过 → 该动作**每次连发两发**。
+        # ⛔2026-07-27 实测代价: 全 walk 7 对真连发全在 Schedule 且全是这两个
+        # reason(其余动作 0 对); 第二发落点撞过 确认键 / 学生头像 / 以及**青辉石
+        # 「購買課程表票券」框**(落点距確認键仅 Δx0.097 —— 擦边过去, 差点 30 石)。
+        # 用 reason 措辞当控制信号 = 隐式 API, 改一个字就换一套行为。改显式 flag。
+        if not getattr(self, "_frame_stable", True) and not action.get("_settle_exempt"):
             if not getattr(self, "_settle_block_t0", 0.0):
                 self._settle_block_t0 = time.time()
             if time.time() - self._settle_block_t0 < 4.0:

@@ -101,8 +101,16 @@ _EXIT_MAX = 14
 
 
 def _game_day() -> str:
-    """BA game-day ISO date (resets 04:00 local) — invite-state key."""
-    return (datetime.now() - timedelta(hours=4)).date().isoformat()
+    """BA game-day ISO date (resets 04:00 **server time**) — invite-state key.
+
+    ⛔与 schedule.py 的 `_game_day` 同一处修正(2026-07-27 实测): 旧版 "resets
+    04:00 **local**" 这句本身就是 bug —— 游戏日界锚在服务器/设备时区, 不是 host。
+    实测 host=UTC-4 / device=Asia/Shanghai → 差 12h, host 跨过 04:00 时台账 key
+    在**同一个游戏日内**翻天, 招待券台账被判过期重置。
+    """
+    from datetime import timezone
+    _SERVER_TZ = timezone(timedelta(hours=8))       # BA 繁中服
+    return (datetime.now(_SERVER_TZ) - timedelta(hours=4)).date().isoformat()
 
 
 def _load_cafe_state() -> dict:
@@ -478,7 +486,14 @@ class CafeSkill(BaseSkill):
             # invite dead-waited 14 ticks until the stuck-20 fallback).
             self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
             self._earnings_claimed = True
-            return action_click_box(claim_active, "claim earnings")
+            # ⛔`_force_settle`(2026-07-27 live 实锤): 收益弹窗**弹出动画**里
+            # 「領取」在 cy≈0.825, 稳定后升到 cy≈0.733。reason 含 "claim" 会命中
+            # _dedup_click 的关键词豁免 → 跳过稳定门 → 在动画帧上锚 0.825 拍下去
+            # → **点在按钮下方空白, 收益一分没领**(memory cafe_flow_spec 的
+            # "收益第1次没领" 就是它)。这个按钮位置会动, 必须等稳定帧。
+            act = action_click_box(claim_active, "claim earnings")
+            act["_force_settle"] = True
+            return act
         claim_grey = self.find_cls(
             screen, [UC.CLAIM_REWARD_GREY, UC.CLAIM_GREY],
             conf=_CLS_CONF, region=_CLAIM_BAND,
