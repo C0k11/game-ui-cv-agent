@@ -1523,8 +1523,15 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         except Exception as _je:
                             _jfb = None
                             _log_pipeline(f"[jit] 复验 YOLO 失败({_je}) → 放行")
-                        if _jfb is not None and not _jit_landing_ok(
+                        if _jfb is not None and _jit_landing_ok(
                                 _jit_tgt, _jit_cls, _jfb):
+                            # 放行也留痕: 没有这行, "JIT 到底跑没跑"在日志上
+                            # 与"没触发"不可区分(live 验收要正向证据)。
+                            _log_pipeline(
+                                f"[jit] 复验通过: 锚 '{_jit_cls}' 仍支撑落点 "
+                                f"(决策龄 {(time.time()-_t_decided)*1000:.0f}ms, "
+                                f"{_jsrc}) — '{reason}'")
+                        elif _jfb is not None:
                             _jage = (time.time() - _t_decided) * 1000
                             _log_pipeline(
                                 f"[jit] ⛔丢弃过期点击: 决策龄 {_jage:.0f}ms, "

@@ -52,8 +52,10 @@ TMP = Path(os.environ.get("TEMP", ".")) / "_walk.png"
 
 # ⛔硬碰钱词 —— 命中一律停。只留**真会掏钱**的那几个。
 # 早先把 確認/扫荡/票 也塞进来了, 结果掃蕩確認一天几十次全卡住 = 跑不完。
+# ⚠"cad" 太短会误伤 a-cad-emy(2026-07-28 live: "select JFD academy 千年"
+# 被拦) → 收紧成带边界的 "cad$"/"cad "; 纯 "$" 保留(CAD$ 真钱价签都带它)。
 MONEY = ("購買", "购买", "purchase", "青辉石", "青輝石", "pyroxene",
-         "免費", "免费", "buy", "free", "cad", "$")
+         "免費", "免费", "buy", "free", "cad$", "cad ", "$")
 
 
 def _hits_money(reason: str) -> bool:
