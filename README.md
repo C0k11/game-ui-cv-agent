@@ -36,7 +36,7 @@ also predates the most recent event UI. Rebuilding it is the top open item.
 **它现在能做什么**(2026-07 实测):
 - ✅ 每日全套日常:收菜(免费包/社团/制造/商店/课程表/咖啡厅摸头)→ 悬赏/交流会/竞技场 → 活动优先吃光体力 → 邮件+每日任务收尾——主链已全面视频流化,响应 7 tick/s(升级前 1 tick/s)
 - ✅ 新活动开荒:自动跳剧情、推 Story/Quest 关、按"活动>双倍>普通"规划体力、盘点活动商店算 farm 计划
-- ✅ 实时战斗感知:scrcpy 视频流 17.9fps(帧龄 0.02 秒、不怕窗口遮挡)+ 19 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡角色识别
+- ✅ 实时战斗感知:scrcpy 视频流 17.9fps(帧龄 0.02 秒、不怕窗口遮挡)+ 19 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡角色识别;视频流层带**预热轮换双缓冲**——实测定位到 MuMu 对每条镜像流有 17.0 秒内在寿命上限(与帧数/码率无关),流活到 10 秒即预热新流无缝接管,消灭了旧架构每 17 秒一次的 3-5 秒感知盲窗
 - ✅ AI 自己打战斗:行为树控牌(急救>集火 Boss>AOE 清群>单体循环)+ 闭环拖拽瞄准(按住后持续跟踪目标再松手),活动 Boss 关实战 71-91 秒通关
 - 🧱 架构升级中(L1→L3):列表结构化解析已上线(台账主键从**屏幕坐标**改成**关号**)、页面图 + BFS 路径规划已上线但**只观测不接管**(实测覆盖率还不够,不敢交导航)、竣工判据 `CLEAN/LEFTOVER/UNKNOWN` 三态已上线——bot 现在会在每个 skill 出口自己喊“活没干干净”,不用等人肉眼发现
 - 🚧 进行中:总力战抄轴(视频轴表→自动执行)、日常全链路视频流化(高频感知线程已上线)、UI 模型 val 补齐(184 个已学会的类里有 55 类没 val 量尺)
@@ -52,7 +52,7 @@ also predates the most recent event UI. Rebuilding it is the top open item.
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs — numeric fields only (all page/button *decisions* are pure YOLO cls as of 2026-07) |
 | **Battle** | scrcpy feed 17.9fps (occlusion-proof) → blackboard → behavior-tree card-play (shipped: event boss 71-91s clears) + ByteTrack lock (ally idsw -66%) |
 | **Safety** | structural purchase-dialog gate (quantity-stepper signal, orthogonal to icon detection) + non-lobby pyroxene sentinel + per-game-day dispatch ledger |
-| **Self-audit** | `exit_report()` completion verdicts · `scripts/audit_cls_usage.py` dead-predicate scan · 13 logic regression fixtures |
+| **Self-audit** | `exit_report()` completion verdicts · `scripts/audit_cls_usage.py` dead-predicate scan · `scripts/l3_health_report.py` detection-drift report (98K-tick corpus: dropped classes / silent skill dependencies / page reachability) · 28 logic regression fixtures |
 | **Tooling** | Annotation dashboard (class mgmt / video→frames→prefill / timeline sheets) |
 
 ## How It Works
