@@ -357,7 +357,12 @@ class ShopSkill(BaseSkill):
         # 白名单放在 _buy / _confirm(挨着钱的那两处, 见 _on_credit_tab)。
         # 导航阶段本来就有 _on_shop 正锚在下一行判, 不需要再加黑名单。
         if self._on_shop(screen):
-            self.log("inside shop (一般 tab) → select")
+            # 到店第一帧就试着给 tab 身份上锁 —— 这是**整段流程里网格最干净的
+            # 一帧**(还没全选, 没有绿框绿勾), 正锚在这里最可靠(live 实测 0.968)。
+            # 见 _select 里那段长注释: 闩锁只挂在 _buy/_confirm 时永远锁不上。
+            self._on_credit_tab(screen)
+            self.log(f"inside shop (一般 tab) → select "
+                     f"(tab latch={'✓' if self._credit_tab_latched else '✗未锁'})")
             self._goto("select")
             return action_wait(400, "entered shop")
 
@@ -388,6 +393,20 @@ class ShopSkill(BaseSkill):
         # Read the credit balance HERE (grid view, top bar visible) — the
         # confirm dialog dims the top bar so it can't be read there.
         self._capture_balance(screen)
+
+        # ⛔⛔ 在**干净的未选中网格帧**上给 tab 身份闩锁上锁(2026-07-28 live 实锤)。
+        # `_on_credit_tab` 的闩锁逻辑 2026-07-25 就写好了, 注释也预见了"全选后
+        # 网格变忙 → 正锚检不到"这一幕 —— 但它**只在 _buy/_confirm 被调用**
+        # (:357 注释「白名单放在 _buy / _confirm(挨着钱的那两处)」), 而那两处
+        # 恰恰是正锚最不可靠的帧。⇒ 闩锁从写下那天起就没有任何机会被置上,
+        # 「进店时确认过」这个前提从未发生。今天 live 复现: tick70 正锚 conf
+        # **0.968**(未选中网格) → 全选后 tick71-75 **连续 5 帧零检出**(不是掉
+        # 阈下, 是 0.05 门槛都不出框, 已用该帧重跑 YOLO 复核) → 3 帧容错用尽 →
+        # 「credit-tab anchor missing at buy → exit」→ **24 件商品一件没买**。
+        # 感知侧真因: 该 cls 没在"全选绿框"样式的帧上标注过(v14 补标清单已记)。
+        # 这里调用一次: 语义仍是 fail-closed —— 只有**正向检到**才上锁, 检不到
+        # 什么都不做; tab 身份只会被本 skill 自己的点击改变, 故锁一次全程有效。
+        self._on_credit_tab(screen)
 
         # Nothing to buy / already bought today.
         if self.find_cls(screen, UC.SHOP_SELECT_ALL_GREY, conf=_CLS_CONF) is not None:

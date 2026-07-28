@@ -401,6 +401,16 @@ class CraftSkill(BaseSkill):
             # 成功时点 1 次就弹確定製造 → _confirm_dialog 接走(_start_taps 到不了 3)。
             # 点≥3 次仍无确认框 = 灰按钮材料不足 = 今天造不了 → pass(用户 2026-06-16:
             # "材料不够造不了就 pass 就行")。钱安全(灰按钮本就不扣信用点)。
+            # ⛔被吞不计发(2026-07-28 live 实锤, 与 ticket_sweep `_max_fires` 同修法):
+            # 本轮只**物理点出去 1 次**, 而 _start_taps 涨到 8 —— 中间 6-7 个 tick
+            # 全被 same-target hold 转成 wait, 计数照加。注释里"8>dedup hold-cap5,
+            # 让丢点重试先落"的安全边际因此**从来不存在**: 一个 2.5s hold 窗口就能
+            # 把额度烧光。今天按钮真灰(帧上红字「材料不足。」+ 材料 4/15)所以结论
+            # 碰巧对; 若只是丢了一次 tap, 同样会误判"材料不足"整天不制造。
+            # ⇒ 数的必须是**真发出去的**点击。
+            if self.action_suppressed and self._start_taps > 0:
+                self._start_taps -= 1
+                self.log("开始制造 被稳定门吞 — 回滚计数(不算一次尝试)")
             if self._start_taps >= 8:
                 self.log("开始制造 ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
@@ -417,6 +427,10 @@ class CraftSkill(BaseSkill):
         # 跨分辨率)。点中 → 弹「確定製造N次」确认框 → _confirm_dialog 收口(信用点,
         # 安全)。根治靠飞轮补 开始制造 样本 → v6c。
         if self._maxed_clicks > 0 and max_btn is not None:
+            # 同上: 外推兜底路径的计数也必须按物理动作算
+            if self.action_suppressed and self._start_taps > 0:
+                self._start_taps -= 1
+                self.log("开始制造(外推) 被稳定门吞 — 回滚计数")
             if self._start_taps >= 8:
                 self.log("开始制造(外推) ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
