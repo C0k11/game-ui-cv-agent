@@ -1,0 +1,967 @@
+{
+ "date": "20260728",
+ "runs": 830,
+ "ticks": 98505,
+ "parse_errors": 0,
+ "days": [
+  "20260301",
+  "20260302",
+  "20260303",
+  "20260304",
+  "20260305",
+  "20260306",
+  "20260307",
+  "20260312",
+  "20260313",
+  "20260316",
+  "20260317",
+  "20260318",
+  "20260329",
+  "20260407",
+  "20260408",
+  "20260415",
+  "20260416",
+  "20260417",
+  "20260418",
+  "20260419",
+  "20260420",
+  "20260422",
+  "20260423",
+  "20260424",
+  "20260428",
+  "20260504",
+  "20260513",
+  "20260515",
+  "20260516",
+  "20260517",
+  "20260528",
+  "20260529",
+  "20260601",
+  "20260602",
+  "20260605",
+  "20260606",
+  "20260609",
+  "20260610",
+  "20260611",
+  "20260612",
+  "20260613",
+  "20260614",
+  "20260615",
+  "20260616",
+  "20260617",
+  "20260626",
+  "20260706",
+  "20260707",
+  "20260709",
+  "20260711",
+  "20260714",
+  "20260715",
+  "20260716",
+  "20260717",
+  "20260721",
+  "20260722",
+  "20260723",
+  "20260724",
+  "20260725",
+  "20260726",
+  "20260727",
+  "20260728"
+ ],
+ "recent_days": [
+  "20260726",
+  "20260727",
+  "20260728"
+ ],
+ "dropped_hot": [
+  {
+   "cls": "1部队",
+   "baseline_days": 3,
+   "last": "20260725"
+  },
+  {
+   "cls": "2部队高亮",
+   "baseline_days": 3,
+   "last": "20260725"
+  },
+  {
+   "cls": "房间区域未解锁",
+   "baseline_days": 5,
+   "last": "20260613"
+  },
+  {
+   "cls": "自动编辑按钮",
+   "baseline_days": 3,
+   "last": "20260725"
+  }
+ ],
+ "dropped_cold": [
+  {
+   "cls": "3部队",
+   "baseline_days": 4,
+   "last": "20260725"
+  },
+  {
+   "cls": "4部队",
+   "baseline_days": 4,
+   "last": "20260725"
+  },
+  {
+   "cls": "c0",
+   "baseline_days": 10,
+   "last": "20260601"
+  },
+  {
+   "cls": "c1",
+   "baseline_days": 3,
+   "last": "20260601"
+  },
+  {
+   "cls": "c2",
+   "baseline_days": 13,
+   "last": "20260615"
+  },
+  {
+   "cls": "c3",
+   "baseline_days": 22,
+   "last": "20260715"
+  },
+  {
+   "cls": "headpat_bubble",
+   "baseline_days": 3,
+   "last": "20260313"
+  },
+  {
+   "cls": "信用货币回收",
+   "baseline_days": 4,
+   "last": "20260707"
+  },
+  {
+   "cls": "入场键没解锁",
+   "baseline_days": 4,
+   "last": "20260721"
+  },
+  {
+   "cls": "前置小装备已选中",
+   "baseline_days": 7,
+   "last": "20260715"
+  },
+  {
+   "cls": "叉叉1",
+   "baseline_days": 4,
+   "last": "20260305"
+  },
+  {
+   "cls": "困难关卡",
+   "baseline_days": 9,
+   "last": "20260715"
+  },
+  {
+   "cls": "困难关卡刷取方案一",
+   "baseline_days": 7,
+   "last": "20260715"
+  },
+  {
+   "cls": "困难关卡刷取方案二",
+   "baseline_days": 7,
+   "last": "20260715"
+  },
+  {
+   "cls": "大装备",
+   "baseline_days": 7,
+   "last": "20260715"
+  },
+  {
+   "cls": "战斗三倍速",
+   "baseline_days": 5,
+   "last": "20260725"
+  },
+  {
+   "cls": "战斗暂停",
+   "baseline_days": 5,
+   "last": "20260725"
+  },
+  {
+   "cls": "批量扫荡",
+   "baseline_days": 8,
+   "last": "20260715"
+  },
+  {
+   "cls": "批量扫荡开始",
+   "baseline_days": 5,
+   "last": "20260715"
+  },
+  {
+   "cls": "批量扫荡开始灰色",
+   "baseline_days": 5,
+   "last": "20260707"
+  },
+  {
+   "cls": "据点防御",
+   "baseline_days": 4,
+   "last": "20260707"
+  },
+  {
+   "cls": "普通关卡选中",
+   "baseline_days": 11,
+   "last": "20260715"
+  },
+  {
+   "cls": "活动剧情_已选择",
+   "baseline_days": 3,
+   "last": "20260725"
+  },
+  {
+   "cls": "自动战斗开启",
+   "baseline_days": 3,
+   "last": "20260725"
+  },
+  {
+   "cls": "角色可摸头黄色感叹号",
+   "baseline_days": 5,
+   "last": "20260306"
+  },
+  {
+   "cls": "角色头像",
+   "baseline_days": 4,
+   "last": "20260306"
+  },
+  {
+   "cls": "跳过战斗未选",
+   "baseline_days": 4,
+   "last": "20260722"
+  }
+ ],
+ "dropped_other": [
+  {
+   "cls": "一花",
+   "baseline_days": 7,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "亚伽里",
+   "baseline_days": 4,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "亚留礼服",
+   "baseline_days": 5,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "令女",
+   "baseline_days": 7,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "伊吕波",
+   "baseline_days": 9,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "伊吹",
+   "baseline_days": 8,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "伊树菜",
+   "baseline_days": 12,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "伊织",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "伊织泳装",
+   "baseline_days": 4,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "优香",
+   "baseline_days": 9,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "优香体育服",
+   "baseline_days": 3,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "佐天",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "佳世子",
+   "baseline_days": 5,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "佳世子礼服",
+   "baseline_days": 7,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "冬",
+   "baseline_days": 7,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "千夏",
+   "baseline_days": 7,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "千夏温泉",
+   "baseline_days": 8,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "千寻",
+   "baseline_days": 4,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "千纱",
+   "baseline_days": 3,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "和香",
+   "baseline_days": 5,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "和香温泉",
+   "baseline_days": 7,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "咏叶",
+   "baseline_days": 5,
+   "last": "20260714",
+   "domain": "avatar"
+  },
+  {
+   "cls": "咏叶应援团",
+   "baseline_days": 6,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "响",
+   "baseline_days": 14,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "响应援团",
+   "baseline_days": 5,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "夏乐队",
+   "baseline_days": 7,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "大蛇",
+   "baseline_days": 3,
+   "last": "20260725",
+   "domain": "battle"
+  },
+  {
+   "cls": "妮娅",
+   "baseline_days": 6,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "宁留",
+   "baseline_days": 5,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "宁留兔女郎",
+   "baseline_days": 6,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "实里",
+   "baseline_days": 7,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "小玉",
+   "baseline_days": 4,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "小玉露营",
+   "baseline_days": 8,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "小雪",
+   "baseline_days": 10,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "弥香",
+   "baseline_days": 3,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "御坂美琴",
+   "baseline_days": 12,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "惠",
+   "baseline_days": 7,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "敦子泳装",
+   "baseline_days": 7,
+   "last": "20260716",
+   "domain": "avatar"
+  },
+  {
+   "cls": "斯大萝",
+   "baseline_days": 6,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "日向",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "日和泳装",
+   "baseline_days": 9,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "日步美泳装",
+   "baseline_days": 7,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "时雨",
+   "baseline_days": 6,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "时雨温泉",
+   "baseline_days": 6,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "星野泳装",
+   "baseline_days": 6,
+   "last": "20260723",
+   "domain": "avatar"
+  },
+  {
+   "cls": "晴",
+   "baseline_days": 4,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "晴露营",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "月夜",
+   "baseline_days": 5,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "朱莉打工",
+   "baseline_days": 5,
+   "last": "20260716",
+   "domain": "avatar"
+  },
+  {
+   "cls": "枫",
+   "baseline_days": 9,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "柚子女仆",
+   "baseline_days": 5,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "桃井",
+   "baseline_days": 6,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "桐乃",
+   "baseline_days": 5,
+   "last": "20260709",
+   "domain": "avatar"
+  },
+  {
+   "cls": "桐乃泳装",
+   "baseline_days": 4,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "沙织",
+   "baseline_days": 9,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "沙织泳装",
+   "baseline_days": 3,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "沙织礼服",
+   "baseline_days": 7,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "沙耶私服",
+   "baseline_days": 7,
+   "last": "20260711",
+   "domain": "avatar"
+  },
+  {
+   "cls": "淳子",
+   "baseline_days": 10,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "澪纱美少女",
+   "baseline_days": 9,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "爱留",
+   "baseline_days": 10,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "白子",
+   "baseline_days": 7,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "白子TERROR",
+   "baseline_days": 6,
+   "last": "20260714",
+   "domain": "avatar"
+  },
+  {
+   "cls": "白子单车",
+   "baseline_days": 9,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "白子泳装",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "真琴",
+   "baseline_days": 8,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "紫",
+   "baseline_days": 5,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "紫泳装",
+   "baseline_days": 4,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "绫音泳装",
+   "baseline_days": 3,
+   "last": "20260714",
+   "domain": "avatar"
+  },
+  {
+   "cls": "美代",
+   "baseline_days": 10,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "美优",
+   "baseline_days": 3,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "美咲",
+   "baseline_days": 8,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "美咲泳装",
+   "baseline_days": 9,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "美祢",
+   "baseline_days": 6,
+   "last": "20260714",
+   "domain": "avatar"
+  },
+  {
+   "cls": "花凛兔女郎",
+   "baseline_days": 8,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "花子",
+   "baseline_days": 7,
+   "last": "20260711",
+   "domain": "avatar"
+  },
+  {
+   "cls": "花子泳装",
+   "baseline_days": 12,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "花绘",
+   "baseline_days": 3,
+   "last": "20260721",
+   "domain": "avatar"
+  },
+  {
+   "cls": "花绘圣诞节",
+   "baseline_days": 9,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "芹奈",
+   "baseline_days": 10,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "若藻",
+   "baseline_days": 8,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "若藻泳装",
+   "baseline_days": 7,
+   "last": "20260711",
+   "domain": "avatar"
+  },
+  {
+   "cls": "英美",
+   "baseline_days": 10,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "英美泳装",
+   "baseline_days": 3,
+   "last": "20260711",
+   "domain": "avatar"
+  },
+  {
+   "cls": "茜香",
+   "baseline_days": 5,
+   "last": "20260709",
+   "domain": "avatar"
+  },
+  {
+   "cls": "茜香泳装",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "莲华",
+   "baseline_days": 10,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "遥香",
+   "baseline_days": 4,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "都子",
+   "baseline_days": 3,
+   "last": "20260724",
+   "domain": "avatar"
+  },
+  {
+   "cls": "野乃美泳装",
+   "baseline_days": 4,
+   "last": "20260709",
+   "domain": "avatar"
+  },
+  {
+   "cls": "阳奈礼服",
+   "baseline_days": 6,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "阳葵",
+   "baseline_days": 7,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "静子",
+   "baseline_days": 10,
+   "last": "20260722",
+   "domain": "avatar"
+  },
+  {
+   "cls": "静子泳装",
+   "baseline_days": 10,
+   "last": "20260716",
+   "domain": "avatar"
+  },
+  {
+   "cls": "风华",
+   "baseline_days": 6,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "鹿江",
+   "baseline_days": 5,
+   "last": "20260725",
+   "domain": "avatar"
+  },
+  {
+   "cls": "麻白",
+   "baseline_days": 4,
+   "last": "20260717",
+   "domain": "avatar"
+  },
+  {
+   "cls": "麻白泳装",
+   "baseline_days": 4,
+   "last": "20260725",
+   "domain": "avatar"
+  }
+ ],
+ "fading": [],
+ "dep_silent": {
+  "batch_sweep": [
+   {
+    "cls": "批量扫荡开始灰色",
+    "last": "20260707"
+   },
+   {
+    "cls": "批量扫荡",
+    "last": "20260715"
+   },
+   {
+    "cls": "批量扫荡开始",
+    "last": "20260715"
+   }
+  ],
+  "cafe": [
+   {
+    "cls": "地区升级",
+    "last": "20260722"
+   }
+  ],
+  "event_quest": [
+   {
+    "cls": "2部队",
+    "last": "20260610"
+   },
+   {
+    "cls": "奖励资讯",
+    "last": "20260711"
+   },
+   {
+    "cls": "2部队高亮",
+    "last": "20260725"
+   },
+   {
+    "cls": "自动编辑按钮",
+    "last": "20260725"
+   }
+  ],
+  "momo_talk": [
+   {
+    "cls": "跳过故事键不可用",
+    "last": "20260610"
+   },
+   {
+    "cls": "地区升级",
+    "last": "20260722"
+   }
+  ],
+  "schedule": [
+   {
+    "cls": "房间区域未解锁",
+    "last": "20260613"
+   },
+   {
+    "cls": "地区升级",
+    "last": "20260722"
+   }
+  ],
+  "shop": [
+   {
+    "cls": "全部选择灰",
+    "last": "20260529"
+   }
+  ],
+  "special_sweep": [
+   {
+    "cls": "信用货币回收",
+    "last": "20260707"
+   }
+  ],
+  "story_mining": [
+   {
+    "cls": "new",
+    "last": "20260610"
+   },
+   {
+    "cls": "剧情中断退出",
+    "last": "20260610"
+   },
+   {
+    "cls": "剧情图标已完成",
+    "last": "20260610"
+   },
+   {
+    "cls": "剧情图标未完成",
+    "last": "20260610"
+   },
+   {
+    "cls": "剧情观看",
+    "last": "20260610"
+   },
+   {
+    "cls": "进入章节",
+    "last": "20260610"
+   },
+   {
+    "cls": "地区升级",
+    "last": "20260722"
+   },
+   {
+    "cls": "1部队",
+    "last": "20260725"
+   }
+  ],
+  "ticket_sweep": [
+   {
+    "cls": "入场键没解锁",
+    "last": "20260721"
+   }
+  ]
+ },
+ "dep_never": {
+  "arena_shop": [
+   "信用点商店"
+  ],
+  "daily_mission": [
+   "一键领取灰色"
+  ],
+  "event_quest": [
+   "自动战斗关闭"
+  ],
+  "shop": [
+   "信用点商店",
+   "已全部选择",
+   "货币",
+   "货币_已选择"
+  ],
+  "story_mining": [
+   "剧情new"
+  ]
+ },
+ "pages_unseen_recent": [
+  "EventShop"
+ ],
+ "pages_never_seen": [],
+ "new_cls": [
+  {
+   "cls": "我方",
+   "recent_days": 1
+  }
+ ]
+}
