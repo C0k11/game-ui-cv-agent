@@ -673,7 +673,45 @@ def fx_sched_ticket_decoy_never_read():
             f"读出 {got} (期望 None 或 2; 读成 1 = 吃了 cy0.698 那个「3→2」诱饵)")
 
 
+def fx_craft_empty_slots_still_enter():
+    """⛔制造红点门控的**第三态**: 三个槽位全空 → 同样没有红点 → 旧码永远 skip。
+
+    2026-07-28 帧实锤(data 帧: 材料清單三行全是「＋開始製造」, 一次領取灰):
+    旧 should_run 只认两态 ①有红点=可领 ②无红点=还在造→skip。第三态「根本没在
+    造」被归进 ② ⇒ **一次都不会开新制造**, 而且一旦空了就再也不会有红点 =
+    **自锁**。修法 = 红点 OR 今日未进过(日台账)。
+
+    这里同时钉住反向: **今天已经进过且无红点就必须 skip** —— 否则台账形同虚设,
+    每一轮 daily 都要白跑一趟制造往返。
+    """
+    import brain.skills.craft as cm
+    from brain.skills.craft import CraftSkill
+    day = cm._game_day()
+    saved = cm._load_craft_state()
+    # 大厅帧: 制造入口在, 身上没有红点(红点在别处 = 不属于制造)
+    screen = _sched_screen(
+        _yb("制造入口", 0.531, 0.953, 0.96),
+        _yb("商店入口", 0.621, 0.953, 0.97),
+        _yb("红点", 0.856, 0.714, 0.92),      # 任务大厅的红点, 不在制造入口上
+        _yb("黄点", 0.098, 0.940, 0.89),      # 咖啡厅的黄点
+    )
+    try:
+        cm._save_craft_state({"game_day": day, "visited": False, "started": 0})
+        first = CraftSkill().should_run(screen)
+        cm._save_craft_state({"game_day": day, "visited": True, "started": 1})
+        second = CraftSkill().should_run(screen)
+        cm._save_craft_state({"game_day": "1970-01-01", "visited": True,
+                              "started": 9})
+        stale = CraftSkill().should_run(screen)
+    finally:
+        cm._save_craft_state(saved)
+    ok = (first is True and second is False and stale is True)
+    return (ok, f"今日未进过={first}(期望True, 第三态) / 已进过={second}"
+                f"(期望False) / 昨日台账={stale}(期望True)")
+
+
 CASES = [
+    ("⛔制造槽位全空_无红点也要进", fx_craft_empty_slots_still_enter, True),
     ("⛔arena未到达_绝不报完成", fx_arena_never_reached_not_complete, True),
     ("⛔shop留店标志跟随plan", fx_shop_chain_flag_follows_plan, True),
     ("challenge_tab_假阳性", fx_challenge_false_positive, True),
