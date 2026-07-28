@@ -75,7 +75,17 @@ class AdbInput:
     # "each capture is thread-safe vs input taps" was a wrong assumption.
     _IO_LOCK = threading.Lock()
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 7555):
+    def __init__(self, host: str | None = None, port: int | None = None):
+        # ⛔端口不写死(2026-07-28 事故: MuMu 实例重启后端口 7555→16384,
+        # 模拟器好好跑着 bot 却连不上)。见 brain/mumu_port 的长注释。
+        if host is None or port is None:
+            try:
+                from brain.mumu_port import mumu_host_port
+                _h, _p = mumu_host_port()
+            except Exception:
+                _h, _p = "127.0.0.1", 7555
+            host = host or _h
+            port = port or _p
         self.addr = f"{host}:{port}"
         self._connected = False
         self._adb = _find_adb()

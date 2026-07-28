@@ -34,7 +34,13 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
-DEV = "127.0.0.1:7555"
+# ⛔端口不写死 — MuMu 实例重启会换号(2026-07-28: 7555→16384, 全仓 16 处硬编码)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from brain.mumu_port import mumu_serial
+    DEV = mumu_serial()
+except Exception:
+    DEV = "127.0.0.1:7555"
 API = "http://127.0.0.1:8000/api/v1"
 TMP = Path(os.environ.get("TEMP", ".")) / "_step_probe.png"
 

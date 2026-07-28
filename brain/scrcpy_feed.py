@@ -41,11 +41,21 @@ def _adb_io_lock():
     return AdbInput._IO_LOCK
 
 
-def find_app_display(serial: str = "127.0.0.1:7555",
+def _default_serial() -> str:
+    """⛔别写死端口 —— MuMu 实例重启会换号(2026-07-28: 7555→16384)。"""
+    try:
+        from brain.mumu_port import mumu_serial
+        return mumu_serial()
+    except Exception:
+        return "127.0.0.1:7555"
+
+
+def find_app_display(serial: str | None = None,
                      pkg: str = "com.nexon.bluearchive"):
     """dumpsys window 按 display 分段找 pkg 焦点窗口所在 displayId.
     找不到(BA 没起) → None: 调用方绝不能拿 display 0 凑数 — 0 是
     Android 桌面 launcher, feed 会永远盯着桌面且 watchdog 不报错."""
+    serial = serial or _default_serial()
     with _adb_io_lock():
         out = subprocess.run(
             [_ADB, "-s", serial, "shell", "dumpsys", "window"],
@@ -149,10 +159,10 @@ class ScrcpyFeed:
 
     _ROTATE_AT = 10.0    # 实际节奏 ~10.5-11s(+watchdog 1s 粒度), 对 13.5s 余量>2s
 
-    def __init__(self, serial: str = "127.0.0.1:7555", max_fps: int = 30,
+    def __init__(self, serial: str | None = None, max_fps: int = 30,
                  display_id: int | None = None,
                  stale_restart_s: float = 3.0, log=None):
-        self._serial = serial
+        self._serial = serial or _default_serial()
         self._max_fps = max_fps
         self._display_id = display_id      # None = 自动定位 BA
         self._stale_restart_s = stale_restart_s

@@ -885,8 +885,14 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         if not dry_run:
             try:
                 adb_serial = str(os.environ.get("ADB_SERIAL") or "").strip()
-                adb_host = "127.0.0.1"
-                adb_port = 7555
+                # ⛔别写死 7555(2026-07-28 事故: 实例重启后端口漂到 16384,
+                # 全仓硬编码 → 连不上却表现成"游戏没反应")。见 brain/mumu_port。
+                try:
+                    from brain.mumu_port import mumu_host_port
+                    adb_host, adb_port = mumu_host_port(refresh=True)
+                    _log_pipeline(f"MuMu adb serial resolved → {adb_host}:{adb_port}")
+                except Exception:
+                    adb_host, adb_port = "127.0.0.1", 7555
                 if ":" in adb_serial:
                     host_part, port_part = adb_serial.rsplit(":", 1)
                     adb_host = host_part.strip() or adb_host
