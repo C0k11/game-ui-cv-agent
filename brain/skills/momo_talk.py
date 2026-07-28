@@ -705,6 +705,18 @@ class MomoTalkSkill(BaseSkill):
             self._sending_streak = 0
             self._reply_positions = set()   # post-bond replies are fresh options
             return action_wait(300, "story done → post-bond chatter (same student)")
+        # ⛔2026-07-28 live: 有些羁绊剧情放完**直接把 MomoTalk 一起关掉回大厅**,
+        # 而这里的出口只认 `_on_unread_list` ⇒ 在大厅上干等 `story: waiting for
+        # menu/skip cls` 到 _STORY_MAX_SEC(112s) 才超时。虽然超时后能自愈(scan
+        # 发现不在 momotalk → 回 enter), 但白白空转近两分钟, 而 skill 总预算才
+        # 1500s。回到大厅是**明确的到达证据**, 直接回 enter 重进继续挖。
+        if self.detect_screen_yolo(screen) == "Lobby":
+            self.log("剧情放完直接回了大厅 → 重进 MomoTalk 继续挖(不干等超时)")
+            self._enter_ticks = 0
+            self._enter_t0 = None
+            self._tab_opened = False
+            self._goto("enter")
+            return action_wait(300, "story done → 回大厅了, 重进 MomoTalk")
         return action_wait(400, "story: waiting for menu/skip cls")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
