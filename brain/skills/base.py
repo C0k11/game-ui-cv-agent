@@ -846,18 +846,35 @@ class BaseSkill(ABC):
             conf=0.30, region=_POPUP_BTN_BAND,
         )
         if popup_confirm is not None:
+            # ⛔`_force_settle`(2026-07-28 live 实锤): 这条兜底**绝不许在动画帧上
+            # 动手**。它的全部合法性建立在上面那句契约上 ——「语境内的该确认由拥有
+            # 语境的 skill 排在本 helper 之前处理掉」。而 skill 的判定带是**窄**的
+            # (schedule `_DIALOG_BAND` y 0.66~0.90), 本 helper 的 `_POPUP_BTN_BAND`
+            # y 0.45~0.95 **宽得多** —— 弹窗**弹入动画**中確認还没落到最终位置时,
+            # 窄带漏掉、宽带接住 ⇒ 契约在动画那一两帧上必然破裂, 于是
+            # **skill 该点的「確認」被这里当成非预期弹窗叉掉了**。
+            # 实测 2026-07-28 tick15: 課程表報告 弹出瞬间, PRIORITY 1 没命中,
+            # 这里打出 "通知弹窗(确认+叉结构) → 叉掉", 落点是全體課程表 popout 的
+            # X (0.889,0.141) —— 报告被叉掉, PRIORITY 1 的派遣落账(_ticket_read_
+            # pending / _day_dispatched)整段跳过 = 单日上限台账少记一次。
+            # 同族第三例(前两: 掃蕩确认框被当完成弹窗 / cafe 領取锚在动画帧)。
+            # ⇒ 等稳定帧再判。settle 门自带 >4s 逃生放行, 不会死锁。
+            def _settled(act):
+                act["_force_settle"] = True
+                return act
+
             popup_cancel = self.find_cls(
                 screen, UC.BTN_CANCEL, conf=0.30, region=_POPUP_BTN_BAND
             )
             if popup_cancel is not None:
-                self.log("通知弹窗(确认+取消结构) → 默认安全路径: 取消")
-                return action_click_box(
-                    popup_cancel, "dismiss notification popup (取消键)")
+                self.log("通知弹窗(确认+取消结构) → 默认安全路径: 取消(等稳定帧)")
+                return _settled(action_click_box(
+                    popup_cancel, "dismiss notification popup (取消键)"))
             popup_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
             if popup_x is not None:
-                self.log("通知弹窗(确认+叉结构) → 默认安全路径: 叉掉")
-                return action_click_box(
-                    popup_x, "dismiss notification popup (弹窗叉叉)")
+                self.log("通知弹窗(确认+叉结构) → 默认安全路径: 叉掉(等稳定帧)")
+                return _settled(action_click_box(
+                    popup_x, "dismiss notification popup (弹窗叉叉)"))
             # 只有确认、无取消/叉 → fail-closed, 这里不碰。
 
         return None

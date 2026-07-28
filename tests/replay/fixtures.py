@@ -583,6 +583,56 @@ def fx_sweep_confirm_not_mistaken_for_done():
             f"action={act.get('action')} reason={act.get('reason')!r}")
 
 
+def _sched_read_tickets(json_name: str, jpg_name: str):
+    """跑真 ScheduleSkill 的 `_read_tickets`(不是复刻算法, 是调它本人)。"""
+    import os
+    from brain.skills.schedule import ScheduleSkill
+    jpg = os.path.join(FX_DIR, jpg_name)
+    if not os.path.exists(jpg):
+        return None, f"SKIP: 缺 {jpg_name}"
+    screen = screen_from_tick(_load(json_name), jpg_path=jpg, load_frame=True)
+    if screen.frame is None:
+        return None, "帧读不出(jpg 在但解码失败)"
+    if screen.frame.shape[1] < 3200:
+        return None, f"fixture 帧宽 {screen.frame.shape[1]} <3200, 会走 ADB 升级路径"
+    sk = ScheduleSkill()
+    sk.reset()
+    return sk._read_tickets(screen), ""
+
+
+def fx_sched_tickets_cls_anchored():
+    """walk_20260728_a 步 024 真帧: 全體課程表 popout, 屏上「持有票券 3/7」。
+
+    ⛔旧法(写死矩形 `_TICKET_REGION`)在这一帧读 **None**。今天 46 帧对拍:
+    旧法读出 11 帧 / 新法(cls 锚定)读出 30 帧, **19 处分歧全是「旧 None 新有值」**
+    —— 新法从不与旧法矛盾, 只在旧法瞎的地方补上。新法读出的序列
+    7,7,7→6,6,6→5,5,5→4,4→3×6→2,2 单调递减零跳变; 人眼在两点交叉验证过
+    (步18 缩略图「4/7」/ 步21「3/7」)。
+    """
+    got, err = _sched_read_tickets("sched_tickets_3.json", "sched_tickets_3.jpg")
+    if err:
+        return (err.startswith("SKIP"), err)
+    return (got == 3, f"读出 {got} (期望 3 — 屏上「持有票券 3/7」)")
+
+
+def fx_sched_ticket_decoy_never_read():
+    """walk_20260728_a 步 034 真帧: 同一个 `课程表票` cls 在屏上有**两处** ——
+    popout 表头 cy≈0.142(被弹窗压住, 读不出) 与 **課程表資訊 弹窗里 cy≈0.698**。
+
+    ⛔后者是「3 → 2」**派遣前后指示器**, 不是余额。往右取数字条读出来是
+    '21'/'1' —— 而 `'1'` **格式完全合法且在 0..7 内**, 不带 y 门的"找到票图标
+    就往右读"会把它当成"还剩 1 张"(真值是 2)。票数是金钱闸输入, 读小丢票、
+    读大则可能在 0 票时去点開始 → 弹青辉石購買框。
+    本用例判"读出 1" = 诱饵没挡住。
+    """
+    got, err = _sched_read_tickets("sched_ticket_decoy.json",
+                                   "sched_ticket_decoy.jpg")
+    if err:
+        return (err.startswith("SKIP"), err)
+    return (got in (None, 2),
+            f"读出 {got} (期望 None 或 2; 读成 1 = 吃了 cy0.698 那个「3→2」诱饵)")
+
+
 CASES = [
     ("⛔arena未到达_绝不报完成", fx_arena_never_reached_not_complete, True),
     ("⛔shop留店标志跟随plan", fx_shop_chain_flag_follows_plan, True),
@@ -602,6 +652,8 @@ CASES = [
     ("悬赏票数_关卡列表页读得出", fx_bounty_tickets_stagelist_readable, False),
     ("⛔悬赏零票_绝不读成非零", fx_bounty_zero_tickets_never_overread, True),
     ("⛔掃蕩确认框_绝不当成完成弹窗", fx_sweep_confirm_not_mistaken_for_done, True),
+    ("课程表票数_cls锚定读得出", fx_sched_tickets_cls_anchored, False),
+    ("⛔课程表票_绝不吃「3→2」诱饵", fx_sched_ticket_decoy_never_read, True),
 ]
 
 
