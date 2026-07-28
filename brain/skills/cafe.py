@@ -502,11 +502,27 @@ class CafeSkill(BaseSkill):
         # audit 2026-06-15: claim 后是双层弹窗(领取奖励动画 + 收益明细), 旧码 close
         # 一次就 _earnings_done=True 前进 → 明细层还盖着 → invite 卡 20t 到 stuck-recovery
         # 才关。改成: close 到 _is_cafe(咖啡页签名回来)才算完, 不是 close 一次就走。
-        if self._earnings_claimed and self._is_cafe(screen):
+        # ⛔⛔2026-07-28 第二次 live 才逮到的真根因: 这条**自称到达证据**的判据
+        # `_earnings_claimed and _is_cafe(screen)` **根本不是到达证据** ——
+        # 上面那段注释说的「the earnings POPUP covers the cafe page signature
+        # (detect_screen_yolo!="Cafe" while it's open)」是 **2026-06-02 的观察**,
+        # 模型变强后**已经不成立**: 实测收益弹窗开着时, 屏上照样检出
+        # `咖啡厅邀请卷 0.97 / 回大厅按钮 0.97 / 返回键 0.98` ⇒ `_is_cafe` 为 True。
+        # 于是 `claim earnings` 一被帧稳定门吞掉, 下一 tick 就从这里判"领完了"
+        # → 关窗走人, 而 `領取_黄 0.97 @cy0.733` 还好端端挂在屏上(帧证据)。
+        # ⇒ 补上真正的到达证据: **屏上已经没有可点的 領取(黄/蓝) 了**。
+        #   领到手 → 按钮变灰或弹窗关 → 这个合取才成立;
+        #   点被吞  → 領取_黄 仍在 → 落回下面 claim_active 分支重发。
+        # ⭐教训: "判据的名字叫到达证据"不等于"它真的是到达证据" —— 必须问
+        #   **它会不会在动作没落地时也成立**。今天这已经是第二遍了。
+        _still_claimable = self.find_cls(
+            screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE],
+            conf=_CLS_CONF, region=(0.28, 0.50, 0.74, 0.90)) is not None
+        if self._earnings_claimed and self._is_cafe(screen) and not _still_claimable:
             self._earnings_claimed = False
             self._earnings_done = True
             self._begin_invite(floor_2=False)
-            return action_wait(300, "earnings popup chain closed → invite")
+            return action_wait(300, "earnings popup chain closed (無可領) → invite")
 
         # ★ FIRST-ENTRY POPUP (user spec: 第一次进咖啡厅有"訪問學生目錄"说明弹窗,
         # 点叉叉关掉再看收益). live 2026-06-14: that popup covered the 咖啡厅收益

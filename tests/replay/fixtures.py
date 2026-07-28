@@ -892,13 +892,25 @@ def fx_cafe_claim_earnings_no_premature_done():
     premature = bool(sk._earnings_done)
     act2 = sk._earnings(screen)
     double = act2.get("action") == "click"
+    # ⛔第二次 live 才逮到的那条: 点被吞后, 只要 領取_黄 还在屏上, **绝不许**
+    # 从"到达证据"分支判领完 —— 旧判据 `_earnings_claimed and _is_cafe` 会成立,
+    # 因为咖啡页签名(咖啡厅邀请卷/回大厅按钮/返回键)在弹窗开着时照样检出。
+    screen_with_cafe_sig = _sched_screen(
+        _yb("领取_黄", 0.500, 0.733, 0.97),
+        _yb("咖啡厅邀请卷", 0.692, 0.904, 0.97),
+        _yb("回大厅按钮", 0.965, 0.032, 0.97),
+        _yb("返回键", 0.045, 0.052, 0.98),
+    )
+    act3 = sk._earnings(screen_with_cafe_sig)
+    false_done = bool(sk._earnings_done) or "invite" in str(act3.get("reason", ""))
     ok = (act1.get("action") == "click"
           and "claim earnings" in str(act1.get("reason", ""))
           and act1.get("_force_settle") is True
-          and not premature and not double)
+          and not premature and not double and not false_done)
     return (ok, f"首点={str(act1.get('reason'))[:28]} / force_settle="
                 f"{act1.get('_force_settle')} / 点时就报领完={premature}(必须False)"
-                f" / 连发={double}(必须False)")
+                f" / 连发={double}(必须False) / 領取_黄还在却判领完={false_done}"
+                f"(必须False)")
 
 
 CASES = [
