@@ -485,6 +485,13 @@ SKILL_YOLO_MAP = {
     # targets. NO emoticon — headpat is cafe-only. (probe-derived 2026-06-01)
     "Schedule": f"{BASE_DETECTORS}+avatar",
     "JointFiringDrill": f"{BASE_DETECTORS}+battle",
+    # ⭐2026-07-28 帧实测补: MomoTalk 的未读列表点的是**行头像**(故意避开红标,
+    # probe 2026-06-01: 点红标打不开), 而头像属于 fused_avatar 域 —— 只挂 ui 时
+    # 那一下在 ui 眼里**半径 0.06 内零 cls = 盲拍**(step_walk 守卫当场拦下)。
+    # 挂上 avatar 后同一帧 5 个头像 conf 0.99-1.00 全中, 且**带学生名**
+    # (贵音/爱丽丝(战斗)/凯伊/千纱乐团/萌) ⇒ 落点从"按 badge 减 0.28 猜"变成
+    # 真锚定, 顺带知道正在挖谁(竣工判据从"3 students"升级成具体名单)。
+    "MomoTalk": f"{BASE_DETECTORS}+avatar",
     # DailyRoutine wraps cafe (emoticon headpat + fused_avatar invite targets)
     # and schedule (fused_avatar room placement) → needs cafe + avatar. No
     # battle: bounty/jfd/arena are separate top-level skills now.
