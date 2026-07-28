@@ -691,7 +691,23 @@ class TicketSweepSkill(BaseSkill):
             # 点击被吞时留在 confirm(入口对账 fall-through 会重点); 真点上后
             # 掃蕩完成弹窗出现 → 顶部 sweep-done 分支落账+进 result。
             self.log("confirm sweep — currency verified (票券), 等掃蕩完成落地")
-            return action_click_box(confirm, "confirm sweep (tickets, not pyroxene)")
+            # ⚠`_force_settle` 在这里是**防御性标记, 不是 bug 修复** —— 说清楚,
+            # 免得后人以为它解决了什么(2026-07-28 我自己先误判过一次):
+            # 本 reason 不含 `_dedup_click` 关键词豁免表里的任何词, 所以它**本来就**
+            # 走稳定门, 打不打这个 flag 行为完全一样。打上是为了钉死这条语义 ——
+            # 将来谁把 reason 改成含「確認/confirm 键」之类的字样, 也不会悄悄退化成
+            # "跳过稳定门"。(reason 措辞当控制信号的坑见 memory reason_string_as_api。)
+            #
+            # ⛔本站点真实存在、但**决定不修**的一个形态(实测 walk_20260728_d
+            # tick51-53, bot 自己的 trajectory 帧为证):
+            #   掃蕩完成 弹窗先以紧凑布局出现(確認 @cy0.705)并**静止 ≥2 帧**,
+            #   稳定门据此正确放行 → 之后弹窗**自行重排**, 確認 升到 cy0.809。
+            #   那一发落空 Δcy=0.104。稳定门原理上抓不到"静止过再重排"。
+            # 代价实测: 浪费 1-2 个 tick, 上面那条重发设计自愈命中, **不丢扫荡**。
+            # 要根治得在派发前再抓一帧复验(~85ms+/次点击), 为省一个 tick 不划算。
+            act = action_click_box(confirm, "confirm sweep (tickets, not pyroxene)")
+            act["_force_settle"] = True
+            return act
 
         if self._phase_ticks > 24:
             self._goto("result")

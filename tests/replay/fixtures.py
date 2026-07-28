@@ -583,6 +583,46 @@ def fx_sweep_confirm_not_mistaken_for_done():
             f"action={act.get('action')} reason={act.get('reason')!r}")
 
 
+def fx_event_panel_fake_confirm_not_a_dialog():
+    """run_20260727_220013/t0276 真帧: **裸的活动扫荡面板**(步进器全灰), 屏上
+    多出一个 `确认键 conf=0.81 @ cy=0.961` —— 面板底部的东西, 不是对话框按钮。
+
+    ⛔旧码 `find_cls(BTN_CONFIRM, conf=0.6)` **不带 region**(与 840AP 那次同病),
+    全屏 argmax 捡到它 → 有確認无取消 ⇒ 判成「掃蕩完成框」→ 过结构闸 →
+    而扫荡面板**自带数量步进器**(MIN/MAX/加减号 @cy0.415) ⇒ `_dialog_is_purchase`
+    命中 ⇒ **判成购买框, 整轮扫荡 back off**。当时 AP=445 ≈ 22 次扫荡。
+
+    本用例同时钉两件事:
+      ① 带 region 后这一帧**取不到** 対话框確認(假阳被排除) —— 这是修复本身;
+      ② `_dialog_is_purchase` 在这一帧**确实为 True** —— 证明"band 才是那道闸",
+         不是结构闸自己变好了。②失败说明这条用例已经测不到原 bug 了。
+    """
+    import os
+    from brain.skills.event_quest import EventQuestSkill, _DIALOG_BTN_BAND
+    from brain.skills import ui_classes as UC
+    jpg = os.path.join(FX_DIR, "event_sweep_panel_fake_confirm.jpg")
+    if not os.path.exists(jpg):
+        return (True, "SKIP: 缺 event_sweep_panel_fake_confirm.jpg")
+    screen = screen_from_tick(_load("event_sweep_panel_fake_confirm.json"),
+                              jpg_path=jpg, load_frame=True)
+    sk = EventQuestSkill()
+    sk.reset()
+    banded = sk.find_cls(screen, UC.BTN_CONFIRM, conf=0.6,
+                         region=_DIALOG_BTN_BAND)
+    unbanded = sk.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
+    is_buy = sk._dialog_is_purchase(screen)
+    bad = []
+    if banded is not None:
+        bad.append(f"带 region 仍取到確認 @cy={(banded.y1 + banded.y2) / 2:.3f}")
+    if unbanded is None:
+        bad.append("不带 region 也取不到 — 这帧已复现不出原 bug, 用例失效")
+    if not is_buy:
+        bad.append("_dialog_is_purchase=False — 结构闸变了, 用例不再测原路径")
+    return (not bad, "/".join(bad) if bad else
+            f"假確認被 band 排除(裸帧 argmax 会捡到 cy="
+            f"{(unbanded.y1 + unbanded.y2) / 2:.3f}), 结构闸仍会误判={is_buy}")
+
+
 def _sched_read_tickets(json_name: str, jpg_name: str):
     """跑真 ScheduleSkill 的 `_read_tickets`(不是复刻算法, 是调它本人)。"""
     import os
@@ -654,6 +694,7 @@ CASES = [
     ("⛔掃蕩确认框_绝不当成完成弹窗", fx_sweep_confirm_not_mistaken_for_done, True),
     ("课程表票数_cls锚定读得出", fx_sched_tickets_cls_anchored, False),
     ("⛔课程表票_绝不吃「3→2」诱饵", fx_sched_ticket_decoy_never_read, True),
+    ("⛔面板底部假確認_不当对话框", fx_event_panel_fake_confirm_not_a_dialog, True),
 ]
 
 

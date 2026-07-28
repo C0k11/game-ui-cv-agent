@@ -82,6 +82,11 @@ _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_
                            # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
 
+# 对话框按钮带 —— 見 `_sweep_flow` 里那段 2026-07-28 的注释。
+# 实测(今天全部帧): 对话框 確認 cy = 0.699 / 0.705 / 0.771 / 0.809;
+# 被误捡的假阳 cy = 0.961(扫荡面板底部); 顶栏 = 0.03。两头都留足余量。
+_DIALOG_BTN_BAND = (0.20, 0.55, 0.82, 0.93)
+
 # 固定位 (live 实测, 帧目检):
 _POS_QUEST_TAB = (0.635, 0.151)     # 活动页 Quest tab (cls 活动quest_已选择 仅0.24-0.59)
 _POS_TOUCH_CONTINUE = (0.5, 0.90)   # 结算 TOUCH-continue
@@ -1471,8 +1476,23 @@ class EventQuestSkill(BaseSkill):
                     self._popup_stuck_t0 = 0.0
             return action_wait(600, f"{label}: popup settling")
         # 确认框 (要使用NAP掃蕩N次嗎?)
-        conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6)
-        cancel_btn = self.find_cls(screen, UC.BTN_CANCEL, conf=0.5)
+        # ⛔2026-07-28 live 实锤 —— 与 840AP 那次**同一个病**(memory completion_gap:
+        # "任何顶栏读数/角落按钮锚定必须带 region"): 这两个 find_cls **没带 region**,
+        # 于是全屏 argmax 捡到了一个 `确认键 conf=0.81 @ cy=0.961`(屏幕最底部,
+        # 活动扫荡面板上的东西, 不是对话框按钮)。
+        # 后果链: 有確認、无取消 → 判成「掃蕩完成框」→ 过结构闸 → 而扫荡面板
+        # **自带数量步进器**(MIN/MAX/加减号 @cy0.415, 那时全灰) → `_dialog_is_purchase`
+        # 的 "stepper 在 cy>0.12 即体内" 命中 → **判成购买框, 整轮扫荡 back off**。
+        # 当时 AP=445, 代价 ≈22 次扫荡。误报方向虽安全, 但"活没干"同样是事故。
+        # 定带依据(今天全部帧实测): 对话框 確認 cy = 0.699 / 0.705 / 0.771 / 0.809;
+        # 假阳 0.961; 顶栏 0.03。取 0.55~0.93 两头都留足余量。
+        # ⚠同型未验: 本文件 unlock/battle 链还有三处无 region 的 BTN_CONFIRM
+        #   (`unlock: confirm auto-formation` / `battle: settle 確認` / `settle: 確認`)。
+        #   今天没跑到那条链, **没有帧证据就不动**(那条链有 fixture 护着, 盲改风险更大)。
+        conf_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6,
+                                 region=_DIALOG_BTN_BAND)
+        cancel_btn = self.find_cls(screen, UC.BTN_CANCEL, conf=0.5,
+                                   region=_DIALOG_BTN_BAND)
         if conf_btn is not None and cancel_btn is not None:
             # ⛔ money gate(2026-07-11 强化): 青辉石黑名单会漏检(購買AP框上
             # v13 全盲实锤) → 加结构闸: body 有 stepper/体力 = 购买框 → 取消。
