@@ -81,6 +81,9 @@ _BANNER_FRESH_SEC = 0.35
 _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
                            # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
+# 连续这么多**扫荡轮**读不到活動點數 ⇒ 认定本期是无点数活动, 转尾关轮转。
+# 取 2 而不是 1: 单轮读失败可能只是弹窗遮挡; 2 轮仍读不到基本就是没有这个 UI。
+_NO_POINTS_ROUNDS = 2
 
 # 对话框按钮带 —— 見 `_sweep_flow` 里那段 2026-07-28 的注释。
 # 实测(今天全部帧): 对话框 確認 cy = 0.699 / 0.705 / 0.771 / 0.809;
@@ -141,9 +144,46 @@ class EventQuestSkill(BaseSkill):
     def no_ui_escape(self):
         return "back" if self.sub_state in self._ESCAPE_PHASES else None
 
+    @staticmethod
+    def _parse_farm_stages(spec) -> List[int]:
+        """把用户配置的「刷哪几关 + 配比」展开成一个按关号的轮转序列。
+
+        接受三种写法(前端/配置怎么方便怎么来):
+            [10, 11]            → 10,11 交替
+            {"10": 1, "11": 2}  → 10,11,11 (银币缺口大就多给)
+            "10,11,11"          → 同上
+        空/None ⇒ 返回 [] = 走自动兜底(尾关轮转)。
+        """
+        if not spec:
+            return []
+        out: List[int] = []
+        try:
+            if isinstance(spec, dict):
+                for k, w in spec.items():
+                    out += [int(k)] * max(0, int(w))
+            elif isinstance(spec, str):
+                out = [int(x) for x in spec.replace("，", ",").split(",")
+                       if x.strip()]
+            else:
+                out = [int(x) for x in spec]
+        except (TypeError, ValueError):
+            return []
+        return [n for n in out if n > 0]
+
     def __init__(self, points_target: int = _POINTS_TARGET_DEFAULT,
-                 tail_quests: int = _TAIL_QUESTS):
+                 tail_quests: int = _TAIL_QUESTS,
+                 farm_stages=None):
         super().__init__("EventQuest")
+        # ⛔2026-07-28 用户实锤:「活动只会刷最后一关」。根因两条, 都在下面修:
+        #  ① `_points` 无条件扫 `len(_quests)-1`(最后一关), 只有**点数达标**才
+        #     转 `_currency` 轮转 —— 而本期是**无点数活动**(点数永远读不出),
+        #     于是 AP 全灌最后一关。今天实测: 22 次全给 Q12=兽爪, 而 memory
+        #     event_ops_playbook 记的账是 **兽爪过剩 Q12 该暂停**, 缺口在
+        #     Q10 卡带(~6,355) 与 Q11 银币(~10,326)。
+        #  ② `_currency_idx` **从头到尾没有 +1 过**, 就算进了轮转也原地打转。
+        # ⇒ 显式关号计划优先(用户可在配置/前端直接指定刷哪几关、按什么配比),
+        #   没配就自动兜底成尾关轮转(memory 定案:「无点数活动只刷最后三关」)。
+        self._farm_stages: List[int] = self._parse_farm_stages(farm_stages)
         # 长跑 skill 的**整体**上限(pipeline.py:2403 `skill.ticks >= max_ticks`
         # → skill.reset() 重来)。⚠与 _BATTLE_MAX 不是一个计数器: 后者是
         # self._battle_ticks(每场战斗归零), 这里是 skill 全程累计。
@@ -220,7 +260,10 @@ class EventQuestSkill(BaseSkill):
         self._pts_cache: Optional[Tuple[int, int]] = None
         self._pts_read_round: int = -1
         self._points_done = False
-        self._currency_idx = 0        # 货币关轮转指针 (倒数第2起)
+        self._currency_idx = 0        # 货币关轮转指针 — 按**扫荡轮次**推进
+        self._cur_round_mark = -1     # 上次推进指针时的 _sweep_rounds
+        self._no_pts_rounds = 0       # 连续读不出活動點數的轮数
+        self._no_pts_round_mark = -1
         self._swept = 0
         self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
         self._ap_spend_after_read = False  # 读数之后又扫荡/出击过 → 读数已陈旧
@@ -1369,26 +1412,78 @@ class EventQuestSkill(BaseSkill):
             self._pts_cache = self._read_points(screen)
             self._pts_read_round = self._sweep_rounds
             self.mark("pts_read")
+        # ⭐用户显式指定了刷哪几关 ⇒ 点数阶段整个跳过, 直接按计划轮转。
+        if self._farm_stages:
+            self.log(f"points: 已配置 farm 计划 {self._farm_stages} → 跳过点数阶段")
+            self._points_done = True
+            self._set("currency")
+            return action_wait(200, "farm plan configured → currency")
         pts = self._pts_cache
         if pts is not None:
+            self._no_pts_rounds = 0
             self.log(f"活動點數 {pts[0]}/{pts[1]}")
             if pts[0] >= min(self._points_target, pts[1]):
                 self._points_done = True
                 self._set("currency")
                 return action_wait(300, "points target reached → currency")
+        else:
+            # ⛔无点数活动逃生(2026-07-28 用户实锤「只会刷最后一关」的直接根因):
+            # 点数读不出时旧码**无条件**继续扫最后一关, 于是整轮 AP 全灌一关。
+            # memory event_ops_playbook 的定案是「无点数活动只刷最后三关」——
+            # 连续 N 轮读不出就认定本期无点数, 转轮转。
+            # ⚠用**扫荡轮次**不用 tick: 点数只在扫完才变, 每 tick 计数没有意义。
+            if self._sweep_rounds != self._no_pts_round_mark:
+                self._no_pts_round_mark = self._sweep_rounds
+                self._no_pts_rounds += 1
+            if self._no_pts_rounds >= _NO_POINTS_ROUNDS:
+                self.log(f"points: 连续 {self._no_pts_rounds} 轮读不到活動點數 "
+                         f"⇒ 判定**本期无点数活动** → 转尾关轮转"
+                         f"(⚠这是'读不出'不是'没有点数'的资源结论)")
+                self._points_done = True
+                self._set("currency")
+                return action_wait(200, "no-points event → currency rotation")
         return self._sweep_quest(screen, quest_idx=len(self._quests) - 1,
                                  phase_after="milestone", label="points")
 
     def _currency(self, screen: ScreenState) -> Dict[str, Any]:
-        """货币关轮流 MAX 扫 (点数满后才进入)."""
+        """货币关轮转 MAX 扫。
+
+        优先用**用户显式指定的关号计划**(`event_farm_stages`), 没配就自动兜底成
+        尾关轮转。⛔`_currency_idx` 必须**按扫荡轮次**推进 —— 旧码它从初始化到
+        永远都是 0, 轮转是死的(2026-07-28 用户实锤「只刷最后一关」的第二个根因)。
+        """
         n = len(self._quests)
         if n < 2:
             self._set("tasks")
             return action_wait(200, "no currency quests")
-        # 轮转: 倒数第2 → 倒数第3 → 倒数第4
-        idx = n - 2 - (self._currency_idx % max(1, n - 1))
+        # 每完成一轮扫荡才转下一关 —— 用 tick 推进会在同一关内乱跳。
+        if self._sweep_rounds != self._cur_round_mark:
+            self._cur_round_mark = self._sweep_rounds
+            self._currency_idx += 1
+
+        if self._farm_stages:
+            want = self._farm_stages[self._currency_idx % len(self._farm_stages)]
+            idx = next((i for i, q in enumerate(self._quests)
+                        if q.get("num") == want), None)
+            if idx is not None:
+                return self._sweep_quest(screen, quest_idx=idx,
+                                         phase_after="milestone",
+                                         label=f"farm Q{want:02d}")
+            # ⛔关号不在本次 survey 的表里(没解锁/没滚到) —— 报出来别静默降级,
+            # 否则"我配了刷 Q10 结果它刷别的"这种事永远查不出。
+            self.log(f"⚠farm 计划要 Q{want:02d}, 但本轮 survey 表里没有 "
+                     f"{[q.get('num') for q in self._quests]} → 本轮回退尾关轮转")
+
+        # 自动兜底: 尾关轮转(memory 定案「无点数活动只刷最后三关」)。
+        # 旧码从 n-2 起算把最后一关排除在外 —— 那是"点数关已经扫饱"的前提下才
+        # 成立; 无点数活动没有这个前提, 最后一关同样是货币关, 要一起轮。
+        _tail = min(self._tail_quests, n)
+        idx = n - 1 - (self._currency_idx % max(1, _tail))
+        _num = self._quests[max(0, idx)].get("num")
         return self._sweep_quest(screen, quest_idx=max(0, idx),
-                                 phase_after="milestone", label="currency")
+                                 phase_after="milestone",
+                                 label=f"currency Q{_num:02d}" if _num
+                                 else "currency")
 
     def _sweep_quest(self, screen: ScreenState, quest_idx: int,
                      phase_after: str, label: str) -> Dict[str, Any]:

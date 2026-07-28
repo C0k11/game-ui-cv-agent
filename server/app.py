@@ -245,7 +245,17 @@ def _default_profile_settings() -> Dict[str, Any]:
         # the LAST stage in an event drops the highest-value shop currency
         # (P-shop items = premium shards / pyroxenes). 0 = old behavior
         # (bottom-most visible stage). 12 = typical 4-stage event finale.
+        # ⛔死配置(2026-07-28 实查): 全仓**没有任何代码读 `event_farming_stage`**。
+        # 「活动只刷最后一关」不是它造成的, 是 event_quest._points 写死
+        # `len(_quests)-1`。留着只为不破坏老 profile, 别再往它写东西。
         "event_farming_stage": 12,
+        # ⭐活动 farm 计划(2026-07-28 用户要求「动态规划 / 前端能指定刷什么」):
+        # 显式指定刷哪几关 + 配比, 三种写法都吃:
+        #     [10, 11]            → 两关交替
+        #     {"10": 1, "11": 2}  → Q11 缺口大就多给一倍
+        #     "10,11,11"          → 同上
+        # 空 = 自动兜底(尾关轮转; memory 定案「无点数活动只刷最后三关」)。
+        "event_farm_stages": [],
         # P1b: hard AP ceiling for event_farming in one run. 0 = disabled
         # (run until max_rounds or ap_reserve). Typical 1-week event
         # budget: 200 sweeps × 40 AP = 8000.
@@ -419,6 +429,13 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
         incoming = raw.get(key)
         if isinstance(incoming, list):
             data[key] = [str(x).strip() for x in incoming if str(x or "").strip()]
+    # ⭐event_farm_stages: 三种写法都放行(list / dict{关号:配比} / "10,11,11"),
+    # 展开与校验交给 `EventQuestSkill._parse_farm_stages` 一处做, 这里只做透传 ——
+    # ⛔白名单归一化会**静默丢掉**没列在这里的 key, 新配置项忘了加就是死配置
+    # (`event_farming_stage` 就是活标本: 存在于默认值里, 全仓无人读)。
+    _fs = raw.get("event_farm_stages")
+    if isinstance(_fs, (list, dict, str)):
+        data["event_farm_stages"] = _fs
     return data
 
 

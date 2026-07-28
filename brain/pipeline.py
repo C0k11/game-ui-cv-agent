@@ -1273,7 +1273,12 @@ class DailyPipeline:
             # 有 bonus 先吃, 没有就退、batch_sweep 兜底扫正常关.
             "special_sweep": SpecialSweepSkill(),
             # 活动 AP 规划器 (2026-07-08): 排 special_sweep 前, 活动吃 AP 优先。
-            "event_quest": EventQuestSkill(),
+            # ⭐`event_farm_stages`(2026-07-28): 用户显式指定活动刷哪几关 + 配比。
+            # 写法三选一: [10,11] / {"10":1,"11":2} / "10,11,11"。
+            # 空 = 自动兜底(尾关轮转)。⛔旧的 `event_farming_stage: 12` 是**死配置**
+            # (全仓没有任何代码读它) —— 别再往那里写。
+            "event_quest": EventQuestSkill(
+                farm_stages=opts.get("event_farm_stages")),
             "arena": ArenaSkill(),
             # 战术大赛商店买体力 (花战术大赛货币, 非青辉石). NOT in DEFAULT_SKILLS —
             # run via skill_order/sub_only for the confirm-step live calibration,
