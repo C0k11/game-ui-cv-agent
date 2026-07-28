@@ -505,6 +505,26 @@ class CafeSkill(BaseSkill):
             self.log(f"wrong screen '{page}', backing out")
             return action_back(f"back from {page}")
 
+        # ⛔⛔咖啡厅「UI 隐藏模式」(2026-07-28 live 帧实锤):
+        # BA 咖啡厅点**空白地面**会把顶栏/底栏/所有按钮整套隐藏(看房/截图功能)。
+        # bot 的 recover 点击(叉叉/home 的坐标在 UI 消失后就是空白)一旦落空,
+        # 就会**自己把 UI 点没**, 之后屏上一个导航 cls 都不剩 ⇒ _enter 只能走
+        # `cafe recover: 无 home/X/返回键 → 等待(绝不瞎按 ESC)` 干等到超时
+        # (实录: 连续 12 tick 该 reason → "could not reach cafe")。
+        # 当时屏上还有 **4 个 Emoticon_Action(4 个学生等着摸头)** + 未领的收益。
+        # 判据(强, 不是瞎点): 有 Emoticon_Action = 人确实站在咖啡厅房间里,
+        # 而**零导航 cls**(返回键/回大厅/咖啡厅收益/移动至N号点 全无) = UI 被隐藏。
+        # ⇒ 再点一次空白把 UI toggle 回来。落点取**左下角空地**(0.12,0.88):
+        #   避开学生(会摸头/开对话)、避开右侧设施, 是 toggle 最安全的位置。
+        _emos = self.find_all_cls(screen, UC.EMOTICON_ACTION, conf=0.30)
+        _navs = self.find_cls(screen, [UC.BTN_BACK, UC.BTN_HOME, UC.CAFE_EARNINGS,
+                                       UC.CAFE_MOVE_1F, UC.CAFE_MOVE_2F,
+                                       UC.CAFE_INVITE_TICKET], conf=0.30)
+        if _emos and _navs is None:
+            self.log(f"咖啡厅 UI 被隐藏(有 {len(_emos)} 个摸头标记但零导航 cls) "
+                     f"→ 点空地把 UI toggle 回来")
+            return action_click(0.12, 0.88, "cafe: UI 被隐藏 → 点空地唤回")
+
         # Unknown / transition screen.
         if self._phase_ticks > _ENTER_MAX:
             self.log("enter budget exhausted, giving up on cafe")
