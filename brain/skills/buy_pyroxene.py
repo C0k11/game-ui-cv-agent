@@ -89,6 +89,23 @@ class BuyPyroxeneSkill(BaseSkill):
         region = (entry.x1 - 0.02, entry.y1 - 0.05, entry.x2 + 0.05, entry.y2 + 0.02)
         return self.dot_in_region(screen, region, dot_classes=(UC.DOT_RED,))
 
+    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    def exit_report(self):
+        """竣工判据 = 今天这个免费包到底领没领。
+
+        ⛔2026-07-28 首次 live 跑通时出口报的是 `UNKNOWN — 未声明竣工判据`,
+        正是「活干没干完没人审计」那一类(memory completion_gap)。而这个 skill
+        更需要判据: 它**整个存在的意义**就是每天领一次, 领不到就是白跑,
+        且它自己 `should_run` 靠红点门控 —— 红点漏检就会静默跳过一整天。
+        """
+        if self._bought:
+            return ("CLEAN", "每日免費組合包已领(內容物 AP x10 + 信用点 x10K)")
+        if self._skipped_already_claimed:
+            return ("CLEAN", "今日免费包**先前已领**(屏上无 免费 标且无未领红点)")
+        return ("LEFTOVER",
+                f"免费包**没领到**(sub={self.sub_state}, 確認点击 "
+                f"{self._confirm_clicks} 次) — 明天查 免费/红点 两条定位是否都漏检")
+
     def __init__(self):
         super().__init__("BuyPyroxene")
         # enter(~6)+combo(~4)+buy(~3)+confirm(~6)+reward(~6)+exit(~6) ≈ 31;
@@ -103,6 +120,9 @@ class BuyPyroxeneSkill(BaseSkill):
         self._bought: bool = False         # set once the free pack is confirmed
         self._buy_retry: Optional[tuple] = None  # (cx,cy) to re-press on drop
         self._confirm_clicks: int = 0      # ack-loop: 確認 实际点击次数(防幻影)
+        # 「今天先前已领」的证据(屏上既无 免费 标也无未领红点) —— 与「没领到」
+        # 区分开, 否则竣工判据每天都会误报 LEFTOVER。见 exit_report。
+        self._skipped_already_claimed: bool = False
 
     def reset(self) -> None:
         super().reset()
@@ -292,6 +312,10 @@ class BuyPyroxeneSkill(BaseSkill):
         # No FREE AND no combo red dot (or we already bought) → genuinely done.
         if self._phase_ticks > 4:
             why = "claimed just now" if self._bought else "no 红点 → already claimed today"
+            # 竣工判据要能区分「今天领到了」和「今天先前已领」——两者都是 CLEAN,
+            # 但只有第三种(既没领到又没证据说已领)才是 LEFTOVER。
+            if not self._bought:
+                self._skipped_already_claimed = True
             self.log(f"no FREE + no combo红点 → done ({why})")
             self._goto("exit")
             return action_wait(250, f"no free pack → exit ({why})")

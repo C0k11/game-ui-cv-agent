@@ -46,8 +46,21 @@ TMP = Path(os.environ.get("TEMP", ".")) / "_walk.png"
 
 # ⛔硬碰钱词 —— 命中一律停。只留**真会掏钱**的那几个。
 # 早先把 確認/扫荡/票 也塞进来了, 结果掃蕩確認一天几十次全卡住 = 跑不完。
-MONEY = ("購買", "购买", "PURCHASE", "青辉石", "青輝石", "pyroxene",
-         "免費", "免费", "buy", "BUY")
+MONEY = ("購買", "购买", "purchase", "青辉石", "青輝石", "pyroxene",
+         "免費", "免费", "buy", "free", "cad", "$")
+
+
+def _hits_money(reason: str) -> bool:
+    """⛔大小写不敏感(2026-07-28 审 buy_pyroxene 时发现的**工具自身的洞**):
+    旧表写死 `"PURCHASE"` 大写 + `"buy"/"BUY"` 两个变体, 而全 bot **最该拦的
+    那一步** reason 是 `confirm FREE purchase (確認键)` —— 小写 `purchase` 不
+    匹配大写常量, `FREE` 也不在表里 ⇒ **青辉石商店里点確認这一步能悄悄自动放行**。
+    (buy_pyroxene 那个商店里, 免費組合包旁边就是 CAD$ 真钱包。)
+    这就是「reason 措辞当控制信号」的又一种形态: 守卫按字符串匹配, 而字符串的
+    大小写/措辞是另一个人随手写的。⇒ 统一小写比对, 并补上 free/cad/$。
+    """
+    r = reason.lower()
+    return any(k.lower() in r for k in MONEY)
 
 # ⭐结构判据(比字符串可靠, 与 skill 内 _dialog_is_purchase 同源):
 # **确认框在屏 且 框体内有数量步进器/体力/青辉石** = 购买框 → 停。
@@ -272,7 +285,7 @@ def main() -> int:
 
         # ── 守卫 ──
         stop = None
-        _money = any(k in reason for k in MONEY)
+        _money = _hits_money(reason)
         _money_ok = any(k in reason for k in a.money_ok) if a.money_ok else False
         _struct = purchase_dialog_structure(boxes)
         rec["purchase_struct"] = _struct
