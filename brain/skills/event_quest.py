@@ -278,6 +278,9 @@ class EventQuestSkill(BaseSkill):
         # quest_idx 只改了日志 label, 实际还在旧关上扫(2026-07-28 用户帧实锤)。
         self._sweep_popup_num: Optional[int] = None
         self._swept = 0
+        # confirm sweep 的吞发回滚 flag(与 craft _start_taps 同修法): 上一发
+        # confirm 被稳定门吞时, _swept/_sweep_rounds 要回滚再重计。
+        self._cs_fired = False
         self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
         self._ap_spend_after_read = False  # 读数之后又扫荡/出击过 → 读数已陈旧
         self._popup_open = False
@@ -1591,9 +1594,15 @@ class EventQuestSkill(BaseSkill):
                             return action_click_box(
                                 close, f"{label}: close popup, AP done")
                         return action_back(f"{label}: AP done → back")
-                    self._sweep_rounds += 1
+                    # ⛔轮次计数**不在这里加**(2026-07-28 live 守卫拦下):
+                    # 掃蕩開始点完只是弹出「要使用NAP掃蕩N次嗎?」确认框, AP
+                    # 还没花。旧码在此 +1 → _currency 下一 tick 看到轮次变化
+                    # 就把轮转指针推到下一关 → 对着**还没确认的弹窗**走"换关
+                    # 先关窗" → 每关只点開始就换走, 一个扫荡都确认不了。
+                    # 计数移到 confirm sweep(確認真点出去 = AP 真扣)那里 ——
+                    # 与 craft _start_taps/schedule 落账同族: 按物理动作计数。
                     return action_click_box(ss, f"{label}: 掃蕩開始 (round "
-                                                f"{self._sweep_rounds}, AP={ap})")
+                                                f"{self._sweep_rounds + 1}, AP={ap})")
                 # ⛔2026-07-25 实锤: 这条旁路**从头到尾没读过 AP**, 却对外宣布
                 # "AP exhausted"。8 tick 在 ZERO-WAIT 下 ≈1.6s(server/app.py:1424
                 # 非 loading wait 一律压 0.12s), **比同文件 _AP_READ_RETRY_SEC=6.0
@@ -1643,9 +1652,21 @@ class EventQuestSkill(BaseSkill):
                          "CANCEL (fail-closed)")
                 self._set("close")
                 return action_click_box(cancel_btn, "PURCHASE DIALOG — cancel!")
+            if self._cs_fired and self.action_suppressed:
+                # 上一发 confirm 被稳定门吞(确认框还在屏) — 回滚计数再重计,
+                # 否则一次真确认被记两轮 → 轮转指针多跳一关。
+                self._swept = max(0, self._swept - 1)
+                self._sweep_rounds = max(0, self._sweep_rounds - 1)
+                self.log(f"{label}: confirm 被吞 — 回滚轮次(不算一轮)")
+            self._cs_fired = True
             self._swept += 1
+            # ⭐轮次在这里推进(确认框確認真发出去 = 这轮扫荡真消费), 见上面
+            # 掃蕩開始处的长注释。_currency 据此转下一关。
+            self._sweep_rounds += 1
             self._ap_spend_after_read = True   # 扫荡花 AP → 上次读数作废
             return action_click_box(conf_btn, f"{label}: confirm sweep (pure AP)")
+        # 走到这 = 确认框(取消+確認同屏)不在 → 上一发 confirm(若有)已落地
+        self._cs_fired = False
         if conf_btn is not None and cancel_btn is None:
             # 掃蕩完成框 (确认键无取消): tooltip 坑 → 连点两次由 tick 自然完成
             # ⛔同样过结构闸: 取消键偶发漏检时購買AP框会伪装成完成框
