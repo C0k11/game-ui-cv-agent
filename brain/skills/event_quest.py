@@ -267,6 +267,9 @@ class EventQuestSkill(BaseSkill):
         self._currency_idx = 0        # 货币关轮转指针 — 按**扫荡轮次**推进
         self._cur_round_mark = -1     # 上次推进指针时的 _sweep_rounds
         self._no_pts_t0 = 0.0         # 「等活動點數读出」墙钟窗口起点(0=未开始)
+        # ⛔当前开着的**掃蕩弹窗属于哪一关**。换关时必须先关掉旧弹窗, 否则新
+        # quest_idx 只改了日志 label, 实际还在旧关上扫(2026-07-28 用户帧实锤)。
+        self._sweep_popup_num: Optional[int] = None
         self._swept = 0
         self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
         self._ap_spend_after_read = False  # 读数之后又扫荡/出击过 → 读数已陈旧
@@ -1511,6 +1514,24 @@ class EventQuestSkill(BaseSkill):
         if got is not None:
             return action_click(*_POS_TOUCH_CONTINUE, f"{label}: dismiss reward")
         if self._on_popup(screen):
+            # ⛔⛔换关必须先关掉当前弹窗(2026-07-28 用户帧证据实锤):
+            # 旧码这里只问"屏上有没有掃蕩弹窗", **从不问这个弹窗是哪一关的**。
+            # 于是 points(Q12) → currency(Q11) 切换时, Q12 的弹窗还开着,
+            # 本函数拿着 quest_idx=Q11 直接在**Q12 的弹窗**上继续 MAX/掃蕩,
+            # **只有日志 label 变成了 Q11**。用户看帧发现是「12 神秘圓圈」,
+            # 而我看日志报了"已换到 Q11" —— [[log-is-not-truth]] 第三次。
+            # 代价: AP 697→17 全灌 Q12(兽爪, memory 记的账是**过剩**)。
+            _want = (self._quests[quest_idx].get("num")
+                     if 0 <= quest_idx < len(self._quests) else None)
+            _have = self._sweep_popup_num
+            if _want is not None and _have is not None and _have != _want:
+                self._sweep_popup_num = None
+                close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
+                if close is not None:
+                    return action_click_box(
+                        close, f"{label}: 换关 Q{_have:02d}→Q{_want:02d} — 先关掉当前弹窗")
+                return action_back(
+                    f"{label}: 换关 Q{_have:02d}→Q{_want:02d} — 关弹窗(无X, ESC)")
             # MAX 可点 → 点; MAX 灰 → AP 不足, 收工
             qmax = self.find_cls(screen, UC.QTY_MAX, conf=_WEAK_CONF)
             qmax_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
@@ -1627,6 +1648,8 @@ class EventQuestSkill(BaseSkill):
             hit = next((r for r in rows
                         if _num is not None and r["num"] == _num), None)
             if hit is not None:
+                # 记下这个掃蕩弹窗属于哪一关 —— 上面那道"换关先关窗"闸靠它。
+                self._sweep_popup_num = _num
                 return action_click_box(hit["enter"],
                                         f"{label}: open quest Q{_num} (按关号锚定)")
             box = min((r["enter"] for r in rows),
