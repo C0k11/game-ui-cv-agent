@@ -809,7 +809,64 @@ def fx_momo_unknown_dialog_never_confirm():
             f"劇透警告框的违规非取消点击={bad or '无'}; 略過框仍能確認={ok2}")
 
 
+def fx_cafe_switch_2f_no_mutate_before_ack():
+    """⛔点「移动至2号点」时**绝不能**先把状态改成"我在2F了"。
+
+    2026-07-28 全仓审计确认(我逐行核过代码): 旧码在 action_click_box 之前就
+    `_begin_invite(floor_2=True)`(内含 `_on_2f=True` + `_goto("invite")`)。
+    reason "switch to cafe 2F" 不在 pipeline 关键词豁免表里 ⇒ 这一发可能被稳定门
+    吞掉/丢 tap, 而状态机已离开 switch 态、再不会点第二次, 全程零帧证据。
+    后果: 人还在 1F 却按 2F 名单邀请/摸头, **2F 整层白丢**。
+    到达证据是现成的: 2F 上按钮变成 CAFE_MOVE_1F。
+    同时钉住不许连发(after-ack)。
+    """
+    from brain.skills.cafe import CafeSkill
+    screen = _sched_screen(_yb("移动至2号点", 0.12, 0.10, 0.97))
+    sk = CafeSkill()
+    sk.reset()
+    sk._goto("switch")
+    act1 = sk._switch_floor(screen)
+    mutated = bool(sk._on_2f) or sk.sub_state != "switch"
+    # 第二次: 还没到 2F(屏上仍是 移动至2号点) → 必须是 after-ack wait, 不许再点
+    act2 = sk._switch_floor(screen)
+    double = act2.get("action") == "click"
+    ok = (act1.get("action") == "click" and not mutated and not double)
+    return (ok, f"首点={act1.get('action')} / 点前就改状态={mutated}"
+                f"(必须 False) / 连发={double}(必须 False)")
+
+
+def fx_cafe_dry_gate_needs_wallclock():
+    """⛔摸头「这片视野扫干净了」不能只数帧 —— 帧数够但墙钟没到时不许判 dry。
+
+    `_HEADPAT_DRY_FRAMES=7` 的注释自己算过账「7×280≈2s」, 但那 280ms 被
+    server/app.py:1519 的 ZERO-WAIT 丢弃(reason 不含 loading → 一律 0.12s),
+    实际只剩 ~1.4s, 而气泡最晚 600ms 才渲染 ⇒ 提前判 dry 就 pan 走 = 漏摸
+    (live 2026-06-09 1F漏摸一个)。
+    本 fixture 在**紧循环**里跑, 真实墙钟 ≈0 ⇒ 即使喂满 7+ 个空帧, 也必须
+    继续 settle, 绝不能判 dry 去 pan/收工。
+    """
+    from brain.skills.cafe import CafeSkill, _HEADPAT_DRY_FRAMES
+    empty = _sched_screen(_yb("移动至2号点", 0.12, 0.10, 0.97))
+    sk = CafeSkill()
+    sk.reset()
+    sk._goto("headpat")
+    sk._pat_settle = 0
+    sk._pat_settle_sec = 0.0
+    bad = []
+    for i in range(_HEADPAT_DRY_FRAMES + 4):
+        act = sk._headpat(empty)
+        r = str(act.get("reason", ""))
+        if act.get("action") in ("swipe", "click") or "done" in str(act.get("action")):
+            bad.append(f"第{i+1}帧就 {act.get('action')}: {r[:50]}")
+            break
+    return (not bad,
+            f"喂 {_HEADPAT_DRY_FRAMES + 4} 个空帧(墙钟≈0) 的越界动作={bad or '无'} "
+            f"(期望全程 settle/scan, 不许 pan 或收工)")
+
+
 CASES = [
+    ("⛔cafe换2F_点前绝不改状态", fx_cafe_switch_2f_no_mutate_before_ack, True),
+    ("⛔cafe判dry_帧数够也要等墙钟", fx_cafe_dry_gate_needs_wallclock, True),
     ("⛔momo未知確認框_只能取消", fx_momo_unknown_dialog_never_confirm, True),
     ("⛔momo面板是别人时_一个click都不许发", fx_momo_panel_identity_gate, True),
     ("⛔制造槽位全空_无红点也要进", fx_craft_empty_slots_still_enter, True),

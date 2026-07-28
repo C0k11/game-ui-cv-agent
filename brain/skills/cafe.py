@@ -78,6 +78,12 @@ _HEADPAT_DRY_FRAMES = 7     # consecutive empty frames ⇒ current view cleared
 #   extra margin for late bubbles / v10-folded-451 lower-conf renders). 精确根因
 #   (时序 vs v10 451检测弱 vs pan盲区) 待明天 live 走一步看漏摸那帧确认。
 _MAX_HEADPATS_PER_FLOOR = 12  # safety helmet (probe: ~12 students/floor)
+# ⛔墙钟下限(2026-07-28) —— 与上面的帧数**合取**, 见 _init_state 的换算说明。
+# 取值忠实于各自注释里写明的设计意图, 不趁机收窄(那些数都是修事故调大的)。
+_HEADPAT_DRY_SEC = 2.0    # 注释原话 "7×280≈2s scan before declaring a region dry"
+_PAT_SETTLE_SEC = 1.4     # 注释原话 "2→3 给足时间: late bubbles after a pan"(3×450)
+_LOBBY_DWELL_SEC = 1.2    # 大厅徽标渐入(3×350); live 2026-06-09 事故加的驻留窗
+_SWITCH_2F_ACK_SEC = 4.0  # 点 移动至2号点 → 2F 到达证据(CAFE_MOVE_1F 出现)
 _MAX_PANS_PER_FLOOR = 6       # safety helmet on camera sweeps
 _INVITES_PER_FLOOR = 1        # invite 1 student per floor (2 total per cafe)
 _INVITE_MAX_SCROLLS = 12      # rows to scroll hunting the target
@@ -212,6 +218,11 @@ class CafeSkill(BaseSkill):
         self._invite_retry_btn: Optional[Tuple[float, float]] = None
         # headpat
         self._pat_count: int = 0
+        # ⭐竣工判据用的**粘性**计数(2026-07-28): `_pat_count` 每层清零
+        # (_switch 里 =0), `_earnings_claimed` 领完也会被复位成 False ——
+        # 拿它们当"今天干了什么"的证据必然低报。另存一份只增不减的。
+        self._pats_total: int = 0
+        self._earnings_done: bool = False
         self._empty_frames: int = 0
         self._pan_count: int = 0
         self._pan_dir: int = 0               # 0=none yet, 1=swept left, 2=right
@@ -222,6 +233,23 @@ class CafeSkill(BaseSkill):
         # one-shot badge-verified re-entry (exit sees lobby dot → missed work)
         self._verify_reentered: bool = False
         self._exit_lobby_ticks: int = 0   # dwell counter for the badge check
+        # ⛔⛔2026-07-28 墙钟化(tick-vs-wallclock 家族, 全仓审计发现 cafe 是
+        # **零墙钟** 的 9 个 skill 之一 —— 所有时序判据都在数 tick)。
+        # 真正的机制不是"tick 变快了": server/app.py:1519 的 ZERO-WAIT 只对
+        # reason 含 加载中/loading 的 wait 兑现 duration_ms, **其余一律睡 0.12s**
+        # (代码注释自己写着 "counters are squashed to a fast re-poll")。
+        # ⇒ 本文件所有 `action_wait(280/350/450, ...)` 的毫秒数**全部被丢弃**,
+        #   于是三条为修漏摸事故调大的判据同时缩水:
+        #     · _HEADPAT_DRY_FRAMES=7  注释自己算的 "7×280≈2s" → 实际 ~1.4s
+        #     · _pat_settle=3          设计 3×450=1.35s+ → 实际 ~0.6s
+        #     · _exit_lobby_ticks<3    设计 3×350=1.05s+ → 实际 ~0.4s
+        #   ⭐时序铁证: _HEADPAT_DRY_FRAMES 5→7 的修复日期 user **2026-06-13**,
+        #   ZERO-WAIT 政策日期 user **2026-06-14** —— **修复落地第二天就被作废**,
+        #   而注释里那句"待明天 live 走一步确认"的"明天"正是那一天。
+        # 修法用**合取**而不是单纯把帧数调大: 帧数抗单帧抖动, 墙钟抗渐入/延迟渲染,
+        # 两者要的是不同的东西, 缺一不可(verifier 对 :1151 的建议, 我认同并推广)。
+        self._pat_settle_sec: float = 0.0  # 本次 settle 还要等多少秒(配合帧数)
+        self._switch_issued: bool = False  # 移动至2号点 已点(等到达证据)
         self._floor_back_done: bool = False  # one-shot 2F→1F dot-driven re-sweep
         self._pct_retries: int = 0           # earnings % OCR retry counter
 
@@ -302,6 +330,28 @@ class CafeSkill(BaseSkill):
             "game_day": _game_day(),
             "invited_names": sorted(self._invited),
         })
+
+    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    def exit_report(self):
+        """咖啡厅的竣工判据 = 收益领了没 / 摸头摸了几个 / 邀请卷用了没。
+
+        ⛔2026-07-28 首次纳入编排时出口报 `UNKNOWN — 未声明竣工判据`。
+        咖啡厅是**最容易"跑通了但没干活"**的 skill: 收益弹窗动画锚点会打空
+        (memory cafe_flow_spec 那个"收益第1次没领"), 摸头靠 `Emoticon_Action`
+        这个弱 cls(mean conf 0.65)且学生在走动, 漏一个人从日志上完全看不出来。
+        ⚠三项都用**粘性**计数 —— `_pat_count` 每层清零、`_earnings_claimed`
+        领完就复位, 拿它们报数必然低报。
+        """
+        _pats, _inv = self._pats_total, len(self._invited)
+        _bits = [f"摸头 {_pats} 人", f"邀请 {_inv} 人",
+                 "收益已领" if self._earnings_done else "**收益没领到**"]
+        if not self._earnings_done:
+            return ("LEFTOVER", " / ".join(_bits) +
+                    " — 收益是每天必领的, 查「領取」是否锚在弹出动画帧上")
+        if _pats == 0:
+            return ("LEFTOVER", " / ".join(_bits) +
+                    " — 一个都没摸到, 查 Emoticon_Action 检出")
+        return ("CLEAN", " / ".join(_bits))
 
     def _goto(self, sub_state: str) -> None:
         """Switch sub_state and reset the per-phase tick counter."""
@@ -492,6 +542,7 @@ class CafeSkill(BaseSkill):
             # invite dead-waited 14 ticks until the stuck-20 fallback).
             self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
             self._earnings_claimed = True
+            self._earnings_done = True      # 粘性: 竣工判据用, 绝不复位
             # ⛔`_force_settle`(2026-07-27 live 实锤): 收益弹窗**弹出动画**里
             # 「領取」在 cy≈0.825, 稳定后升到 cy≈0.733。reason 含 "claim" 会命中
             # _dedup_click 的关键词豁免 → 跳过稳定门 → 在动画帧上锚 0.825 拍下去
@@ -910,8 +961,12 @@ class CafeSkill(BaseSkill):
         click_x = min(0.99, mark.cx + _HEADPAT_DX)  # body is right of the bubble
         click_y = mark.cy
         self._pat_count += 1
+        self._pats_total += 1
         self._empty_frames = 0
         self._pat_settle = 1  # one tick for the heart animation
+        # 爱心动画比 pan 短, 但同样吃 squash —— 给半个 pan 的墙钟。
+        self._pat_settle_sec = _PAT_SETTLE_SEC / 2.0
+        self.mark("pat_settle")
         self._recent_pats.append((mark.cx, mark.cy))
         if len(self._recent_pats) > _HEADPAT_DEDUP_KEEP:
             self._recent_pats.pop(0)
@@ -959,9 +1014,13 @@ class CafeSkill(BaseSkill):
             return self._finish_headpat(screen, is_2f, "max headpats")
 
         # Post-pat / post-pan settle — let animation finish before scanning.
-        if self._pat_settle > 0:
-            self._pat_settle -= 1
-            return action_wait(450, f"headpat settle ({self._pat_settle})")
+        # 合取: 帧数没走完 **或** 墙钟没到, 都继续等(见 _init_state 的换算说明)。
+        if self._pat_settle > 0 or self.since("pat_settle") < self._pat_settle_sec:
+            if self._pat_settle > 0:
+                self._pat_settle -= 1
+            _psw = self.since("pat_settle")
+            return action_wait(450, f"headpat settle (帧{self._pat_settle} / "
+                                    f"{_psw:.1f}/{self._pat_settle_sec:.1f}s)")
 
         # PRIORITY: pat any visible marker immediately (markers fade fast).
         mark = self._emoticon_mark(screen)
@@ -970,7 +1029,13 @@ class CafeSkill(BaseSkill):
 
         # No marker this frame.
         self._empty_frames += 1
-        if self._empty_frames < _HEADPAT_DRY_FRAMES:
+        if self._empty_frames == 1:
+            self.mark("dry_scan")
+        # 合取: 帧数不够 **或** 墙钟不够, 都不许判 dry(见 _init_state 换算说明)。
+        # 单看帧数会被 squash 削成 ~1.4s, 而气泡最晚 600ms 才渲染 + v10 折进
+        # cls451 后 conf 偏弱 —— 提前判 dry 就 pan 走 = 漏摸(live 2026-06-09)。
+        if (self._empty_frames < _HEADPAT_DRY_FRAMES
+                or self.since("dry_scan") < _HEADPAT_DRY_SEC):
             return action_wait(280, f"scanning headpat (empty={self._empty_frames}, pan={self._pan_dir})")
         # ⭐dry 前最后一扫: 清 dedup 残留(2026-07-21 tick595 实锤: 被吞的 pat
         # 毒化 _recent_pats, 4 泡泡在屏仍判 empty×6)。真拍过的泡泡已消失,
@@ -995,6 +1060,8 @@ class CafeSkill(BaseSkill):
             self._pan_count += 1
             self._empty_frames = 0
             self._pat_settle = 3   # 2→3 (user 2026-06-13 给足时间): late bubbles after a pan
+            self._pat_settle_sec = _PAT_SETTLE_SEC   # 墙钟合取(450ms 被 squash)
+            self.mark("pat_settle")
             self.log(f"{floor_tag} sweep LEFT full-span (reveal right overflow)")
             return action_swipe(0.80, 0.45, 0.10, 0.45, 600, f"pan left ({floor_tag})")
         if self._pan_dir == 1:
@@ -1003,6 +1070,8 @@ class CafeSkill(BaseSkill):
             self._pan_count += 1
             self._empty_frames = 0
             self._pat_settle = 3   # 2→3 (user 2026-06-13 给足时间): late bubbles after a pan
+            self._pat_settle_sec = _PAT_SETTLE_SEC   # 墙钟合取(450ms 被 squash)
+            self.mark("pat_settle")
             self.log(f"{floor_tag} sweep RIGHT full-span (reveal left overflow)")
             return action_swipe(0.10, 0.45, 0.90, 0.45, 600, f"pan right ({floor_tag})")
 
@@ -1073,9 +1142,22 @@ class CafeSkill(BaseSkill):
 
         switch = self.find_cls(screen, UC.CAFE_MOVE_2F, conf=_CLS_CONF)
         if switch is not None:
-            self.log("switching to cafe 2F (YOLO 移动至2号点)")
-            self._reset_headpat_for_floor()
-            self._begin_invite(floor_2=True)
+            # ⛔⛔mutate-before-ack(2026-07-28 全仓审计, task#23 家族):
+            # 旧码在 `action_click_box` **之前**就 `_begin_invite(floor_2=True)`
+            # (里面 `_on_2f = True` + `_goto("invite")`), 状态挂在**代码路径**上。
+            # 而 reason "switch to cafe 2F" 不在 pipeline 的关键词豁免表里 ⇒ 这一发
+            # 完全可能被稳定门吞掉或丢 tap, 而状态机已经离开 switch 态、再也不会
+            # 点第二次, 全程没有任何帧证据确认换层成功。后果: 人还在 1F 却按 2F
+            # 的名单去邀请/摸头, 2F 整层白丢。
+            # ⇒ 这里**只发动作**; 真正的状态切换交给上面那条
+            #   `on_2f_btn is not None`(CAFE_MOVE_1F 出现 = 到达 2F 的帧证据)分支。
+            if self._switch_issued and self.since("switch_2f") < _SWITCH_2F_ACK_SEC:
+                return action_wait(300, f"移动至2号点 已点 — 等 2F 到达证据 "
+                                        f"(after-ack {self.since('switch_2f'):.1f}"
+                                        f"/{_SWITCH_2F_ACK_SEC:.1f}s)")
+            self.log("switching to cafe 2F (YOLO 移动至2号点) — 状态等到达证据再改")
+            self._switch_issued = True
+            self.mark("switch_2f")
             return action_click_box(switch, "switch to cafe 2F")
 
         if self._phase_ticks > _SWITCH_MAX:
@@ -1119,8 +1201,17 @@ class CafeSkill(BaseSkill):
                 # detectable at 0.58 on the very frame the one-shot check ran
                 # empty on). Require 3 consecutive dot-free lobby ticks.
                 self._exit_lobby_ticks += 1
-                if self._exit_lobby_ticks < 3:
-                    return action_wait(350, f"lobby badge dwell ({self._exit_lobby_ticks}/3)")
+                if self._exit_lobby_ticks == 1:
+                    self.mark("lobby_dwell")
+                # 合取(2026-07-28): 帧数抗单帧抖动, 墙钟抗"徽标还没渐入完"。
+                # 这道复验是**漏摸/收益重累的唯一兜底** —— 它一空转, cafe 就带着
+                # 没干完的活报 done, 而 exit_report 还会给 CLEAN(漏一个人从计数上
+                # 完全看不出来)。350ms 被 squash 后原本只剩 ~0.4s。
+                if (self._exit_lobby_ticks < 3
+                        or self.since("lobby_dwell") < _LOBBY_DWELL_SEC):
+                    return action_wait(
+                        350, f"lobby badge dwell (帧{self._exit_lobby_ticks}/3, "
+                             f"{self.since('lobby_dwell'):.1f}/{_LOBBY_DWELL_SEC:.1f}s)")
             self.log("back in lobby, cafe done")
             return action_done("cafe complete")
         if self._phase_ticks > _EXIT_MAX:
