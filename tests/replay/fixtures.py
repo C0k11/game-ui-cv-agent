@@ -913,7 +913,50 @@ def fx_cafe_claim_earnings_no_premature_done():
                 f"(必须False)")
 
 
+def fx_cafe_dot_gate_only_on_lobby():
+    """⛔「大厅红点门控」只能在大厅上判 —— 人已经在咖啡厅里时绝不许判"没活干"。
+
+    2026-07-28 live 帧实锤: bot 停在**咖啡厅 1 号店内**, 屏上有
+    `咖啡厅收益 0.98`(= _LOBBY_DOT_ENTRIES 里的 CAFE_EARNINGS), 它被当成"入口"
+    参与判定而身上没黄点 ⇒ should_run=False ⇒ **整个 cafe 被 dot-gate skip**,
+    那一刻屏上挂着 **收益 108,334 信用点 / 123 AP / 9,167 信用点** 和
+    **3 个 Emoticon_Action(3 个学生等着摸头)**。
+    根因: CAFE_INVITE_TICKET / CAFE_EARNINGS 是**咖啡厅内部** cls, 大厅上不会
+    出现 —— 放进"大厅入口"列表 = 给"人已在咖啡厅"装了个必然为假的判据。
+    反向也钉: 真在大厅且入口无点时, 仍必须 skip(否则门控失效, 每轮白跑)。
+    """
+    from brain.skills.cafe import CafeSkill
+
+    # ① 咖啡厅内部: 有 咖啡厅收益/移动至2号点/返回键, 没有大厅底栏
+    inside = _sched_screen(
+        _yb("咖啡厅收益", 0.919, 0.893, 0.98),
+        _yb("移动至2号点", 0.102, 0.142, 0.98),
+        _yb("返回键", 0.045, 0.052, 0.98),
+        _yb("Emoticon_Action", 0.588, 0.652, 0.98),
+    )
+    # ② 真大厅: 底栏 8 入口齐, 咖啡厅入口无黄点
+    lobby = _sched_screen(
+        _yb("咖啡厅入口", 0.073, 0.953, 0.96),
+        _yb("课程表入口", 0.165, 0.953, 0.97),
+        _yb("学生入口", 0.258, 0.953, 0.98),
+        _yb("编辑入口", 0.350, 0.953, 0.97),
+        _yb("社交入口", 0.437, 0.953, 0.96),
+        _yb("制造入口", 0.531, 0.953, 0.96),
+        _yb("商店入口", 0.621, 0.953, 0.97),
+        _yb("招募入口", 0.713, 0.953, 0.97),
+        _yb("任务大厅入口", 0.955, 0.834, 0.98),
+    )
+    sk = CafeSkill()
+    sk.reset()
+    a = sk.should_run(inside)
+    b = sk.should_run(lobby)
+    return (a is True and b is False,
+            f"咖啡厅内={a}(期望True, 判不了就放行) / 大厅且入口无点={b}"
+            f"(期望False, 门控仍要生效)")
+
+
 CASES = [
+    ("⛔cafe大厅门控_只在大厅判", fx_cafe_dot_gate_only_on_lobby, True),
     ("⛔cafe领收益_点时绝不报领完", fx_cafe_claim_earnings_no_premature_done, True),
     ("⛔cafe换2F_点前绝不改状态", fx_cafe_switch_2f_no_mutate_before_ack, True),
     ("⛔cafe判dry_帧数够也要等墙钟", fx_cafe_dry_gate_needs_wallclock, True),

@@ -191,6 +191,21 @@ class CafeSkill(BaseSkill):
     _LOBBY_DOT_ENTRIES = [UC.NAV_CAFE, UC.CAFE_INVITE_TICKET, UC.CAFE_EARNINGS]
 
     def should_run(self, screen: ScreenState) -> bool:
+        # ⛔⛔2026-07-28 live 实锤: 这道门控**只在大厅上成立**, 名字里的 LOBBY
+        # 就是这个意思, 但旧码不管在哪一页都拿它判。
+        # 后果(当场帧证据): bot 停在**咖啡厅 1 号店内**时, 屏上有
+        #   `咖啡厅收益 0.98`(= _LOBBY_DOT_ENTRIES 里的 CAFE_EARNINGS)
+        # 它被当成"入口"参与判定, 而它身上当然没有黄点(黄点在 移动至2号点 上)
+        # ⇒ dot_on_entry 返回 False ⇒ **整个 cafe 被 dot-gate skip**,
+        #   而那一刻屏上挂着 **收益 108,334 信用点 / 123 AP / 9,167 信用点**
+        #   和 **3 个 Emoticon_Action(3 个学生等着摸头)**。
+        # 根因: CAFE_INVITE_TICKET / CAFE_EARNINGS 是**咖啡厅内部**的 cls,
+        # 大厅上根本不会出现 —— 把它们放进"大厅入口"列表, 等于给"人已经在
+        # 咖啡厅里"这种情况装了一个必然为假的判据。
+        # ⇒ 不在大厅就**判不了**, 按 dot_on_entry 一贯的语义放行(fail-open 到
+        #   "进去看一眼", 而不是 fail-closed 到"今天不干了")。
+        if not screen.is_lobby():
+            return True
         return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
 
     def __init__(self):
@@ -429,6 +444,24 @@ class CafeSkill(BaseSkill):
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_attempts += 1
         page = self.detect_screen_yolo(screen)
+
+        # ⛔⛔2026-07-28 live 实锤(差点又丢一次收益): 收益弹窗有**两种版式** ——
+        #  · 小弹窗: 咖啡厅 UI 露在外面 ⇒ `_is_cafe`/page=="Cafe" 成立
+        #  · **大弹窗**「咖啡廳收益」(1號店/1號店/2號店 三格明细): **盖住底栏**
+        #    ⇒ page != "Cafe" ⇒ 旧码走 recover **点叉叉把它关掉**
+        # 实测那一刻屏上明明白白挂着 `領取_黄 0.97` + 收益
+        # **108,334 信用点 / 123 AP / 9,167 信用点** —— 关掉就等于把这笔钱扔了
+        # (下一轮 dot-gate 还可能因为"入口无黄点"直接 skip 整个 cafe)。
+        # ⇒ 收益是**钱**, 遵循「目标 cls 出现立即点」: 只要 claim band 里有可点的
+        #   領取(黄/蓝), 不管当前认不认得出这是哪一页, 一律先转 earnings 去领,
+        #   绝不先关窗。这条要放在 page 判定**之前**。
+        if self.find_cls(screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW,
+                                  UC.CLAIM_BLUE], conf=_CLS_CONF,
+                         region=(0.28, 0.50, 0.74, 0.90)) is not None:
+            self._enter_attempts = 0
+            self.log("enter 阶段就看到可领的 領取 → 先去领钱, 绝不先关窗")
+            self._goto("earnings")
+            return action_wait(300, "看到可领收益 → earnings")
 
         if page == "Cafe":
             self._enter_attempts = 0
