@@ -170,6 +170,10 @@ _POPOUT_CLOSE_SEC = 1.6        # 关 popout 后等它真关掉的墙钟(到期�
 # 報告確認 后等报告真关掉的墙钟。取 1.2s: 实测报告弹窗淡出 ~0.6s, 留一倍余量;
 # 比 popout 短是因为它挡住的是**下一次派遣**, 卡太久会吃掉排课节奏。
 _REPORT_CONFIRM_SEC = 1.2
+# 上一发疑似被稳定门吞时的**最小**重发间隔。⚠不能是 0 —— action_suppressed
+# 反映的是上一 tick 的吞, 可能陈旧, 零冷却会在报告关闭动画里连发(2026-07-28)。
+_REPORT_SUPPRESSED_RETRY_SEC = 0.5
+_REPORT_CONFIRM_MAX_FIRES = 3   # 同一份报告最多点几次(封顶后交给下游 re-scan)
 # Reaction time: before concluding a region has "no room/target", re-scan this
 # many frames so fused_avatar (flickery per-frame on the small popout heads) and
 # the layout have time to settle (user: 给点击和模型识别一些反应时间).
@@ -268,6 +272,7 @@ class ScheduleSkill(BaseSkill):
         self._popout_close_issued: bool = False  # 关 popout 已发出, 等帧证据(after-ack)
         # ⭐2026-07-28 live: 報告確認 也要 after-ack(与 popout 同构)。见 PRIORITY 1。
         self._report_confirm_issued: bool = False
+        self._report_confirm_fires: int = 0   # 同一份报告已点几次(重发封顶)
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
         # ⭐区域切换到达态验证(2026-07-25): 点 ARROW_LEFT 前的标题指纹 / 起点墙钟 /
         # 已发 tap 数。标题真变了才算切成功 —— 绝不用"我发过点击"当证据。
@@ -845,6 +850,7 @@ class ScheduleSkill(BaseSkill):
         if not _report_up:
             # 报告已不在屏 → 解冻 after-ack, 下一个报告能立刻確認(不留冷却尾巴)
             self._report_confirm_issued = False
+            self._report_confirm_fires = 0   # 发数按"每份报告"计
         if _report_up:
             # ★ Defense ③ (hard cap): each confirmed report = one ticket spent. A
             # day caps at _MAX_TICKETS; exceeding it means tickets ran out and the
@@ -858,6 +864,19 @@ class ScheduleSkill(BaseSkill):
             # 上限用**今日累计**(持久台账), 不是本跑计数 —— 2026-07-25 事故当天
             # 早些 session 已派 4 次, 本跑只数到 3, 旧的 per-run 上限完全没兜住。
             if max(self._dispatch_count, self._day_dispatched) >= _MAX_TICKETS:
+                # ⚠2026-07-28 live 观察(**看到了但故意不改**): 触顶时屏上那份
+                # 課程表報告(第 7 张票的收据)也不会被关 → 转 exit → stuck 20 →
+                # 去点**背景 popout 的叉叉**(0.889,0.140, 跟报告不在一层)。出口
+                # 是脏的, 但**没有损失**: 票在「課程表開始」时就已扣、奖励已落袋,
+                # 报告只是收据, 挂着或被别的路径关掉都不掉东西。
+                # ⛔我当天写过一版"用『没有取消键』判定它是收据就允许点確認",
+                #   **自己驳回了**: 那是**负向**判据 = fail-OPEN —— 30 青辉石事故
+                #   的真实帧正是"该检出的 cls(青辉石)没检出", 同一个漏检发生在
+                #   取消键上, 购买框就会被判成收据然后被亲手确认。
+                #   姊妹 fixture 自己写着购买框判据必须靠**结构正向**特征。
+                #   ⇒ 到顶就是一步不动, 这条不动摇(fixture ⛔票到顶_零点击 钉着)。
+                # 真要改善出口, 应该改 stuck-20 recover 的落点选择(让它只点
+                # **当前最上层**弹窗的叉叉), 那是另一件事, 不在金钱路径上。
                 self.log(f"⛔ 今日已排课{max(self._dispatch_count, self._day_dispatched)}次 "
                          f">= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
                 self._goto("exit")
@@ -876,13 +895,29 @@ class ScheduleSkill(BaseSkill):
             # 但那张图上到处是可点设施, 跟「popout 尾发误开设施」是同一个风险面。
             # ⚠ 用显式 flag 而不是裸 `since()`: since() 首次调用会**就地打点并
             # 返回 0.0**, 拿它当冷却判据会把**第一发**也挡掉。
-            if self._report_confirm_issued and not self.action_suppressed:
-                if self.since("report_confirm") < _REPORT_CONFIRM_SEC:
-                    return action_wait(250, "report 確認 已发 — 等报告真关掉(after-ack)")
-                self.log(f"⚠report 確認 {_REPORT_CONFIRM_SEC:.1f}s 还没关掉 — 重发")
-            elif self._report_confirm_issued:
-                self.log("report 確認 被稳定门吞(未落屏) — 立刻重发")
+            # ⛔⛔ 2026-07-28 live 逐帧实锤: 上面那条 after-ack 只挡住了"正常"路径,
+            # 而 `elif ... 立刻重发` 这条**零冷却** —— 它信的是 `action_suppressed`,
+            # 可那面旗子反映的是**上一 tick** 的吞(可能早已陈旧), 不是"这一发没出去"。
+            # 实录 tick91→92: 91 確認 已真下发(exec=36ms), 92 帧上 确认键 仍在
+            # (conf 0.977, 报告关闭动画中) → 走了 elif → **1 个 tick 内连发第二发**。
+            # 这次第二发正好又落在同一个 確認 上(无害), 但只要报告在决策与落 tap
+            # 之间关掉, 它就打到背后的区域地图 —— 与 popout 尾发误开设施同一风险面。
+            # ⇒ **任何重发路径都必须有冷却**, 且总发数封顶。
+            if self._report_confirm_issued:
+                _w = self.since("report_confirm")
+                _min_gap = (_REPORT_SUPPRESSED_RETRY_SEC if self.action_suppressed
+                            else _REPORT_CONFIRM_SEC)
+                if _w < _min_gap:
+                    return action_wait(250, f"report 確認 已发 — 等报告真关掉"
+                                            f"(after-ack {_w:.1f}s/{_min_gap:.1f}s)")
+                if self._report_confirm_fires >= _REPORT_CONFIRM_MAX_FIRES:
+                    self.log(f"⛔report 確認 已发 {self._report_confirm_fires} 次仍未关闭 — "
+                             f"停止重发(避免往地图上盲拍), 交给下游 re-scan")
+                    return action_wait(300, "report 確認 重发上限 → 不再点")
+                self.log(f"⚠report 確認 {_w:.1f}s 还没关掉"
+                         f"{'(上一发被吞)' if self.action_suppressed else ''} — 重发")
             self._report_confirm_issued = True
+            self._report_confirm_fires += 1
             self.mark("report_confirm")
             self.log(f"schedule report → confirm (count={self._dispatch_count}, YOLO 确认键)")
             self._ticket_read_pending = True  # re-read count back on the popout
