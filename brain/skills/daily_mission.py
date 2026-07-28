@@ -44,7 +44,14 @@ _ENTRY_DOT_REGION = (0.00, 0.30, 0.13, 0.40)
 _ENTER_MAX = 20
 _CLAIM_ALL_MAX = 26
 _NO_YELLOW_DONE = 5     # consecutive ticks w/ no 全部领取_黄 (no grey/popup) = batch drained
+# ⛔tick-vs-墙钟家族(2026-07-28): 上面两个 dry 计数等的是奖励弹窗弹出/列表
+# 刷新的渲染过程, zero-wait 后 5 tick 只剩 0.75-1.25s, 一次弹窗淡入就凑满
+# → 提前判"领空", 批量/单项奖励漏领(与 deep-dive r2 C6 要修的 bug 同形复发)。
+# 帧数×墙钟合取, 取 ×1.6 年代等效, 不收窄:
+_NO_YELLOW_SEC = 8.0     # 5×1.6
+_DRY_SINGLE_SEC = 4.8    # 3×1.6
 _CLAIM_SINGLE_MAX = 20
+_CLAIM_SINGLE_SEC = 32.0  # 20×1.6 — 纯 tick 的 OR 闸不一起改会先开枪
 _EXIT_MAX = 14
 
 
@@ -208,8 +215,11 @@ class DailyMissionSkill(BaseSkill):
         # earlier in tick(), so these are real empty frames) = batch drained.
         # Don't sit in a 20+ tick STUCK freeze waiting for a yellow that's gone.
         self._no_yellow += 1
-        if self._no_yellow >= _NO_YELLOW_DONE:
-            self.log(f"连续{self._no_yellow}拍无全部领取_黄(领空/无可领) → claim_single")
+        if self._no_yellow == 1:
+            self.mark("dry_yellow")
+        if (self._no_yellow >= _NO_YELLOW_DONE
+                and self.since("dry_yellow") >= _NO_YELLOW_SEC):
+            self.log(f"连续{self._no_yellow}拍且{_NO_YELLOW_SEC:.0f}s无全部领取_黄 → claim_single")
             self._goto("claim_single")
             return action_wait(250, "no more 全部领取_黄 → single")
 
@@ -241,8 +251,14 @@ class DailyMissionSkill(BaseSkill):
         # (deep-dive r2 C6): the old "claim_all gone ⇒ done" shortcut exited on
         # a single flicker frame and left remaining 单项黄 unclaimed.
         self._dry_singles = getattr(self, "_dry_singles", 0) + 1
-        if self._phase_ticks > _CLAIM_SINGLE_MAX or self._dry_singles >= 3:
-            self.log(f"no 黄 claim cls ({self._dry_singles} dry frames) → done "
+        if self._dry_singles == 1:
+            self.mark("dry_single")
+        if (self._phase_ticks > _CLAIM_SINGLE_MAX
+                and self.since("claim_single_wall") > _CLAIM_SINGLE_SEC) or (
+                self._dry_singles >= 3
+                and self.since("dry_single") >= _DRY_SINGLE_SEC):
+            self.log(f"no 黄 claim cls ({self._dry_singles} dry frames, "
+                     f"{self.since('dry_single'):.1f}s) → done "
                      f"(all={self._all_claims}, single={self._single_claims})")
             self._goto("exit")
             return action_wait(250, "no more claims → exit")

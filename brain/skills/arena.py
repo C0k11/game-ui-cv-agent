@@ -64,9 +64,18 @@ _COOLDOWN_REGION = (0.12, 0.71, 0.27, 0.77)
 
 _ENTER_MAX = 24
 _CLAIM_MAX = 12
+# ⛔tick-vs-墙钟家族(2026-07-28): _ENTER_MAX 24 tick 被 zero-wait 压到
+# 3.6-6.0s 盖不住两次页面加载(→ 'arena never reached' 假成功, 5 票作废);
+# _CLAIM_MAX 12 tick=1.8-3.0s 比 _CLAIM_SETTLE_SEC=2.5 还短 —— 那个墙钟
+# 修复被它顶掉, 每日獎勵 漏领复发。改「帧数 AND 墙钟」合取(×1.6 等效):
+_ENTER_MAX_SEC = 38.4
+_CLAIM_MAX_SEC = 19.2
 # 领完一个黄钮后 toast 动画期间下一个检不出 —— 用墙钟等, 别数 tick
 # (2026-07-25: 旧的 "2 tick" ≈0.24s 盖不住动画, 每日獎勵 直接漏领)。
 _CLAIM_SETTLE_SEC = 2.5
+# 点了黄钮之后到帧证据(toast/按钮消失)前不重发 — reason 含 claim 命中关键词
+# 豁免会跳过稳定门+hold, 旧码 ~0.2s 一发把 6 次上限虚耗光(2026-07-28)。
+_CLAIM_RETRY_SEC = 6.0
 _EXIT_MAX = 16
 
 
@@ -87,6 +96,7 @@ class ArenaSkill(BaseSkill):
         self._enter_ticks: int = 0
         self._claim_clicks: int = 0
         self._claim_pending: bool = False   # 上一 tick 发了 claim 点击, 等落账
+        self._claim_fired: bool = False     # 发过 claim(重发用墙钟 gate)
         self._claim_t0: float = 0.0         # 无新黄钮的墙钟起点(0=未计时)
         self._fights_done: int = 0
         self._cooldown: int = 0
@@ -137,6 +147,7 @@ class ArenaSkill(BaseSkill):
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
         self._phase_ticks = 0
+        self.mark("phase")                 # _phase_ticks 的墙钟版
 
     # ── helpers ──────────────────────────────────────────────────────────
     def _on_arena(self, screen: ScreenState) -> bool:
@@ -366,7 +377,7 @@ class ArenaSkill(BaseSkill):
                 return act
             return action_wait(450, "hub: arena tile not seen (transition)")
 
-        if self._enter_ticks > _ENTER_MAX:
+        if self._enter_ticks > _ENTER_MAX and self.since("enter_wall") > _ENTER_MAX_SEC:
             self.log("can't reach arena, exiting")
             self._goto("exit")
             return action_wait(300, "enter timeout")
@@ -394,7 +405,9 @@ class ArenaSkill(BaseSkill):
                 self.log(f"claim arena reward #{self._claim_clicks} 已落账")
             self._claim_pending = False
 
-        if self._claim_clicks >= 6 or self._phase_ticks > _CLAIM_MAX:
+        if self._claim_clicks >= 6 or (
+                self._phase_ticks > _CLAIM_MAX
+                and self.since("phase") > _CLAIM_MAX_SEC):
             self.log(f"claim done ({self._claim_clicks})")
             self._goto("fight_check")
             return action_wait(250, "claim done → fight_check")
@@ -402,10 +415,21 @@ class ArenaSkill(BaseSkill):
         # Click any active 领取奖励_黄 (灰 = already claimed, ignore).
         claim = self.find_cls(screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW], conf=_CLS_CONF)
         if claim is not None:
+            # ⛔after-ack(2026-07-28): reason 含 claim → 关键词豁免跳过稳定门+
+            # hold, 旧码在 toast 渲染出来前 ~0.2s 一发连点同一个黄钮, 每发都
+            # 落账把 6 次上限吃光 → 真没领的黄钮被 "claim done" 抛下。
+            # 点完等帧证据(toast 在顶部分支处理/黄钮消失), 期间不重发;
+            # _force_settle 让它老实走稳定门(别再吃豁免)。
+            if getattr(self, "_claim_fired", False) and self.since("claim_fire") < _CLAIM_RETRY_SEC:
+                return action_wait(300, "claim 已发 — 等 toast/黄钮消失的帧证据")
             self._claim_pending = True
             self._claim_t0 = 0.0
+            self._claim_fired = True
+            self.mark("claim_fire")
             self.log(f"claim arena reward ({claim.cls_name})")
-            return action_click_box(claim, "claim arena reward")
+            act = action_click_box(claim, "claim arena reward")
+            act["_force_settle"] = True
+            return act
 
         # ⭐墙钟而非 tick(2026-07-25 live 实锤: 每日獎勵 漏领):
         # 领完一个后 toast 动画期间下一个黄钮检不出, 旧码等 "2 tick" —— 而非

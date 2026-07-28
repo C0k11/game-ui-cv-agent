@@ -35,7 +35,13 @@ from brain.skills import ui_classes as UC
 _CLS_CONF = 0.30
 _MAIL_ZONE = (0.86, 0.0, 0.97, 0.09)   # top-right envelope + its red dot
 
-_ENTER_MAX = 20
+_ENTER_MAX = 20          # 跑飞兜底(tick); 真上限走墙钟 _ENTER_MAX_SEC
+# ⛔tick-vs-墙钟家族(2026-07-28): zero-wait 后 tick≈0.15-0.25s, 20 tick=3-5s
+# 根本盖不住 大厅→邮箱 的真实转场。×1.6 年代等效 = 32s。
+_ENTER_MAX_SEC = 32.0
+_OPEN_SETTLE_SEC = 4.8   # 点开邮箱后的开场动画驻留(旧 3 tick×1.6s=4.8s;
+#                          live 2026-06-10: 转场期 page 两不像, fallthrough 的
+#                          nav_home 把半开的邮箱关掉, open→back→open 震荡 3 轮)
 _CLAIM_MAX = 30
 _EXIT_MAX = 14
 _CLAIM_STUCK = 4   # 一次領取 still yellow after this many taps = blocked (bag full)
@@ -59,6 +65,7 @@ class MailSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._claims: int = 0
         self._enter_settle: int = 0   # blind wait after clicking the mailbox
+        self._open_clicked: bool = False  # 点过邮箱入口(墙钟 settle 的启用闸)
 
     def reset(self) -> None:
         super().reset()
@@ -123,15 +130,22 @@ class MailSkill(BaseSkill):
         # CLOSED the half-open mailbox (live 2026-06-10: open→back→open
         # oscillated 3 rounds before luckily landing). Same race class as the
         # arena enter fix.
-        if self._enter_settle > 0:
-            self._enter_settle -= 1
-            return action_wait(600, f"mailbox opening ({self._enter_settle} left)")
+        # 帧数×墙钟合取(tick-vs-墙钟家族): wait 时长被 zero-wait 压 0.12s,
+        # 纯 tick 倒数只剩 ~0.5s, 盖不住开场动画 → fallthrough nav_home 把
+        # 半开的邮箱关掉(它要防的 2026-06-10 事故原样复发)。
+        if self._enter_settle > 0 or (
+                self._open_clicked and self.since("mail_open") < _OPEN_SETTLE_SEC):
+            if self._enter_settle > 0:
+                self._enter_settle -= 1
+            return action_wait(600, "mailbox opening (settle)")
 
         if screen.is_lobby():
             mail_btn = self.find_cls(screen, UC.NAV_MAIL, conf=_CLS_CONF)
             if mail_btn is not None:
                 self.log("opening mail (YOLO 邮件箱)")
                 self._enter_settle = 3
+                self._open_clicked = True
+                self.mark("mail_open")
                 return action_click_box(mail_btn, "open mailbox")
             # Envelope cls missed but its red dot is in the mail zone — click
             # the dot's anchor (its own center) to open the mailbox.
@@ -139,11 +153,13 @@ class MailSkill(BaseSkill):
             if dot is not None:
                 self.log("opening mail via red-dot anchor (envelope cls missed)")
                 self._enter_settle = 3
+                self._open_clicked = True
+                self.mark("mail_open")
                 return action_click(dot.cx, min(0.06, dot.cy + 0.02), "open mailbox (dot)")
             self.log("on lobby but no 邮件箱/红点 — YOLO gap; waiting")
             return action_wait(400, "waiting for 邮件箱 cls")
 
-        if self._phase_ticks > _ENTER_MAX:
+        if self._phase_ticks > _ENTER_MAX and self.since("enter_phase") > _ENTER_MAX_SEC:
             self.log("enter budget exhausted, giving up")
             return action_done("could not reach mailbox")
         if len(screen.yolo_boxes or []) < 2:

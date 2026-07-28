@@ -53,11 +53,18 @@ _VERIFY_RETRY_MAX = 10     # 405 轮播重试上限 (双相位修正后期望 �
 _PHASE_MAX = 18
 # ⚠`_PHASE_MAX` 是 **tick** 不是秒 —— 实测 tick 速率 0.15~2.3 s/tick, 同一个 "18"
 # 落在 2.7s ~ 41s 之间。凡"等某个东西出现"的地方一律另用墙钟, 别复用它。
+# ⛔tick-vs-墙钟家族(2026-07-28): 上面那行注释早就写明了病, 但 enter/verify/
+# unlock/tasks 四处判据还在裸用 tick。全部改「帧数 AND 墙钟」合取(×1.6 等效):
+_ENTER_MAX_SEC = 38.4      # 24×1.6 — enter 等的是 3.2s/张的 banner 轮播
+_PHASE_MAX_SEC = 28.8      # 18×1.6 — verify/milestone/tasks 等整场景加载+领奖链
+_UNLOCK_QUEST_SEC = 420.0  # unlock **每关**墙钟(战斗 300 + 编队/结算 120),
+                           # 旧 518 tick 总和=78-130s, 第一场解锁战打一半就开枪
+_MS_CLAIM_RETRY_SEC = 6.0  # milestone 領取 after-ack(盖 step 门控节奏)
 _MILESTONE_ANCHOR_SEC = 4.0   # 等「獎勵資訊」入口渲染的墙钟窗口
-_BATTLE_MAX = 500          # battle poll ticks — ZERO-WAIT 后 tick≈0.6s(wait
-                           # 被压 0.12s), 46 时代假设 5s/tick 已失效: 46≈28s <
-                           # 战斗 70-90s → 必超时 done → derail 二连根因
-                           # (2026-07-24 workflow 深挖实锤)。500≈5min 上限。
+_BATTLE_MAX = 2400         # ⚠纯轮询次数上限(跑飞兜底), 计时权威是
+                           # _BATTLE_MAX_SEC 墙钟。旧值 500 在 0.15-0.25s/tick
+                           # 下=75-125s < 战斗 70-140s, 比墙钟先开枪 → 战斗中
+                           # 途 done(与墙钟修复极性相反, 2026-07-28 agent 扫描核实)。
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
 _BATTLE_MAX_SEC = 300      # 单场战斗墙钟上限(实测活动关 70-90s, 5min 极宽松)
 _AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP, 别把整轮判死)
@@ -278,6 +285,7 @@ class EventQuestSkill(BaseSkill):
         self._tasks_done = False
         self._milestone_done = False  # 里程碑(獎勵資訊)领奖阶段
         self._milestone_wait_t0 = 0.0  # 等「獎勵資訊」入口渲染的墙钟起点(0=未计时)
+        self._ms_claim_fired = False   # milestone 領取 after-ack flag
 
     def reset(self) -> None:
         super().reset()
@@ -289,6 +297,7 @@ class EventQuestSkill(BaseSkill):
         if state != self.sub_state:
             self.sub_state = state
             self._phase_ticks = 0
+            self.mark("phase_wall")    # _phase_ticks 的墙钟版(合取判据用)
 
     def _read_bonus_xn(self, screen) -> Tuple[Optional[str], str]:
         """读 Bonus 槽的 xN。返回 (数字串|None, 来源标签)。
@@ -696,7 +705,7 @@ class EventQuestSkill(BaseSkill):
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         """⭐感知铁律(2026-07-11): cls 主导 + 极端事件驱动 —
         目标 cls(405)出现→立即点; 加载中→wait; 无锁定→wait(轮播在转)。"""
-        if self._phase_ticks > _ENTER_MAX:
+        if self._phase_ticks > _ENTER_MAX and self.since("phase_wall") > _ENTER_MAX_SEC:
             return action_done("event_quest enter timeout")
         # already on the quest list? (re-entry / retry path)
         if self._on_quest_list(screen):
@@ -964,7 +973,9 @@ class EventQuestSkill(BaseSkill):
             self.log("landed on Challenge tab — switching to Quest tab")
             return action_click(*_POS_QUEST_TAB, "switch to Quest tab (fixed)")
         # 无证据(转场渲染/模型盲区页) → wait; 超时兜底 back 重扫
-        if self._phase_ticks > _PHASE_MAX:
+        # (墙钟合取: 2.7s 的窗口把「还在加载」和「点错了」混为一谈 → 白跑
+        #  一圈还多按一次 back, 把已进对的活动页退掉)
+        if self._phase_ticks > _PHASE_MAX and self.since("phase_wall") > _PHASE_MAX_SEC:
             self._verify_retries += 1
             if self._verify_retries > _VERIFY_RETRY_MAX:
                 return action_done("event_quest: carousel retries exhausted")
@@ -1104,6 +1115,7 @@ class EventQuestSkill(BaseSkill):
             self._quests = self._quests[-self._tail_quests:]
             _nums = [q["num"] for q in self._quests]
             self._set("unlock")
+            self.mark("unlock_quest")   # 第一关的每关墙钟从进 unlock 起算
             return action_wait(300, f"survey done (tail quests {_nums})")
         r = todo[0]
         _cy, _num = r["cy"], r["num"]
@@ -1134,8 +1146,11 @@ class EventQuestSkill(BaseSkill):
     # ── unlock (加成解锁: 自动编队 + 真打一次) ────────────────────────
 
     def _unlock(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._phase_ticks > _BATTLE_MAX + _PHASE_MAX:
-            return action_done("event_quest unlock timeout")
+        # 每关墙钟(2026-07-28): 旧 tick 总和闸在第一场解锁战打到一半就开枪 —
+        # 20AP 已花但 settle 没跑到, Best Record 不落账, bot 被丢在战斗屏。
+        # since("unlock_quest") 在每关收关处(settle → _unlock_idx+=1)重打点。
+        if self.since("unlock_quest") > _UNLOCK_QUEST_SEC:
+            return action_done("event_quest unlock timeout (per-quest wall)")
         # ⭐mutate-before-ack 对账(2026-07-22 live 实锤: 任務開始 点击被稳定门
         # 吞(scrcpy 断流 ADB 帧源翻转→帧未稳定), stage 已进 "edit" → 弹窗仍
         # 开却死等编队页, stuck20 差点被叉掉弹窗)。信号只活一个 tick, 入口先
@@ -1384,6 +1399,7 @@ class EventQuestSkill(BaseSkill):
                 self._unlock_idx += 1
                 self._formation_step = ""
                 self._auto_insurance = False   # 下一关重新补点
+                self.mark("unlock_quest")      # 下一关的墙钟从这里起算
                 return action_wait(500, "back on list after unlock")
             return action_click(*_POS_TOUCH_CONTINUE, "settle: TOUCH continue")
         return action_wait(500, f"unlock: step {step}")
@@ -1667,7 +1683,7 @@ class EventQuestSkill(BaseSkill):
     # +9M信用点实录)→獲得獎勵toast→灰90翻转→叉退回) ────────────────────
 
     def _milestone(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._phase_ticks > _PHASE_MAX:
+        if self._phase_ticks > _PHASE_MAX and self.since("phase_wall") > _PHASE_MAX_SEC:
             self._set("tasks")
             return action_wait(200, "milestone phase timeout → tasks")
         if self._milestone_done:
@@ -1678,7 +1694,17 @@ class EventQuestSkill(BaseSkill):
             return action_click(*_POS_TOUCH_CONTINUE, "milestone: dismiss reward")
         claim_y = self.find_cls(screen, UC.CLAIM_REWARD_YELLOW, conf=0.5)
         if claim_y is not None:
-            return action_click_box(claim_y, "milestone: 領取獎勵 (黄)")
+            # ⛔after-ack(2026-07-28): 旧 reason 含「領取獎勵」命中关键词豁免 →
+            # 稳定门+hold 全跳 → 每 tick 真发一发(0.2s 节奏), 后续发落在
+            # 獲得獎勵 toast/弹窗动画中途的坐标上。发一发等帧证据, 且
+            # _force_settle 走稳定门(别再拿措辞当控制 API)。
+            if self._ms_claim_fired and self.since("ms_claim") < _MS_CLAIM_RETRY_SEC:
+                return action_wait(300, "milestone claim 已发 — 等 toast/按钮变灰")
+            self._ms_claim_fired = True
+            self.mark("ms_claim")
+            act = action_click_box(claim_y, "milestone: claim reward (黄)")
+            act["_force_settle"] = True
+            return act
         claim_g = self.find_cls(screen, UC.CLAIM_REWARD_GREY, conf=0.30)
         if claim_g is not None:
             self._milestone_done = True
@@ -1722,7 +1748,7 @@ class EventQuestSkill(BaseSkill):
     # ── tasks (活动任務领奖) / close ──────────────────────────────────
 
     def _tasks(self, screen: ScreenState) -> Dict[str, Any]:
-        if self._phase_ticks > _PHASE_MAX:
+        if self._phase_ticks > _PHASE_MAX and self.since("phase_wall") > _PHASE_MAX_SEC:
             self._set("close")
             return action_wait(200, "tasks phase timeout")
         if self._tasks_done:

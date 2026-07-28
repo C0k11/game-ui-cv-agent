@@ -52,6 +52,15 @@ _DONE_CONFIRM_BAND = (0.30, 0.74, 0.70, 0.90)
 # 扫完重读票数的墙钟窗(旧值是 `_phase_ticks > 8` = 真实仅 1.2-2.0s, 一次
 # OCR 抖动就够把整轮票判死; 单位口径见 BaseSkill.mark)
 _POST_SWEEP_READ_SEC = 6.0
+# ⛔tick-vs-墙钟家族(2026-07-28, agent 扫描 5 条全核实): zero-wait 后本文件
+# 各 tick 闸缩水 6-10 倍 — enter 22 tick 只剩 3.3-5.5s(一次稳定门阻塞 4s 就
+# 吃光), 120 tick 总预算只剩 18-30s(JFD 8 轮单扫根本跑不完, 超时还不走 _exit
+# 把 bot 丢在模态上)。全部改「帧数 AND 墙钟」合取, ×1.6 年代等效, 不收窄:
+_SKILL_BUDGET_SEC = 180.0    # 旧 120 tick×1.6≈192s 口径
+_ENTER_MAX_SEC = 35.0        # 旧 22 tick×1.6
+_BRANCH_WAIT_SEC = 16.0      # 旧 12 tick×1.6
+_STAGE_WAIT_SEC = 14.0       # 旧 10 tick×1.6
+_MAX_RENDER_SEC = 3.0        # 弹窗动画实测 1-2s; 超时后的固定位 MAX 兜底本身无害
 # A 青辉石 icon inside THIS band = a buy dialog (NOT the top-bar balance at cy<0.10).
 # Deep-dive C5 (2026-06-09): aligned to schedule's LIVE-VERIFIED region (icon
 # at cy≈0.577 > old 0.48 bound — same miss risk as arena C4).
@@ -102,7 +111,7 @@ class TicketSweepSkill(BaseSkill):
 
     def __init__(self, name: str):
         super().__init__(name)
-        self.max_ticks = 120
+        self.max_ticks = 1200   # 跑飞兜底; 真预算走墙钟 _SKILL_BUDGET_SEC
         self._branches: List[str] = []
         self._init_state()
 
@@ -329,6 +338,15 @@ class TicketSweepSkill(BaseSkill):
         self.ticks += 1
         self._phase_ticks += 1
 
+        # 墙钟预算: 超时走 _exit 收尾(关掉模态回大厅), 不原地 done 把 bot
+        # 丢在 任務資訊/確認框 上让下一个 skill 从陌生页面开跑。
+        if self.since("skill_budget") > _SKILL_BUDGET_SEC:
+            if self.sub_state != "exit":
+                self.log(f"墙钟预算 {_SKILL_BUDGET_SEC:.0f}s 用尽 → exit 收尾")
+                self._goto("exit")
+            elif self.since("skill_budget") > _SKILL_BUDGET_SEC + 30.0:
+                self.log("exit 收尾也超时")
+                return action_done(f"{self.name} timeout")
         if self.ticks >= self.max_ticks:
             self.log("timeout")
             return action_done(f"{self.name} timeout")
@@ -387,7 +405,7 @@ class TicketSweepSkill(BaseSkill):
                 return act
             return action_wait(450, "hub: tile not seen")
 
-        if self._enter_ticks > 22:
+        if self._enter_ticks > 22 and self.since("enter_wall") > _ENTER_MAX_SEC:
             self.log("can't reach page, exiting")
             self._goto("exit")
             return action_wait(300, "enter timeout")
@@ -434,7 +452,7 @@ class TicketSweepSkill(BaseSkill):
             self._branch_settle = 2
             return act
 
-        if self._phase_ticks > 12:
+        if self._phase_ticks > 12 and self.since("phase") > _BRANCH_WAIT_SEC:
             self.log("branch select timeout — trying stage anyway")
             self._goto("stage")
             return action_wait(300, "branch timeout → stage")
@@ -448,7 +466,7 @@ class TicketSweepSkill(BaseSkill):
                 self.log("only locked stages → exit")
                 self._goto("exit")
                 return action_wait(300, "locked stages → exit")
-            if self._phase_ticks > 10:
+            if self._phase_ticks > 10 and self.since("phase") > _STAGE_WAIT_SEC:
                 self.log("no 入场键 found → exit")
                 self._goto("exit")
                 return action_wait(300, "no stage cls → exit")
@@ -559,7 +577,10 @@ class TicketSweepSkill(BaseSkill):
             # 2026-06-09 JFD) set _maxed=True too early → swept ONCE with 24
             # tickets unspent. Wait a few frames for the solid MAX to settle;
             # only if it never appears (truly greyed = 1 ticket) fall back.
-            if self._max_wait < self._MAX_RENDER_WAIT:
+            if self._max_wait == 0:
+                self.mark("max_render")
+            if (self._max_wait < self._MAX_RENDER_WAIT
+                    or self.since("max_render") < _MAX_RENDER_SEC):
                 self._max_wait += 1
                 return action_wait(350, f"waiting MAX render ({self._max_wait})")
             # cls111 MAX_可点击 flaky (live 2026-06-15: bounty/jfd 只扫了1票, MAX 没
@@ -805,6 +826,7 @@ class TicketSweepSkill(BaseSkill):
                 self.log(f"⚠ tickets={self._tickets} but 0 sweeps → re-enter once")
                 self._goto("enter")
                 self._enter_ticks = 0
+                self.clear_timer("enter_wall")   # 回炉重跑 enter 的墙钟也要归零
                 return action_wait(300, "0-sweep 对账不平 → 回炉重试")
             # Stay on the hub — the next campaign skill re-uses it.
             self.log(f"done on hub ({self._sweep_cycles} sweeps)")

@@ -55,7 +55,12 @@ _POS_CAMPAIGN = (0.599, 0.244)      # 任务关卡推图 tile (cls67 backup)
 _MIN_AP = 20          # below this, a sweep can't run — skip the whole trip
 _ENTER_MAX = 22
 _PHASE_MAX = 14
-_RESULT_MAX = 16
+# ⛔tick-vs-墙钟家族(2026-07-28): zero-wait 后 14 tick=2.1-3.5s, 盖不住
+# 对话框/页面渲染(1-2s 量级) → MAX 没等到就 close, swept=False 假成功。
+# 所有 _PHASE_MAX 判据改「帧数 AND 墙钟」合取(×1.6 年代等效 22.4s):
+_PHASE_MAX_SEC = 22.4
+_SKILL_BUDGET_SEC = 144.0   # 全 skill 墙钟预算(旧 90 tick×1.6s)
+_RESULT_MAX = 16            # ⚠纯计数(确认点击次数), 不是时间 — 不动
 
 
 class BatchSweepSkill(BaseSkill):
@@ -77,7 +82,7 @@ class BatchSweepSkill(BaseSkill):
 
     def __init__(self):
         super().__init__("BatchSweep")
-        self.max_ticks = 90
+        self.max_ticks = 600   # 跑飞兜底; 真预算走墙钟 _SKILL_BUDGET_SEC
         self._init_state()
 
     def _init_state(self) -> None:
@@ -96,6 +101,12 @@ class BatchSweepSkill(BaseSkill):
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
         self._phase_ticks = 0
+        self.mark("phase")
+
+    def _phase_timeout(self) -> bool:
+        """帧数 AND 墙钟合取 — tick 计数抗检出抖动, 墙钟抗 zero-wait 缩水。"""
+        return (self._phase_ticks > _PHASE_MAX
+                and self.since("phase") > _PHASE_MAX_SEC)
 
     # ── semantizer shorthand ────────────────────────────────────────────
     def _screen(self, screen: ScreenState):
@@ -105,6 +116,15 @@ class BatchSweepSkill(BaseSkill):
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
+        # 墙钟预算(旧 90 tick 在 zero-wait 下只剩 13-22s, 半路开枪把 bot 丢在
+        # 扫荡对话框/结果页上)。超时走 close 收尾而不是原地 done。
+        if self.since("skill_budget") > _SKILL_BUDGET_SEC:
+            if self.sub_state != "close":
+                self.log(f"墙钟预算 {_SKILL_BUDGET_SEC:.0f}s 用尽 → close 收尾")
+                self._goto("close")
+            elif self.since("skill_budget") > _SKILL_BUDGET_SEC + 30.0:
+                self.log(f"close 收尾也超时 (swept={self._swept})")
+                return action_done("batch_sweep timeout")
         if self.ticks >= self.max_ticks:
             self.log(f"timeout (swept={self._swept})")
             return action_done("batch_sweep timeout")
@@ -163,7 +183,7 @@ class BatchSweepSkill(BaseSkill):
             self._goto("stage")
             return action_wait(300, "stage select reached")
         if sid != "task_hall":
-            if self._phase_ticks > _PHASE_MAX:
+            if self._phase_timeout():
                 self._goto("enter")
                 return action_wait(300, "hall lost → re-enter")
             return action_wait(450, f"waiting for hall ({sid})")
@@ -180,7 +200,7 @@ class BatchSweepSkill(BaseSkill):
             self._goto("dialog")
             return action_wait(300, "sweep dialog open")
         if sid != "stage_select":
-            if self._phase_ticks > _PHASE_MAX:
+            if self._phase_timeout():
                 self._goto("enter")
                 return action_wait(300, "stage select lost → re-enter")
             return action_wait(450, f"waiting for stage select ({sid})")
@@ -208,7 +228,7 @@ class BatchSweepSkill(BaseSkill):
             self._goto("confirm")
             return action_wait(200, "confirm dialog up")
         if sid != "sweep_batch_dialog":
-            if self._phase_ticks > _PHASE_MAX:
+            if self._phase_timeout():
                 self._goto("enter")
                 return action_wait(300, "dialog lost → re-enter")
             return action_wait(450, f"waiting for sweep dialog ({sid})")
@@ -238,7 +258,7 @@ class BatchSweepSkill(BaseSkill):
                 self._maxed = True
                 self.log("MAX already grey (count capped) → start")
             else:
-                if self._phase_ticks > _PHASE_MAX:
+                if self._phase_timeout():
                     self._goto("close")
                     return action_wait(300, "MAX never seen → close")
                 return action_wait(400, "waiting for MAX")
@@ -286,7 +306,7 @@ class BatchSweepSkill(BaseSkill):
         if sid == "sweep_running":
             self._goto("running")
             return action_wait(200, "sweep running")
-        if self._phase_ticks > _PHASE_MAX:
+        if self._phase_timeout():
             self._goto("results")
             return action_wait(300, "confirm gone → results")
         return action_wait(400, "waiting for 掃蕩內容 dialog")
@@ -301,7 +321,7 @@ class BatchSweepSkill(BaseSkill):
         if sid == "result_page":
             self._goto("results")
             return action_wait(200, "results up")
-        if self._phase_ticks > _PHASE_MAX:
+        if self._phase_timeout():
             self._goto("results")
             return action_wait(300, "no skip seen → results")
         return action_wait(500, "sweep running")

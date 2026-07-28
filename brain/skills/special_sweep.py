@@ -77,6 +77,8 @@ class SpecialSweepSkill(BaseSkill):
         self._started: bool = False
         self._result_confirms: int = 0
         self._sweep_rounds: int = 0
+        self._ap_read_round: int = -1      # AP early-skip 每轮只读一次(热路径隔离)
+        self._ap_cache = None
         self._swept: bool = False
 
     def reset(self) -> None:
@@ -223,15 +225,25 @@ class SpecialSweepSkill(BaseSkill):
         # 所以最准的安全门: **只有 MAX 可点(QTY_MAX positively 检到)才扫; MAX 灰 → close,
         # 绝不点扫荡。** 不确定(MAX 都没正向检到)也不盲扫(money skill 安全 > 多扫一次)。
         # _confirm 仍保留青辉石防线③ 兜底。AP 读数只当 early-skip 优化(读不出不据此 close)。
-        try:
-            from brain.pipeline import _read_topbar_clean
-            ap = _read_topbar_clean(UC.TOPBAR_AP)
-        except Exception:
-            ap = None
-        if ap is not None and ap < _SWEEP_COST:
-            self.log(f"AP={ap} < 单次成本{_SWEEP_COST} → close (early-skip, 不触发买体力框)")
-            self._goto("close")
-            return action_wait(250, "AP 不够一次扫荡 → close (money-safe)")
+        # ⛔慢IO挡热路径(click_causality_gate 第二类根因, 2026-07-28 修):
+        # _read_topbar_clean 每次真抓 3-5 张 ADB 4K 帧 ≈ 阻塞 2.3-3.9s, 旧码
+        # 每 tick 无条件跑 → 同 tick 的 MAX/扫荡开始 点击全部用 2.5-4s 前的
+        # 陈旧帧。改: 每轮只读一次, 且读数 tick 本身只 wait 不点(把慢 IO 与
+        # 点击决策隔离在不同 tick)。
+        if self._ap_read_round != self._sweep_rounds:
+            self._ap_read_round = self._sweep_rounds
+            try:
+                from brain.pipeline import _read_topbar_clean
+                ap = _read_topbar_clean(UC.TOPBAR_AP)
+            except Exception:
+                ap = None
+            self._ap_cache = ap
+            if ap is not None and ap < _SWEEP_COST:
+                self.log(f"AP={ap} < 单次成本{_SWEEP_COST} → close (early-skip, 不触发买体力框)")
+                self._goto("close")
+                return action_wait(250, "AP 不够一次扫荡 → close (money-safe)")
+            return action_wait(250, "AP snapshot taken — 下 tick 用新鲜帧决策")
+        ap = self._ap_cache
 
         # ⚠️ 灰 MAX 有歧义: **点 MAX 前**灰=资源不足(该 close); **点 MAX 后**灰=count 已设满
         # (正常, 该继续扫)。所以 grey→close 只在 not _maxed 时判; _maxed 后不再看 MAX 状态。
@@ -283,6 +295,15 @@ class SpecialSweepSkill(BaseSkill):
             self._goto("close")
             return action_wait(300, "扫荡开始 never seen → close")
         # _maxed=True (资源已确认可负担) → 固定位扫荡开始兜底安全。
+        # ⛔after-ack(2026-07-28): 旧码三样全无(_started/_sweep_rounds/_goto)
+        # → skill 原地留在 _sweep 每 3 tick 盲拍一次; 第一发落地后确认框弹出
+        # 使屏幕指纹变化, same-target hold 判"页面已推进"放行第二发 → 在无 cls
+        # 支撑的坐标上往刚弹出的对话框里连拍, 且迟迟不进 _confirm 的青辉石闸。
+        # 与 cls 路径(上面 SWEEP_START 分支)保持一致, 让下一 tick 由 _confirm 接管。
+        self._started = True
+        self._sweep_rounds += 1
+        self.log(f"click 扫荡开始 fixed-pos (round {self._sweep_rounds})")
+        self._goto("confirm")
         return action_click(*_POS_SWEEP_START, "start special sweep (fixed pos)")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:

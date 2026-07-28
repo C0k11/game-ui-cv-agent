@@ -1102,6 +1102,34 @@ class CafeSkill(BaseSkill):
             self._goto("switch")
             return action_wait(300, "resume → switch to 2F")
 
+        # 切回 1F 的到达对账(2026-07-28): _floor_back_done 只认帧证据 —
+        # 1F 才有 移動至2號店, 2F 才有 移動至1號店。点击被吞(仍见 2F 按钮)
+        # 超过 ACK 窗就有界重发, 绝不一发定生死。
+        if getattr(self, "_floor_back_pending", False) and not is_2f:
+            _btn_region = (0.0, 0.03, 0.30, 0.22)
+            _still_2f = self.find_cls(screen, UC.CAFE_MOVE_1F, conf=_CLS_CONF,
+                                      region=_btn_region)
+            _proof_1f = self.find_cls(screen, UC.CAFE_MOVE_2F, conf=_CLS_CONF,
+                                      region=_btn_region)
+            if _proof_1f is not None and _still_2f is None:
+                self._floor_back_pending = False
+                self._floor_back_done = True
+                self.log("帧证据: 移動至2號店 出现 = 已回 1F → 重扫落账")
+            elif _still_2f is not None and self.since("floor_back") > _SWITCH_2F_ACK_SEC:
+                self._floor_back_retries = getattr(self, "_floor_back_retries", 0) + 1
+                if self._floor_back_retries > 3:
+                    self.log("切回1F 3 次没落地 → 放弃重扫 → exit")
+                    self._floor_back_pending = False
+                    self._floor_back_done = True   # 防死循环: 当作处理过
+                    self._goto("exit")
+                    return action_wait(300, "floor-back failed → exit")
+                self.mark("floor_back")
+                self.log(f"切回1F未落地(仍见 移動至1號店) → 重发 #{self._floor_back_retries}")
+                return action_click_box(_still_2f, "1F dot on switch btn → back to 1F")
+            elif (_proof_1f is None and _still_2f is None
+                    and self.since("floor_back") < _SWITCH_2F_ACK_SEC * 2):
+                return action_wait(300, "切回1F转场中 — 等楼层按钮出现")
+
         # Safety helmet.
         if self._pat_count >= _MAX_HEADPATS_PER_FLOOR:
             return self._finish_headpat(screen, is_2f, "max headpats")
@@ -1182,7 +1210,14 @@ class CafeSkill(BaseSkill):
                                     region=(0.0, 0.03, 0.30, 0.22))
                 if mv1 is not None and self.dot_in_region(
                         screen, (mv1.x1 - 0.01, mv1.y1 - 0.05, mv1.x2 + 0.04, mv1.y2 + 0.01)):
-                    self._floor_back_done = True
+                    # ⛔mutate-before-ack(2026-07-28, 与 _switch_floor :1108 同形):
+                    # _floor_back_done 不在这里落账 — 点击被吞时人还在 2F, 却按
+                    # 1F 分支把干净的 2F 重扫一遍, 然后 "1F re-sweep done" 把 1F
+                    # 真正的活永久丢掉。落账移到 _headpat 的帧证据分支
+                    # (移動至2號店 出现 = 真回到 1F)。
+                    self._floor_back_pending = True
+                    self._floor_back_retries = 0
+                    self.mark("floor_back")
                     self._on_2f = False
                     self._reset_headpat_for_floor()
                     self._goto("headpat")

@@ -68,6 +68,15 @@ _ENTER_MAX = 22
 _COMBO_MAX = 16
 _BUY_MAX = 16
 _CONFIRM_MAX = 10            # poll the dialog for the FREE cls before bailing
+# ⛔tick-vs-墙钟家族(2026-07-28): _CONFIRM_MAX 10 tick 被 zero-wait 压到
+# 1.5-2.5s, 且「等对话框出现」和「等 免费 cls 渲染」共用同一个 _phase_ticks
+# 不重置 — 对话框第 8 tick 才出现时只剩 2 tick 判 免费 → 真免费包被当付费
+# 框 cancel 掉。拆成两个独立墙钟(方向都 fail-closed: 等得久只是晚 cancel,
+# 绝不会多确认)。⚠FREE 判定 conf 保持 0.30 不降 — 降门槛放大「付费框误判
+# 免费」方向, 钱闸只紧不松(agent 建议里降 conf 那半句已驳回)。
+_DIALOG_WAIT_SEC = 16.0      # 等确认框渲染(×1.6 年代等效)
+_FREE_POLL_SEC = 8.0         # 框出现后 poll 免费 cls(≈40+ 帧, 盖住 flicker)
+_REPRESS_COOLDOWN_SEC = 3.0  # 重按 buy 的节流(旧 %4≈6.4s → 现 0.8s 连打, 同病)
 _EXIT_MAX = 14
 
 
@@ -120,6 +129,7 @@ class BuyPyroxeneSkill(BaseSkill):
         self._bought: bool = False         # set once the free pack is confirmed
         self._buy_retry: Optional[tuple] = None  # (cx,cy) to re-press on drop
         self._confirm_clicks: int = 0      # ack-loop: 確認 实际点击次数(防幻影)
+        self._dialog_seen: bool = False    # 确认框首见(免费 poll 墙钟起点)
         # 「今天先前已领」的证据(屏上既无 免费 标也无未领红点) —— 与「没领到」
         # 区分开, 否则竣工判据每天都会误报 LEFTOVER。见 exit_report。
         self._skipped_already_claimed: bool = False
@@ -338,15 +348,20 @@ class BuyPyroxeneSkill(BaseSkill):
         if confirm_btn is None:
             # Dialog not up yet. Re-press the buy button (ADB may have dropped),
             # then give it a few ticks. If never appears, fall back to buy.
-            if self._phase_ticks > _CONFIRM_MAX:
+            if (self._phase_ticks > _CONFIRM_MAX
+                    and self.since("confirm_enter") > _DIALOG_WAIT_SEC):
                 if self._on_combo_tab(screen) or self._shop_open(screen):
                     self.log("confirm dialog never appeared → back to buy")
+                    self._dialog_seen = False   # 下次进 confirm 重新起 poll 表
+                    self.clear_timer("dialog_seen")
                     self._goto("buy")
                     return action_wait(300, "no dialog → re-pick buy")
                 self._goto("exit")
                 return action_wait(300, "confirm timeout → exit")
-            if self._buy_retry is not None and self._phase_ticks % 4 == 0:
+            if (self._buy_retry is not None and self._phase_ticks % 4 == 0
+                    and self.since("buy_repress") > _REPRESS_COOLDOWN_SEC):
                 bx, by = self._buy_retry
+                self.mark("buy_repress")
                 self.log("confirm dialog absent, re-pressing buy button (drop?)")
                 return action_click(bx, by, "re-press FREE buy (no dialog)")
             return action_wait(300, "waiting for purchase-confirm dialog")
@@ -372,7 +387,12 @@ class BuyPyroxeneSkill(BaseSkill):
 
         # Dialog up but no FREE yet. FREE is static here, so poll a few frames
         # (rule #5). If it never shows, this is NOT a free pack → cancel.
-        if self._phase_ticks > _CONFIRM_MAX:
+        # 墙钟从「第一次看到对话框」起算(独立于等框阶段), 帧数×墙钟合取。
+        if not self._dialog_seen:
+            self._dialog_seen = True
+            self.mark("dialog_seen")
+        if (self._phase_ticks > _CONFIRM_MAX
+                and self.since("dialog_seen") > _FREE_POLL_SEC):
             self.log("⛔ dialog has NO 免费 cls (paid?) — cancelling, never buy")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
             if cancel is not None:

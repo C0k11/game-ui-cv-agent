@@ -192,10 +192,20 @@ class ClubSkill(BaseSkill):
         if confirm is not None:
             # 不提前 latch _checked_in(2026-07-21 mutate-before-ack 根治: 点击被吞
             # 时旧码已置 _checked_in=True → _exit 的 badge-verify 兜底(L202 not
-            # _checked_in)被骗过, 签到没成仍报 done)。reason 加"確認键"稳定门豁免。
+            # _checked_in)被骗过, 签到没成仍报 done)。
+            # ⛔reason 不再当控制 API(reason_string_as_api 家族): 旧写法靠
+            # "確認键"命中关键词豁免 → 稳定门+same-target hold 一起被跳过 ⇒
+            # ①簽到獎勵框是自动弹出的, 第一帧多为弹入动画帧, 锚上去打空
+            # ②无 hold 的第二发落在框消失后的社團页上 = 盲拍。
+            # 改 _force_settle 老实走稳定门 + 显式 after-ack(6s 盖 step 门控节奏)。
+            if self._checkin_clicked and self.since("checkin_fire") < 6.0:
+                return action_wait(300, "確認已发 — 等确认框消失的帧证据")
             self._checkin_clicked = True
-            self.log("社團簽到 → 確認键 (10AP to mailbox)")
-            return action_click_box(confirm, "confirm club sign-in (確認键)")
+            self.mark("checkin_fire")
+            self.log("社團簽到 → 確認 (10AP to mailbox)")
+            act = action_click_box(confirm, "confirm club sign-in")
+            act["_force_settle"] = True
+            return act
 
         # Dialog gone. 若点過確認 → 签到落地 latch(到达证据, post-ack)。
         if self._checkin_clicked:
