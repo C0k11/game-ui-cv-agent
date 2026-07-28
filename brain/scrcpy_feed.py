@@ -130,7 +130,24 @@ def _make_client(device, max_fps: int, display_id: int):
 
 class ScrcpyFeed:
     """后台线程持帧: latest() 返回 (frame_bgr, age_s, seq); 线程安全.
-    watchdog: 断流 > stale_restart_s 自动重启 client(流断裂唯一正解)."""
+
+    ⭐流寿命 17.0s 定律(2026-07-28 三组对照实测): MuMu12 对每个 scrcpy
+    镜像流有内在 **17.0s** 寿命上限 — 30fps/8M、10fps/8M、30fps/4M 全部
+    死在 t+17.0(误差 <0.1s), 与帧数/码率/输入无关; 死后 server 进程仍活、
+    socket 不断, 只是永不再出帧。这就是"每 ~20s 断流 3.5s"(task#17,
+    2026-07-21 埋点)的全部真相 — 旧架构等死+重启 = 每 17s 一个 3-5s 盲窗。
+
+    修法 = 预热轮换(双缓冲): 双流并行实测 per-instance 定时器(A 死 t+17.3,
+    B 起于 t+8.6 死于 t+25.6 = 自己的 17.0s), 且并存 8s+ 互不干扰。
+    ⇒ 流活到 _ROTATE_AT 时预热新流(首帧实测稳定 0.20s) → 原子交接 → 旧流
+    收尸, 全程零盲窗。断流 watchdog 保留作兜底(轮换失败/流早死)。
+    150s 验证: 11 次轮换全成, 活跃画面零 >0.5s 间隙, 兜底重启 0, 无进程残留;
+    静止画面(H.264 天然不出帧)仍由 _is_static() 独立链证实内容=当前屏。
+
+    ⚠换手后的流实测最短只活过 13.5s(对照实验 V1, 可能受静止期影响),
+    比裸流 17.0s 短 — _ROTATE_AT 必须给最坏 13.5s 留余量, 别调回 12。"""
+
+    _ROTATE_AT = 10.0    # 实际节奏 ~10.5-11s(+watchdog 1s 粒度), 对 13.5s 余量>2s
 
     def __init__(self, serial: str = "127.0.0.1:7555", max_fps: int = 30,
                  display_id: int | None = None,
@@ -145,13 +162,17 @@ class ScrcpyFeed:
         self._ts = 0.0
         self._seq = 0
         self._client = None
+        self._client_born = 0.0
         self._stopping = False
         self._watchdog = None
         self._restart_lock = threading.Lock()   # stop()×watchdog 重启互斥
         self.restarts = 0
+        self.rotations = 0
         self._fail_streak = 0
 
     def _start_client(self):
+        """起一个新 client 并返回 (client, first_frame_holder).
+        ⚠不赋值 self._client — 调用方决定何时交接(轮换需要新旧并存窗口)."""
         from adbutils import adb
         import scrcpy
         did = self._display_id
@@ -162,12 +183,22 @@ class ScrcpyFeed:
                                    " — 拒绝回退 display 0(桌面)")
             self._display_id = did
         dev = adb.device(serial=self._serial)
-        self._client = _make_client(dev, self._max_fps, did)
-        self._client.add_listener(scrcpy.EVENT_FRAME, self._on_frame)
-        self._client.start(threaded=True)
+        client = _make_client(dev, self._max_fps, did)
+        holder = {"got": False}
+
+        def _on(frame, _h=holder):
+            if frame is None:
+                return
+            _h["got"] = True
+            self._on_frame(frame)
+
+        client.add_listener(scrcpy.EVENT_FRAME, _on)
+        client.start(threaded=True)
+        return client, holder
 
     def start(self, timeout_s: float = 10.0) -> bool:
-        self._start_client()
+        self._client, _ = self._start_client()
+        self._client_born = time.time()
         t0 = time.time()
         ok = False
         while time.time() - t0 < timeout_s:
@@ -213,10 +244,51 @@ class ScrcpyFeed:
         except Exception:
             return False
 
+    def _rotate(self):
+        """预热新流 → 首帧到达即接管 → 旧流收尸. 交接窗口两流并写
+        latest(内容都是当前屏, 无害), 全程不断流. 失败=沿用旧流,
+        把 born 后移一轮退避, 旧流真死时由断流兜底接住."""
+        with self._restart_lock:
+            if self._stopping:
+                return
+            old = self._client
+            try:
+                new, holder = self._start_client()
+            except Exception as e:
+                self._log(f"    [feed] rotate 预热失败({e}) → 退避, 交断流兜底")
+                self._client_born = time.time()
+                return
+            t0 = time.time()
+            while time.time() - t0 < 3.0 and not holder["got"]:
+                time.sleep(0.05)
+            if not holder["got"]:
+                self._log("    [feed] rotate 新流 3s 无首帧 → 弃, 沿用旧流")
+                try:
+                    new.stop()
+                except Exception:
+                    pass
+                self._client_born = time.time()
+                return
+            self._client = new
+            self._client_born = time.time()
+            self.rotations += 1
+            self._log(f"    [feed] rotate #{self.rotations} ok "
+                      f"(首帧 {time.time()-t0:.2f}s)")
+            try:
+                if old is not None:
+                    old.stop()
+            except Exception:
+                pass
+
     def _watchdog_loop(self):
         static_streak = 0
         while not self._stopping:
             time.sleep(1.0)
+            # ⭐预热轮换: 流寿命 17.0s 定律(见类 docstring), 12s 处无缝换新
+            if (not self._stopping and self._client is not None
+                    and time.time() - self._client_born >= self._ROTATE_AT):
+                self._rotate()
+                continue
             with self._lock:
                 age = time.time() - self._ts if self._ts else 0.0
             if age <= self._stale_restart_s or self._stopping:
@@ -259,7 +331,8 @@ class ScrcpyFeed:
                     # 永不变 → 重定位永不触发)
                     if self._fail_streak >= 2:
                         self._display_id = None
-                    self._start_client()
+                    self._client, _ = self._start_client()
+                    self._client_born = time.time()
                     self.restarts += 1
                     self._fail_streak = 0
                     with self._lock:  # 宽限: 给新 client 出帧窗口
