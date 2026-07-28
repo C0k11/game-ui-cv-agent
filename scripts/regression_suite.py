@@ -14,9 +14,13 @@ check 实现与 brain 内真实防线同判据(独立复刻, 判据变更两边�
 帧来源见 data/regression/manifest.json 各 case 的 origin。
 """
 import json
+import os
 import sys
 from pathlib import Path
 
+# ⛔回放绝不写生产状态(2026-07-28): schedule 的 _reconcile_ledger 挂进
+# _read_tickets 后, 票数 fixture(历史帧)会在同游戏日内钳真台账。
+os.environ.setdefault("BA_REPLAY", "1")
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, r"D:\Project\ai game secretary")
 from vision.io_utils import imread_any  # noqa: E402

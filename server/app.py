@@ -1468,6 +1468,79 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 globals()["_STEP_PENDING"] = None
                 _PIPELINE_STATUS["step_pending"] = None
 
+            # 3b. ⭐JIT 落点复验(2026-07-28 幽灵点击根治, 一处集中修) ──
+            # 决策帧 → 落 tap 之间隔着 稳定门/hold(≤4s) + step 门人审(1.5~40s)
+            # + exec(32-800ms), 三段叠加后"决策时看到的目标"未必还在屏上。
+            # 一天里在 4 个 skill 上各修过一次同形(schedule 報告確認/cafe 領取/
+            # arena claim/club 簽到)才被用户点破是同一个病: after-ack 只管
+            # "同目标别连发", 不管"发出去时目标还在不在"。
+            # 规则: 距决策 >0.30s 的 click, 若决策帧上落点有 cls 锚(半径 0.06
+            # 内/含住落点), 就重抓一帧跑 YOLO 确认同名 cls 仍支撑落点; 消失 →
+            # 丢弃这一发 + 置 action_suppressed 让 skill 下一 tick 重算。
+            # ⛔盲拍(决策帧上落点本就无 cls, 如"点击继续"空点)无从复验, 放行 —
+            #   否则合法空点会被永久丢弃死循环。
+            # ⚠旧笔记 click_causality_gate 那句「JIT复验治不了它」只对因果倒置
+            #   成立(复验读到同一张冻结帧); 尾发/弹窗重排这两种, 复验读到的是
+            #   更新的帧, 能救。新帧选取沿用主循环因果闸口径: scrcpy 帧摄取
+            #   时刻必须晚于上次 tap(+0.25s 动画余量), 否则落 ADB 抓真·当前帧。
+            if (not dry_run and action_type == "click"
+                    and not action.get("_atomic_no_gate")
+                    and time.time() - _t_decided > _JIT_STALE_S):
+                _jit_tgt = action.get("target") or [0.5, 0.5]
+                try:
+                    _jit_boxes = list(getattr(pipe.last_screen, "yolo_boxes",
+                                              None) or [])
+                except Exception:
+                    _jit_boxes = []
+                _jit_cls = _jit_anchor_cls(_jit_tgt, _jit_boxes)
+                if _jit_cls is not None:
+                    _jfr = None
+                    _jsrc = ""
+                    _jlt = globals().get("_LAST_TAP_SENT_TS", 0.0)
+                    try:
+                        if _scrcpy_feed is not None:
+                            _f3, _a3, _s3 = _scrcpy_feed.latest()
+                            if (_f3 is not None and _a3 is not None
+                                    and time.time() - _a3 > _jlt + 0.25):
+                                _jfr = _f3
+                                _jsrc = f"scrcpy age={_a3*1000:.0f}ms"
+                    except Exception:
+                        pass
+                    if _jfr is None and adb is not None:
+                        # 静止屏 scrcpy 不产新帧(或断流) → screencap 拿真·当前帧
+                        try:
+                            _jfr = adb.capture_frame()
+                            _jsrc = "adb"
+                        except Exception:
+                            _jfr = None
+                    if _jfr is None:
+                        _log_pipeline("[jit] 复验取不到新帧 → 放行(维持旧行为)")
+                    else:
+                        try:
+                            from brain.pipeline import _run_yolo_on_image
+                            _jh, _jw = _jfr.shape[:2]
+                            _jfb = _run_yolo_on_image(_jfr, _jw, _jh)
+                        except Exception as _je:
+                            _jfb = None
+                            _log_pipeline(f"[jit] 复验 YOLO 失败({_je}) → 放行")
+                        if _jfb is not None and not _jit_landing_ok(
+                                _jit_tgt, _jit_cls, _jfb):
+                            _jage = (time.time() - _t_decided) * 1000
+                            _log_pipeline(
+                                f"[jit] ⛔丢弃过期点击: 决策龄 {_jage:.0f}ms, "
+                                f"锚 '{_jit_cls}' 在新帧({_jsrc}, "
+                                f"{len(_jfb)}框)落点半径 {_JIT_RADIUS} 内已消失"
+                                f" — '{reason}'")
+                            try:
+                                if pipe.current_skill is not None:
+                                    pipe.current_skill.action_suppressed = True
+                            except Exception:
+                                pass
+                            action = {"action": "wait", "duration_ms": 200,
+                                      "reason": f"jit-discard ({reason})"}
+                            action_type = "wait"
+                            reason = action["reason"]
+
             # 3. Execute action (unless dry_run)
             # ⚠只放行真输入动作(2026-07-16 审计 A 级): 旧闸把最高频的
             # wait 也送进执行函数, 落穿 ADB 分支后每 tick 执行
@@ -1586,6 +1659,46 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _PIPELINE_RUNNING = False
         _PIPELINE_STATUS["running"] = False
         _log_pipeline("Pipeline worker stopped.")
+
+
+# ⭐JIT 落点复验的两个纯几何判定(2026-07-28 幽灵点击根治)。
+# 拆成纯函数: 不碰帧/模型, 回归测试可以直接喂框列表验语义。
+_JIT_STALE_S = 0.30   # 决策帧超过这个龄才复验; 快路径(自主 tick)免检零成本
+_JIT_RADIUS = 0.06    # 与 step_walk 盲拍守卫同一半径
+
+
+def _jit_box_supports(tgt, b, radius: float = _JIT_RADIUS) -> bool:
+    """框 b 支撑落点 tgt: 含住落点, 或中心距 ≤ radius(宽按钮偏心 tap 靠含住兜)。"""
+    tx, ty = float(tgt[0]), float(tgt[1])
+    if b.x1 <= tx <= b.x2 and b.y1 <= ty <= b.y2:
+        return True
+    return ((b.cx - tx) ** 2 + (b.cy - ty) ** 2) ** 0.5 <= radius
+
+
+def _jit_anchor_cls(tgt, boxes, radius: float = _JIT_RADIUS):
+    """决策帧上落点锚定的 cls 名; None = 盲拍(无从复验, 调用方必须放行)。
+
+    含住落点的框优先(距离记 0), 否则半径内中心最近者。"""
+    best = None
+    best_d = None
+    tx, ty = float(tgt[0]), float(tgt[1])
+    for b in boxes:
+        if b.x1 <= tx <= b.x2 and b.y1 <= ty <= b.y2:
+            d = 0.0
+        else:
+            d = ((b.cx - tx) ** 2 + (b.cy - ty) ** 2) ** 0.5
+            if d > radius:
+                continue
+        if best_d is None or d < best_d:
+            best, best_d = b, d
+    return best.cls_name if best is not None else None
+
+
+def _jit_landing_ok(tgt, cls_name: str, fresh_boxes,
+                    radius: float = _JIT_RADIUS) -> bool:
+    """新帧上落点仍被**同名** cls 支撑? False ⇒ 目标已消失/移位, 丢弃这一发。"""
+    return any(b.cls_name == cls_name and _jit_box_supports(tgt, b, radius)
+               for b in fresh_boxes)
 
 
 def _execute_pipeline_action(action: Dict[str, Any], hwnd: int, img_w: int, img_h: int, adb: Any = None, android_w: int = 0, android_h: int = 0) -> None:

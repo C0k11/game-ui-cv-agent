@@ -98,6 +98,12 @@ def _load_sched_state() -> dict:
 
 
 def _save_sched_state(state: dict) -> None:
+    # ⛔回归/离线回放绝不许写生产台账(2026-07-28): _reconcile_ledger 挂进
+    # _read_tickets 后, 票数 fixture 用的**历史帧**会在同游戏日内把真台账
+    # 钳掉(测试改生产状态)。regression_suite 设 BA_REPLAY=1 全局禁写。
+    import os as _os
+    if _os.environ.get("BA_REPLAY"):
+        return
     try:
         _SCHED_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         _SCHED_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False),
@@ -368,6 +374,29 @@ class ScheduleSkill(BaseSkill):
                     f"帧证实换区 {self._verified_switches} 次)")
         return ("UNKNOWN", f"票数异常 {self._tickets}")
 
+    def _reconcile_ledger(self, cur: int) -> None:
+        """⭐台账自相矛盾钳制(2026-07-28 用户点破「台账当上限误杀真实资源」)。
+
+        屏上还剩 cur 张 ⇒ 本游戏日**最多**已派 _MAX_TICKETS-cur 次。台账比这
+        还大, 说明它是上一个票周期的残值(当天实锤: 屏上 7/7 满票, 台账
+        dispatched=7 → `max(4,7)>=7` 触顶 → **3 张真实票被误杀**, 我还报成
+        "触顶是正确判断")。屏上票数是唯一权威 → 台账钳到物理上限并落盘
+        (带 tickets_seen 留痕, 下次直接看得见"台账 7 屏上 7/7"这种矛盾)。
+
+        方向安全: 只会把"已派次数"钳**小** = 允许把屏上真实存在的票花掉;
+        绝不放大。票=0 时 _max_possible=7 ≥ 任何合法台账值 → 不动, 上限闸
+        与 ⛔票到顶_零点击 fixture 的语义原样有效。⛔台账本体不删(2026-07-25
+        跨 session 事故防线): 票数读不出时它仍是唯一兜底。"""
+        _max_possible = _MAX_TICKETS - cur
+        if self._day_dispatched > _max_possible:
+            self.log(f"⛔台账自相矛盾: 屏上剩 {cur}/{_MAX_TICKETS}(今日最多已派 "
+                     f"{_max_possible}) 但台账记 {self._day_dispatched} → "
+                     f"旧周期残值, 钳到 {_max_possible}")
+            self._day_dispatched = _max_possible
+            _save_sched_state({"game_day": _game_day(),
+                               "dispatched": self._day_dispatched,
+                               "tickets_seen": cur})
+
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """Read 持有票券 X/7 via digit-OCR. Returns current count, or None.
 
@@ -416,6 +445,7 @@ class ScheduleSkill(BaseSkill):
             if cur != self._tickets:
                 self.log(f"tickets: {cur}/{_MAX_TICKETS} (cls锚定 {' '.join(dbg)})")
             self._tickets = cur
+            self._reconcile_ledger(cur)
             return cur
         if len(vals) > 1:
             # ⛔两个窗口/两个锚点读出不同的数 = 至少一个错 → 一律丢弃。
@@ -461,6 +491,7 @@ class ScheduleSkill(BaseSkill):
         if cur != self._tickets:
             self.log(f"tickets: {cur}/{_MAX_TICKETS} (raw {raw!r})")
         self._tickets = cur
+        self._reconcile_ledger(cur)
         return cur
 
     # ── screen-state helpers (pure YOLO) ──────────────────────────────────
@@ -863,6 +894,9 @@ class ScheduleSkill(BaseSkill):
             # out, click NOTHING.
             # 上限用**今日累计**(持久台账), 不是本跑计数 —— 2026-07-25 事故当天
             # 早些 session 已派 4 次, 本跑只数到 3, 旧的 per-run 上限完全没兜住。
+            # ⭐2026-07-28: 台账在 _reconcile_ledger 被屏上票数钳制过(屏上剩
+            # cur 张 ⇒ 台账 ≤ 7-cur), 旧周期残值不再能单方面否决屏上真实票;
+            # 票数读不出时台账保持原值 = 跨 session 兜底原样(fail-closed)。
             if max(self._dispatch_count, self._day_dispatched) >= _MAX_TICKETS:
                 # ⚠2026-07-28 live 观察(**看到了但故意不改**): 触顶时屏上那份
                 # 課程表報告(第 7 张票的收据)也不会被关 → 转 exit → stuck 20 →
@@ -1179,7 +1213,10 @@ class ScheduleSkill(BaseSkill):
                 # 那正是 2026-07-25 硬上限没兜住 30 青辉石那次的原因之一。
                 self._day_dispatched += _spent
                 _save_sched_state({"game_day": _game_day(),
-                                   "dispatched": self._day_dispatched})
+                                   "dispatched": self._day_dispatched,
+                                   # ⭐留痕(2026-07-28): 下个 session 一眼看出
+                                   # "台账 dispatched=7 但当时屏上就剩 X" 类矛盾
+                                   "tickets_seen": self._tickets})
                 self.log(f"dispatch 落账: 票 {_prev}→{self._tickets}, "
                          f"count={self._dispatch_count} "
                          f"(今日累计 {self._day_dispatched})")
