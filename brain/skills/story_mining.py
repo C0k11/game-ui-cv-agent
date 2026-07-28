@@ -93,6 +93,7 @@ class StoryMiningSkill(BaseSkill):
         self._skill_t0 = None          # 整个 skill 墙钟起点(见 _SKILL_BUDGET_SEC)
         self._cut_ticks = 0
         self._skipped_stories = 0      # 跳完的剧情段数(竣工判据用)
+        self._no_dot_skips = 0         # 因"卡上无黄点=没矿"被跳过的类别数
         self._settle_sec = 0.0         # 当前这次转场还要等多少秒(墙钟)
         self._tried_enters: List[tuple] = []   # node 入场键 positions already entered
                                                # (battle nodes we back out of → skip next)
@@ -123,7 +124,16 @@ class StoryMiningSkill(BaseSkill):
 
     def exit_report(self):
         """竣工判据 —— 此前报 UNKNOWN, 于是"跑了 6 分钟一个节点都没挖到"这种
-        空跑没人审计得出来(而它正是 max_ticks 缩水后的典型结局)。"""
+        空跑没人审计得出来(而它正是 max_ticks 缩水后的典型结局)。
+
+        ⛔2026-07-28 live 当场修的**我自己的误报**: 首跑时三个类别全部
+        「无黄点 → no mine, skip」, 帧证实剧情 hub 上主線/短篇/支線/重播四张卡
+        **一个黄点都没有**(该账号剧情已挖完) —— 这是 **没活可干(CLEAN)**,
+        而第一版把它报成 LEFTOVER「一个节点都没进」。
+        ⇒ 必须区分两种 exhausted:
+           · 「无黄点」= 信号说没矿 → CLEAN
+           · 「进去过又退回 hub」= 有矿挖不动(战斗门/漏检) → 值得关注
+        """
         if self._skipped_stories:
             return ("CLEAN", f"跳完 {self._skipped_stories} 段剧情"
                              f"(类别 exhausted={self._exhausted or '-'}, "
@@ -133,8 +143,13 @@ class StoryMiningSkill(BaseSkill):
                     f"进了 {len(self._tried_enters)} 节点/"
                     f"{len(self._tried_chapters)} 章但**一段剧情都没跳完** — "
                     f"多半卡在战斗节点或跳过链")
+        if self._no_dot_skips and self._no_dot_skips >= len(self._categories):
+            return ("CLEAN",
+                    f"{self._no_dot_skips} 个类别全部**无黄点 = 没矿可挖**"
+                    f"(不是没干活) — 剧情已挖完, 等新剧情/新学生")
         return ("LEFTOVER",
-                f"一个节点都没进(exhausted={self._exhausted or '-'}) — "
+                f"一个节点都没进(exhausted={self._exhausted or '-'}, "
+                f"无黄点跳过 {self._no_dot_skips}/{len(self._categories)}) — "
                 f"查 黄点/new 徽章 与 入场键 是否检出")
 
     def _settle(self, sec: float) -> None:
@@ -583,6 +598,7 @@ class StoryMiningSkill(BaseSkill):
                 if not self._card_has_mine_dot(screen, card):
                     self.log(f"category {cat}: 无黄点 → no mine, skip")
                     self._exhausted.append(cat)
+                    self._no_dot_skips += 1   # 竣工判据靠它区分"没矿"与"没干活"
                     self._cat_idx += 1
                     continue
                 self._current_cat = cat
