@@ -81,9 +81,13 @@ _BANNER_FRESH_SEC = 0.35
 _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
                            # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
-# 连续这么多**扫荡轮**读不到活動點數 ⇒ 认定本期是无点数活动, 转尾关轮转。
-# 取 2 而不是 1: 单轮读失败可能只是弹窗遮挡; 2 轮仍读不到基本就是没有这个 UI。
-_NO_POINTS_ROUNDS = 2
+# 进 points 阶段后给这么多秒反复读活動點數; **窗口内一次都不扫荡**。
+# ⛔为什么必须是墙钟且必须挡住扫荡(2026-07-28 第一版实锤): 第一版按**扫荡轮次**
+# 计数(连续 2 轮读不到才判无点数) —— 而 points 阶段的**第 1 轮就是 MAX 扫荡**,
+# 697 AP 一次性花掉 34 次全灌最后一关, 等判出"无点数"转到 Q11 时只剩 17 AP。
+# 判定必须发生在**第一次扫荡之前**, 否则修了等于没修。
+# 4s: 点数条渲染实测 <1s, 留 4 倍余量; 窗口内是 wait 态, 慢 IO 不挡点击热路径。
+_NO_POINTS_SEC = 4.0
 
 # 对话框按钮带 —— 見 `_sweep_flow` 里那段 2026-07-28 的注释。
 # 实测(今天全部帧): 对话框 確認 cy = 0.699 / 0.705 / 0.771 / 0.809;
@@ -262,8 +266,7 @@ class EventQuestSkill(BaseSkill):
         self._points_done = False
         self._currency_idx = 0        # 货币关轮转指针 — 按**扫荡轮次**推进
         self._cur_round_mark = -1     # 上次推进指针时的 _sweep_rounds
-        self._no_pts_rounds = 0       # 连续读不出活動點數的轮数
-        self._no_pts_round_mark = -1
+        self._no_pts_t0 = 0.0         # 「等活動點數读出」墙钟窗口起点(0=未开始)
         self._swept = 0
         self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
         self._ap_spend_after_read = False  # 读数之后又扫荡/出击过 → 读数已陈旧
@@ -1420,7 +1423,7 @@ class EventQuestSkill(BaseSkill):
             return action_wait(200, "farm plan configured → currency")
         pts = self._pts_cache
         if pts is not None:
-            self._no_pts_rounds = 0
+            self._no_pts_t0 = 0.0     # 读到点数 → 解除"无点数"计时窗
             self.log(f"活動點數 {pts[0]}/{pts[1]}")
             if pts[0] >= min(self._points_target, pts[1]):
                 self._points_done = True
@@ -1428,20 +1431,26 @@ class EventQuestSkill(BaseSkill):
                 return action_wait(300, "points target reached → currency")
         else:
             # ⛔无点数活动逃生(2026-07-28 用户实锤「只会刷最后一关」的直接根因):
-            # 点数读不出时旧码**无条件**继续扫最后一关, 于是整轮 AP 全灌一关。
-            # memory event_ops_playbook 的定案是「无点数活动只刷最后三关」——
-            # 连续 N 轮读不出就认定本期无点数, 转轮转。
-            # ⚠用**扫荡轮次**不用 tick: 点数只在扫完才变, 每 tick 计数没有意义。
-            if self._sweep_rounds != self._no_pts_round_mark:
-                self._no_pts_round_mark = self._sweep_rounds
-                self._no_pts_rounds += 1
-            if self._no_pts_rounds >= _NO_POINTS_ROUNDS:
-                self.log(f"points: 连续 {self._no_pts_rounds} 轮读不到活動點數 "
-                         f"⇒ 判定**本期无点数活动** → 转尾关轮转"
-                         f"(⚠这是'读不出'不是'没有点数'的资源结论)")
-                self._points_done = True
-                self._set("currency")
-                return action_wait(200, "no-points event → currency rotation")
+            # 点数读不出时旧码**无条件**继续扫最后一关, 整轮 AP 全灌一关。
+            # memory event_ops_playbook 的定案是「无点数活动只刷最后三关」。
+            # ⚠⚠判定必须在**第一次扫荡之前**完成 —— 见 `_NO_POINTS_SEC` 那段:
+            # 第一版按扫荡轮次判, 结果第 1 轮 MAX 就把 697 AP 花光了。
+            if not self._no_pts_t0:
+                self._no_pts_t0 = self.clock()
+            _el = self.clock() - self._no_pts_t0
+            if _el <= _NO_POINTS_SEC:
+                # 窗口内**绝不扫荡**, 只反复重读。此处是 wait 态, run_digit_ocr
+                # 的 ADB 4K 重抓(~900ms)不挡点击热路径。
+                self._pts_cache = self._read_points(screen)
+                if self._pts_cache is not None:
+                    return action_wait(150, "points: 读到点数了 — 下一 tick 按点数走")
+                return action_wait(400, f"points: 等活動點數读出 ({_el:.1f}s)")
+            self.log(f"points: {_el:.1f}s 内读不到活動點數 ⇒ 判定**本期无点数活动**"
+                     f" → 转尾关轮转(⚠这是'读不出'不是'没有点数'的资源结论; "
+                     f"这条反复出现就去查点数条版式/cls 漏检)")
+            self._points_done = True
+            self._set("currency")
+            return action_wait(200, "no-points event → currency rotation")
         return self._sweep_quest(screen, quest_idx=len(self._quests) - 1,
                                  phase_after="milestone", label="points")
 
