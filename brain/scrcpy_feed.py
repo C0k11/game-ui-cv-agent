@@ -222,9 +222,21 @@ class ScrcpyFeed:
             if age <= self._stale_restart_s or self._stopping:
                 static_streak = 0
                 continue
-            # 连续 20 次判静止(~90s)仍无新帧 → 强制重启一次验流活性
+            # 连续 N 次判静止仍无新帧 → 强制重启一次验流活性
             # (死 socket 停在安静页会被静止判定无限续命 — 审计实锤)
-            if static_streak < 20 and self._is_static():
+            # ⛔2026-07-28 实测: 旧值 20 且本循环 `time.sleep(1.0)` ⇒ 静止 **~20s**
+            # 就强制重启一次(注释里写的 "~90s" 对不上代码)。step_walk 逐帧门控时
+            # 画面静止几十秒是常态(人在审帧/改代码), 实录 **每 21-36s 重启一次,
+            # 一段日志里 10 次** —— 每次都要在 Android 侧重建 MediaCodec +
+            # VirtualDisplay, 正是这段注释自己警告的"重启风暴"。
+            # 提到 120(~2min): 代价可控 —— `_is_static()` 每轮都用**独立 ADB 链**
+            # 与真实屏幕比过, 判静止就意味着"feed 最后一帧 == 当前屏幕", 拿到的
+            # 画面是对的; 而死 socket 一旦屏幕真变化, 下一轮 `_is_static()` 立刻
+            # 返回 False → 马上重启。所以"无限续命"的窗口只存在于屏幕也没变的
+            # 时候, 那时重不重启对决策毫无影响。
+            # ⚠ 这**不是**"游戏崩溃的原因"的证明(今天崩了 3 次, 未复现不断因果),
+            #   只是消除一个有量化证据的无谓压力源。
+            if static_streak < 120 and self._is_static():
                 static_streak += 1
                 with self._lock:      # ADB 对比一致=帧内容就是当前屏幕
                     self._ts = time.time()
