@@ -710,7 +710,108 @@ def fx_craft_empty_slots_still_enter():
                 f"(期望False) / 昨日台账={stale}(期望True)")
 
 
+def fx_momo_panel_identity_gate():
+    """⛔点开学生 A 之后, 右侧会话面板还停在 B —— 绝不在 B 的面板上替 A 干活。
+
+    2026-07-28 帧实锤: 点了「贵音」, 右侧气泡头像全是 `凯伊 cx=0.717`, 连羁绊
+    剧情概要正文写的都是 Kei。与 event_quest「换关不关旧弹窗、只有 label 变了」
+    同构 —— **参数变了 ≠ 屏幕变了**。
+    钉两件事: ①面板是别人时**一个 click 都不许发** ②面板换对了要立刻放行。
+    """
+    from brain.skills.momo_talk import MomoTalkSkill
+
+    def _av(name, cx, cy, conf=0.99):
+        from brain.skills.base import YoloBox
+        return YoloBox(cls_id=-1, cls_name=name, confidence=conf,
+                       x1=cx - 0.02, y1=cy - 0.02, x2=cx + 0.02, y2=cy + 0.02,
+                       model_tag="avatar")
+
+    # 左栏列表头像(cx 0.205) + 右侧会话面板头像(cx 0.57-0.72) + 一个可点的回复选项
+    left = [_av("贵音", 0.205, 0.349), _av("爱丽丝(战斗)", 0.205, 0.455)]
+    reply = _yb("学生信息回复选项", 0.747, 0.678, 0.98)
+
+    def _screen(panel_name):
+        return _sched_screen(*left, _av(panel_name, 0.568, 0.337),
+                             _av(panel_name, 0.717, 0.381), reply)
+
+    sk = MomoTalkSkill()
+    sk.reset()
+    sk._cur_student = "贵音"
+    sk._goto("dialogue")
+    sk.mark("convo")
+
+    # ① 面板是「凯伊」→ 不许点
+    bad = []
+    for _ in range(4):
+        act = sk._dialogue(_screen("凯伊"))
+        if act.get("action") == "click":
+            bad.append(str(act.get("reason", ""))[:60])
+
+    # ② 面板换成「贵音」→ 必须立刻能干活(点回复选项)
+    act2 = sk._dialogue(_screen("贵音"))
+    ok2 = act2.get("action") == "click" and "reply" in str(act2.get("reason", ""))
+
+    return (not bad and ok2,
+            f"面板是别人时的违规点击={bad or '无'}; 面板换对后能干活={ok2} "
+            f"(实际 {act2.get('action')}/{str(act2.get('reason'))[:40]})")
+
+
+def fx_momo_unknown_dialog_never_confirm():
+    """⛔MomoTalk 里的未知 確認+取消 框 → 只能取消。
+
+    2026-07-28 帧实锤: 点「進入羈絆劇情」弹出**劇透警告框**(按钮 cy≈0.913,
+    落在 _story 判定带 y0.55-0.85 之外 ⇒ 旧码根本不处理它), 而框上明写
+    **「點擊確認時將前往活動頁面」** —— 点確認就把 bot 带出 MomoTalk。
+    反向也要钉: 合法的「是否略過此劇情?」框(同屏有 剧情menu/跳过故事键 chrome)
+    必须仍然能確認, 否则羁绊剧情永远跳不过去。
+    """
+    from brain.skills.momo_talk import MomoTalkSkill
+
+    # ① 劇透警告框: 双钮 @cy0.913, 屏上无 story chrome
+    warn = _sched_screen(
+        _yb("确认键", 0.603, 0.913), _yb("取消键", 0.397, 0.913),
+        _yb("学生momotalk信息未读", 0.506, 0.778, 0.86),
+    )
+    sk = MomoTalkSkill()
+    sk.reset()
+    bad = []
+    cancels = 0
+    for _ in range(4):
+        act = sk.tick(warn)
+        r = str(act.get("reason", ""))
+        if act.get("action") == "click":
+            if "取消" not in r:
+                bad.append(r[:60])
+            else:
+                cancels += 1
+    # ⛔连发也要钉: 这道闸第一版就漏了 after-ack, 上线第一次 live 就被 step_walk
+    # 逮到「取消连发 3 次」(第 3 发时框已关掉, 拍在面板下方空白上)。
+    if cancels != 1:
+        bad.append(f"取消发了 {cancels} 次(期望 1, 其余该是 after-ack wait)")
+
+    # ② 略過剧情框: 双钮 @cy0.724 + 右上角 story chrome → 必须还能確認
+    skipdlg = _sched_screen(
+        _yb("确认键", 0.599, 0.724), _yb("取消键", 0.401, 0.727),
+        _yb("剧情menu", 0.941, 0.055), _yb("跳过故事键", 0.946, 0.166),
+    )
+    sk2 = MomoTalkSkill()
+    sk2.reset()
+    sk2.sub_state = "story"
+    sk2._story_cut = 1
+    ok2 = False
+    for _ in range(3):
+        act = sk2.tick(skipdlg)
+        if act.get("action") == "click" and "confirm story skip" in str(act.get("reason", "")):
+            ok2 = True
+            break
+
+    return (not bad and ok2,
+            f"劇透警告框的违规非取消点击={bad or '无'}; 略過框仍能確認={ok2}")
+
+
 CASES = [
+    ("⛔momo未知確認框_只能取消", fx_momo_unknown_dialog_never_confirm, True),
+    ("⛔momo面板是别人时_一个click都不许发", fx_momo_panel_identity_gate, True),
     ("⛔制造槽位全空_无红点也要进", fx_craft_empty_slots_still_enter, True),
     ("⛔arena未到达_绝不报完成", fx_arena_never_reached_not_complete, True),
     ("⛔shop留店标志跟随plan", fx_shop_chain_flag_follows_plan, True),

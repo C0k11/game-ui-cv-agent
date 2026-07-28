@@ -39,7 +39,28 @@ _ROW_DY = 0.06                               # node-icon ↔ 入场键 same-row 
 
 _MAX_PAGE_TURNS = 6      # 右切换 paging cap per category (short/side grids)
 _MAX_MAIN_SWIPES = 5     # 卷-list swipe-left cap (main)
-_BARREN_LIMIT = 5        # empty scans before exhausting a category
+# ⛔⛔2026-07-28 全文件墙钟化(tick-vs-wallclock 家族, 见 memory)。
+# 旧值全是 **tick**; zero-wait 后 0.15-0.25 s/tick, 相对 1.6 s/tick 年代缩水 6.4-10 倍。
+# 本文件是**受灾最重的一个**(静态审计):
+#   · `_cooldown = 2/3` **出现 15 处** —— 每一次页面跳转/翻页/滑动后的稳定等待,
+#     3.2-4.8s → **0.5-0.75s**。剧情各级列表(篇/章/节点)的转场都在 1-3s 量级,
+#     0.5s 的"稳定"等于没等 ⇒ 下一 tick 读到的是**转场中的半张屏**:
+#     该有的 cls 还没渲染 → 走进 barren 分支 → 误判"这页没矿"→ 往回退一级。
+#   · `max_ticks = 1500` → **~6min** 跑完三个类别(旧 ~40min) ⇒ 挖到一半静默超时。
+#   · `_nav_ticks > 40` → **10s** 就报 "can't reach story hub"(旧 64s)。
+#   · `_BARREN_LIMIT = 5` → **~1.3s** 就判一页没矿(旧 ~8s)。
+# 换算口径: 旧注释都写于 ~1.6s/tick 年代, 一律 ×1.6 还原成秒, **绝不趁机收窄**
+# (那些数当初就是为修事故调大的)。
+_SETTLE_SHORT = 3.2      # 旧 _cooldown=2
+_SETTLE_LONG = 4.8       # 旧 _cooldown=3
+_BARREN_SEC = 8.0        # 旧 _BARREN_LIMIT=5 empty scans
+_NAV_MAX_SEC = 64.0      # 旧 _nav_ticks>40
+_SKILL_BUDGET_SEC = 2400.0   # 旧 max_ticks=1500 (三个类别全挖完)
+# after-ack 窗口必须**同时覆盖自主跑(0.25s/tick)与 step 门控(步间隔 4-6s)**两种
+# 节奏 —— momo_talk 那边第一版写 2.0s, 在 step_walk 下必然过期, 照样连发 5 次。
+# 放宽近乎零代价(框 1-2s 就渲染, 上面的 confirm 分支立刻接走)。
+_SKIP_ACK_SEC = 6.0      # 跳过故事键/menu → 「是否略過」确认框渲染(after-ack)
+_BARREN_LIMIT = 5        # 仅留作日志计数(判据已改墙钟 _BARREN_SEC)
 _RESULT_BAND = (0.32, 0.55, 0.68, 0.85)  # centered battle-result 确认键 band
 # ⛔2026-07-25 墙钟化: 旧值 `_FIGHT_HOLD = 120` **ticks**, 注释自称 "~2min" ——
 # 那是 ~1.6s/tick 年代的账。zero-wait 后自主跑实测 0.15-0.25 s/tick(口径见
@@ -54,7 +75,8 @@ _FIGHT_HOLD_SEC = 240.0
 class StoryMiningSkill(BaseSkill):
     def __init__(self) -> None:
         super().__init__("StoryMining")
-        self.max_ticks = 1500
+        # max_ticks 只当**跑飞兜底**(不再是有效上限); 真上限走 _SKILL_BUDGET_SEC。
+        self.max_ticks = 20000
         # 主线 first (user: 先去主线), then 短篇 = 支线.
         self._categories = [UC.STORY_MAIN, UC.STORY_SHORT, UC.STORY_SIDE]
         self._init_state()
@@ -67,8 +89,11 @@ class StoryMiningSkill(BaseSkill):
         self._page_turns = 0
         self._main_swipes = 0
         self._nav_ticks = 0
+        self._nav_t0 = None            # 导航阶段墙钟起点(见 _NAV_MAX_SEC)
+        self._skill_t0 = None          # 整个 skill 墙钟起点(见 _SKILL_BUDGET_SEC)
         self._cut_ticks = 0
-        self._cooldown = 0
+        self._skipped_stories = 0      # 跳完的剧情段数(竣工判据用)
+        self._settle_sec = 0.0         # 当前这次转场还要等多少秒(墙钟)
         self._tried_enters: List[tuple] = []   # node 入场键 positions already entered
                                                # (battle nodes we back out of → skip next)
         self._tried_chapters: List[float] = [] # chapter 黄点 cy already opened (a
@@ -96,11 +121,36 @@ class StoryMiningSkill(BaseSkill):
         super().reset()
         self._init_state()
 
+    def exit_report(self):
+        """竣工判据 —— 此前报 UNKNOWN, 于是"跑了 6 分钟一个节点都没挖到"这种
+        空跑没人审计得出来(而它正是 max_ticks 缩水后的典型结局)。"""
+        if self._skipped_stories:
+            return ("CLEAN", f"跳完 {self._skipped_stories} 段剧情"
+                             f"(类别 exhausted={self._exhausted or '-'}, "
+                             f"进过 {len(self._tried_enters)} 个节点)")
+        if self._tried_enters or self._tried_chapters:
+            return ("LEFTOVER",
+                    f"进了 {len(self._tried_enters)} 节点/"
+                    f"{len(self._tried_chapters)} 章但**一段剧情都没跳完** — "
+                    f"多半卡在战斗节点或跳过链")
+        return ("LEFTOVER",
+                f"一个节点都没进(exhausted={self._exhausted or '-'}) — "
+                f"查 黄点/new 徽章 与 入场键 是否检出")
+
+    def _settle(self, sec: float) -> None:
+        """转场后等 sec 秒再读屏 —— 墙钟, 不是 tick(见文件头换算口径)。"""
+        self._settle_sec = sec
+        self.mark("settle")
+
     # ── tick: reactive priority chain ─────────────────────────────────────
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
-        if self.ticks >= self.max_ticks:
-            self.log("timeout")
+        if self._skill_t0 is None:
+            self._skill_t0 = self.clock()
+        _run = self.clock() - self._skill_t0
+        if _run >= _SKILL_BUDGET_SEC or self.ticks >= self.max_ticks:
+            self.log(f"timeout ({_run:.0f}s / {self.ticks} tick, "
+                     f"exhausted={self._exhausted})")
             return action_done("story mining timeout")
 
         # ★ Decision inputs from a CLEAN ADB frame (overlay burn defense).
@@ -120,9 +170,12 @@ class StoryMiningSkill(BaseSkill):
         except Exception:
             pass
 
-        if self._cooldown > 0:
-            self._cooldown -= 1
-            return action_wait(400, f"story settle ({self._cooldown})")
+        if self._settle_sec > 0.0:
+            _sw = self.since("settle")
+            if _sw < self._settle_sec:
+                return action_wait(
+                    400, f"story settle ({_sw:.1f}/{self._settle_sec:.1f}s)")
+            self._settle_sec = 0.0
 
         # P0: splashes / reward.
         splash = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=_CLS_CONF)
@@ -140,13 +193,13 @@ class StoryMiningSkill(BaseSkill):
         watch = self.find_cls(screen, UC.STORY_WATCH, conf=_CLS_CONF)
         if watch is not None:
             self._cut_ticks = 0
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             self._barren = 0
             return action_click_box(watch, "觀看 — chain next episode")
         quit_node = self.find_cls(screen, UC.STORY_QUIT, conf=_CLS_CONF)
         if quit_node is not None:
             self._cut_ticks = 0
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             self._barren = 0
             return action_click_box(quit_node, "中断 — leave node (觀看 cls missed)")
 
@@ -164,7 +217,7 @@ class StoryMiningSkill(BaseSkill):
         if res_confirm is not None:
             if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is None:
                 self._fighting = False
-                self._cooldown = 2
+                self._settle(_SETTLE_SHORT)
                 return action_click_box(res_confirm, "dismiss battle/result dialog (确认键)")
             # confirm+cancel together = the story SKIP-CONFIRM dialog (是否略過
             # 此劇情? — the only confirm+cancel dialog in the story flow). The
@@ -185,7 +238,7 @@ class StoryMiningSkill(BaseSkill):
                 self._barren = 0
                 self._fighting = True
                 self.mark("fight")
-                self._cooldown = 3
+                self._settle(_SETTLE_LONG)
                 self.log("story battle node → 出击 (free, no AP)")
                 return action_click_box(sortie, "story battle 出击 (no AP)")
             return action_wait(500, "squad screen — waiting for 出击")
@@ -217,7 +270,7 @@ class StoryMiningSkill(BaseSkill):
         # The skip-confirm dialog has BOTH buttons → unaffected (P1 handles).
         cancel_only = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
         if cancel_only is not None and self.find_cls(screen, UC.BTN_CONFIRM, conf=0.20) is None:
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             return action_click_box(cancel_only, "取消 — decline navigation offer, keep mining")
 
         # P1: cutscene skip chain (story auto-plays → skip ASAP).
@@ -229,7 +282,7 @@ class StoryMiningSkill(BaseSkill):
         play = self.find_cls(screen, UC.STORY_ENTER_CHAPTER, conf=_CLS_CONF, region=(0.25, 0.50, 0.80, 0.92))
         if play is not None:
             self._barren = 0
-            self._cooldown = 3
+            self._settle(_SETTLE_LONG)
             return action_click_box(play, "enter chapter (进入章节)")
 
         # P3: MINE — drill deepest-first (node 入场键 > 黄点章 > new 篇/卡).
@@ -237,7 +290,7 @@ class StoryMiningSkill(BaseSkill):
         if mine is not None:
             self._barren = 0
             self._back_streak = 0
-            self._cooldown = 3
+            self._settle(_SETTLE_LONG)
             return mine
 
         # P3.5: on the 剧情 hub CATEGORY page → open the current category card to
@@ -250,7 +303,7 @@ class StoryMiningSkill(BaseSkill):
             self._page_turns = 0
             self._main_swipes = 0
             self._tried_cards = []
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             return action_click_box(hub_card, f"open category ({hub_card.cls_name})")
         # All categories exhausted/skipped → finish cleanly (the old finish in
         # _exhaust_and_advance is unreachable from the hub fast-exhaust path —
@@ -278,8 +331,13 @@ class StoryMiningSkill(BaseSkill):
             if reveal is not None:
                 return reveal
             self._barren += 1
-            if self._barren <= _BARREN_LIMIT:
-                return action_wait(350, f"scanning for unplayed ({self._barren})")
+            if self._barren == 1:
+                self.mark("barren")
+            _bw = self.since("barren")
+            if _bw < _BARREN_SEC:
+                return action_wait(
+                    350, f"scanning for unplayed "
+                         f"({_bw:.1f}/{_BARREN_SEC:.0f}s, n={self._barren})")
             # Nothing minable here (e.g. a chapter with only battle/locked/done
             # nodes). Back OUT one level to find the next unplayed chapter/篇 —
             # NOT exhaust the whole category. Only give up to the next category
@@ -289,7 +347,7 @@ class StoryMiningSkill(BaseSkill):
             if self._back_streak > 8:
                 self._back_streak = 0
                 return self._exhaust_and_advance(screen)
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             back = self.find_cls(screen, [UC.BTN_BACK], conf=_CLS_CONF)
             return (action_click_box(back, "back out → next unplayed chapter/篇")
                     if back else action_back("back out → next unplayed chapter/篇"))
@@ -298,7 +356,8 @@ class StoryMiningSkill(BaseSkill):
         story_tile = self.find_cls(screen, UC.HUB_STORY, conf=_CLS_CONF)
         if story_tile is not None:
             self._nav_ticks = 0
-            self._cooldown = 2
+            self._nav_t0 = None
+            self._settle(_SETTLE_SHORT)
             return action_click_box(story_tile, "enter 剧情 hub")
 
         # P7: navigation (lobby → mission hub).
@@ -317,7 +376,8 @@ class StoryMiningSkill(BaseSkill):
             confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=(0.30, 0.55, 0.85, 0.85))
             if confirm is not None:
                 self._cut_ticks = 0
-                self._cooldown = 2
+                self._skipped_stories += 1
+                self._settle(_SETTLE_SHORT)
                 return action_click_box(confirm, "confirm story skip (确认键)")
         if self._cut_ticks > 0:
             cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
@@ -326,13 +386,24 @@ class StoryMiningSkill(BaseSkill):
                 return action_click_box(cont, "tap continue")
 
         if self._cut_ticks < 3:
+            # ⛔after-ack(2026-07-28, 与 momo_talk 同病 —— 那边 step_walk 实拦到
+            # **连点 5 次**): 「是否略過此劇情?」确认框要时间渲染, 而这里只要
+            # 跳过键/menu 还在屏上就每 tick 再点一次, **第二发正好把刚弹出的框
+            # 又关掉** ⇒ 自锁。这边有 `_cut_ticks < 3` 兜着所以最多三连发, 但
+            # 三发同样能把框关掉两次。发过就等帧证据(上面那段接走確認)。
+            if self._cut_ticks > 0 and self.since("story_cut") < _SKIP_ACK_SEC:
+                return action_wait(300, f"跳过/menu 已发 — 等略過确认框 "
+                                        f"(after-ack {self.since('story_cut'):.1f}"
+                                        f"/{_SKIP_ACK_SEC:.1f}s)")
             skip = self.find_cls(screen, UC.STORY_SKIP, conf=0.40, region=(0.82, 0.05, 1.0, 0.30))
             if skip is not None:
                 self._cut_ticks += 1
+                self.mark("story_cut")
                 return action_click_box(skip, "跳过故事键")
             menu = self.find_cls(screen, UC.STORY_MENU, conf=0.40, region=(0.82, 0.0, 1.0, 0.16))
             if menu is not None:
                 self._cut_ticks += 1
+                self.mark("story_cut")
                 return action_click_box(menu, "open 剧情menu")
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
@@ -419,7 +490,7 @@ class StoryMiningSkill(BaseSkill):
         if arrow is not None and self._page_turns < _MAX_PAGE_TURNS:
             self._page_turns += 1
             self._barren = 0
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             self._tried_cards = []   # cards shift on page turn
             self.log(f"右切换 next page ({self._page_turns}/{_MAX_PAGE_TURNS})")
             return action_click_box(arrow, "next page (find new card)")
@@ -427,7 +498,7 @@ class StoryMiningSkill(BaseSkill):
         if self._current_cat == UC.STORY_MAIN and self._main_swipes < _MAX_MAIN_SWIPES:
             self._main_swipes += 1
             self._barren = 0
-            self._cooldown = 2
+            self._settle(_SETTLE_SHORT)
             self._tried_cards = []   # cards shift on swipe
             self.log(f"swipe-left 卷 list ({self._main_swipes}/{_MAX_MAIN_SWIPES})")
             return action_swipe(0.65, 0.42, 0.30, 0.42, 500, "reveal newer 卷")
@@ -446,7 +517,7 @@ class StoryMiningSkill(BaseSkill):
         if self._cat_idx >= len(self._categories):
             return action_done("story mining finished (all categories)")
         back = self.find_cls(screen, [UC.BTN_BACK, UC.BTN_HOME], conf=_CLS_CONF)
-        self._cooldown = 2
+        self._settle(_SETTLE_SHORT)
         return (action_click_box(back, "back to hub for next category")
                 if back else action_back("back to hub for next category"))
 
@@ -530,13 +601,17 @@ class StoryMiningSkill(BaseSkill):
 
     def _navigate(self, screen: ScreenState) -> Dict[str, Any]:
         self._nav_ticks += 1
-        if self._nav_ticks > 40:
-            self.log("nav: can't reach story hub")
-            return action_done("story mining unreachable")
+        if self._nav_t0 is None:
+            self._nav_t0 = self.clock()
+        _nw = self.clock() - self._nav_t0
+        if _nw > _NAV_MAX_SEC:
+            self.log(f"nav: can't reach story hub ({_nw:.0f}s / "
+                     f"{self._nav_ticks} tick) — 抓这一刻的帧看缺什么 cls")
+            return action_done(f"story mining unreachable ({_nw:.0f}s)")
         if self.detect_screen_yolo(screen) == "Lobby":
             act = self.click_cls(screen, UC.NAV_TASKS, "open hub from lobby", conf=_CLS_CONF)
             if act is not None:
-                self._cooldown = 2
+                self._settle(_SETTLE_SHORT)
                 return act
             return action_wait(400, "nav: 任务大厅入口 not seen")
         return action_wait(400, "nav: waiting (no known page)")

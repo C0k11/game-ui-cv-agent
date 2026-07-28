@@ -104,7 +104,19 @@ _EXIT_MAX_SEC = 22.0
 _SKILL_BUDGET_SEC = 1500.0
 # 跳过故事键/剧情menu → 「是否略過此劇情?」确认框渲染的 after-ack 窗口。
 # 2026-07-28 live: 没有这道闸时连点 5 次, 第二发把刚弹出的确认框又关掉 = 自锁。
-_SKIP_ACK_SEC = 2.0
+# ⛔窗口必须**同时覆盖自主跑和 step 模式两种节奏**(2026-07-28 live 教训):
+# 第一版写 2.0s, 自主跑(0.25 s/tick)够用, 但 step_walk 每步要抓干净帧+跑 YOLO,
+# 步间隔 **4-6s** ⇒ 窗口必然已过期 ⇒ 在门控下**照样连发 5 次**, 看起来"修了没用"。
+# 手动实测证明按钮本身没问题: 点一次 ≫ 就弹出「是否略過此劇情?」(取消0.98/确认0.98)
+# —— 所以那 5 连发确实是**弹出来又被下一发关掉**的自锁。
+# 放宽到 6.0s 近乎零代价: 框正常 1-2s 就渲染出来, 上面的 confirm 分支立刻接走,
+# 根本等不满; 放窄却直接把一整段剧情卡死。(同 _FIGHT_HOLD 的取舍口径)
+_SKIP_ACK_SEC = 6.0
+# 点开学生 → 右侧会话面板真的换成他的窗口(实测切换 ~5s, 给 8s)。
+# 必须 ≤ _OPEN_RENDER_SEC, 否则"面板没换"会被"还没渲染"那条先判掉。
+_PANEL_SWITCH_SEC = 8.0
+# 未知確認框点了取消 → 框真的关掉的 after-ack 窗口(防连发)。
+_UNKNOWN_ACK_SEC = 1.5
 
 
 class MomoTalkSkill(BaseSkill):
@@ -147,6 +159,8 @@ class MomoTalkSkill(BaseSkill):
         self._enter_t0 = None                # 进入阶段的墙钟起点(见 _ENTER_MAX_SEC)
         self._skill_t0 = None                # 整个 skill 的墙钟起点(见 _SKILL_BUDGET_SEC)
         self._seen_convo: bool = False       # 本学生的会话 cls 见到过没(选窗口用)
+        self._unknown_cancel_issued: bool = False   # 未知確認框的取消已发(after-ack)
+        self._skip_confirm_issued: bool = False     # 略過確認已发(等框消失才复位)
         self._tab_opened: bool = False
         self._students_done: int = 0
         self._cur_student: str = ""          # 当前正在挖的角色名(avatar cls)
@@ -206,6 +220,23 @@ class MomoTalkSkill(BaseSkill):
         self._seen_convo = True
         self.mark("convo")
 
+    def _panel_student(self, screen: ScreenState):
+        """右侧会话面板**当前显示的是谁** —— 用消息气泡旁的头像(avatar 域)。
+
+        左侧未读列表的头像固定在 cx≈0.205, 右侧会话面板的在 cx≈0.55-0.80,
+        两者不会混。取该带内出现次数最多的角色名(一屏会有多条同人的气泡)。
+        """
+        names: Dict[str, int] = {}
+        for b in (screen.yolo_boxes or []):
+            if getattr(b, "model_tag", "") != "avatar":
+                continue
+            if b.confidence < _AVATAR_CONF or not (0.52 <= b.cx <= 0.82):
+                continue
+            names[b.cls_name] = names.get(b.cls_name, 0) + 1
+        if not names:
+            return None
+        return max(names.items(), key=lambda kv: kv[1])[0]
+
     def _row_avatar(self, screen: ScreenState, row_cy: float):
         """未读列表**同一行**的学生头像框(fused_avatar 域, 带中文角色名)。
 
@@ -251,6 +282,50 @@ class MomoTalkSkill(BaseSkill):
                      f"{'/'.join(self._mined) or '-'})")
             return action_done(f"momotalk timeout ({self._students_done})")
 
+        # ⛔⛔全局: **未知的 確認+取消 框 → 一律取消, 绝不確認**(2026-07-28 帧实锤)
+        # 实拦到一个代码完全不认识的页面: 点「進入羈絆劇情」后弹出**劇透警告框**
+        #   「警告 / 本內容包含 Ex.十字神名篇結局的強烈劇透 / …
+        #    **點擊確認時將前往活動頁面。** / 取消 · 確認」
+        # 两个要害:
+        #  ① 按钮在 **cy≈0.913**, 而 _story 的略過框判定带是 y 0.55-0.85 ⇒
+        #     **没有任何代码路径处理它**, 它会一直糊在屏上; 当时 bot 在 scan 里
+        #     照常要去 swipe 滑列表(列表在框后面仍被检出 0.86) = 对着遮罩瞎滑。
+        #  ② 点確認 = **跳去活动页面**, 直接把 bot 带出 MomoTalk, 而这个状态机
+        #     根本不覆盖活动页 ⇒ 必然走失。这正是 story_mining P0.9 防的那类
+        #     「導航離開」框, momo_talk 一直缺这道闸。
+        # 判据(干净且可证): MomoTalk 全流程里**合法的** confirm+cancel 框只有
+        # 「是否略過此劇情?」, 而它出现时屏幕右上角**一定同时有 story chrome**
+        # (实测那帧: 剧情menu 0.98 + 跳过故事键 0.96)。没有 chrome 的双钮框 =
+        # 未知 ⇒ fail-closed 取消。
+        _cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
+        _confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF)
+        if _cancel is not None and _confirm is not None:
+            _chrome = self.find_cls(screen, [UC.STORY_MENU, UC.STORY_SKIP],
+                                    conf=0.30, region=(0.80, 0.0, 1.0, 0.30))
+            if _chrome is None:
+                # ⛔after-ack —— **这道闸自己第一版就漏了它**, 上线第一次 live 就被
+                # step_walk 连发守卫逮到「取消连发 3 次」(第 3 发时框已经关掉,
+                # 落点半径 0.06 内零 cls, 拍在 MomoTalk 面板下方的空白上)。
+                # 记这一笔是因为它证明了一件事: **新写的每一个 click 分支都要先
+                # 回答"这一下发出去之后凭什么知道它落地了"** —— 我今天一整天都在
+                # 修这个族, 自己新写的闸照样踩。
+                if self._unknown_cancel_issued:
+                    _uw = self.since("unknown_cancel")
+                    if _uw < _UNKNOWN_ACK_SEC:
+                        return action_wait(300, f"未知框取消已发 — 等它关掉 "
+                                                f"(after-ack {_uw:.1f}/"
+                                                f"{_UNKNOWN_ACK_SEC:.1f}s)")
+                    self.log("取消发出后未知框仍在 — 判为被吞, 重发一次")
+                self.log(f"⛔未知確認框(确认@cy{_confirm.cy:.3f} 取消@cy"
+                         f"{_cancel.cy:.3f}, 无剧情chrome) → 取消, 绝不確認 "
+                         f"(可能是劇透警告/導航離開框)")
+                self._unknown_cancel_issued = True
+                self.mark("unknown_cancel")
+                return action_click_box(_cancel, "⛔未知確認框 → 取消(绝不確認)")
+        else:
+            # 框没了 = 取消真的落地了 → 复位, 下一个未知框才能重新触发
+            self._unknown_cancel_issued = False
+
         # Global: bond level-up splash + reward popup.
         levelup = self.find_cls(screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=_CLS_CONF)
         if levelup is not None:
@@ -278,6 +353,17 @@ class MomoTalkSkill(BaseSkill):
         self._enter_ticks += 1
         if self._enter_t0 is None:
             self._enter_t0 = self.clock()
+        # ⛔skill 从**剧情屏**启动(上一次跑到一半被打断 / 用户手动停在剧情里):
+        # 剧情屏既没有 momotalk cls, 也没有 home/返回键 → 旧码走 nav_home 的
+        # "无 home/X/返回键 → 等待(绝不瞎按 ESC)" 一直等到 _ENTER_MAX 报
+        # unreachable(2026-07-28 live 复现)。剧情屏是**我们自己认识的页面**,
+        # 直接交给 story 状态用跳过链走出去, 不是"不认识的屏"。
+        if self._in_story(screen):
+            self.log("启动时就在剧情屏 → 交给 story 跳过链走出去(不报 unreachable)")
+            self._story_taps = 0
+            self._story_cut = 0
+            self._goto("story")
+            return action_wait(300, "启动即在剧情中 → story")
         if self._on_momotalk(screen):
             self.log("inside MomoTalk → open 对话区域 tab")
             self._goto("open_tab")
@@ -414,6 +500,30 @@ class MomoTalkSkill(BaseSkill):
             self._scan_misses = 0
             return action_back("dialogue timeout")
 
+        # ⛔⛔面板身份闸(2026-07-28 帧实锤): 点开学生 A 之后, 右侧会话面板可能
+        # **还停在上一个学生 B** 上 —— 实测点了「贵音」, 右侧面板的气泡头像全是
+        # `凯伊 cx=0.717`, 连羁绊剧情概要正文写的都是 Kei。旧码不问"现在这个面板
+        # 是谁的"就直接点 CTA/回复 ⇒ 在 B 的面板上替 A 干活:
+        #   · A 的未读**永远清不掉**(点两次到 _ROW_OPEN_CAP 后被跳过)
+        #   · B 被重复挖(这次侥幸 B 也确实有矿, 所以看不出来)
+        # 与 event_quest「换关不关旧弹窗、只有日志 label 变了」**完全同构**:
+        # **参数变了 ≠ 屏幕变了**(见 memory log_is_not_truth 的元教训)。
+        # ⚠只在**两边都认出来**时才判不符 —— 面板还没渲染出头像(names 空)属于
+        #   "判不了", 交给上面的 _OPEN_RENDER_SEC 窗口, 绝不在这里瞎猜。
+        if self._cur_student:
+            _panel = self._panel_student(screen)
+            if _panel is not None and _panel != self._cur_student:
+                _w = self.since("convo")
+                if _w < _PANEL_SWITCH_SEC:
+                    return action_wait(300, f"面板还是「{_panel}」不是"
+                                            f"「{self._cur_student}」— 等切换 "
+                                            f"({_w:.1f}/{_PANEL_SWITCH_SEC:.0f}s)")
+                self.log(f"⛔面板 {_w:.1f}s 仍停在「{_panel}」而我点的是"
+                         f"「{self._cur_student}」— 判开学生那一下没落地 → 回 scan 重开")
+                self._goto("scan")
+                self._scan_misses = 0
+                return action_wait(300, "面板未切换 → rescan")
+
         # Bond-story CTA (priority — the 80-pyroxene payoff).
         goto_bond = self.find_cls(screen, UC.GOTO_BOND_STORY, conf=_CLS_CONF)
         if goto_bond is not None:
@@ -528,11 +638,34 @@ class MomoTalkSkill(BaseSkill):
             return action_click_box(got, "dismiss bond reward (header) → post-bond")
 
         # Skip-confirm dialog (是否略過) → 确认键.
+        # ⛔⛔2026-07-28 live 实锤的死循环(mutate-before-ack, task#23 家族):
+        #   tick=8  wait  帧未稳定(转场/滚动) — 等稳定帧: confirm story skip
+        #   tick=9  click 跳过故事键                    ← 又退回去点 skip
+        # 两个毛病叠在一起:
+        #  ① `self._story_cut = 0` **写在动作发出之前** —— 动作被【帧稳定门】吞掉
+        #     后, `_story_cut` 已经是 0, 下一 tick 这条分支根本不再成立 ⇒ 掉回
+        #     去点 跳过故事键 ⇒ 把刚弹出的确认框又关掉 ⇒ **无限循环**
+        #     (帧证据: 那一帧 确认键 0.98@cy0.725 明明就在屏上、也在判定带内)。
+        #  ② 这一步**该豁免稳定门**: 落点是对话框上的固定按钮, 不是滚动列表里的
+        #     目标, 不需要"等画面停"。用**显式 `_settle_exempt`**, 绝不靠在 reason
+        #     里塞"確認"骗过去(memory reason_string_as_api: 那种做法同时把
+        #     same-target hold 也一起豁免掉, 是 30 青辉石近失的根因)。
+        # ⇒ latch 延后到**确认框真的消失**(下方到达证据), 这里只发动作。
         if self._story_cut > 0:
             confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=(0.30, 0.55, 0.85, 0.85))
             if confirm is not None:
-                self._story_cut = 0
-                return action_click_box(confirm, "confirm story skip")
+                self._skip_confirm_issued = True
+                self.mark("skip_confirm")
+                _act = action_click_box(confirm, "confirm story skip")
+                _act["_settle_exempt"] = True     # 只豁免稳定门, hold 仍然生效
+                return _act
+        # 到达证据: 点过確認 且确认框现已不在 → 这一段真的跳掉了 → 复位计数
+        if self._skip_confirm_issued and self.find_cls(
+                screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
+                region=(0.30, 0.55, 0.85, 0.85)) is None:
+            self._skip_confirm_issued = False
+            self._story_cut = 0
+            self.clear_timer("story_cut")
 
         # MENU → 跳过故事键 (skip ASAP — story auto-plays).
         # ⛔⛔after-ack(2026-07-28 live 实拦, double_fire_family 第六例):
