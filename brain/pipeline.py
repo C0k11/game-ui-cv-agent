@@ -887,14 +887,25 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
         # The comma grouping VALIDATES digit structure — when present, trust
         # only a clean single group; several disjoint groups = fragment mess →
         # fail-closed None (multi-sample voting retries).
-        raw_n = raw.replace("，", ",")
-        groups = _re.findall(r"\d{1,3}(?:,\d{3})+", raw_n)
+        # ⭐千位分隔符归一(2026-07-28 live 实锤, 原始片段为证):
+        # 青辉石 15,426 那一条, ocr 返回**两个片段** `'15.'`(score .66) 与
+        # `',426'`(score .80) —— **两边各自把分隔符包了进去**, 拼接成 `'15.,426'`。
+        # 后果: 旧正则只认 `,` 不匹配; 落到下面"保留小数点"的通用清洗 →
+        # `'15.426'` → `parse_count` 既非纯数字也无 '/' ⇒ **None**, 这一帧整个
+        # 读不出(fail-closed 安全, 但钱闸拿不到数)。
+        # ⚠我第一版只把正则的 `,` 放宽成 `[.,]` —— **不管用**, 因为真正的形态是
+        # 「点+逗号连在一起」。先折叠连续分隔符, 再做三位分组匹配。
+        # ⛔为什么可以放心把 `.` 当分隔符: 判据是**三位一组**(`[.,]\d{3}`)。
+        # 本域里真正的小数只有百分比且都是**一位**小数(cafe 收益 '58.3' / '0.0%',
+        # 见下面那段 2026-06-09 的注释) —— 一位小数永远匹配不上 \d{3}。
+        raw_n = _re.sub(r"[.,]{2,}", ",", raw.replace("，", ","))
+        groups = _re.findall(r"\d{1,3}(?:[.,]\d{3})+", raw_n)
         if groups:
             longest = max(groups, key=len)
             others = [g for g in groups if g != longest and g not in longest]
             if others:
                 return None   # ambiguous overlapping fragments
-            return longest.replace(",", "")
+            return longest.replace(",", "").replace(".", "")
         # Keep the decimal point too (deep-dive r2 C1, 2026-06-09): stripping it
         # turned "0.0%" into "00" and "58.3" into "583" — consumers that parse
         # floats (cafe earnings % gate) need the dot. parse_count() is dot-free
