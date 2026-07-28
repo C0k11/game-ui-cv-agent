@@ -84,6 +84,10 @@ _HEADPAT_DRY_SEC = 2.0    # 注释原话 "7×280≈2s scan before declaring a re
 _PAT_SETTLE_SEC = 1.4     # 注释原话 "2→3 给足时间: late bubbles after a pan"(3×450)
 _LOBBY_DWELL_SEC = 1.2    # 大厅徽标渐入(3×350); live 2026-06-09 事故加的驻留窗
 _SWITCH_2F_ACK_SEC = 4.0  # 点 移动至2号点 → 2F 到达证据(CAFE_MOVE_1F 出现)
+# 点「領取」→ 帧证据(按钮变灰 / 弹窗链关掉)。要覆盖自主跑与 step 门控两种节奏
+# (门控每步 4-6s), 故取 6.0s —— 放宽近乎零代价: 真领到了下一 tick 就走灰按钮/
+# 到达分支, 等不满; 放窄则退回"点被吞却报领完"的老病。
+_CLAIM_ACK_SEC = 6.0
 _MAX_PANS_PER_FLOOR = 6       # safety helmet on camera sweeps
 _INVITES_PER_FLOOR = 1        # invite 1 student per floor (2 total per cafe)
 _INVITE_MAX_SCROLLS = 12      # rows to scroll hunting the target
@@ -540,9 +544,29 @@ class CafeSkill(BaseSkill):
             # covers the cafe signature → _is_cafe False → invite freezes
             # "waiting for cafe UI" (live 2026-06-09: earnings popup stayed open,
             # invite dead-waited 14 ticks until the stuck-20 fallback).
+            # ⛔⛔2026-07-28 live 实锤 —— **昨天那个正确的修复暴露了这个老 bug**:
+            #   tick=13 wait  帧未稳定(转场/滚动) — 等稳定帧: claim earnings
+            #   tick=14 wait  earnings done → invite        ← 状态却已经"领完了"
+            #   tick=15 click close leftover earnings before invite  ← 关窗, 钱没领
+            # 帧证据: 那一帧屏上 `領取_黄 0.97 @cy0.733` 原封不动。
+            # 机制: 下面 `_force_settle=True`(昨天为修"锚在弹出动画帧上打空"加的,
+            # 本身正确)会让这一发**被帧稳定门吞掉**; 而旧码在动作发出**之前**就
+            # `_earnings_done = True` ⇒ 下一 tick 本函数第一行 `if self._earnings_done`
+            # 直接转 invite, **永远不会重试这一发**。
+            # ⭐加 _force_settle 之前这发必然发得出去, 所以 mutate-before-ack 藏着
+            #   不显形 —— 一个正确的修复把另一个一直存在的 bug 顶出了水面。
+            # ⇒ ①这里**绝不**置 `_earnings_done`, 它只能由下面那条到达证据分支
+            #   (`_earnings_claimed and _is_cafe(screen)` = 弹窗链真的关干净了)来置;
+            #   ②补 after-ack: 窗口内不重发, 窗口过了仍见 領取_黄 就判被吞并重发。
+            if self._earnings_claimed and self.since("claim_earn") < _CLAIM_ACK_SEC:
+                return action_wait(300, f"領取已发 — 等帧证据(按钮变灰/弹窗关) "
+                                        f"(after-ack {self.since('claim_earn'):.1f}"
+                                        f"/{_CLAIM_ACK_SEC:.1f}s)")
+            if self._earnings_claimed:
+                self.log("領取发出后 領取_黄 仍在 — 判为被吞(稳定门/丢tap), 重发一次")
             self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
             self._earnings_claimed = True
-            self._earnings_done = True      # 粘性: 竣工判据用, 绝不复位
+            self.mark("claim_earn")
             # ⛔`_force_settle`(2026-07-27 live 实锤): 收益弹窗**弹出动画**里
             # 「領取」在 cy≈0.825, 稳定后升到 cy≈0.733。reason 含 "claim" 会命中
             # _dedup_click 的关键词豁免 → 跳过稳定门 → 在动画帧上锚 0.825 拍下去

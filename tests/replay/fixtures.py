@@ -864,7 +864,45 @@ def fx_cafe_dry_gate_needs_wallclock():
             f"(期望全程 settle/scan, 不许 pan 或收工)")
 
 
+def fx_cafe_claim_earnings_no_premature_done():
+    """⛔点「領取」时绝不能先把 _earnings_done 置 True —— 那一发会被稳定门吞掉。
+
+    2026-07-28 live 实锤:
+        tick=13 wait  帧未稳定(转场/滚动) — 等稳定帧: claim earnings
+        tick=14 wait  earnings done → invite      ← 状态却已"领完了"
+        tick=15 click close leftover earnings before invite   ← 关窗, 钱没领
+    帧证据: 那一帧 `領取_黄 0.97 @cy0.733` 原封不动。
+    机制: `_force_settle=True`(昨天为修"锚在弹出动画帧上打空"加的, 本身正确)
+    让这一发可能被吞, 而旧码在动作发出前就 `_earnings_done=True` ⇒ 下一 tick
+    本函数第一行直接转 invite, **永远不重试**。
+    ⇒ 一个正确的修复把另一个一直存在的 bug 顶出了水面。
+    本 fixture 钉两件事: ①点击那一刻 _earnings_done 必须仍为 False
+                        ②同一帧再来一次必须是 after-ack wait, 不许连发
+    """
+    from brain.skills.cafe import CafeSkill
+    # 收益弹窗开着, 領取_黄 在 claim band (0.28,0.50,0.74,0.90) 内
+    screen = _sched_screen(
+        _yb("领取_黄", 0.500, 0.733, 0.97),
+        _yb("咖啡厅收益", 0.919, 0.893, 0.98),
+    )
+    sk = CafeSkill()
+    sk.reset()
+    sk._goto("earnings")
+    act1 = sk._earnings(screen)
+    premature = bool(sk._earnings_done)
+    act2 = sk._earnings(screen)
+    double = act2.get("action") == "click"
+    ok = (act1.get("action") == "click"
+          and "claim earnings" in str(act1.get("reason", ""))
+          and act1.get("_force_settle") is True
+          and not premature and not double)
+    return (ok, f"首点={str(act1.get('reason'))[:28]} / force_settle="
+                f"{act1.get('_force_settle')} / 点时就报领完={premature}(必须False)"
+                f" / 连发={double}(必须False)")
+
+
 CASES = [
+    ("⛔cafe领收益_点时绝不报领完", fx_cafe_claim_earnings_no_premature_done, True),
     ("⛔cafe换2F_点前绝不改状态", fx_cafe_switch_2f_no_mutate_before_ack, True),
     ("⛔cafe判dry_帧数够也要等墙钟", fx_cafe_dry_gate_needs_wallclock, True),
     ("⛔momo未知確認框_只能取消", fx_momo_unknown_dialog_never_confirm, True),
