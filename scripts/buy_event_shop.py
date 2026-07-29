@@ -176,10 +176,51 @@ def main():
     BTN_W, BTN_H = 420, 110
     _dead = set()                       # 售罄/买不起位置(tab 内拉黑)
 
+    def read_balance(fr, d):
+        """余额 = 「货币数量显示区域」cls 框内 digit-OCR(用户 2026-07-28 指路)。
+
+        多窗扫描: det 对这个浅底小条边界敏感(shop1 帧同位置四窗全 None 而
+        shop4 三窗全对, 离线标定实锤), 取各窗读数中**位数最多**的。
+        读不出 → None, 调用方降级(不做买不起过滤, 走 MAX/no_dialog 兜底) —
+        余额是增强层, fail-open 到旧行为, 不阻塞购买。"""
+        from brain.pipeline import run_digit_ocr
+        b = next((x for x in d if x[0] == "货币数量显示区域"), None)
+        if b is None:
+            return None
+        _, _, x1, y1, x2, y2, W, H = b
+        bw = x2 - x1
+        vals = []
+        for lcut, rcut in ((0.20, 0.75), (0.25, 1.0), (0.30, 0.80), (0.40, 1.0)):
+            raw = run_digit_ocr(fr, ((x1 + bw * lcut) / W, y1 / H,
+                                     (x1 + bw * rcut) / W, y2 / H))
+            digs = re.sub(r"[^\d]", "", raw or "")
+            if digs and 0 <= int(digs) <= 99999:
+                vals.append(int(digs))
+        # ⛔孤证不采(离线标定实锤): shop1 帧四窗只有一窗读出 '393'(千位分隔符
+        # 丢失, 真值 3393) — 错读比 None 更糟(静默砍掉买得起的位置)。只信
+        # ≥2 窗一致的值; 全是孤证 → None 降级(不做买不起过滤, 安全方向)。
+        for v in sorted(set(vals), key=lambda x: -len(str(x))):
+            if vals.count(v) >= 2:
+                return v
+        return None
+
+    def verify_tab(d, want_i):
+        """当前选中币种 = 「货币_已选择」cy 在左侧 tab 列的序位(用户指路)。"""
+        sel = next((x for x in d if x[0] == "货币_已选择"), None)
+        if sel is None:
+            return None
+        tabs = sorted([x for x in d if x[0] in ("货币", "货币_已选择")],
+                      key=lambda x: (x[3] + x[5]) / 2)
+        for i, t in enumerate(tabs, 1):
+            if t is sel:
+                return i
+        return None
+
     def scan_items(tab_i):
         """当前屏 → [(price, cx, ry)] 候选(价集校验+家具行剔除)。纯读不点。"""
         fr = adb.capture_frame()
         d = dets(fr, 0.28)
+        scan_items.last_frame, scan_items.last_dets = fr, d
         anchor_ys = sorted({int((y1 + y2) / 2)
                             for n, c, x1, y1, x2, y2, W, H in d
                             if n == "购买"})
@@ -235,6 +276,28 @@ def main():
             items = [t for t in scan_items(tab_i) if t[0] >= min_price]
             if not items:
                 return bought
+            # ⭐数学闸(用户 2026-07-28: 不许"点了才知道买不起"):
+            # 余额可读时, 单价 > 余额的位置直接不点。⛔tab 身份校验同帧做 —
+            # 读的是哪个币的余额必须与正在买的 tab 一致, 否则跳过本轮。
+            _fr = getattr(scan_items, "last_frame", None)
+            _d = getattr(scan_items, "last_dets", [])
+            _tab_now = verify_tab(_d, tab_i)
+            if _tab_now is not None and _tab_now != tab_i:
+                print(f"    ⛔tab 身份不符: 选中={_tab_now} 预期={tab_i} — 重点 tab",
+                      flush=True)
+                tap(*TAB_XY[tab_i - 1])
+                time.sleep(2.5)
+                continue
+            bal = read_balance(_fr, _d) if _fr is not None else None
+            if bal is not None:
+                before = len(items)
+                items = [t for t in items if t[0] <= bal]
+                if before != len(items):
+                    print(f"    余额 {bal}: 砍掉 {before - len(items)} 个买不起的位置",
+                          flush=True)
+                if not items:
+                    print(f"    余额 {bal} < 本遍最低价 → 本遍收工", flush=True)
+                    return bought
             items.sort(key=lambda t: -t[0])   # 单价降序
             # 拉黑距离匹配: ry 来自检出锚, ±5px 帧间抖动会击穿精确
             # tuple 匹配 → 售罄位被反复点(审计⑨)
@@ -253,6 +316,12 @@ def main():
             print(f"      → {r}", flush=True)
             if r == "bought":
                 bought += 1
+                # 买后对账: 新余额落到日志(能读出时), Δ=本次真实花费
+                _fr2 = adb.capture_frame()
+                _b2 = read_balance(_fr2, dets(_fr2, 0.28))
+                if _b2 is not None:
+                    _tag = f" (Δ-{bal - _b2})" if bal is not None else ""
+                    print(f"      对账: 余额 → {_b2}{_tag}", flush=True)
             else:
                 _dead.add((px, py))     # 售罄/买不起: 本 tab 内不再点
         return bought
