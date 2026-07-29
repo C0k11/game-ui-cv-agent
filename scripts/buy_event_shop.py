@@ -381,6 +381,25 @@ def main():
                 n = sweep_screen(ti, min_price=floor)
                 total += n
                 print(f"  pass{pass_i} 取景{screen_i} 成交 {n}", flush=True)
+        # ⭐经济台账(2026-07-28 用户: 让程序自己推断刷哪关): 每 tab 跑完记
+        # 「购后余额」— planner 用它判断该币商店还饿不饿(买完清零=还缺,
+        # 剩一大笔=饱和停刷)。选关推断的唯一数据源, 零新增 OCR 依赖。
+        if not plan_only:
+            try:
+                _fr = adb.capture_frame()
+                _bal = read_balance(_fr, dets(_fr, 0.28))
+                _eco_p = ROOT / "data" / "event_economy.json"
+                _eco = (json.loads(_eco_p.read_text(encoding="utf-8"))
+                        if _eco_p.exists() else {})
+                _eco.setdefault("tabs", {})[str(ti)] = {
+                    "balance_after_buy": _bal,
+                    "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                _eco_p.write_text(json.dumps(_eco, ensure_ascii=False,
+                                             indent=1), encoding="utf-8")
+                print(f"  [economy] tab{ti} 购后余额={_bal} → 台账", flush=True)
+            except Exception as _e:
+                print(f"  [economy] 台账写入失败(不阻塞): {_e}", flush=True)
     print(f"done 总成交 {total}", flush=True)
 
 
