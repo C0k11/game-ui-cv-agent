@@ -229,12 +229,23 @@ def main():
         fr = adb.capture_frame()
         d = dets(fr, 0.28)
         scan_items.last_frame, scan_items.last_dets = fr, d
-        # 行锚 conf ≥0.5: 售罄卡的購買按钮是**暗态**, live 帧实测 3 个售罄位
-        # 2 个零检出 + 1 个 0.41, 而亮态 0.78-0.95 — 0.5 分界把售罄位挡在
-        # 候选之外(用户: 别点卖完的), 漏网的走 no_dialog 兜底。
+        # ⛔conf 分界已被对抗审推翻(全量 645 位置+153 位人审): 售罄位 79%
+        # conf≥0.5(23 个 ≥0.90), 亮态还有 0.065/0.130 — conf 编码的是训练
+        # 熟悉度, 与亮暗态无关, 任何阈值都切不开。我上一版只看一帧 3 个位就
+        # 定 0.5 = 单帧标定谬误(与上期 read_price 同病)。
+        # ⭐真信号 = 购买按钮 det 框内灰度均值: 暗态(售罄) 75-97 / 亮态
+        # 115-145, 双峰零重叠且与人审 100% 吻合。列级过滤(比行锚准: 同行
+        # 亮暗混合也能挡)。⚠绝对亮度信号, 只在固定 MuMu 环境成立。
         anchor_ys = sorted({int((y1 + y2) / 2)
                             for n, c, x1, y1, x2, y2, W, H in d
-                            if n == "购买" and c >= 0.5})
+                            if n == "购买"})
+        dark_spots = []
+        for n, c, x1, y1, x2, y2, W, H in d:
+            if n == "购买":
+                _g = cv2.cvtColor(fr[int(y1):int(y2), int(x1):int(x2)],
+                                  cv2.COLOR_BGR2GRAY).mean()
+                if _g < 105:
+                    dark_spots.append(((x1 + x2) / 2, (y1 + y2) / 2))
         # ⛔跨行 ±ROW_DY 补全已删(2026-07-28 --plan 实锤): 补出来的**幽灵行**
         # 没有按钮, 读价窗口卡在邻行「可購買N次」黑条上, 30/12 这类次数恰好
         # ∈ 价集 → 校验漏过。v14 购买按钮检出已稳(实测 7/8 conf 0.90-0.95,
@@ -272,6 +283,11 @@ def main():
                 if valid is not None and price not in valid:
                     print(f"    ⚠read_price {price} ∉ tab{tab_i} 价目集 "
                           f"@({cx},{ry2}) → 弃(疑 OCR 串位)", flush=True)
+                    continue
+                # 暗态售罄位不进候选(gray 双峰判定, 见 dark_spots 注释)
+                if any(abs(cx - dx) < 100 and abs(ry2 - dy) < 100
+                       for dx, dy in dark_spots):
+                    print(f"    售罄(暗态按钮) @({cx},{ry2}) → 跳过", flush=True)
                     continue
                 items.append((price, cx, ry2))
         return items
