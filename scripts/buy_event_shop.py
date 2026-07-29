@@ -197,10 +197,18 @@ def main():
             if digs and 0 <= int(digs) <= 99999:
                 vals.append(int(digs))
         # ⛔孤证不采(离线标定实锤): shop1 帧四窗只有一窗读出 '393'(千位分隔符
-        # 丢失, 真值 3393) — 错读比 None 更糟(静默砍掉买得起的位置)。只信
-        # ≥2 窗一致的值; 全是孤证 → None 降级(不做买不起过滤, 安全方向)。
-        for v in sorted(set(vals), key=lambda x: -len(str(x))):
-            if vals.count(v) >= 2:
+        # 丢失, 真值 3393) — 错读比 None 更糟(静默砍掉买得起的位置)。
+        # ⭐后缀合票(2026-07-28 全量验证抓到共识被击穿): shop5 帧
+        # vals=[3597,597,597,97] — 两个窗口在同一位置切掉千位, **截位错读彼此
+        # 一致** 2:1 击败真值。短读数若是长读数的**后缀**, 就是同一数字的截位
+        # 证据 → 票归长数。合票后仍 <2 票 → None 降级(不过滤, 安全方向)。
+        votes = {}
+        for v in vals:
+            votes[v] = votes.get(v, 0) + 1
+        for v in sorted(votes, key=lambda x: -len(str(x))):
+            total = sum(c for u, c in votes.items()
+                        if str(u) == str(v) or str(v).endswith(str(u)))
+            if total >= 2:
                 return v
         return None
 
@@ -221,9 +229,12 @@ def main():
         fr = adb.capture_frame()
         d = dets(fr, 0.28)
         scan_items.last_frame, scan_items.last_dets = fr, d
+        # 行锚 conf ≥0.5: 售罄卡的購買按钮是**暗态**, live 帧实测 3 个售罄位
+        # 2 个零检出 + 1 个 0.41, 而亮态 0.78-0.95 — 0.5 分界把售罄位挡在
+        # 候选之外(用户: 别点卖完的), 漏网的走 no_dialog 兜底。
         anchor_ys = sorted({int((y1 + y2) / 2)
                             for n, c, x1, y1, x2, y2, W, H in d
-                            if n == "购买"})
+                            if n == "购买" and c >= 0.5})
         # ⛔跨行 ±ROW_DY 补全已删(2026-07-28 --plan 实锤): 补出来的**幽灵行**
         # 没有按钮, 读价窗口卡在邻行「可購買N次」黑条上, 30/12 这类次数恰好
         # ∈ 价集 → 校验漏过。v14 购买按钮检出已稳(实测 7/8 conf 0.90-0.95,
