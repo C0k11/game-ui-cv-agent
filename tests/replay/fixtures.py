@@ -955,6 +955,35 @@ def fx_cafe_dot_gate_only_on_lobby():
             f"(期望False, 门控仍要生效)")
 
 
+def fx_multi_farm_quota_not_max():
+    """2026-07-30 用户: "分配体力把商店搬空" — MAX 一发把 AP 全灌当前关,
+    轮转形同虚设(实录 909AP 全给 Q11, Q10 卡带零产出)。多关轮转时每轮
+    必须走固定配额(加号), 绝不点 MAX。帧=walk 步58 真实扫荡面板。"""
+    from brain.skills.event_quest import EventQuestSkill
+    raw = _load("sweep_panel_q11.json")
+    sk = EventQuestSkill(farm_stages=[10, 11])
+    sk.reset()
+    sk._quests = [{"num": 11, "cy": 0.5}]
+    a = sk._sweep_quest(screen_from_tick(raw), 0, "close", "farm Q11")
+    r = str(a.get("reason", ""))
+    return ("轮转配额" in r and "MAX" not in r,
+            f"reason={r!r} (期望 加号配额, 绝不 MAX)")
+
+
+def fx_single_farm_still_max():
+    """反向锁: 单关配置时保持 MAX(一关吃满没毛病) — 别把配额逻辑
+    误伤到单关场景。同一张扫荡面板帧。"""
+    from brain.skills.event_quest import EventQuestSkill
+    raw = _load("sweep_panel_q11.json")
+    sk = EventQuestSkill(farm_stages=[12])
+    sk.reset()
+    sk._quests = [{"num": 11, "cy": 0.5}]
+    a = sk._sweep_quest(screen_from_tick(raw), 0, "close", "farm Q12")
+    r = str(a.get("reason", ""))
+    return (r.endswith("MAX"),
+            f"reason={r!r} (期望点 MAX)")
+
+
 CASES = [
     ("⛔cafe大厅门控_只在大厅判", fx_cafe_dot_gate_only_on_lobby, True),
     ("⛔cafe领收益_点时绝不报领完", fx_cafe_claim_earnings_no_premature_done, True),
@@ -984,6 +1013,8 @@ CASES = [
     ("课程表票数_cls锚定读得出", fx_sched_tickets_cls_anchored, False),
     ("⛔课程表票_绝不吃「3→2」诱饵", fx_sched_ticket_decoy_never_read, True),
     ("⛔面板底部假確認_不当对话框", fx_event_panel_fake_confirm_not_a_dialog, True),
+    ("⛔多关轮转_配额不MAX", fx_multi_farm_quota_not_max, True),
+    ("单关_仍走MAX", fx_single_farm_still_max, True),
 ]
 
 

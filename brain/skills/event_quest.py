@@ -281,6 +281,9 @@ class EventQuestSkill(BaseSkill):
         # confirm sweep 的吞发回滚 flag(与 craft _start_taps 同修法): 上一发
         # confirm 被稳定门吞时, _swept/_sweep_rounds 要回滚再重计。
         self._cs_fired = False
+        # 多关轮转的每轮配额计数(加号已点次数, 2026-07-30 均分 AP): 每轮
+        # confirm 后归零; 加号被吞时在点击处回滚。
+        self._round_plus = 0
         self._last_ap_read: Optional[int] = None   # 最后一次成功读到的 AP(竣工判据)
         self._ap_spend_after_read = False  # 读数之后又扫荡/出击过 → 读数已陈旧
         self._popup_open = False
@@ -1579,12 +1582,32 @@ class EventQuestSkill(BaseSkill):
             qmax = self.find_cls(screen, UC.QTY_MAX, conf=_WEAK_CONF)
             qmax_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
             plus_grey = self.find_cls(screen, "加号灰色", conf=_CLS_CONF)
-            if qmax is not None and qmax_grey is None:
+            # ⭐多关轮转不 MAX(2026-07-30 用户: "分配体力把商店搬空"): MAX 一发
+            # 把 AP 全灌当前关 → 轮转形同虚设(实录: 909AP 全给 Q11, Q10 卡带
+            # 全天零产出, 而商店货架**每日重置**两币每天都要)。多关时每轮固定
+            # 配额 = 加号点到 6 次(1+5, ≈90AP), 轮转指针每轮前进 → AP 自然按
+            # 配比均分; 单关时保持 MAX(一关吃满没毛病)。加号被稳定门吞时计数
+            # 回滚(按物理动作计数, 与 craft _start_taps 同族)。
+            _qty_ready = False
+            _multi = len(set(self._farm_stages)) > 1
+            if _multi and qmax is not None and qmax_grey is None:
+                if self.action_suppressed and self._round_plus > 0:
+                    self._round_plus -= 1
+                if self._round_plus < 5:
+                    plus = self.find_cls(screen, "加号", conf=_CLS_CONF,
+                                         region=(0.30, 0.20, 1.0, 0.80))
+                    if plus is not None:
+                        self._round_plus += 1
+                        return action_click_box(
+                            plus, f"{label}: 轮转配额+1 ({self._round_plus}/5)")
+                # 配额满 / 加号不在(已顶格或 AP 上限使加号转灰) → 开扫
+                _qty_ready = True
+            elif qmax is not None and qmax_grey is None:
                 return action_click_box(qmax, f"{label}: MAX")
-            if qmax_grey is not None and plus_grey is None:
+            if qmax_grey is not None and plus_grey is None and not _qty_ready:
                 # MAX 灰但加号亮 = 已顶格待开扫 (MAX 点过)
                 pass
-            if qmax_grey is not None and plus_grey is not None:
+            if (qmax_grey is not None and plus_grey is not None) or _qty_ready:
                 ss = self.find_cls(screen, UC.SWEEP_START, conf=0.5)
                 # ⛔源头闸(2026-07-11 事故修复): 全灰≠可扫 — AP=0 时点掃蕩開始
                 # 会弹「購買AP」框(30青辉石实锤)。扫前必读 topbar AP, 读不出
@@ -1687,6 +1710,7 @@ class EventQuestSkill(BaseSkill):
             # ⭐轮次在这里推进(确认框確認真发出去 = 这轮扫荡真消费), 见上面
             # 掃蕩開始处的长注释。_currency 据此转下一关。
             self._sweep_rounds += 1
+            self._round_plus = 0   # 本轮配额已消费, 下一关面板重新计
             self._ap_spend_after_read = True   # 扫荡花 AP → 上次读数作废
             return action_click_box(conf_btn, f"{label}: confirm sweep (pure AP)")
         # 走到这 = 确认框(取消+確認同屏)不在 → 上一发 confirm(若有)已落地
