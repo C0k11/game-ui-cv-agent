@@ -271,6 +271,7 @@ def main():
                 row_ys.add(ay)
         valid = VALID_PRICES.get(tab_i)
         items = []
+        _furn_rows = 0
         for ry in row_ys:
             row = []
             for cx in COLS:
@@ -288,6 +289,7 @@ def main():
                     prices and max(prices) > FURNITURE_PRICE):
                 print(f"    行 y={ry}: 价签 {sorted(prices)} → 家具行, 整行跳过",
                       flush=True)
+                _furn_rows += 1
                 continue
             for price, cx, ry2 in row:
                 # ⭐价集校验(playbook 债落地): 读出的价 ∉ 本 tab 价目表 =
@@ -302,6 +304,9 @@ def main():
                     print(f"    售罄(暗态按钮) @({cx},{ry2}) → 跳过", flush=True)
                     continue
                 items.append((price, cx, ry2))
+        # 货架状态挂属性(survey_shelf 累计用): 亮位=items, 暗位/家具行计数
+        scan_items.last_dark = len(dark_spots)
+        scan_items.last_furn = _furn_rows
         return items
 
     def sweep_screen(tab_i, min_price=0) -> int:
@@ -414,53 +419,117 @@ def main():
     if not ensure_shop_page():
         sys.exit(1)
 
+    # ⭐币种动态枚举(用户 2026-07-30: 不许 hardcode 刷哪/买哪 — 万一下期
+    # 4 种币呢): 左侧 tab 列 = YOLO (货币|货币_已选择) cls 按 cy 排序,
+    # 坐标/数量全部从检出来。最后一个 tab = 盒抽/小活动产物币, **绝不自动买**
+    # (07-28 "tab3 铁律"的动态化形态, K 币时=第 K 个)。TAB_XY 只做检出弱时
+    # 的兜底(本期 3 币标定值)。
+    _fr0 = _cap()
+    _d0 = dets(_fr0, 0.5)
+    _tabs0 = sorted([x for x in _d0 if x[0] in ("货币", "货币_已选择")],
+                    key=lambda x: (x[3] + x[5]) / 2)
+    if len(_tabs0) >= 2:
+        tab_xy = [(int((x[2] + x[4]) / 2), int((x[3] + x[5]) / 2))
+                  for x in _tabs0]
+        print(f"[tabs] YOLO 检出 {len(tab_xy)} 个货币 tab", flush=True)
+    else:
+        tab_xy = list(TAB_XY)
+        print(f"[tabs] tab cls 检出不足({len(_tabs0)}) → 兜底本期标定坐标 3 个",
+              flush=True)
+    n_tabs = len(tab_xy)
+
+    def survey_shelf(tab_i):
+        """全货架巡检(回顶+逐屏 scan, 纯读不点): YOLO 购买按钮定位+gray 亮暗,
+        OCR 只读价格/余额数字。跨屏计数有边界行重复 — 判据是 bright>0 的
+        二值(搬空/还饿), 精度无所谓。plan 模式下这就是"第一次进活动先盘店"。"""
+        adb._shell("input swipe 2400 700 2400 1600 400")
+        time.sleep(2)
+        # ⛔tab 身份校验(2026-07-30 冻结事故顺带抓到的洞: 巡检没验身份,
+        # tab 切换失败时把同一 tab 的货架记到两个币头上): 与 sweep_screen
+        # 同源判据, 不符重点一次; 仍不符 → 本 tab 巡检作废(fail-closed)。
+        for _retry in range(2):
+            scan_items(tab_i)
+            _tn = verify_tab(scan_items.last_dets, tab_i)
+            if _tn is None or _tn == tab_i:
+                break
+            print(f"    ⛔巡检 tab 身份不符: 选中={_tn} 预期={tab_i} — 重点 tab",
+                  flush=True)
+            tap(*tab_xy[tab_i - 1])
+            time.sleep(2.5)
+        else:
+            print(f"    ⛔tab{tab_i} 重点后身份仍不符 — 巡检作废", flush=True)
+            return None
+        bright = dark = furn = 0
+        bal = None
+        for si in range(5):
+            if si:
+                adb._shell("input swipe 2400 1300 2400 750 500")
+                time.sleep(2)
+            items = scan_items(tab_i)
+            bright += len(items)
+            dark += getattr(scan_items, "last_dark", 0)
+            furn += getattr(scan_items, "last_furn", 0)
+            for p2, x2, y2 in sorted(items, key=lambda t: -t[0]):
+                print(f"    [货架] 单价{p2} @({x2},{y2})", flush=True)
+            if bal is None and scan_items.last_frame is not None:
+                bal = read_balance(scan_items.last_frame, scan_items.last_dets)
+        return {"bright": bright, "dark": dark, "furn_rows": furn,
+                "balance": bal}
+
+    def write_ledger(ti, shelf):
+        try:
+            _eco_p = ROOT / "data" / "event_economy.json"
+            _eco = (json.loads(_eco_p.read_text(encoding="utf-8"))
+                    if _eco_p.exists() else {})
+            _eco["n_tabs"] = n_tabs
+            _eco.setdefault("tabs", {})[str(ti)] = {
+                "balance_after_buy": shelf["balance"],
+                "shelf_bright": shelf["bright"],
+                "shelf_dark": shelf["dark"],
+                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            _eco_p.write_text(json.dumps(_eco, ensure_ascii=False, indent=1),
+                              encoding="utf-8")
+            print(f"  [economy] tab{ti} 亮位={shelf['bright']} "
+                  f"暗位={shelf['dark']} 余额={shelf['balance']} → 台账",
+                  flush=True)
+        except Exception as _e:
+            print(f"  [economy] 台账写入失败(不阻塞): {_e}", flush=True)
+
     total = 0
-    for ti, (tx, ty) in enumerate(TAB_XY, 1):
+    for ti, (tx, ty) in enumerate(tab_xy, 1):
         if only_tab and ti != only_tab:
             continue
-        # ⛔tab3(符咒)本轮不跑(用户 2026-07-28): 前两币=角色素材;
-        # 符咒出自盒抽小活动, 花法(神名碎片)等用户拍板, 绝不自动买。
-        if VALID_PRICES.get(ti) is None:
-            print(f"[tab{ti}] 跳过(不在本轮购买范围)", flush=True)
+        if ti == n_tabs:
+            print(f"[tab{ti}] 跳过(最后一币=盒抽/小活动产物, 绝不自动买)",
+                  flush=True)
             continue
         print(f"[tab{ti}]", flush=True)
         _dead.clear()
         tap(tx, ty)
         time.sleep(3)
-        # 「购买」cls 只对顶部行位置检出稳(训练分布) → 小步滑动让每行
-        # 轮流滚到顶部, 每步用 cls 检出买(cls 主导, 滑动只是取景)
-        # ⭐两遍: PASS1 只买 ≥100(高价档吃满预算), PASS2 清低档。
-        for pass_i, floor in ((1, 100), (2, 0)):
-            adb._shell("input swipe 2400 700 2400 1600 400")   # 回顶
-            time.sleep(2)
-            # 售罄拉黑按 (px,py) 记 — 两遍间滚动相位不同, 不跨遍复用
-            _dead.clear()
-            for screen_i in range(5):
-                if screen_i:
-                    adb._shell("input swipe 2400 1300 2400 750 500")
-                    time.sleep(2)
-                n = sweep_screen(ti, min_price=floor)
-                total += n
-                print(f"  pass{pass_i} 取景{screen_i} 成交 {n}", flush=True)
-        # ⭐经济台账(2026-07-28 用户: 让程序自己推断刷哪关): 每 tab 跑完记
-        # 「购后余额」— planner 用它判断该币商店还饿不饿(买完清零=还缺,
-        # 剩一大笔=饱和停刷)。选关推断的唯一数据源, 零新增 OCR 依赖。
         if not plan_only:
-            try:
-                _fr = adb.capture_frame()
-                _bal = read_balance(_fr, dets(_fr, 0.28))
-                _eco_p = ROOT / "data" / "event_economy.json"
-                _eco = (json.loads(_eco_p.read_text(encoding="utf-8"))
-                        if _eco_p.exists() else {})
-                _eco.setdefault("tabs", {})[str(ti)] = {
-                    "balance_after_buy": _bal,
-                    "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-                }
-                _eco_p.write_text(json.dumps(_eco, ensure_ascii=False,
-                                             indent=1), encoding="utf-8")
-                print(f"  [economy] tab{ti} 购后余额={_bal} → 台账", flush=True)
-            except Exception as _e:
-                print(f"  [economy] 台账写入失败(不阻塞): {_e}", flush=True)
+            # 「购买」cls 只对顶部行位置检出稳(训练分布) → 小步滑动让每行
+            # 轮流滚到顶部, 每步用 cls 检出买(cls 主导, 滑动只是取景)
+            # ⭐两遍: PASS1 只买 ≥100(高价档吃满预算), PASS2 清低档。
+            for pass_i, floor in ((1, 100), (2, 0)):
+                adb._shell("input swipe 2400 700 2400 1600 400")   # 回顶
+                time.sleep(2)
+                # 售罄拉黑按 (px,py) 记 — 两遍间滚动相位不同, 不跨遍复用
+                _dead.clear()
+                for screen_i in range(5):
+                    if screen_i:
+                        adb._shell("input swipe 2400 1300 2400 750 500")
+                        time.sleep(2)
+                    n = sweep_screen(ti, min_price=floor)
+                    total += n
+                    print(f"  pass{pass_i} 取景{screen_i} 成交 {n}", flush=True)
+        # ⭐货架台账(用户 2026-07-30: 判"该币还刷不刷"看的是货架不是余额 —
+        # 余额 0 + 货架有亮位 = 还饿要刷; 余额 0 + 全暗 = 搬空停刷)。
+        # plan 模式 = 首日盘店, 同样落账; 实买模式 = 买完后的购后货架。
+        shelf = survey_shelf(ti)
+        if shelf is not None:
+            write_ledger(ti, shelf)
     print(f"done 总成交 {total}", flush=True)
 
 

@@ -464,6 +464,12 @@ class EventQuestSkill(BaseSkill):
             rows.append({"num": self._read_quest_num(screen, star),
                          "cy": ecy, "enter": enter, "star": star})
         rows.sort(key=lambda r: r["cy"])
+        # ⭐max_stage 落账(用户 2026-07-30: 币-关映射不 hardcode): 看到的最大
+        # 关号=活动 Quest 总关数, planner 用「尾 K 关↔K 币按序」推关。只在
+        # 数值增长时写盘(一个活动期最多几次)。
+        _nums = [r["num"] for r in rows if r["num"] is not None]
+        if _nums:
+            self._note_max_stage(max(_nums))
         # ⭐运行时结构自洽校验(2026-07-25 审计): 与离线验收同款判据 — 同帧关号
         # 自上而下必须严格递增。相邻误读(11→12)在 1-30 范围闸内完全合法, 一旦
         # 带错号落账 = 真关整个活动期被跳过加成核对。取最长严格递增子序列,
@@ -484,6 +490,24 @@ class EventQuestSkill(BaseSkill):
                     self.log(f"⚠关号 {r['num']} 破坏同帧递增序 — 判误读, 置 None")
                     r["num"] = None
         return rows
+
+    def _note_max_stage(self, n: int) -> None:
+        """把活动 Quest 最大关号写进 economy 台账(planner 关映射的数据源)。"""
+        if n <= getattr(self, "_max_stage_seen", 0):
+            return
+        self._max_stage_seen = n
+        try:
+            import json, os
+            p = "data/event_economy.json"
+            d = (json.load(open(p, encoding="utf-8"))
+                 if os.path.exists(p) else {})
+            if n > int(d.get("max_stage") or 0):
+                d["max_stage"] = n
+                json.dump(d, open(p, "w", encoding="utf-8"),
+                          ensure_ascii=False, indent=1)
+                self.log(f"[economy] max_stage={n} → 台账")
+        except Exception:
+            pass
 
     def _read_quest_num(self, screen: ScreenState,
                         star: Optional[YoloBox]) -> Optional[int]:
