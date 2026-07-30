@@ -22,12 +22,12 @@ sys.stdout.reconfigure(encoding="utf-8")
 ROOT = Path(r"D:\Project\ai game secretary")
 
 # 本期常量(奇普托斯, 2026-07-21~08-04; 换活动要重标)
-TAB_STAGE = {1: 10, 2: 11, 3: 12}      # 币 tab ↔ 掉落关
+# ⛔只管前两币(用户 2026-07-30 纠偏: 第三币=盒抽/内置小游戏产出, 不好量化,
+# Q12=盒抽门票关 — 这条链**不归程序推断**, 刷不刷 Q12 由用户手动配置决定。
+# 我第一版把爪台账/盒抽需求塞进推断器 = 过度设计, 已删)。
+TAB_STAGE = {1: 10, 2: 11}             # 币 tab ↔ 掉落关
 HUNGRY_MAX = 500       # 购后余额 < 此值 = 商店还饿, 继续刷
 SATURATED_MIN = 3000   # 购后余额 ≥ 此值 = 饱和, 停刷
-# 爪(tab3 掉落币)特判: 商店 tab3 用的是符咒不是爪, 爪的需求=盒抽。
-# 盒抽台账没建立前, 用保守常量: 剩余盒数未知按 5 盒 × 300抽 × 6爪 = 9000。
-CLAW_DEMAND_FALLBACK = 9000
 
 
 def load(p, default):
@@ -40,7 +40,6 @@ def load(p, default):
 def plan():
     eco = load("data/event_economy.json", {})
     tabs = eco.get("tabs", {})
-    claw = eco.get("claw", {})     # 盒抽台账(gift 脚本落): balance / boxes_left
     lines = []
     stages = []
     for ti in (1, 2):
@@ -62,22 +61,15 @@ def plan():
         else:
             lines.append(f"tab{ti}(Q{stage}): 购后余额 {bal} 中间带 → 半量(轮转尾)")
             stages.append(stage)   # v1 不做半量, 记账单即可
-    # 爪/Q12: 余额 vs 盒抽需求
-    claw_bal = claw.get("balance")
-    claw_demand = claw.get("demand", CLAW_DEMAND_FALLBACK)
-    if claw_bal is None:
-        lines.append(f"爪(Q12): 无余额台账 → 保守停刷(2026-07-28 帧证据 21,035 过剩)")
-    elif claw_bal < claw_demand:
-        lines.append(f"爪(Q12): 余额 {claw_bal} < 盒抽需求 {claw_demand} → 刷")
-        stages.append(12)
-    else:
-        lines.append(f"爪(Q12): 余额 {claw_bal} ≥ 盒抽需求 {claw_demand} → 停刷")
 
     cfg = load("data/app_config.json", {})
     prof = (cfg.get("profiles") or {}).get(cfg.get("active_profile", "default"), {})
     manual = prof.get("event_farm_stages") or []
+    # 一致性只比 Q10/Q11: Q12(第三币门票)不归推断器管, 用户配了就照配置刷。
+    manual_cmp = [s for s in manual if s in TAB_STAGE.values()]
     return {"suggested_stages": stages, "manual_stages": manual,
-            "agree": sorted(set(stages)) == sorted(set(manual)) if manual else None,
+            "agree": (sorted(set(stages)) == sorted(set(manual_cmp))
+                      if manual else None),
             "ledger_lines": lines}
 
 
