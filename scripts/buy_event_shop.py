@@ -176,38 +176,50 @@ def main():
     BTN_W, BTN_H = 420, 110
     _dead = set()                       # 售罄/买不起位置(tab 内拉黑)
 
-    def read_balance(fr, d):
-        """余额 = 「货币数量显示区域」cls 框内 digit-OCR(用户 2026-07-28 指路)。
+    # ⛔read_balance 换 rec-only(2026-07-30 结案, task#35「丢首位」机制查清):
+    # 屏上 3,135 被旧路径一致读成 135 — 不是裁剪几何, 是 run_digit_ocr 走
+    # **det+rec 全管线**, det 在浅底胶囊上把「3,」段漏检(只框住 135), 任何
+    # 窗口组都救不了(四窗 4:0 一致地错, 后缀合票无从救 — pass1 因此提前
+    # 收工真损失)。rec-only 全框直读 '3,135' conf .80 完美 — 与 read_price
+    # 同法。⚠rec-only 的误差模型与 det 相反: 垃圾出现在**前缀**(图标圆环/
+    # 左缘阴影被硬解成 9/2, 实测 [865,865,9865] / 0728 语料 2↔22 交替),
+    # 不再有截位短数 → ①窗口全部必含完整数字(剥图标窗 l0.20 会半切首位,
+    # 弃用) ②合票方向反转: 后缀关系时票归**短数**(长数=幻影前缀)。
+    _BAL_WINDOWS = ((0.0, 1.0), (0.06, 1.0), (0.12, 1.0))
 
-        多窗扫描: det 对这个浅底小条边界敏感(shop1 帧同位置四窗全 None 而
-        shop4 三窗全对, 离线标定实锤), 取各窗读数中**位数最多**的。
+    def read_balance(fr, d):
+        """余额 = 「货币数量显示区域」cls 框内 rec-only 直读(det 会漏首段)。
+
         读不出 → None, 调用方降级(不做买不起过滤, 走 MAX/no_dialog 兜底) —
         余额是增强层, fail-open 到旧行为, 不阻塞购买。"""
-        from brain.pipeline import run_digit_ocr
         b = next((x for x in d if x[0] == "货币数量显示区域"), None)
         if b is None:
             return None
         _, _, x1, y1, x2, y2, W, H = b
         bw = x2 - x1
         vals = []
-        for lcut, rcut in ((0.20, 0.75), (0.25, 1.0), (0.30, 0.80), (0.40, 1.0)):
-            raw = run_digit_ocr(fr, ((x1 + bw * lcut) / W, y1 / H,
-                                     (x1 + bw * rcut) / W, y2 / H))
-            digs = re.sub(r"[^\d]", "", raw or "")
+        for lcut, rcut in _BAL_WINDOWS:
+            crop = fr[int(y1):int(y2), int(x1 + bw * lcut):int(x1 + bw * rcut)]
+            if crop.size == 0:
+                continue
+            try:
+                out = ocr.text_recognizer([crop])
+                txts = out[0] if isinstance(out, tuple) else out
+                raw = "".join(t for t, _ in (txts or []))
+            except Exception:
+                continue
+            digs = re.sub(r"[^\d]", "", raw)
             if digs and 0 <= int(digs) <= 99999:
                 vals.append(int(digs))
-        # ⛔孤证不采(离线标定实锤): shop1 帧四窗只有一窗读出 '393'(千位分隔符
-        # 丢失, 真值 3393) — 错读比 None 更糟(静默砍掉买得起的位置)。
-        # ⭐后缀合票(2026-07-28 全量验证抓到共识被击穿): shop5 帧
-        # vals=[3597,597,597,97] — 两个窗口在同一位置切掉千位, **截位错读彼此
-        # 一致** 2:1 击败真值。短读数若是长读数的**后缀**, 就是同一数字的截位
-        # 证据 → 票归长数。合票后仍 <2 票 → None 降级(不过滤, 安全方向)。
+        # ⛔孤证不采 + ⭐后缀合票**归短数**(2026-07-30 反转): rec-only 下窗口
+        # 必含完整数字, 短数不可能是截位; 长数=短数+幻影前缀(图标/阴影硬解)。
+        # [865,865,9865] → 票归 865。合票后仍 <2 票 → None 降级(安全方向)。
         votes = {}
         for v in vals:
             votes[v] = votes.get(v, 0) + 1
-        for v in sorted(votes, key=lambda x: -len(str(x))):
+        for v in sorted(votes, key=lambda x: len(str(x))):
             total = sum(c for u, c in votes.items()
-                        if str(u) == str(v) or str(v).endswith(str(u)))
+                        if str(u) == str(v) or str(u).endswith(str(v)))
             if total >= 2:
                 return v
         return None
@@ -352,6 +364,55 @@ def main():
             else:
                 _dead.add((px, py))     # 售罄/买不起: 本 tab 内不再点
         return bought
+
+    def on_shop_page(d) -> bool:
+        """活动商店页判据: 左侧货币 tab 列(≥2 个)或余额胶囊在屏。"""
+        tabs = [x for x in d if x[0] in ("货币", "货币_已选择") and x[1] >= 0.5]
+        cap = any(x[0] == "货币数量显示区域" and x[1] >= 0.5 for x in d)
+        return len(tabs) >= 2 or cap
+
+    def ensure_shop_page() -> bool:
+        """⛔到达闸(2026-07-30 用户当场抓包): 旧版没有任何"我在商店页吗"的
+        判据, 假定启动时人已把游戏放在商店页 — 今天停在任务 hub, tab 坐标
+        点空 + verify_tab None 被放行 + scan 扫不到但 20 次盲滑照做(swipe
+        不带落点, step_walk 盲拍闸只管 click = 守卫盲区)。
+        修: 不在商店页 → cls 锚定逐步导航(每步验帧), 到不了绝不滑动。
+        导航链: 大厅[任务大厅入口] → 任务hub[距离结束还剩] → 活动hub
+        [活动商店(底栏, conf≥0.85 — 贈品交換页会被同 cls 捡 0.66)] → 商店。"""
+        for hop in range(6):
+            fr = _cap()
+            if fr is None:
+                print("⛔抓帧失败 — 停", flush=True)
+                return False
+            d = dets(fr, 0.5)
+            if on_shop_page(d):
+                if hop:
+                    print(f"  [nav] 已到活动商店页({hop} 跳)", flush=True)
+                return True
+            # ⚠「活动商店」(底栏)只在 Quest tab 取景下检得出(0.97), Story tab
+            # 上零检出(2026-07-30 实测, 训练分布缺) → 活动页内先切 Quest tab。
+            for cls_name, min_c in (("活动商店", 0.85),
+                                    ("活动quest", 0.60),
+                                    ("距离结束还剩", 0.60),
+                                    ("任务大厅入口", 0.60)):
+                cands = [x for x in d if x[0] == cls_name and x[1] >= min_c]
+                if cands:
+                    b = max(cands, key=lambda x: x[1])
+                    cx, cy = int((b[2] + b[4]) / 2), int((b[3] + b[5]) / 2)
+                    print(f"  [nav] {cls_name} {b[1]:.2f} → tap({cx},{cy})",
+                          flush=True)
+                    tap(cx, cy)
+                    time.sleep(3)
+                    break
+            else:
+                print(f"⛔不在商店页且无导航锚点(检出 {len(d)} 框) — "
+                      f"fail-closed 停, 绝不盲滑", flush=True)
+                return False
+        print("⛔6 跳仍未到商店页 — 停", flush=True)
+        return False
+
+    if not ensure_shop_page():
+        sys.exit(1)
 
     total = 0
     for ti, (tx, ty) in enumerate(TAB_XY, 1):
