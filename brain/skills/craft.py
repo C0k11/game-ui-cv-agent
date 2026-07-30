@@ -133,6 +133,7 @@ class CraftSkill(BaseSkill):
         self._start_clicked: bool = False  # we pressed 开始制造 → confirm is ours
         self._craft_confirm_clicked: bool = False  # 点過確認; latch _started 仅凭到达证据
         self._start_taps: int = 0          # 开始制造 clicks w/o resulting confirm
+        self._min_fallback_done: bool = False  # MAX 材料不足 → 已降到 MIN 重试过
         self._claims: int = 0
 
     def reset(self) -> None:
@@ -411,6 +412,19 @@ class CraftSkill(BaseSkill):
             if self.action_suppressed and self._start_taps > 0:
                 self._start_taps -= 1
                 self.log("开始制造 被稳定门吞 — 回滚计数(不算一次尝试)")
+            # ⭐MIN 降级重试(2026-07-29 live 帧实锤): 游戏的 MAX 键**不按瓶颈
+            # 材料钳数量** — MAX=3 后材料 5/15 红字+開始製造转灰, 而数量=1 时
+            # 5/5 是够的。旧逻辑 ×8 直接 skip = 白丢当天能造的那 1 次。
+            # 行为信号复用「点了无確定製造框=灰」: 首轮 4 次真点击无框 → 点
+            # MIN 降到 1 再试一轮; 第二轮仍满 8 → 真造不了, skip(原兜底)。
+            if self._start_taps >= 4 and not self._min_fallback_done:
+                min_btn = self.find_cls(screen, UC.QTY_MIN, conf=_CLS_CONF)
+                if min_btn is not None:
+                    self._min_fallback_done = True
+                    self._start_taps = 0
+                    self.log("開始製造 无响应×4 → MAX 材料不足? 降 MIN 重试")
+                    return action_click_box(min_btn, "quantity MIN fallback (材料不足)")
+                self._min_fallback_done = True   # MIN 不在屏(已是1/漏检) → 原路兜底
             if self._start_taps >= 8:
                 self.log("开始制造 ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
