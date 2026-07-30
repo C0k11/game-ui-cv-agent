@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from brain.skills.base import (
     BaseSkill, OcrBox, YoloBox, ScreenState,
     action_click, action_click_box, action_back, action_wait, action_done,
+    game_clock,
 )
 from brain.skills.cafe import CafeSkill
 from brain.skills.schedule import ScheduleSkill
@@ -1323,6 +1324,12 @@ class DailyPipeline:
         self._last_wait_reason: str = ""
         self._last_action_reason: str = ""
         self._stuck_counter: int = 0  # ticks in same sub_state
+        # ⛔stuck 网墙钟合取(2026-07-29): 9/20 tick 是 1s/tick 年代标定的,
+        # zero-wait 后缩成 ~2-4s, 比 skill 自己的等待预算(如 buy_pyroxene 等
+        # 确认框 16s)还短 → 兜底越权抢方向盘, 今天把 skill 正在用的商店页
+        # 整个叉掉了。tick 阈值保留, 但必须同时满足墙钟(game_clock 扣掉
+        # step 门人审停顿) — tick_vs_wallclock 排查清单当时漏掉的 pipeline 层。
+        self._stuck_t0: float = 0.0   # same-wait 连续段起点(game_clock)
         self._consecutive_timeouts: int = 0  # skills that timed out in a row
         self._last_click_target: Optional[list] = None
         self._last_click_reason: str = ""
@@ -2582,8 +2589,12 @@ class DailyPipeline:
             self._stuck_counter += 1
         else:
             self._stuck_counter = 0
+            self._stuck_t0 = game_clock()
         self._last_sub_state = skill.sub_state
         self._last_wait_reason = action_reason if action_type == "wait" else ""
+        # 墙钟合取: tick 阈值(9/20)只作下限, 真触发还要求 same-wait 持续了
+        # 对应的秒数(1s/tick 年代的原语义)。game_clock 扣人审停顿。
+        _stuck_sec = (game_clock() - self._stuck_t0) if self._stuck_counter > 0 else 0.0
 
         # If the exact same wait reason repeats for 20+ ticks, burst ESC to break out.
         # CRITICAL: Do NOT send ESC when on lobby — ESC on lobby opens
@@ -2630,7 +2641,8 @@ class DailyPipeline:
         # during battles (legit long waits with changing/known reasons).
         if (action_type == "wait" and not _is_battle_wait and not _popup_on_screen
                 and not _BRINGUP_EXPOSE
-                and self._stuck_counter >= 9 and self._stuck_counter % 3 == 0):
+                and self._stuck_counter >= 9 and self._stuck_counter % 3 == 0
+                and _stuck_sec >= 9.0):
             self._blind_tap_count = getattr(self, "_blind_tap_count", 0) + 1
             # Target real dismiss zones first (TOUCH-TO-CONTINUE / X), then
             # corners — center hits reward cards that absorb the tap.
@@ -2644,7 +2656,8 @@ class DailyPipeline:
             action_type = "click"
             action_reason = str(action.get("reason", "") or "")
 
-        if action_type == "wait" and self._stuck_counter > 0 and self._stuck_counter % 20 == 0:
+        if (action_type == "wait" and self._stuck_counter > 0
+                and self._stuck_counter % 20 == 0 and _stuck_sec >= 20.0):
             if screen.is_lobby():
                 print(f"[Pipeline] Skill '{skill.name}' repeating wait on lobby for {self._stuck_counter} ticks, skipping ESC (unsafe on lobby)")
             elif _is_battle_wait:

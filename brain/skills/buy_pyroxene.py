@@ -35,7 +35,7 @@ from typing import Any, Dict, Optional
 
 from brain.skills.base import (
     BaseSkill, ScreenState, YoloBox,
-    action_click, action_click_box, action_wait, action_back, action_done,
+    action_click_box, action_wait, action_back, action_done,
 )
 from brain.skills import ui_classes as UC
 
@@ -66,7 +66,7 @@ _BUY_FREE_POLL = 14          # poll this many ticks for the flickery 免费 cls
 # Per-sub-state tick budgets — every phase is bounded, never dead-waits.
 _ENTER_MAX = 22
 _COMBO_MAX = 16
-_BUY_MAX = 16
+_BUY_MAX = 30                # buy 态现在自己管「点击→等框→重按」全程(2026-07-29)
 _CONFIRM_MAX = 10            # poll the dialog for the FREE cls before bailing
 # ⛔tick-vs-墙钟家族(2026-07-28): _CONFIRM_MAX 10 tick 被 zero-wait 压到
 # 1.5-2.5s, 且「等对话框出现」和「等 免费 cls 渲染」共用同一个 _phase_ticks
@@ -74,9 +74,9 @@ _CONFIRM_MAX = 10            # poll the dialog for the FREE cls before bailing
 # 框 cancel 掉。拆成两个独立墙钟(方向都 fail-closed: 等得久只是晚 cancel,
 # 绝不会多确认)。⚠FREE 判定 conf 保持 0.30 不降 — 降门槛放大「付费框误判
 # 免费」方向, 钱闸只紧不松(agent 建议里降 conf 那半句已驳回)。
-_DIALOG_WAIT_SEC = 16.0      # 等确认框渲染(×1.6 年代等效)
 _FREE_POLL_SEC = 8.0         # 框出现后 poll 免费 cls(≈40+ 帧, 盖住 flicker)
-_REPRESS_COOLDOWN_SEC = 3.0  # 重按 buy 的节流(旧 %4≈6.4s → 现 0.8s 连打, 同病)
+_BUY_SETTLE_SEC = 2.5        # buy 点击后等确认框渲染的墙钟(过时重按)
+_REWARD_WAIT_SEC = 8.0       # 確認已发后等 reward 弹窗证据的墙钟
 _EXIT_MAX = 14
 
 
@@ -128,6 +128,7 @@ class BuyPyroxeneSkill(BaseSkill):
         self._phase_ticks: int = 0
         self._bought: bool = False         # set once the free pack is confirmed
         self._buy_retry: Optional[tuple] = None  # (cx,cy) to re-press on drop
+        self._buy_fired: bool = False      # buy 点击已发(显式 flag, 裸 since 首调 0.0 会挡第一发)
         self._confirm_clicks: int = 0      # ack-loop: 確認 实际点击次数(防幻影)
         self._dialog_seen: bool = False    # 确认框首见(免费 poll 墙钟起点)
         # 「今天先前已领」的证据(屏上既无 免费 标也无未领红点) —— 与「没领到」
@@ -302,10 +303,31 @@ class BuyPyroxeneSkill(BaseSkill):
 
         free_buy = self._free_buy_button(screen)
         if free_buy is not None:
+            # ⛔mutate-before-ack 同病漏网(2026-07-29 live 实锤): 旧码先
+            # _goto("confirm") 再返回点击, 点击被稳定门吞("帧未稳定") 时 skill
+            # 已在 confirm 等一个从没点出来的框 → 空转 21 tick → pipeline
+            # stuck-20 兜底把商店页整个叉掉。07-21 修了 confirm 態的確認,
+            # 这里是 _buy 的同形。修: 状态不跳, 停在 buy —— 对话框出现由顶部
+            # 分支自然转 confirm; 被吞立即重按; 落地但渲染慢则墙钟节流重按。
+            if self._buy_fired and self.action_suppressed:
+                self.log("buy tap 被稳定门吞 — 立即重按(帧已稳定)")
+                self._buy_fired = False
+            if self._buy_fired and self.since("buy_fired") < _BUY_SETTLE_SEC:
+                return action_wait(300, "buy tapped — waiting confirm dialog")
+            self._buy_fired = True
+            self.mark("buy_fired")
             self._buy_retry = (free_buy.cx, free_buy.cy)
             self.log(f"clicking FREE pack 购买 at ({free_buy.cx:.2f},{free_buy.cy:.2f})")
-            self._goto("confirm")
             return action_click_box(free_buy, "buy FREE daily combo pack")
+
+        # 按过购买后的"无 FREE"不再是已领证据 — 确认框弹入过渡帧会把价签/
+        # 红点一起遮住, 这里误判 already-claimed 会把真免费包放跑。等对话框
+        # 渲染(顶部分支接), 超时由 _BUY_MAX 收口。
+        if self._buy_fired:
+            if self._phase_ticks > _BUY_MAX:
+                self._goto("exit")
+                return action_wait(250, "buy fired but no dialog ever → exit")
+            return action_wait(350, "buy fired — waiting dialog render")
 
         # No FREE this frame. Distinguish "已领" from "免费 just flickering" via
         # the 組合包 TAB red dot (probe: dot present ⇒ NOT claimed yet).
@@ -346,24 +368,23 @@ class BuyPyroxeneSkill(BaseSkill):
 
         confirm_btn = self._confirm_dialog(screen)
         if confirm_btn is None:
-            # Dialog not up yet. Re-press the buy button (ADB may have dropped),
-            # then give it a few ticks. If never appears, fall back to buy.
-            if (self._phase_ticks > _CONFIRM_MAX
-                    and self.since("confirm_enter") > _DIALOG_WAIT_SEC):
-                if self._on_combo_tab(screen) or self._shop_open(screen):
-                    self.log("confirm dialog never appeared → back to buy")
-                    self._dialog_seen = False   # 下次进 confirm 重新起 poll 表
-                    self.clear_timer("dialog_seen")
-                    self._goto("buy")
-                    return action_wait(300, "no dialog → re-pick buy")
-                self._goto("exit")
-                return action_wait(300, "confirm timeout → exit")
-            if (self._buy_retry is not None and self._phase_ticks % 4 == 0
-                    and self.since("buy_repress") > _REPRESS_COOLDOWN_SEC):
-                bx, by = self._buy_retry
-                self.mark("buy_repress")
-                self.log("confirm dialog absent, re-pressing buy button (drop?)")
-                return action_click(bx, by, "re-press FREE buy (no dialog)")
+            # 2026-07-29 重构: 进 confirm 的唯一入口是"对话框真在屏"(buy 顶部
+            # 分支), 这里框没了只有两种情况 — ①確認已发, 框在关闭动画里 →
+            # 停住等 reward 证据(顶部分支接), 超时 fail-closed exit; ②误检
+            # 闪没/被吞 → 回 buy 重走(buy 态管重按与节流)。旧版的盲坐标
+            # re-press 删除: 它在大厅上就是幽灵点击(今天 step_walk 实拦)。
+            if self._confirm_clicks > 0:
+                if (self._phase_ticks > _CONFIRM_MAX
+                        and self.since("confirm_fired") > _REWARD_WAIT_SEC):
+                    self.log("確認已发但始终无 reward 证据 → exit (fail-closed)")
+                    self._goto("exit")
+                    return action_wait(300, "confirmed, no reward evidence → exit")
+                return action_wait(300, "confirm fired — waiting reward popup")
+            if self._phase_ticks >= 3:
+                self._dialog_seen = False   # 下次进 confirm 重新起 poll 表
+                self.clear_timer("dialog_seen")
+                self._goto("buy")
+                return action_wait(250, "dialog gone → back to buy")
             return action_wait(300, "waiting for purchase-confirm dialog")
 
         # ★ SAFETY GATE: only confirm when the 免费 cls is in the price area.
@@ -378,6 +399,7 @@ class BuyPyroxeneSkill(BaseSkill):
             # reward-popup 检查=落地唯一确认; reason 含"確認键"→ 稳定门豁免立即
             # 点(渲染好的确认键=看到就点); 计数 cap fail-closed。
             self._confirm_clicks += 1
+            self.mark("confirm_fired")   # reward 等待墙钟起点(显式 mark, 裸 since 首调 0.0)
             if self._confirm_clicks > 6:
                 self.log("⛔ 確認 点了6次仍无 reward 弹窗 → exit (fail-closed)")
                 self._goto("exit")
