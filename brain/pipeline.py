@@ -2027,6 +2027,18 @@ class DailyPipeline:
 
         self._total_ticks += 1
 
+        # ⭐帧源预热闸(2026-08-01 新游戏日实锤): MuMu 冷启/镜像通道重建期的头
+        # 几秒全是加载帧(在屏 ≤2 类), zero-wait 0.12s/tick 几秒就烧光收菜
+        # skill 的 `_phase_ticks > _ENTER_MAX` 进入预算 → BuyPyroxene/Club/
+        # Schedule/Cafe 四连 "enter budget exhausted" 秒放弃, 黄点全亮活全丢
+        # (mail.py 07-28 加过墙钟合取, 其余同形没传导 — 该在源头一处修)。
+        # 运行头 30s 内检出数 <5 的帧不交给 skill; 墙钟超限放行(fail-open,
+        # 真盲区页不能永堵)。reason 带「加载中」走真实等待不受 zero-wait 压缩。
+        if (time.time() - self._run_start_ts < 30.0
+                and len(getattr(screen, "yolo_boxes", None) or []) < 5):
+            return action_wait(500, f"帧源预热中(加载中) — 本帧仅 "
+                                    f"{len(screen.yolo_boxes or [])} 类检出")
+
         # 新 tick = 新一屏: 干掉上一 tick 缓存的 ADB 干净帧(digit 读数复用用)。
         invalidate_clean_frame_cache()
         if self._total_ticks % 300 == 0:
