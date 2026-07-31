@@ -68,6 +68,7 @@ _BATTLE_MAX = 2400         # ⚠纯轮询次数上限(跑飞兜底), 计时权�
 _SWEEP_ROUNDS_MAX = 30     # 点数期一次 MAX 就把 AP 扫光, 这是保险帽
 _BATTLE_MAX_SEC = 300      # 单场战斗墙钟上限(实测活动关 70-90s, 5min 极宽松)
 _AP_READ_RETRY_SEC = 6.0   # AP 读不出时的墙钟重试窗(读失败≠没AP, 别把整轮判死)
+_PV_READ_SEC = 6.0         # 掃蕩弹窗关号读不出的墙钟重试窗, 超时 fail-closed 关窗重开
 # survey 墙钟预算(2026-07-25 live 定): 开/关 4 关 popup = 8 次点击, 而活动页背景
 # 常驻动画让帧几乎永不"稳定" → 每次点击最坏要等帧稳定门 4s 超时逃生 = 32s 下限。
 # 90s 给足余量。⚠**绝不能用 tick 计**: 等待期间 _phase_ticks 照涨, 旧的 36 tick
@@ -274,9 +275,11 @@ class EventQuestSkill(BaseSkill):
         self._currency_idx = 0        # 货币关轮转指针 — 按**扫荡轮次**推进
         self._cur_round_mark = -1     # 上次推进指针时的 _sweep_rounds
         self._no_pts_t0 = 0.0         # 「等活動點數读出」墙钟窗口起点(0=未开始)
-        # ⛔当前开着的**掃蕩弹窗属于哪一关**。换关时必须先关掉旧弹窗, 否则新
-        # quest_idx 只改了日志 label, 实际还在旧关上扫(2026-07-28 用户帧实锤)。
-        self._sweep_popup_num: Optional[int] = None
+        # ⛔当前开着的**掃蕩弹窗属于哪一关**(2026-07-31 换关假象结案): 身份只
+        # 从弹窗标题 OCR 感知(_read_popup_num), 绝不拿"开窗时想开哪关"的意图当
+        # 身份。None=未验; 弹窗不在屏时自动失效, 下次弹窗帧重验。
+        self._popup_vnum: Optional[int] = None
+        self._pv_fail_t0 = 0.0        # 弹窗关号连续读不出的墙钟起点(0=未失败)
         self._swept = 0
         # confirm sweep 的吞发回滚 flag(与 craft _start_taps 同修法): 上一发
         # confirm 被稳定门吞时, _swept/_sweep_rounds 要回滚再重计。
@@ -527,6 +530,28 @@ class EventQuestSkill(BaseSkill):
             return None
         n = int(d)
         # 活动 Quest 关号实际范围 1-30(尾三关 Q10-12); 越界 = 误读, 宁可 None
+        return n if 1 <= n <= 30 else None
+
+    def _read_popup_num(self, screen: ScreenState) -> Optional[int]:
+        """掃蕩弹窗标题里的关号(「11 | 神秘的電波塔」)。读不出 → None。
+
+        锚=弹窗叉叉(弹窗右上角, 带 region 防全屏 argmax 捡错): 标题数字在叉叉
+        下方 1.2-3.6 倍叉高、屏左 x0.04-0.30 横带(推薦 Lv.80 在 x≈0.50 不入带)。
+        2026-07-31 标定: walk_20260731 4 帧 4/4 读出 11。
+        """
+        if screen.frame is None:
+            return None
+        x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF,
+                          region=(0.60, 0.08, 1.0, 0.45))
+        if x is None:
+            return None
+        h = x.y2 - x.y1
+        raw = _read_digits(screen.frame,
+                           (0.04, x.y2 + 1.2 * h, 0.30, x.y2 + 3.6 * h))
+        d = "".join(ch for ch in (raw or "") if ch.isdigit())
+        if not d:
+            return None
+        n = int(d)
         return n if 1 <= n <= 30 else None
 
     # ── 加成台账 (persistent, data/event_bonus_state.json) ────────────
@@ -1561,6 +1586,11 @@ class EventQuestSkill(BaseSkill):
         if self._phase_ticks > _PHASE_MAX * 3:
             self._set(phase_after)
             return action_wait(200, f"{label} sweep phase timeout")
+        if not self._on_popup(screen):
+            # 弹窗不在屏(真关掉/被确认框·动画盖住) → 身份缓存失效, 下次弹窗帧
+            # 重验。这是身份缓存唯一的清除点 — 关窗动作那里绝不清(见下)。
+            self._popup_vnum = None
+            self._pv_fail_t0 = 0.0
         # 结果/确认链
         skip = self.find_cls(screen, UC.BATTLE_SKIP, conf=0.6)
         if skip is not None:
@@ -1569,24 +1599,42 @@ class EventQuestSkill(BaseSkill):
         if got is not None:
             return action_click(*_POS_TOUCH_CONTINUE, f"{label}: dismiss reward")
         if self._on_popup(screen):
-            # ⛔⛔换关必须先关掉当前弹窗(2026-07-28 用户帧证据实锤):
-            # 旧码这里只问"屏上有没有掃蕩弹窗", **从不问这个弹窗是哪一关的**。
-            # 于是 points(Q12) → currency(Q11) 切换时, Q12 的弹窗还开着,
-            # 本函数拿着 quest_idx=Q11 直接在**Q12 的弹窗**上继续 MAX/掃蕩,
-            # **只有日志 label 变成了 Q11**。用户看帧发现是「12 神秘圓圈」,
-            # 而我看日志报了"已换到 Q11" —— [[log-is-not-truth]] 第三次。
-            # 代价: AP 697→17 全灌 Q12(兽爪, memory 记的账是**过剩**)。
+            # ⛔⛔弹窗身份 = 感知不是意图(2026-07-31 换关假象结案, 同病第三例):
+            # v1 只问"有没有弹窗"不问是哪关的(07-28, AP697 全灌 Q12);
+            # v2 拿"开窗时想开哪关"的意图当身份, 且关窗时**先清状态再发动作**
+            # (mutate-before-ack) — 关窗点击在结果动画期被稳定门吞掉一次, 闸
+            # 就永久解除武装 → 8+2 轮 reason 交替 Q10/Q11 而弹窗从没换过,
+            # ~1130AP 全灌 Q11(帧铁证 walk_20260731 022125_015: reason=
+            # "farm Q10 round 4" 标题=「11 神秘的電波塔」, 体外复现同帧同状态
+            # 闸必触发 ⇒ 运行时身份已被清)。
+            # v3(现行): 身份从弹窗标题 OCR 读出(_read_popup_num, 每个弹窗一次,
+            # 缓存到弹窗离屏), 读不出超时 fail-closed 关窗重开(宁多关一次不
+            # 扫错关); 关窗动作**绝不清缓存** — 点击被吞时闸下一 tick 仍武装,
+            # 弹窗真关掉后由函数顶部的非弹窗帧失效逻辑自然清。
             _want = (self._quests[quest_idx].get("num")
                      if 0 <= quest_idx < len(self._quests) else None)
-            _have = self._sweep_popup_num
-            if _want is not None and _have is not None and _have != _want:
-                self._sweep_popup_num = None
+            if _want is not None and self._popup_vnum is None:
+                n = self._read_popup_num(screen)
+                if n is not None:
+                    self._popup_vnum = n
+                    self._pv_fail_t0 = 0.0
+                else:
+                    if not self._pv_fail_t0:
+                        self._pv_fail_t0 = self.clock()
+                    _el = self.clock() - self._pv_fail_t0
+                    if _el < _PV_READ_SEC:
+                        return action_wait(
+                            400, f"{label}: 弹窗关号读不出, 重试中 "
+                                 f"({_el:.1f}s/{_PV_READ_SEC}s)")
+            _have = self._popup_vnum
+            if _want is not None and (_have is None or _have != _want):
+                _why = (f"换关 Q{_have:02d}→Q{_want:02d}" if _have is not None
+                        else f"弹窗身份读不出(want Q{_want:02d})")
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 if close is not None:
                     return action_click_box(
-                        close, f"{label}: 换关 Q{_have:02d}→Q{_want:02d} — 先关掉当前弹窗")
-                return action_back(
-                    f"{label}: 换关 Q{_have:02d}→Q{_want:02d} — 关弹窗(无X, ESC)")
+                        close, f"{label}: {_why} — 先关掉当前弹窗")
+                return action_back(f"{label}: {_why} — 关弹窗(无X, ESC)")
             # MAX 可点 → 点; MAX 灰 → AP 不足, 收工
             qmax = self.find_cls(screen, UC.QTY_MAX, conf=_WEAK_CONF)
             qmax_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
@@ -1752,8 +1800,9 @@ class EventQuestSkill(BaseSkill):
             hit = next((r for r in rows
                         if _num is not None and r["num"] == _num), None)
             if hit is not None:
-                # 记下这个掃蕩弹窗属于哪一关 —— 上面那道"换关先关窗"闸靠它。
-                self._sweep_popup_num = _num
+                # ⛔这里不再记弹窗身份(那是 v2 的意图当身份, 换关假象根因之一),
+                # 身份等弹窗开出来由 _read_popup_num 从标题感知。新弹窗配额重计。
+                self._round_plus = 0
                 return action_click_box(hit["enter"],
                                         f"{label}: open quest Q{_num} (按关号锚定)")
             box = min((r["enter"] for r in rows),

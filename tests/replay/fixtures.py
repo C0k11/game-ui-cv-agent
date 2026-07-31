@@ -964,6 +964,7 @@ def fx_multi_farm_quota_not_max():
     sk = EventQuestSkill(farm_stages=[10, 11])
     sk.reset()
     sk._quests = [{"num": 11, "cy": 0.5}]
+    sk._popup_vnum = 11    # 弹窗身份已验(fixture 无帧, 模拟标题 OCR 读出)
     a = sk._sweep_quest(screen_from_tick(raw), 0, "close", "farm Q11")
     r = str(a.get("reason", ""))
     return ("轮转配额" in r and "MAX" not in r,
@@ -978,10 +979,52 @@ def fx_single_farm_still_max():
     sk = EventQuestSkill(farm_stages=[12])
     sk.reset()
     sk._quests = [{"num": 11, "cy": 0.5}]
+    sk._popup_vnum = 11    # 弹窗身份已验(fixture 无帧, 模拟标题 OCR 读出)
     a = sk._sweep_quest(screen_from_tick(raw), 0, "close", "farm Q12")
     r = str(a.get("reason", ""))
     return (r.endswith("MAX"),
             f"reason={r!r} (期望点 MAX)")
+
+
+def fx_sweep_wrong_popup_must_close():
+    """2026-07-31 换关假象结案: 弹窗身份(标题OCR)≠目标关 → 必须关窗重开;
+    且关窗动作被稳定门吞后闸必须**仍武装**(v2 在发动作前清身份 →
+    吞一次就永久解除 → 8+2 轮 reason 交替全灌 Q11, ~1130AP 错灌)。"""
+    from brain.skills.event_quest import EventQuestSkill
+    raw = _load("sweep_panel_q11.json")
+    scr = screen_from_tick(raw)
+    sk = EventQuestSkill(farm_stages=[10, 11])
+    sk.reset()
+    sk._quests = [{"num": 10, "cy": 0.4}, {"num": 11, "cy": 0.5}]
+    sk._popup_vnum = 11        # 身份已验=Q11, 但轮转指针要刷 Q10
+    a1 = sk._sweep_quest(scr, 0, "close", "farm Q10")
+    r1 = str(a1.get("reason", ""))
+    armed = sk._popup_vnum == 11   # 发完关窗动作身份不许被清(吞发后要复发)
+    a2 = sk._sweep_quest(scr, 0, "close", "farm Q10")
+    r2 = str(a2.get("reason", ""))
+    ok = ("换关" in r1 and armed and "换关" in r2
+          and a1.get("action") in ("click", "back"))
+    return (ok, f"r1={r1!r} armed={armed} r2={r2!r} "
+                f"(期望两 tick 都发关窗, 身份不被清)")
+
+
+def fx_sweep_unknown_popup_fail_closed():
+    """弹窗身份读不出时: 墙钟窗口内等待重试, 超时必须关窗重开 —
+    **身份未知的弹窗上绝不开扫**(宁多关一次不扫错关)。"""
+    from brain.skills.event_quest import EventQuestSkill
+    raw = _load("sweep_panel_q11.json")
+    scr = screen_from_tick(raw)    # frame=None → 标题 OCR 必 None
+    sk = EventQuestSkill(farm_stages=[10, 11])
+    sk.reset()
+    sk._quests = [{"num": 10, "cy": 0.4}, {"num": 11, "cy": 0.5}]
+    a1 = sk._sweep_quest(scr, 0, "close", "farm Q10")
+    r1 = str(a1.get("reason", ""))
+    wait_ok = a1.get("action") == "wait" and "读不出" in r1
+    sk._pv_fail_t0 = sk.clock() - 7.0     # 模拟重试窗超时
+    a2 = sk._sweep_quest(scr, 0, "close", "farm Q10")
+    r2 = str(a2.get("reason", ""))
+    ok = wait_ok and "身份读不出" in r2 and a2.get("action") in ("click", "back")
+    return (ok, f"r1={r1!r} r2={r2!r} (期望 先等待重试, 超时关窗)")
 
 
 def fx_panel_stepper_not_purchase_dialog():
@@ -1028,6 +1071,8 @@ CASES = [
     ("⛔课程表票_绝不吃「3→2」诱饵", fx_sched_ticket_decoy_never_read, True),
     ("⛔面板底部假確認_不当对话框", fx_event_panel_fake_confirm_not_a_dialog, True),
     ("⛔多关轮转_配额不MAX", fx_multi_farm_quota_not_max, True),
+    ("⛔错弹窗必关_吞发不解武装", fx_sweep_wrong_popup_must_close, True),
+    ("⛔弹窗身份读不出_fail-closed关窗", fx_sweep_unknown_popup_fail_closed, True),
     ("单关_仍走MAX", fx_single_farm_still_max, True),
     ("⛔面板亮stepper_不当购买框", fx_panel_stepper_not_purchase_dialog, True),
 ]
