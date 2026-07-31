@@ -433,7 +433,13 @@ class CraftSkill(BaseSkill):
             self.log("clicking 开始制造")
             self._start_clicked = True
             self.mark("start_click")     # after-ack 窗口起点(见下方 fall-through 闸)
-            return action_click_box(start_btn, "start craft (开始制造)")
+            _a = action_click_box(start_btn, "start craft (开始制造)")
+            # ⭐2026-08-01 live 实锤: 自计数回滚每 tick 立即重点 → same-target
+            # hold 计时反复重置永远出不去, 連吞 15 发直到 timeout 制造没开成。
+            # 開始製造 是幂等键(確定製造框弹出后 cls 变化, JIT bbox 复验兜底)
+            # → 与 event_quest 配额加号/换关X 同用显式豁免(273ed9f 家族)。
+            _a["_hold_exempt"] = True
+            return _a
         # 兜底: 开始制造(idx444) 是 v6b 漏检的 missing cls (probe 旧模型 0.93,
         # v6b 退步漏检 → craft 卡死, live 2026-06-06)。已点过 MAX (= 在 dialog 里)
         # 且 MAX/MAX灰 检出 → 用它外推开始制造位置 (probe: MAX(0.926,0.713) →
