@@ -120,7 +120,7 @@ def _game_day() -> str:
     """
     from datetime import timezone
     _SERVER_TZ = timezone(timedelta(hours=8))       # BA 繁中服
-    return (datetime.now(_SERVER_TZ) - timedelta(hours=4)).date().isoformat()
+    return (datetime.now(_SERVER_TZ) - timedelta(hours=3)).date().isoformat()
 
 
 def _load_cafe_state() -> dict:

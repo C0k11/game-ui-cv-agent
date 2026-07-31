@@ -65,7 +65,7 @@ _SCHED_STATE_FILE = _DATA_DIR / "schedule_state.json"
 
 
 def _game_day() -> str:
-    """BA 游戏日(04:00 刷新) ISO 日期 —— 日累计台账的 key。
+    """BA 游戏日(UTC+8 03:00 刷新 = JST 04:00, 2026-08-01 帧证 2:35→3:18 任務 8/8→1/8) ISO 日期 —— 日累计台账的 key。
 
     ⛔2026-07-27 实测事故: 旧版用**裸 `datetime.now()`(host 本地时钟)**, 而游戏
     日界锚在**设备/服务器时区**。实测 host=UTC-4 / device=Asia/Shanghai(UTC+8)
@@ -83,7 +83,7 @@ def _game_day() -> str:
     """
     from datetime import datetime, timedelta, timezone
     _SERVER_TZ = timezone(timedelta(hours=8))       # BA 繁中服
-    return (datetime.now(_SERVER_TZ) - timedelta(hours=4)).date().isoformat()
+    return (datetime.now(_SERVER_TZ) - timedelta(hours=3)).date().isoformat()
 
 
 def _load_sched_state() -> dict:
