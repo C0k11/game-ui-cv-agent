@@ -2123,6 +2123,17 @@ class DailyPipeline:
                         _cr = _read_topbar_count(screen, TOPBAR_CREDIT)
                         _py = _read_topbar_count(screen, TOPBAR_PYROXENE)
                     _prev_py = _RESOURCES.get("pyroxene")
+                    # ⛔帧级质量闸(2026-07-31 误急停结案): 采样帧的 credits 若
+                    # 相对基线**位数暴缩**(23,125,907→23,125 实锤), 说明这一帧
+                    # 顶栏读数整体不可信(转场/遮挡) — 同帧的 pyroxene 幻影值
+                    # (16,706→16,770)当时就是这么入的基线, 下一轮真值 16,726
+                    # (+20 任务收入)反被判 DROPPED 全线急停。整帧丢弃。
+                    _cr_prev = _RESOURCES.get("credits")
+                    if (_cr is not None and _cr_prev
+                            and len(str(_cr)) < len(str(_cr_prev))):
+                        print(f"[Pipeline] 采样帧不可信(credits {_cr_prev}→{_cr} "
+                              f"位数暴缩) — 本帧三币读数全部丢弃", flush=True)
+                        _ap = _cr = _py = None
                     if _py is not None:
                         if _prev_py is not None and _py < _prev_py:
                             # Suspected drop. The #1 false positive is OCR
@@ -2165,6 +2176,20 @@ class DailyPipeline:
                                     print(f"[Pipeline] pyroxene {_prev_py}→{_py}: clean "
                                           f"re-reads={_py_c1}/{_py_c2} disagree or "
                                           f"unconfirmed, ignoring", flush=True)
+                        elif _prev_py is not None and _py > _prev_py:
+                            # ⭐基线上调与下调**对称**过闸(2026-07-31): 上调值
+                            # 会成为下一轮 kill 的比较基线, 幻影高值入账 =
+                            # 真值反被判掉钱。clean 双读一致才抬。
+                            self._py_drop_pending = None
+                            _pu1 = _read_pyroxene_clean()
+                            time.sleep(0.5)
+                            _pu2 = _read_pyroxene_clean()
+                            if _pu1 is not None and _pu1 == _pu2:
+                                _RESOURCES["pyroxene"] = _pu1
+                            else:
+                                print(f"[Pipeline] pyroxene 上调 {_prev_py}→{_py} "
+                                      f"clean复读不一致({_pu1}/{_pu2}) — 不入基线",
+                                      flush=True)
                         else:
                             self._py_drop_pending = None
                             _RESOURCES["pyroxene"] = _py
