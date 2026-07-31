@@ -984,6 +984,20 @@ def fx_single_farm_still_max():
             f"reason={r!r} (期望点 MAX)")
 
 
+def fx_panel_stepper_not_purchase_dialog():
+    """2026-07-31 配额首考当场误杀: 纯 AP 扫荡确认框(80AP×4)被 cancel —
+    配额模式下面板 stepper 保持亮态, MAX_可点击 cx0.84 隔 dim 层 0.98 检出,
+    全屏 body 判据把它当购买框铁证。修=stepper 必须在弹窗横向范围内
+    (cx<0.72)。本帧含 取消+确认+面板亮MAX → 必须判 False。"""
+    from brain.skills.event_quest import EventQuestSkill
+    raw = _load("sweep_confirm_panel_stepper.json")
+    sk = EventQuestSkill()
+    sk.reset()
+    got = sk._dialog_is_purchase(screen_from_tick(raw))
+    return (got is False,
+            f"_dialog_is_purchase={got} (期望 False — 面板亮 stepper 不是购买框证据)")
+
+
 CASES = [
     ("⛔cafe大厅门控_只在大厅判", fx_cafe_dot_gate_only_on_lobby, True),
     ("⛔cafe领收益_点时绝不报领完", fx_cafe_claim_earnings_no_premature_done, True),
@@ -1015,6 +1029,7 @@ CASES = [
     ("⛔面板底部假確認_不当对话框", fx_event_panel_fake_confirm_not_a_dialog, True),
     ("⛔多关轮转_配额不MAX", fx_multi_farm_quota_not_max, True),
     ("单关_仍走MAX", fx_single_farm_still_max, True),
+    ("⛔面板亮stepper_不当购买框", fx_panel_stepper_not_purchase_dialog, True),
 ]
 
 

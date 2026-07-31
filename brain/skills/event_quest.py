@@ -632,9 +632,17 @@ class EventQuestSkill(BaseSkill):
             return True
         for b in (screen.yolo_boxes or []):
             cy = (b.y1 + b.y2) / 2
+            cx = (b.x1 + b.x2) / 2
             if cy <= 0.12 or b.confidence < 0.20:
                 continue
-            if b.cls_name in self._BUY_DIALOG_MARKERS:
+            # ⛔stepper 必须在**确认弹窗横向范围内**(2026-07-31 配额首考当场
+            # 误杀): 上面"纯AP框 stepper 零检出"是 MAX 时代**灰态**的实测 —
+            # 配额模式下面板 stepper 保持亮态, 隔着 dim 层照样 0.98 检出
+            # (实锤帧: MAX_可点击 cx0.84/加号 cx0.79 从弹窗右侧露出 → 纯AP
+            # 80AP×4 扫荡框被 cancel)。历史两帧真購買AP框的弹窗右界≈0.74,
+            # 其 stepper 全在弹窗中央 — cx<0.72 内的 stepper 才是购买框铁证,
+            # 面板 stepper(cx≥0.78)排除。青辉石通道不加此限(检到即铁证)。
+            if b.cls_name in self._BUY_DIALOG_MARKERS and cx < 0.72:
                 return True
         return False
 
