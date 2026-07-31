@@ -1058,6 +1058,16 @@ class ScheduleSkill(BaseSkill):
         Sequence (once):  click 夏莱办公室 → ARROW_LEFT (jump to last region).
         Then per region:  click SCHED_ALL → open popout → roster.
         """
+        # ⭐popout 检查必须先于 _is_schedule(2026-07-31 live 帧实锤): 全屏
+        # popout 把底图 SCHOOL 瓦片/页面签名全盖住 → _is_schedule False →
+        # 旧顺序走不到这里, 空等 _NAVIGATE_MAX 后 back 把**开得好好的 popout**
+        # 关掉(守卫拦下才没白干)。popout 在屏本身就是"在 schedule 里"的最强
+        # 证据 — 判定从强到弱排。
+        if self._roster_open(screen):
+            self._reset_region()
+            self._goto("roster")
+            return action_wait(300, "popout already open → roster")
+
         if not self._is_schedule(screen):
             if self.detect_screen_yolo(screen) == "Lobby":
                 self.log("on lobby, schedule exited — done")
@@ -1066,12 +1076,6 @@ class ScheduleSkill(BaseSkill):
                 self.log("lost schedule UI, backing out")
                 return action_back("back (schedule UI lost)")
             return action_wait(500, "waiting for schedule UI")
-
-        # If a popout is already open, go scan it.
-        if self._roster_open(screen):
-            self._reset_region()
-            self._goto("roster")
-            return action_wait(300, "popout already open → roster")
 
         if self._tickets == 0:
             self.log("no tickets remaining, exiting")
