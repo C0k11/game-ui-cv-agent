@@ -28,8 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw_images"
 TRAJ = ROOT / "data" / "trajectories"
 MASTER = RAW / "_classes.txt"
-# v9 active (2026-06-12) — prefill today's clean frames with the live model.
-UI_WEIGHTS = Path(r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v9\weights\best.pt")
+# 预标用线上模型(2026-08-01 v9→v14: 预标钉旧版=白白丢 5 代召回)。
+UI_WEIGHTS = Path(r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v14\weights\best.pt")
 
 _THUMB = (48, 27)   # grayscale thumb for near-dupe metric
 
