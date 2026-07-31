@@ -1925,6 +1925,13 @@ class DailyPipeline:
         # (memory cafe_flow_spec 记的"收益第1次没领"就是这个)。
         # 不动关键词列表(那会波及全部 interceptor/dismiss 路径), 让个别调用点
         # 显式声明"我这个按钮会动, 必须等稳定帧"。
+        # ⭐`_hold_exempt`(2026-07-31): 显式 flag 版完全豁免(稳定门+hold 一起跳),
+        # 给「幂等/自计数快速连点」用 — 首例=配额轮转的加号连点: 静态按钮+
+        # skill 自己计数不读屏, same-target hold 2.5s/发把 5 发拖到 50+ tick,
+        # 直接烧光 _sweep_quest 的 phase 预算(swept=0 实锤)。显式 flag,
+        # 不塞关键词(reason 措辞当控制信号的老坑)。
+        if action.get("_hold_exempt"):
+            return action
         if (not action.get("_force_settle")) and any(k in _r for k in (
                 "interceptor", "dismiss", "reward", "獎勵", "奖励", "result",
                 "結果", "结果", "确认键", "確認", "continue", "繼續", "領取",

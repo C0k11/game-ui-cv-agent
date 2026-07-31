@@ -1606,8 +1606,12 @@ class EventQuestSkill(BaseSkill):
                                          region=(0.30, 0.20, 1.0, 0.80))
                     if plus is not None:
                         self._round_plus += 1
-                        return action_click_box(
+                        _a = action_click_box(
                             plus, f"{label}: 轮转配额+1 ({self._round_plus}/5)")
+                        # 静态按钮+自计数连点: hold 2.5s/发烧光 phase 预算
+                        # (2026-07-31 swept=0 实锤) → 显式豁免稳定门+hold
+                        _a["_hold_exempt"] = True
+                        return _a
                 # 配额满 / 加号不在(已顶格或 AP 上限使加号转灰) → 开扫
                 _qty_ready = True
             elif qmax is not None and qmax_grey is None:
