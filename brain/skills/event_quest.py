@@ -1632,9 +1632,18 @@ class EventQuestSkill(BaseSkill):
                         else f"弹窗身份读不出(want Q{_want:02d})")
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 if close is not None:
-                    return action_click_box(
+                    _a = action_click_box(
                         close, f"{label}: {_why} — 先关掉当前弹窗")
-                return action_back(f"{label}: {_why} — 关弹窗(无X, ESC)")
+                    # ⭐2026-08-01 AP744 剩着收工的根因: 换关 X 被稳定门连吞 →
+                    # phase 预算(confirm 没落地不重置)烧光 → 提前收口。X 是
+                    # 幂等键(弹窗一关 X 即消失, 重发被 JIT bbox 复验丢弃) →
+                    # 与配额加号同用显式豁免, 不给稳定门吞的机会。
+                    _a["_hold_exempt"] = True
+                    return _a
+                # ⛔ESC 兜底已删(2026-08-01): X 检出 0.97 极稳用不上它, 而它在
+                # 陈旧帧上发出会把**列表页**退掉(live 实锤: 退到 MissionHub,
+                # currency 阶段无恢复路径 → 本轮轮转直接夭折)。X 没检出=等下一帧。
+                return action_wait(400, f"{label}: {_why} — 等弹窗X出现")
             # MAX 可点 → 点; MAX 灰 → AP 不足, 收工
             qmax = self.find_cls(screen, UC.QTY_MAX, conf=_WEAK_CONF)
             qmax_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)

@@ -1703,8 +1703,19 @@ def _jit_anchor_cls(tgt, boxes, radius: float = _JIT_RADIUS):
 
 def _jit_landing_ok(tgt, cls_name: str, fresh_boxes,
                     radius: float = _JIT_RADIUS) -> bool:
-    """新帧上落点仍被**同名** cls 支撑? False ⇒ 目标已消失/移位, 丢弃这一发。"""
-    return any(b.cls_name == cls_name and _jit_box_supports(tgt, b, radius)
+    """新帧上落点仍被**同名** cls 支撑? False ⇒ 目标已消失/移位, 丢弃这一发。
+
+    ⛔2026-08-01 用户抓包收紧: 旧判「中心距 ≤0.06 也算支撑」在掃蕩完成框上
+    放行了確認键老坐标 — 落点其实压在奖励图标上(差 0.059)弹出 tooltip。
+    「附近有同名 cls」≠「落点在按钮框内」: 游戏按像素判定, 复验必须按
+    **bbox 含住**(外扩 0.012 容忍亚像素抖动)。多丢的合法微移点击由
+    action_suppressed 让 skill 重算新坐标, 自愈且方向安全。
+    (radius 参数保留只为签名兼容, 不再参与判定。)"""
+    tx, ty = float(tgt[0]), float(tgt[1])
+    _m = 0.012
+    return any(b.cls_name == cls_name
+               and (b.x1 - _m) <= tx <= (b.x2 + _m)
+               and (b.y1 - _m) <= ty <= (b.y2 + _m)
                for b in fresh_boxes)
 
 
