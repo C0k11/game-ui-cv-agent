@@ -312,7 +312,10 @@ def main() -> int:
             # schedule 那次 popout 尾发就误开过设施)。
             _dismissy = any(k in reason for k in (
                 "close", "dismiss", "確認", "确认", "取消", "叉叉", "reward",
-                "continue", "領取", "领取"))
+                "continue", "領取", "领取",
+                # 配额加号(2026-07-31): round 间过渡帧上决策帧有加号/探针帧
+                # 动画中消失 — 自计数+吞发回滚+JIT 复验三层兜底, 放行记账
+                "轮转配额"))
             # ⭐zero-det wake 是**定义上**无 cls 支撑的动作, 盲拍闸对它永远误报
             # (2026-07-27 第一步就撞上)。与"危险盲拍"的本质区别:
             #   危险盲拍 = skill **以为**屏上有按钮 → 点歪进错页;
