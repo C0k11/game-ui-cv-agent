@@ -289,6 +289,7 @@ class EventQuestSkill(BaseSkill):
         self._popup_open = False
         self._formation_step = ""     # unlock 子步: '', 'edit', 'auto', 'confirm', 'sortie'
         self._tasks_done = False
+        self._tasks_wait_t0 = 0.0     # tasks 无锚死等的收口墙钟(0=未计时)
         self._milestone_done = False  # 里程碑(獎勵資訊)领奖阶段
         self._milestone_wait_t0 = 0.0  # 等「獎勵資訊」入口渲染的墙钟起点(0=未计时)
         self._ms_claim_fired = False   # milestone 領取 after-ack flag
@@ -1723,6 +1724,12 @@ class EventQuestSkill(BaseSkill):
             # 掃蕩開始处的长注释。_currency 据此转下一关。
             self._sweep_rounds += 1
             self._round_plus = 0   # 本轮配额已消费, 下一关面板重新计
+            # ⭐每轮 confirm 落地重置 phase 预算(2026-07-31 第三考实锤):
+            # 配额轮转一轮 ~15-20 tick(scrcpy 断流期更慢), 多轮累计必烧光
+            # `_phase_ticks > _PHASE_MAX*3` 的总预算 → round 3 开不出来,
+            # 600+ AP 留给尾轮。确认真落地=活的进展, 预算按**轮**计,
+            # 真卡死仍被单轮预算逮住(tick_vs_wallclock 家族)。
+            self._phase_ticks = 0
             self._ap_spend_after_read = True   # 扫荡花 AP → 上次读数作废
             return action_click_box(conf_btn, f"{label}: confirm sweep (pure AP)")
         # 走到这 = 确认框(取消+確認同屏)不在 → 上一发 confirm(若有)已落地
@@ -1862,6 +1869,19 @@ class EventQuestSkill(BaseSkill):
             self._tasks_done = True
             self._set("close")
             return action_wait(200, "no task rewards")
+        # ⛔waiting 死等收口(2026-07-31 实锤 ×114 tick 直到 stuck-120 兜底):
+        # 任務按钮/领取锚全被弹窗盖住时这里原地空转。先关挡路弹窗露出底层;
+        # 10s 仍无锚 → close 收工(任务奖励明天还能领, fail-closed 不误动)。
+        _x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.5)
+        if _x is not None:
+            return action_click_box(_x, "tasks: close blocking popup")
+        if not self._tasks_wait_t0:
+            self._tasks_wait_t0 = self.clock()
+        if self.clock() - self._tasks_wait_t0 > 10.0:
+            self.log("tasks: 10s 无任何锚(遮挡/漏检) → close 收口")
+            self._tasks_done = True
+            self._set("close")
+            return action_wait(200, "tasks timeout → close")
         return action_wait(600, "tasks: waiting")
 
     def _close(self, screen: ScreenState) -> Dict[str, Any]:
