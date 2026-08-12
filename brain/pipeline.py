@@ -332,7 +332,21 @@ def _topbar_strip_map():
         # ⇒ 教训: 短数字(14176/999)能自证, 长数不能; 给长数标定必须挂人审真值。
         # ⚠n=10 且只有一个信用点数值, 样本小 —— 但真值锚定优于大样本的共识锚定。
         TOPBAR_CREDIT: (0.10, 5.5, 0.65),
-        TOPBAR_PYROXENE: (0.10, 6.0, 1.20),
+        # ⛔⛔2026-08-07 live 事故 + 重标: kill-switch 报
+        # `青辉石 18036→18003 MONEY BREACH` 把整条 pipeline 急停, 而人眼看帧
+        # 余额**一分没少**。复现: 同一张 4K 帧 OCR 4 次里 3 次读成 18003
+        # (逗号被读成 0 + 末位 6 被切) —— 是**裁切窗口**的锅, 不是模型。
+        # 病根: 信用点当初已按人眼真值重标(y_pad 0.65), 而青辉石**留着网格
+        # 共识值 (6.0, 1.20)** —— 正是上面那条注释警告过的"共识≠真值", 这一格
+        # 当时漏做了。27 帧 × 42 组参数实测(真值 18,036, 人眼读):
+        #   y_pad ≤0.35 → 裁太紧, 纵向切掉数字, 读成 `36`
+        #   y_pad 0.40~0.50 → **27/27 零错读**(x_to 5.0~6.0 全通)
+        #   y_pad ≥0.55 → 裁太松吃进邻居, 读成 `18003`
+        #   现役的 1.20 = 20/27 对 / **7 次错读**, 整张网格最烂的区之一
+        # 取安全块中心, 对两种失效模式都留最大余量。
+        # ⚠单一数值(18,036)标定, 样本值不够多 —— 但失效是**几何性**的(裁切高度),
+        #   且旧值已被实锤打脸。⛔危害双向: 会读低就会读高, **读高会掩盖真实掉钱**。
+        TOPBAR_PYROXENE: (0.10, 5.5, 0.45),
     }
 
 
@@ -1684,6 +1698,44 @@ class DailyPipeline:
                 return action_click_box(x_y, "interceptor: reward X-close (YOLO)")
             print("[Interceptor] YOLO reward popup → blind tap (no cls)")
             return action_click(0.5, 0.88, "interceptor: dismiss reward (blind, no cls)")
+        # ── 剧情过场逃生 (2026-08-07 live 实锤的阻塞洞) ──────────────────
+        # 现象: EventQuest 点进活动 → 撞上活动开场剧情 → `back` **完全无效**
+        # (BA 剧情过场不吃 ESC), 连按 5 次屏上还是 `剧情menu 0.98` ⇒ EventQuest
+        # 判 verify-timeout 放弃活动, Arena 接手继续 back 空转。**整个活动被一段
+        # 开场剧情挡死**。
+        # 病根: `if page is not None: return action_back(...)` 这条通用退出路径
+        # 在 arena/cafe/schedule/ticket_sweep 共 5 处复制粘贴, 而**只有
+        # StoryMining 会跳剧情** —— 它不在 canonical skill_order 里。
+        # ⇒ 放到 interceptor: 谁撞进剧情都能出来, 不用改那 5 处。
+        # 流程照搬 story_mining.py:384-422 已验证的顺序(确认框 → 跳过键 → menu),
+        # region 也照抄 —— 别自己发明。⛔ StoryMining 自己在跑时不插手(它有
+        # after-ack 计时, 插手会把刚弹出的略過框再点关一次 = 那边记过的自锁)。
+        if type(skill).__name__ != "StoryMiningSkill":
+            _st_chrome = find_yolo_box(screen, ["剧情menu", "跳过故事键"],
+                                       min_conf=0.30)
+            if _st_chrome is not None and 0.80 <= _st_chrome.cx <= 1.0 \
+                    and _st_chrome.cy <= 0.30:
+                _st_cf = find_yolo_box(screen, ["确认键"], min_conf=0.30)
+                if _st_cf is not None and 0.30 <= _st_cf.cx <= 0.85 \
+                        and 0.55 <= _st_cf.cy <= 0.85:
+                    print("[Interceptor] 剧情逃生: 略過确认框 → 确认键")
+                    return action_click_box(_st_cf, "interceptor: confirm story skip")
+                # after-ack: 跳过/menu 发出后要给「是否略過」框渲染时间, 否则
+                # 第二发正好把刚弹出的框又关掉(story_mining 那边记过的自锁)。
+                _st_last = getattr(self, "_story_escape_ts", 0.0)
+                if time.time() - _st_last < 3.0:
+                    return action_wait(350, "interceptor: 剧情逃生 — 等略過确认框")
+                _st_skip = find_yolo_box(screen, ["跳过故事键"], min_conf=0.40)
+                if _st_skip is not None:
+                    self._story_escape_ts = time.time()
+                    print("[Interceptor] 剧情逃生: 跳过故事键")
+                    return action_click_box(_st_skip, "interceptor: 跳过故事键")
+                _st_menu = find_yolo_box(screen, ["剧情menu"], min_conf=0.40)
+                if _st_menu is not None and _st_menu.cy <= 0.16:
+                    self._story_escape_ts = time.time()
+                    print("[Interceptor] 剧情逃生: 开 剧情menu")
+                    return action_click_box(_st_menu, "interceptor: open 剧情menu")
+
         # Full-screen bond / region level-up — tap anywhere to advance.
         levelup_y = find_yolo_box(screen, ["羁绊升级", "地区升级"], min_conf=0.35)
         if levelup_y:

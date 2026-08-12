@@ -221,6 +221,11 @@ class CafeSkill(BaseSkill):
     def _init_state(self) -> None:
         self._phase_ticks: int = 0          # ticks spent in current sub_state
         self._enter_attempts: int = 0
+        # ⛔"UI 被隐藏"必须**连续多帧**成立才算数(2026-08-07 live 实锤, 见 _enter):
+        # 单帧零导航 cls 的成因里混着**转场帧**(进咖啡厅时学生先渲染、UI chrome
+        # 还没出来 → 恰好"有摸头标记 + 零导航 cls"), 而那一步的落点是写死坐标,
+        # 误触会点进家具編輯模式。真 UI-隐藏是持续状态, 转场帧是一瞬 ⇒ 用计数分开。
+        self._ui_hidden_ticks: int = 0
         # earnings
         self._earnings_done: bool = False
         self._earnings_claimed: bool = False  # set after claim → close popup proactively
@@ -520,10 +525,35 @@ class CafeSkill(BaseSkill):
         _navs = self.find_cls(screen, [UC.BTN_BACK, UC.BTN_HOME, UC.CAFE_EARNINGS,
                                        UC.CAFE_MOVE_1F, UC.CAFE_MOVE_2F,
                                        UC.CAFE_INVITE_TICKET], conf=0.30)
+        # ⛔⛔弹窗在场时**绝不**走「UI 隐藏」分支(2026-08-02 live 帧实锤):
+        # 咖啡厅弹了「說明/訪問學生目錄」框(確認键灰、右上带 X), 而这一步的落点
+        # (0.12,0.88) 是**写死坐标**, 在 UI 显示时正压在底栏「編輯模式」按钮一带
+        # —— 误触会进家具编辑模式。零导航 cls 有两种成因: ①UI 真被 toggle 隐藏
+        # ②弹窗盖住/转场帧漏检。②在这里必须优先按「关弹窗」处理, 而不是盲点空地。
+        _popup_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.60)
+        if _popup_x is not None:
+            self.log("咖啡厅有弹窗(叉叉在场) → 先关弹窗, 不走 UI-隐藏盲点分支")
+            return action_click_box(_popup_x, "cafe: close blocking popup (X)")
+        # ⛔⛔单帧不算数(2026-08-07 live 实锤): 上面那道弹窗闸是 2026-08-02 加的,
+        # 代码在、常量对, 却**没拦住** —— 因为 skill 那一帧上连叉叉都没检出:
+        # 那是张**进咖啡厅的转场帧**(学生已渲染 → 有 1 个 Emoticon_Action,
+        # UI chrome 还没出来 → 零导航 cls), 恰好满足"UI 隐藏"的形状。
+        # 我的探针帧(晚一拍)上 回大厅0.98/返回键0.97/移动至2号点0.96/邀请卷0.98
+        # /弹窗叉叉0.96 **全在**, 屏上是「說明·訪問學生目錄」弹窗 + 完整底栏,
+        # 而写死落点 (0.12,0.88) 正压在「編輯模式/禮物」上。
+        # ⇒ 原注释自己列了两种成因(①真隐藏 ②弹窗/**转场帧漏检**), 但只挡了弹窗。
+        # 真 UI-隐藏是**持续状态**, 转场帧是一瞬 ⇒ 要求连续 3 拍成立才动手。
         if _emos and _navs is None:
-            self.log(f"咖啡厅 UI 被隐藏(有 {len(_emos)} 个摸头标记但零导航 cls) "
-                     f"→ 点空地把 UI toggle 回来")
+            self._ui_hidden_ticks += 1
+            if self._ui_hidden_ticks < 3:
+                self.log(f"疑似咖啡厅 UI 隐藏({self._ui_hidden_ticks}/3) — "
+                         f"可能只是转场帧, 再看一拍(绝不盲点写死坐标)")
+                return action_wait(350, "cafe: 疑似 UI 隐藏 — 等下一帧确认")
+            self.log(f"咖啡厅 UI 被隐藏(连续 {self._ui_hidden_ticks} 拍: "
+                     f"{len(_emos)} 个摸头标记 + 零导航 cls) → 点空地把 UI toggle 回来")
+            self._ui_hidden_ticks = 0
             return action_click(0.12, 0.88, "cafe: UI 被隐藏 → 点空地唤回")
+        self._ui_hidden_ticks = 0
 
         # Unknown / transition screen.
         if self._phase_ticks > _ENTER_MAX:

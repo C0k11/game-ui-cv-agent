@@ -144,6 +144,33 @@ class CraftSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
+    @staticmethod
+    def _btn_is_grey(screen: ScreenState, box, s_thr: float = 94.0) -> bool:
+        """按钮框内 HSV 饱和度判禁用态 —— **不依赖模型**。
+
+        ⛔为什么需要它: v14 把灰键检成 0.99 的亮态(訓練集里 219 个灰「開始製造」
+        当年被标成亮态 444, 2026-08-02 已改类 444→485, 但要 v15 重训才生效)。
+        在模型追上来之前, conf 不编码可点性 ⇒ 用像素兜底。
+        阈值 94 由 scripts/audit_gray_mislabel.py 在 806 个人审框上标定
+        (彩色按钮亮态 S≈184 / 去饱和灰态 S≈3, 中间带零样本)。
+        ⚠只对**彩色按钮**成立; 白底钮(全部選擇)灰化方向相反, 别套用。
+        拿不到帧一律返回 False(fail-open 走原行为探针), 绝不因判据缺失卡死流程。
+        """
+        frame = getattr(screen, "frame", None)
+        if frame is None or box is None:
+            return False
+        try:
+            import cv2                                       # noqa: PLC0415
+            h, w = frame.shape[:2]
+            x1, y1 = max(0, int(box.x1 * w)), max(0, int(box.y1 * h))
+            x2, y2 = min(w, int(box.x2 * w)), min(h, int(box.y2 * h))
+            crop = frame[y1:y2, x1:x2]
+            if crop.size == 0:
+                return False
+            return float(cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)[:, :, 1].mean()) < s_thr
+        except Exception:                                    # noqa: BLE001
+            return False
+
     def _mark_visited(self) -> None:
         """写今日台账 —— 只在**帧证实到过制造页**之后写(见 _reached)。"""
         if not self._reached:
@@ -395,7 +422,30 @@ class CraftSkill(BaseSkill):
             self._maxed_clicks += 1
             self.log("set MAX quantity (YOLO MAX_可点击)")
             return action_click_box(max_btn, "set craft quantity MAX")
+        # ⭐⭐v15 起模型直接吐灰态类 —— 这是**最强的判据**, 必须排在所有兜底之前。
+        # ⛔2026-08-07 live 实锤的迁移断裂: 下面那道像素闸挂在
+        # `find_cls(CRAFT_START)` 非空这个前提上, 而它成立**只因为 v14 把灰键
+        # 误检成亮态**。v15 修对了 → find_cls(亮态) 返回 None → 灰键闸整条被
+        # 跳过 → 一路落到下面的「MAX 外推」去盲点一个禁用按钮。
+        # **修好模型反而把为模型缺陷写的兜底打死了**, 这类断裂 grep 不出来,
+        # 只能靠 live 逐帧撞见。
+        _grey_btn = self.find_cls(screen, UC.CRAFT_START_GREY, conf=_CLS_CONF)
+        if _grey_btn is not None:
+            self.log(f"開始製造 = 灰态 cls({UC.CRAFT_START_GREY} "
+                     f"{_grey_btn.confidence:.2f}) → skip craft(零无效点击)")
+            self._goto("exit")
+            return action_wait(300, "craft 開始製造 greyed cls → skip")
         start_btn = self.find_cls(screen, UC.CRAFT_START, conf=_CLS_CONF)
+        if start_btn is not None and self._btn_is_grey(screen, start_btn):
+            # ⭐2026-08-02 live 实锤 + 像素判据直接判灰(不再靠行为探针烧 8 次点击):
+            # 帧上「開始製造」灰 + 红字「材料不足。」, 而 v14 照样给 0.99 的**亮态**
+            # CRAFT_START —— 因为训练集里 219 个灰键当年就被标成亮态 444(今天已
+            # 改类 444→485, 但模型要 v15 重训才生效)。⇒ conf 不编码可点性这件事,
+            # 在模型追上来之前先用像素兜底: 按钮框内 HSV-S 双峰实测 亮≈184 / 灰≈3,
+            # 阈值 94(scripts/audit_gray_mislabel.py 标定, 806 框零错分)。
+            self.log("開始製造 像素判灰(S<94, 材料不足) → skip craft(零无效点击)")
+            self._goto("exit")
+            return action_wait(300, "craft 開始製造 greyed (材料不足) → skip")
         if start_btn is not None:
             # ⚠2026-06-16 实测: 材料不足时 開始製造 变灰但 CRAFT_START cls 仍 fire,
             # 点了没反应/不弹確定製造框 → 旧码每 tick 重点到 max_ticks 超时空转 60+ 拍。

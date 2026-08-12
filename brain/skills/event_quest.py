@@ -101,6 +101,10 @@ _NO_POINTS_SEC = 4.0
 # 实测(今天全部帧): 对话框 確認 cy = 0.699 / 0.705 / 0.771 / 0.809;
 # 被误捡的假阳 cy = 0.961(扫荡面板底部); 顶栏 = 0.03。两头都留足余量。
 _DIALOG_BTN_BAND = (0.20, 0.55, 0.82, 0.93)
+# 掃蕩完成框(无取消键)專用带: 只认**落位后**的確認键。
+# 全部实测位: 确认框 0.699 / 弹入中途 0.705 / 0.771 / 完成框稳定 0.809。
+# 下沿取 0.75 —— 排掉 0.699/0.705 两个中途位, 保留 0.771/0.809。
+_DONE_BTN_BAND = (0.20, 0.75, 0.82, 0.93)
 
 # 固定位 (live 实测, 帧目检):
 _POS_QUEST_TAB = (0.635, 0.151)     # 活动页 Quest tab (cls 活动quest_已选择 仅0.24-0.59)
@@ -336,9 +340,17 @@ class EventQuestSkill(BaseSkill):
         return _read_digits(screen.frame, _R_SLOT_BONUS_XN), "固定位兜底"
 
     def _on_quest_list(self, screen: ScreenState) -> bool:
-        """活动 quest 列表页特征: ≥2 入场键 + (关卡得星 或 活动商店/活动任务底栏)."""
+        """活动 quest 列表页特征: ≥2 关卡行 + (关卡得星 或 活动商店/活动任务底栏)."""
+        # ⛔⛔"新活动首日"盲点(2026-08-07 live 实锤, CODE:BOX 开活动当天):
+        # 旧码只数 `入场键`(已解锁), 要求 ≥2。而**刚开的活动只解锁第 1 关** ——
+        # 屏上是 1 个 入场键 + 4 个 入场键没解锁 ⇒ len=1 < 2 ⇒ verify 恒 False
+        # ⇒ 上层连点 3 次 Quest tab 后判「上期领奖页」back 出去, **整个活动
+        # 一关都打不了**, 而 AP 有 909、活動點數 0/15000。
+        # 页面身份取决于"有一列关卡行", **不取决于解锁了几关** ⇒ 两态一起数。
+        # (STAGE_ENTER_LOCKED 本来就是同一列表的行, 只是钥匙图标而非「入場」。)
         enters = [b for b in (screen.yolo_boxes or [])
-                  if b.cls_name == UC.STAGE_ENTER and b.confidence >= _CLS_CONF]
+                  if b.cls_name in (UC.STAGE_ENTER, UC.STAGE_ENTER_LOCKED)
+                  and b.confidence >= _CLS_CONF]
         if len(enters) < 2:
             return False
         # ⛔负特征 (2026-07-09 live 实锤): 特殊作戰運輸船列表也有 入场键+得星_0,
@@ -369,7 +381,20 @@ class EventQuestSkill(BaseSkill):
         return has_bottom and (qsel or (not qunsel and star3))
 
     def _on_popup(self, screen: ScreenState) -> bool:
-        """任務資訊 popup 特征: 扫荡开始 + 任务开始 同屏."""
+        """任務資訊 popup 特征: 扫荡开始 + 任务开始 同屏.
+
+        ⛔⛔"首通关卡没有扫荡"(2026-08-07 live, CODE:BOX 开活动当天):
+        旧判据只认**扫荡面板**(掃蕩開始+任務開始) —— 那是**打过一次之后**才有的
+        形态。**从没打过的关**弹出来的是「章節資訊」+ 一个「進入章節」按钮,
+        零扫荡控件 ⇒ `_on_popup` 恒 False ⇒ survey 开了 popup 等不到判定,
+        超时关掉、再开、再关…… (用户现场看到的"叉掉了又打开反复几次"),
+        最后 `survey 墙钟超时 90s` 整个活动放弃。
+        Story 和 Quest 两条 tab 都撞同一堵墙(Quest 01 千年高架南側站台 同样是首通)。
+        ⇒ 补上首通形态: `进入章节`(cls139) 在屏 = 这也是关卡 popup, 只是还没打过。
+          它没有加成徽章 ⇒ 下游 `unlocked=False` ⇒ 自动进 unlock(打解锁战), 正确。
+        """
+        if self.find_cls(screen, UC.STORY_ENTER_CHAPTER, conf=_CLS_CONF) is not None:
+            return True
         return (self.find_cls(screen, UC.SWEEP_START, conf=_CLS_CONF) is not None
                 and self.find_cls(screen, UC.TASK_START, conf=_CLS_CONF) is not None)
 
@@ -883,8 +908,18 @@ class EventQuestSkill(BaseSkill):
                 self._set("verify")
                 bcx = (b405.x1 + b405.x2) / 2
                 bcy = (b405.y1 + b405.y2) / 2 + 0.10
-                act = action_click(bcx, bcy, "banner tap (405 atomic 零延迟)")
-                act["_atomic_no_gate"] = True   # 2.5s 窗口, 同 tick 落屏
+                act = action_click(bcx, bcy, "banner tap (405 + 落地前复验)")
+                # ⛔⛔2026-08-07 live 实锤 — 原来这里是 `_atomic_no_gate=True`,
+                # **主动关掉落点复验去和轮播赛跑**。上面那段注释自己写着
+                # 「检出405→tap 落屏延迟 >1.5s 就点到切页后的 474 卡(误入三连根因)」
+                # —— 知道失效模式却选择赛跑, 于是今天又进错上期活动(页面写着
+                # 「活動期間已結束」), 整个活动一关没打。
+                # ⭐实测证据: 任務大廳实帧上 v15 检出 `距离奖励获得结束 0.88`
+                # (474, cx0.078 cy0.149) —— **类完全没问题, 信号一直都在**,
+                # 是代码把唯一能用的那道闸关了。
+                # 改成定向复验: 落地前用最新帧确认 405 还在屏上, 换页了就丢弃,
+                # 下一拍重来。轮播 2.5s/页, 丢一次最多多等一轮, 远好过进错活动。
+                act["_jit_require_cls"] = UC.EVENT_END_LEFT
                 return act
         if banner is not None:
             if src_frame is not None and self._banner_blacklisted(screen, src_frame):
@@ -899,9 +934,11 @@ class EventQuestSkill(BaseSkill):
             # ⚠标签必须说清**真实**来源与帧龄 —— 旧码不管走哪条都写 "fresh",
             # 复盘时看到 'fresh atomic' 会以为观测是新的(实测中位 399ms)。
             tag = src_tag or ("tick+1" if src_frame is None else "?")
-            act = action_click_box(banner, f"banner tap ({tag} atomic, "
+            act = action_click_box(banner, f"banner tap ({tag}, 落地前复验, "
                                            f"帧上={banner.cls_name})")
-            act["_atomic_no_gate"] = True       # 2.5s 窗口, 同 tick 落屏
+            # 同上(2026-08-07): 这条路径原来也 `_atomic_no_gate=True` 关闸赛跑。
+            # 点的就是 405 那张卡 ⇒ 落地前要求 405 仍在屏, 换页了丢弃重来。
+            act["_jit_require_cls"] = banner.cls_name
             return act
         hub = self.find_cls(screen, UC.NAV_TASKS, conf=_CLS_CONF)
         if hub is not None:
@@ -1078,7 +1115,21 @@ class EventQuestSkill(BaseSkill):
             self._popup_open = False
             self._set("enter")
             return action_wait(200, "survey: page lost → re-enter")
-        if not self._survey_swiped:
+        # ⛔⛔"新活动别瞎滑"(用户 2026-08-07 现场纠正, CODE:BOX 开活动当天):
+        # 「这种从 1 开始打没打过的, **游戏会自动帮你把下一个关卡归位过来给你点**。
+        #   我们的滑动路由逻辑是死的不是变通的」。
+        # 滑到底是**成熟活动刷尾关**的策略, 前提是尾关**已解锁**; 新活动只有第 1
+        # 关开着(实测: 1 个 入场键 + 4 个 入场键没解锁), 滑到底只会把唯一能打的
+        # 那关滑出视野 → survey 找不到目标 → back 回 hub, 活动一关不打。
+        # ⇒ 闸: **可打的关(未锁 入场键)≥2 才有"尾关"可寻**, 否则前沿关就在眼前,
+        #   直接打, 一次都不滑。判据是屏上证据, 不是猜。
+        _unlocked = [b for b in (screen.yolo_boxes or [])
+                     if b.cls_name == UC.STAGE_ENTER and b.confidence >= _CLS_CONF]
+        if not self._survey_swiped and len(_unlocked) < 2:
+            self._survey_swiped = True      # 记为"已处理", 但不发滑动
+            self.log(f"新活动/前沿关: 屏上只有 {len(_unlocked)} 个已解锁入场键 "
+                     f"→ **不滑列表**(游戏会自动把下一关归位), 直接打眼前这关")
+        elif not self._survey_swiped:
             self._survey_swiped = True
             self._survey_settle = 2   # 滚动后等 2 tick 用新鲜坐标 (回弹稳定闸)
             # 向底部滚 = 内容上移 = from 下 to 上 (2026-07-09 live: 方向写反把
@@ -1169,8 +1220,24 @@ class EventQuestSkill(BaseSkill):
         #   num  → 唯一的**身份**(跨帧/跨 run 有效), 台账只认它
         rows = self.parse_quest_rows(screen)
         # 过渡帧检出不全 → tail 错位, 必须看到完整尾部才动手
-        if len(rows) < self._tail_quests:
+        # ⛔⛔"新活动首日"第三处同族盲点(2026-08-07 live, CODE:BOX 开活动当天):
+        # `_tail_quests` 默认 3 = 成熟活动要看齐尾三关才动手。而**刚开的活动
+        # 只解锁第 1 关**, rows 恒等于 1 ⇒ 这里永远 wait ⇒ survey 空转到
+        # BRINGUP FREEZE 280 拍, 活动一关不打。
+        # (前两处: `_on_quest_list` 要求 ≥2 入场键 / `_survey` 无条件滑到底。
+        #  同一个根因: **判据把"关卡多"当成了页面成立的前提**。)
+        # ⇒ 只在"确实还有更多行可看"时才等: 屏上有**锁着的关**说明列表完整
+        # (锁关就是尾部), 或已经等过一轮 → 有几行打几行。
+        _locked = [b for b in (screen.yolo_boxes or [])
+                   if b.cls_name == UC.STAGE_ENTER_LOCKED and b.confidence >= _CLS_CONF]
+        # ⛔下限 1(2026-08-07 当场补): 只放宽"关卡少", **不放宽"一关都没读到"** ——
+        # 弹窗盖住列表的过渡帧 rows=0 也会带着 _locked, 放行会让 _quests 空转。
+        if len(rows) == 0 or (len(rows) < self._tail_quests and not _locked
+                              and self._phase_ticks < 12):
             return action_wait(600, f"survey: partial list ({len(rows)} rows)")
+        if len(rows) < self._tail_quests and _locked:
+            self.log(f"新活动: 只有 {len(rows)} 个可打关(+{len(_locked)} 个锁着) "
+                     f"→ 就打这 {len(rows)} 关, 不等齐尾三关")
         tail = rows[-self._tail_quests:]
         todo = [r for r in tail if not self._surveyed(r)]
         if not todo:
@@ -1792,13 +1859,28 @@ class EventQuestSkill(BaseSkill):
         # 走到这 = 确认框(取消+確認同屏)不在 → 上一发 confirm(若有)已落地
         self._cs_fired = False
         if conf_btn is not None and cancel_btn is None:
-            # 掃蕩完成框 (确认键无取消): tooltip 坑 → 连点两次由 tick 自然完成
+            # 掃蕩完成框 (确认键无取消)
             # ⛔同样过结构闸: 取消键偶发漏检时購買AP框会伪装成完成框
             if self._dialog_is_purchase(screen):
                 self.log("⛔ purchase-dialog structure (no-cancel frame) — back off")
                 self._set("close")
                 return action_back("PURCHASE DIALOG suspected — back!")
-            return action_click_box(conf_btn, f"{label}: 掃蕩完成 確認")
+            # ⛔⛔弹入动画中途位不许点(2026-08-02 用户抓包 + 日志铁证):
+            # 掃蕩完成框的確認键**稳定位 cy≈0.809**, 但弹入过程中它从 ~0.705
+            # 一路滑下来。`_DIALOG_BTN_BAND` 下沿 0.55 把中途位也圈了进去 ⇒
+            # skill 在动画帧上就派发 0.705, 等 tap 落地按钮早已滑走, 落点砸在
+            # 「最終獲得獎勵」行的道具图标上 → 弹出物品 tooltip(task#32 那个
+            # 压暗遮罩的来源之一)。
+            # 帧证(logs/agent.out.log 06:22:10~13): tick67 点 0.7053 →
+            # [jit] ⛔丢弃(锚在新帧已消失) → tick68 重算 0.8092 → 复验通过。
+            # ⚠**JIT 只在决策龄 >0.30s 才复验**(_JIT_STALE_S): step_mode 有人审
+            # 停顿必然触发, 所以这个病在门控下被完全掩盖; **自主跑决策龄常 <0.3s,
+            # JIT 直接跳过, 这一发就真砸到道具上**。⇒ 必须在源头掐掉, 不能靠 JIT。
+            done_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6,
+                                     region=_DONE_BTN_BAND)
+            if done_btn is None:
+                return action_wait(200, f"{label}: 掃蕩完成框確認键未落位(弹入中) — 等")
+            return action_click_box(done_btn, f"{label}: 掃蕩完成 確認")
         # 列表页 → 开目标关 popup
         rows = self.parse_quest_rows(screen)
         # 0 <= 而不是只 < : 负 idx 会从尾部静默取关(空表则直接 IndexError)

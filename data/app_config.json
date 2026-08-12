@@ -14,6 +14,10 @@
       "event_ap_reserve": 0,
       "enable_bonus_team": true,
       "event_farming_stage": 12,
+      "event_farm_stages": {
+        "10": 1,
+        "11": 2
+      },
       "event_farming_ap_budget": 0,
       "event_min_ap_for_sweep": 20,
       "event_shop_auto_buy": true,

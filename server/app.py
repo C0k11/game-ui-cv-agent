@@ -1483,16 +1483,50 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             #   成立(复验读到同一张冻结帧); 尾发/弹窗重排这两种, 复验读到的是
             #   更新的帧, 能救。新帧选取沿用主循环因果闸口径: scrcpy 帧摄取
             #   时刻必须晚于上次 tap(+0.25s 动画余量), 否则落 ADB 抓真·当前帧。
+            # ⭐2026-08-02 分级复验(修「快路径全程免检」): 旧闸是
+            #   `决策龄 > 0.30s` 才进 JIT ⇒ **自主跑基本全程跳过**
+            #   (frame_age_truth 实测 cap→tap 中位 ~85ms), JIT 只在 step_mode
+            #   的人审停顿下生效 —— 于是 event_quest 掃蕩確認键那种「决策帧上
+            #   按钮还在弹入中途位 cy0.705, 85ms 后落到 0.809」的尾发, 在
+            #   step_mode 下被 JIT 悄悄接住、看不见, 自主跑却直接砸到道具上。
+            # ⛔但 0.30s 不是拍脑袋: 低于它, scrcpy 往往还没产出「晚于上次 tap」
+            #   的新帧, 复验只能回退 ADB screencap(~900ms) 阻塞热路径 —— 那才是
+            #   这个阈值真正在挡的成本。所以不是降阈值, 是**分级**:
+            #     慢路径(>0.30s): 行为不变, 允许 ADB 回退拿真·当前帧
+            #     快路径(≤0.30s): 只在 scrcpy 手上**恰好**有比决策帧更新的帧时
+            #                     复验(帧已在内存, 零额外 IO, 只多一次 YOLO
+            #                     ~30-50ms); 没有就放行, **绝不回退 ADB**
+            #   用比决策帧旧的帧复验毫无意义(必然通过), 故快路径额外要求
+            #   帧摄取时刻 > _t_decided。
+            _jit_slow = time.time() - _t_decided > _JIT_STALE_S
             if (not dry_run and action_type == "click"
                     and not action.get("_atomic_no_gate")
-                    and time.time() - _t_decided > _JIT_STALE_S):
+                    and (_jit_slow or _JIT_FAST_PATH)):
                 _jit_tgt = action.get("target") or [0.5, 0.5]
                 try:
                     _jit_boxes = list(getattr(pipe.last_screen, "yolo_boxes",
                                               None) or [])
                 except Exception:
                     _jit_boxes = []
-                _jit_cls = _jit_anchor_cls(_jit_tgt, _jit_boxes)
+                # ⭐⭐定向复验(2026-08-07 live 实锤 — 活动轮播):
+                # 动作可以显式指定"落地前必须仍看得见这个 cls", 用于**目标本身
+                # 会在决策→落屏之间换掉**的场合。典型 = 任務大廳活动入口轮播:
+                # 2.5s/页 在「距离结束还剩」(405, 当期可打) 与「距离奖励获得结束」
+                # (474, 上期只领奖) 之间交替, 而 tap 落屏延迟 1-2s ⇒ 检出 405 去点,
+                # 落地时卡已翻成 474 ⇒ **进错活动**。event_quest 原来的做法是
+                # `_atomic_no_gate=True` 关掉复验去赛跑(注释里承认这是"误入三连根因"),
+                # 这里改成: 用最新帧确认 405 还在, 不在就丢弃, 下一拍重来。
+                # ⚠不能靠默认的落点锚: 落点是 405 气泡下方 +0.10 的徽章本体,
+                # 半径内本来就没有 405 框 ⇒ 默认锚拿不到它, 必须显式点名。
+                _req_cls = action.get("_jit_require_cls")
+                _jit_cls = _req_cls or _jit_anchor_cls(_jit_tgt, _jit_boxes)
+                # ⛔⛔别强制慢路径(用户 2026-08-07 现场发现"点击怎么这么慢"):
+                # 我最初这里写了 `_jit_slow = True` 让它 ADB 抓真·当前帧 ——
+                # 而 ADB 抓 4K 帧实测 ~900ms([[frame_age_truth]]), **等于给正在
+                # 和 2.5s 轮播赛跑的那一发又加了近 1 秒延迟**, 自相矛盾:
+                # 为了"别点错"反而更容易错过窗口。
+                # scrcpy 快帧龄实测 13.8ms, 足够判"轮播换页没有" ⇒ 走快路径,
+                # 只在快帧比决策帧新时复验; 拿不到新帧就放行(维持旧行为)。
                 if _jit_cls is not None:
                     _jfr = None
                     _jsrc = ""
@@ -1500,13 +1534,20 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     try:
                         if _scrcpy_feed is not None:
                             _f3, _a3, _s3 = _scrcpy_feed.latest()
+                            # 快路径额外闸: 帧必须比**决策时刻**新, 否则复验读到
+                            # 的就是决策用的那张, 必然通过 = 白跑一次 YOLO。
+                            _fresh_enough = (_jit_slow
+                                             or time.time() - _a3 > _t_decided)
                             if (_f3 is not None and _a3 is not None
-                                    and time.time() - _a3 > _jlt + 0.25):
+                                    and time.time() - _a3 > _jlt + 0.25
+                                    and _fresh_enough):
                                 _jfr = _f3
                                 _jsrc = f"scrcpy age={_a3*1000:.0f}ms"
                     except Exception:
                         pass
-                    if _jfr is None and adb is not None:
+                    # ⛔ADB 回退只给慢路径: 快路径上它是 ~900ms 的热路径阻塞,
+                    # 而快路径的全部价值就在于"零额外 IO"。
+                    if _jfr is None and adb is not None and _jit_slow:
                         # 静止屏 scrcpy 不产新帧(或断流) → screencap 拿真·当前帧
                         try:
                             _jfr = adb.capture_frame()
@@ -1514,7 +1555,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         except Exception:
                             _jfr = None
                     if _jfr is None:
-                        _log_pipeline("[jit] 复验取不到新帧 → 放行(维持旧行为)")
+                        # 快路径拿不到更新的帧是**常态**(scrcpy 还没出下一帧),
+                        # 每次都打日志会把 pipeline 日志淹掉 → 只在慢路径记。
+                        if _jit_slow:
+                            _log_pipeline("[jit] 复验取不到新帧 → 放行(维持旧行为)")
                     else:
                         try:
                             from brain.pipeline import _run_yolo_on_image
@@ -1523,7 +1567,31 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         except Exception as _je:
                             _jfb = None
                             _log_pipeline(f"[jit] 复验 YOLO 失败({_je}) → 放行")
-                        if _jfb is not None and _jit_landing_ok(
+                        # 定向复验只问"这个 cls 还在不在屏上"(轮播换页时它整个
+                        # 消失), 不要求它压住落点 —— 落点本就在它下方 0.10。
+                        if _req_cls is not None and _jfb is not None:
+                            _still = [b for b in _jfb
+                                      if getattr(b, "cls_name", "") == _req_cls
+                                      and getattr(b, "confidence", 0) >= 0.45]
+                            if _still:
+                                _log_pipeline(
+                                    f"[jit] 定向复验通过: '{_req_cls}' 仍在屏"
+                                    f"({_jsrc}) — '{reason}'")
+                            else:
+                                _log_pipeline(
+                                    f"[jit] ⛔丢弃: 定向 cls '{_req_cls}' 在新帧"
+                                    f"({_jsrc}, {len(_jfb)}框)**已消失** = 轮播已换页,"
+                                    f" 这一点会落到错的活动上 — '{reason}'")
+                                try:
+                                    if pipe.current_skill is not None:
+                                        pipe.current_skill.action_suppressed = True
+                                except Exception:
+                                    pass
+                                action = {"action": "wait", "duration_ms": 200,
+                                          "reason": f"jit-discard ({reason})"}
+                                action_type = "wait"
+                                reason = action["reason"]
+                        elif _jfb is not None and _jit_landing_ok(
                                 _jit_tgt, _jit_cls, _jfb):
                             # 放行也留痕: 没有这行, "JIT 到底跑没跑"在日志上
                             # 与"没触发"不可区分(live 验收要正向证据)。
@@ -1670,7 +1738,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
 # ⭐JIT 落点复验的两个纯几何判定(2026-07-28 幽灵点击根治)。
 # 拆成纯函数: 不碰帧/模型, 回归测试可以直接喂框列表验语义。
-_JIT_STALE_S = 0.30   # 决策帧超过这个龄才复验; 快路径(自主 tick)免检零成本
+_JIT_STALE_S = 0.30   # 超过这个龄 = 慢路径: 允许 ADB 回退抓真·当前帧复验
+#: 快路径(≤_JIT_STALE_S, 自主跑绝大多数 tick)也复验 —— 但只用 scrcpy 手上
+#: **恰好**比决策帧新的帧, 拿不到就放行, 绝不回退 ADB。代价 = 每次点击多一次
+#: YOLO(~30-50ms), 收益 = 弹入动画期的尾发不再全靠 step_mode 才拦得住。
+#: 关掉它就退回 2026-08-02 之前的「快路径全程免检」行为。
+_JIT_FAST_PATH = True
 _JIT_RADIUS = 0.06    # 与 step_walk 盲拍守卫同一半径
 
 

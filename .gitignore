@@ -162,3 +162,13 @@ scripts/dedup_*.py
 data/axis_videos/
 data/axis_cookies.txt
 data/raw_images/_val_v15_gap/
+
+# 运行时产物（bot 跑一次就生成一批，不入库）
+/data/walk_*
+/data/push*.jsonl
+/data/step_*.jsonl
+/data/craft_state.json
+/data/event_economy.json
+/data/event_topped.json
+/data/routing_v2/
+/gate_scan_rows.json
