@@ -5,8 +5,8 @@
 本包把整条链拆成 6 层，每层只做一件事，**判据只有一个定义处**：
 
     config/   用户配置（前端可选项）—— 纯数据
-    percept/  帧 → 结构化观测（scrcpy 0ms / YOLO / 数字读取）
-    state/    观测 → 页面身份（结构判据 + 连续 N 帧确认）
+    percept/  帧  结构化观测（scrcpy 0ms / YOLO / 数字读取）
+    state/    观测  页面身份（结构判据 + 连续 N 帧确认）
     act/      动作 + 三道闸（金钱 / 落地复验 / 连发）
     flow/     每个玩法一个 flow：「看到 X 就做 Y」
     app/      主循环 + CLI + 前端 API

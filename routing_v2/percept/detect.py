@@ -7,10 +7,10 @@
   2. **`_废弃` 前缀的类在这一层直接丢弃**（README §A11）。`_classes.txt` 是
      按行号索引的，废案类不能删行，只能改名；那就在检测出口处统一过滤，
      上层永远看不见废案，也就不会再有人拿废案当"漏训"去补数据。
-  3. **imgsz 必须按模型给**（ui_v2+ 训练在 960；实测 @1920 → 0 检出）。
+  3. **imgsz 必须按模型给**（ui_v2+ 训练在 960；实测 @1920  0 检出）。
 
-⛔别对 ui 权重跑 `strip_optimizer`: YOLO26 是 NMS-free，去重靠 o2o 头学出来，
-   FP16 量化会改变它 —— 同一轮权重 FP32 双框 206 → FP16 550（2026-08-07 实锤）。
+别对 ui 权重跑 `strip_optimizer`: YOLO26 是 NMS-free，去重靠 o2o 头学出来，
+   FP16 量化会改变它 —— 同一轮权重 FP32 双框 206  FP16 550（2026-08-07 实锤）。
    registry 里 v15 指的是**未 strip** 的 `best_real.pt`，别"顺手优化"。
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from routing_v2.percept.observe import Box
 _ROOT = Path(__file__).resolve().parents[2]
 _REGISTRY = _ROOT / "data" / "model_registry.json"
 
-# 每个模型的推理尺寸。⛔ui 必须 960 —— 训练就在 960，@1920 实测零检出。
+# 每个模型的推理尺寸。ui 必须 960 —— 训练就在 960，@1920 实测零检出。
 _IMGSZ = {"ui": 960, "avatar": 960, "battle": 960, "emoticon": 640}
 # 每个模型的检出下限。ui 取 0.20：弱类（免费 live ~0.18-0.30）在这个下限才出得来，
 # 上层判据自己再按 cls 收紧（金钱链一律 ≥0.45）。
@@ -42,7 +42,7 @@ _CLASSES_TXT = _ROOT / "data" / "raw_images" / "_classes.txt"
 def _name_table(model, tag: str) -> Dict[int, str]:
     """类名表。**ui 优先用 `_classes.txt`（按行号索引）而不是权重里烧进去的名字。**
 
-    ⛔为什么: 权重里的 names 是**训练那一刻**的快照。之后我们又把 9 个废案类
+    为什么: 权重里的 names 是**训练那一刻**的快照。之后我们又把 9 个废案类
        改名加了 `_废弃N_` 前缀（`_classes.txt` 是按行号索引的，废案只能改名不能
        删行）。只信权重的话，这些废案还会照常吐出来，然后又有人拿它们当
        "有 cls 但检不到 = 漏训"去补数据 —— §A11 那个坑我已经踩过一次。
@@ -54,22 +54,22 @@ def _name_table(model, tag: str) -> Dict[int, str]:
     lines = [l.strip() for l in
              _CLASSES_TXT.read_text(encoding="utf-8").splitlines() if l.strip()]
     nc = len(wnames)
-    # ⭐2026-08-11 放宽「行数必须相等」：**master 比权重多是正常状态** ——
+    # 2026-08-11 放宽「行数必须相等」：**master 比权重多是正常状态** ——
     #    加了新 cls 还没重训时就是这样，而且前端（server/app.py `_master_append`）
     #    在标注中心自己就会 append。新类**永远 append 在末尾**，idx 递增、
-    #    前 nc 行的对应关系不变 ⇒ 取前 nc 行仍然正确。
-    #    ⛔**只放宽「多于」**：少于 nc 说明表被删过行 = idx 已错位，仍整表退回。
-    #    ⛔再加一道安全闸：截断后 diff 若暴增（>40），说明不是单纯 append 而是
+    #    前 nc 行的对应关系不变  取前 nc 行仍然正确。
+    #    **只放宽「多于」**：少于 nc 说明表被删过行 = idx 已错位，仍整表退回。
+    #    再加一道安全闸：截断后 diff 若暴增（>40），说明不是单纯 append 而是
     #      顺序真乱了（memory 里那种「按另一套 idx 打的标」），照样退回权重表。
     if len(lines) < nc:
-        print(f"[detect] ⚠_classes.txt {len(lines)} 行 < 权重 nc={nc}"
+        print(f"[detect] _classes.txt {len(lines)} 行 < 权重 nc={nc}"
               f" — 表被删过行, idx 已错位, 退回权重名字表", flush=True)
         return wnames
     extra = len(lines) - nc
     head = lines[:nc]
     diff = [(i, wnames[i], head[i]) for i in range(nc) if wnames.get(i) != head[i]]
     if len(diff) > 40:
-        print(f"[detect] ⚠截断到前 {nc} 行后仍有 {len(diff)} 处不同 —"
+        print(f"[detect] 截断到前 {nc} 行后仍有 {len(diff)} 处不同 —"
               f" 疑似顺序错乱而非 append, 退回权重名字表", flush=True)
         return wnames
     if extra:
@@ -88,7 +88,7 @@ def _registry() -> dict:
 
 
 def resolve(model_key: str) -> Path:
-    """registry[key].active → versions[active].path。**fail-closed**。"""
+    """registry[key].active  versions[active].path。**fail-closed**。"""
     reg = _registry()
     sec = reg.get(model_key)
     if not sec:
@@ -119,7 +119,7 @@ def load(tag: str = "ui"):
             _names[tag] = _name_table(m, tag)
             n = len(_names[tag])
             dep = sum(1 for v in _names[tag].values() if str(v).startswith("_废弃"))
-            print(f"[detect] {tag} ← {path.name} (nc={n}, 其中废案 {dep} 个已屏蔽)",
+            print(f"[detect] {tag}  {path.name} (nc={n}, 其中废案 {dep} 个已屏蔽)",
                   flush=True)
         return _models[tag]
 
@@ -127,7 +127,7 @@ def load(tag: str = "ui"):
 def warm(tags=("ui",)):
     """预热 —— 主循环起跑前调用，别让第一帧背模型加载的几秒。
 
-    ⛔起跑必须过预热闸（2026-08-01 事故）：冷启动的加载帧会把收菜 skill 的
+    起跑必须过预热闸（2026-08-01 事故）：冷启动的加载帧会把收菜 skill 的
     预算烧光。这里同步加载并跑一张空图，返回才算就绪。
     """
     import numpy as np
@@ -141,7 +141,7 @@ def warm(tags=("ui",)):
 
 
 def infer(frame, tags=("ui",), conf_override: Optional[float] = None) -> List[Box]:
-    """一帧 → Box 列表（归一化坐标，已过滤废案类）。"""
+    """一帧  Box 列表（归一化坐标，已过滤废案类）。"""
     global _dropped_deprecated
     if frame is None:
         return []

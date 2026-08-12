@@ -4,26 +4,26 @@ Verified flow (interactive probe 2026-06-01, data/_craft_probe_log.md). The old
 skill had a "进制造就退" bug (it never started crafts) AND a SAFETY hole: it
 looked for the wrong claim cls and could trigger the 立即完成 rush dialog.
 
-★★ HARD RULES (probe-derived) ★★
+ HARD RULES (probe-derived) 
 - The craft-main 一次領取 (CLAIM_ONCE_YELLOW) is AMBIGUOUS:
-    • crafts FINISHED → tapping it collects them FREE (direct GOT_REWARD).
-    • crafts RUNNING  → tapping it pops 「是否立即完成?」 which spends 製造券
-      (a consumable). We NEVER spend券 → if a confirm dialog appears after the
+    • crafts FINISHED  tapping it collects them FREE (direct GOT_REWARD).
+    • crafts RUNNING   tapping it pops 「是否立即完成?」 which spends 製造券
+      (a consumable). We NEVER spend券  if a confirm dialog appears after the
       tap, CANCEL it. (製造券 isn't pyroxene, but user spec: 让制造自然跑完.)
-- per-slot 立即完成 (blue, no cls) is NEVER clicked (we have no cls → never
+- per-slot 立即完成 (blue, no cls) is NEVER clicked (we have no cls  never
   blind-click there).
-- START is safe: 快速制造 costs 信用点 only (probe: 19,000/unit). 快速制造 →
-  MAX → 开始制造 → 确认键(確定製造N次) spends credits (abundant) — fine.
+- START is safe: 快速制造 costs 信用点 only (probe: 19,000/unit). 快速制造 
+  MAX  开始制造  确认键(確定製造N次) spends credits (abundant) — fine.
 
 State machine
 -------------
-enter    lobby → NAV_CRAFT → Craft page (CRAFT_QUICK/CRAFT_START signature).
-collect  一次领取黄色 → tap. If a confirm dialog (确认键+取消键) appears = the
-         券-rush 立即完成 → CANCEL (never spend券). GOT_REWARD = free collect
+enter    lobby  NAV_CRAFT  Craft page (CRAFT_QUICK/CRAFT_START signature).
+collect  一次领取黄色  tap. If a confirm dialog (确认键+取消键) appears = the
+         券-rush 立即完成  CANCEL (never spend券). GOT_REWARD = free collect
          (dismissed globally). 一次领取灰色 / none = nothing to collect.
-start    快速制造 → MAX_可点击 → 开始制造 → 确认键(确定製造N次, credits, safe).
-         Nothing startable (slots busy) → exit.
-exit     BTN_HOME / BTN_BACK → lobby → done.
+start    快速制造  MAX_可点击  开始制造  确认键(确定製造N次, credits, safe).
+         Nothing startable (slots busy)  exit.
+exit     BTN_HOME / BTN_BACK  lobby  done.
 
 Detectors: base "ui" only.
 """
@@ -40,12 +40,12 @@ from brain.skills.base import (
 from brain.skills import ui_classes as UC
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-# ⛔按游戏日的"今天进过没有"台账 —— 红点门控第三态的解药, 见 should_run。
+# 按游戏日的"今天进过没有"台账 —— 红点门控第三态的解药, 见 should_run。
 _CRAFT_STATE_FILE = _DATA_DIR / "craft_state.json"
 
 
 def _game_day() -> str:
-    """BA 游戏日(UTC+8 03:00 刷新 = JST 04:00, 2026-08-01 帧证 2:35→3:18 任務 8/8→1/8) ISO 日期 —— 与 schedule/cafe 的 `_game_day` 同一份
+    """BA 游戏日(UTC+8 03:00 刷新 = JST 04:00, 2026-08-01 帧证 2:353:18 任務 8/81/8) ISO 日期 —— 与 schedule/cafe 的 `_game_day` 同一份
     实现(锚服务器时区 UTC+8, 不用裸 datetime.now(); 2026-07-27 时区事故结论)。"""
     from datetime import datetime, timedelta, timezone
     _SERVER_TZ = timezone(timedelta(hours=8))       # BA 繁中服
@@ -82,22 +82,22 @@ _COLLECT_MAX = 16
 _START_MAX = 18
 _EXIT_MAX = 14
 # 等**真实动画**的超时一律墙钟(tick 数不是时间单位, 见 BaseSkill.mark 注释)
-_COLLECT_SETTLE_SEC = 3.2   # 一次领取 → GOT_REWARD 弹窗实测 2.5-3s
+_COLLECT_SETTLE_SEC = 3.2   # 一次领取  GOT_REWARD 弹窗实测 2.5-3s
 _QUICK_SETTLE_SEC = 2.0     # 立即完成(券)对话框渲染
-_CONFIRM_WAIT_SEC = 2.5     # 开始制造 → 「確定製造N次嗎?」确认框渲染(after-ack 窗口)
-_CONFIRM_ACK_SEC = 1.5      # 点完確認 → 确认框关掉(after-ack, 防尾发第二次確認)
+_CONFIRM_WAIT_SEC = 2.5     # 开始制造  「確定製造N次嗎?」确认框渲染(after-ack 窗口)
+_CONFIRM_ACK_SEC = 1.5      # 点完確認  确认框关掉(after-ack, 防尾发第二次確認)
 
 
 class CraftSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
         """红点(可领) **OR** 今日未进过 —— 红点门控只有两态是个纯产出损失洞。
 
-        ⛔2026-07-28 帧实锤(用户点名要考的三件事之一): 旧门控只认两态 ——
-          ① 有红点 = 造好了可领 → 进
-          ② 无红点 = 还在造 → skip
+        2026-07-28 帧实锤(用户点名要考的三件事之一): 旧门控只认两态 ——
+           有红点 = 造好了可领  进
+           无红点 = 还在造  skip
         实际存在**第三态: 三个槽位全空、根本没在造**, 它同样**没有红点**
-        (当天帧: 材料清單三行全是「＋ 開始製造」, 一次領取灰) ⇒ 永远走 ②
-        ⇒ **一次都不会开新的制造**。制造是纯免费产素材的, 槽位空着 = 纯损失,
+        (当天帧: 材料清單三行全是「＋ 開始製造」, 一次領取灰)  永远走 
+         **一次都不会开新的制造**。制造是纯免费产素材的, 槽位空着 = 纯损失,
         而且一旦空了就再也不会有红点 —— 这个洞会**自锁**, 越久越亏。
 
         修法与 buy_pyroxene/schedule 的日台账同构: 无红点时, 只要**今天还没进
@@ -109,9 +109,9 @@ class CraftSkill(BaseSkill):
             return True
         st = _load_craft_state()
         if not st.get("visited"):
-            self.log("制造无红点, 但今日未进过 → 仍进(第三态: 槽位可能全空)")
+            self.log("制造无红点, 但今日未进过  仍进(第三态: 槽位可能全空)")
             return True
-        self.log(f"制造无红点 且今日已进过(started={st.get('started', 0)}) → skip")
+        self.log(f"制造无红点 且今日已进过(started={st.get('started', 0)})  skip")
         return False
 
     def __init__(self):
@@ -122,7 +122,7 @@ class CraftSkill(BaseSkill):
     def _init_state(self) -> None:
         self._phase_ticks: int = 0
         self._entered: bool = False
-        # ⭐"真的站在制造页上过"的帧证据(不是"点过入口")。日台账只在它为真时才写,
+        # "真的站在制造页上过"的帧证据(不是"点过入口")。日台账只在它为真时才写,
         # 否则一次入口点空就把今天的制造锁死(fail-closed 方向: 宁可明天再进)。
         self._reached: bool = False
         self._collect_done: bool = False
@@ -130,10 +130,10 @@ class CraftSkill(BaseSkill):
         self._maxed_clicks: int = 0
         self._quick_settle: bool = False     # 墙钟 timer "quick_settle" 计时
         self._started: bool = False
-        self._start_clicked: bool = False  # we pressed 开始制造 → confirm is ours
+        self._start_clicked: bool = False  # we pressed 开始制造  confirm is ours
         self._craft_confirm_clicked: bool = False  # 点過確認; latch _started 仅凭到达证据
         self._start_taps: int = 0          # 开始制造 clicks w/o resulting confirm
-        self._min_fallback_done: bool = False  # MAX 材料不足 → 已降到 MIN 重试过
+        self._min_fallback_done: bool = False  # MAX 材料不足  已降到 MIN 重试过
         self._claims: int = 0
 
     def reset(self) -> None:
@@ -148,12 +148,12 @@ class CraftSkill(BaseSkill):
     def _btn_is_grey(screen: ScreenState, box, s_thr: float = 94.0) -> bool:
         """按钮框内 HSV 饱和度判禁用态 —— **不依赖模型**。
 
-        ⛔为什么需要它: v14 把灰键检成 0.99 的亮态(訓練集里 219 个灰「開始製造」
-        当年被标成亮态 444, 2026-08-02 已改类 444→485, 但要 v15 重训才生效)。
-        在模型追上来之前, conf 不编码可点性 ⇒ 用像素兜底。
+        为什么需要它: v14 把灰键检成 0.99 的亮态(訓練集里 219 个灰「開始製造」
+        当年被标成亮态 444, 2026-08-02 已改类 444485, 但要 v15 重训才生效)。
+        在模型追上来之前, conf 不编码可点性  用像素兜底。
         阈值 94 由 scripts/audit_gray_mislabel.py 在 806 个人审框上标定
         (彩色按钮亮态 S≈184 / 去饱和灰态 S≈3, 中间带零样本)。
-        ⚠只对**彩色按钮**成立; 白底钮(全部選擇)灰化方向相反, 别套用。
+        只对**彩色按钮**成立; 白底钮(全部選擇)灰化方向相反, 别套用。
         拿不到帧一律返回 False(fail-open 走原行为探针), 绝不因判据缺失卡死流程。
         """
         frame = getattr(screen, "frame", None)
@@ -184,7 +184,7 @@ class CraftSkill(BaseSkill):
     def exit_report(self):
         """竣工判据 —— 这个 skill 的价值就两件事: 领成品 + 把空槽填上。
 
-        ⛔它 2026-07-28 之前**从来没开过一次新制造**(should_run 第三态洞), 而
+        它 2026-07-28 之前**从来没开过一次新制造**(should_run 第三态洞), 而
         出口只报 UNKNOWN, 所以没人审计得出来。判据必须能把"进去了但既没领也
         没造"这种空跑单独标出来。"""
         if not self._reached:
@@ -211,13 +211,13 @@ class CraftSkill(BaseSkill):
             return True
         # Direct craft markers (快速制造 / 开始制造 are craft-only).
         if self.find_cls(screen, [UC.CRAFT_QUICK, UC.CRAFT_START], conf=_CLS_CONF) is not None:
-            # ⭐强证据(craft-only cls 在帧上) → 才算"到过", 日台账认这个。
+            # 强证据(craft-only cls 在帧上)  才算"到过", 日台账认这个。
             # 下面 `return self._entered` 那条是弱证据(只是"点过入口且不在大厅"),
             # 不写台账 —— 否则一次误判就把今天的制造锁死。
             self._reached = True
             return True
-        # ★ Mis-ID guard: the craft main row shows 一次领取黄/灰, which is ALSO
-        # Mail's PAGE_SIGNATURE → detect_screen_yolo wrongly returns "Mail" on the
+        #  Mis-ID guard: the craft main row shows 一次领取黄/灰, which is ALSO
+        # Mail's PAGE_SIGNATURE  detect_screen_yolo wrongly returns "Mail" on the
         # craft page (live 2026-06-02: craft entered fine but bounced back to
         # lobby forever). Once we've clicked our own craft entry (_entered),
         # trust ANY non-lobby screen as craft rather than the false Mail ID.
@@ -241,7 +241,7 @@ class CraftSkill(BaseSkill):
             self._mark_visited()
             return action_done("craft timeout")
 
-        # Global: free-collect reward popup → dismiss via continue / header.
+        # Global: free-collect reward popup  dismiss via continue / header.
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
             return action_click_box(cont, "dismiss reward via continue")
@@ -268,7 +268,7 @@ class CraftSkill(BaseSkill):
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         if self._is_craft(screen):
-            self.log("inside craft → collect")
+            self.log("inside craft  collect")
             self._goto("collect")
             return action_wait(400, "entered craft")
 
@@ -289,15 +289,15 @@ class CraftSkill(BaseSkill):
             shop = self.find_cls(screen, UC.NAV_SHOP, conf=_CLS_CONF)
             if shop is not None:
                 self._entered = True
-                self.log("制造入口 missed → adjacent fallback (shop − 1 slot)")
+                self.log("制造入口 missed  adjacent fallback (shop − 1 slot)")
                 return action_click(max(0.05, shop.cx - 0.092), shop.cy, "open craft (adjacent to shop)")
             social = self.find_cls(screen, UC.NAV_SOCIAL, conf=_CLS_CONF)
             if social is not None:
                 self._entered = True
-                self.log("制造入口 missed → adjacent fallback (social + 1 slot)")
+                self.log("制造入口 missed  adjacent fallback (social + 1 slot)")
                 return action_click(min(0.95, social.cx + 0.094), social.cy, "open craft (adjacent to social)")
             if self._phase_ticks > _ENTER_MAX:
-                self.log("制造入口 + adjacency unavailable → give up")
+                self.log("制造入口 + adjacency unavailable  give up")
                 return action_done("craft entry unreachable")
             self.log("on lobby but no 制造入口/邻位 — waiting")
             return action_wait(400, "waiting for 制造入口 cls")
@@ -315,14 +315,14 @@ class CraftSkill(BaseSkill):
                 return action_wait(300, "collect: back on lobby, re-enter")
             if self._phase_ticks > _COLLECT_MAX:
                 self._goto("exit")
-                return action_wait(300, "collect lost craft → exit")
+                return action_wait(300, "collect lost craft  exit")
             return action_wait(400, "waiting for craft UI (collect)")
 
-        # ★ A confirm dialog here = the 立即完成(券) rush from tapping 一次領取
-        # while crafts are RUNNING → CANCEL, never spend券.
+        #  A confirm dialog here = the 立即完成(券) rush from tapping 一次領取
+        # while crafts are RUNNING  CANCEL, never spend券.
         dlg = self._confirm_dialog(screen)
         if dlg is not None:
-            self.log("⛔ 一次领取 → 立即完成(券) dialog → cancel, never spend券")
+            self.log(" 一次领取  立即完成(券) dialog  cancel, never spend券")
             self._collect_done = True
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
             if cancel is not None:
@@ -337,7 +337,7 @@ class CraftSkill(BaseSkill):
 
         if self._collect_done:
             self._goto("start")
-            return action_wait(250, "collect done → start")
+            return action_wait(250, "collect done  start")
 
         # 一次领取黄色: finished crafts collect FREE; running ones pop the券
         # dialog (caught above). Tap it, then settle to see which happens.
@@ -348,38 +348,38 @@ class CraftSkill(BaseSkill):
             # (t0134-0139) 用 2 tick 时, skill 在弹窗出现**之前**就回到 start、
             # 看到被遮住的屏、判 "nothing startable" 退出 = 收了昨天的制造却
             # 一个新的都没开。当时改成 4 tick。
-            # ⛔2026-07-25: 那个 4 是**tick**。zero-wait 后自主跑 0.15-0.25
-            # s/tick(口径见 BaseSkill.mark) ⇒ 真实只剩 **0.6-1.0s**, 远低于
+            # 2026-07-25: 那个 4 是**tick**。zero-wait 后自主跑 0.15-0.25
+            # s/tick(口径见 BaseSkill.mark)  真实只剩 **0.6-1.0s**, 远低于
             # 2.5-3s 需求 —— **2026-06-12 那次修复在 zero-wait 上线后已被悄悄
             # 作废**, 同一个 bug 修过又复活。改墙钟, 直接对着现象的真实时长写。
             self._collect_settle = True
             self.mark("collect_settle")
             return action_click_box(yellow, "collect finished crafts")
 
-        # Grey claim-all or nothing → nothing (free) to collect.
-        self.log("no 一次领取黄色 → nothing to collect, start phase")
+        # Grey claim-all or nothing  nothing (free) to collect.
+        self.log("no 一次领取黄色  nothing to collect, start phase")
         self._goto("start")
-        return action_wait(250, "no free collect → start")
+        return action_wait(250, "no free collect  start")
 
     def _start(self, screen: ScreenState) -> Dict[str, Any]:
         if not self._is_craft(screen) and not self._confirm_dialog(screen):
             if screen.is_lobby():
                 self._goto("exit")
-                return action_wait(300, "start: on lobby → exit")
+                return action_wait(300, "start: on lobby  exit")
             if self._phase_ticks > _START_MAX:
                 self._goto("exit")
-                return action_wait(300, "start lost craft → exit")
+                return action_wait(300, "start lost craft  exit")
             return action_wait(400, "waiting for craft UI (start)")
 
         # craft-start confirm (確定製造N次) — ONLY trust it after WE clicked
         # 开始制造 (deep-dive r2 C5): an unconditional confirm here would also
         # confirm a leaked 立即完成 dialog = spends 製造券. Unexpected dialog
-        # in start state ⇒ cancel, never confirm.
+        # in start state  cancel, never confirm.
         dlg = self._confirm_dialog(screen)
         if dlg is not None:
-            # ⛔尾发闸(2026-07-28 补, double_fire_family 第五例): 点完 確認 之后
-            # 下一 tick 关闭动画还没走完 → 框仍在屏 → _start_clicked 依旧 True
-            # ⇒ **再点一发確認**。第二发落在 (0.598,0.699), 框关掉后那个位置是
+            # 尾发闸(2026-07-28 补, double_fire_family 第五例): 点完 確認 之后
+            # 下一 tick 关闭动画还没走完  框仍在屏  _start_clicked 依旧 True
+            #  **再点一发確認**。第二发落在 (0.598,0.699), 框关掉后那个位置是
             # 快速製造 面板的 材料清單/節點 区 —— 这次碰巧无害, 但"这次碰巧压到
             # 什么"从来不是评估尾发的口径(见 memory double_fire_family)。
             # 状态挂在**物理动作**(確認已发)而不是代码路径上, 等帧证据(框消失)。
@@ -388,31 +388,31 @@ class CraftSkill(BaseSkill):
                 if _w < _CONFIRM_ACK_SEC:
                     return action_wait(300, f"確認已发 — 等确认框关掉"
                                             f"(after-ack {_w:.1f}s)")
-                # 窗口过了框还在 ⇒ 那一发被吞了 → 允许重发一次(不是连发)
+                # 窗口过了框还在  那一发被吞了  允许重发一次(不是连发)
                 self.log("確認发出后确认框仍在 — 判为被吞, 重发一次")
                 self._craft_confirm_clicked = False
             if self._start_clicked:
                 # 不提前 latch _started(2026-07-21 mutate-before-ack 根治: reason
-                # 无"確認"被稳定门吞时旧码已 _started=True+goto exit → craft 没开始
+                # 无"確認"被稳定门吞时旧码已 _started=True+goto exit  craft 没开始
                 # 却报 done)。latch 延迟到确认框消失(到达证据, 下方); reason 加
                 # "確認键"稳定门豁免立即点。
                 self.log("confirming craft start (確定製造N次, 耗信用点 — safe)")
                 self._craft_confirm_clicked = True
                 self.mark("craft_confirm")
                 return action_click_box(dlg, "confirm craft start (credits, 確認键)")
-            self.log("⛔ unexpected confirm dialog in start state (开始制造 not clicked) → cancel (券-safe)")
+            self.log(" unexpected confirm dialog in start state (开始制造 not clicked)  cancel (券-safe)")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
             if cancel is not None:
                 return action_click_box(cancel, "cancel unexpected dialog (券-safe)")
             return action_back("dismiss unexpected dialog (券-safe)")
 
-        # 到达证据: 已点過確認 且确认框现已消失 → craft 已开始 → latch _started
+        # 到达证据: 已点過確認 且确认框现已消失  craft 已开始  latch _started
         # (post-ack, 绝不在点击前)。
         if self._craft_confirm_clicked:
-            self.log("确认框消失 → craft 已开始 → exit")
+            self.log("确认框消失  craft 已开始  exit")
             self._started = True
             self._goto("exit")
-            return action_wait(300, "craft started → exit")
+            return action_wait(300, "craft started  exit")
 
         # In the 快速制造 dialog? MAX_可点击 / 开始制造 present.
         # max_btn 找 可点击 或 灰色(已到顶) — 后者也是"在 dialog 里"的锚点。
@@ -422,122 +422,122 @@ class CraftSkill(BaseSkill):
             self._maxed_clicks += 1
             self.log("set MAX quantity (YOLO MAX_可点击)")
             return action_click_box(max_btn, "set craft quantity MAX")
-        # ⭐⭐v15 起模型直接吐灰态类 —— 这是**最强的判据**, 必须排在所有兜底之前。
-        # ⛔2026-08-07 live 实锤的迁移断裂: 下面那道像素闸挂在
+        # v15 起模型直接吐灰态类 —— 这是**最强的判据**, 必须排在所有兜底之前。
+        # 2026-08-07 live 实锤的迁移断裂: 下面那道像素闸挂在
         # `find_cls(CRAFT_START)` 非空这个前提上, 而它成立**只因为 v14 把灰键
-        # 误检成亮态**。v15 修对了 → find_cls(亮态) 返回 None → 灰键闸整条被
-        # 跳过 → 一路落到下面的「MAX 外推」去盲点一个禁用按钮。
+        # 误检成亮态**。v15 修对了  find_cls(亮态) 返回 None  灰键闸整条被
+        # 跳过  一路落到下面的「MAX 外推」去盲点一个禁用按钮。
         # **修好模型反而把为模型缺陷写的兜底打死了**, 这类断裂 grep 不出来,
         # 只能靠 live 逐帧撞见。
         _grey_btn = self.find_cls(screen, UC.CRAFT_START_GREY, conf=_CLS_CONF)
         if _grey_btn is not None:
             self.log(f"開始製造 = 灰态 cls({UC.CRAFT_START_GREY} "
-                     f"{_grey_btn.confidence:.2f}) → skip craft(零无效点击)")
+                     f"{_grey_btn.confidence:.2f})  skip craft(零无效点击)")
             self._goto("exit")
-            return action_wait(300, "craft 開始製造 greyed cls → skip")
+            return action_wait(300, "craft 開始製造 greyed cls  skip")
         start_btn = self.find_cls(screen, UC.CRAFT_START, conf=_CLS_CONF)
         if start_btn is not None and self._btn_is_grey(screen, start_btn):
-            # ⭐2026-08-02 live 实锤 + 像素判据直接判灰(不再靠行为探针烧 8 次点击):
+            # 2026-08-02 live 实锤 + 像素判据直接判灰(不再靠行为探针烧 8 次点击):
             # 帧上「開始製造」灰 + 红字「材料不足。」, 而 v14 照样给 0.99 的**亮态**
             # CRAFT_START —— 因为训练集里 219 个灰键当年就被标成亮态 444(今天已
-            # 改类 444→485, 但模型要 v15 重训才生效)。⇒ conf 不编码可点性这件事,
+            # 改类 444485, 但模型要 v15 重训才生效)。 conf 不编码可点性这件事,
             # 在模型追上来之前先用像素兜底: 按钮框内 HSV-S 双峰实测 亮≈184 / 灰≈3,
             # 阈值 94(scripts/audit_gray_mislabel.py 标定, 806 框零错分)。
-            self.log("開始製造 像素判灰(S<94, 材料不足) → skip craft(零无效点击)")
+            self.log("開始製造 像素判灰(S<94, 材料不足)  skip craft(零无效点击)")
             self._goto("exit")
-            return action_wait(300, "craft 開始製造 greyed (材料不足) → skip")
+            return action_wait(300, "craft 開始製造 greyed (材料不足)  skip")
         if start_btn is not None:
-            # ⚠2026-06-16 实测: 材料不足时 開始製造 变灰但 CRAFT_START cls 仍 fire,
-            # 点了没反应/不弹確定製造框 → 旧码每 tick 重点到 max_ticks 超时空转 60+ 拍。
-            # 成功时点 1 次就弹確定製造 → _confirm_dialog 接走(_start_taps 到不了 3)。
-            # 点≥3 次仍无确认框 = 灰按钮材料不足 = 今天造不了 → pass(用户 2026-06-16:
+            # 2026-06-16 实测: 材料不足时 開始製造 变灰但 CRAFT_START cls 仍 fire,
+            # 点了没反应/不弹確定製造框  旧码每 tick 重点到 max_ticks 超时空转 60+ 拍。
+            # 成功时点 1 次就弹確定製造  _confirm_dialog 接走(_start_taps 到不了 3)。
+            # 点≥3 次仍无确认框 = 灰按钮材料不足 = 今天造不了  pass(用户 2026-06-16:
             # "材料不够造不了就 pass 就行")。钱安全(灰按钮本就不扣信用点)。
-            # ⛔被吞不计发(2026-07-28 live 实锤, 与 ticket_sweep `_max_fires` 同修法):
+            # 被吞不计发(2026-07-28 live 实锤, 与 ticket_sweep `_max_fires` 同修法):
             # 本轮只**物理点出去 1 次**, 而 _start_taps 涨到 8 —— 中间 6-7 个 tick
             # 全被 same-target hold 转成 wait, 计数照加。注释里"8>dedup hold-cap5,
             # 让丢点重试先落"的安全边际因此**从来不存在**: 一个 2.5s hold 窗口就能
             # 把额度烧光。今天按钮真灰(帧上红字「材料不足。」+ 材料 4/15)所以结论
             # 碰巧对; 若只是丢了一次 tap, 同样会误判"材料不足"整天不制造。
-            # ⇒ 数的必须是**真发出去的**点击。
+            #  数的必须是**真发出去的**点击。
             if self.action_suppressed and self._start_taps > 0:
                 self._start_taps -= 1
                 self.log("开始制造 被稳定门吞 — 回滚计数(不算一次尝试)")
-            # ⭐MIN 降级重试(2026-07-29 live 帧实锤): 游戏的 MAX 键**不按瓶颈
+            # MIN 降级重试(2026-07-29 live 帧实锤): 游戏的 MAX 键**不按瓶颈
             # 材料钳数量** — MAX=3 后材料 5/15 红字+開始製造转灰, 而数量=1 时
             # 5/5 是够的。旧逻辑 ×8 直接 skip = 白丢当天能造的那 1 次。
-            # 行为信号复用「点了无確定製造框=灰」: 首轮 4 次真点击无框 → 点
-            # MIN 降到 1 再试一轮; 第二轮仍满 8 → 真造不了, skip(原兜底)。
+            # 行为信号复用「点了无確定製造框=灰」: 首轮 4 次真点击无框  点
+            # MIN 降到 1 再试一轮; 第二轮仍满 8  真造不了, skip(原兜底)。
             if self._start_taps >= 4 and not self._min_fallback_done:
                 min_btn = self.find_cls(screen, UC.QTY_MIN, conf=_CLS_CONF)
                 if min_btn is not None:
                     self._min_fallback_done = True
                     self._start_taps = 0
-                    self.log("開始製造 无响应×4 → MAX 材料不足? 降 MIN 重试")
+                    self.log("開始製造 无响应×4  MAX 材料不足? 降 MIN 重试")
                     return action_click_box(min_btn, "quantity MIN fallback (材料不足)")
-                self._min_fallback_done = True   # MIN 不在屏(已是1/漏检) → 原路兜底
+                self._min_fallback_done = True   # MIN 不在屏(已是1/漏检)  原路兜底
             if self._start_taps >= 8:
-                self.log("开始制造 ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
+                self.log("开始制造 ×8 无確定製造框  灰(材料不足)  skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
-                return action_wait(300, "craft 开始制造 greyed (材料不足) → skip")
+                return action_wait(300, "craft 开始制造 greyed (材料不足)  skip")
             self._start_taps += 1
             self.log("clicking 开始制造")
             self._start_clicked = True
             self.mark("start_click")     # after-ack 窗口起点(见下方 fall-through 闸)
             _a = action_click_box(start_btn, "start craft (开始制造)")
-            # ⭐2026-08-01 live 实锤: 自计数回滚每 tick 立即重点 → same-target
+            # 2026-08-01 live 实锤: 自计数回滚每 tick 立即重点  same-target
             # hold 计时反复重置永远出不去, 連吞 15 发直到 timeout 制造没开成。
             # 開始製造 是幂等键(確定製造框弹出后 cls 变化, JIT bbox 复验兜底)
-            # → 与 event_quest 配额加号/换关X 同用显式豁免(273ed9f 家族)。
+            #  与 event_quest 配额加号/换关X 同用显式豁免(273ed9f 家族)。
             _a["_hold_exempt"] = True
             return _a
         # 兜底: 开始制造(idx444) 是 v6b 漏检的 missing cls (probe 旧模型 0.93,
-        # v6b 退步漏检 → craft 卡死, live 2026-06-06)。已点过 MAX (= 在 dialog 里)
-        # 且 MAX/MAX灰 检出 → 用它外推开始制造位置 (probe: MAX(0.926,0.713) →
+        # v6b 退步漏检  craft 卡死, live 2026-06-06)。已点过 MAX (= 在 dialog 里)
+        # 且 MAX/MAX灰 检出  用它外推开始制造位置 (probe: MAX(0.926,0.713) 
         # 开始制造(0.870,0.812), 偏移 cx-0.056/cy+0.10; dialog 布局固定, 归一化
-        # 跨分辨率)。点中 → 弹「確定製造N次」确认框 → _confirm_dialog 收口(信用点,
-        # 安全)。根治靠飞轮补 开始制造 样本 → v6c。
+        # 跨分辨率)。点中  弹「確定製造N次」确认框  _confirm_dialog 收口(信用点,
+        # 安全)。根治靠飞轮补 开始制造 样本  v6c。
         if self._maxed_clicks > 0 and max_btn is not None:
             # 同上: 外推兜底路径的计数也必须按物理动作算
             if self.action_suppressed and self._start_taps > 0:
                 self._start_taps -= 1
                 self.log("开始制造(外推) 被稳定门吞 — 回滚计数")
             if self._start_taps >= 8:
-                self.log("开始制造(外推) ×8 无確定製造框 → 灰(材料不足) → skip craft(8>dedup hold-cap5, 让丢点重试先落)")
+                self.log("开始制造(外推) ×8 无確定製造框  灰(材料不足)  skip craft(8>dedup hold-cap5, 让丢点重试先落)")
                 self._goto("exit")
-                return action_wait(300, "craft 开始制造 greyed (材料不足) → skip")
+                return action_wait(300, "craft 开始制造 greyed (材料不足)  skip")
             sx = max(0.0, max_btn.cx - 0.056)
             sy = min(1.0, max_btn.cy + 0.10)
-            self.log(f"开始制造漏检 → MAX 外推点击 ({sx:.3f},{sy:.3f})")
+            self.log(f"开始制造漏检  MAX 外推点击 ({sx:.3f},{sy:.3f})")
             self._start_taps += 1
             self._start_clicked = True
             self.mark("start_click")     # after-ack 窗口起点(见下方 fall-through 闸)
             return action_click(sx, sy, "start craft (MAX 外推开始制造)")
 
-        # Not in dialog → open it via 快速制造.
+        # Not in dialog  open it via 快速制造.
         quick = self.find_cls(screen, UC.CRAFT_QUICK, conf=_CLS_CONF)
         if quick is not None and self._phase_ticks <= _START_MAX:
             self.log("opening 快速制造 dialog")
             self._quick_settle = True
             self.mark("quick_settle")
             return action_click_box(quick, "open quick-craft")
-        # 刚点过快速制造 → 等 dialog 渲染再判 (防点后下一 tick dialog 没好就误判
-        # nothing startable 立即 exit, live 2026-06-06 t0011→t0012 就是这样挂的)。
+        # 刚点过快速制造  等 dialog 渲染再判 (防点后下一 tick dialog 没好就误判
+        # nothing startable 立即 exit, live 2026-06-06 t0011t0012 就是这样挂的)。
         if self._quick_settle:
             _w = self.since("quick_settle")
             if _w < _QUICK_SETTLE_SEC:
                 return action_wait(350, f"quick-craft dialog settle ({_w:.1f}s)")
             self._quick_settle = False
 
-        # ⛔after-ack(2026-07-28 帧实测补): 点过 开始制造 之后、確定製造N次 确认框
+        # after-ack(2026-07-28 帧实测补): 点过 开始制造 之后、確定製造N次 确认框
         # 还没渲染出来的那几帧, 屏上**一个 craft 锚点都不剩** —— 实测确认框帧
         # (data/craft_probe_20260728) 全帧只有 8 框: 取消/确认/返回/回大厅/弹窗叉叉
-        # + 顶栏三币, MAX/开始制造/快速制造 **三条全落空** ⇒ 直接掉到下面
-        # "nothing startable → exit", 而 _exit 的第一件事就是点 弹窗叉叉 关掉
-        # 那个还没確認的框 ⇒ **制造点了等于没点**。
+        # + 顶栏三币, MAX/开始制造/快速制造 **三条全落空**  直接掉到下面
+        # "nothing startable  exit", 而 _exit 的第一件事就是点 弹窗叉叉 关掉
+        # 那个还没確認的框  **制造点了等于没点**。
         # 这是 2026-07-28「判定带宽窄不一致 / 动画帧契约必破」那一族的第四例:
         # 差别只在这里破的不是判定带而是"整套锚点同时消失"。修法同族: 动作发出后
         # 必须先等**帧证据**, 不许在证据窗口内下"没活干"的结论。
-        # ⚠只挡这条 fall-through: 若 开始制造 仍在屏上(灰=材料不足), 上面的
+        # 只挡这条 fall-through: 若 开始制造 仍在屏上(灰=材料不足), 上面的
         #   _start_taps 重试路径先接走, 不会被这段拖慢。
         if self._start_clicked and not self._craft_confirm_clicked:
             _w = self.since("start_click")
@@ -545,7 +545,7 @@ class CraftSkill(BaseSkill):
                 return action_wait(300,
                                    f"点过 开始制造 — 等 確定製造N次 确认框 "
                                    f"({_w:.1f}/{_CONFIRM_WAIT_SEC:.1f}s)")
-            # 窗口过了还没框 ⇒ 那一下确实没落地(被吞/灰按钮) → 允许重试
+            # 窗口过了还没框  那一下确实没落地(被吞/灰按钮)  允许重试
             self._start_clicked = False
 
         # Patience window (live 2026-06-12): right after a collect the screen
@@ -553,10 +553,10 @@ class CraftSkill(BaseSkill):
         # is invisible for a few ticks. Verdict only after a real window.
         if self._phase_ticks < 6:
             return action_wait(450, "start: no 快速制造 yet — settling before verdict")
-        # Nothing startable (slots busy / no free slot) or budget out → exit.
-        self.log("nothing startable (busy slots / YOLO gap) → exit")
+        # Nothing startable (slots busy / no free slot) or budget out  exit.
+        self.log("nothing startable (busy slots / YOLO gap)  exit")
         self._goto("exit")
-        return action_wait(300, "no startable craft → exit")
+        return action_wait(300, "no startable craft  exit")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":

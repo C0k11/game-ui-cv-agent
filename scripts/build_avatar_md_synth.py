@@ -7,16 +7,16 @@ keep every UI/emoticon box's label intact, and rotate the AVATAR boxes through
 all 252 characters. Output frames are multi-domain (ui+avatar) by construction,
 master-idx, so:
   • no negative-label毒化 (UI boxes are labelled)
-  • no fused_avatar局部→master remap (we emit master idx directly)
+  • no fused_avatar局部master remap (we emit master idx directly)
   • no teacher pass (background frame already carries the UI labels)
-  • bonus: label a few dozen multi-domain momo/cafe frames → synth covers all 252
+  • bonus: label a few dozen multi-domain momo/cafe frames  synth covers all 252
     characters by rotating refs into the avatar slots.
 
 Background source = raw_images TRAIN frames (excl. _-dirs and VAL_SOURCES) that
 have ≥1 avatar box (master 143-393) AND ≥1 UI box. Reuses ref loading + ref
 augmentation from build_fused_avatar_dataset.
 
-Output: data/raw_images/_synth_avatar_md/  → add to build_ui_v2 SYNTH_SOURCES.
+Output: data/raw_images/_synth_avatar_md/   add to build_ui_v2 SYNTH_SOURCES.
 Usage: py scripts/build_avatar_md_synth.py [--per-char 80] [--include-val(测逻辑)]
 """
 from __future__ import annotations
@@ -155,11 +155,11 @@ def main():
     print(f"[md-synth] multi-domain bg frames: {len(bgs)}  |  chars with refs: {len(avail)}/{len(avatar_names)}"
           + ("  (include_val=测逻辑)" if include_val else "  (train only)"))
     if not bgs:
-        print("  → 还没有 train 多域帧(需 UI+头像都标的 train 帧, 主要靠 v6weak 补头像那批)。等补全。")
-        print("  → 想先验证逻辑可加 --include-val (拿 171121 等 val 帧测, 别用于正式产出)")
+        print("   还没有 train 多域帧(需 UI+头像都标的 train 帧, 主要靠 v6weak 补头像那批)。等补全。")
+        print("   想先验证逻辑可加 --include-val (拿 171121 等 val 帧测, 别用于正式产出)")
         return
     if not avail:
-        print("  → 没加载到角色 ref (检查 data/captures/角色头像 大图)。")
+        print("   没加载到角色 ref (检查 data/captures/角色头像 大图)。")
         return
 
     if OUT.exists():
@@ -223,9 +223,9 @@ def main():
             (OUT / f"{stem}.txt").write_text("\n".join(labels) + "\n", encoding="utf-8")
             written += 1
 
-    print(f"[md-synth] wrote {written} frames → {OUT}")
+    print(f"[md-synth] wrote {written} frames  {OUT}")
     print(f"  char coverage: {len(cls_count)}/{len(avail)}  (avg {sum(cls_count.values())//max(1,len(cls_count))}/char)")
-    print(f"  → add '_synth_avatar_md' to build_ui_v2 SYNTH_SOURCES")
+    print(f"   add '_synth_avatar_md' to build_ui_v2 SYNTH_SOURCES")
 
 
 if __name__ == "__main__":

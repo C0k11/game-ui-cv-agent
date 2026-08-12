@@ -17,8 +17,8 @@ Design rules
 - `forbid` = classes that must NOT be present — used to split sibling screens
   (Location Select vs region view both show 課程表 chrome; only the region
   view has 全体课程表).
-- Scoring: all `need` present + one `any_of` + no `forbid` → matched.
-  Multiple matches → the one with the most satisfied anchors wins.
+- Scoring: all `need` present + one `any_of` + no `forbid`  matched.
+  Multiple matches  the one with the most satisfied anchors wins.
 - UNKNOWN is a first-class answer. Skills must treat UNKNOWN as "do not
   click anything you can't justify" (识别上了再决定, 不抢跑不乱点).
 
@@ -43,7 +43,7 @@ from brain.skills.ui_classes import (
 MIN_CONF = 0.45
 
 
-# screen_id → signature. Order matters only for documentation; matching is
+# screen_id  signature. Order matters only for documentation; matching is
 # score-based across all entries.
 SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     # ── hub ────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     },
 
     # ── task hall (任務大廳; live walk step 1, 2026-06-11) ──────────────
-    # ★ per-activity dots are visible ONLY here — the lobby entry dot is NOT
+    #  per-activity dots are visible ONLY here — the lobby entry dot is NOT
     #   a work signal (user iron rule: enter and scan, never gate at entry).
     "task_hall": {
         "need": [],
@@ -192,7 +192,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     "result_page": {
         # Generic single-confirm result/notice page: 確認 + popup X but NO
         # 取消 (掃蕩完成 loot page, 通知/背包已滿 notices, etc.). A cancel
-        # present means it's a DECISION dialog instead → confirm_dialog.
+        # present means it's a DECISION dialog instead  confirm_dialog.
         "need": [UC.BTN_CONFIRM, UC.BTN_CLOSE_X],
         "any_of": [],
         "forbid": [UC.BTN_CANCEL, SWEEP_PLAN1, SWEEP_PLAN2, UC.SHOP_SELECT_ALL],

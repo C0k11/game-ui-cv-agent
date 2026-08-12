@@ -4,11 +4,11 @@
 前端不用手写表单：`SCHEMA` 描述了每个字段的类型/标签/取值来源，
 `/api/schema` 直接吐给前端自动渲染（开关 / 多选 / 数字 / 下拉）。
 
-⛔**金钱项 LOCKED**：前端只读，没有放宽入口。这不是 UI 层的选择，是这里
+**金钱项 LOCKED**：前端只读，没有放宽入口。这不是 UI 层的选择，是这里
    `merged()` 强制覆盖 —— 就算有人直接改 profile.json 也改不动。
    （用户铁律：bot 绝不花青辉石/真钱。）
 
-⭐"选项从屏上动态扫"的字段（悬赏分支 / JFD 学院 / 活动关卡）在 SCHEMA 里标
+"选项从屏上动态扫"的字段（悬赏分支 / JFD 学院 / 活动关卡）在 SCHEMA 里标
    `dynamic: "..."`，前端进那一页时调 `/api/scan/<name>` 拿当前真实可选项，
    **不写死清单**（§A8/§A9：写死的清单换个版面/换个活动就过期）。
 """
@@ -37,27 +37,27 @@ DEFAULTS: Dict[str, Any] = {
         "arena": True,
         "mail": True,
         "daily_mission": True,
-        "story_mining": False,     # ⭐剧情挖矿 —— 默认关，前端按钮开
-        "momotalk": False,         # ⭐MomoTalk 好感度 —— 默认关，前端按钮开
+        "story_mining": False,     # 剧情挖矿 —— 默认关，前端按钮开
+        "momotalk": False,         # MomoTalk 好感度 —— 默认关，前端按钮开
         "batch_sweep": False,
         "special_sweep": False,
     },
 
     # ── 跑的顺序（前端可拖拽）────────────────────────────────────────
-    # ⭐活动期间 AP 全给活动（用户 2026-07-15 拍板），所以 batch_sweep /
+    # 活动期间 AP 全给活动（用户 2026-07-15 拍板），所以 batch_sweep /
     #   special_sweep 默认不在链里。没活动时手动打开。
     "order": ["daily_routine", "cafe", "schedule", "bounty", "jfd",
               "event", "arena", "mail", "daily_mission",
               "momotalk", "story_mining"],
 
-    # ── ⭐AP 怎么分（用户点名）────────────────────────────────────────
+    # ── AP 怎么分（用户点名）────────────────────────────────────────
     # 用户原话：「有活动刷活动，但我认为可以给 user 选择 —— 都刷活动，还是
     #            都刷双三倍的地方，还是分配百分比体力」
-    # ⭐三种意图都用**同一个百分比表**表达，不需要额外的模式枚举：
-    #     都刷活动     → {"event": 100}
-    #     都刷双三倍   → {"special_sweep": 50, "batch_sweep": 50}
-    #     六四分       → {"event": 60, "special_sweep": 40}
-    # ⛔**bot 认不出"哪个是双三倍"**：`452 双倍或三倍活动进行中` 只报"有"、
+    # 三种意图都用**同一个百分比表**表达，不需要额外的模式枚举：
+    #     都刷活动      {"event": 100}
+    #     都刷双三倍    {"special_sweep": 50, "batch_sweep": 50}
+    #     六四分        {"event": 60, "special_sweep": 40}
+    # **bot 认不出"哪个是双三倍"**：`452 双倍或三倍活动进行中` 只报"有"、
     #    不报"哪一类"（全仓零使用）。所以是不是双三倍得**用户自己知道**，
     #    这里只负责按用户给的比例把 AP 分下去，不会自动去找双三倍。
     "plan": {
@@ -73,28 +73,28 @@ DEFAULTS: Dict[str, Any] = {
         "fixed_stage": None,
         "use_tickets": "all",          # all | keep_n
         "keep_tickets": 0,
-        # ⭐用户点名：「票用在哪个地区，还是一个地区用几张」
+        # 用户点名：「票用在哪个地区，还是一个地区用几张」
         #   {分支名: 张数}；空 = 按 branches 顺序打到票光（老行为）。
-        #   ⭐实现用**票数差**算已用几张（数事实），读取点 flow/sweep.py `_quota`。
+        #   实现用**票数差**算已用几张（数事实），读取点 flow/sweep.py `_quota`。
         "ticket_plan": {},
     },
 
     # ── 学院交流会 ───────────────────────────────────────────────────
-    # ⭐三个学院都有 cls（三一/千年/格黑娜，各 84 train）—— 顺序即优先级
+    # 三个学院都有 cls（三一/千年/格黑娜，各 84 train）—— 顺序即优先级
     "jfd": {
         "academies": ["千年", "三一", "格黑娜"],
         "difficulty": "highest",
         "use_tickets": "all",
         "keep_tickets": 0,
-        "ticket_plan": {},             # ⭐同 bounty：{学院名: 张数}
+        "ticket_plan": {},             # 同 bounty：{学院名: 张数}
     },
 
     # ── 活动 ─────────────────────────────────────────────────────────
     "event": {
-        "clear_first_with_team": 1,    # ⭐首通用部队1（速推主力，用户规则）
-        "bonus_team": 2,               # ⭐加成队 = 部队2
-        "order": "clear_then_bonus",   # ⭐先 Q1→Qn 通关，再打加成
-        "shop_plan_before_bonus": True,  # ⭐先商店推算定缺哪种币，再按币种编队
+        "clear_first_with_team": 1,    # 首通用部队1（速推主力，用户规则）
+        "bonus_team": 2,               # 加成队 = 部队2
+        "order": "clear_then_bonus",   # 先 Q1Qn 通关，再打加成
+        "shop_plan_before_bonus": True,  # 先商店推算定缺哪种币，再按币种编队
         "farm_stages": {"10": 1, "11": 2},
         "ap_reserve": 0,
         "min_ap_for_sweep": 20,
@@ -103,13 +103,13 @@ DEFAULTS: Dict[str, Any] = {
             "auto_buy": True,
             "currencies": [],          # 空 = 全部非红线币种
             "furniture": False,
-            "skip_last_tab": True,     # ⛔tab3 盒抽币绝不自动买
+            "skip_last_tab": True,     # tab3 盒抽币绝不自动买
         },
     },
 
     # ── 咖啡厅 ───────────────────────────────────────────────────────
-    # 用户口述权威走法：弹窗叉 → 收益≠0 领 → 邀请卷找角色下滑 → 摸头给足时间
-    #                  → 2号厅 → 无黄点才返回
+    # 用户口述权威走法：弹窗叉  收益≠0 领  邀请卷找角色下滑  摸头给足时间
+    #                   2号厅  无黄点才返回
     "cafe": {
         "invite_targets": ["凯伊", "爱丽丝(战斗)", "爱丽丝"],
         "skip_invite": False,
@@ -137,7 +137,7 @@ DEFAULTS: Dict[str, Any] = {
     "shop": {
         "common_priority": [],
         "tactical_priority": [],
-        "refresh_times": 0,            # ⛔刷新要花青辉石 → 锁 0
+        "refresh_times": 0,            # 刷新要花青辉石  锁 0
         "buy_free_pack": True,         # 免費組合包（逐帧人审）
     },
 
@@ -149,7 +149,7 @@ DEFAULTS: Dict[str, Any] = {
         "buy_energy_drink": False,     # 花大赛币买体力（不是青辉石）
     },
 
-    # ── 剧情挖矿 ⭐用户点名 ───────────────────────────────────────────
+    # ── 剧情挖矿 用户点名 ───────────────────────────────────────────
     "story_mining": {
         "sources": ["羁绊剧情", "主线剧情", "支线剧情", "短篇剧情"],
         "target_students": [],         # 空 = 全部；有值 = 只挖这些人的羁绊
@@ -159,7 +159,7 @@ DEFAULTS: Dict[str, Any] = {
         "stop_on_battle": True,        # 剧情里遇战斗：True=跳过该节点, False=打
     },
 
-    # ── MomoTalk 好感度 ⭐用户点名 ────────────────────────────────────
+    # ── MomoTalk 好感度 用户点名 ────────────────────────────────────
     "momotalk": {
         "reply_policy": "first_option",  # first_option | last_option | random
         "target_students": [],
@@ -172,7 +172,7 @@ DEFAULTS: Dict[str, Any] = {
     "daily_mission": {"claim_all": True},
     "club": {"claim": True},
 
-    # ── ⛔安全（前端只读，LOCKED 强制覆盖）────────────────────────────
+    # ── 安全（前端只读，LOCKED 强制覆盖）────────────────────────────
     "safety": {
         "forbid_premium_currency": True,
         "ap_purchase_limit": 0,
@@ -183,9 +183,9 @@ DEFAULTS: Dict[str, Any] = {
     # ── 运行 ─────────────────────────────────────────────────────────
     "run": {
         "step_mode": True,             # 逐帧门控（每一发都要人放行）
-        "frame_source": "scrcpy",      # ⛔不提供 adb 选项
+        "frame_source": "scrcpy",      # 不提供 adb 选项
         "confirm_frames": 3,           # 状态连续 N 帧才认（§A3）
-        # ⛔状态不变 N 帧才判"这一发丢了"重发（§A5）。
+        # 状态不变 N 帧才判"这一发丢了"重发（§A5）。
         #   **别调小**：实测「加载中」平均 1.67s ≈ 50 帧@30fps。阈值比页面
         #   打开时间还短的话，页面正在开就重发，第二发落到**新页面**上，
         #   往往正好把它又关掉 —— 2026-08-08 实测商店/咖啡厅连点 5 次进不去
@@ -196,12 +196,12 @@ DEFAULTS: Dict[str, Any] = {
         "max_minutes_per_flow": 15,
         "save_frames": True,           # 落干净帧（飞轮素材，常开）
         "unknown_escape": True,        # 长时间 UNKNOWN 时允许温和逃生
-        "allow_home_escape": False,    # ⛔⛔回大厅当兜底 —— 默认关，见 §A1
+        "allow_home_escape": False,    # 回大厅当兜底 —— 默认关，见 §A1
     },
 }
 
 
-# ⛔这些路径无论 profile 里写什么，一律强制成这个值。
+# 这些路径无论 profile 里写什么，一律强制成这个值。
 LOCKED: Dict[str, Any] = {
     "safety.forbid_premium_currency": True,
     "safety.ap_purchase_limit": 0,
@@ -218,7 +218,7 @@ LOCKED: Dict[str, Any] = {
 # kind: toggle | multi | select | int | float | text | list | order | readonly
 SCHEMA = {
     "modules": {"kind": "toggle_group", "label": "跑哪些玩法",
-                "note": "⭐挖矿 / MomoTalk 默认关，按钮开"},
+                "note": "挖矿 / MomoTalk 默认关，按钮开"},
     "order": {"kind": "order", "label": "执行顺序", "source": "modules"},
 
     "plan.ap_mode": {"kind": "select", "label": "AP 怎么分",
@@ -228,11 +228,11 @@ SCHEMA = {
     "plan.ap_split": {"kind": "map", "label": "AP 百分比分配",
                       "options": ["event", "story_mining"],
                       "planned": ["batch_sweep", "special_sweep"],
-                      "note": "⭐都刷活动 = event:100。"
-                              "⛔「都刷双三倍」要的 special_sweep / batch_sweep "
+                      "note": "都刷活动 = event:100。"
+                              "「都刷双三倍」要的 special_sweep / batch_sweep "
                               "**两条 flow 还没实现**（见 registry.PLANNED），"
                               "现在填了也不会跑。"
-                              "⛔另外 bot 认不出哪个是双三倍，得你自己知道"},
+                              "另外 bot 认不出哪个是双三倍，得你自己知道"},
     "plan.ap_floor": {"kind": "int", "label": "全局留底 AP", "min": 0, "max": 999},
 
     "bounty.branches": {"kind": "multi", "label": "悬赏刷哪些分支",
@@ -245,7 +245,7 @@ SCHEMA = {
     "bounty.keep_tickets": {"kind": "int", "label": "留几张票", "min": 0, "max": 20},
     "bounty.ticket_plan": {"kind": "map", "label": "每个分支分几张票",
                            "dynamic": "bounty_branches",
-                           "note": "⭐留空 = 按上面的顺序打到票光。"
+                           "note": "留空 = 按上面的顺序打到票光。"
                                    "填了就按张数分配（用票数差算，不靠计数器）"},
 
     "jfd.academies": {"kind": "multi", "label": "交流会刷哪些学院（顺序=优先级）",
@@ -256,19 +256,19 @@ SCHEMA = {
                         "options": ["all", "keep_n"]},
     "jfd.ticket_plan": {"kind": "map", "label": "每个学院分几张票",
                         "dynamic": "jfd_academies",
-                        "note": "⭐留空 = 按上面的顺序打到票光"},
+                        "note": "留空 = 按上面的顺序打到票光"},
 
     "event.clear_first_with_team": {"kind": "select", "label": "首通用哪支部队",
                                     "options": [1, 2, 3, 4],
-                                    "note": "⭐用户规则：首通用部队1（速推主力）"},
+                                    "note": "用户规则：首通用部队1（速推主力）"},
     "event.bonus_team": {"kind": "select", "label": "加成队",
                          "options": [1, 2, 3, 4]},
     "event.order": {"kind": "select", "label": "打法顺序",
                     "options": ["clear_then_bonus", "bonus_only", "clear_only"],
-                    "note": "⭐用户规则：先 Q1→Qn 整体打通，再打加成"},
+                    "note": "用户规则：先 Q1Qn 整体打通，再打加成"},
     "event.shop_plan_before_bonus": {"kind": "toggle",
                                      "label": "先商店推算再编加成队"},
-    "event.farm_stages": {"kind": "map", "label": "刷哪几关（关→轮数）",
+    "event.farm_stages": {"kind": "map", "label": "刷哪几关（关轮数）",
                           "dynamic": "event_stages"},
     "event.shop.currencies": {"kind": "multi", "label": "活动商店买哪些币种",
                               "dynamic": "event_shop_currencies"},
@@ -305,7 +305,7 @@ SCHEMA = {
     "run.max_minutes": {"kind": "int", "label": "总时长上限（分）", "min": 5, "max": 300},
     "run.allow_home_escape": {"kind": "toggle",
                               "label": "允许「回大厅」当兜底",
-                              "note": "⛔默认关。回大厅按钮几乎每页都在，"
+                              "note": "默认关。回大厅按钮几乎每页都在，"
                                       "当兜底会把转场帧变成'弹回大厅'（§A1）"},
 
     "safety.forbid_premium_currency": {"kind": "readonly", "label": "禁止花青辉石"},
@@ -334,7 +334,7 @@ def _set_path(d: dict, path: str, val) -> None:
 
 
 def merged(user: dict | None = None) -> dict:
-    """DEFAULTS ← 用户配置 ← LOCKED（LOCKED 最后落，谁也改不动）。"""
+    """DEFAULTS  用户配置  LOCKED（LOCKED 最后落，谁也改不动）。"""
     cfg = _deep_merge(DEFAULTS, user or {})
     for path, val in LOCKED.items():
         _set_path(cfg, path, val)
@@ -348,12 +348,12 @@ def load(path: Path | str | None = None) -> dict:
         try:
             user = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            print(f"[config] ⛔profile 解析失败({e}) — 用默认值，不静默带病跑",
+            print(f"[config] profile 解析失败({e}) — 用默认值，不静默带病跑",
                   flush=True)
     return merged(user)
 
 
-# ⛔⛔mojibake 自检（2026-08-10 实伤）：UTF-8 的中文被按 Latin-1/GBK 解一遍后，
+# mojibake 自检（2026-08-10 实伤）：UTF-8 的中文被按 Latin-1/GBK 解一遍后，
 #    会变成 `æå®¤`（教室）这种串 —— 特征是**大量 U+00C0~U+00FF 的拉丁补充字符**。
 #    一旦写进 profile，`bounty.branches` 之类就永远匹配不上屏上的 cls，
 #    而且**不报错、不停机，只是那条 flow 静默选不中分支**。属于「静默失败」族，
@@ -379,11 +379,11 @@ def _mojibake(node) -> list:
 
 
 def save(cfg: dict, path: Path | str | None = None) -> Path:
-    """存用户配置。⛔LOCKED 项不写盘（写了也没用，徒增误解）。"""
+    """存用户配置。LOCKED 项不写盘（写了也没用，徒增误解）。"""
     bad = _mojibake(cfg)
     if bad:
         raise ValueError(
-            "⛔配置里有乱码字符串，拒绝写盘（写进去会让 flow 静默选不中分支）：\n  "
+            "配置里有乱码字符串，拒绝写盘（写进去会让 flow 静默选不中分支）：\n  "
             + "\n  ".join(sorted(set(bad))[:8])
             + "\n八成是客户端按错误编码读写了 JSON —— 请用 UTF-8 重发。")
     p = Path(path or PROFILE)

@@ -109,7 +109,7 @@ def main() -> int:
 
     print()
     print("=" * 60)
-    print(f"📊 Manual-only val (29 frames) — {weights_path.name}")
+    print(f" Manual-only val (29 frames) — {weights_path.name}")
     print("=" * 60)
     print(f"  mAP50    = {out['mAP50']:.4f}")
     print(f"  mAP50-95 = {out['mAP50_95']:.4f}")

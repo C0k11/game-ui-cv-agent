@@ -90,9 +90,9 @@ class Flow:
 
     # ── 派发 ────────────────────────────────────────────────────────────
     def decide(self, obs: Observation, st: StateView) -> Optional[Action]:
-        """派发顺序：**覆盖层 → 底页 → offsite**。
+        """派发顺序：**覆盖层  底页  offsite**。
 
-        ⭐覆盖层先处理：对话框/奖励框盖在底页上时，先把它关掉才谈得上继续。
+        覆盖层先处理：对话框/奖励框盖在底页上时，先把它关掉才谈得上继续。
            但覆盖层处理器返回 None（比如这一帧確認键还没渲染出来）时要**落回
            底页**，否则会卡在"覆盖层认了但点不到"的空转里。
         """
@@ -104,8 +104,8 @@ class Flow:
                 act = fn(obs, st)
                 if act is not None:
                     return act
-        # ⭐pre_page：阶段机之类"先于页面、但**不许先于 overlay**"的逻辑挂这。
-        #    ⛔子类绝不许覆写 decide()（架构不变量测试拦）——2026-08-08 两个
+        # pre_page：阶段机之类"先于页面、但**不许先于 overlay**"的逻辑挂这。
+        #    子类绝不许覆写 decide()（架构不变量测试拦）——2026-08-08 两个
         #    子类各自写了按页派发, overlay 顺序全被跳过（sweep 把确认框里的
         #    费用图标当票数锚; event 同形）。
         act = self.pre_page(obs, st)
@@ -123,63 +123,63 @@ class Flow:
     def observe(self, obs: Observation, st: StateView) -> None:
         """**每一帧**都会调，不管当前是哪一页。
 
-        ⛔为什么需要它：有些信号是**一闪而过**且出现在"哪一页都不是"的帧上。
+        为什么需要它：有些信号是**一闪而过**且出现在"哪一页都不是"的帧上。
            2026-08-08 实测：`战斗胜利` conf 0.99 出现在一个 page=unknown 的帧上，
            而胜负判定写在 `on_battle_result` 里 —— 等結算頁确认下来，胜利横幅
-           早没了 ⇒ 18 场全记成"胜负未知"。
-           ⇒ 这类**瞬时证据**必须在 observe 里粘住，不能等到对应页面才看。
+           早没了  18 场全记成"胜负未知"。
+            这类**瞬时证据**必须在 observe 里粘住，不能等到对应页面才看。
         """
 
     # ── 全 flow 共享的通用页面处理（§A2：写一次，不是每个 flow 抄一遍）──
     def on_confirm_dialog(self, obs: Observation, st: StateView) -> Optional[Action]:
-        """双键决策框的**默认**处理：灰确认 → 取消；否则确认。
+        """双键决策框的**默认**处理：灰确认  取消；否则确认。
 
-        ⛔为什么敢给默认值：金钱闸（`act/money.py`）在这之前就跑了 ——
+        为什么敢给默认值：金钱闸（`act/money.py`）在这之前就跑了 ——
            真是购买框的话早就 halt 了，轮不到这里。剩下的双键框都是
            "确认扫荡 / 确认使用 / 确认领取"这类，确认是对的。
-        ⛔2026-08-08 实测：不给默认值的后果是扫荡确认框落到 unknown，
+        2026-08-08 实测：不给默认值的后果是扫荡确认框落到 unknown，
            bot 在那儿关了 10 次弹窗叉叉，白白空转 200 帧。
         """
-        # ⛔⛔系统「是否結束？」框（確認=退出游戏）的第二道防线。
-        #    ⛔判据**必须用 act/money.system_dialog() 这唯一一份**（§A2）——
+        # 系统「是否結束？」框（確認=退出游戏）的第二道防线。
+        #    判据**必须用 act/money.system_dialog() 这唯一一份**（§A2）——
         #    08-09 实锤：这里原来自己抄了一份"顶栏没货币"判据，把 840AP
         #    加成扫荡确认框（盖住顶栏、但 `回大厅按钮` 0.96 在场）当成
-        #    系统框点了取消 ⇒ 三层判据两层已修，漏的就是这层散装的。
+        #    系统框点了取消  三层判据两层已修，漏的就是这层散装的。
         from routing_v2.act import money as _money
         if _money.system_dialog(obs, getattr(st, "last_solid", None)) is not None:
             c = obs.find(V.CANCEL, 0.45)
             if c is not None:
-                return tap_box(c, "⛔疑似系统框（judged by money.system_dialog）→ 只点取消")
+                return tap_box(c, "疑似系统框（judged by money.system_dialog） 只点取消")
             return None
         if obs.has(V.CONFIRM_GREY, 0.45):
             c = obs.find(V.CANCEL, 0.45)
-            return tap_box(c, "确认键是灰的 → 取消") if c is not None else None
+            return tap_box(c, "确认键是灰的  取消") if c is not None else None
         cf = obs.find(V.CONFIRM, 0.45)
         return tap_box(cf, "确认（双键框）") if cf is not None else None
 
     def on_ack_dialog(self, obs: Observation, st: StateView) -> Optional[Action]:
         """单键确认框 = 通知/结果页，点掉。
 
-        ⛔为什么放在基类：这个框在**每一条链**上都会弹（领邮件、上完课、扫荡完、
+        为什么放在基类：这个框在**每一条链**上都会弹（领邮件、上完课、扫荡完、
            买完东西）。老代码让 13 个 skill 各写一遍，于是有的写了有的没写，
            没写的那条链就卡在这一帧上空转（08-08 mail 实测）。
-        ⛔安全性：真是购买框的话 `act/money.py` 的判据会先把它拦成 halt，
+        安全性：真是购买框的话 `act/money.py` 的判据会先把它拦成 halt，
            轮不到这里点。
         """
         cf = obs.find(V.CONFIRM, 0.45)
         return tap_box(cf, "确认（单键通知框）") if cf is not None else None
 
     def on_reward(self, obs: Observation, st: StateView) -> Optional[Action]:
-        # ⛔语义优先级，不是 conf argmax（`获得奖励` 是横幅不是按钮，见 battle.py）
-        # ⛔⛔**子类绝不许用 `obs.find([A, B])` 覆写这个方法**（08-11 live 实锤）：
+        # 语义优先级，不是 conf argmax（`获得奖励` 是横幅不是按钮，见 battle.py）
+        # **子类绝不许用 `obs.find([A, B])` 覆写这个方法**（08-11 live 实锤）：
         #    `find(列表)` 的语义是**全屏 conf argmax**，不是"先 A 后 B"——
         #    只有这里这种 `or` 链才是优先级。daily_mission/mail 各自抄了一份
         #    `find([GOT_REWARD, CONFIRM], 0.40)`，于是在「獲得獎勵！」全屏
         #    overlay 上（`获得奖励` **0.98** 横幅 @(0.500,0.224) vs
         #    `点击继续字样` **0.93** @(0.501,0.877)，帧上没有確認键）
-        #    永远选中横幅 ⇒ 连点 11 次画面纹丝不动（02:00:41→02:02:59），
+        #    永远选中横幅  连点 11 次画面纹丝不动（02:00:4102:02:59），
         #    而 `点击继续字样` 这一档**根本没进过候选**。
-        #    ⇒ 覆写没有收益，一律继承本方法。
+        #     覆写没有收益，一律继承本方法。
         b = (obs.find(V.CONFIRM, 0.40)
              or obs.find(V.STORY_TAP_CONTINUE, 0.40)
              or obs.find(V.GOT_REWARD, 0.40))
@@ -193,14 +193,14 @@ class Flow:
     def on_claim_panel(self, obs: Observation, st: StateView) -> Optional[Action]:
         """可关闭的领取面板（有弹窗叉叉）：有黄键就领，全灰就叉掉。
 
-        ⛔2026-08-08 live：cafe 收益领完后面板上只剩 `领取_灰`+叉叉，底页
+        2026-08-08 live：cafe 收益领完后面板上只剩 `领取_灰`+叉叉，底页
            身份 unknown，flow 无出路卡死。这一层给所有 flow 兜住这个形态。
         """
         b = obs.find(V.CLAIM_ACTIVE, 0.45)
         if b is not None:
             return tap_box(b, f"领取（{b.cls}）", counter="claims")
         x = obs.find(V.CLOSE_X, 0.55)
-        return tap_box(x, "领完了 → 叉掉面板") if x is not None else None
+        return tap_box(x, "领完了  叉掉面板") if x is not None else None
 
     def on_levelup(self, obs: Observation, st: StateView) -> Optional[Action]:
         b = obs.find([V.BOND_LEVELUP, V.REGION_LEVELUP], 0.40)
@@ -210,7 +210,7 @@ class Flow:
         """落到了这个 flow 没登记的页面。
 
         默认行为 = **什么都不做**，等 runner 的导航层把我们带回去。
-        ⛔子类别在这里写"点返回键" —— 那正是老代码 4 处复制粘贴的
+        子类别在这里写"点返回键" —— 那正是老代码 4 处复制粘贴的
            `if page is not None: return action_back(...)`（§A2）。
         """
         return None
@@ -229,7 +229,7 @@ class Flow:
     def once(self, key: str) -> bool:
         """同一件事这一轮只做一次（**决策时就标记**）。
 
-        ⚠只给"纯逻辑/纯日志"用。要**点一下**的事情用 `pending()`，见下。
+        只给"纯逻辑/纯日志"用。要**点一下**的事情用 `pending()`，见下。
         """
         if self.state.get(f"once:{key}"):
             return False
@@ -239,11 +239,11 @@ class Flow:
     def pending(self, key: str) -> bool:
         """这件事**还没真的做成**（不标记；由 runner 在 tap 落地后标记）。
 
-        ⛔⛔2026-08-08 实测：craft 用 `once("quick")` 决定要不要点「快速製造」，
+        2026-08-08 实测：craft 用 `once("quick")` 决定要不要点「快速製造」，
            那一发被 JIT 闸丢掉了（锚点漂移 0.051 > 容差 0.050），但 once 已经
-           把标记消耗掉 ⇒ 下一帧不再重试 ⇒ **一次制造都没开成**，还报了 CLEAN。
+           把标记消耗掉  下一帧不再重试  **一次制造都没开成**，还报了 CLEAN。
            这是「数意图不数事实」的第 3 次复发（前两次是计数器和加成阶段）。
-        ⇒ 配 `tap_box(..., once="quick")` 用：**tap 真的发出去了才算做过**。
+         配 `tap_box(..., once="quick")` 用：**tap 真的发出去了才算做过**。
            没发出去就每帧重试，重复由连发闸兜住。
         """
         return not self.state.get(f"once:{key}")
@@ -260,12 +260,12 @@ class Flow:
     def hold(self, key: str, n: int) -> bool:
         """某个**内容**判据必须连续 n 个 tick 成立才算数。
 
-        ⛔⛔§A3 的内容层版本（2026-08-08 新架构第一次跑活动就复发）:
+        §A3 的内容层版本（2026-08-08 新架构第一次跑活动就复发）:
            页面身份的连续帧确认在 `state/machine.py` 里，但"屏上还有没有可打的
            关"这类**内容**判据仍然是单帧的 —— 点完入场键的**过渡帧**上，刚点
            的那一行会瞬时消失，于是当场判成"没关可打，收工"，和老代码那个
            bug 一字不差。
-           ⇒ **任何"收工/没活了"的判断都必须过这道 hold。**
+            **任何"收工/没活了"的判断都必须过这道 hold。**
         """
         k = f"hold:{key}"
         cnt = (self.state.get(k, 0) + 1
@@ -282,34 +282,34 @@ class Flow:
 class ExitMixin:
     """通用退出：**必须有明确的、当前页面专属的控件**才动手（§A1）。
 
-    ⛔⛔**顺序是 取消 > 结果框確認 > 叉叉 > 返回键**，这个顺序是流血换的
+    **顺序是 取消 > 结果框確認 > 叉叉 > 返回键**，这个顺序是流血换的
        （2026-07-27 悬赏弃 6 票的第三个根因）:
        停在「要使用6票掃蕩6次嗎?」这种**模态框**上时，屏上那个被检成
        `弹窗叉叉` conf **0.96** 的小 ✕ **根本不吃点击** —— 连点 6 次画面
        纹丝不动。模态框唯一正解是它自己的「取消」。
-       ⚠**高 conf 检出 ≠ 可点击**：0.96 的框照样可能是装饰层/被遮挡层。
+       **高 conf 检出 ≠ 可点击**：0.96 的框照样可能是装饰层/被遮挡层。
 
-    ⛔另一条负门禁（2026-06-10 就写过，07-27 又用一次）：
+    另一条负门禁（2026-06-10 就写过，07-27 又用一次）：
        **结果弹窗永远没有取消键**。全语料 44,669 帧实证：奖励弹窗 494 帧里
        带取消键的 **0 帧**。所以"有取消键"= 这是个**决策框**不是结果框，
        退出它只能点取消，不能点確認（点確認就等于答应了那件事）。
     """
 
     def exit_step(self, obs: Observation, prefer_close: bool = True):
-        # ① 取消键最优先 —— 模态框上它是唯一有效的出口
+        #  取消键最优先 —— 模态框上它是唯一有效的出口
         c = obs.find(V.CANCEL, 0.45)
         if c is not None:
             return tap_box(c, "退出: 取消（模态框唯一有效出口）")
-        # ② 结果框（有確認、**没有**取消）→ 点確認关掉
+        #  结果框（有確認、**没有**取消） 点確認关掉
         cf = obs.find(V.CONFIRM, 0.45)
         if cf is not None:
             return tap_box(cf, "退出: 確認（结果框；结果框永远没有取消键）")
-        # ③ 叉叉
+        #  叉叉
         if prefer_close:
             x = obs.find(V.CLOSE_X, 0.55)
             if x is not None:
                 return tap_box(x, "退出: 关弹窗")
-        # ④ ⛔⛔**要么一路返回，要么一路回大厅，绝不混用**（用户 2026-08-12:
+        #  **要么一路返回，要么一路回大厅，绝不混用**（用户 2026-08-12:
         #    「不要又点返回又点大厅按钮，**要么返回要么大厅**，根据逻辑语义
         #      重新修改」）。
         #    原来是「有返回键就点返回，没有才点回大厅」——**两个键的语义完全不同**:
@@ -318,15 +318,15 @@ class ExitMixin:
         #    混着用的表现就是 live 里那串「点一下返回、紧接着点一下回大厅」，
         #    看起来像重复点击，实际是**两套退出策略在同一条链上打架**：
         #    返回退了一层，新页面正好没有返回键，于是又跳回大厅，前一下白点。
-        #    ⇒ 选定语义后**坚持到底**：本 flow 的 `exit_step` 是"逐层退"语义
+        #     选定语义后**坚持到底**：本 flow 的 `exit_step` 是"逐层退"语义
         #      （给下一个 flow 在中间层认出入口的机会），那就**只用返回键**；
-        #      屏上没有返回键 = 这一层退不了，交给 ⑤ 的系统返回键，
+        #      屏上没有返回键 = 这一层退不了，交给  的系统返回键，
         #      而不是改用另一套语义。
-        #    ⚠真想"直接回大厅"的调用方请显式走 `nav.to_lobby()`，别指望这里。
+        #    真想"直接回大厅"的调用方请显式走 `nav.to_lobby()`，别指望这里。
         b = obs.find(V.BACK, 0.55)
         if b is not None:
             return tap_box(b, "退出: 返回键（逐层退，全程只用这一种）")
-        # ⑤ 最后手段：系统返回键。安全性由 `nav.back_key()` **统一**把关
+        #  最后手段：系统返回键。安全性由 `nav.back_key()` **统一**把关
         #    （大厅上按返回会弹退出游戏框 —— 见那里的注释）。
         from routing_v2.flow.nav import back_key
-        return back_key(obs, "退出: 屏上无退出控件 → 系统返回键")
+        return back_key(obs, "退出: 屏上无退出控件  系统返回键")

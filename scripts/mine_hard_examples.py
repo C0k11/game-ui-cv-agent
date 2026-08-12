@@ -4,12 +4,12 @@ Runs the trained fused_avatar detector on every trajectory frame and identifies
 predictions that are "interesting for the next training round" — typically:
 
   * Medium-conf detections (0.10-0.45): model knows something is there but isn't
-    sure which character → classifier needs more samples to disambiguate.
+    sure which character  classifier needs more samples to disambiguate.
   * Confidence-split detections: same bbox region has >=2 predictions of different
-    classes, none above 0.5 → classifier is choosing between similar-looking
+    classes, none above 0.5  classifier is choosing between similar-looking
     characters; user review resolves ambiguity.
   * Rare-class predictions: model predicts a class with very few train samples,
-    even at high conf → useful to verify and add to train.
+    even at high conf  useful to verify and add to train.
 
 For each hard example, the frame is copied to
   data/raw_images/_hard_examples_<tag>/frames/<runname>__<tick>.jpg
@@ -126,7 +126,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=str(DEFAULT_MODEL))
     ap.add_argument("--data", default=str(DEFAULT_DATA_YAML))
-    ap.add_argument("--tag", default="v1", help="Output dir tag → _hard_examples_<tag>/")
+    ap.add_argument("--tag", default="v1", help="Output dir tag  _hard_examples_<tag>/")
     ap.add_argument("--scan-limit", type=int, default=2000,
                     help="Max trajectory frames to scan for hard examples")
     ap.add_argument("--max", type=int, default=200,
@@ -273,7 +273,7 @@ def main() -> int:
     audit_path = out_dir.parent / "audit.json"
     audit_path.write_text(json.dumps(audit_entries, ensure_ascii=False, indent=2),
                           encoding="utf-8")
-    print(f"\nEmitted {emit_count} hard examples → {out_dir}")
+    print(f"\nEmitted {emit_count} hard examples  {out_dir}")
     print(f"Audit:    {audit_path}")
     print()
     print(f"Next: open dashboard, select '_hard_examples_{args.tag}' dataset, review")

@@ -1,4 +1,4 @@
-"""Build Chinese→English student name mapping from reference default_config.
+"""Build ChineseEnglish student name mapping from reference default_config.
 
 Outputs data/student_name_map.json with format:
 {
@@ -77,7 +77,7 @@ SUFFIX_MAP = {
 
 
 def global_to_filename(global_name: str) -> str:
-    """Convert 'Hina (Swimsuit)' → 'Hina_(Swimsuit)'."""
+    """Convert 'Hina (Swimsuit)'  'Hina_(Swimsuit)'."""
     return global_name.replace(" (", "_(").replace(" ", "_")
 
 
@@ -91,7 +91,7 @@ def cn_to_possible_filenames(cn_name: str, global_name: str) -> list:
     fn2 = fn.replace("＊", "")
     if fn2 != fn:
         candidates.append(fn2)
-    # Try common variant suffixes: Camp→Camping, Track→Sportswear, Cheer Squad→Cheerleader
+    # Try common variant suffixes: CampCamping, TrackSportswear, Cheer SquadCheerleader
     VARIANT_MAP = {
         "Camp": "Camping", "Track": "Sportswear",
         "Cheer_Squad": "Cheerleader",
@@ -102,7 +102,7 @@ def cn_to_possible_filenames(cn_name: str, global_name: str) -> list:
     return candidates
 
 
-# Build mapping: Chinese name → English filename
+# Build mapping: Chinese name  English filename
 name_map = {}  # cn_name -> filename_stem
 unmapped = []
 
@@ -124,7 +124,7 @@ for student in students:
             break
 
     if matched:
-        # Map CN name (simplified) → filename
+        # Map CN name (simplified)  filename
         name_map[cn_name] = matched
 
         # Also add Traditional Chinese variant if possible
@@ -195,12 +195,12 @@ for tc, en in MANUAL_TC.items():
     if en in crop_names:
         name_map[tc] = en
 
-print(f"\nMapped: {len(name_map)} name→filename entries")
+print(f"\nMapped: {len(name_map)} namefilename entries")
 print(f"Unmapped: {len(unmapped)} entries")
 if unmapped[:5]:
     print("  Sample unmapped:")
     for cn, gl, cands in unmapped[:5]:
-        print(f"    '{cn}' → '{gl}' (tried: {cands})")
+        print(f"    '{cn}'  '{gl}' (tried: {cands})")
 
 # Save
 OUT.write_text(json.dumps(name_map, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -211,4 +211,4 @@ print("\n=== Verification against tick_0062 names ===")
 test_names = ["乃愛", "乃愛(睡衣)", "亞伽里", "亞伽里(正月)", "亞子"]
 for name in test_names:
     result = name_map.get(name, "NOT FOUND")
-    print(f"  '{name}' → '{result}'")
+    print(f"  '{name}'  '{result}'")

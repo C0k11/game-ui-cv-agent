@@ -2,13 +2,13 @@
 """凹轴耶罗尼姆斯池 标注修复 (2026-07-12, 用户人审后四毒点).
 
 用户已审: 我方/敌方/主教口径(主教=44帧, boss基本静止)。遗留:
-  1. 主教只标 44/444 战斗帧 → 400 帧假负样本 (训练毒药)
+  1. 主教只标 44/444 战斗帧  400 帧假负样本 (训练毒药)
   2. HUD 漏标 123 帧 (暗帧 v4 漏检: 战斗暂停/倍速键)
   3. 倍速键疑似混标 (412 1倍速 278框 vs 129 三倍速 45框, 用户截图 UI=3x)
   4. 478 塞特的愤怒 残留 1 框
 
 方案 = 传播 + NCC 图像校验 (绝不盲补):
-  主教: 未标战斗帧 ← 时间最近已标框, crop 与已标模板均值 NCC ≥ 阈值才写
+  主教: 未标战斗帧  时间最近已标框, crop 与已标模板均值 NCC ≥ 阈值才写
   HUD : 位置固定, 同法; 倍速键额外做 1x/3x 模板判别改写
   全程先备份池 label 到 data/raw_images/_backups/
 
@@ -89,7 +89,7 @@ def main():
     report = defaultdict(list)
     changed = set()
 
-    # ── 1. 478 残留 → 480 (在主教位置邻域才改) ──
+    # ── 1. 478 残留  480 (在主教位置邻域才改) ──
     for n, bs in frames.items():
         for b in bs:
             if b[0] == SETH:
@@ -101,7 +101,7 @@ def main():
                 changed.add(n)
 
     # ── 2. 主教: 全帧模板搜索 (boss 会动/相机移动, 最近邻传播 p50 仅 0.21
-    #    已证伪 → matchTemplate 半分辨率全图搜, 多模板取最大响应) ──
+    #    已证伪  matchTemplate 半分辨率全图搜, 多模板取最大响应) ──
     labeled_b = sorted(n for n in combat if any(b[0] == BISHOP for b in frames[n]))
     tpl_b = [(n, next(b for b in frames[n] if b[0] == BISHOP)) for n in labeled_b]
     SCALE = 0.5
@@ -243,7 +243,7 @@ def main():
             shutil.copy2(src, bak / src.name)
         for n in changed:
             save(imgs[n].with_suffix(".txt"), frames[n])
-        print(f"[apply] {len(changed)} 帧已改, 备份 → {bak}")
+        print(f"[apply] {len(changed)} 帧已改, 备份  {bak}")
 
     # ── 报告 ──
     print(f"pool={POOL.name} 战斗帧={len(combat)}")

@@ -33,7 +33,7 @@ CONF = 0.35   # HUD 类 v13 检出通常 0.9+; 0.35 防弱假阳污染人审队�
 def main() -> None:
     from ultralytics import YOLO
     model = YOLO(V13)
-    name_by_idx = model.names  # v13 内部 idx → name
+    name_by_idx = model.names  # v13 内部 idx  name
 
     ts = time.strftime("%H%M%S")
     for pool in POOLS:

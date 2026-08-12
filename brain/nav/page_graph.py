@@ -12,23 +12,23 @@ skill 将来只需要声明目标("我要到 EventQuestList"), 路径交给 BFS�
 出现的 cls = 核心指纹; 转移边取自 trajectory 里 click 动作落点 + 后续帧组变化。
 本文件是把那份稿子**形式化成机器可读**, 并把稿子里列出的坑编码成负条件。
 
-## ⛔v1 纪律: 只观测, 不接管
+## v1 纪律: 只观测, 不接管
 和 exit_report 一样 —— 先挂在 pipeline 上每 tick 输出"我认为在哪一页", 跟
 skill 自己的 sub_state 对账, 攒够真实分布再谈让它接管导航。
 **绝不在没有实测准确率之前把导航交给它。**
 
 ## 编码进来的已证实陷阱(全部来自 screen_flow_draft 实测)
-1. `课程表票` 有**域外假阳**: 悬赏扫荡确认框里的票券图标被检成它 → 任何
-   "见课程表票⇒Schedule" 的单 cls 判据都会误判。⇒ Schedule 族一律要求
+1. `课程表票` 有**域外假阳**: 悬赏扫荡确认框里的票券图标被检成它  任何
+   "见课程表票Schedule" 的单 cls 判据都会误判。 Schedule 族一律要求
    ≥2 个核心 cls, 且加 `取消键` 负条件。
 2. **确认框族高度同构**: {确认+取消+叉叉(+MAX/MIN)} 在 扫荡确认/活动商店购买/
-   AP购买/退出确认 之间 cls 集合几乎不可分 ⇒ 本图**拒绝**给它们单独定名,
+   AP购买/退出确认 之间 cls 集合几乎不可分  本图**拒绝**给它们单独定名,
    统一归 `ConfirmDialog_ambiguous`, 由调用方的上下文闸(base.has_qty_stepper /
    event_quest._dialog_is_purchase)处理。**图不做它做不到的判断。**
 3. `弹窗叉叉`-only 帧(弹窗动画中, 实测 ~31 帧): 输出 UNKNOWN 等下一帧,
    **不硬归类**。
 4. 摸头特写只有 `Emoticon_Action` 且 chrome 全隐是**合法画面**, 不是 stuck。
-5. EventShop 在本期活动皮上 v13 只剩 `购买`+chrome, 无法正锚 ⇒ 只能反向排除,
+5. EventShop 在本期活动皮上 v13 只剩 `购买`+chrome, 无法正锚  只能反向排除,
    标记 `weak=True`, 识别结果不可用于导航决策。
 """
 from __future__ import annotations
@@ -37,9 +37,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ── 页面定义 ────────────────────────────────────────────────────────────
 # core     : 核心指纹 cls(组内 ≥80% 帧出现)
-# min_core : 至少命中几个 core 才算这一页(单 cls 判据的坑见文件头 ①)
+# min_core : 至少命中几个 core 才算这一页(单 cls 判据的坑见文件头 )
 # require  : **必须全部出现**, 少一个直接否决。
-#            ⛔为什么需要它(2026-07-25 全语料实测才发现): 光有 min_core 时,
+#            为什么需要它(2026-07-25 全语料实测才发现): 光有 min_core 时,
 #            "扫荡开始+任务开始" 两个通用 cls 就能凑够 Bounty_SweepPanel 的
 #            门槛, **票种压根没参与判定** —— 活动关的扫荡面板被判成悬赏的,
 #            实测 219 帧。凡是"靠某个专属物件区分的同构页面"(悬赏/交流会/
@@ -61,7 +61,7 @@ PAGES: Dict[str, P] = {
                  "战术大赛", "特殊任务"],
         "min_core": 3, "parent": "Lobby",
     },
-    # ── Schedule 族 (⛔坑①: 一律 ≥2 core + 取消键负条件) ──
+    # ── Schedule 族 (坑: 一律 ≥2 core + 取消键负条件) ──
     "Schedule_RegionSelect": {
         "core": ["课程表票", "夏莱办公室", "夏莱居住区", "格黑娜学院中央区",
                  "阿拜多斯高中", "千年研究所"],
@@ -69,15 +69,15 @@ PAGES: Dict[str, P] = {
     },
     "Schedule_RoomCarousel": {
         "core": ["全体课程表", "左切换", "右切换", "课程表票"],
-        # ⛔2026-07-27 live 实锤: 只有 min_core=2 时, **社交页**(社團/好友/幫手
-        # 三卡)靠通用的 左切换+右切换 就凑够 2 → 被判成课程表轮播, 而它同帧的
-        # 「社团」0.99 让 Club(core 1/1) 只拿到 1 分, 打分按**绝对命中数**排序 →
-        # 通用 chrome 打赢专属物件。这正是 memory 经验① "靠专属物件区分的同构
+        # 2026-07-27 live 实锤: 只有 min_core=2 时, **社交页**(社團/好友/幫手
+        # 三卡)靠通用的 左切换+右切换 就凑够 2  被判成课程表轮播, 而它同帧的
+        # 「社团」0.99 让 Club(core 1/1) 只拿到 1 分, 打分按**绝对命中数**排序 
+        # 通用 chrome 打赢专属物件。这正是 memory 经验 "靠专属物件区分的同构
         # 页面, 那个物件必须进 require" 的第二次复发。
         # 两帧验证: 真轮播帧 全体课程表=0.98 在; 社交页帧无此 cls。
-        # ⛔用 require_any(OR) 不是 require(AND): 全语料实测 AND 会误伤 65 帧
+        # 用 require_any(OR) 不是 require(AND): 全语料实测 AND 会误伤 65 帧
         # 真课程表页(那些帧只检出 课程表票、没检出 全体课程表)。两个都是课程表
-        # **域专属**, 社交页两个都不带 → OR 既挡住误判又不误伤。
+        # **域专属**, 社交页两个都不带  OR 既挡住误判又不误伤。
         "require_any": ["全体课程表", "课程表票"],
         "min_core": 2, "neg": ["扫荡开始", "任务开始", "悬赏通缉票", "学院交流会票", "取消键", "弹窗叉叉"],
         "parent": "Schedule_RegionSelect",
@@ -173,7 +173,7 @@ PAGES: Dict[str, P] = {
         "min_core": 2, "parent": "Lobby",
     },
     "EventShop": {
-        # ⛔坑⑤: 本期活动皮上 v13 只剩 购买+chrome, 无正锚 → weak, 仅观测
+        # 坑: 本期活动皮上 v13 只剩 购买+chrome, 无正锚  weak, 仅观测
         "core": ["购买"],
         "min_core": 1, "weak": True,
         "neg": ["全部选择", "战术大赛商店已选择", "信用点商店_已选中", "免费"],
@@ -186,18 +186,18 @@ PAGES: Dict[str, P] = {
     "BondLevelUp": {"core": ["羁绊升级"], "min_core": 1, "parent": None},
     "Club": {"core": ["社团"], "min_core": 1, "parent": "Lobby"},
     "Loading": {"core": ["加载中"], "min_core": 1, "parent": None},
-    "Cafe_Headpat": {  # ⛔坑④: chrome 全隐 + 只有 Emoticon 是合法态
+    "Cafe_Headpat": {  # 坑: chrome 全隐 + 只有 Emoticon 是合法态
         "core": ["Emoticon_Action"], "min_core": 1, "parent": "Cafe_Hall1",
     },
 }
 
-# ⛔坑②: 确认框族**故意不定名** —— cls 集合不可分, 图不做它做不到的判断。
+# 坑: 确认框族**故意不定名** —— cls 集合不可分, 图不做它做不到的判断。
 # 命中这个形状就报 ambiguous, 让调用方用上下文闸(结构/位置)去分。
 CONFIRM_SHAPE = ("确认键", "取消键")
 
 # ── 转移边: (from_page, 点这个 cls, to_page) ─────────────────────────────
-# 全部来自 screen_flow_draft 的"点击去向(观测)"。返回键→parent /
-# 回大厅按钮→Lobby 是全局默认边, 不在这里重复。
+# 全部来自 screen_flow_draft 的"点击去向(观测)"。返回键parent /
+# 回大厅按钮Lobby 是全局默认边, 不在这里重复。
 EDGES: List[Tuple[str, str, str]] = [
     ("Lobby", "任务大厅入口", "MissionHub"),
     ("Lobby", "课程表入口", "Schedule_RegionSelect"),
@@ -208,7 +208,7 @@ EDGES: List[Tuple[str, str, str]] = [
     ("MissionHub", "战术大赛", "Arena_Opponents"),
     ("MissionHub", "悬赏通缉", "Bounty_SceneSelect"),
     ("MissionHub", "学院交流会", "Exchange_SchoolSelect"),
-    # ⚠2026-07-25 审计补边: EventQuestList/EventSweepPanel 原先**零入边** —
+    # 2026-07-25 审计补边: EventQuestList/EventSweepPanel 原先**零入边** —
     # 文件头旗舰用例 route(...,'EventQuestList') 永远 None, 而 event_quest 是
     # 当前 skill_order 唯一主链。banner cls 取 live 实际点击的 405(event_quest
     # _enter 点「距离结束还剩」进活动, 不是 idx77 那个入口框)。
@@ -248,7 +248,7 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
     ns = _names(screen, conf)
     if not ns:
         return None, "零检出(黑屏/过场/CG) — 等下一帧"
-    # ⛔坑③: 只剩一个叉叉 = 弹窗动画中, 不判
+    # 坑: 只剩一个叉叉 = 弹窗动画中, 不判
     if ns <= {"弹窗叉叉", _GLOBAL_BACK, _GLOBAL_HOME}:
         return None, "只剩弹窗/chrome cls — 等下一帧"
     hits = []
@@ -258,10 +258,10 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
         req = p.get("require", ())
         if req and not all(n in ns for n in req):
             continue
-        # ⭐require_any(2026-07-27): "这一页必须至少带一个**本域专属**物件"。
+        # require_any(2026-07-27): "这一页必须至少带一个**本域专属**物件"。
         # 与 require(AND) 的分工: AND 适合"只有一个专属锚且必现"的页; 域里有
         # **多个专属锚、但每帧只保证出现其中之一**时只能用 OR。
-        # ⛔实测逼出来的(全语料 44,177 有检出帧): Schedule_RoomCarousel 用
+        # 实测逼出来的(全语料 44,177 有检出帧): Schedule_RoomCarousel 用
         # AND require=[全体课程表] 翻 182 帧 —— 修正 117(社交页误判 57/咖啡厅 4/
         # 纯"左切换+右切换"凑数垃圾 56), 但**误伤 65 帧真课程表页**(那些帧
         # 全体课程表 没检出、只检出 课程表票)。改 OR 后误伤归零。
@@ -273,14 +273,14 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
             # require 命中也算"具体度", 让专属判据赢过通用判据
             hits.append((k + len(req), p["min_core"], name))
     if not hits:
-        # ⛔坑②: 确认框形状但认不出是哪个框
+        # 坑: 确认框形状但认不出是哪个框
         if all(c in ns for c in CONFIRM_SHAPE):
             return None, ("ConfirmDialog_ambiguous — 确认框族 cls 不可分, "
                           "交上下文闸(结构/位置)判, 图不猜")
         return None, f"无匹配页面 (在屏 {len(ns)} 类)"
     hits.sort(key=lambda t: (t[0], t[1]), reverse=True)
     best = hits[0]
-    tag = " ⚠weak" if PAGES[best[2]].get("weak") else ""
+    tag = " weak" if PAGES[best[2]].get("weak") else ""
     extra = ""
     if len(hits) > 1 and hits[1][0] == best[0]:
         extra = f" (并列: {[h[2] for h in hits[:3]]})"
@@ -299,7 +299,7 @@ def neighbors(page: str) -> List[Tuple[str, str]]:
 
 
 def route(src: str, dst: str, max_hops: int = 8) -> Optional[List[str]]:
-    """BFS: 从 src 走到 dst 要依次点哪些 cls。走不到 → None。"""
+    """BFS: 从 src 走到 dst 要依次点哪些 cls。走不到  None。"""
     if src == dst:
         return []
     if src not in PAGES or dst not in PAGES:

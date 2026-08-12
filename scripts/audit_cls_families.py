@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """cls **族关系**审计 —— 485 类不是 485 个独立目标, 是「物件 × 状态」。
 
-⛔用户 2026-07-25 点破: "你得思考 cls 之间的联系, 有的都是某些 cls 的变种
+用户 2026-07-25 点破: "你得思考 cls 之间的联系, 有的都是某些 cls 的变种
 或者是没被点击之前的状态之类的"。
 
 为什么这件事值钱 —— 状态混淆是**最贵的一类 bug**:
-  把「不可点」当「可点」→ 空点、卡流程;  把「可点」当「不可点」→ 漏活、资源作废。
+  把「不可点」当「可点」 空点、卡流程;  把「可点」当「不可点」 漏活、资源作废。
 而只要 val 里**只有族里的一态**, 这类 bug 就**永远测不出来**。
 实测到的最刺眼一例: `关卡得星_3` val 794 实例, 而 `关卡得星_0` val **0** —— 可
 memory[[ui-cls-semantics]] 早就记着"Challenge 行灰星=独立类 _0, 任何得星族
@@ -13,9 +13,9 @@ startswith/子串闸都会在 Challenge tab 误通过", 那起 Challenge 假阳�
 **用现有 val 根本测不到**。
 
 三条用途:
- ① val 必须**成对**: 同族成员都要有实例, 否则测不出状态混淆
- ② 训练配额按族均衡: 同族一个 1425 框一个 1 框, 模型必然偏向多的那个
- ③ 代码判据按族审: 用了族里某一态, 就要问"另一态出现时会怎样"
+  val 必须**成对**: 同族成员都要有实例, 否则测不出状态混淆
+  训练配额按族均衡: 同族一个 1425 框一个 1 框, 模型必然偏向多的那个
+  代码判据按族审: 用了族里某一态, 就要问"另一态出现时会怎样"
 
 跑: py scripts/audit_cls_families.py [--all-domains] [--json out.json]
 """
@@ -33,7 +33,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DS = r"D:\Project\ml_cache\models\yolo\dataset\ui_v2"
 
 # 状态后缀模式 —— 剥掉后剩下的是"物件词根"。
-# ⚠纯字符串模式, 不猜语义: 宁可漏归族(少报), 也不要把两个不相干的类硬凑一族。
+# 纯字符串模式, 不猜语义: 宁可漏归族(少报), 也不要把两个不相干的类硬凑一族。
 STATE_PATTERNS = [
     (r"_黄$", "可用/高亮"),
     (r"_灰$|_灰色$", "不可用"),
@@ -45,7 +45,7 @@ STATE_PATTERNS = [
     (r"高亮$", "高亮"),
     (r"_已完成$|已完成$", "已完成"),
     (r"_未完成$|未完成$", "未完成"),
-    # ⚠"没解锁"变体必须收(2026-07-25 审计: 入场键/入场键没解锁 这对真状态族
+    # "没解锁"变体必须收(2026-07-25 审计: 入场键/入场键没解锁 这对真状态族
     # 因缺此变体整个进不了族表, val 成对审计+gap 队列族配额对它双双失效)
     (r"未解锁$|没解锁$", "未解锁"),
     (r"不可用$", "不可用"),
@@ -119,7 +119,7 @@ def main() -> int:
           f"{'' if a.all_domains else ' (仅 UI 域)'}\n")
 
     print("=" * 76)
-    print("⛔ val 只覆盖族内一部分 → **状态混淆测不出来**")
+    print(" val 只覆盖族内一部分  **状态混淆测不出来**")
     print("=" * 76)
     partial = []
     for root, mem in sorted(multi.items()):
@@ -129,13 +129,13 @@ def main() -> int:
     for root, mem in partial:
         print(f"\n【{root}】")
         for m in sorted(mem, key=lambda x: -x["train"]):
-            flag = "✅val" if m["val"] > 0 else "⛔无val"
+            flag = "val" if m["val"] > 0 else "无val"
             print(f"    {m['name']:22} {str(m['state'] or '-'):8} "
                   f"train {m['train']:6d}  val {m['val']:5d}  {flag}")
     print(f"\n小计: {len(partial)} 个族只测得出一部分状态")
 
     print("\n" + "=" * 76)
-    print("⚠️ 族内训练样本失衡 (>20x) → 模型偏向样本多的那一态")
+    print("️ 族内训练样本失衡 (>20x)  模型偏向样本多的那一态")
     print("=" * 76)
     imbal = []
     for root, mem in sorted(multi.items()):
@@ -159,7 +159,7 @@ def main() -> int:
                    "imbalanced": [i[0] for i in imbal]},
                   open(a.json, "w", encoding="utf-8"), ensure_ascii=False,
                   indent=1)
-        print(f"\n→ {a.json}")
+        print(f"\n {a.json}")
     return 0
 
 

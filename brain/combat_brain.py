@@ -2,9 +2,9 @@
 """combat 2.0 v7 战斗大脑: scrcpy 感知线程 + 黑板 + 行为树控牌.
 
 架构(playbook 4.8 定案, 不再打补丁):
-  ScrcpyFeed(~25fps) → Perception 线程(battle+avatar 每帧, ui 低频)
-  → Blackboard(全队HP/亮卡表/敌表/boss/亮度) → 行为树 tick(决策只读黑板)
-  → 动作(ADB tap / motionevent 闭环拖拽, 拖拽中每步读黑板跟目标).
+  ScrcpyFeed(~25fps)  Perception 线程(battle+avatar 每帧, ui 低频)
+   Blackboard(全队HP/亮卡表/敌表/boss/亮度)  行为树 tick(决策只读黑板)
+   动作(ADB tap / motionevent 闭环拖拽, 拖拽中每步读黑板跟目标).
 
 v6 的根性缺陷: ADB 1fps 链, 闭环拖拽中途 capture_frame 等 ~1s,
 目标早跑了; v7 黑板帧龄 <150ms, 圈真正贴住目标.
@@ -65,7 +65,7 @@ def _hp_of(crop_bgr):
 
 
 class Perception(threading.Thread):
-    """scrcpy 帧 → YOLO → 黑板. battle+avatar 每帧, ui 每 20 帧(判败兜底)."""
+    """scrcpy 帧  YOLO  黑板. battle+avatar 每帧, ui 每 20 帧(判败兜底)."""
 
     def __init__(self, feed, battle, avatar, ui, flywheel_dir=None):
         super().__init__(daemon=True)
@@ -180,8 +180,8 @@ class CombatBrain:
         self.adb_capture = adb_capture   # ADB 抓帧(判败二次确认用)
         self.last_tgt = None        # 粘滞(归一化)
         self.last_card = None
-        self.fail_n = {}            # 卡名→连续释放失败次数
-        self.cooldown = {}          # 卡名→冷却截止时刻(防误判亮卡死循环)
+        self.fail_n = {}            # 卡名连续释放失败次数
+        self.cooldown = {}          # 卡名冷却截止时刻(防误判亮卡死循环)
 
     # ── 目标函数(闭环拖拽中反复调用, 每次读最新黑板) ──────────────
     def tgt_boss(self, s: Snapshot):
@@ -214,7 +214,7 @@ class CombatBrain:
         if not s.allies:
             return None, "我方?"
         readable = [a for a in s.allies if a[2] is not None]
-        if not readable:                  # 全员血条被遮 → 退我方群心
+        if not readable:                  # 全员血条被遮  退我方群心
             return self.tgt_ally_center(s)
         a = min(readable, key=lambda x: x[2])
         return (a[0], a[1]), f"我方HP{a[2]:.0%}"
@@ -229,8 +229,8 @@ class CombatBrain:
     # ── 行为树: 从上往下第一个命中的规则执行(顺序=优先级, 直接改) ──
     def decide(self, s: Snapshot):
         """返回 (规则名, card, target_fn) 或 None(攒费).
-        ⚠sat 判亮对部分卡失真(优香卡面天然高饱和, 亮灰 sat 重叠,
-        2026-07-15 Q11 实锤) → 释放失败退避冷却是主防线, 不追求判准."""
+        sat 判亮对部分卡失真(优香卡面天然高饱和, 亮灰 sat 重叠,
+        2026-07-15 Q11 实锤)  释放失败退避冷却是主防线, 不追求判准."""
         now = time.time()
         lit = [c for c in s.lit if self.cooldown.get(c[0], 0) < now]
         if not lit:
@@ -267,7 +267,7 @@ class CombatBrain:
             return "辅助增益", c, fn
         return None
 
-    # ── 释放(闭环拖拽: DOWN → 每步读黑板 MOVE 跟目标 → UP) ──────────
+    # ── 释放(闭环拖拽: DOWN  每步读黑板 MOVE 跟目标  UP) ──────────
     def play(self, rule: str, card, target_fn) -> bool:
         name = card[0]
         inf = self.skills.get(name, {})
@@ -278,7 +278,7 @@ class CombatBrain:
             time.sleep(0.6)
             ok = self._card_gone(name)
             self.log(f"    ⚡[{rule}]{name}(auto, sat{card[3]:.0f}) "
-                     f"释放={'✓' if ok else '✗'}")
+                     f"释放={'' if ok else ''}")
             self.last_card = name
             self._book(name, ok)
             return ok
@@ -303,14 +303,14 @@ class CombatBrain:
         ok = self._card_gone(name)
         self.log(f"    ⚡[{rule}]{name}[{inf.get('role', '?')}"
                  f"{'|AOE' if inf.get('aoe') else ''}](sat{card[3]:.0f})"
-                 f"→{desc}@({tx},{ty}) 瞄准={'Y' if aimed else 'N'} "
-                 f"释放={'✓' if ok else '✗'}")
+                 f"{desc}@({tx},{ty}) 瞄准={'Y' if aimed else 'N'} "
+                 f"释放={'' if ok else ''}")
         self.last_card = name
         self._book(name, ok)
         return ok
 
     def _book(self, name: str, ok: bool):
-        """失败退避: 连续 2 次释放✗ → 冷却 12s(等 cost 回复).
+        """失败退避: 连续 2 次释放  冷却 12s(等 cost 回复).
         sat 判亮对部分卡失真(亮灰重叠), 退避让误判无法卡死决策循环."""
         if ok:
             self.fail_n[name] = 0
@@ -347,15 +347,15 @@ class CombatBrain:
             s = self.p.snapshot()
             if s.age > 5.0:               # feed 假死: 不拿旧状态做决策
                 if time.time() - last_status > 5:
-                    self.log(f"    ⚠帧龄{s.age:.1f}s — 感知断流, 等恢复"
+                    self.log(f"    帧龄{s.age:.1f}s — 感知断流, 等恢复"
                              f"(feed重启x{getattr(self.p.feed, 'restarts', '?')})")
                     last_status = time.time()
                 time.sleep(1.0)
                 continue
             if s.victory:
                 # 胜利侧 ADB 干净帧二次确认(与判败侧对称): ADB 帧仍
-                # 检出战斗 HUD = scrcpy 侧误报 → 重置锁存继续打;
-                # 抓不到帧/横幅已过场 → 信连续2帧检出
+                # 检出战斗 HUD = scrcpy 侧误报  重置锁存继续打;
+                # 抓不到帧/横幅已过场  信连续2帧检出
                 if self.adb_capture is not None:
                     fr = self.adb_capture()
                     if fr is not None:
@@ -366,11 +366,11 @@ class CombatBrain:
                                      " — 误报重置, 继续)")
                             self.p.clear_victory()
                             continue
-                self.log(f"    ⭐胜利({time.time() - t0:.0f}s)")
+                self.log(f"    胜利({time.time() - t0:.0f}s)")
                 return "win"
             if s.auto_on:                     # 状态门: 检出开启才点(接管)
                 self.shell(f"input tap {auto_xy[0]} {auto_xy[1]}")
-                self.log("    AUTO→关(bot接管)")
+                self.log("    AUTO关(bot接管)")
                 time.sleep(1.0)
                 continue
             if not s.in_battle:
@@ -378,14 +378,14 @@ class CombatBrain:
                 if ("确认键" in s.ui_names and time.time() - t0 > 30
                         and time.time() - empty_since > 6):
                     # ADB 干净帧二次确认(独立于 scrcpy 断流的第二链路):
-                    # Q12 实锤胜利帧落在断流窗口 → 胜局被误判败
+                    # Q12 实锤胜利帧落在断流窗口  胜局被误判败
                     if self.adb_capture is not None:
                         fr = self.adb_capture()
                         if fr is not None:
                             bn = {d[0] for d in self.p._dets(
                                 self.p.battle, fr, 0.5)}
                             if "战斗胜利" in bn:
-                                self.log(f"    ⭐胜利(ADB 二次确认, "
+                                self.log(f"    胜利(ADB 二次确认, "
                                          f"{time.time() - t0:.0f}s)")
                                 return "win"
                             if bn & BATTLE_HUD:
@@ -394,7 +394,7 @@ class CombatBrain:
                                 empty_since = None
                                 continue
                     self.log(f"    battle域空+确认键({time.time() - t0:.0f}s)"
-                             f" → 判败/结束")
+                             f"  判败/结束")
                     return "lose"
                 time.sleep(0.4)
                 continue

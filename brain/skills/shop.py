@@ -4,11 +4,11 @@ Verified flow (interactive probe 2026-06-01, data/_shop_probe_log.md). The old
 skill blindly confirmed ANY purchase. The user requires DYNAMIC budget planning:
 read the credit balance and only buy when we stay above a configured reserve.
 
-★★ HARD RULES ★★
+ HARD RULES 
 - NEVER touch the 青辉石商店 tab — that spends pyroxene. We stay on the default
   一般(信用点) tab, which is 100% credits, so this skill cannot spend
   pyroxene/real money by construction.
-  ⛔2026-07-25 全量 cls 审计纠正: 旧版靠"检出 `青辉石商店_已选择` 就 abort"的
+  2026-07-25 全量 cls 审计纠正: 旧版靠"检出 `青辉石商店_已选择` 就 abort"的
   **黑名单**把关, 而那个 cls **训练 0 框 / 92k tick 实战 0 检出** —— 4 道守卫
   全是死码, 却在注释里显得防护森严。现改为 **fail-closed 白名单**:
   `_on_credit_tab()` 正向确认 `信用点商店_已选中`(613 训练框/644 实战检出),
@@ -20,12 +20,12 @@ read the credit balance and only buy when we stay above a configured reserve.
 
 State machine
 -------------
-enter    lobby → NAV_SHOP → shop page (默认 一般 tab). Pyroxene-tab guard.
-select   全部选择 (SHOP_SELECT_ALL) → all items green-checked. 全部选择灰 = nothing
-         to buy / already bought today → exit.
-buy      选择购买 (SHOP_BUY_SELECTED) → purchase-confirm dialog.
-confirm  read budget → balance−total ≥ reserve → 确认键; else 取消键 → exit.
-exit     GOT_REWARD dismissed globally → lobby → done.
+enter    lobby  NAV_SHOP  shop page (默认 一般 tab). Pyroxene-tab guard.
+select   全部选择 (SHOP_SELECT_ALL)  all items green-checked. 全部选择灰 = nothing
+         to buy / already bought today  exit.
+buy      选择购买 (SHOP_BUY_SELECTED)  purchase-confirm dialog.
+confirm  read budget  balance−total ≥ reserve  确认键; else 取消键  exit.
+exit     GOT_REWARD dismissed globally  lobby  done.
 
 Detectors: base "ui" only. OCR: DIGITS ONLY (credit balance / total).
 """
@@ -90,7 +90,7 @@ class ShopSkill(BaseSkill):
         self.max_ticks = 60
         self._reserve = _DEFAULT_RESERVE
         # shop统一 (2026-06-16): True = 买完信用点留在店内(done-in-shop), 由紧随的
-        # arena_shop 在同一次访问继续切战术大赛 tab。daily 编排 shop→arena_shop 永远
+        # arena_shop 在同一次访问继续切战术大赛 tab。daily 编排 shoparena_shop 永远
         # 相邻, 故默认 True。单跑/无 arena_shop 跟随时设 False 则正常退大厅。
         self.chain_in_shop = True
         self._init_state()
@@ -106,7 +106,7 @@ class ShopSkill(BaseSkill):
         self._cancel_clicks: int = 0      # ack-loop: cancel 实际点击次数
         self._dialog_gone: int = 0        # 点击后弹窗连续消失帧计数(=落地确认)
         self._tab_miss: int = 0           # 信用点正锚连续漏检帧计数(容错闪断)
-        # ⛔tab 身份闩锁(2026-07-25 live 实锤后加): 见 _on_credit_tab 注释。
+        # tab 身份闩锁(2026-07-25 live 实锤后加): 见 _on_credit_tab 注释。
         self._credit_tab_latched: bool = False
 
     def reset(self) -> None:
@@ -124,7 +124,7 @@ class ShopSkill(BaseSkill):
         return self.find_cls(screen, self._SHOP_PAGE_CLS, conf=0.25) is not None
 
     def _on_credit_tab(self, screen: ScreenState) -> bool:
-        """⛔**正向**确认当前在信用点(一般)tab —— 花钱前唯一可信的通行证。
+        """**正向**确认当前在信用点(一般)tab —— 花钱前唯一可信的通行证。
 
         2026-07-25 全量 cls 审计实锤: 原来那 4 道 pyroxene-tab 守卫全都写成
         「检出 `青辉石商店_已选择` 就退」的 **fail-OPEN 黑名单**, 而这个 cls
@@ -134,12 +134,12 @@ class ShopSkill(BaseSkill):
         同批零标注的还有 青辉石商店/信用点商店/总力战商店/大决战商店/
         神名文字碎片商店1&2 —— **所有商店 tab 类只有 `信用点商店_已选中`
         真被标注过**(613 框 / 实战检出 644)。
-        ⇒ 改成 fail-closed 白名单: 正向检到信用点 tab 才允许继续, 读不出就退。
+         改成 fail-closed 白名单: 正向检到信用点 tab 才允许继续, 读不出就退。
         与 2026-06-14 arena_shop 定下的原则一致("正向证明这是我要的那笔才点,
         不是没看到坏东西就点") —— 那次定了原则却没迁到 shop.py, 又一次
         "一处修了同形没迁"。
         """
-        # ⚠必须带 region(2026-07-25 全语料复核): 92,855 tick 里该 cls 581 次
+        # 必须带 region(2026-07-25 全语料复核): 92,855 tick 里该 cls 581 次
         # 真阳性全部落在左栏 tab 位(cx 0.050/cy 0.19-0.30), 但有 3 次屏中央
         # conf 0.877-0.903 的幻觉(Cafe 转场/EventQuest verify 帧) — 不带 region
         # 的全屏 argmax 会放行伪造通行证(840AP 事故同根因: 角落锚定必须带 region)。
@@ -148,10 +148,10 @@ class ShopSkill(BaseSkill):
                          region=(0.0, 0.10, 0.15, 0.40)) is not None:
             self._credit_tab_latched = True
             return True
-        # ⛔身份闩锁(2026-07-25 live 实锤后加 —— 我当天的"3 帧容错"仍误杀了采购):
-        # 日志 `inside shop (一般 tab) → select` 正锚**确认过**, 但全选后网格变忙
-        # (5 个绿勾+价格条), 左栏 tab 正锚掉到 conf 阈下 → 连续 3 帧看不到 →
-        # fail-closed 退出 → **当天信用点采购一件没买**。
+        # 身份闩锁(2026-07-25 live 实锤后加 —— 我当天的"3 帧容错"仍误杀了采购):
+        # 日志 `inside shop (一般 tab)  select` 正锚**确认过**, 但全选后网格变忙
+        # (5 个绿勾+价格条), 左栏 tab 正锚掉到 conf 阈下  连续 3 帧看不到 
+        # fail-closed 退出  **当天信用点采购一件没买**。
         # 加帧数是治标。正解: **tab 身份不会自己变** —— 只有显式点左栏/滑动才换 tab,
         # 而那是本 skill 自己的动作。所以一旦正向确认过, 本次店内访问期间就成立;
         # 闩锁只在 reset()(重新进店)清零。仍然是 fail-closed: **没确认过就不给锁**,
@@ -174,9 +174,9 @@ class ShopSkill(BaseSkill):
         pipeline 点击豁免词, 稳定门吞不掉。"""
         self._cancel_clicks += 1
         if self._cancel_clicks > 4:
-            self.log("cancel clicked 4x, dialog still up → exit (fail-closed)")
+            self.log("cancel clicked 4x, dialog still up  exit (fail-closed)")
             self._goto("exit")
-            return action_wait(300, "cancel stuck → exit")
+            return action_wait(300, "cancel stuck  exit")
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF,
                                region=_DIALOG_BAND)
         if cancel is not None:
@@ -187,18 +187,18 @@ class ShopSkill(BaseSkill):
         """Read + cache the credit balance from the TOP-BAR — must be on the GRID
         view (top bar visible; the confirm dialog dims it + has no currency cls).
 
-        ★ The shop screen has MANY 信用点 (TOPBAR_CREDIT) boxes — every item's
+         The shop screen has MANY 信用点 (TOPBAR_CREDIT) boxes — every item's
         price label is one (cy≈0.44/0.79) PLUS the top-bar balance (cy≈0.03).
-        read_count anchors on the highest-conf box → a GRID PRICE, not the
-        balance (live 2026-06-02: read 40000 instead of ~141M → wrongly
+        read_count anchors on the highest-conf box  a GRID PRICE, not the
+        balance (live 2026-06-02: read 40000 instead of ~141M  wrongly
         cancelled). So we anchor on the TOP-BAR 信用点 only (cy<0.10) and OCR the
-        digit strip to its right (verified: span 0.11 → 141,602,561).
+        digit strip to its right (verified: span 0.11  141,602,561).
         病历: 该 top-bar 信用点 cls 曾在 grid 帧上很飘 (live 2026-06-09 每帧都漏检
-        → balance=None → 误取消)，clean ADB frame 路径即为此而加。"""
+         balance=None  误取消)，clean ADB frame 路径即为此而加。"""
         if self._balance is not None or screen.frame is None:
             return
         # Prefer a CLEAN ADB frame (2026-06-11): the in-shop top bar read on the
-        # live frame returns None/truncated → budget unverifiable → cancel,
+        # live frame returns None/truncated  budget unverifiable  cancel,
         # which blocked every purchase. The clean frame reads it correctly.
         try:
             from brain.pipeline import _read_topbar_clean
@@ -217,7 +217,7 @@ class ShopSkill(BaseSkill):
             from brain.pipeline import run_digit_ocr, parse_count
         except Exception:
             return
-        # ⛔2026-07-27: 这里原本是 `_read_topbar_count` 的手抄版(x 0.003/0.115、
+        # 2026-07-27: 这里原本是 `_read_topbar_count` 的手抄版(x 0.003/0.115、
         # y ±0.012 全是屏幕比例)。改成共用 `icon_strip` + 顶栏同一套图标单位常数,
         # 既去掉重复实现, 也一并吃到 y 留白修正(±0.012 ≈ 0.35bh, 偏紧)。
         from brain.pipeline import icon_strip, _TOPBAR_STRIP, _TOPBAR_STRIP_DEFAULT
@@ -229,11 +229,11 @@ class ShopSkill(BaseSkill):
             self.log(f"shop credit balance (top-bar) = {self._balance:,} (raw {raw!r})")
 
     def _read_total_thousands(self, frame, region):
-        """OCR a region → the FIRST full thousands-grouped number (e.g.
+        """OCR a region  the FIRST full thousands-grouped number (e.g.
         '3,121,500'), as int, or None. STRICT structure gate: only accepts a
         complete `\\d{1,3}(,\\d{3})+` token — det fragments ('121,5' / '3,121,5')
         never match, so a broken read can NOT come back smaller than the true
-        total (total-read-small = fail-OPEN toward overspending; reject → the
+        total (total-read-small = fail-OPEN toward overspending; reject  the
         caller falls back to the conservative ceiling)."""
         if frame is None:
             return None
@@ -254,18 +254,18 @@ class ShopSkill(BaseSkill):
             # boundary-anchored token + TOTALITY check: the accepted token must
             # contain EVERY digit OCR saw (det dropping any group would make the
             # read smaller than the true total = fail-OPEN; '3,121,5 500' and
-            # '31,215 500' style fragments both fail totality → ceiling).
+            # '31,215 500' style fragments both fail totality  ceiling).
             m = _re.search(r"(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])", raw)
             digits_all = _re.sub(r"\D", "", raw)
             if not m or _re.sub(r"\D", "", m.group(0)) != digits_all:
-                self.log(f"總價 invalid/partial thousands token: raw={raw!r} → ceiling")
+                self.log(f"總價 invalid/partial thousands token: raw={raw!r}  ceiling")
                 return None
             return int(m.group(0).replace(",", ""))
         except Exception:
             return None
 
     def _read_balance_longest(self, frame, region):
-        """OCR a region → the LONGEST contiguous digit run (commas stripped),
+        """OCR a region  the LONGEST contiguous digit run (commas stripped),
         as int, or None. Bypasses run_digit_ocr's comma-group early-return,
         which on a live OCR fragment ('28,096' + '458') returned a short
         number that got reserve-rejected (2026-06-12 shop never bought). Only
@@ -311,7 +311,7 @@ class ShopSkill(BaseSkill):
     def _affordable(self) -> bool:
         """Buy only when the grid-read balance stays above reserve even after a
         worst-case purchase (一般-tab totals observed ~3M; 20M ceiling is safe).
-        Balance unread → fail-safe cancel (never blind-buy)."""
+        Balance unread  fail-safe cancel (never blind-buy)."""
         if self._balance is None:
             return False
         return self._balance >= (self._reserve + _ASSUMED_MAX_TOTAL)
@@ -325,7 +325,7 @@ class ShopSkill(BaseSkill):
             self.log(f"timeout (purchased={self._purchased})")
             return action_done(f"shop timeout (purchased={self._purchased})")
 
-        # Global: purchase reward popup → dismiss via continue / header.
+        # Global: purchase reward popup  dismiss via continue / header.
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
             return action_click_box(cont, "dismiss reward via continue")
@@ -361,8 +361,8 @@ class ShopSkill(BaseSkill):
             # 一帧**(还没全选, 没有绿框绿勾), 正锚在这里最可靠(live 实测 0.968)。
             # 见 _select 里那段长注释: 闩锁只挂在 _buy/_confirm 时永远锁不上。
             self._on_credit_tab(screen)
-            self.log(f"inside shop (一般 tab) → select "
-                     f"(tab latch={'✓' if self._credit_tab_latched else '✗未锁'})")
+            self.log(f"inside shop (一般 tab)  select "
+                     f"(tab latch={'' if self._credit_tab_latched else '未锁'})")
             self._goto("select")
             return action_wait(400, "entered shop")
 
@@ -387,22 +387,22 @@ class ShopSkill(BaseSkill):
                 return action_wait(300, "select: back on lobby")
             if self._phase_ticks > _SELECT_MAX:
                 self._goto("exit")
-                return action_wait(300, "select lost shop → exit")
+                return action_wait(300, "select lost shop  exit")
             return action_wait(400, "waiting for shop UI (select)")
 
         # Read the credit balance HERE (grid view, top bar visible) — the
         # confirm dialog dims the top bar so it can't be read there.
         self._capture_balance(screen)
 
-        # ⛔⛔ 在**干净的未选中网格帧**上给 tab 身份闩锁上锁(2026-07-28 live 实锤)。
+        #  在**干净的未选中网格帧**上给 tab 身份闩锁上锁(2026-07-28 live 实锤)。
         # `_on_credit_tab` 的闩锁逻辑 2026-07-25 就写好了, 注释也预见了"全选后
-        # 网格变忙 → 正锚检不到"这一幕 —— 但它**只在 _buy/_confirm 被调用**
+        # 网格变忙  正锚检不到"这一幕 —— 但它**只在 _buy/_confirm 被调用**
         # (:357 注释「白名单放在 _buy / _confirm(挨着钱的那两处)」), 而那两处
-        # 恰恰是正锚最不可靠的帧。⇒ 闩锁从写下那天起就没有任何机会被置上,
+        # 恰恰是正锚最不可靠的帧。 闩锁从写下那天起就没有任何机会被置上,
         # 「进店时确认过」这个前提从未发生。今天 live 复现: tick70 正锚 conf
-        # **0.968**(未选中网格) → 全选后 tick71-75 **连续 5 帧零检出**(不是掉
-        # 阈下, 是 0.05 门槛都不出框, 已用该帧重跑 YOLO 复核) → 3 帧容错用尽 →
-        # 「credit-tab anchor missing at buy → exit」→ **24 件商品一件没买**。
+        # **0.968**(未选中网格)  全选后 tick71-75 **连续 5 帧零检出**(不是掉
+        # 阈下, 是 0.05 门槛都不出框, 已用该帧重跑 YOLO 复核)  3 帧容错用尽 
+        # 「credit-tab anchor missing at buy  exit」 **24 件商品一件没买**。
         # 感知侧真因: 该 cls 没在"全选绿框"样式的帧上标注过(v14 补标清单已记)。
         # 这里调用一次: 语义仍是 fail-closed —— 只有**正向检到**才上锁, 检不到
         # 什么都不做; tab 身份只会被本 skill 自己的点击改变, 故锁一次全程有效。
@@ -410,12 +410,12 @@ class ShopSkill(BaseSkill):
 
         # Nothing to buy / already bought today.
         if self.find_cls(screen, UC.SHOP_SELECT_ALL_GREY, conf=_CLS_CONF) is not None:
-            self.log("全部选择灰 → nothing to buy / done, exiting")
+            self.log("全部选择灰  nothing to buy / done, exiting")
             self._goto("exit")
             return action_wait(300, "shop nothing to select")
 
-        # Already selected → go buy. v8 reality (probed 2026-06-11):
-        #  · SHOP_ALL_SELECTED (cls402 已全部选择) has ZERO training samples →
+        # Already selected  go buy. v8 reality (probed 2026-06-11):
+        #  · SHOP_ALL_SELECTED (cls402 已全部选择) has ZERO training samples 
         #    never fires.
         #  · SHOP_BUY_SELECTED (cls450 选择购买) flickers out live.
         #  · BUT the checked select-all box renders a GREEN_CHECK (绿勾) right
@@ -430,18 +430,18 @@ class ShopSkill(BaseSkill):
                 or self.find_cls(screen, UC.SHOP_BUY_SELECTED, conf=_CLS_CONF) is not None
                 or self.find_cls(screen, UC.SHOP_ALL_SELECTED, conf=_CLS_CONF) is not None):
             self._goto("buy")
-            return action_wait(250, "items selected (绿勾/buy cls) → buy")
+            return action_wait(250, "items selected (绿勾/buy cls)  buy")
 
         sel = self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF)
         if sel is not None:
             # 今日已售罄 robustness (2026-06-16 实测): 当日商品全部买光后 ITEM 卡变灰,
-            # 但「全部選擇」按钮本身不变灰 → SHOP_SELECT_ALL_GREY 检测落空 → 旧码无限
-            # 点全部選擇(售罄商品选不中→无绿勾→不前进)直到 max_ticks。绿勾检测在上面,
-            # 走到这=点了仍无绿勾。点≥3次仍无绿勾 = 无可选 = 售罄 → exit(钱安全, 没选没买)。
+            # 但「全部選擇」按钮本身不变灰  SHOP_SELECT_ALL_GREY 检测落空  旧码无限
+            # 点全部選擇(售罄商品选不中无绿勾不前进)直到 max_ticks。绿勾检测在上面,
+            # 走到这=点了仍无绿勾。点≥3次仍无绿勾 = 无可选 = 售罄  exit(钱安全, 没选没买)。
             if self._select_clicks >= 3:
-                self.log("全部選擇 ×3 无绿勾 → 今日已售罄 nothing to buy → exit")
+                self.log("全部選擇 ×3 无绿勾  今日已售罄 nothing to buy  exit")
                 self._goto("exit")
-                return action_wait(300, "shop sold out (3x select no 绿勾) → exit")
+                return action_wait(300, "shop sold out (3x select no 绿勾)  exit")
             # Pace retries (稳定规则 2026-06-11): give the toggle a beat to
             # render before judging the click dropped.
             if self._phase_ticks % 3 != 1:
@@ -462,12 +462,12 @@ class ShopSkill(BaseSkill):
         return action_wait(400, "waiting for 全部选择 cls")
 
     def _buy(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ Tab guard (deep-dive C8, 2026-06-09; **2026-07-25 改 fail-closed**):
+        #  Tab guard (deep-dive C8, 2026-06-09; **2026-07-25 改 fail-closed**):
         # 旧版是「检出 青辉石商店_已选择 就退」, 而那个 cls 训练 0 框 / 实战
         # 0 检出 —— 这道守卫从来没生效过(详见 _on_credit_tab 注释)。
         # 现在改成正向白名单: 花钱前必须看见 信用点商店_已选中。
-        # ⚠一击退出会误杀(2026-07-25 v14 回放实锤): 正锚在健康商店网格帧上有
-        # 单帧漏检(run_20260616 t07 conf 0.216 → t08 恢复 0.971), 一击退=当天
+        # 一击退出会误杀(2026-07-25 v14 回放实锤): 正锚在健康商店网格帧上有
+        # 单帧漏检(run_20260616 t07 conf 0.216  t08 恢复 0.971), 一击退=当天
         # 信用点采购整单静默跳过。miss 期间只 wait 绝不点(方向仍 fail-closed),
         # 连续 3 帧才退 — 与本文件 _dialog_gone"容忍 1 帧 YOLO 闪断"同款容错。
         if not self._on_credit_tab(screen):
@@ -475,15 +475,15 @@ class ShopSkill(BaseSkill):
             if self._tab_miss < 3:
                 return action_wait(350, f"credit-tab anchor miss "
                                         f"{self._tab_miss}/3 — hold (no click)")
-            self.log("⛔ 买入阶段连续3帧看不到「信用点商店_已选中」正锚 — "
+            self.log(" 买入阶段连续3帧看不到「信用点商店_已选中」正锚 — "
                      "fail-closed 退出(绝不在 tab 身份未知时确认购买)")
             self._goto("exit")
-            return action_wait(300, "credit-tab anchor missing at buy → exit")
+            return action_wait(300, "credit-tab anchor missing at buy  exit")
         self._tab_miss = 0
-        # Confirm dialog already up → budget decision.
+        # Confirm dialog already up  budget decision.
         if self._confirm_dialog(screen) is not None:
             self._goto("confirm")
-            return action_wait(200, "confirm dialog up → budget check")
+            return action_wait(200, "confirm dialog up  budget check")
 
         if not self._on_shop(screen):
             if screen.is_lobby():
@@ -491,7 +491,7 @@ class ShopSkill(BaseSkill):
                 return action_wait(300, "buy: back on lobby")
             if self._phase_ticks > _BUY_MAX:
                 self._goto("exit")
-                return action_wait(300, "buy lost shop → exit")
+                return action_wait(300, "buy lost shop  exit")
             return action_wait(400, "waiting for shop UI (buy)")
 
         # The 選擇購買 button: cls450 (选择购买) when v8 sees it, else the same
@@ -507,7 +507,7 @@ class ShopSkill(BaseSkill):
             if self._buy_clicks >= 4:
                 self.log("buy button clicked 4x, no dialog — exiting")
                 self._goto("exit")
-                return action_wait(300, "buy stuck → exit")
+                return action_wait(300, "buy stuck  exit")
             # Pace (稳定规则): the confirm dialog takes a beat to render.
             if self._phase_ticks % 3 != 1 and self._buy_clicks > 0:
                 return action_wait(450, "buy clicked — settling for dialog")
@@ -522,15 +522,15 @@ class ShopSkill(BaseSkill):
                                     region=(0.84, 0.06, 0.91, 0.17))
         if sel_checked is None and self.find_cls(screen, UC.SHOP_SELECT_ALL, conf=_CLS_CONF) is not None:
             self._goto("select")
-            return action_wait(250, "not selected → back to select")
+            return action_wait(250, "not selected  back to select")
         if self._phase_ticks > _BUY_MAX:
             self._goto("exit")
-            return action_wait(300, "no buy cls → exit")
+            return action_wait(300, "no buy cls  exit")
         return action_wait(400, "waiting for 选择购买 cls")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
         # 弹窗在场判定放最前(2026-07-25 重排): 点过 confirm/**cancel** 后连续
-        # 2 帧无弹窗 = 点击已落地(容忍 1 帧 YOLO 闪断) → exit。cancel 也必须走
+        # 2 帧无弹窗 = 点击已落地(容忍 1 帧 YOLO 闪断)  exit。cancel 也必须走
         # 这条落地确认 — 见 _cancel_dialog 注释。
         # (2026-07-21 live: mutate-before-ack 让 confirm 被稳定门吞后状态机
         # 带假 _purchased 退出, 遗留弹窗被 stuck-20 点了取消 = 24件购买作废)。
@@ -541,11 +541,11 @@ class ShopSkill(BaseSkill):
                     and self._dialog_gone >= 2)
                     or self._phase_ticks > _CONFIRM_MAX):
                 self._goto("exit")
-                return action_wait(300, "confirm dialog gone → exit")
+                return action_wait(300, "confirm dialog gone  exit")
             return action_wait(300, "waiting for confirm dialog")
         self._dialog_gone = 0
 
-        # ⛔ Tab guard (deep-dive r2 C4; **2026-07-25 改 fail-closed**):
+        #  Tab guard (deep-dive r2 C4; **2026-07-25 改 fail-closed**):
         # _affordable() 只看**信用点**余额 —— 在青辉石 tab 上它会开开心心地
         # 判"买得起"然后花青辉石。这是全流程最后一道、也是唯一挨着"確認"
         # 按钮的闸, 所以必须正向白名单: 看不见信用点 tab 正锚 = 取消。
@@ -555,27 +555,27 @@ class ShopSkill(BaseSkill):
             if self._tab_miss < 3:
                 return action_wait(350, f"credit-tab anchor miss "
                                         f"{self._tab_miss}/3 — hold (no confirm)")
-            self.log("⛔ 确认阶段连续3帧看不到「信用点商店_已选中」正锚 — "
+            self.log(" 确认阶段连续3帧看不到「信用点商店_已选中」正锚 — "
                      "取消, 绝不确认(fail-closed)")
             return self._cancel_dialog(screen, "credit-tab anchor missing")
         self._tab_miss = 0
 
-        # ★ PRIMARY budget source (2026-06-12): the confirm dialog itself shows
+        #  PRIMARY budget source (2026-06-12): the confirm dialog itself shows
         # 持有數量 (balance) and 總購買價格 (total) in large clear text — read
         # BOTH from fixed dialog regions and do the exact check. This replaces
-        # the topbar read (vote-flaky: '25,583,379' OCR'd unstably → None →
+        # the topbar read (vote-flaky: '25,583,379' OCR'd unstably  None 
         # false cancel, live t0163) and the over-conservative 20M ceiling
         # (balance 25.58M vs reserve5M+20M gate = razor margin).
         # The dialog's 持有數量 is white-on-light, clear, and IMMUNE to the
         # topbar's left-truncation (live 2026-06-12: topbar 28,096,458 OCR'd
-        # as 96,458 → shop never bought). It IS the topbar balance. Read it
+        # as 96,458  shop never bought). It IS the topbar balance. Read it
         # from the fixed region — but only AFTER the popup finishes rendering,
         # so retry on the in-screen (never-vanishing) dialog instead of bailing
         # to the truncated topbar on the first miss. Use the LONGEST-digit-run
         # parse (NOT run_digit_ocr's comma logic, which returned a short
-        # fragment live → rejected → 8 retries → cancel, 2026-06-12).
+        # fragment live  rejected  8 retries  cancel, 2026-06-12).
         # 持有數量 region: 4K 帧上 RapidOCR det 对 7位逗号数字('7,432,788')分组易碎,
-        # 旧区(0.26,0.63,0.47,0.71)会丢最左组只读出 '432788'<1M → 误 fail-closed 取消
+        # 旧区(0.26,0.63,0.47,0.71)会丢最左组只读出 '432788'<1M  误 fail-closed 取消
         # (2026-06-26 实测+多agent帧取证)。垂直留白放宽到 (0.61,0.73) 后 det 一次读出整串
         # '7,432,788' conf0.895。读小=取消(fail-closed方向), 改区不引入 fail-open。
         bal = self._read_balance_longest(screen.frame, (0.28, 0.61, 0.49, 0.73))
@@ -583,9 +583,9 @@ class ShopSkill(BaseSkill):
             if self._phase_ticks <= 8:
                 return action_wait(450, f"confirm dialog up, re-reading 持有數量 "
                                         f"({self._phase_ticks}/8)")
-            # Exhausted retries → fail-CLOSED cancel (never blind-buy on an
+            # Exhausted retries  fail-CLOSED cancel (never blind-buy on an
             # unread balance). Don't fall through to the truncated topbar.
-            self.log("⛔ 持有數量 unreadable after retries → cancel (fail-closed)")
+            self.log(" 持有數量 unreadable after retries  cancel (fail-closed)")
             return self._cancel_dialog(screen, "unread balance")
 
         # 總購買價格 sits on a DARK band — det fragments the digits beyond
@@ -597,7 +597,7 @@ class ShopSkill(BaseSkill):
         # comma 截断(同余额病), 但 RapidOCR **直读同一 crop 就完整出 '3,121,500'**
         # (离线实测 A/C 配方全对)。改直读 + **严格千分位结构校验**: 总价读小 =
         # balance-tot 虚高 = fail-OPEN 方向, 所以只接受完整 `\d{1,3}(,\d{3})+`
-        # 结构(det 碎裂产物必不合法 → 拒 → 退保守 8M 天花板, fail-closed)。
+        # 结构(det 碎裂产物必不合法  拒  退保守 8M 天花板, fail-closed)。
         tot = self._read_total_thousands(screen.frame, (0.59, 0.61, 0.85, 0.73))
         _DIALOG_CEILING = 8_000_000
         if tot is None or tot < 10_000:
@@ -607,16 +607,16 @@ class ShopSkill(BaseSkill):
             # 2026-07-21 live 实锤: confirm 点击可能被 pipeline 帧稳定门吞成
             # wait / ADB 丢 tap — 先 _goto("exit") 会让 confirm 永远不落地。
             # 停在 confirm, 以"对话框消失"为点击落地的唯一确认(上方 dialog-gone
-            # 分支 → exit)。dedup 同目标 hold 限频不会连射; >4 次仍在 →
+            # 分支  exit)。dedup 同目标 hold 限频不会连射; >4 次仍在 
             # fail-closed 退(绝不无限重试购买点击)。
             self._confirm_clicks += 1
             if self._confirm_clicks > 4:
-                self.log("confirm clicked 4x, dialog still up → exit (fail-closed)")
+                self.log("confirm clicked 4x, dialog still up  exit (fail-closed)")
                 self._goto("exit")
-                return action_wait(300, "confirm stuck → exit")
+                return action_wait(300, "confirm stuck  exit")
             self._purchased = True
             return action_click_box(confirm, "confirm shop purchase (within budget)")
-        self.log("⛔ dialog budget: balance-total < reserve → cancel")
+        self.log(" dialog budget: balance-total < reserve  cancel")
         return self._cancel_dialog(screen, "budget")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
@@ -624,10 +624,10 @@ class ShopSkill(BaseSkill):
         # 下滑切 tab 即可, 没必要退大厅再进) ──────────────────────────────────
         # 信用点(一般 tab)买完后, 若仍在商店网格内, 就 done-IN-SHOP(不 nav_home),
         # 让紧随的 arena_shop 在同一次访问里继续(arena_shop._enter 已支持 _on_shop
-        # → 直接 swipe 到战术大赛 tab, 无需从大厅重进)。复用 arena_shop 全部钱防线。
+        #  直接 swipe 到战术大赛 tab, 无需从大厅重进)。复用 arena_shop 全部钱防线。
         # 仅在确实回到大厅(已被别处导走)或超时才正常收尾。
         if self.chain_in_shop and self._on_shop(screen):
-            # ⛔绝不带着活购买框交棒(2026-07-25): cancel 被吞/漏点时兜底关掉,
+            # 绝不带着活购买框交棒(2026-07-25): cancel 被吞/漏点时兜底关掉,
             # arena_shop 在模态下点不动 swipe 会整段空转。
             if self._confirm_dialog(screen) is not None:
                 stray = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF,
@@ -636,8 +636,8 @@ class ShopSkill(BaseSkill):
                     return action_click_box(
                         stray, "cancel stray purchase dialog before handoff")
             status = "purchased" if self._purchased else "no purchase"
-            self.log(f"done ON shop grid ({status}) → 留在店内, arena_shop 接力切战术大赛 tab")
-            return action_done(f"shop complete in-shop ({status}) → arena tab next")
+            self.log(f"done ON shop grid ({status})  留在店内, arena_shop 接力切战术大赛 tab")
+            return action_done(f"shop complete in-shop ({status})  arena tab next")
         if self.detect_screen_yolo(screen) == "Lobby":
             status = "purchased" if self._purchased else "no purchase"
             self.log(f"done ({status})")

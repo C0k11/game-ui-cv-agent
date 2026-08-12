@@ -53,7 +53,7 @@ def make_manual_yaml() -> Path:
 def eval_manual_mAP50(weights: Path, yaml_path: Path) -> tuple[float, float, float, float]:
     """Returns (mAP50, mAP50_95, P, R) on manual val. Tiny batch + half=True
     to coexist with the running trainer (which is using ~16GB VRAM).
-    Trainer batch=8 imgsz=960 → ~16GB. Eval batch=1 imgsz=960 → ~2GB. Safe.
+    Trainer batch=8 imgsz=960  ~16GB. Eval batch=1 imgsz=960  ~2GB. Safe.
     """
     from ultralytics import YOLO  # imported lazily — module is heavy
     model = YOLO(str(weights))
@@ -172,7 +172,7 @@ def main() -> int:
                 if is_best:
                     best_manual = m50
                     shutil.copyfile(tmp_pt, best_manual_pt)
-                    print(f"[watcher] ep{ep}: 🏆 NEW BEST manual mAP50 = {m50:.4f} (vs prior {best_manual - m50 + m50:.4f}) → saved best_manual.pt")
+                    print(f"[watcher] ep{ep}: 🏆 NEW BEST manual mAP50 = {m50:.4f} (vs prior {best_manual - m50 + m50:.4f})  saved best_manual.pt")
                 else:
                     print(f"[watcher] ep{ep}: manual mAP50 = {m50:.4f} (best = {best_manual:.4f})")
 

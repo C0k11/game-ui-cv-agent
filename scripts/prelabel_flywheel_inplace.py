@@ -31,7 +31,7 @@ MANIFEST = ROOT / "data" / "_flywheel_prelabel_manifest.csv"
 sys.path.insert(0, str(ROOT))
 
 
-# ⛔战斗域目录: 用 UI 模型预标战斗帧 = 灌垃圾。名字带这些词的一律不碰,
+# 战斗域目录: 用 UI 模型预标战斗帧 = 灌垃圾。名字带这些词的一律不碰,
 # 不依赖 build_battle_v9.SRCS (那张表只收已并入训练的, botplay 新录不在里面 —
 # 2026-08-02 实测 7 个 run_*_botplay_clean 全在飞轮口径内, 当时只是碰巧
 # 每张都已有 txt 才没被写脏)。战斗侧标注走 battle 模型自己的管线。
@@ -57,7 +57,7 @@ def _flywheel_dirs() -> list[Path]:
             continue
         out.append(d)
     if skipped:
-        print(f"⛔battle-domain dirs excluded ({len(skipped)}): {skipped[:3]}"
+        print(f"battle-domain dirs excluded ({len(skipped)}): {skipped[:3]}"
               + (" ..." if len(skipped) > 3 else ""))
     return out
 

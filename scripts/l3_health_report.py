@@ -5,11 +5,11 @@ L3 全场定义(l1_l3_roadmap): 每天遍历所有页面, 只到达只识别不�
 "哪些页面到不了、哪些类检出掉了"。全场依赖 L2 导航接管(未够格), 这是
 **不依赖导航的离线半场**: 用 data/trajectories 的实战检出流回答同两个问题
 的可回答部分:
-  ① cls 检出健康度 — 基线期常见的类最近静默了(DROPPED/FADING)
-  ② skill 依赖健康 — 每个 skill 代码里引用的 cls, 近窗口零检出的列出来
-  ③ 页面可达性 proxy — PageGraph 已知页面近窗口没观测到的列出来(identify
+   cls 检出健康度 — 基线期常见的类最近静默了(DROPPED/FADING)
+   skill 依赖健康 — 每个 skill 代码里引用的 cls, 近窗口零检出的列出来
+   页面可达性 proxy — PageGraph 已知页面近窗口没观测到的列出来(identify
      只观测, 不导航)
-⚠诚实口径: 离线半场分不开「页面没去」和「检出坏了」— 只报事实+最后见到
+诚实口径: 离线半场分不开「页面没去」和「检出坏了」— 只报事实+最后见到
 日期, 分辨要靠全场(带导航)或人工。
 
 用法: python scripts/l3_health_report.py [--recent-days 3] [--jobs 24]
@@ -37,7 +37,7 @@ _RUN_RE = re.compile(r"^run_(\d{8})_\d{6}$")
 
 def scan_run(run_dir_str: str):
     """单 run 扫描(子进程): 返回 (date, n_ticks, n_err, cls_counter, page_counter,
-    skills_seen)。⚠trajectory 的 box 字段是 cls/conf(不是 cls_name/confidence)
+    skills_seen)。trajectory 的 box 字段是 cls/conf(不是 cls_name/confidence)
     — pg_eval 第一版写错名拿到空结论的坑, 这里映射成 shim 再喂 identify。"""
     sys.path.insert(0, run_dir_str.split("data")[0].rstrip("\\/"))
     from brain.nav.page_graph import identify  # noqa: E402 (子进程各自 import)
@@ -81,7 +81,7 @@ def scan_run(run_dir_str: str):
 
 
 def load_domains() -> dict:
-    """master 表 → cls 名 → 域(ui/avatar/battle)。与 audit_cls_usage 同口径。"""
+    """master 表  cls 名  域(ui/avatar/battle)。与 audit_cls_usage 同口径。"""
     master = (REPO / "data" / "raw_images" / "_classes.txt").read_text(
         encoding="utf-8").splitlines()
     out = {}
@@ -97,13 +97,13 @@ def load_domains() -> dict:
     return out
 
 
-# skill 文件名 → trajectory `skill` 字段的运行时名(去下划线小写对齐;
+# skill 文件名  trajectory `skill` 字段的运行时名(去下划线小写对齐;
 # ticket_sweep 是 Bounty/JFD 两个实例的基类, 特判)
 _STEM_SPECIAL = {"ticket_sweep": {"Bounty", "JFD"}}
 
 
 def skill_cls_deps() -> dict:
-    """静态提取 skill → 引用的 cls 名。⚠不只 UC.CONST — batch_sweep 用的
+    """静态提取 skill  引用的 cls 名。不只 UC.CONST — batch_sweep 用的
     SWEEP_BATCH_* 在 brain.screens 里, 第一版漏掉后 `批量扫荡` 报成
     '依赖方:-'(审计工具也要被审计)。"""
     from brain.skills import ui_classes as UC
@@ -141,7 +141,7 @@ def main() -> int:
     runs = sorted(p for p in TRAJ_DIR.iterdir()
                   if p.is_dir() and _RUN_RE.match(p.name))
     if not runs:
-        print("⛔ 没扫到任何 run — 分母为 0, 拒绝出报告")
+        print(" 没扫到任何 run — 分母为 0, 拒绝出报告")
         return 1
     print(f"scanning {len(runs)} runs with {args.jobs} workers ...")
 
@@ -153,7 +153,7 @@ def main() -> int:
     total_ticks = sum(r[1] for r in results)
     total_err = sum(r[2] for r in results)
     if total_ticks == 0:
-        print("⛔ 0 tick 解析成功 — 分母为 0, 拒绝出报告(查字段名/路径)")
+        print(" 0 tick 解析成功 — 分母为 0, 拒绝出报告(查字段名/路径)")
         return 1
 
     all_days = sorted({r[0] for r in results})
@@ -249,10 +249,10 @@ def main() -> int:
         f"- cls 宇宙(实战出现过): **{len(cls_days)}** 类; "
         f"skill 依赖表: {len(deps)} 个 skill",
         "",
-        "⚠离线半场口径: 「近窗口 0 检出」分不开『页面没去』vs『检出坏了』,",
+        "离线半场口径: 「近窗口 0 检出」分不开『页面没去』vs『检出坏了』,",
         "本报告只给事实 + 最后见到日期; 分辨靠带导航的全场或人工。",
         "",
-        f"## ①A DROPPED·疑似检出退化 — **依赖方 skill 在 recent 窗口跑过**"
+        f"## A DROPPED·疑似检出退化 — **依赖方 skill 在 recent 窗口跑过**"
         f"而 cls 零检出 ({len(dropped_hot)})",
     ]
     for c, b, last in sorted(dropped_hot, key=lambda t: -t[1]):
@@ -260,7 +260,7 @@ def main() -> int:
         lines.append(f"- `{c}` 基线 {b} 天见过, 最后 {last}; 依赖方: {owners}")
     lines += [
         "",
-        f"## ①B DROPPED·近窗未访问(UI 域, 低优先) ({len(dropped_cold)})",
+        f"## B DROPPED·近窗未访问(UI 域, 低优先) ({len(dropped_cold)})",
         "  (skill 没跑到那些页面, 分不出检出好坏 — 全场遍历才能定性)",
     ]
     for c, b, last in sorted(dropped_cold, key=lambda t: -t[1])[:25]:
@@ -272,27 +272,27 @@ def main() -> int:
     _n_bt = sum(1 for t in dropped_other if t[3] == "battle")
     lines += [
         "",
-        f"## ①C DROPPED·头像/战斗域(随访问面波动, 只计数) — "
+        f"## C DROPPED·头像/战斗域(随访问面波动, 只计数) — "
         f"avatar {_n_av} / battle {_n_bt}",
     ]
-    lines += ["", f"## ② FADING — day-rate 掉到基线 30% 以下 ({len(fading)})"]
+    lines += ["", f"##  FADING — day-rate 掉到基线 30% 以下 ({len(fading)})"]
     for c, b, r, last in fading:
-        lines.append(f"- `{c}` 基线 {b} 天 → recent {r} 天, 最后 {last}")
-    lines += ["", f"## ③ skill 依赖静默 — 依赖 cls 在 recent 窗口零检出"]
+        lines.append(f"- `{c}` 基线 {b} 天  recent {r} 天, 最后 {last}")
+    lines += ["", f"##  skill 依赖静默 — 依赖 cls 在 recent 窗口零检出"]
     for sk, items in sorted(dep_silent.items()):
         lines.append(f"- **{sk}**: " + ", ".join(
             f"`{n}`(最后 {d})" for n, d in items))
-    lines += ["", f"## ④ skill 依赖·整库从未见过 — 死判据/待录场景候选"]
+    lines += ["", f"##  skill 依赖·整库从未见过 — 死判据/待录场景候选"]
     for sk, names in sorted(dep_never.items()):
         lines.append(f"- **{sk}**: " + ", ".join(f"`{n}`" for n in names))
     lines += [
         "",
-        f"## ⑤ 页面可达性 proxy (PageGraph {len(pages_known)} 页)",
+        f"##  页面可达性 proxy (PageGraph {len(pages_known)} 页)",
         f"- 历史观测到 {len(pages_ever)} 页; recent 窗口观测到 {len(pages_recent)} 页",
         f"- **recent 没到过**(历史到过): {', '.join(pages_unseen_recent) or '无'}",
         f"- **图上有但整库从未观测到**: {', '.join(pages_never) or '无'}",
         "",
-        f"## ⑥ NEW — 基线没有, recent 才出现 ({len(new_cls)})",
+        f"##  NEW — 基线没有, recent 才出现 ({len(new_cls)})",
     ]
     for c, r in new_cls:
         lines.append(f"- `{c}` recent {r} 天")
@@ -318,7 +318,7 @@ def main() -> int:
         "new_cls": [{"cls": c, "recent_days": r} for c, r in new_cls],
     }, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    print(f"OK → {md}")
+    print(f"OK  {md}")
     print(f"     dropped: hot={len(dropped_hot)} cold={len(dropped_cold)} "
           f"other={len(dropped_other)}; fading={len(fading)} "
           f"dep_silent_skills={len(dep_silent)} dep_never_skills={len(dep_never)} "

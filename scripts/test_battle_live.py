@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """实战战斗感知综合实测 (2026-07-15, combat 2.0 首次 live 验证).
 
-战斗进行时跑: 连抓 ADB 干净帧 → battle v9(registry 最新, 全 18 类) +
-fused_avatar(技能卡区 y>0.72) 双模型逐帧检出 → jsonl 记录 + 抽样可视化。
+战斗进行时跑: 连抓 ADB 干净帧  battle v9(registry 最新, 全 18 类) +
+fused_avatar(技能卡区 y>0.72) 双模型逐帧检出  jsonl 记录 + 抽样可视化。
 产物: data/_battle_live_test/<stamp>/  (frames jsonl + vis*.jpg + 干净帧)
 
 用法: py scripts/test_battle_live.py [秒数, 默认120]
@@ -91,7 +91,7 @@ def main():
     print(f"\n== {fi} 帧汇总 ==")
     print("battle:", dict(bat_cnt.most_common(12)))
     print("cards:", dict(ava_cnt.most_common(10)))
-    print("out →", out)
+    print("out ", out)
 
 
 if __name__ == "__main__":

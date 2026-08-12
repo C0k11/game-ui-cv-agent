@@ -5,14 +5,14 @@
   「死判据」在老仓里出现过至少 10 次 —— 代码里堂堂正正写着 `find_cls(战斗失败)`，
   而那个类**一框训练数据都没有**，于是"输了"这件事永远检测不到，而代码看起来
   一切正常。反过来，`_废弃77` 那种废案我又误判成"漏训"，跑去补数据。
-  ⇒ 这里给每个用到的类标 (train, val)，并提供 `require()` 在 import 期就把
+   这里给每个用到的类标 (train, val)，并提供 `require()` 在 import 期就把
     "拿死类当唯一信号"打回来。数据来自 ui_v2 数据集实测（2026-08-08）。
 
-  DEAD  = train 0        ⛔绝不能当唯一判据，只能当"或"列表里的可选成员
-  WEAK  = train < 100    ⚠可用但样本薄，别拿它做 fail-closed 的**否定**判据
+  DEAD  = train 0        绝不能当唯一判据，只能当"或"列表里的可选成员
+  WEAK  = train < 100    可用但样本薄，别拿它做 fail-closed 的**否定**判据
   SOLID = train >= 100
 
-⛔改名铁律：`_classes.txt` 是按**行号**索引的。废案类只能改名加 `_废弃N_` 前缀，
+改名铁律：`_classes.txt` 是按**行号**索引的。废案类只能改名加 `_废弃N_` 前缀，
    **绝不能删行** —— 删了行号索引会让全库标注错位。废案在 detect 层已被丢弃。
 """
 from __future__ import annotations
@@ -62,7 +62,7 @@ ARROW_RIGHT = "右切换"
 # ══ 领取族 ═════════════════════════════════════════════════════════════
 CLAIM_ALL_YELLOW = "全部领取_黄"
 CLAIM_ALL_GREY = "全部领取_灰色"
-CLAIM_ONEKEY_GREY = "一键领取灰色"          # ⛔DEAD train=0
+CLAIM_ONEKEY_GREY = "一键领取灰色"          # DEAD train=0
 CLAIM_ONCE_YELLOW = "一次领取黄色"
 CLAIM_ONCE_GREY = "一次领取灰色"
 CLAIM_YELLOW = "领取_黄"
@@ -115,8 +115,8 @@ BRANCH_DESERT = "沙漠铁道"
 BRANCH_CLASSROOM = "教室"
 BOUNTY_BRANCHES = [BRANCH_CLASSROOM, BRANCH_HIGHWAY, BRANCH_DESERT]
 
-# ══ 学院交流会学院 ⭐有 cls（各 84 train / 5 val，2026-08-08 实测）═══════
-# ⛔老 jfd.py 写着"三个学院 tile 没有 YOLO cls（v6 gap）"并用写死坐标选择 ——
+# ══ 学院交流会学院 有 cls（各 84 train / 5 val，2026-08-08 实测）═══════
+# 老 jfd.py 写着"三个学院 tile 没有 YOLO cls（v6 gap）"并用写死坐标选择 ——
 #    那是 v6 时代的事实，v15 早就训了。**这就是 §A8 的标准案例：写死坐标一旦
 #    落下去，就没人回头看它补上了没。**
 ACADEMY_TRINITY = "三一"
@@ -170,9 +170,9 @@ BATTLE_START = "战斗开始"
 BATTLE_RESTART = "重新开始键"
 BATTLE_CONTINUE = "继续键"
 BATTLE_GIVEUP = "放弃键"
-BATTLE_WIN = "战斗胜利"              # ⚠WEAK train=33，但 live 实测检得出
+BATTLE_WIN = "战斗胜利"              # WEAK train=33，但 live 实测检得出
 BATTLE_COMPLETE = "战斗完成"          # 横幅，train=90
-BATTLE_LOSE = "战斗失败"             # ⛔DEAD train=0 —— **输了看不见**
+BATTLE_LOSE = "战斗失败"             # DEAD train=0 —— **输了看不见**
 BATTLE_SKIP = "skip键"
 GOTO_LOBBY_TEXT = "前往大厅文字按钮"
 # 战斗内可见 = 这些里出现 ≥2 个（单个会在别处漏出）
@@ -194,7 +194,7 @@ SHOP_ALL_SELECTED = "已全部选择"
 SHOP_BUY = "购买"
 SHOP_BUY_GREY = "购买灰色"           # v15 起可用（train=212）
 SHOP_BUY_SELECTED = "选择购买"
-SHOP_BUY_PYROXENE = "购买青辉石"      # ⛔金钱红线锚点
+SHOP_BUY_PYROXENE = "购买青辉石"      # 金钱红线锚点
 CURRENCY = "货币"
 CURRENCY_SEL = "货币_已选择"
 CURRENCY_QTY_AREA = "货币数量显示区域"
@@ -204,7 +204,7 @@ FREE = "免费"
 SHOP_TAB_CREDIT = "信用点商店"
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"
 SHOP_TAB_PYROXENE = "青辉石商店"
-SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"     # ⛔进了这个 tab 就是在花青辉石
+SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"     # 进了这个 tab 就是在花青辉石
 ARENA_SHOP_TAB = "战术大赛商店"
 ARENA_SHOP_TAB_SEL = "战术大赛商店已选择"
 ARENA_SHOP_CURRENCY = "战术大赛商店货币"
@@ -214,7 +214,7 @@ ENERGY_DRINK_MID = "一般能量饮料"
 # ══ 制造 ═══════════════════════════════════════════════════════════════
 CRAFT_QUICK = "快速制造"
 CRAFT_START = "开始制造"
-CRAFT_START_GREY = "开始制造灰色"      # ⭐v15 起模型真会吐（train=289）
+CRAFT_START_GREY = "开始制造灰色"      # v15 起模型真会吐（train=289）
 CRAFT_NO_MATERIAL = "材料不足"
 
 # ══ 活动 ═══════════════════════════════════════════════════════════════
@@ -226,7 +226,7 @@ EVENT_SHOP = "活动商店"
 EVENT_TASK = "活动任务"
 EVENT_BONUS = "活动关卡产出额外加成"
 EVENT_REWARD_INFO = "奖励资讯"
-# ⭐这两个才是真正在用的活动入口（train 949 / 130，live 实帧 0.88）。
+# 这两个才是真正在用的活动入口（train 949 / 130，live 实帧 0.88）。
 #    带 `_活动入口` 后缀的 77/78 是**废案**，已在 detect 层丢弃。
 EVENT_LIVE = "距离结束还剩"           # 当期，进行中，可打关
 EVENT_ENDED = "距离奖励获得结束"       # 上期余韵期，只能领尾奖
@@ -235,8 +235,8 @@ EVENT_AFTERSTORY = "後日談"           # 上期活动的特征物
 EVENT_MULTIPLIER = "双倍或三倍活动进行中"
 SPECIAL_DEFENSE = "据点防御"
 SPECIAL_CREDIT = "信用货币回收"
-# ⛔这两个本该用来判"这关打过没"，但 **train=0 / val=0**，一框都没有。
-#    ⇒ 关卡完成度只能靠 关卡得星_0 / _3（1263 / 3765 框）间接判。
+# 这两个本该用来判"这关打过没"，但 **train=0 / val=0**，一框都没有。
+#     关卡完成度只能靠 关卡得星_0 / _3（1263 / 3765 框）间接判。
 EVENT_STAGE_STORY_SEEN = "活动剧情关卡_已看"     # DEAD
 EVENT_STAGE_BATTLE_DONE = "活动站斗关卡_已打"    # DEAD
 
@@ -248,8 +248,8 @@ STORY_ENTER_CHAPTER = "进入章节"
 STORY_SKIP = "跳过故事键"
 STORY_SKIP_DISABLED = "跳过故事键不可用"
 STORY_TAP_CONTINUE = "点击继续字样"
-STORY_MENU = "剧情menu"              # ⭐用这个（train=335）
-STORY_MENU_DEAD = "故事菜单键"        # ⛔DEAD train=0，别用
+STORY_MENU = "剧情menu"              # 用这个（train=335）
+STORY_MENU_DEAD = "故事菜单键"        # DEAD train=0，别用
 STORY_NODE_DONE = "剧情图标已完成"
 STORY_NODE_UNDONE = "剧情图标未完成"
 STORY_QUIT = "剧情中断退出"
@@ -265,7 +265,7 @@ REGION_LEVELUP = "地区升级"
 MOMO_TAB = "momotalk学生聊天区域按钮"
 MOMO_TAB_SEL = "momotalk学生聊天区域已进入"
 MOMO_UNREAD = "学生momotalk信息未读"   # train=6462，非常强
-MOMO_SENDING = "学生发送信息中"        # ★瞬时：学生打字中 → 见即等
+MOMO_SENDING = "学生发送信息中"        # 瞬时：学生打字中  见即等
 MOMO_REPLY_OPT = "学生信息回复选项"
 MOMO_GOTO_BOND = "前往羁绊剧情"
 MOMO_ENTER_BOND = "进入羁绊剧情"
@@ -275,13 +275,13 @@ ARENA_ROW = "战术大赛对战选择区域"
 ARENA_ATTACK_FORM = "攻击编制"     # 对手详情面板上的"进攻编队"入口（435）
 
 # ══ 剧情过场逃生（interceptor 用）══════════════════════════════════════
-# ⛔BA 的过场**不吃 KEYCODE_BACK**（2026-08-07 连按 5 次实测全无响应）。
-#    唯一有效链：剧情menu(右上) → 跳过故事键 → 确认键。
+# BA 的过场**不吃 KEYCODE_BACK**（2026-08-07 连按 5 次实测全无响应）。
+#    唯一有效链：剧情menu(右上)  跳过故事键  确认键。
 STORY_ESCAPE_CHAIN = [STORY_MENU, STORY_SKIP]
 
 
 # ══ 健康度表（ui_v2 数据集实测 2026-08-08）════════════════════════════
-# cls → (train, val)。只登记**代码里真的会引用**的类；没登记的默认按 UNKNOWN
+# cls  (train, val)。只登记**代码里真的会引用**的类；没登记的默认按 UNKNOWN
 # 处理（require() 会放行但打日志），不是"没登记就是死类"。
 HEALTH: Dict[str, Tuple[int, int]] = {
     BATTLE_LOSE: (0, 0),
@@ -323,20 +323,20 @@ WEAK = {c for c, (t, _) in HEALTH.items() if 0 < t < 100}
 def require(cls: str, *, sole_signal: bool = True) -> str:
     """在 flow 里声明"我要靠这个类做判断"。
 
-    `sole_signal=True`（默认）= 这是**唯一**信号 ⇒ 死类直接抛，别让死判据上线。
-    `sole_signal=False` = 它只是"或"列表里的一员 ⇒ 死类放行但打警告。
+    `sole_signal=True`（默认）= 这是**唯一**信号  死类直接抛，别让死判据上线。
+    `sole_signal=False` = 它只是"或"列表里的一员  死类放行但打警告。
 
-    ⛔为什么值得有这道闸：老仓里 4 道商店金钱守卫全是死码，全仓 10 条死判据，
+    为什么值得有这道闸：老仓里 4 道商店金钱守卫全是死码，全仓 10 条死判据，
        全都是"代码写得好好的，类没数据"。grep 找不出来，只能在这里挡。
     """
     if cls in DEAD:
         if sole_signal:
             raise RuntimeError(
-                f"⛔死判据: '{cls}' train=0，不能当唯一信号。"
+                f"死判据: '{cls}' train=0，不能当唯一信号。"
                 f"要么补训练数据，要么换判据（见 routing_v2/README.md §B）")
-        print(f"[vocab] ⚠'{cls}' train=0，只能当可选成员，别指望它", flush=True)
+        print(f"[vocab] '{cls}' train=0，只能当可选成员，别指望它", flush=True)
     elif cls in WEAK:
-        print(f"[vocab] ⚠'{cls}' 样本薄 train={HEALTH[cls][0]}，别拿它做否定判据",
+        print(f"[vocab] '{cls}' 样本薄 train={HEALTH[cls][0]}，别拿它做否定判据",
               flush=True)
     return cls
 
@@ -345,6 +345,6 @@ def health_report() -> str:
     lines = ["cls 健康度（train/val, ui_v2 @2026-08-08）", "─" * 52]
     for c in sorted(HEALTH, key=lambda x: HEALTH[x][0]):
         t, v = HEALTH[c]
-        flag = "⛔DEAD" if t == 0 else ("⚠WEAK" if t < 100 else "  ok ")
+        flag = "DEAD" if t == 0 else ("WEAK" if t < 100 else "  ok ")
         lines.append(f"{flag} {c:<24s} train={t:<6d} val={v}")
     return "\n".join(lines)

@@ -21,7 +21,7 @@ from brain.skills.ticket_sweep import TicketSweepSkill, _CLS_CONF, _STAGE_PANEL
 from brain.skills import ui_classes as UC
 
 
-# Branch display name (incl. traditional aliases) → its right-panel cls.
+# Branch display name (incl. traditional aliases)  its right-panel cls.
 _BRANCH_CLS = {
     "高架公路": UC.STAGE_HIGHWAY,
     "沙漠铁道": UC.STAGE_DESERT_RAIL, "沙漠鐵道": UC.STAGE_DESERT_RAIL,
@@ -48,7 +48,7 @@ class BountySkill(TicketSweepSkill):
         # Always enter (user iron rule 2026-06-11): the LOBBY entry dot only
         # means "something in the hall has work" — it must NOT gate this skill.
         # The real signal is the 悬赏通缉 tile's own dot, checked by the hall
-        # scan inside _enter (no dot there → graceful "no work" exit).
+        # scan inside _enter (no dot there  graceful "no work" exit).
         return True
 
     def _click_branch(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
@@ -62,4 +62,4 @@ class BountySkill(TicketSweepSkill):
             if box is not None:
                 self.log(f"select bounty branch '{name}' (cls {cls})")
                 return action_click_box(box, f"select bounty branch {name}")
-        return None  # branch cls not seen this frame → base waits / times out
+        return None  # branch cls not seen this frame  base waits / times out

@@ -8,24 +8,24 @@ memory 里这条结论挂了很久，全仓零使用（老代码只有 `brain/sk
 2026-08-11 看图才发现结论下早了：**452 检出的不是一个全局横幅，而是任务大厅
 每个磁贴左上角那枚红色「活動進行中」小标** —— 人眼看
 `data/raw_images/v2step_20260811/013124_000162_task_hall.png` 就一目了然。
-⇒ **它的位置就指明了是哪个磁贴**，配合同屏的磁贴 cls 就能说清是哪一类。
+ **它的位置就指明了是哪个磁贴**，配合同屏的磁贴 cls 就能说清是哪一类。
 
-    ┌ 活動進行中 ┐          ← 452 的框（红标）
-    │  懸賞通緝  │          ← V.HUB_BOUNTY 的框（只框住标题文字，不是整张卡）
+    ┌ 活動進行中 ┐           452 的框（红标）
+    │  懸賞通緝  │           V.HUB_BOUNTY 的框（只框住标题文字，不是整张卡）
     └────────────┘
 
-## ⛔本模块只做感知，不碰策略
+## 本模块只做感知，不碰策略
 
 刷什么、往哪投 AP 是**用户的决定**（memory `routing_v2_live_day3` §「策略是用户的」
 —— 我 08-10 擅自改 arena 配对被当场叫停）。这里只回答"屏上写着哪几类有加成"，
 **不给任何 flow 改刷取顺序**。上层要不要用、怎么用，交配置和用户。
 
-## 归属半径怎么标出来的（⛔实测，不是"我觉得 0.1 差不多"）
+## 归属半径怎么标出来的（实测，不是"我觉得 0.1 差不多"）
 
 memory `template_label_assets` 记着五个自造几何判据全废的教训，共同点是
 **我发明像素统计判据然后当因果**。所以这里的每个数都挂了人眼真值：
 
-真值来源（看图确认，两天天然不同源 ⇒ 满足 `val_set_crisis` 的「单位是天」）:
+真值来源（看图确认，两天天然不同源  满足 `val_set_crisis` 的「单位是天」）:
   * `data/raw_images/v2step_20260811/*task_hall*.png` (25 帧) —— 任務 / 懸賞通緝 /
     特殊任務 三个磁贴挂标；學園交流會 / 戰術大賽 / 劇情 没挂
   * `data/raw_images/v2step_20260810/*task_hall*.png` (27 帧) —— 只有學園交流會挂
@@ -43,10 +43,10 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
   | dx = 452.cx − 磁贴.cx    | −0.0179 ~ −0.0074    | （全负 = 恒偏左）    |
   | margin = 次近距 ÷ 最近距 | 2.12 ~ 4.37          | —                    |
 
-  ⇒ 真/假之间有 0.0543 / 0.0898 的**空档**，取几何中点 sqrt(·)≈**0.070** 当绝对半径；
+   真/假之间有 0.0543 / 0.0898 的**空档**，取几何中点 sqrt(·)≈**0.070** 当绝对半径；
     比例判据同理 sqrt(1.30×2.50)≈**1.80**。两条**都要过**（见下面为什么要两条）。
 
-⚠为什么不只用绝对半径：归一化坐标下的欧氏距离是**依赖宽高比**的
+为什么不只用绝对半径：归一化坐标下的欧氏距离是**依赖宽高比**的
 （memory `read_layer_icon_units`：屏幕比例只在标定它的那个分辨率上成立，
 语料里实测过 19 种分辨率）。上表全部标定自 2560×1440。
 `dc ÷ 磁贴框高` 是**布局常数**（磁贴自身尺寸当单位，同 read.py 的图标单位铁律），
@@ -59,9 +59,9 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
   学院选择页 6 / 课程表区域页 5 / 组合包 1 / 关卡弹窗 1 …
 其中悬赏分支页那三个 452 在 cx≈0.555，而分支 cls（高架公路等）在 cx≈0.904 ——
 **中心距 0.35，布局完全是另一套**（红标在宽行卡左端，名字标签在右端）。
-⇒ 本模块只认 `V.HUB_TILES`；换一套锚点必须重新标定。屏上没有磁贴时**不表态**
+ 本模块只认 `V.HUB_TILES`；换一套锚点必须重新标定。屏上没有磁贴时**不表态**
 （返回空 + `in_task_hall=False`），绝不"就近凑一个"—— §A1 认不出就什么都不做。
-✅这 1003 帧跑 `read_boosts()`：归属命中 74 次，**全部落在 task_hall 且磁贴全对，
+这 1003 帧跑 `read_boosts()`：归属命中 74 次，**全部落在 task_hall 且磁贴全对，
   非 task_hall 页面零归属**；其余 113 个 452 一律进 `orphans`（如实说"说不清"）。
 
 ## 已知感知缺口（诚实记账，别当成 bug 去修代码）
@@ -69,13 +69,13 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
 452 本身数据很足（`ui_v2` 数据集实测 **train 6219 框 / 4900 帧，val 1319 框 / 900 帧**），
 但 **conf 波动极大**：08-11 任務/懸賞 稳在 0.95，特殊任務 0.53~0.89，
 而 08-10 學園交流會 那枚只有 **0.10~0.51**（中位 0.19）。
-detect 层 ui 的地板就是 0.20 ⇒ 弱的那枚**多数帧根本进不了 Observation**。
+detect 层 ui 的地板就是 0.20  弱的那枚**多数帧根本进不了 Observation**。
 实测单帧命中率（分母 = `in_task_hall` 的帧）:
   08-11 任務 20/22 · 懸賞 20/22 · 特殊 21/22 = 0.91~0.96
-  08-10 學園交流會 **13/27 = 0.481**   ← 就是它拖低了整体
-⇒ ①`hit.weak` 标出 conf<0.45 的，调用方自己决定信不信；
-  ②多帧要结论请用 `consensus()`，别拿单帧当真相（README §A3 / 病根「单帧当真相」）；
-  ③真正的修法是**补样本**（08-10 那 27 帧已在飞轮里），不是在这里加 OCR 兜底
+  08-10 學園交流會 **13/27 = 0.481**    就是它拖低了整体
+ `hit.weak` 标出 conf<0.45 的，调用方自己决定信不信；
+  多帧要结论请用 `consensus()`，别拿单帧当真相（README §A3 / 病根「单帧当真相」）；
+  真正的修法是**补样本**（08-10 那 27 帧已在飞轮里），不是在这里加 OCR 兜底
     —— 「YOLO 看不见就补数据，不加 OCR 把问题藏起来」是 read.py 开篇那条铁律。
 
 ## 用法
@@ -104,16 +104,16 @@ BADGE_CONF = 0.20         # 452 的下限 = detect 层 ui 地板（再低也进�
 TILE_CONF = 0.45          # 磁贴 cls 的下限；实测 6 个磁贴恒在 0.977~0.994，很稳
 WEAK_CONF = 0.45          # 低于此值只当"疑似"，`hit.weak=True`
 
-# 磁贴 → routing_v2 flow 名（`flow/registry.py` 的 key）。
-# ⚠`batch_sweep` / `special_sweep` 在 registry 里是 **PLANNED（有开关没实现）**，
+# 磁贴  routing_v2 flow 名（`flow/registry.py` 的 key）。
+# `batch_sweep` / `special_sweep` 在 registry 里是 **PLANNED（有开关没实现）**，
 #   所以"任務/特殊任務 在加成"这个事实目前**没有 flow 能消费** —— 这正是
-#   memory `mainline_ap_routing` 那条「全仓没有『无活动→自动切回推图/扫荡』分支」。
+#   memory `mainline_ap_routing` 那条「全仓没有『无活动自动切回推图/扫荡』分支」。
 #   这里如实映射，不假装它能跑。
 TILE_FLOW: Dict[str, str] = {
-    V.HUB_CAMPAIGN: "batch_sweep",      # ⛔PLANNED，未实现
+    V.HUB_CAMPAIGN: "batch_sweep",      # PLANNED，未实现
     V.HUB_STORY:    "story_mining",
     V.HUB_BOUNTY:   "bounty",
-    V.HUB_SPECIAL:  "special_sweep",    # ⛔PLANNED，未实现
+    V.HUB_SPECIAL:  "special_sweep",    # PLANNED，未实现
     V.HUB_JFD:      "jfd",
     V.HUB_ARENA:    "arena",
 }
@@ -152,7 +152,7 @@ class BoostHit:
 class BoostOrphan:
     """检出了 452 但**说不清是谁的** —— 超半径 / 方向不对 / 屏上没有磁贴。
 
-    ⛔它不是噪声，是"有加成但我认不出"，必须让调用方看见：
+    它不是噪声，是"有加成但我认不出"，必须让调用方看见：
        典型成因是那个磁贴自己漏检了（比如加载中），这时最近磁贴会是隔壁那个，
        距离 ~0.09 被半径挡掉 —— 挡对了，但事实是"这里确实有加成"。
     """
@@ -208,15 +208,15 @@ def read_boosts(obs: Observation, *,
                 tiles: Optional[Sequence[str]] = None) -> BoostReport:
     """任务大厅这一帧：哪几个磁贴挂着「活動進行中」。**纯函数，不点任何东西。**
 
-    `tiles` 默认 `V.HUB_TILES`。⛔传别的锚点集合前先重标半径 —— 上面文档里
+    `tiles` 默认 `V.HUB_TILES`。传别的锚点集合前先重标半径 —— 上面文档里
     悬赏分支页那个反例说明**换一套页面，几何整个变**。
 
     读不出就返回空报告（`in_task_hall=False`），绝不猜。
     """
     names = list(tiles) if tiles else list(V.HUB_TILES)
 
-    # ① 磁贴：每个 cls 只留 conf 最高那个。
-    #    ⛔实测踩到过：012241_000017 那帧 YOLO 给了**两个**「悬赏通缉」框，其中一个
+    #  磁贴：每个 cls 只留 conf 最高那个。
+    #    实测踩到过：012241_000017 那帧 YOLO 给了**两个**「悬赏通缉」框，其中一个
     #      正好压在红标上（中心距 0.0004）—— 不去重的话 margin 会被这个 DUP 毁掉。
     #      YOLO26 是 NMS-free，DUP 是它的常态（v15 验收时按 DUP/WRONG 拆过 FP）。
     tile_boxes: Dict[str, Box] = {}
@@ -234,7 +234,7 @@ def read_boosts(obs: Observation, *,
                           for b in badges),
             in_task_hall=False)
 
-    # ② 每枚 452 归到最近的磁贴，再过三道闸。
+    #  每枚 452 归到最近的磁贴，再过三道闸。
     cand: List[BoostHit] = []
     orphans: List[BoostOrphan] = []
     for m in badges:
@@ -255,7 +255,7 @@ def read_boosts(obs: Observation, *,
             continue
         if m.cy >= t1.cy:
             # 红标是卡片左上角的子元件，**恒在标题文字上方**（实测 dy 全负，
-            # 89/89 全负）。这是布局因果不是统计巧合 ⇒ 出现在下方的一律不认。
+            # 89/89 全负）。这是布局因果不是统计巧合  出现在下方的一律不认。
             orphans.append(BoostOrphan(m, t1.cls, d1,
                                        f"在「{t1.cls}」下方（dy={m.cy - t1.cy:+.4f}），"
                                        f"红标应恒在标题上方"))
@@ -267,9 +267,9 @@ def read_boosts(obs: Observation, *,
             margin=(d2 / d1) if d1 > 0 else float("inf"),
             badge=m, tile_box=t1))
 
-    # ③ 一个磁贴只能有一枚红标 —— 走到这里还同属一个磁贴的，**必然是同一枚的 DUP**：
+    #  一个磁贴只能有一枚红标 —— 走到这里还同属一个磁贴的，**必然是同一枚的 DUP**：
     #    相邻磁贴的红标间距 ≈ 磁贴行距 0.128，而半径只有 0.070，两枚真红标不可能
-    #    同时进同一个磁贴的圈。⇒ 取 conf 最高那个当代表（同一物件，用模型最好的
+    #    同时进同一个磁贴的圈。 取 conf 最高那个当代表（同一物件，用模型最好的
     #    那次估计；按距离取会把 0.95 的丢掉留下 0.22 的，`weak` 就报假了），
     #    并列再比距离。被丢掉的照样进 orphans，逐帧人审时看得见。
     best: Dict[str, BoostHit] = {}
@@ -293,17 +293,17 @@ def consensus(reports: Iterable[BoostReport], *,
               min_ratio: float = 0.25) -> Dict[str, int]:
     """多帧共识 —— 返回 {磁贴 cls: 命中帧数}，只保留占比 ≥ `min_ratio` 的。
 
-    ⛔为什么要有这个：单帧命中率实测最低只有 **48.1%**（弱 conf 的那枚红标一半帧
+    为什么要有这个：单帧命中率实测最低只有 **48.1%**（弱 conf 的那枚红标一半帧
       根本进不了 Observation），而"这个玩法今天有没有加成"是**持久事实**，用一帧
       下结论就是 README 病根里的「单帧当真相」。
       分母只算 `in_task_hall=True` 的帧（不在任务大厅的帧没有发言权）。
 
-    ⚠这是**或**的语义不是**与**：某帧漏检不代表没加成，所以按帧数占比投票。
+    这是**或**的语义不是**与**：某帧漏检不代表没加成，所以按帧数占比投票。
       `min_ratio=0.25` 也是标出来的，不是拍的：
         真: 08-11 三枚 20/22、20/22、21/22 = 0.91~0.96；08-10 那枚弱的 13/27 = **0.481**
-        假: 全语料 1003 帧扫过，位置归属的误报 **0 次** ⇒ 假阳占比 0.000
-      真值下限 0.481 和 0.000 之间取一半 ⇒ 0.25。
-      ⛔别抬到 0.5：08-10 學園交流會 那枚正好卡在 0.481，抬了就整天报"没有加成"。
+        假: 全语料 1003 帧扫过，位置归属的误报 **0 次**  假阳占比 0.000
+      真值下限 0.481 和 0.000 之间取一半  0.25。
+      别抬到 0.5：08-10 學園交流會 那枚正好卡在 0.481，抬了就整天报"没有加成"。
     """
     votes: Dict[str, int] = {}
     total = 0
@@ -323,7 +323,7 @@ def consensus(reports: Iterable[BoostReport], *,
 def _selftest() -> int:
     """`python -m routing_v2.percept.boost` —— 对实测帧复算归属准确率。
 
-    ⛔它验的是"归属对不对"，真值是**人眼看图**定的（见模块文档），
+    它验的是"归属对不对"，真值是**人眼看图**定的（见模块文档），
       不是拿模型自己的输出当真值（memory `template_label_assets` 那五个废掉的
       自动检测器，共同点就是自己发明判据又自己当真值）。
     """
@@ -351,7 +351,7 @@ def _selftest() -> int:
             bad += len(got - want)
             miss += len(want - got)
         con = consensus(reps)
-        flag = "✅" if set(con) == want else "❌"
+        flag = "" if set(con) == want else ""
         print(f"{flag} {day}: 共识 {sorted(con)}  真值 {sorted(want)}  ({len(reps)} 帧)")
     print(f"逐帧: 命中 {ok} / 错归 {bad} / 漏 {miss}  （{frames} 帧；"
           f"漏的是 conf<{BADGE_CONF} 进不了 Observation 的弱红标）")

@@ -18,8 +18,8 @@ Modes:
   skip       leave frames that already have a non-empty label untouched
 
 Recommended flow for a fresh dataset (build the unified training set):
-  ui pass → avatar pass → emoticon pass  (all merge, same frames)  → human
-  精修 ONCE in the dashboard → train. Run the teacher passes BEFORE精修, not
+  ui pass  avatar pass  emoticon pass  (all merge, same frames)   human
+  精修 ONCE in the dashboard  train. Run the teacher passes BEFORE精修, not
   after (merge would re-add boxes a human deliberately deleted).
 
 Label format: `cls cx cy w h` normalized, cls = 0-based MASTER index — the
@@ -43,7 +43,7 @@ RAW = REPO / "data" / "raw_images"
 TRAJ = REPO / "data" / "trajectories"
 MASTER_FILE = RAW / "_classes.txt"
 
-# ⛔人审资产保护注册表(2026-07-25 建)。data/raw_images/ 在 .gitignore:40 —— 人审
+# 人审资产保护注册表(2026-07-25 建)。data/raw_images/ 在 .gitignore:40 —— 人审
 # 标注**全盘唯一副本, 零 VCS 兜底**。而预标是整池覆盖: 实测若对已人审的
 # run_20260715_025638_botplay_clean 跑一次 overwrite, 559 个人审 battle 框会被
 # 361 个模型框顶替。这里登记的池, prefill 默认**直接拒绝**, 除非显式
@@ -65,7 +65,7 @@ def _guard_audited(img_dir: Path, mode: str, allow_audited: bool) -> None:
     info = audited_pools().get(img_dir.name)
     if info:
         raise SystemExit(
-            f"⛔ {img_dir.name} 已登记为**人审池**({info.get('reviewed_at','?')}, "
+            f" {img_dir.name} 已登记为**人审池**({info.get('reviewed_at','?')}, "
             f"{info.get('note','')}) — 拒绝 mode={mode} 覆盖。\n"
             f"   人审标注在 .gitignore 内, 覆盖=永久丢失。确实要重标请显式传 "
             f"allow_audited=True(CLI: --allow-audited), 并先自行备份。")
@@ -87,27 +87,27 @@ def _backup_labels(img_dir: Path, stamp: str) -> int:
         shutil.copy2(p, dst / p.name)
         n += 1
     got = len(list(dst.glob("*.txt")))
-    if got != len(srcs):     # ⛔断言非空且完整, 半备份半覆盖是最坏情况
-        raise SystemExit(f"⛔ 备份不完整 {got}/{len(srcs)} → {dst}, 中止预标")
+    if got != len(srcs):     # 断言非空且完整, 半备份半覆盖是最坏情况
+        raise SystemExit(f" 备份不完整 {got}/{len(srcs)}  {dst}, 中止预标")
     return n
 
 
-# ⚠**已被 battle v10s 取代, 默认别开**(2026-07-25 当天就废了)。
+# **已被 battle v10s 取代, 默认别开**(2026-07-25 当天就废了)。
 # 用户提的种子模型法更干净: 拿人审的 54 帧 ×8 过采样 warm-train 出 v10s, 模型
 # **自己**就把黄机甲判成敌方了 —— 5 个没训过的池上「我方@cx>=0.55」从 153 掉到
 # 21, 而那 21 个抽检 18/18 **全是真学生**(推进到中线的我方)。此时再开 cx 规则
 # 只会把这 21 个真学生改错。
-# ⇒ 规则本身留着(换新域、模型还没学会时的应急兜底), 但**先训模型, 别先套规则**。
+#  规则本身留着(换新域、模型还没学会时的应急兜底), 但**先训模型, 别先套规则**。
 #
-# ⭐cx 位置规则(2026-07-25 实测): 「模型判我方 且 cx>=阈值 → 改判敌方」。
-# ⛔**严格池级门控, 绝不能默认开**: battle v10 训练集 我方:敌方=4.7:1 且 10 个
-# 源池里 6 个敌方框=0 → 模型先验"战场小人=我方", 实测敌方→我方 22.5%/反向 0%。
-# 该规则在**固定横版镜头**的活动关(botplay)上把类错 43→4; 但在**大决战**上是
+# cx 位置规则(2026-07-25 实测): 「模型判我方 且 cx>=阈值  改判敌方」。
+# **严格池级门控, 绝不能默认开**: battle v10 训练集 我方:敌方=4.7:1 且 10 个
+# 源池里 6 个敌方框=0  模型先验"战场小人=我方", 实测敌方我方 22.5%/反向 0%。
+# 该规则在**固定横版镜头**的活动关(botplay)上把类错 434; 但在**大决战**上是
 # 灾难: 耶罗尼姆斯池人审 GT 里 我方 2483 框中 1689 个(68.0%)cx>=0.50、白_黑
 # 27.5% —— 那边镜头跟随平移, "我方在左"根本不成立, 无门控套用会灌 1682 条毒标签。
-# 阈值取 0.55 而非 0.50: 人审池上扫阈值 0.45→8误伤 / 0.50→3 / 0.55→3 / 0.60→4,
+# 阈值取 0.55 而非 0.50: 人审池上扫阈值 0.458误伤 / 0.503 / 0.553 / 0.604,
 # 底部平坦, 0.55 给"推进到中线的学生"留余量(实测边界误伤集中在 0.50-0.55)。
-# ⚠这条规则**永远只能活在后处理里**: 实测把整帧水平平移 ±25% 帧宽(外观一个像素
+# 这条规则**永远只能活在后处理里**: 实测把整帧水平平移 ±25% 帧宽(外观一个像素
 # 没动), v10 判定保持 98.4% —— 全卷积 end2end head 架构上就学不到绝对 x 坐标,
 # 指望"训练进去"是没有的事。
 CX_RULE_THRESHOLD = 0.55
@@ -126,7 +126,7 @@ def _resolve_side_ids() -> None:
     idx = master_idx()
     _CLS_ALLY, _CLS_ENEMY = idx.get("我方", -1), idx.get("敌方", -1)
     if _CLS_ALLY < 0 or _CLS_ENEMY < 0:
-        raise SystemExit("⛔ master 词表里找不到 我方/敌方 — cx 规则无法启用")
+        raise SystemExit(" master 词表里找不到 我方/敌方 — cx 规则无法启用")
 
 # Per-tag inference imgsz — mirrors brain/pipeline.py _IMGSZ_BY_TAG. Wrong imgsz
 # silently yields 0 detections (ui @1920 = nothing), so pin it per model.
@@ -142,15 +142,15 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 # can't stamp a spurious avatar class onto a cafe sprite (and vice-versa).
 # 2026-07-17: ui 域含 451 Emoticon_Action — ui v6+ 已兼职摸头(live 管线
 # fold-in 正是靠它, emoticon 独立模型已退役), 旧表把 451 划给 emoticon
-# teacher 导致 ui 预标漏摸头框(用户抓)。⚠451 同时在 emoticon teacher 域
+# teacher 导致 ui 预标漏摸头框(用户抓)。451 同时在 emoticon teacher 域
 # (dashboard 补标仍可用): 两域重叠, overwrite 模式二者都会重写 451 框。
 def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i < 476  # UI=非头像非战斗身份段(476+), 含451摸头
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
 # battle 静态 span — 只供 UI datalist 展示/校验; **写路径一律用
 # owns_for(tag, remap) 的词表动态 span**(见下)。
-# ⚠2026-07-14 教训: 曾枚举 476-479, 主教480/球481/黑白482 加类后静默漏
-# (用户"只标cls"输黑白被拒实锤) → 改开放规则: HUD 段 + 476 起全部身份类
+# 2026-07-14 教训: 曾枚举 476-479, 主教480/球481/黑白482 加类后静默漏
+# (用户"只标cls"输黑白被拒实锤)  改开放规则: HUD 段 + 476 起全部身份类
 # (新 boss 类永远往 master 尾部追加, 自动纳入)。
 def _battle_span(i: int) -> bool:   return i in (set(range(128, 137)) | {412}) or i >= 476
 _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
@@ -160,7 +160,7 @@ _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
 def owns_for(tag: str, remap: dict):
     """写路径(prefill/suggest)用的 owns 判定。battle 域 = 该权重词表∩master
     (remap.values(), v5 加新类自动跟随, 无枚举漏类)。
-    ⚠2026-07-11 审计教训: 曾把 _OWNS['battle'] 设 lambda True — merge 模式
+    2026-07-11 审计教训: 曾把 _OWNS['battle'] 设 lambda True — merge 模式
     没事(检出本来只有战斗类), 但 **overwrite 模式 kept=[e if not owns] 起始
     变空 = 整池 UI/头像/emoticon 手标全被清掉**, owns 在 overwrite 里是
     "保留其他模型框"的过滤器, 双重用途缺一不可。"""
@@ -190,10 +190,10 @@ def get_model(model_key: str = "ui", version: "str | None" = None):
     trained with its own local ordering (fused_avatar, emoticon) lands on the
     correct master index; names absent from master are simply dropped.
 
-    version=None → registry active 版本。指定 version → 用该版本权重, 但 span/tag
+    version=None  registry active 版本。指定 version  用该版本权重, 但 span/tag
     仍由 model_key 决定 (只换权重、不换域)。关键用法: model_key='ui' + version='v6c'
-    → 借 unified v6c(nc455) 当 teacher, 经 _ui_span 过滤只吐 UI 域框 (头像/emoticon
-    丢弃); model_key='ui' + version='v5' → 旧特化补 cafe 弱类(咖啡厅收益/邀请卷)。"""
+     借 unified v6c(nc455) 当 teacher, 经 _ui_span 过滤只吐 UI 域框 (头像/emoticon
+    丢弃); model_key='ui' + version='v5'  旧特化补 cafe 弱类(咖啡厅收益/邀请卷)。"""
     cache_key = (model_key, version)
     if cache_key not in _MODELS:
         from ultralytics import YOLO
@@ -287,7 +287,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 allow_audited: bool = False, cx_rule: bool = False) -> dict:
     """Prefill every *.jpg under img_dir with ONE model. See module docstring
     for modes. `overwrite=True` is a back-compat alias for mode='overwrite'.
-    version=None → registry active; 指定版本可选不同 teacher 权重 (见 get_model)。
+    version=None  registry active; 指定版本可选不同 teacher 权重 (见 get_model)。
 
     allow_audited: 突破人审池保护闸(API 端点**永不传**, 只给命令行的人)。
     cx_rule: 开启 cx 位置规则改判(见 CX_RULE_* 注释), 仅白名单池生效。
@@ -304,7 +304,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
     if _cx_on:
         _resolve_side_ids()
     if cx_rule and not _cx_on:
-        print(f"⚠cx 规则已请求但 {img_dir.name} 不在白名单 "
+        print(f"cx 规则已请求但 {img_dir.name} 不在白名单 "
               f"{CX_RULE_ALLOWED_POOLS} — **不启用**(大决战等跟随镜头域套用会灌毒标签)")
     n_flip = 0
     m, remap, tag = get_model(model_key, version)
@@ -374,7 +374,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
             if progress and written % 50 == 0:
                 progress(written, len(imgs))
     if _cx_on:
-        print(f"⭐cx 规则(>={CX_RULE_THRESHOLD}) 把 {n_flip} 个「我方」改判敌方 "
+        print(f"cx 规则(>={CX_RULE_THRESHOLD}) 把 {n_flip} 个「我方」改判敌方 "
               f"— 人审时优先复查这些框(阈值边界 0.50-0.55 有真学生误伤)")
     return {"written": written, "skipped": skipped, "total": len(imgs),
             "model": model_key, "version": version, "mode": mode,

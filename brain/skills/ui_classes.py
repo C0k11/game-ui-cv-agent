@@ -55,7 +55,7 @@ BTN_CONFIRM_GREY = "灰色确认"   # 23  (12f)  disabled confirm (insufficient)
 BTN_CANCEL = "取消键"           # 118 (47f)
 BTN_CLOSE_X = "弹窗叉叉"        # 19  (429f) popup close X
 BTN_BACK = "返回键"            # 31  (695f) top-left back arrow
-BTN_HOME = "回大厅按钮"         # 28  (689f) home button → lobby
+BTN_HOME = "回大厅按钮"         # 28  (689f) home button  lobby
 BTN_COLLAPSE = "收起键"         # 29  (0f — NOT trained)
 LOADING = "加载中"             # 22  (45f)
 
@@ -196,7 +196,7 @@ SHOP_SELECT_ALL = "全部选择"         # 55  (18f)
 SHOP_SELECT_ALL_GREY = "全部选择灰"   # 404 (12f)
 SHOP_ALL_SELECTED = "已全部选择"      # 402  全选完成态（区别于 全部选择/灰）
 SHOP_BUY = "购买"                   # 103 (30f)  per-item buy
-# 489 = 灰(禁用)态「購買」。v15 起模型真会吐它。⚠尚无消费方 —— 记在这里是因为
+# 489 = 灰(禁用)态「購買」。v15 起模型真会吐它。尚无消费方 —— 记在这里是因为
 # 它可能是 `no_dialog 两义`(买不起 / 本日限購已尽)的直接解: 屏上按钮变灰
 # 本身就是"这件买不了"的信号, 比事后靠"点了没弹框"反推可靠。接入前要 live 验。
 SHOP_BUY_GREY = "购买灰色"           # 489
@@ -204,14 +204,14 @@ SHOP_BUY_SELECTED = "选择购买"        # 450  全选后批量购买按钮
 SHOP_BUY_PYROXENE = "购买青辉石"      # 395 (16f)
 CURRENCY = "货币"                   # 102 (18f)
 CURRENCY_SEL = "货币_已选择"         # 101 (18f)
-CURRENCY_QTY_AREA = "货币数量显示区域"  # 104  数字显示区 → digit-OCR 锚点(余额/总价)
+CURRENCY_QTY_AREA = "货币数量显示区域"  # 104  数字显示区  digit-OCR 锚点(余额/总价)
 COMBO_PACK = "组合包未选择"          # 414 (12f)
 COMBO_PACK_SEL = "组合包已选择"      # 445 (14f)
 FREE = "免费"                       # 446 (14f)
-# 商店左侧 tab 指示器 —— ⛔ 切勿进 青辉石 tab 购买（花青辉石）
+# 商店左侧 tab 指示器 ——  切勿进 青辉石 tab 购买（花青辉石）
 SHOP_TAB_CREDIT = "信用点商店"        # 62   一般(信用点)tab
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"  # 54  一般 tab 选中 = 安全
-SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"  # 61  ⛔ 花青辉石 tab 选中
+SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"  # 61   花青辉石 tab 选中
 
 # ── 战术大赛商店 (买体力 — 花战术大赛货币, NOT 青辉石/信用点) ──────────
 # 商店左栏下滑可见. 新类 469-473 (v9 起训, 2026-06-11 用户手标+模板补).
@@ -224,10 +224,10 @@ ENERGY_DRINK_MID = "一般能量饮料"          # 473  60AP, 售30货币
 # ── 制造 / craft ────────────────────────────────────────────────────
 CRAFT_QUICK = "快速制造"             # 443 (28f)
 CRAFT_START = "开始制造"             # 444 (19f)
-# ⭐485 = 灰(禁用)态「開始製造」。2026-08-02 从 444 里拆出来(219 个灰键当年被
+# 485 = 灰(禁用)态「開始製造」。2026-08-02 从 444 里拆出来(219 个灰键当年被
 # 错标成亮态 444), v15 起模型真会吐它 —— 2026-08-07 live 首次实测 0.99。
-# ⛔加这个常量是**必须的**: 没有它, 灰键在全 bot 无人认识 → craft 的灰键闸
-# (挂在 `find_cls(CRAFT_START)` 非空这个前提上)整条被跳过 → 落到 MAX 外推盲点。
+# 加这个常量是**必须的**: 没有它, 灰键在全 bot 无人认识  craft 的灰键闸
+# (挂在 `find_cls(CRAFT_START)` 非空这个前提上)整条被跳过  落到 MAX 外推盲点。
 CRAFT_START_GREY = "开始制造灰色"     # 485
 
 # ── 活动 (event — 周年庆暂跳过, 但 cls 已训) ────────────────────────
@@ -240,7 +240,7 @@ EVENT_TASK = "活动任务"              # 96  (37f)
 EVENT_BONUS = "活动关卡产出额外加成"  # 110 (12f)
 EVENT_REWARD_INFO = "奖励资讯"       # 475 (活动页右下入口, v13 0.96)
 EVENT_END_LEFT = "距离结束还剩"       # 405 (23f)
-# ⛔语义区分(用户 2026-07-08): 「距離獎勵獲得結束」= 上个活动的领奖余韵期 banner
+# 语义区分(用户 2026-07-08): 「距離獎勵獲得結束」= 上个活动的领奖余韵期 banner
 # (只能进去领尾奖, 无关卡可打)。405 只标「距離結束還剩」(进行中可打)。
 # event skill: 检到 474 的活动 = 领奖期, 只领奖不派 AP。51 样本(0708 OCR 重分类)。
 EVENT_REWARD_END = "距离奖励获得结束"  # 474 (51f, waits v13)
@@ -275,7 +275,7 @@ SCENE_DONE = "战斗图标已完成"         # 447 (12f)
 MOMO_CHAT_TAB = "momotalk学生聊天区域按钮"     # 448  对话区域 tab (未读列表入口)
 MOMO_CHAT_TAB_SEL = "momotalk学生聊天区域已进入"  # 449  对话区域 tab 选中态
 MOMO_UNREAD = "学生momotalk信息未读"  # 439 (121f) unread conversation badge
-MOMO_SENDING = "学生发送信息中"       # 438 (28f)  ★瞬时:学生打字中→连续轮询,见即等
+MOMO_SENDING = "学生发送信息中"       # 438 (28f)  瞬时:学生打字中连续轮询,见即等
 MOMO_REPLY_OPT = "学生信息回复选项"    # 440 (32f)  reply choice
 GOTO_BOND_STORY = "前往羁绊剧情"      # 441 (12f)
 ENTER_BOND_STORY = "进入羁绊剧情"     # 442 (12f)

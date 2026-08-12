@@ -47,8 +47,8 @@ _DEFAULT_DT = 1.0 / 240.0
 class _OneEuro:
     """One-Euro filter for a single scalar (Casiez et al. 2012).
 
-    Cutoff frequency rises with speed: slow signal → low cutoff → strong
-    smoothing (no jitter); fast signal → high cutoff → little smoothing (no
+    Cutoff frequency rises with speed: slow signal  low cutoff  strong
+    smoothing (no jitter); fast signal  high cutoff  little smoothing (no
     lag). `min_cutoff` sets the floor smoothing; `beta` sets how aggressively
     smoothing relaxes with speed.
     """
@@ -327,7 +327,7 @@ class BoxTracker:
         used_tracks = set()
         used_dets = set()
 
-        # STAGE 1: high-confidence detections → all tracks
+        # STAGE 1: high-confidence detections  all tracks
         if self._tracks and high_dets:
             hi_list = [d for _, d in high_dets]
             hi_idx = [i for i, _ in high_dets]
@@ -340,7 +340,7 @@ class BoxTracker:
                 used_tracks.add(ti)
                 used_dets.add(real_di)
 
-        # STAGE 2: low-confidence detections → unmatched tracks (ByteTrack rescue)
+        # STAGE 2: low-confidence detections  unmatched tracks (ByteTrack rescue)
         if low_dets:
             lo_list = [d for _, d in low_dets]
             lo_idx = [i for i, _ in low_dets]

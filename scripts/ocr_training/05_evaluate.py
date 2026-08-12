@@ -196,7 +196,7 @@ def print_report(result: dict):
     if result["failures"]:
         print(f"\n  Top failures:")
         for f in result["failures"][:20]:
-            print(f"    '{f['expected']}' → '{f['predicted']}' (conf={f['conf']:.2f})")
+            print(f"    '{f['expected']}'  '{f['predicted']}' (conf={f['conf']:.2f})")
 
 
 def main():

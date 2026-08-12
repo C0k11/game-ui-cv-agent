@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """活动加成重打 + Q12 扫荡 + 台账 (2026-07-15, 用户指令三件套).
 
-A. 部队2(加成 farm 队)把 Q1-12 每关重打一遍 → 该关扫荡永久享受加成
+A. 部队2(加成 farm 队)把 Q1-12 每关重打一遍  该关扫荡永久享受加成
    (上期 Q09 弱队烂记录教训); 台账 data/event_bonus_state_midnight.json
    记 bonus_cleared, 打过的跳过(可断点续跑)。
-B. 台账 12/12 → Q12 扫荡链吃剩余 AP: MAX→掃蕩開始→确认框**结构白名单闸**
-   (检出取消+确认 且 body 无 stepper/体力 → 才点确认; 否则取消+停,
+B. 台账 12/12  Q12 扫荡链吃剩余 AP: MAX掃蕩開始确认框**结构白名单闸**
+   (检出取消+确认 且 body 无 stepper/体力  才点确认; 否则取消+停,
    money fail-closed)。
 路由: 入场键 cls + 行关号 digit-OCR(实测 '01'-'03' 全对), 不赌列表位置。
 用法: py -u scripts/event_bonus_rerun.py
@@ -66,18 +66,18 @@ def main():
     led = ledger_load()
 
     def ensure_quest_tab():
-        """⛔Challenge 误入防线(2026-07-15 实锤: 盲 tab tap 点空停在 Challenge,
+        """Challenge 误入防线(2026-07-15 实锤: 盲 tab tap 点空停在 Challenge,
         关号 OCR 读的是 Challenge 01-03)。正锚=「活动quest_已选择」(cls 100)
-        检出才放行; 检出「活动quest」(94, 未选中)→ 点它的 box 切换再验。
-        fail-closed: 6 次不成 → None(绝不在未知 tab 上点入场)。"""
+        检出才放行; 检出「活动quest」(94, 未选中) 点它的 box 切换再验。
+        fail-closed: 6 次不成  None(绝不在未知 tab 上点入场)。"""
         for _ in range(6):
             fr = adb.capture_frame()
             if fr is None:
                 continue
             d = dets(ui, fr, 0.35)
             names = {n for n, *_ in d}
-            # 正锚①活动quest_已选择(实测在部分列表状态漏检) ②关卡得星_3
-            # 精确匹配 — ⚠Challenge 行灰星是独立类「关卡得星_0」(idx83),
+            # 正锚活动quest_已选择(实测在部分列表状态漏检) 关卡得星_3
+            # 精确匹配 — Challenge 行灰星是独立类「关卡得星_0」(idx83),
             # 旧 startswith 在 Challenge tab 会误通过(2026-07-17 实锤,
             # "视野有得星徽章=必在 Quest"的旧假设错误)
             if "活动quest_已选择" in names or "关卡得星_3" in names:
@@ -86,7 +86,7 @@ def main():
             if tab is not None:
                 _, _, x1, y1, x2, y2, W, H = tab
                 tap(int((x1 + x2) / 2), int((y1 + y2) / 2))
-                print("    tab≠Quest → 点「活动quest」tab 切换", flush=True)
+                print("    tab≠Quest  点「活动quest」tab 切换", flush=True)
             time.sleep(3)
         return None
 
@@ -103,8 +103,8 @@ def main():
 
     def formation_and_sortie() -> bool:
         """编队页感知驱动(2026-07-15 用户纠偏: 不许无脑出击):
-        逐帧 YOLO → 2部队(cls 126)未选中→点; 2部队高亮(120)→先「快速编辑」
-        (121, 自动编队保加成满配)→(确认弹窗有则点)→「出击」(124)。"""
+        逐帧 YOLO  2部队(cls 126)未选中点; 2部队高亮(120)先「快速编辑」
+        (121, 自动编队保加成满配)(确认弹窗有则点)「出击」(124)。"""
         auto_done = False
         for _ in range(14):
             fr = adb.capture_frame()
@@ -143,7 +143,7 @@ def main():
                 print("    切部队2", flush=True)
                 time.sleep(2.5)
             time.sleep(1.2)
-        print("    ⛔编队页感知循环 14 轮未完成 — 停")
+        print("    编队页感知循环 14 轮未完成 — 停")
         return False
 
     def fight_and_settle() -> bool:
@@ -173,7 +173,7 @@ def main():
         target = todo[0]
         fr = ensure_quest_tab()
         if fr is None:
-            print("    ⛔Quest tab 正锚(活动quest_已选择)拿不到 — 停")
+            print("    Quest tab 正锚(活动quest_已选择)拿不到 — 停")
             return
         rows = list_rows(fr)
         nums = [q for q, _ in rows if q]
@@ -199,19 +199,19 @@ def main():
         if fight_and_settle():
             led["bonus_cleared"][str(target)] = True
             ledger_save(led)
-            print(f"  ✓ Q{target} 加成记录入账", flush=True)
+            print(f"   Q{target} 加成记录入账", flush=True)
         else:
-            print(f"  ✗ Q{target} 战斗超时 — 停")
+            print(f"   Q{target} 战斗超时 — 停")
             return
 
-    print("[A] 12关加成全记录 ✓", flush=True)
+    print("[A] 12关加成全记录 ", flush=True)
 
     # ── B. Q12 扫荡吃剩余 AP ──
-    # B0. ⛔金钱铁律: 扫前正向读 AP(体力cls锚定+右侧0.06 strip),
-    # None 或 <20(单次成本) → 收工, 绝不试探点扫荡开始(fail-closed)
+    # B0. 金钱铁律: 扫前正向读 AP(体力cls锚定+右侧0.06 strip),
+    # None 或 <20(单次成本)  收工, 绝不试探点扫荡开始(fail-closed)
     fr = ensure_quest_tab()
     if fr is None:
-        print("[B] ⛔Quest tab 正锚拿不到 — 停")
+        print("[B] Quest tab 正锚拿不到 — 停")
         return
     ap = None
     for n, c, x1, y1, x2, y2, W, H in dets(ui, fr, 0.5):
@@ -235,7 +235,7 @@ def main():
     for _ in range(10):
         fr = ensure_quest_tab()
         if fr is None:
-            print("[B] ⛔Quest tab 正锚丢失 — 停")
+            print("[B] Quest tab 正锚丢失 — 停")
             return
         d = dets(ui, fr, 0.5)
         entries = sorted(
@@ -257,7 +257,7 @@ def main():
     d = dets(ui, fr, 0.5)
     mx = next((b for b in d if b[0] == "MAX_可点击"), None)
     if mx is None:
-        print("[B] ⛔MAX_可点击 检不出 — 不扫, 人工看", flush=True)
+        print("[B] MAX_可点击 检不出 — 不扫, 人工看", flush=True)
         return
     tap(int((mx[2] + mx[4]) / 2), int((mx[3] + mx[5]) / 2))
     time.sleep(2.5)
@@ -271,7 +271,7 @@ def main():
                if y1 / H > 0.12 and n in _DANGER]
     sw = next((b for b in d if b[0] == "扫荡开始" and b[1] >= 0.5), None)
     if sw is None:
-        print("[B] ⛔扫荡开始 检不出 — 不扫, 人工看", flush=True)
+        print("[B] 扫荡开始 检不出 — 不扫, 人工看", flush=True)
         return
     tap(int((sw[2] + sw[4]) / 2), int((sw[3] + sw[5]) / 2))
     time.sleep(5)
@@ -289,7 +289,7 @@ def main():
     if {"取消键", "确认键"} <= names and not body_bad:
         ck = next(b for b in d if b[0] == "确认键")
         tap(int((ck[2] + ck[4]) / 2), int((ck[3] + ck[5]) / 2))
-        print("[B] 扫荡确认(纯AP闸过) ✓", flush=True)
+        print("[B] 扫荡确认(纯AP闸过) ", flush=True)
         time.sleep(6)
         tap(1920, 1900)          # 结果窗 TOUCH
         time.sleep(3)
@@ -297,7 +297,7 @@ def main():
     else:
         if "取消键" in names:
             tap(1540, 1570)
-        print(f"[B] ⛔确认框结构闸拦截(body={body_bad}) — 不扫, 人工看",
+        print(f"[B] 确认框结构闸拦截(body={body_bad}) — 不扫, 人工看",
               flush=True)
     print("done", flush=True)
 

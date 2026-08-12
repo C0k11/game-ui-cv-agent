@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""⛔敌我混淆专项审计 —— 用户 2026-07-25: "经常敌方标记成友方"。
+"""敌我混淆专项审计 —— 用户 2026-07-25: "经常敌方标记成友方"。
 
 在**人审过的**池上量 battle 模型的身份类混淆矩阵, 并回答三个决策问题:
-  ① 单帧混淆率到底多少(不是感觉, 是数字)
-  ② track 级类别投票能纠回多少(这才是修翻转的正解, ReID 只是让 track 更长)
-  ③ 位置先验(我方偏左/敌方偏右)有多强, 能不能当兜底判据
+   单帧混淆率到底多少(不是感觉, 是数字)
+   track 级类别投票能纠回多少(这才是修翻转的正解, ReID 只是让 track 更长)
+   位置先验(我方偏左/敌方偏右)有多强, 能不能当兜底判据
 
-⚠分母口径: 只统计**匹配上 GT 的预测框**(IoU≥0.45)。漏检/误检是另一回事,
+分母口径: 只统计**匹配上 GT 的预测框**(IoU≥0.45)。漏检/误检是另一回事,
 单独报, 绝不混进"混淆率"里稀释或夸大。
 
 跑: py scripts/audit_side_confusion.py <pool_substr> [--track]
@@ -48,7 +48,7 @@ def iou_mat(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def load_gt(txt: Path) -> list:
-    """→ [(master_cls, xyxy_norm)]  仅身份类。"""
+    """ [(master_cls, xyxy_norm)]  仅身份类。"""
     out = []
     if not txt.exists():
         return out
@@ -171,8 +171,8 @@ def main() -> int:
     f2e = conf_mat[(476, 477)]
     n_e = sum(conf_mat[(477, p)] for p in prs)
     n_f = sum(conf_mat[(476, p)] for p in prs)
-    print(f"\n⭐用户主诉「敌方被标成友方」: {e2f}/{n_e} = "
-          f"{100*e2f/max(n_e,1):.2f}%   (反向 友方→敌方 {f2e}/{n_f} = "
+    print(f"\n用户主诉「敌方被标成友方」: {e2f}/{n_e} = "
+          f"{100*e2f/max(n_e,1):.2f}%   (反向 友方敌方 {f2e}/{n_f} = "
           f"{100*f2e/max(n_f,1):.2f}%)")
 
     print(f"\n{'='*70}\n位置先验(人审 GT 的 cx 分布) — 我方偏左/敌方偏右?")
@@ -189,7 +189,7 @@ def main() -> int:
             acc = ((a < t).sum() + (b >= t).sum()) / (len(a) + len(b))
             if acc > bestacc:
                 best, bestacc = t, acc
-        print(f"  → 单纯用 cx 阈值 {best:.2f} 分敌我: 准确率 "
+        print(f"   单纯用 cx 阈值 {best:.2f} 分敌我: 准确率 "
               f"{100*bestacc:.1f}%  (够不够当兜底判据看这个数)")
 
     if use_track and track_obs:
@@ -208,9 +208,9 @@ def main() -> int:
                 elif p != g and vote != g:
                     kept_bad += 1
         print(f"  轨迹数(≥3帧) {sum(1 for o in track_obs.values() if len(o)>=3)}")
-        print(f"  ✅投票纠回错框: {fixed}")
-        print(f"  ⛔投票**弄坏**本来对的框: {broke}   ← 这个必须接近 0 才敢用")
-        print(f"  ⚠仍然错(整条轨迹都错): {kept_bad}")
+        print(f"  投票纠回错框: {fixed}")
+        print(f"  投票**弄坏**本来对的框: {broke}    这个必须接近 0 才敢用")
+        print(f"  仍然错(整条轨迹都错): {kept_bad}")
     return 0
 
 

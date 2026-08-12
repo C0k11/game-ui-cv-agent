@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """两段式状态对扩散器: 模板定位 + 像素特征判亮/灰, 一次同时补两个 cls。
 
-⛔为什么不能直接用 spread_template_label.py 扩散灰态(2026-08-02 实测定罪):
+为什么不能直接用 spread_template_label.py 扩散灰态(2026-08-02 实测定罪):
 `TM_CCOEFF_NORMED` 归一化时**减去均值**, 正好把亮度差消掉只匹配形状 —
 而「購買」二字亮态灰态形状完全一样。实测样板帧 frame_000366: 亮态 103
-得分 0.9591, 比一半灰态(0.8623-0.8704)还高 ⇒ 单靠模板分**必然**把亮态
+得分 0.9591, 比一半灰态(0.8623-0.8704)还高  单靠模板分**必然**把亮态
 污染成灰态。所以状态对必须两段式:
-  ① 模板匹配只负责**定位**(召回该按钮所有实例, 不分状态)
-  ② 每个命中框量 (V, B-R) 双特征判状态, 落中间带的一律 unsure 不标
+   模板匹配只负责**定位**(召回该按钮所有实例, 不分状态)
+   每个命中框量 (V, B-R) 双特征判状态, 落中间带的一律 unsure 不标
 
 判据在 806 个人审定稿框上标定: 灰 V≤143 / 亮 V≥167 (中间 24 点空隙),
-V<158 & B-R<83 二分 806/806 = 100%。⚠**这组数值只对「購買」有效**,
+V<158 & B-R<83 二分 806/806 = 100%。**这组数值只对「購買」有效**,
 换按钮必须重新标定 — 「全部選擇」的灰比亮更亮(白底钮去饱和), 方向是反的。
 
 Usage:
@@ -86,7 +86,7 @@ def _scan(rel):
         elif c["bright_v"] <= v <= c["bright_v_max"] and br >= c["bright_br"]:
             state = c["bright"]
         else:
-            # 中间带 + **转场淡出**帧 → unsure, 不标。淡出时按钮渐隐混白:
+            # 中间带 + **转场淡出**帧  unsure, 不标。淡出时按钮渐隐混白:
             # V 反而升高(203-208 > 正常亮态 197)而 B-R 掉下来(32-83 < 85),
             # 只设 V 下限会把它们当亮态收进来 (2026-08-02 sheet 抓到 3 例)。
             state = 0
@@ -144,7 +144,7 @@ def main() -> None:
     hits = [(f, h) for f, v, h in results if v == "hit" and h]
     cnt = collections.Counter(st for _, hs in hits for *_, st in hs)
     print(f"verdicts: {dict(verd)}")
-    print(f"命中帧 {len(hits)}  →  亮{args.bright_cls}: {cnt[args.bright_cls]}  "
+    print(f"命中帧 {len(hits)}    亮{args.bright_cls}: {cnt[args.bright_cls]}  "
           f"灰{args.dark_cls}: {cnt[args.dark_cls]}  unsure(不标): {cnt[0]}")
 
     with open(ROOT / "data" / f"_spread_{args.tag}.csv", "w", newline="", encoding="utf-8") as f:

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""倍速类标注全库审计 (2026-07-14, 用户实锤: 单▶被模型判「战斗三倍速」,
+"""倍速类标注全库审计 (2026-07-14, 用户实锤: 单被模型判「战斗三倍速」,
 疑似从早代就类语义污染).
 
-词表: 412=战斗1倍速(▶) / 135=战斗2倍速(▶▶) / 129=战斗三倍速(▶▶▶)。
+词表: 412=战斗1倍速() / 135=战斗2倍速() / 129=战斗三倍速()。
 方法: 全 battle 训练池 + 大蛇池, 裁出全部 {412,135,129} GT 框, 数框内深色
 三角连通域个数 = 实际倍速, 输出 标注 × 实际 混淆矩阵 + 抽样拼图人工复核。
 
@@ -37,10 +37,10 @@ N2CLS = {1: 412, 2: 135, 3: 129}
 
 
 def count_arrows(crop: np.ndarray) -> int:
-    """倍速按钮内深色▶个数。
+    """倍速按钮内深色个数。
     v2: 黄色高亮态(按下/发光)按钮上三角互相粘连成一个连通域 — v1 直接数
-    连通域把 3▶ 数成 1(赫赛德 27 框假警报实锤)。改为: 每个显著连通域按
-    宽高比 w/(h*0.72) 推内含三角数(单▶ w/h≈0.72, 粘连 n 个 ≈ n×0.72)。"""
+    连通域把 3 数成 1(赫赛德 27 框假警报实锤)。改为: 每个显著连通域按
+    宽高比 w/(h*0.72) 推内含三角数(单 w/h≈0.72, 粘连 n 个 ≈ n×0.72)。"""
     g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     dark = (g < 110).astype(np.uint8)
     n, _, stats, _ = cv2.connectedComponentsWithStats(dark, 8)
@@ -69,7 +69,7 @@ def main():
     for pool_name in POOLS:
         pool = RAW / pool_name
         if not pool.is_dir():
-            print(f"⚠ 池不存在: {pool_name}")
+            print(f" 池不存在: {pool_name}")
             continue
         short = pool_name[:24]
         for lbl in sorted(pool.glob("*.txt")):
@@ -103,8 +103,8 @@ def main():
                 if fix and n in N2CLS and N2CLS[n] != c:
                     fixes.append((lbl, li, c, N2CLS[n]))
 
-    print(f"\n{'池':<26} {'标注':<8} {'实际1▶':>6} {'实际2▶':>6} "
-          f"{'实际3▶':>6} {'其他':>5}")
+    print(f"\n{'池':<26} {'标注':<8} {'实际1':>6} {'实际2':>6} "
+          f"{'实际3':>6} {'其他':>5}")
     for (short, c), cnt in sorted(mat.items()):
         other = sum(v for k, v in cnt.items() if k not in (1, 2, 3))
         print(f"{short:<26} {SPEED[c]:<8} {cnt.get(1, 0):>6} "
@@ -119,7 +119,7 @@ def main():
         ok, buf = cv2.imencode(".jpg", grid)
         if ok:
             buf.tofile(str(OUT / f"{short}_标注{SPEED[c]}_实际{n}箭头.jpg"))
-    print(f"\n抽样拼图 → {OUT}")
+    print(f"\n抽样拼图  {OUT}")
 
     if fix and fixes:
         import shutil
@@ -139,7 +139,7 @@ def main():
                 parts[0] = str(new)
                 lines[li] = " ".join(parts)
             lbl.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"[fix] 重写 {len(fixes)} 框 / {len(by_file)} 文件, 备份 → {bak}")
+        print(f"[fix] 重写 {len(fixes)} 框 / {len(by_file)} 文件, 备份  {bak}")
 
 
 if __name__ == "__main__":

@@ -5,11 +5,11 @@ detector.  For each frame in the val split (or any source dir of labeled .jpg):
   - Load truth bboxes from .txt
   - Run fused_avatar_yolo26m inference
   - Overlay BOTH on the image (truth = green, pred = red w/ class name)
-  - Compute IoU matches → categorize:
-      ✓ MATCHED  (truth bbox has overlapping pred with same class, IoU >= 0.5)
-      ✗ MISS     (truth bbox has no matching pred → false negative)
-      ⚠ FP       (pred bbox with no matching truth → false positive)
-      ⚠ WRONG    (matched bbox but wrong class — character ID error)
+  - Compute IoU matches  categorize:
+       MATCHED  (truth bbox has overlapping pred with same class, IoU >= 0.5)
+       MISS     (truth bbox has no matching pred  false negative)
+       FP       (pred bbox with no matching truth  false positive)
+       WRONG    (matched bbox but wrong class — character ID error)
   - Render summary stats per frame
 
 Sort: frames with lowest recall first so the worst cases are visible at the top.
@@ -92,7 +92,7 @@ def match_truth_to_pred(truths: List[Dict], preds: List[Dict], iou_thr: float = 
     Algorithm:
       1. Sort preds by confidence desc (high-conf preds get first pick)
       2. For each pred (in conf order), find best unmatched GT with IoU>=thr
-      3. If found, match pred→GT; mark both as used
+      3. If found, match predGT; mark both as used
       4. Remaining unmatched GTs = misses, remaining unmatched preds = FPs
 
     This avoids the "low-conf duplicate steals match from high-conf real
@@ -228,7 +228,7 @@ def main() -> int:
         ann_b64 = img_to_b64(annotated)
         miss_names = sorted({truths[ti]["name"] for ti in misses})
         fp_list = sorted([f'{preds[pi]["name"]}({preds[pi]["conf"]:.2f})' for pi in fps])
-        wrong_list = [f'{truths[ti]["name"]}→{preds[pi]["name"]}({preds[pi]["conf"]:.2f})'
+        wrong_list = [f'{truths[ti]["name"]}{preds[pi]["name"]}({preds[pi]["conf"]:.2f})'
                       for ti, pi in wrong]
         frame_blocks.append({
             "name": img_path.name,
@@ -294,11 +294,11 @@ tr:nth-child(even) {{ background:#161922 }}
         if fb["fp_list"]:
             stats.append(f'<div class="stats fp">误检 (top 10): {", ".join(fb["fp_list"][:10])}</div>')
         if not stats:
-            stats.append('<div class="stats good">完美 ✓</div>')
+            stats.append('<div class="stats good">完美 </div>')
         html.extend(stats)
 
     # Per-class table (sorted by recall ascending — worst first)
-    html.append('<h2>Per-class recall (worst → best)</h2>')
+    html.append('<h2>Per-class recall (worst  best)</h2>')
     html.append('<table><tr><th>class</th><th>truth</th><th>matched</th><th>recall</th>'
                 '<th>FP as this</th><th>wrong-pred-here</th></tr>')
     for cls in sorted(per_class_truth.keys(),

@@ -1,29 +1,29 @@
 """DailyMissionSkill — claim 每日任务 rewards (pure-YOLO rewrite of daily_tasks).
 
 Verified flow (interactive probe 2026-06-01, data/_daily_reward_probe_log.md).
-★ CRITICAL distinction the probe corrected:
-  - lobby LEFT 每日领奖 (NAV_DAILY_REWARD, ~0.045,0.358) → THIS 任務 reward screen.
-  - lobby RIGHT 任务大厅入口 (NAV_TASKS) → the BATTLE hub (bounty/arena/etc).
+ CRITICAL distinction the probe corrected:
+  - lobby LEFT 每日领奖 (NAV_DAILY_REWARD, ~0.045,0.358)  THIS 任務 reward screen.
+  - lobby RIGHT 任务大厅入口 (NAV_TASKS)  the BATTLE hub (bounty/arena/etc).
   We enter via NAV_DAILY_REWARD, never NAV_TASKS.
 
 The 全體 tab aggregates every task category, so claiming there covers
 每天/每週/成就/挑戰 — no tab switching needed.
 
-★ MUST RUN LAST: the other dailies (cafe/craft/bounty/arena/...) must complete
+ MUST RUN LAST: the other dailies (cafe/craft/bounty/arena/...) must complete
 first to unlock these mission rewards. Placed at the end of DailyRoutine.
 
-⛔ NEVER touch 立即前往 (the "go" button on UNFINISHED tasks — events/challenges/
+ NEVER touch 立即前往 (the "go" button on UNFINISHED tasks — events/challenges/
 campaign). We only ever click the exact 全部领取_黄 / 领取_黄 claim cls, so an
 unfinished task's go-button is never clicked.
 
 State machine
 -------------
-enter         lobby → NAV_DAILY_REWARD → 任務 screen (全體 tab).
-claim_all     全部领取_黄 (CLAIM_ALL_YELLOW) → reward dismiss. Loop until it
+enter         lobby  NAV_DAILY_REWARD  任務 screen (全體 tab).
+claim_all     全部领取_黄 (CLAIM_ALL_YELLOW)  reward dismiss. Loop until it
               greys (全部领取_灰色 / 一键领取灰色).
-claim_single  remaining 领取_黄 (CLAIM_YELLOW, e.g. 完成每日任務8次 meta) → claim
-              each → reward dismiss. Done when no 黄 claim cls remain.
-exit          BTN_HOME / BTN_BACK → lobby → done.
+claim_single  remaining 领取_黄 (CLAIM_YELLOW, e.g. 完成每日任務8次 meta)  claim
+              each  reward dismiss. Done when no 黄 claim cls remain.
+exit          BTN_HOME / BTN_BACK  lobby  done.
 
 Detectors: base "ui" only.
 """
@@ -44,9 +44,9 @@ _ENTRY_DOT_REGION = (0.00, 0.30, 0.13, 0.40)
 _ENTER_MAX = 20
 _CLAIM_ALL_MAX = 26
 _NO_YELLOW_DONE = 5     # consecutive ticks w/ no 全部领取_黄 (no grey/popup) = batch drained
-# ⛔tick-vs-墙钟家族(2026-07-28): 上面两个 dry 计数等的是奖励弹窗弹出/列表
+# tick-vs-墙钟家族(2026-07-28): 上面两个 dry 计数等的是奖励弹窗弹出/列表
 # 刷新的渲染过程, zero-wait 后 5 tick 只剩 0.75-1.25s, 一次弹窗淡入就凑满
-# → 提前判"领空", 批量/单项奖励漏领(与 deep-dive r2 C6 要修的 bug 同形复发)。
+#  提前判"领空", 批量/单项奖励漏领(与 deep-dive r2 C6 要修的 bug 同形复发)。
 # 帧数×墙钟合取, 取 ×1.6 年代等效, 不收窄:
 _NO_YELLOW_SEC = 8.0     # 5×1.6
 _DRY_SINGLE_SEC = 4.8    # 3×1.6
@@ -63,7 +63,7 @@ class DailyMissionSkill(BaseSkill):
     ]
 
     # Claim only when the daily-task counter reaches this (user 2026-06-11:
-    # n/8 ≥ 7 → most rewards unlocked; below that entering is wasted motion).
+    # n/8 ≥ 7  most rewards unlocked; below that entering is wasted motion).
     _MIN_TASKS_DONE = 7
 
     def _tasks_done_count(self, screen: ScreenState, entry) -> int | None:
@@ -71,9 +71,9 @@ class DailyMissionSkill(BaseSkill):
         live lobby: entry@(0.046,0.360), badge OCR raw '4/8'). None = unread."""
         try:
             from brain.pipeline import run_digit_ocr
-            # ⛔2026-07-27 单位换成**入口框自身尺寸**(原来 0.02/0.055/0.035/0.005
-            # 都是屏幕比例)。每日领奖 框实测 iw 0.0252 / ih 0.0231 (n=2207) ⇒
-            # 0.02→0.79 框宽, 0.055→2.38 框高, 0.035→1.39 框宽, 0.005→0.22 框高。
+            # 2026-07-27 单位换成**入口框自身尺寸**(原来 0.02/0.055/0.035/0.005
+            # 都是屏幕比例)。每日领奖 框实测 iw 0.0252 / ih 0.0231 (n=2207) 
+            # 0.020.79 框宽, 0.0552.38 框高, 0.0351.39 框宽, 0.0050.22 框高。
             # 16:9 下几何等价, 换分辨率/窗口不再漂(见 brain.pipeline.icon_strip)。
             _bw = max(1e-6, entry.x2 - entry.x1)
             _bh = max(1e-6, entry.y2 - entry.y1)
@@ -88,7 +88,7 @@ class DailyMissionSkill(BaseSkill):
 
     def should_run(self, screen: ScreenState) -> bool:
         # Run when a red dot sits by the 每日领奖 entry AND the n/8 daily-task
-        # counter says enough dailies are finished (n ≥ 7). Entry not visible ⇒
+        # counter says enough dailies are finished (n ≥ 7). Entry not visible 
         # defer (True). (Rewards unlock as other dailies finish — run it last.)
         entry = self.find_cls(screen, UC.NAV_DAILY_REWARD, conf=0.40)
         if entry is None:
@@ -101,7 +101,7 @@ class DailyMissionSkill(BaseSkill):
             return False
         n = self._tasks_done_count(screen, entry)
         if n is not None and n < self._MIN_TASKS_DONE:
-            self.log(f"daily tasks {n}/8 < {self._MIN_TASKS_DONE} → not worth claiming yet, skip")
+            self.log(f"daily tasks {n}/8 < {self._MIN_TASKS_DONE}  not worth claiming yet, skip")
             return False
         return True
 
@@ -143,7 +143,7 @@ class DailyMissionSkill(BaseSkill):
             self.log(f"timeout (all={self._all_claims}, single={self._single_claims})")
             return action_done("daily_mission timeout")
 
-        # Global: reward reveal → dismiss via continue / header (NEVER center).
+        # Global: reward reveal  dismiss via continue / header (NEVER center).
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
             return action_click_box(cont, "dismiss reward (continue)")
@@ -169,7 +169,7 @@ class DailyMissionSkill(BaseSkill):
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         if self._on_page(screen):
-            self.log("inside 每日领奖 (任務) → claim_all")
+            self.log("inside 每日领奖 (任務)  claim_all")
             self._goto("claim_all")
             return action_wait(400, "entered daily mission")
 
@@ -194,10 +194,10 @@ class DailyMissionSkill(BaseSkill):
                 return action_wait(300, "claim_all: back on lobby")
             if self._phase_ticks > _CLAIM_ALL_MAX:
                 self._goto("exit")
-                return action_wait(300, "claim_all lost page → exit")
+                return action_wait(300, "claim_all lost page  exit")
             return action_wait(400, "waiting for 任務 UI")
 
-        # 全部领取_黄 → one tap claims a batch (rewards come in 2-3 popups).
+        # 全部领取_黄  one tap claims a batch (rewards come in 2-3 popups).
         claim_all = self.find_cls(screen, UC.CLAIM_ALL_YELLOW, conf=_CLS_CONF)
         if claim_all is not None:
             self._all_claims += 1
@@ -205,11 +205,11 @@ class DailyMissionSkill(BaseSkill):
             self.log(f"全部领取_黄 (#{self._all_claims})")
             return action_click_box(claim_all, "claim all daily-mission rewards")
 
-        # Claim-all greyed → batch done. (全部领取_灰 cls is weak/may be absent.)
+        # Claim-all greyed  batch done. (全部领取_灰 cls is weak/may be absent.)
         if self.find_cls(screen, [UC.CLAIM_ALL_GREY, UC.CLAIM_ONEKEY_GREY], conf=_CLS_CONF) is not None:
-            self.log("全部领取_灰 → claim_single")
+            self.log("全部领取_灰  claim_single")
             self._goto("claim_single")
-            return action_wait(250, "claim-all greyed → single")
+            return action_wait(250, "claim-all greyed  single")
 
         # Claimed ≥1 batch and now several ticks with no 黄 (reward popups return
         # earlier in tick(), so these are real empty frames) = batch drained.
@@ -219,24 +219,24 @@ class DailyMissionSkill(BaseSkill):
             self.mark("dry_yellow")
         if (self._no_yellow >= _NO_YELLOW_DONE
                 and self.since("dry_yellow") >= _NO_YELLOW_SEC):
-            self.log(f"连续{self._no_yellow}拍且{_NO_YELLOW_SEC:.0f}s无全部领取_黄 → claim_single")
+            self.log(f"连续{self._no_yellow}拍且{_NO_YELLOW_SEC:.0f}s无全部领取_黄  claim_single")
             self._goto("claim_single")
-            return action_wait(250, "no more 全部领取_黄 → single")
+            return action_wait(250, "no more 全部领取_黄  single")
 
         # Total budget backstop.
         if self._phase_ticks > _CLAIM_ALL_MAX:
-            self.log("claim_all budget → claim_single")
+            self.log("claim_all budget  claim_single")
             self._goto("claim_single")
-            return action_wait(250, "claim-all budget → single")
+            return action_wait(250, "claim-all budget  single")
         return action_wait(400, "waiting for 全部领取_黄")
 
     def _claim_single(self, screen: ScreenState) -> Dict[str, Any]:
         if not self._on_page(screen):
             if screen.is_lobby():
-                self.log("back on lobby → done")
+                self.log("back on lobby  done")
                 return action_done(f"daily_mission complete (all={self._all_claims}, single={self._single_claims})")
             self._goto("exit")
-            return action_wait(300, "single lost page → exit")
+            return action_wait(300, "single lost page  exit")
 
         # Remaining individual 领取_黄 (meta tasks like 完成每日任務8次). NEVER
         # touch 立即前往 — we only match the exact claim cls.
@@ -248,7 +248,7 @@ class DailyMissionSkill(BaseSkill):
             return action_click_box(single, "claim single daily-mission reward")
 
         # No 黄 this frame — require 3 CONSECUTIVE dry frames before done
-        # (deep-dive r2 C6): the old "claim_all gone ⇒ done" shortcut exited on
+        # (deep-dive r2 C6): the old "claim_all gone  done" shortcut exited on
         # a single flicker frame and left remaining 单项黄 unclaimed.
         self._dry_singles = getattr(self, "_dry_singles", 0) + 1
         if self._dry_singles == 1:
@@ -258,10 +258,10 @@ class DailyMissionSkill(BaseSkill):
                 self._dry_singles >= 3
                 and self.since("dry_single") >= _DRY_SINGLE_SEC):
             self.log(f"no 黄 claim cls ({self._dry_singles} dry frames, "
-                     f"{self.since('dry_single'):.1f}s) → done "
+                     f"{self.since('dry_single'):.1f}s)  done "
                      f"(all={self._all_claims}, single={self._single_claims})")
             self._goto("exit")
-            return action_wait(250, "no more claims → exit")
+            return action_wait(250, "no more claims  exit")
         return action_wait(400, f"waiting (claim_single, dry {self._dry_singles}/3)")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
@@ -271,7 +271,7 @@ class DailyMissionSkill(BaseSkill):
         if self._phase_ticks > _EXIT_MAX:
             return action_done("daily_mission exit timeout")
         # ESC after reaching the lobby opens the 是否結束 quit prompt, whose
-        # body hides the Lobby signature cls → the old exit ESC-looped on it
+        # body hides the Lobby signature cls  the old exit ESC-looped on it
         # until timeout (live 2026-06-10; never clicks 確認, so safe but
         # stuck). Cancel-first clears any dialog on the way out.
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)

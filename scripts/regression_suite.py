@@ -4,13 +4,13 @@
 历史事故帧固定集, 新模型/新防线出货前必跑:
   py scripts/regression_suite.py            # 全部用例
   py scripts/regression_suite.py --domain ui
-veto 用例 FAIL → exit 2(金钱安全一票否决, 训练收尾流程必须硬停);
-非 veto FAIL → exit 1(功能回退警告, 人工定夺)。
+veto 用例 FAIL  exit 2(金钱安全一票否决, 训练收尾流程必须硬停);
+非 veto FAIL  exit 1(功能回退警告, 人工定夺)。
 
 check 实现与 brain 内真实防线同判据(独立复刻, 判据变更两边同步):
   purchase_dialog ≈ event_quest._dialog_is_purchase 结构白名单闸:
     取消键+确认键同屏(conf≥0.20 守卫地板) 且 body(y>0.12) 出现
-    stepper(加号/MAX_可点击/MIN_灰色) 或 体力 → 购买框。
+    stepper(加号/MAX_可点击/MIN_灰色) 或 体力  购买框。
 帧来源见 data/regression/manifest.json 各 case 的 origin。
 """
 import json
@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-# ⛔回放绝不写生产状态(2026-07-28): schedule 的 _reconcile_ledger 挂进
+# 回放绝不写生产状态(2026-07-28): schedule 的 _reconcile_ledger 挂进
 # _read_tickets 后, 票数 fixture(历史帧)会在同游戏日内钳真台账。
 os.environ.setdefault("BA_REPLAY", "1")
 sys.stdout.reconfigure(encoding="utf-8")
@@ -73,8 +73,8 @@ def check_purchase_dialog(dets) -> bool:
 
 def check_speed_1x(dets) -> bool:
     """倍速按钮判定: 检出「战斗1倍速」且无「战斗三倍速」= True。
-    2026-07-14 大蛇池实锤: 白亮底单▶ 形态在旧训练集 412 样本缺失(旧池全是
-    灰/暗底), v8 按底色风格判成三倍速 → 预标 100 框错。v9 吃进修正样本后
+    2026-07-14 大蛇池实锤: 白亮底单 形态在旧训练集 412 样本缺失(旧池全是
+    灰/暗底), v8 按底色风格判成三倍速  预标 100 框错。v9 吃进修正样本后
     此用例应转 PASS。"""
     names = {n for n, *_ in dets}
     return "战斗1倍速" in names and "战斗三倍速" not in names
@@ -120,9 +120,9 @@ def main():
         if not ok and c.get("known_bug"):
             tag = "KNOWN-BUG"       # 已知病记录, 不计失败; 修复后移除标记
         elif ok and c.get("known_bug"):
-            tag = "PASS(已修复→请移除known_bug标记)"
+            tag = "PASS(已修复请移除known_bug标记)"
         else:
-            tag = "PASS" if ok else ("⛔VETO-FAIL" if c.get("veto") else "⚠FAIL")
+            tag = "PASS" if ok else ("VETO-FAIL" if c.get("veto") else "FAIL")
         if not ok and not c.get("known_bug"):
             if c.get("veto"):
                 veto_fail += 1
@@ -133,7 +133,7 @@ def main():
     print(f"\nveto失败 {veto_fail} | 功能失败 {warn_fail} | "
           f"通过 {len(cases) - veto_fail - warn_fail}/{len(cases)}")
     if veto_fail or logic_rc == 2:
-        print("⛔ 金钱防线回归失败 — 一票否决, 禁止出货!")
+        print(" 金钱防线回归失败 — 一票否决, 禁止出货!")
         sys.exit(2)
     if warn_fail or logic_rc:
         sys.exit(1)

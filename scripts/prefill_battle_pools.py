@@ -3,8 +3,8 @@
 
 路由(用户 spec):
   - HUD/UI 类(一倍速/二倍速/自动战斗关闭/暂停/暂停菜单 继续键132 重新开始键131
-    放弃键133/结算链等) → 通用 ui 模型 v13
-  - 我方(476)/敌方(477) 小人 → battle_yolo26n_v2 (只贡献身份类, HUD 检出丢弃)
+    放弃键133/结算链等)  通用 ui 模型 v13
+  - 我方(476)/敌方(477) 小人  battle_yolo26n_v2 (只贡献身份类, HUD 检出丢弃)
 
 闸(战斗帧特化):
   - 红点/黄点全丢 — 战斗画面无 UI 入口点, 检出全是位置先验假阳
@@ -23,7 +23,7 @@ sys.path.insert(0, r"D:\Project\ai game secretary")
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 UI_W = r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v13\weights\last.pt"
 # v3 (2026-07-10): nc14 全战斗域直出(身份+塞特+Boss+HUD+倍速+暂停菜单),
-# 战斗域检出 0.93-0.995 全面强于通用 ui 模型 → 路由反转: battle 全收,
+# 战斗域检出 0.93-0.995 全面强于通用 ui 模型  路由反转: battle 全收,
 # ui 只补 battle 词表外的类(叉叉/确认/取消/加载/获得奖励等)。
 BT_W = r"D:\Project\ml_cache\models\yolo\runs\battle_yolo26n_v3\weights\best.pt"
 MASTER = [l.strip() for l in open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]

@@ -12,7 +12,7 @@ Strategy:
   2. Build new master = seed set.  Add any extra `--keep` names too
      (for classes you plan to label soon but haven't yet).
   3. For every dataset (raw_images + trajectories):
-     - Rewrite every label .txt: remap cls indices old→new; DROP any
+     - Rewrite every label .txt: remap cls indices oldnew; DROP any
        label line referencing a class not in new master.
      - If a label file becomes empty, delete it (YOLO treats missing
        .txt as zero boxes, same as empty file but cleaner).
@@ -251,7 +251,7 @@ def main() -> int:
 
     # ── 4. Save new master ──
     save_classes(MASTER_FILE, new_master)
-    print(f"[save] master → {MASTER_FILE} ({len(new_master)} classes)")
+    print(f"[save] master  {MASTER_FILE} ({len(new_master)} classes)")
 
     # ── 5. Sync every dataset's local classes.txt to the new master ──
     synced = 0

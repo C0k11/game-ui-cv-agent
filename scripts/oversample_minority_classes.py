@@ -140,7 +140,7 @@ def main() -> int:
         cname = classes[c] if c < len(classes) else f"cls_{c}"
         cur = len(minority[c])
         K = math.ceil(args.target / cur)
-        print(f"  class {c:3d} {cname:30s}: {cur} → {cur*K} frames (K={K})")
+        print(f"  class {c:3d} {cname:30s}: {cur}  {cur*K} frames (K={K})")
 
     print(f"\n[plan] {len(frame_copy_count)} unique frames to replicate (K-1 copies each)")
     total_new = sum(K - 1 for K in frame_copy_count.values())

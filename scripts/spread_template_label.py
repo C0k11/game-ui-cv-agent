@@ -5,13 +5,13 @@
 成千上万张零标注帧上。模板匹配本身就是检测器 — 不需要先用 cls 指纹捞场景
 (指纹选宽会捞错画面, 选窄会漏, 2026-08-02 实测教训)。
 
-⛔纪律(硬编码在流程里, 别绕过):
-  - 遮罩帧不标: 帧内出现 118取消键/397获得奖励/142点击继续 任一 → 整帧跳过
+纪律(硬编码在流程里, 别绕过):
+  - 遮罩帧不标: 帧内出现 118取消键/397获得奖励/142点击继续 任一  整帧跳过
     (dim 对话框 / 獲得獎勵 overlay / tooltip 压暗, 三形态都不是该 cls 的真态)
   - 已有同 cls 标注附近的命中不重复写 (中心距 < dedup_r)
   - 默认 --dry: 只出 CSV + contact sheet 给人审, --apply 才落 txt
   - 落盘一律**数值键**去重比对, 绝不用字符串比对 (dataset build 会截行尾零,
-    字符串比对会把同一个框判成缺失 → 灌重复行, 2026-08-02 自伤过一次)
+    字符串比对会把同一个框判成缺失  灌重复行, 2026-08-02 自伤过一次)
 
 Usage:
   # Bonus(110): 模板取自 flywheel_20260801/frame_000245 最終行那个框
@@ -49,7 +49,7 @@ def _scan(task) -> tuple:
     """单帧扫描: 返回 (frame, verdict, hits)。hits=[(cx,cy,score)]。"""
     rel, cls_id, thr, dedup_r = task
     txt = (RAW / rel).with_suffix(".txt")
-    # 全池模式下大量帧没有预标 txt —— 无 txt ⇒ 无 cls 可查, 遮罩闸退化为
+    # 全池模式下大量帧没有预标 txt —— 无 txt  无 cls 可查, 遮罩闸退化为
     # 只靠亮度判据(下方 DIM_V), 这是可接受的降级(宁可多出几张给人审)。
     lines = ([l.split() for l in txt.read_text(encoding="utf-8").splitlines() if l.strip()]
              if txt.exists() else [])
@@ -115,11 +115,11 @@ def main() -> None:
                                     int((cx - bw / 2) * TW):int((cx + bw / 2) * TW)])
     print(f"cls {args.cls} 「{cls_name}」  template {tpl.shape} from {args.tpl_frame}")
 
-    # ⛔战斗域帧不碰 (UI cls 模板扫战斗帧 = 假阳污染 battle 侧素材)
+    # 战斗域帧不碰 (UI cls 模板扫战斗帧 = 假阳污染 battle 侧素材)
     sys.path.insert(0, str(ROOT))
     from scripts.prelabel_flywheel_inplace import BATTLE_MARKERS, _flywheel_dirs
     if args.scan_all:
-        # ⭐全池模式: 模板匹配**不依赖预标**, 不必局限在 dedup 后那 7,057 帧。
+        # 全池模式: 模板匹配**不依赖预标**, 不必局限在 dedup 后那 7,057 帧。
         # 稀有场景(craft「材料不足」这种一天只出现几秒的)恰恰是被 dedup 当
         # "近重复"砍掉、或压根没预标的那两万帧里才有量 —— 2026-08-02 实测:
         # 预标池里含 craft 開始製造键的只有 11 帧, 全池才是真正的存量。
@@ -133,7 +133,7 @@ def main() -> None:
     frames = [f for f in all_frames
               if not any(m in Path(f).parts[0].lower() for m in BATTLE_MARKERS)]
     if len(frames) != len(all_frames):
-        print(f"⛔battle-domain frames excluded: {len(all_frames) - len(frames)}")
+        print(f"battle-domain frames excluded: {len(all_frames) - len(frames)}")
     print(f"pool: {len(frames)} frames  thr={args.thr}")
 
     tasks = [(f, args.cls, args.thr, args.dedup_r) for f in frames]

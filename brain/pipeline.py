@@ -96,7 +96,7 @@ def _get_ocr():
       if present, otherwise uses default PP-OCRv3.
     - Tries to enable CUDA provider (det + rec). Falls back to CPU if CUDA
       runtime DLLs are unavailable. Measured on RTX 4090: full-frame 1262x2243
-      CPU 2.2 FPS → CUDA 3.3 FPS; ROI-sized (~45% screen) CUDA 9 FPS.
+      CPU 2.2 FPS  CUDA 3.3 FPS; ROI-sized (~45% screen) CUDA 9 FPS.
     """
     global _ocr_engine, _ocr_lock
     import threading
@@ -171,15 +171,15 @@ def _load_model_registry() -> dict:
 def _resolve_path(model_key: str, fallback: Path) -> Path:
     """Resolve an active model's weights path via registry.
 
-    ⛔fail-closed(2026-07-16 审计): registry 存在但该 key 解析不出 →
+    fail-closed(2026-07-16 审计): registry 存在但该 key 解析不出 
     raise, 绝不静默回落硬编码老路径 — 旧行为是"registry JSON 手编出错
     /active 指错"时带着 5 月 v1(145类, 缺全部商店/confirm 钱防线类)照常
     开跑, 正是"改了 registry 没效果、旧模型还在跑"的复现路径。
     fallback 仅在 registry 文件整体缺失(全新环境)时使用。"""
     reg = _load_model_registry()
-    if not reg:                     # registry 文件缺失/坏 → 见下
+    if not reg:                     # registry 文件缺失/坏  见下
         if fallback.is_file():
-            print(f"[Pipeline] ⚠registry 缺失, {model_key} 回落 {fallback}")
+            print(f"[Pipeline] registry 缺失, {model_key} 回落 {fallback}")
             return fallback
         raise RuntimeError(f"model registry 缺失且 {model_key} fallback 不存在")
     section = reg.get(model_key)
@@ -234,7 +234,7 @@ def set_yolo_context(ctx: str) -> None:
         _yolo_context_lock = threading.Lock()
     with _yolo_context_lock:
         if _yolo_context != ctx:
-            print(f"[Pipeline] YOLO context: {_yolo_context} → {ctx}")
+            print(f"[Pipeline] YOLO context: {_yolo_context}  {ctx}")
             _yolo_context = ctx
 
 def get_yolo_context() -> str:
@@ -247,11 +247,11 @@ def get_yolo_context() -> str:
         return _yolo_context
 
 
-# ── Lobby resource snapshot (user 2026-06-09: 大厅顶栏三资源稳读 → 全局复用) ──
+# ── Lobby resource snapshot (user 2026-06-09: 大厅顶栏三资源稳读  全局复用) ──
 # Refreshed on lobby frames every ~30s. Consumers:
-#   • shop budget fallback (in-shop top-bar credit cls is flaky → use snapshot)
-#   • ⛔ PYROXENE KILL-SWITCH: a DROP between two consecutive confirmed reads =
-#     money breach somewhere → abort the whole pipeline (global audit on top of
+#   • shop budget fallback (in-shop top-bar credit cls is flaky  use snapshot)
+#   •  PYROXENE KILL-SWITCH: a DROP between two consecutive confirmed reads =
+#     money breach somewhere  abort the whole pipeline (global audit on top of
 #     every per-skill guard).
 _RESOURCES: Dict[str, Any] = {"ap": None, "credits": None, "pyroxene": None, "ts": 0.0}
 
@@ -263,7 +263,7 @@ def get_resource_snapshot() -> Dict[str, Any]:
 
 
 # ── 数字 strip 几何: 一律用「锚点图标自身尺寸」当单位 ──────────────────────
-# ⛔2026-07-27 定死, 起因是 bounty 票数在关卡列表页 **0/211 帧**读得出。
+# 2026-07-27 定死, 起因是 bounty 票数在关卡列表页 **0/211 帧**读得出。
 #
 # 为什么不能用屏幕比例(0.078 这种):
 #   屏幕比例只在**标定它的那个分辨率+宽高比**上成立。这个系统的帧至少有三条
@@ -277,7 +277,7 @@ def get_resource_snapshot() -> Dict[str, Any]:
 #   体力 5.44 (4.68~5.72, 含 "/240" 尾巴)
 # 同一批数据换算成屏幕比例则随分辨率漂 —— 这就是差别。
 #
-# ⚠y 留白同样关键, 而且这条**教训在仓库里躺了 10 天没传导**:
+# y 留白同样关键, 而且这条**教训在仓库里躺了 10 天没传导**:
 # `arena.py:188` 2026-07-17 就写过"±0.4bh 是临界高度, icon 框轻微抖动就把整串
 # 裁没(live 12 连 None 实锤), ±0.8bh 同帧完整读出" —— 但 ticket_sweep(0.4)
 # 和这里的顶栏(0.25)都没跟着改。DB 文本检测器需要行外留白才肯出框。
@@ -297,14 +297,14 @@ def icon_strip(box, x_from: float, x_to: float, y_pad: float):
 
 # Per-currency digit strip in ICON units: (x_from, x_to, y_pad).
 # 语义保留自 2026-06-11 的标定意图:
-#   AP    → 只要 "999" 不碰 "/240"(旧 0.078 屏宽吃到斜杠 → 读成 9999);
+#   AP     只要 "999" 不碰 "/240"(旧 0.078 屏宽吃到斜杠  读成 9999);
 #           parse_count 取分子, 所以右界宁短勿长。
-#   credit→ 9 位长数, 需要最宽的窗口。
-#   pyrox → 中等。
+#   credit 9 位长数, 需要最宽的窗口。
+#   pyrox  中等。
 def _topbar_strip_map():
-    """⭐2026-07-27 网格标定(scratchpad/grid_cal.py)。
+    """2026-07-27 网格标定(scratchpad/grid_cal.py)。
 
-    真值代理 = **同一 run 内货币值近乎恒定**(只有买卖才动) ⇒ 对每个
+    真值代理 = **同一 run 内货币值近乎恒定**(只有买卖才动)  对每个
     (run, 货币) 取全部 (窗口 x 帧) 读数的共识值, 共识≥55% 才当真值; 34 run /
     246 帧 / 35 组参数 / 58 个有强真值的组。
 
@@ -313,39 +313,39 @@ def _topbar_strip_map():
     | 信用点 | (5.5, **0.5**)     |100.0% | 0.0% | 0.0% |  40 |
     | 体力   | (5.0, **1.6**)     | 88.1% | 9.4% | 2.5% | 202 |
 
-    ⛔**y 留白必须逐币标定, 方向还相反**: 信用点要**紧**(0.5), AP 要**松**(1.6)。
+    **y 留白必须逐币标定, 方向还相反**: 信用点要**紧**(0.5), AP 要**松**(1.6)。
     我先前用单一 0.80 是折中 —— 那也是为什么"tight vs loose"二选一的对比里
     信用点反而变差。别再拿一个常数套所有货币。
-    ⚠信用点那 100% 的 n 只有 40(强真值组少), 可信度低于另外两个, 别过度解读。
-    ⚠这些数字是**离线共识**不是绝对真值; 顶栏读数上层仍有 5 帧众数投票 +
+    信用点那 100% 的 n 只有 40(强真值组少), 可信度低于另外两个, 别过度解读。
+    这些数字是**离线共识**不是绝对真值; 顶栏读数上层仍有 5 帧众数投票 +
       ≥2 票才信 + 位数收缩闸兜底(`_read_topbar_clean`), 本表只提高单帧命中率。
     """
     from brain.skills.ui_classes import TOPBAR_AP, TOPBAR_CREDIT, TOPBAR_PYROXENE
     return {
         TOPBAR_AP: (0.10, 5.0, 1.60),
-        # ⛔信用点**没用网格那个 0.50** —— 网格的真值代理是"多参数共识", 而 8 位
+        # 信用点**没用网格那个 0.50** —— 网格的真值代理是"多参数共识", 而 8 位
         # 长数的**系统性截断可以自己成为共识**: 它推荐的 (5.5,0.50) 在今天的
         # 基线帧上读出 `390459`(吞掉前三位), 而屏幕上白纸黑字是 23,390,459。
         # 改用**人眼读出的真值**重标(今天 walk 的 10 张 4K 帧, 真值 23,390,459):
-        #   y_pad=0.65 → **10/10 全对**(x_to 4.5~6.5 都行), 其余 y_pad 只有 9/10,
+        #   y_pad=0.65  **10/10 全对**(x_to 4.5~6.5 都行), 其余 y_pad 只有 9/10,
         #   且失败一律是 None 不是错数(零错读)。
-        # ⇒ 教训: 短数字(14176/999)能自证, 长数不能; 给长数标定必须挂人审真值。
-        # ⚠n=10 且只有一个信用点数值, 样本小 —— 但真值锚定优于大样本的共识锚定。
+        #  教训: 短数字(14176/999)能自证, 长数不能; 给长数标定必须挂人审真值。
+        # n=10 且只有一个信用点数值, 样本小 —— 但真值锚定优于大样本的共识锚定。
         TOPBAR_CREDIT: (0.10, 5.5, 0.65),
-        # ⛔⛔2026-08-07 live 事故 + 重标: kill-switch 报
-        # `青辉石 18036→18003 MONEY BREACH` 把整条 pipeline 急停, 而人眼看帧
+        # 2026-08-07 live 事故 + 重标: kill-switch 报
+        # `青辉石 1803618003 MONEY BREACH` 把整条 pipeline 急停, 而人眼看帧
         # 余额**一分没少**。复现: 同一张 4K 帧 OCR 4 次里 3 次读成 18003
         # (逗号被读成 0 + 末位 6 被切) —— 是**裁切窗口**的锅, 不是模型。
         # 病根: 信用点当初已按人眼真值重标(y_pad 0.65), 而青辉石**留着网格
         # 共识值 (6.0, 1.20)** —— 正是上面那条注释警告过的"共识≠真值", 这一格
         # 当时漏做了。27 帧 × 42 组参数实测(真值 18,036, 人眼读):
-        #   y_pad ≤0.35 → 裁太紧, 纵向切掉数字, 读成 `36`
-        #   y_pad 0.40~0.50 → **27/27 零错读**(x_to 5.0~6.0 全通)
-        #   y_pad ≥0.55 → 裁太松吃进邻居, 读成 `18003`
+        #   y_pad ≤0.35  裁太紧, 纵向切掉数字, 读成 `36`
+        #   y_pad 0.40~0.50  **27/27 零错读**(x_to 5.0~6.0 全通)
+        #   y_pad ≥0.55  裁太松吃进邻居, 读成 `18003`
         #   现役的 1.20 = 20/27 对 / **7 次错读**, 整张网格最烂的区之一
         # 取安全块中心, 对两种失效模式都留最大余量。
-        # ⚠单一数值(18,036)标定, 样本值不够多 —— 但失效是**几何性**的(裁切高度),
-        #   且旧值已被实锤打脸。⛔危害双向: 会读低就会读高, **读高会掩盖真实掉钱**。
+        # 单一数值(18,036)标定, 样本值不够多 —— 但失效是**几何性**的(裁切高度),
+        #   且旧值已被实锤打脸。危害双向: 会读低就会读高, **读高会掩盖真实掉钱**。
         TOPBAR_PYROXENE: (0.10, 5.5, 0.45),
     }
 
@@ -372,7 +372,7 @@ def _read_topbar_count(screen, cls_name: str):
     # Right edge = a per-currency span from the icon, in ICON WIDTHS. History:
     # the neighbour-clip (clip at the next 加号/icon) was the first bug — the
     # neighbour flickers frame-to-frame, and when AP's 加号 dropped the span
-    # over-reached into credit and read 999→9999 (12× live 2026-06-11). It was
+    # over-reached into credit and read 9999999 (12× live 2026-06-11). It was
     # replaced by a fixed SCREEN FRACTION, which killed the flicker but pinned
     # the read to one resolution — see `icon_strip` above for why that breaks.
     x_from, x_to, y_pad = _TOPBAR_STRIP.get(cls_name, _TOPBAR_STRIP_DEFAULT)
@@ -393,13 +393,13 @@ class _FrameShim:
 def _read_topbar_clean(cls_name, samples: int = 5):
     """Top-bar count from fresh overlay-free ADB frames (2026-06-10 money rule),
     made robust to the digit OCR's BOTH-WAY instability (live 2026-06-11:
-    leading-digit DROP 6587→587 AND right-edge OVER-read 999→9999 / credit
+    leading-digit DROP 6587587 AND right-edge OVER-read 9999999 / credit
     reaching into the neighbour). Neither "fewest" nor "most" digits is right,
     so VOTE: read up to `samples` clean frames, return the MODE (the value the
     OCR agrees on most often — correct more often than any single error mode).
     Returns int or None.
 
-    ⚠️ KNOWN GAP (task#5): AP/credit still mis-crop on many frames; pyroxene is
+    ️ KNOWN GAP (task#5): AP/credit still mis-crop on many frames; pyroxene is
     reliable. Until per-currency right-edge crop is calibrated, callers that
     spend on a balance (shop) must treat a low-confidence read as unverifiable
     and skip — never over-trust an inflated read."""
@@ -417,7 +417,7 @@ def _read_topbar_clean(cls_name, samples: int = 5):
             v = None
         if v is not None:
             reads.append(v)
-            if reads.count(v) >= 3:   # strong agreement → done early
+            if reads.count(v) >= 3:   # strong agreement  done early
                 return v
     if not reads:
         return None
@@ -431,8 +431,8 @@ def _read_topbar_clean(cls_name, samples: int = 5):
 def _read_topbar_clean_multi(cls_names, samples: int = 5):
     """快照专用: 一批 clean 帧共享给多个货币读数 (2026-07-11 链路审计).
     语义与 _read_topbar_clean 完全一致(≤samples 帧 / 每 cls mode 投票 /
-    3 票强共识早退 / ≥2 票才信), 但 3 货币共享同批帧 → captures 15→5、
-    YOLO 15→5(旧版 lobby 快照单 tick 16 连拍阻塞主循环 7-20s 的元凶)。
+    3 票强共识早退 / ≥2 票才信), 但 3 货币共享同批帧  captures 155、
+    YOLO 155(旧版 lobby 快照单 tick 16 连拍阻塞主循环 7-20s 的元凶)。
     _read_topbar_clean 本体保持原样 — shop/ticket_sweep 等金钱敏感调用方
     的单币种投票语义不动。Returns {cls_name: int|None}."""
     from collections import Counter
@@ -500,15 +500,15 @@ SKILL_YOLO_MAP = {
     # targets. NO emoticon — headpat is cafe-only. (probe-derived 2026-06-01)
     "Schedule": f"{BASE_DETECTORS}+avatar",
     "JointFiringDrill": f"{BASE_DETECTORS}+battle",
-    # ⭐2026-07-28 帧实测补: MomoTalk 的未读列表点的是**行头像**(故意避开红标,
+    # 2026-07-28 帧实测补: MomoTalk 的未读列表点的是**行头像**(故意避开红标,
     # probe 2026-06-01: 点红标打不开), 而头像属于 fused_avatar 域 —— 只挂 ui 时
     # 那一下在 ui 眼里**半径 0.06 内零 cls = 盲拍**(step_walk 守卫当场拦下)。
     # 挂上 avatar 后同一帧 5 个头像 conf 0.99-1.00 全中, 且**带学生名**
-    # (贵音/爱丽丝(战斗)/凯伊/千纱乐团/萌) ⇒ 落点从"按 badge 减 0.28 猜"变成
+    # (贵音/爱丽丝(战斗)/凯伊/千纱乐团/萌)  落点从"按 badge 减 0.28 猜"变成
     # 真锚定, 顺带知道正在挖谁(竣工判据从"3 students"升级成具体名单)。
     "MomoTalk": f"{BASE_DETECTORS}+avatar",
     # DailyRoutine wraps cafe (emoticon headpat + fused_avatar invite targets)
-    # and schedule (fused_avatar room placement) → needs cafe + avatar. No
+    # and schedule (fused_avatar room placement)  needs cafe + avatar. No
     # battle: bounty/jfd/arena are separate top-level skills now.
     "DailyRoutine": f"{BASE_DETECTORS}+cafe+avatar",
 }
@@ -566,7 +566,7 @@ def _get_yolo():
                     _p = Path("D:/Project") / str(_p).lstrip("/\\")
                 if _p.is_file():
                     _battle_path = _p
-                    print(f"[Pipeline] battle_heads → registry {_pick}")
+                    print(f"[Pipeline] battle_heads  registry {_pick}")
         except Exception as _e:
             print(f"[Pipeline] battle registry resolve failed({_e}), legacy")
         if _battle_path.is_file():
@@ -622,10 +622,10 @@ def _get_yolo():
             # 那次假 no-UI 让 wake-tap 反复戳开「購買AP」框, 差点碰钱)。
             if not _load_model(model_path, model_conf, model_tag) and model_tag == "ui":
                 _UI_LOAD_FAILED = True
-                print("[Pipeline] ⛔ ui model FAILED to load after retry — pipeline will "
+                print("[Pipeline]  ui model FAILED to load after retry — pipeline will "
                       "abort immediately (fail-closed: no taps without UI eyes)")
         # ── emoticon fold-in (ui v6+, 判定提前 2026-07-17) ────────────────
-        # ui 类表含 Emoticon_Action → 摸头泡泡由 ui forward pass 提供,
+        # ui 类表含 Emoticon_Action  摸头泡泡由 ui forward pass 提供,
         # standalone v26n 不再加载(旧代码先完整加载再 fold-in 丢弃 = 每次
         # 启动白加载一个模型)。ui 缺该类(pre-v6)才补载 v26n 保 cafe headpat。
         # cafe.py + 摸头过滤按 cls_name 匹配, box 来自哪个模型无感。
@@ -638,10 +638,10 @@ def _get_yolo():
             for n in m.names.values()
         )
         if ui_has_emoticon:
-            print("[Pipeline] ui model carries Emoticon_Action → standalone "
+            print("[Pipeline] ui model carries Emoticon_Action  standalone "
                   "emoticon model not loaded (one fewer inference per cafe tick)")
         elif _YOLO_EMOTICON.is_file():
-            # 0.50 conf (was 0.15→0.30 same day): live 2026-06-09 credit-card
+            # 0.50 conf (was 0.150.30 same day): live 2026-06-09 credit-card
             # icons kept firing as Emoticon_Action (0.36-0.75). Business gate is
             # 0.55 (cafe.py _EMOTICON_CONF), real v26n bubbles score 0.9+, so
             # 0.50 costs nothing and kills the remaining mid-conf FPs.
@@ -658,7 +658,7 @@ _OCR_WORK_W = 1280  # Downscale wide frames for faster OCR
 # ── PURE-YOLO MODE (user spec 2026-05-29) ────────────────────────────────
 # OCR is fully disabled to force every skill's navigation + click logic
 # through YOLO cls — NO OCR fallback. This surfaces every place still
-# secretly relying on OCR (they go blind → log+wait → we migrate them).
+# secretly relying on OCR (they go blind  log+wait  we migrate them).
 # Once the YOLO pipeline is verified end-to-end, flip this back on and
 # scope OCR to DIGIT-ONLY scanning (AP / ticket / mail counts).
 _OCR_ENABLED = False
@@ -690,7 +690,7 @@ _BRINGUP_EXPOSE = True
 
 # Gated-click hold cap (user 2026-06-13): after a transition click whose screen
 # hasn't changed, hold ~this many ticks before assuming the tap was lost and
-# allowing one retry. 16→5 (user 2026-06-13 "无端等待": 16 was ~22s of dead
+# allowing one retry. 165 (user 2026-06-13 "无端等待": 16 was ~22s of dead
 # waiting; a real nav transition renders in 2-3 ticks so the fingerprint flips
 # and releases well before the cap — the cap only fires on a genuinely stuck
 # screen, where re-tapping after ~5 ticks is right). Reward/dismiss popups are
@@ -701,16 +701,16 @@ _CLICK_HOLD_CAP = 5
 # 的这段时间内自动确认(patch-day 冷启动, TOUCH TO START 前后)。窗口外出现的
 # "只有确认"弹窗一律不在 interceptor 层碰 — 交给当前 skill 的语境处理。
 _STARTUP_UPDATE_WINDOW_S = 180.0
-# ⛔⛔默认 OFF (2026-07-25 第二次帧实锤误触发后定): 这条闸是 **fail-OPEN 黑名单**
-# ——「没看到取消键/叉叉 → 就点確認」, 而铁律要求碰確認必须**正向白名单**。
+# 默认 OFF (2026-07-25 第二次帧实锤误触发后定): 这条闸是 **fail-OPEN 黑名单**
+# ——「没看到取消键/叉叉  就点確認」, 而铁律要求碰確認必须**正向白名单**。
 # 它的立论"强更框是未训练面, 全帧几乎零 ui cls"已被**两帧**证伪:
-#   ① run_20260717_054026/t0054 战术大赛结算屏(4 框) → 旧闸放行盲点確認
-#   ② 2026-07-25 22:36 「Battle Complete」屏 —— 收紧成"確認是全帧唯一检出"之后
+#    run_20260717_054026/t0054 战术大赛结算屏(4 框)  旧闸放行盲点確認
+#    2026-07-25 22:36 「Battle Complete」屏 —— 收紧成"確認是全帧唯一检出"之后
 #      **依然命中**(结算屏 ui 域就只暴露一个 確認@0.97), 当场被 step 门拦下
 # 迄今 **0 次记录在案的正确触发, 2 次误触发**。少放行的代价 = patch 日冷启动停在
 # 更新框等人点一下(可见、可恢复); 多放行的代价 = 每次重启后 180s 内, 在任意
 # "只剩一个確認"的游戏内屏上盲点確認。
-# ⇒ 默认关闭, 只在 patch 日由人显式打开(BA_AUTO_UPDATE_CONFIRM=1)。
+#  默认关闭, 只在 patch 日由人显式打开(BA_AUTO_UPDATE_CONFIRM=1)。
 # 正解(待做, 不是 papering over): **给强更框训一个 cls**, 正向检出才点 ——
 # 与 pipeline 里"undetected overlay is a HOLE to fix (train a cls)"同一条纪律。
 _AUTO_UPDATE_CONFIRM = os.environ.get("BA_AUTO_UPDATE_CONFIRM", "") == "1"
@@ -729,7 +729,7 @@ def set_force_all_skills(v: bool) -> None:
 def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     """Run OCR on a BGR numpy array and return normalized OcrBox list.
 
-    Downscales frames wider than _OCR_WORK_W for speed (4K→1280px ≈ 9x faster).
+    Downscales frames wider than _OCR_WORK_W for speed (4K1280px ≈ 9x faster).
     Coordinates are normalized 0-1 so the caller is resolution-independent.
     """
     if not _OCR_ENABLED:
@@ -768,8 +768,8 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
 # ── Clean-frame source (money-read defense) ────────────────────────────
 # The Win32 YoloOverlay burns boxes/labels into every DXcam frame, which can
 # KILL detection of small icons (live 2026-06-09: arena 战术大赛票 icon got a
-# tight green box + label burned over it → ui_v7 detected NOTHING → ticket
-# read None every tick → fail-closed exit with tickets unspent). ADB screencap
+# tight green box + label burned over it  ui_v7 detected NOTHING  ticket
+# read None every tick  fail-closed exit with tickets unspent). ADB screencap
 # runs inside Android where the overlay physically doesn't exist. Money-
 # critical reads should prefer this source. The server registers the ADB
 # capture function here once the pipeline's ADB connection is up.
@@ -782,7 +782,7 @@ _CLEAN_FRAME_SOURCE = None
 # 所以同一 tick 内的多次数字读数看到的必然是同一屏, 抓一次就够。
 # ticket_sweep._read_tickets 一个 tick 最多读 3 次 = 白等 1.5s。
 #
-# ⛔默认 max_age=0 不缓存, 语义与旧版逐字节相同。原因: _read_topbar_clean /
+# 默认 max_age=0 不缓存, 语义与旧版逐字节相同。原因: _read_topbar_clean /
 # _read_topbar_clean_multi 的多帧投票**靠每次拿到不同帧**才有意义, 一旦缓存
 # 就塌成"同一帧读 5 遍"的复读, 直接废掉金钱读数的投票防线。只有显式传
 # max_age 的调用方(run_digit_ocr)才走缓存。
@@ -818,8 +818,8 @@ def clean_frame_cache_stats() -> Dict[str, int]:
 def get_clean_frame(max_age: float = 0.0):
     """A fresh overlay-free frame via the registered source, or None.
 
-    max_age > 0 → 允许复用 **本 tick 内** max_age 秒以内抓过的帧。
-    max_age = 0(默认) → 每次真抓, 老调用方语义不变。
+    max_age > 0  允许复用 **本 tick 内** max_age 秒以内抓过的帧。
+    max_age = 0(默认)  每次真抓, 老调用方语义不变。
     """
     if _CLEAN_FRAME_SOURCE is None:
         return None
@@ -867,7 +867,7 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
     # 数字读数需要 4K 细节(1080p 实测伤金钱读数): 主 tick 帧换 scrcpy
     # 1440p 后(2026-07-16 Phase2), 凡传入低于 4K 的帧自动升级 ADB 干净帧
     # 重抓 — 一处兜底, 9 个 skill 调用点零改动。抓帧失败用原帧(降级可用)。
-    # ⭐同 tick 复用(2026-07-25): 一个 tick 内屏幕不会变(点击在 tick 返回后
+    # 同 tick 复用(2026-07-25): 一个 tick 内屏幕不会变(点击在 tick 返回后
     # 才落屏), 所以第 2..N 次读数直接吃缓存, 每次省 ~770ms。
     try:
         if frame.shape[1] < 3200:
@@ -894,7 +894,7 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
         result, _ = ocr(crop)
         if not result:
             return None
-        # Sort fragments LEFT→RIGHT before joining — the detector returns text
+        # Sort fragments LEFTRIGHT before joining — the detector returns text
         # boxes in arbitrary order, which scrambles comma-grouped numbers
         # (live 2026-06-09: "179,958,141" came back as '9581179414').
         try:
@@ -905,19 +905,19 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
         raw = "".join(line[1] for line in result)
         # Comma-grouped big numbers (credit 25,583,379 etc): blind strip-and-
         # join DUPLICATES digits when OCR fragments overlap (live 2026-06-12:
-        # '25,583,379' → '255833379' = 10x over-read → shop budget chaos).
+        # '25,583,379'  '255833379' = 10x over-read  shop budget chaos).
         # The comma grouping VALIDATES digit structure — when present, trust
-        # only a clean single group; several disjoint groups = fragment mess →
+        # only a clean single group; several disjoint groups = fragment mess 
         # fail-closed None (multi-sample voting retries).
-        # ⭐千位分隔符归一(2026-07-28 live 实锤, 原始片段为证):
+        # 千位分隔符归一(2026-07-28 live 实锤, 原始片段为证):
         # 青辉石 15,426 那一条, ocr 返回**两个片段** `'15.'`(score .66) 与
         # `',426'`(score .80) —— **两边各自把分隔符包了进去**, 拼接成 `'15.,426'`。
-        # 后果: 旧正则只认 `,` 不匹配; 落到下面"保留小数点"的通用清洗 →
-        # `'15.426'` → `parse_count` 既非纯数字也无 '/' ⇒ **None**, 这一帧整个
+        # 后果: 旧正则只认 `,` 不匹配; 落到下面"保留小数点"的通用清洗 
+        # `'15.426'`  `parse_count` 既非纯数字也无 '/'  **None**, 这一帧整个
         # 读不出(fail-closed 安全, 但钱闸拿不到数)。
-        # ⚠我第一版只把正则的 `,` 放宽成 `[.,]` —— **不管用**, 因为真正的形态是
+        # 我第一版只把正则的 `,` 放宽成 `[.,]` —— **不管用**, 因为真正的形态是
         # 「点+逗号连在一起」。先折叠连续分隔符, 再做三位分组匹配。
-        # ⛔为什么可以放心把 `.` 当分隔符: 判据是**三位一组**(`[.,]\d{3}`)。
+        # 为什么可以放心把 `.` 当分隔符: 判据是**三位一组**(`[.,]\d{3}`)。
         # 本域里真正的小数只有百分比且都是**一位**小数(cafe 收益 '58.3' / '0.0%',
         # 见下面那段 2026-06-09 的注释) —— 一位小数永远匹配不上 \d{3}。
         raw_n = _re.sub(r"[.,]{2,}", ",", raw.replace("，", ","))
@@ -942,7 +942,7 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
 def parse_count(s: Optional[str]):
     """Parse a digit-OCR string into useful numbers.
 
-    "7/8" → (7, 8); "25117" → (25117, None); "240/240" → (240, 240).
+    "7/8"  (7, 8); "25117"  (25117, None); "240/240"  (240, 240).
     Returns (current, total) where total may be None. None on unparseable.
     """
     if not s:
@@ -966,10 +966,10 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     """Run YOLO on a BGR numpy array and return normalized YoloBox list.
 
     Only runs models matching the current context:
-      'cafe'   → emoticon model only
-      'battle' → battle_heads model only
-      'all'    → all models
-      'none'/'' → skip entirely (returns empty)
+      'cafe'    emoticon model only
+      'battle'  battle_heads model only
+      'all'     all models
+      'none'/''  skip entirely (returns empty)
 
     Non-blocking: if YOLO is still loading in the pre-warm thread, returns
     empty immediately instead of blocking the pipeline worker.
@@ -1004,7 +1004,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     # detectors were trained at smaller native frame sizes — 960 is fine.
     _IMGSZ_BY_TAG = {
         # ui_v2 trained at imgsz=960 on 2475×1392 frames. MUST infer at 960:
-        # verified 2026-05-28 that v2 @ imgsz=1920 → 0 detections, but @ 960 →
+        # verified 2026-05-28 that v2 @ imgsz=1920  0 detections, but @ 960 
         # 一次领取黄色 conf 0.936 etc. (The earlier 1920 "4K fix" was wrong —
         # production frames are 2475×1392, not 4K; the occasional 4K frame was
         # a capture-path glitch, not the norm.)
@@ -1034,10 +1034,10 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                     # ui carries a folded Emoticon_Action (cls451). When the
                     # standalone v26n (tag "cafe", 0.995) is ALSO running it is
                     # the emoticon AUTHORITY — drop the ui copy, else the two
-                    # models double-box every bubble (offset boxes, IoU<0.6 →
+                    # models double-box every bubble (offset boxes, IoU<0.6 
                     # dedup can't catch) = ghosting + "emoticon 和 ui 抢信用点"
                     # (live 2026-06-09). After fold-in (2026-06-11) v26n is
-                    # unloaded → _standalone_emo_active False → ui 451 passes.
+                    # unloaded  _standalone_emo_active False  ui 451 passes.
                     if (model_tag == "ui" and "emoticon" in cls_low
                             and _standalone_emo_active):
                         continue
@@ -1076,7 +1076,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
         # Pre-pass — DOMAIN AUTHORITY, not confidence: the emoticon model's
         # (tag "cafe") only legit target is a headpat bubble, which never
         # overlaps a UI element. Any emoticon box overlapping (IoU>0.3) a box
-        # from another model is an FP on that element → drop it EVEN IF its
+        # from another model is an FP on that element  drop it EVEN IF its
         # conf is higher (live 2026-06-09: emoticon 0.75 on the 2號店 credit
         # icon outranked ui and "won" the conf-desc dedup — wrong winner).
         _others = [b for b in yolo_boxes if b.model_tag != "cafe"]
@@ -1185,7 +1185,7 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
                            injected_yolo_boxes=None) -> ScreenState:
     """Build ScreenState from an in-memory BGR numpy array (no file I/O).
 
-    Used by the MuMu runner for zero-copy capture → detect pipeline.
+    Used by the MuMu runner for zero-copy capture  detect pipeline.
 
     Args:
         skip_ocr: if True, skip OCR (expensive ~50ms) and reuse prev_ocr_boxes.
@@ -1200,10 +1200,10 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
         yolo_boxes = injected_yolo_boxes
     else:
         yolo_boxes = _run_yolo_on_image(frame_bgr, w, h)
-    # ⭐OCR on-demand (2026-07-11 用户铁律: OCR 只在读数字/盲区兜底时跑):
+    # OCR on-demand (2026-07-11 用户铁律: OCR 只在读数字/盲区兜底时跑):
     # YOLO ≥3 框 = 已知屏, cls 主导, 整帧 OCR 纯浪费(实测每次 1-1.5s, 旧策略
     # 每 3 tick 一跑拖慢全链)。YOLO <3 框 = 未知屏(羁绊升级/通知弹窗/TOUCH
-    # START 等 OCR 拦截器兜底场景) → 才跑整帧 OCR。数字读取(票数/AP/总价)
+    # START 等 OCR 拦截器兜底场景)  才跑整帧 OCR。数字读取(票数/AP/总价)
     # 各 skill 本来就走 screen.frame 裁剪 digit-OCR, 不依赖这里。
     # 2026-07-11 用户二次收紧("OCR只有花钱/用票时启动"): 门从 <3框 收到
     # **完全零检出的亮屏**才跑 — 加载中转场(加载中 cls ≥1框)/普通页一律
@@ -1252,9 +1252,9 @@ class DailyPipeline:
     """
 
     # Fallback skill sequence for direct DailyPipeline() use (no server).
-    # ⭐canonical 在 server/app.py _DEFAULT_SKILL_ORDER(2026-07-11 用户定死,
-    # 那边是唯一权威, 改序改那边) — 此处仅同步拷贝: 收菜攒AP → 纯票扫荡 →
-    # 学园交流会(吃AP) → 活动(剩余AP全灌) → 战术大赛 → 邮件 → 每日领奖 →
+    # canonical 在 server/app.py _DEFAULT_SKILL_ORDER(2026-07-11 用户定死,
+    # 那边是唯一权威, 改序改那边) — 此处仅同步拷贝: 收菜攒AP  纯票扫荡 
+    # 学园交流会(吃AP)  活动(剩余AP全灌)  战术大赛  邮件  每日领奖 
     # 活动再跑一轮(消化 mail/任务回灌的新AP, AP<20 自动秒过)。
     DEFAULT_SKILLS = [
         "daily_routine",
@@ -1272,7 +1272,7 @@ class DailyPipeline:
     def __init__(self, skill_names: Optional[List[str]] = None,
                  profile_options: Optional[Dict[str, Any]] = None):
         opts = dict(profile_options or {})  # reserved for future per-skill config
-        # ⛔必须在 __init__ 里初始化: 青辉石掉钱哨兵读它。整段 kill-switch 包在
+        # 必须在 __init__ 里初始化: 青辉石掉钱哨兵读它。整段 kill-switch 包在
         # `except Exception: pass` 里 —— 少这一行, 非大厅哨兵第一次跑就
         # AttributeError, 被静默吞掉 = **整个金钱守卫悄悄死掉且零日志**。
         # (原来它只在大厅分支里被赋值, 非大厅路径根本够不到。)
@@ -1295,9 +1295,9 @@ class DailyPipeline:
             # 有 bonus 先吃, 没有就退、batch_sweep 兜底扫正常关.
             "special_sweep": SpecialSweepSkill(),
             # 活动 AP 规划器 (2026-07-08): 排 special_sweep 前, 活动吃 AP 优先。
-            # ⭐`event_farm_stages`(2026-07-28): 用户显式指定活动刷哪几关 + 配比。
+            # `event_farm_stages`(2026-07-28): 用户显式指定活动刷哪几关 + 配比。
             # 写法三选一: [10,11] / {"10":1,"11":2} / "10,11,11"。
-            # 空 = 自动兜底(尾关轮转)。⛔旧的 `event_farming_stage: 12` 是**死配置**
+            # 空 = 自动兜底(尾关轮转)。旧的 `event_farming_stage: 12` 是**死配置**
             # (全仓没有任何代码读它) —— 别再往那里写。
             "event_quest": EventQuestSkill(
                 farm_stages=opts.get("event_farm_stages")),
@@ -1315,7 +1315,7 @@ class DailyPipeline:
             "daily_routine": DailyRoutineSkill(sub_only=opts.get("sub_only")),
         }
         # 审计 #3 (2026-06-17): registry 的 shop 是 TOP-LEVEL 单跑实例, 后面没有
-        # arena_shop 承接留店 → 必须正常退大厅(否则单跑完游戏卡在商店网格)。
+        # arena_shop 承接留店  必须正常退大厅(否则单跑完游戏卡在商店网格)。
         # daily_routine 内部自己 new 的 ShopSkill 保持 chain_in_shop=True(紧跟
         # arena_shop, 同访问切战术大赛 tab)。
         self._skill_registry["shop"].chain_in_shop = False
@@ -1338,9 +1338,9 @@ class DailyPipeline:
         self._last_wait_reason: str = ""
         self._last_action_reason: str = ""
         self._stuck_counter: int = 0  # ticks in same sub_state
-        # ⛔stuck 网墙钟合取(2026-07-29): 9/20 tick 是 1s/tick 年代标定的,
+        # stuck 网墙钟合取(2026-07-29): 9/20 tick 是 1s/tick 年代标定的,
         # zero-wait 后缩成 ~2-4s, 比 skill 自己的等待预算(如 buy_pyroxene 等
-        # 确认框 16s)还短 → 兜底越权抢方向盘, 今天把 skill 正在用的商店页
+        # 确认框 16s)还短  兜底越权抢方向盘, 今天把 skill 正在用的商店页
         # 整个叉掉了。tick 阈值保留, 但必须同时满足墙钟(game_clock 扣掉
         # step 门人审停顿) — tick_vs_wallclock 排查清单当时漏掉的 pipeline 层。
         self._stuck_t0: float = 0.0   # same-wait 连续段起点(game_clock)
@@ -1417,7 +1417,7 @@ class DailyPipeline:
             pass
         print("[Pipeline] Stopped")
 
-    # Skill name → lobby-badge key.  User rule (2026-05-13):
+    # Skill name  lobby-badge key.  User rule (2026-05-13):
     # "黄/红点才进，没点 pass to next" applies GLOBALLY to every
     # collection skill, not just bottom-nav ones.  The lobby badge
     # scanner returns badges from multiple regions:
@@ -1429,8 +1429,8 @@ class DailyPipeline:
     #
     # Bounty / Arena both enter via the right-sidebar 任務 tile.  The
     # tile dot semantics (per user 2026-05-13):
-    #   yellow → bounty/arena tickets available (悬赏通缉用黄点识别)
-    #   red    → event tasks have unclaimed rewards (活动任务红点)
+    #   yellow  bounty/arena tickets available (悬赏通缉用黄点识别)
+    #   red     event tasks have unclaimed rewards (活动任务红点)
     # Either way the campaign tile is the entry, so any non-none state
     # means "go look in there".  When the tile shows "none" both
     # tickets are drained AND tasks claimed — safe to skip.
@@ -1465,7 +1465,7 @@ class DailyPipeline:
         weren't there at pipeline start.  Using first_seen would skip
         Club even though social just lit up red, losing a claim
         (run_20260513_205321: initial all-clear, social=red appeared
-        mid-run, Club still skipped → user noticed missing AP claim).
+        mid-run, Club still skipped  user noticed missing AP claim).
 
         Returns:
             str reason if we should skip (caller logs + advances).
@@ -1473,7 +1473,7 @@ class DailyPipeline:
         """
         badge_key = self._SKILL_BADGE_MAP.get(skill.name)
         if not badge_key:
-            return None  # No badge mapping → always run
+            return None  # No badge mapping  always run
         # Prefer last_seen (refreshed every advance_skill); fall back to
         # first_seen if last_seen hasn't populated yet.
         snapshot = (
@@ -1481,13 +1481,13 @@ class DailyPipeline:
             or getattr(self, "_lobby_badges_first_seen", None)
         )
         if not snapshot:
-            return None  # We haven't seen the lobby yet → can't decide, run
+            return None  # We haven't seen the lobby yet  can't decide, run
         state = snapshot.get(badge_key, "unknown")
         if state in ("red", "yellow"):
-            return None  # Has a dot → something to do, run
+            return None  # Has a dot  something to do, run
         if state == "none":
             return f"no {badge_key} badge on lobby nav (nothing to claim/play)"
-        return None  # unknown / not detected → run
+        return None  # unknown / not detected  run
 
     def _start_current_skill(self) -> None:
         """Reset and start the currently selected skill.
@@ -1560,14 +1560,14 @@ class DailyPipeline:
             self._running = False
             return
         duration_s = max(0.0, time.time() - self._skill_start_time)
-        # ⭐竣工判据 (2026-07-25): status 只说"流程走完没", 这里问"活干完没"。
-        # 出口处大声报, 不满足就带 ⚠ —— 5 票 / 253 AP 那种事, 早有这一行就会在
+        # 竣工判据 (2026-07-25): status 只说"流程走完没", 这里问"活干完没"。
+        # 出口处大声报, 不满足就带  —— 5 票 / 253 AP 那种事, 早有这一行就会在
         # skill 退出那一刻自己喊出来, 而不是等用户肉眼发现。
         try:
             _verdict, _detail = skill.exit_report()
         except Exception as _e:                                   # noqa: BLE001
             _verdict, _detail = "UNKNOWN", f"exit_report 异常 {type(_e).__name__}: {_e}"
-        _mark = {"CLEAN": "✔", "LEFTOVER": "⚠", "UNKNOWN": "?"}.get(_verdict, "?")
+        _mark = {"CLEAN": "", "LEFTOVER": "", "UNKNOWN": "?"}.get(_verdict, "?")
         print(f"[Pipeline] {_mark} 竣工判据 {skill.name}: {_verdict} — {_detail}",
               flush=True)
         self._results.append(
@@ -1605,8 +1605,8 @@ class DailyPipeline:
     #
     # The 8 bottom-nav icons each render a small dot when something is
     # actionable:
-    #   • RED dot   → unclaimed reward at that location
-    #   • YELLOW dot → unfinished task / new content at that location
+    #   • RED dot    unclaimed reward at that location
+    #   • YELLOW dot  unfinished task / new content at that location
     # We scan the lobby a few times during a run (at start, between
     # skills, at end) and diff to see what got cleared vs. what was
     # missed.  Future: use the initial scan to skip skills whose icon
@@ -1646,7 +1646,7 @@ class DailyPipeline:
             f = first.get(k, "none")
             l = last.get(k, "none")
             if f != "none" and l == "none":
-                cleared.append(f"{k}:{f}→clear")
+                cleared.append(f"{k}:{f}clear")
             elif f != "none" and l != "none":
                 remaining.append(f"{k}:{l}")
             elif f == "none" and l != "none":
@@ -1673,8 +1673,8 @@ class DailyPipeline:
         # blind-confirm a 'visit friend cafe' / 'exit game' prompt.
         # 旧 OCR 分支段(P0 断线/退出框, P0.5 签到/选项/公告/指南任务,
         # P1 通知/promo/课程表弹窗X, P2 level-up/TAP TO CONTINUE/獲得獎勵
-        # /羈絆)已整段删除(2026-07-17) — _OCR_ENABLED=False 恒假 →
-        # ocr_boxes 恒空 → find_any_text 恒 None, 全部 dead code;
+        # /羈絆)已整段删除(2026-07-17) — _OCR_ENABLED=False 恒假 
+        # ocr_boxes 恒空  find_any_text 恒 None, 全部 dead code;
         # 活的同功能保护在 base._handle_common_popups cls 段。
         # ════════════════════════════════════════════════════════════════
         # Reward-result popup (获得奖励) — dismiss via 确认键, else tap.
@@ -1682,7 +1682,7 @@ class DailyPipeline:
         if reward_y:
             confirm_y = find_yolo_box(screen, ["确认键"], min_conf=0.30)
             if confirm_y:
-                print("[Interceptor] YOLO reward popup → 确认键")
+                print("[Interceptor] YOLO reward popup  确认键")
                 return action_click_box(confirm_y, "interceptor: confirm reward (YOLO)")
             # 2026-07-21 逐帧审实锤: 旧码 确认键 没检出就盲拍 (0.5,0.92) — 那是
             # 屏幕底栏空白/模态遮罩, 关不掉弹窗。獲得獎勵弹窗的关闭控件本就有
@@ -1690,25 +1690,25 @@ class DailyPipeline:
             # 全没有才盲拍, 且盲拍点改 0.88(点击继续字样典型位)而非底栏 0.92。
             cont_y = find_yolo_box(screen, ["点击继续字样"], min_conf=0.30)
             if cont_y:
-                print("[Interceptor] YOLO reward popup → 点击继续字样")
+                print("[Interceptor] YOLO reward popup  点击继续字样")
                 return action_click_box(cont_y, "interceptor: reward TAP-CONTINUE (YOLO)")
             x_y = find_yolo_box(screen, ["弹窗叉叉"], min_conf=0.30)
             if x_y:
-                print("[Interceptor] YOLO reward popup → 弹窗叉叉")
+                print("[Interceptor] YOLO reward popup  弹窗叉叉")
                 return action_click_box(x_y, "interceptor: reward X-close (YOLO)")
-            print("[Interceptor] YOLO reward popup → blind tap (no cls)")
+            print("[Interceptor] YOLO reward popup  blind tap (no cls)")
             return action_click(0.5, 0.88, "interceptor: dismiss reward (blind, no cls)")
         # ── 剧情过场逃生 (2026-08-07 live 实锤的阻塞洞) ──────────────────
-        # 现象: EventQuest 点进活动 → 撞上活动开场剧情 → `back` **完全无效**
-        # (BA 剧情过场不吃 ESC), 连按 5 次屏上还是 `剧情menu 0.98` ⇒ EventQuest
+        # 现象: EventQuest 点进活动  撞上活动开场剧情  `back` **完全无效**
+        # (BA 剧情过场不吃 ESC), 连按 5 次屏上还是 `剧情menu 0.98`  EventQuest
         # 判 verify-timeout 放弃活动, Arena 接手继续 back 空转。**整个活动被一段
         # 开场剧情挡死**。
         # 病根: `if page is not None: return action_back(...)` 这条通用退出路径
         # 在 arena/cafe/schedule/ticket_sweep 共 5 处复制粘贴, 而**只有
         # StoryMining 会跳剧情** —— 它不在 canonical skill_order 里。
-        # ⇒ 放到 interceptor: 谁撞进剧情都能出来, 不用改那 5 处。
-        # 流程照搬 story_mining.py:384-422 已验证的顺序(确认框 → 跳过键 → menu),
-        # region 也照抄 —— 别自己发明。⛔ StoryMining 自己在跑时不插手(它有
+        #  放到 interceptor: 谁撞进剧情都能出来, 不用改那 5 处。
+        # 流程照搬 story_mining.py:384-422 已验证的顺序(确认框  跳过键  menu),
+        # region 也照抄 —— 别自己发明。 StoryMining 自己在跑时不插手(它有
         # after-ack 计时, 插手会把刚弹出的略過框再点关一次 = 那边记过的自锁)。
         if type(skill).__name__ != "StoryMiningSkill":
             _st_chrome = find_yolo_box(screen, ["剧情menu", "跳过故事键"],
@@ -1718,7 +1718,7 @@ class DailyPipeline:
                 _st_cf = find_yolo_box(screen, ["确认键"], min_conf=0.30)
                 if _st_cf is not None and 0.30 <= _st_cf.cx <= 0.85 \
                         and 0.55 <= _st_cf.cy <= 0.85:
-                    print("[Interceptor] 剧情逃生: 略過确认框 → 确认键")
+                    print("[Interceptor] 剧情逃生: 略過确认框  确认键")
                     return action_click_box(_st_cf, "interceptor: confirm story skip")
                 # after-ack: 跳过/menu 发出后要给「是否略過」框渲染时间, 否则
                 # 第二发正好把刚弹出的框又关掉(story_mining 那边记过的自锁)。
@@ -1739,18 +1739,18 @@ class DailyPipeline:
         # Full-screen bond / region level-up — tap anywhere to advance.
         levelup_y = find_yolo_box(screen, ["羁绊升级", "地区升级"], min_conf=0.35)
         if levelup_y:
-            print(f"[Interceptor] YOLO level-up ({levelup_y.cls_name}) → tap dismiss")
+            print(f"[Interceptor] YOLO level-up ({levelup_y.cls_name})  tap dismiss")
             return action_click(0.5, 0.5, "interceptor: dismiss level-up (YOLO)")
 
         # ── P-1: 强更下载确认框 (pure YOLO, 启动期专用, 2026-07-16 重构) ──
         # patch-day 冷启动在标题屏前后(TOUCH TO START 前后)弹"需要下載遊戲所
         # 需的檔案 X.XX GB"强更框。旧版 OCR 文字匹配(通知标题+下載 body 词表)
         # 已删 — 纯 相位+结构 判定:
-        #   ① 启动期: 距 pipeline start() < _STARTUP_UPDATE_WINDOW_S
-        #   ② 标题屏语境: 标题屏/强更框是未训练面, 全帧几乎零 ui cls
+        #    启动期: 距 pipeline start() < _STARTUP_UPDATE_WINDOW_S
+        #    标题屏语境: 标题屏/强更框是未训练面, 全帧几乎零 ui cls
         #      (大厅误判免疫: lobby 常态 10+ 框)
-        #   ③ 结构: 确认键在场, 且全帧无 取消键/弹窗叉叉/灰色确认
-        #      (用户 spec: 强更框只有確認; 可取消的框不是强更 → 不碰)
+        #    结构: 确认键在场, 且全帧无 取消键/弹窗叉叉/灰色确认
+        #      (用户 spec: 强更框只有確認; 可取消的框不是强更  不碰)
         # 窗口外 / 结构不符: 这里一律不动(其余不动) — 只有确认的弹窗归当前
         # skill 的语境 handler。
         if (time.time() - getattr(self, "_run_start_ts", 0.0)
@@ -1758,11 +1758,11 @@ class DailyPipeline:
             _upd_confirm = find_yolo_box(screen, ["确认键"], min_conf=0.30)
             _upd_blocker = find_yolo_box(
                 screen, ["取消键", "弹窗叉叉", "灰色确认"], min_conf=0.30)
-            # ⛔2026-07-25 收紧(全仓金钱审计 #3, 有帧实锤): 旧闸放行到
+            # 2026-07-25 收紧(全仓金钱审计 #3, 有帧实锤): 旧闸放行到
             # `len(yolo_boxes) <= 4`, 而 4 个框**放得进一整屏游戏内 UI** ——
             # run_20260717_054026/tick_0054 实锤误触发: 那帧是**战术大赛结算屏**
             # (确认键0.97 + 回大厅按钮0.97 + 返回键0.96 + 战术大赛票0.66), 恰好
-            # 4 框、无取消键、在 180s 启动窗内 → 闸放行, 盲点了那个確認。
+            # 4 框、无取消键、在 180s 启动窗内  闸放行, 盲点了那个確認。
             # 这条闸的立论是"标题屏/强更框是**未训练面**, 全帧几乎零 ui cls",
             # 那 4 个全是**已训练的游戏内 cls**, 直接证伪了那个前提。
             # 收紧成: 確認键必须是全帧**唯一**的检出框。少放行的代价 = patch 日
@@ -1776,7 +1776,7 @@ class DailyPipeline:
                     # fail-closed: 只报不点。日志必须说清"我本来会点哪里",
                     # 否则以后没人知道这条闸到底有没有在正确的场合触发过
                     # (money_safety: 包着防线的 except/分支绝不许静默)。
-                    print("[Interceptor] ⛔启动期 confirm-only 弹窗 —— **不点**"
+                    print("[Interceptor] 启动期 confirm-only 弹窗 —— **不点**"
                           f"(BA_AUTO_UPDATE_CONFIRM 未开启)。若这是强更框请手动"
                           f"点確認 @({(_upd_confirm.x1 + _upd_confirm.x2) / 2:.3f},"
                           f"{(_upd_confirm.y1 + _upd_confirm.y2) / 2:.3f})")
@@ -1839,7 +1839,7 @@ class DailyPipeline:
         screen.fresh_boxes = fresh_boxes
         screen.fresh_frame = fresh_frame
         screen.fresh_ts = fresh_ts
-        # ⭐主 tick 帧自己的帧龄(秒)。以前只有 fresh 通道有帧龄, skill 于是只能
+        # 主 tick 帧自己的帧龄(秒)。以前只有 fresh 通道有帧龄, skill 于是只能
         # **假设** tick 帧更旧 —— 2026-07-25 实测推翻: scrcpy tick 帧中位 13.8ms,
         # fresh 通道中位 399ms, 32 个同时有两者的 tick 里 **17 个(53.1%) fresh 更旧**。
         # 时敏判定要"用更新的那个", 就必须两边都能量。
@@ -1891,9 +1891,9 @@ class DailyPipeline:
 
         A transition click is allowed ONCE, then HELD (converted to wait) until
         the screen fingerprint actually changes — the next stage rendered — or a
-        generous cap (lost tap → one retry). This kills the frantic ADB re-click
+        generous cap (lost tap  one retry). This kills the frantic ADB re-click
         that re-fired the SAME button before the screen transitioned (live
-        2026-06-13: arena_shop 商店入口 ×2 / schedule popout thrash → Location
+        2026-06-13: arena_shop 商店入口 ×2 / schedule popout thrash  Location
         Select 乱走). 加载中 always waits (暂停 process 给游戏加载时间).
 
         Same-target steppers (e.g. MAX clicked defensively ×3) are unaffected:
@@ -1901,15 +1901,15 @@ class DailyPipeline:
         Different-target clicks (multi-select cards, room heads) always pass.
         """
         action_type = action.get("action", "")
-        # ⭐原子零延迟通道(2026-07-22): 轮播类目标(hub 活动卡 ~2.5s/页切换)
-        # 检出→tap 必须同 tick 落屏, 任何 hold/pend 都会撞切页点错卡(误入
+        # 原子零延迟通道(2026-07-22): 轮播类目标(hub 活动卡 ~2.5s/页切换)
+        # 检出tap 必须同 tick 落屏, 任何 hold/pend 都会撞切页点错卡(误入
         # 午夜派對三连根因)。skill 打 _atomic_no_gate 标记的动作稳定门直接
         # 放行(step 门在 server 侧同标记豁免)。仅限时序敏感且金钱安全的点击。
         if action.get("_atomic_no_gate"):
             return action
         if action_type == "wait":
             # wait 不清锁(2026-07-21 walk 实锤: skill 的 settle-wait 每次把同
-            # 目标锁抹掉 → (click,wait,wait) 节拍重点击全部裸放行,
+            # 目标锁抹掉  (click,wait,wait) 节拍重点击全部裸放行,
             # BuyPyroxene/enter ×12)。锁跨越 skill 自身节拍存活, 释放路径
             # 只有两条: 指纹变化(页面真进了) 或 2.5s 墙钟(丢 tap 重试)。
             return action
@@ -1941,7 +1941,7 @@ class DailyPipeline:
             self._last_back_sig = sig
             return action
         if action_type != "click":
-            # swipe/swipe_tap/scroll 真移动画面 → 位置锁语义失效, 才清锁
+            # swipe/swipe_tap/scroll 真移动画面  位置锁语义失效, 才清锁
             self._last_click_target = None
             self._last_click_sig = None
             self._click_hold = 0
@@ -1951,7 +1951,7 @@ class DailyPipeline:
         # ── universal loading gate: never tap mid-transition ──
         try:
             if screen is not None and screen.is_loading():
-                return action_wait(500, "加载中 → 暂停, 等加载完成")
+                return action_wait(500, "加载中  暂停, 等加载完成")
         except Exception:
             pass
 
@@ -1964,20 +1964,20 @@ class DailyPipeline:
         # ── "看到目标就点" exemption (user 2026-06-13: 无端等待) ──────────────
         # Stacked popups (sweep/battle/event rewards, 領取/確認/continue, X-close)
         # sit at the SAME position and EACH layer must be clicked through. The
-        # same-target hold below would HOLD the dismiss → the popup never gets
-        # clicked → deadlock until the cap (the ~22s "无端等待"). These act on a
-        # popup that IS on screen right now → click it immediately, never hold.
+        # same-target hold below would HOLD the dismiss  the popup never gets
+        # clicked  deadlock until the cap (the ~22s "无端等待"). These act on a
+        # popup that IS on screen right now  click it immediately, never hold.
         _r = reason
-        # ⭐`_force_settle`(2026-07-27 live): 反向 opt-out —— 打了这个标记的动作
+        # `_force_settle`(2026-07-27 live): 反向 opt-out —— 打了这个标记的动作
         # **不吃**下面这条关键词豁免, 老老实实走稳定门 + same-target hold。
-        # ⛔为什么需要: 这条豁免按 **reason 子串**命中, 而"claim/領取/確認"这类词
+        # 为什么需要: 这条豁免按 **reason 子串**命中, 而"claim/領取/確認"这类词
         # 会误伤**位置会动**的按钮。实测(cafe 收益): 弹窗弹出动画里「領取」在
         # cy≈0.825, 稳定后升到 cy≈0.733; skill 在动画帧上 action_click_box 锚到
-        # 0.825 → 豁免让它立刻拍下去 → **点在按钮下方空白, 收益领不到**
+        # 0.825  豁免让它立刻拍下去  **点在按钮下方空白, 收益领不到**
         # (memory cafe_flow_spec 记的"收益第1次没领"就是这个)。
         # 不动关键词列表(那会波及全部 interceptor/dismiss 路径), 让个别调用点
         # 显式声明"我这个按钮会动, 必须等稳定帧"。
-        # ⭐`_hold_exempt`(2026-07-31): 显式 flag 版完全豁免(稳定门+hold 一起跳),
+        # `_hold_exempt`(2026-07-31): 显式 flag 版完全豁免(稳定门+hold 一起跳),
         # 给「幂等/自计数快速连点」用 — 首例=配额轮转的加号连点: 静态按钮+
         # skill 自己计数不读屏, same-target hold 2.5s/发把 5 发拖到 50+ tick,
         # 直接烧光 _sweep_quest 的 phase 预算(swept=0 实锤)。显式 flag,
@@ -1990,9 +1990,9 @@ class DailyPipeline:
                 "领取", "claim", "close", "关闭", "關閉", "叉叉",
                 "PURCHASE", "cancel",  # 金钱逃逸: 购买框 veto/取消绝不 hold
                                        # (与 back 分支 :1731 同理, 2026-07-25)
-                # ⛔tab 切换必须豁免(2026-07-25 live 实锤, 与 region_switch_truth
+                # tab 切换必须豁免(2026-07-25 live 实锤, 与 region_switch_truth
                 # 的 ARROW_LEFT 同一根因第二次): 活动页背景有角色待机动画+对话
-                # 气泡, 帧几乎**永远不"稳定"** → 「Challenge tab → Quest tab」的
+                # 气泡, 帧几乎**永远不"稳定"**  「Challenge tab  Quest tab」的
                 # 点击被连吞, event_quest 据此误判"上期领奖页"退出 + FREEZE 20 tick。
                 # 切 tab 是**幂等**动作(重复点同一 tab 无副作用), 与"导航进关卡"
                 # 风险完全不同, 不该受这道为防"点在移动按钮上"而设的闸约束。
@@ -2008,17 +2008,17 @@ class DailyPipeline:
 
         # ── frame-settle gate(2026-07-17 用户"不要强拍"): 导航/进入类点击
         # 只在稳定帧放行 — 连续两帧结构指纹+质心一致(_tick_with_screen 每
-        # tick 记录)。转场动画/列表滚动中指纹或质心持续变化 → 自然等待;
+        # tick 记录)。转场动画/列表滚动中指纹或质心持续变化  自然等待;
         # 稳定后首帧立即放行 = 零固定延迟。弹窗 dismiss/领取类在上方豁免
         # 通道已 return(点弹窗强拍无害)。>4s 未稳定放行一次(背景动画让
         # 某 cls 持续抖动时的死锁保险)。
-        # ⭐`_settle_exempt`(2026-07-27 live 逼出来): 只豁免**稳定门**, 下面的
+        # `_settle_exempt`(2026-07-27 live 逼出来): 只豁免**稳定门**, 下面的
         # same-target hold 照常生效。
         # 为什么必须拆开: 上面那条 reason 关键词豁免是 `return action` —— 它把
         # 「稳定门」和「dedup hold」**一起**跳过了。schedule 为了让「課程表開始」
         # 不被稳定门吞, 在 reason 里塞了"確認键"三个字去命中它(schedule.py 注释
-        # 自认), 于是 dedup hold 也被顺带绕过 → 该动作**每次连发两发**。
-        # ⛔2026-07-27 实测代价: 全 walk 7 对真连发全在 Schedule 且全是这两个
+        # 自认), 于是 dedup hold 也被顺带绕过  该动作**每次连发两发**。
+        # 2026-07-27 实测代价: 全 walk 7 对真连发全在 Schedule 且全是这两个
         # reason(其余动作 0 对); 第二发落点撞过 确认键 / 学生头像 / 以及**青辉石
         # 「購買課程表票券」框**(落点距確認键仅 Δx0.097 —— 擦边过去, 差点 30 石)。
         # 用 reason 措辞当控制信号 = 隐式 API, 改一个字就换一套行为。改显式 flag。
@@ -2047,8 +2047,8 @@ class DailyPipeline:
             union = sig | last_sig
             jacc = (len(sig & last_sig) / len(union)) if union else 1.0
             if jacc >= 0.5:
-                # Screen still the same stage → the click hasn't landed/rendered
-                # → HOLD instead of re-tapping. 墙钟上限(2026-07-11 链路审计:
+                # Screen still the same stage  the click hasn't landed/rendered
+                #  HOLD instead of re-tapping. 墙钟上限(2026-07-11 链路审计:
                 # 旧 5-tick 上限 ×~2s/tick ≈9s, 丢 tap 恢复太慢, 轮播类目标必
                 # miss) — 2.5s 覆盖正常转场渲染, 丢 tap 快速重试。
                 self._click_hold = getattr(self, "_click_hold", 0) + 1
@@ -2058,12 +2058,12 @@ class DailyPipeline:
                     return action_wait(
                         450, f"等下一阶段cls出现 "
                              f"(hold {self._click_hold}, <2.5s): {reason}")
-                # 墙钟到 → tap likely lost → allow ONE retry, reset.
-                print(f"[Pipeline] click hold 2.5s → 重试: {reason}", flush=True)
+                # 墙钟到  tap likely lost  allow ONE retry, reset.
+                print(f"[Pipeline] click hold 2.5s  重试: {reason}", flush=True)
                 self._click_hold = 0
                 self._last_click_sig = sig
                 return action
-            # else: screen advanced → genuine new action, fall through to record.
+            # else: screen advanced  genuine new action, fall through to record.
 
         self._last_click_target = target
         self._last_click_reason = reason
@@ -2079,9 +2079,9 @@ class DailyPipeline:
 
         self._total_ticks += 1
 
-        # ⭐帧源预热闸(2026-08-01 新游戏日实锤): MuMu 冷启/镜像通道重建期的头
+        # 帧源预热闸(2026-08-01 新游戏日实锤): MuMu 冷启/镜像通道重建期的头
         # 几秒全是加载帧(在屏 ≤2 类), zero-wait 0.12s/tick 几秒就烧光收菜
-        # skill 的 `_phase_ticks > _ENTER_MAX` 进入预算 → BuyPyroxene/Club/
+        # skill 的 `_phase_ticks > _ENTER_MAX` 进入预算  BuyPyroxene/Club/
         # Schedule/Cafe 四连 "enter budget exhausted" 秒放弃, 黄点全亮活全丢
         # (mail.py 07-28 加过墙钟合取, 其余同形没传导 — 该在源头一处修)。
         # 运行头 30s 内检出数 <5 的帧不交给 skill; 墙钟超限放行(fail-open,
@@ -2097,11 +2097,11 @@ class DailyPipeline:
             _cfs = clean_frame_cache_stats()
             if _cfs["grab"] or _cfs["hit"]:
                 print(f"[Pipeline] digit 帧缓存: 真抓 {_cfs['grab']} / 复用 "
-                      f"{_cfs['hit']} → 省 ≈{_cfs['hit'] * 0.77:.1f}s", flush=True)
+                      f"{_cfs['hit']}  省 ≈{_cfs['hit'] * 0.77:.1f}s", flush=True)
 
         # ── frame-settle 历史(_dedup_click 稳定门用, 2026-07-17 用户"不要
         # 强拍"): 每 tick 记录 结构指纹+各cls质心, 连续两帧一致=页面稳定。
-        # 转场动画/列表滚动期间指纹或质心持续变化 → 导航类点击自然等待;
+        # 转场动画/列表滚动期间指纹或质心持续变化  导航类点击自然等待;
         # 稳定后首帧立即放行 = 零人为延迟, 纯事件驱动。
         _sig_now = self._screen_sig(screen)
         _cent_now = {}
@@ -2125,8 +2125,8 @@ class DailyPipeline:
         self._frame_stable = _stable
         if _stable:
             # 4s 超时窗语义=连续不稳定时长(2026-07-21 审计: t0 在豁免通道/非
-            # click 动作路径都不清零 → 陈旧携带 100s+ 后下一个导航点击可在
-            # 不稳定帧上被"秒放行")。每个稳定 tick 清零 → 纯收紧。
+            # click 动作路径都不清零  陈旧携带 100s+ 后下一个导航点击可在
+            # 不稳定帧上被"秒放行")。每个稳定 tick 清零  纯收紧。
             self._settle_block_t0 = 0.0
 
         # Hard-example mining 已停用(2026-07-16 审计 A 级): 每 tick 写盘
@@ -2170,8 +2170,8 @@ class DailyPipeline:
                             if b.cls_name in set(LOBBY_NAV_ICONS) and b.confidence >= 0.30)
                 if _navs >= 2:  # lobby (nav bar fully visible) — top bar reliable
                     # Read from a CLEAN ADB frame (2026-06-11 rule): the live
-                    # frame left-truncates these on transition (6497→497,
-                    # AP→9999, credit→None). One clean YOLO pass per 30s snapshot
+                    # frame left-truncates these on transition (6497497,
+                    # AP9999, creditNone). One clean YOLO pass per 30s snapshot
                     # is cheap; fall back to the live read only if no clean
                     # source is registered.
                     if get_clean_frame() is not None:
@@ -2187,34 +2187,34 @@ class DailyPipeline:
                         _cr = _read_topbar_count(screen, TOPBAR_CREDIT)
                         _py = _read_topbar_count(screen, TOPBAR_PYROXENE)
                     _prev_py = _RESOURCES.get("pyroxene")
-                    # ⛔帧级质量闸(2026-07-31 误急停结案): 采样帧的 credits 若
-                    # 相对基线**位数暴缩**(23,125,907→23,125 实锤), 说明这一帧
+                    # 帧级质量闸(2026-07-31 误急停结案): 采样帧的 credits 若
+                    # 相对基线**位数暴缩**(23,125,90723,125 实锤), 说明这一帧
                     # 顶栏读数整体不可信(转场/遮挡) — 同帧的 pyroxene 幻影值
-                    # (16,706→16,770)当时就是这么入的基线, 下一轮真值 16,726
+                    # (16,70616,770)当时就是这么入的基线, 下一轮真值 16,726
                     # (+20 任务收入)反被判 DROPPED 全线急停。整帧丢弃。
                     _cr_prev = _RESOURCES.get("credits")
                     if (_cr is not None and _cr_prev
                             and len(str(_cr)) < len(str(_cr_prev))):
-                        print(f"[Pipeline] 采样帧不可信(credits {_cr_prev}→{_cr} "
+                        print(f"[Pipeline] 采样帧不可信(credits {_cr_prev}{_cr} "
                               f"位数暴缩) — 本帧三币读数全部丢弃", flush=True)
                         _ap = _cr = _py = None
                     if _py is not None:
                         if _prev_py is not None and _py < _prev_py:
                             # Suspected drop. The #1 false positive is OCR
-                            # left-truncation (6497→497, stable across reads so
+                            # left-truncation (6497497, stable across reads so
                             # the old "2 consecutive" guard never helped, and
                             # it false-tripped a breach 2026-06-11).
-                            # ① A digit-count SHRINK is a truncation misread —
+                            #  A digit-count SHRINK is a truncation misread —
                             #    our skills never spend ~90% of the balance in
                             #    one 30s window. Reject outright.
                             if len(str(_py)) < len(str(_prev_py)):
-                                print(f"[Pipeline] pyroxene {_prev_py}→{_py}: digit "
+                                print(f"[Pipeline] pyroxene {_prev_py}{_py}: digit "
                                       f"shrink = OCR truncation, ignored (no spend)",
                                       flush=True)
                             else:
-                                # ② Same/more digits → confirm on TWO independent
+                                #  Same/more digits  confirm on TWO independent
                                 #    CLEAN ADB frames that AGREE (2026-07-17: 单次
-                                #    干净帧复读被 7/4 换位误读骗过 12471→12447
+                                #    干净帧复读被 7/4 换位误读骗过 1247112447
                                 #    误急停; 换位型误读每次错法不同, 两次独立读
                                 #    到同一错值概率极低; 真掉钱两读同真值必抓)。
                                 _py_c1 = _read_pyroxene_clean()
@@ -2223,25 +2223,25 @@ class DailyPipeline:
                                 if (_py_c1 is not None and _py_c1 == _py_c2
                                         and _py_c1 < _prev_py
                                         and len(str(_py_c1)) == len(str(_prev_py))):
-                                    print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → "
+                                    print(f"[Pipeline]  PYROXENE DROPPED {_prev_py}  "
                                           f"{_py_c1} (2x clean-frame confirmed) — MONEY "
                                           f"BREACH, ABORTING PIPELINE", flush=True)
                                     self._running = False
-                                    return action_done("⛔ pyroxene drop detected — aborted")
+                                    return action_done(" pyroxene drop detected — aborted")
                                 elif (_py_c1 is not None and _py_c1 == _py_c2
                                         and _py_c1 >= _prev_py):
-                                    # clean frame shows balance intact → glitch。
-                                    # ⚠抬基线与判掉钱同标准: 两读必须**一致**
+                                    # clean frame shows balance intact  glitch。
+                                    # 抬基线与判掉钱同标准: 两读必须**一致**
                                     # (2026-07-25 审计: 原 max(_c1,_c2) 让单次
-                                    # 超读抬高基线 → 之后真值两读一致 < 假基线
+                                    # 超读抬高基线  之后真值两读一致 < 假基线
                                     # = 假 MONEY BREACH 全线急停, 且无自愈路径)
                                     _RESOURCES["pyroxene"] = _py_c1
                                 else:
-                                    print(f"[Pipeline] pyroxene {_prev_py}→{_py}: clean "
+                                    print(f"[Pipeline] pyroxene {_prev_py}{_py}: clean "
                                           f"re-reads={_py_c1}/{_py_c2} disagree or "
                                           f"unconfirmed, ignoring", flush=True)
                         elif _prev_py is not None and _py > _prev_py:
-                            # ⭐基线上调与下调**对称**过闸(2026-07-31): 上调值
+                            # 基线上调与下调**对称**过闸(2026-07-31): 上调值
                             # 会成为下一轮 kill 的比较基线, 幻影高值入账 =
                             # 真值反被判掉钱。clean 双读一致才抬。
                             self._py_drop_pending = None
@@ -2251,7 +2251,7 @@ class DailyPipeline:
                             if _pu1 is not None and _pu1 == _pu2:
                                 _RESOURCES["pyroxene"] = _pu1
                             else:
-                                print(f"[Pipeline] pyroxene 上调 {_prev_py}→{_py} "
+                                print(f"[Pipeline] pyroxene 上调 {_prev_py}{_py} "
                                       f"clean复读不一致({_pu1}/{_pu2}) — 不入基线",
                                       flush=True)
                         else:
@@ -2261,7 +2261,7 @@ class DailyPipeline:
                         _RESOURCES["ap"] = _ap
                     if _cr is not None:
                         _RESOURCES["credits"] = _cr
-                    # ts 无条件更新(2026-07-11): 旧版只在读到值时更新 → 全
+                    # ts 无条件更新(2026-07-11): 旧版只在读到值时更新  全
                     # None 时下个 lobby tick 立即重跑整个连拍 = 重试风暴。
                     # 失败也等 30s 再试(kill-switch 周期不变)。
                     _RESOURCES["ts"] = _now
@@ -2270,25 +2270,25 @@ class DailyPipeline:
                               f"credits={_RESOURCES['credits']} pyroxene={_RESOURCES['pyroxene']}",
                               flush=True)
                 elif _now - _RESOURCES.get("watch_ts", 0.0) > 20:
-                    # ⛔非 lobby 掉钱盲区(2026-07-25 自查, 30 青辉石事故的
+                    # 非 lobby 掉钱盲区(2026-07-25 自查, 30 青辉石事故的
                     # 「为什么守卫没响」): kill-switch 整块挂在 `_navs >= 2`
                     # 也就是**只在大厅采样**。而 schedule 那一整趟 run 从头到尾
                     # 没回过大厅 —— 钱是在这个盲区里花掉的, 守卫一次都没跑。
                     # 不能把大厅那套 5 帧 clean 连拍搬到全程(每 30s 阻塞数秒),
                     # 所以做成两级:
-                    #   ① 廉价哨兵: 直接用本 tick **已经算好**的 YOLO 框读顶栏
+                    #    廉价哨兵: 直接用本 tick **已经算好**的 YOLO 框读顶栏
                     #      青辉石(零额外抓帧/推理; 没有顶栏图标时 OCR 都不跑)。
-                    #   ② 只有"疑似掉了"才升级到原来那套 2 次独立 clean 帧确认。
-                    # ⚠基线**绝不由 live 读写入**: live 帧在过渡时会左截断/超读,
+                    #    只有"疑似掉了"才升级到原来那套 2 次独立 clean 帧确认。
+                    # 基线**绝不由 live 读写入**: live 帧在过渡时会左截断/超读,
                     # 一次超读把基线抬高, 下一次正确读数就成了"掉钱"。基线只能
                     # 由大厅快照或 clean 复读更新。同样保留位数收缩过滤(位数变少
                     # = 截断误读, 我们的 skill 不会 30s 内花掉 90% 余额)。
-                    # ⚠live 顶栏读数**很脏**(离线实测 scratchpad/watch_replay.py:
+                    # live 顶栏读数**很脏**(离线实测 scratchpad/watch_replay.py:
                     # 事故 run 104 帧, 读出 97, 与真值一致仅 **56%** —— 14061 被
                     # 读成 14006 ×19 / 14906 ×2 / 截断成 61 ×13 / 4061 ×4)。
                     # 所以它只能当**触发器**, 绝不能当判据; 而且单次可疑不算数:
                     # 真花钱是**持久**的(余额一直低下去), OCR 噪声是**瞬时**的。
-                    # ⇒ 连续两次哨兵采样(相隔 ≥20s)都读到"位数相同且低于基线"
+                    #  连续两次哨兵采样(相隔 ≥20s)都读到"位数相同且低于基线"
                     #   才升级到昂贵的 2×clean 复核。代价是最多 20s 检测延迟 ——
                     #   无所谓, 这道闸本来就是事后急停, 不是事前拦截(事前拦截
                     #   是各 skill 的购买框结构闸)。
@@ -2300,14 +2300,14 @@ class DailyPipeline:
                                 and len(str(_live_py)) == len(str(_prev_py)))
                     if _suspect and self._py_drop_pending is None:
                         self._py_drop_pending = _live_py
-                        print(f"[Pipeline] ⚠非大厅哨兵: 青辉石 {_prev_py}→"
+                        print(f"[Pipeline] 非大厅哨兵: 青辉石 {_prev_py}"
                               f"{_live_py}(live, 单次) — 记疑, 等下一次采样复现",
                               flush=True)
                         _suspect = False
                     elif not _suspect:
                         self._py_drop_pending = None
                     if _suspect:
-                        print(f"[Pipeline] ⚠非大厅哨兵: 青辉石 {_prev_py}→"
+                        print(f"[Pipeline] 非大厅哨兵: 青辉石 {_prev_py}"
                               f"{_live_py}(live, 连续两次) — 升级 clean 复核",
                               flush=True)
                         _c1 = _read_pyroxene_clean()
@@ -2315,24 +2315,24 @@ class DailyPipeline:
                         _c2 = _read_pyroxene_clean()
                         if (_c1 is not None and _c1 == _c2 and _c1 < _prev_py
                                 and len(str(_c1)) == len(str(_prev_py))):
-                            print(f"[Pipeline] ⛔⛔ PYROXENE DROPPED {_prev_py} → "
+                            print(f"[Pipeline]  PYROXENE DROPPED {_prev_py}  "
                                   f"{_c1} (非大厅哨兵, 2x clean-frame confirmed) — "
                                   f"MONEY BREACH, ABORTING PIPELINE", flush=True)
                             self._running = False
-                            return action_done("⛔ pyroxene drop detected — aborted")
+                            return action_done(" pyroxene drop detected — aborted")
                         if (_c1 is not None and _c1 == _c2
                                 and _c1 >= _prev_py):
-                            # ⚠两读一致才准抬基线(同上大厅分支, 2026-07-25)
+                            # 两读一致才准抬基线(同上大厅分支, 2026-07-25)
                             _RESOURCES["pyroxene"] = _c1
                         else:
                             print(f"[Pipeline] 非大厅哨兵: clean 复读 {_c1}/{_c2} "
                                   f"不一致或未确认, 忽略(基线不动)", flush=True)
         except Exception as _e:
-            # ⛔绝不静默: 这里包着的是**金钱急停闸**。旧码 `except: pass` 意味着
+            # 绝不静默: 这里包着的是**金钱急停闸**。旧码 `except: pass` 意味着
             # 任何一处 AttributeError/import 失败都会让整个守卫悄悄死掉, 而日志
             # 上一个字都不会有 —— 事后翻日志只会看到"守卫从没报过警", 完全无法
             # 区分"没掉钱"和"守卫根本没跑"。这正是 [[log-is-not-truth]] 那类坑。
-            print(f"[Pipeline] ⚠⚠ 青辉石 kill-switch 本 tick 异常(守卫未生效): "
+            print(f"[Pipeline]  青辉石 kill-switch 本 tick 异常(守卫未生效): "
                   f"{type(_e).__name__}: {_e}", flush=True)
 
         # Early bail-out: BA / MuMu not actually visible.  Wide set of
@@ -2396,11 +2396,11 @@ class DailyPipeline:
                 f"trained cls — 有框才操作: we do NOT blind-tap]"
             )
             self._save_trajectory(screenshot_path, screen, None, wait_action)
-            # ⛔ ui 模型没加载成功 = 假 no-UI(眼睛缺失非画面空), 立刻 abort,
+            #  ui 模型没加载成功 = 假 no-UI(眼睛缺失非画面空), 立刻 abort,
             # 绝不走下面的 blind/wake-tap(2026-07-07: 假 no-UI + wake-tap 固定位
-            # 撞上 topbar AP「+」→ 反复戳开購買AP框)。fail-closed: 无眼不动手。
+            # 撞上 topbar AP「+」 反复戳开購買AP框)。fail-closed: 无眼不动手。
             if _UI_LOAD_FAILED:
-                print("[Pipeline] ⛔ ui model failed to load — aborting immediately "
+                print("[Pipeline]  ui model failed to load — aborting immediately "
                       "(fail-closed, no blind/wake taps without UI eyes). "
                       "Restart the server to reload the model.")
                 self._running = False
@@ -2431,7 +2431,7 @@ class DailyPipeline:
             # BRING-UP (有框才操作): with _BRINGUP_EXPOSE we do NOT blind-tap on
             # a 0-box screen — a black screen/loading should just wait, and an
             # undetected overlay is a HOLE to fix (train a cls), not paper over.
-            # It then waits → 30-tick abort saves frames for inspection.
+            # It then waits  30-tick abort saves frames for inspection.
             if self._no_ba_ticks >= 2 and not _BRINGUP_EXPOSE:
                 # Reward popups (獲得獎勵 + TOUCH TO CONTINUE) that the ui model
                 # doesn't detect at all land here. Target the actual dismiss
@@ -2446,15 +2446,15 @@ class DailyPipeline:
                 return blind
             # 放置立绘屏 (lobby idle showcase) wake-tap — EXPOSE-compatible.
             # The lobby auto-hides ALL UI after ~15s idle, leaving only the
-            # Live2D character → ZERO YOLO cls → counts as no-UI → 30-tick abort
+            # Live2D character  ZERO YOLO cls  counts as no-UI  30-tick abort
             # (live 2026-06-15: momo_talk 等大厅门控 skill 全被它卡死/误skip).
             # A BRIGHT (non-black) 0-box frame is the showcase, NOT a black
             # loading screen — a SINGLE benign wake-tap on the empty TOP-CENTER
-            # sky (0.5,0.05: never the character → no touch-dialogue; never a nav
-            # button → no wandering) reveals the UI so the next tick sees it.
+            # sky (0.5,0.05: never the character  no touch-dialogue; never a nav
+            # button  no wandering) reveals the UI so the next tick sees it.
             # This is NOT the prohibited blind-nav (no ESC/返回/return-to-lobby):
             # it only wakes an idle screen. Abort safety net preserved — if the
-            # tap can't reveal UI, _no_ba_ticks keeps climbing → 30-tick abort.
+            # tap can't reveal UI, _no_ba_ticks keeps climbing  30-tick abort.
             try:
                 _bright = screen.frame is not None and float(screen.frame.mean()) > 25.0
             except Exception:
@@ -2465,13 +2465,13 @@ class DailyPipeline:
             # 后自行重试。立绘屏唤醒场景不受影响(daily 系 skill 不声明)。
             _cur_skill = self.current_skill
             # 转场护栏(2026-07-11 实锤×2: 轮播 tap 点对活动页, 落地加载的零框
-            # 帧在第 3 个 tick 就被 back 拆掉): ①暗帧=加载转场, 只等不 back
-            # (盲区页如運輸船主页是亮的) ②距上次 click/back/swipe <8s = 转场
+            # 帧在第 3 个 tick 就被 back 拆掉): 暗帧=加载转场, 只等不 back
+            # (盲区页如運輸船主页是亮的) 距上次 click/back/swipe <8s = 转场
             # 窗口, 不 escape。
             _recent_act = (time.time()
                            - getattr(self, "_last_act_ts", 0.0)) < 8.0
-            # 加载序列护栏(2026-07-11 实锤×7: 点对活动页→加载中→后期零框帧
-            # →第3个零框tick被back拆掉): 距最近「加载中」检出<30s = 大概率
+            # 加载序列护栏(2026-07-11 实锤×7: 点对活动页加载中后期零框帧
+            # 第3个零框tick被back拆掉): 距最近「加载中」检出<30s = 大概率
             # 仍在加载/进场动画序列, 零框帧只等不动。(活动进场动画实测零框
             # 暗帧持续 18s+, 12s 窗口不够又被 6/30 拆一次; 代价=真盲区页
             # 的逃生推迟到 30s, 可接受 — no_ba 30-tick abort 兜底仍在。)
@@ -2488,7 +2488,7 @@ class DailyPipeline:
                 return esc
             if (_bright and not _recent_act and not _recent_loading
                     and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0):
-                # ⚠️位置从 (0.5,0.05) 挪到 (0.35,0.12) — 旧点自以为是"空天区", 实际
+                # ️位置从 (0.5,0.05) 挪到 (0.35,0.12) — 旧点自以为是"空天区", 实际
                 # 压在 topbar 的 AP「+」按钮带上(2026-07-07 假 no-UI 时反复戳开
                 # 購買AP框)。(0.35,0.12) = topbar 下方 / 左侧图标列右侧 / 角色左侧,
                 # 两代 lobby 皮肤实测都是空背景; 真立绘屏(UI 全隐)点哪都安全。
@@ -2504,7 +2504,7 @@ class DailyPipeline:
                 return wake
             return wait_action
 
-        # First lobby-visit of the run → snapshot all 8 nav-icon badges.
+        # First lobby-visit of the run  snapshot all 8 nav-icon badges.
         # Inexpensive (~5ms on a 4K screenshot) and only runs until the
         # first snapshot lands, so it can't impact steady-state perf.
         was_empty = not getattr(self, "_lobby_badges_first_seen", None)
@@ -2552,7 +2552,7 @@ class DailyPipeline:
         intercept = self._global_interceptor(screen, skill)
         if intercept:
             intercept = self._dedup_click(intercept)
-            # ⭐证据截胡防线(2026-07-25 live 实锤): interceptor 命中时 skill.tick()
+            # 证据截胡防线(2026-07-25 live 实锤): interceptor 命中时 skill.tick()
             # 这一帧被完全跳过, 而不少 skill 的"落地证据"正是 interceptor 要关掉
             # 的那个弹窗(奖励/升级)。把 interceptor 处理了什么告诉 skill, 让它能
             # 把"interceptor 替我关了奖励弹窗"当作到达证据 —— 否则它会以为动作没
@@ -2575,12 +2575,12 @@ class DailyPipeline:
         # (cafe / mail / schedule / club / craft / momo_talk / ...) override
         # should_run to look for their red/yellow dot — no dot = no work = skip.
         # The dot cls FLICKERS frame-to-frame (live: social 红点 detected on some
-        # lobby frames, missed on others → single-frame should_run false-skipped
+        # lobby frames, missed on others  single-frame should_run false-skipped
         # a real 未读 day, repeatedly). So we VOTE: should_run True on ANY of the
         # first _DOT_GATE_FRAMES frames = has work (run); only skip after that
         # many CONSECUTIVE no-dot frames. Keeps the dot-gate (user: 通过红黄点进入,
         # 别 always-enter) while being robust to weak-cls flicker. Battle/sweep
-        # skills don't override should_run (returns True) → pass on frame 1.
+        # skills don't override should_run (returns True)  pass on frame 1.
         _DOT_GATE_FRAMES = 4
         if not getattr(self, "_dot_gate_done", False):
             try:
@@ -2588,13 +2588,13 @@ class DailyPipeline:
                     self._dot_gate_done = True
                     print(f"[Pipeline] '{skill.name}' FORCE-RUN (--force-skills, dot gate bypassed)")
                 elif skill.should_run(screen):
-                    self._dot_gate_done = True  # dot seen this frame → run the skill
+                    self._dot_gate_done = True  # dot seen this frame  run the skill
                 else:
                     g = int(getattr(self, "_dot_gate_ticks", 0)) + 1
                     self._dot_gate_ticks = g
                     if g >= _DOT_GATE_FRAMES:
                         print(f"[Pipeline] '{skill.name}' should_run=False "
-                              f"({g}-frame vote, no dot) → skip")
+                              f"({g}-frame vote, no dot)  skip")
                         self._results.append(
                             SkillResult(
                                 skill_name=skill.name,
@@ -2621,16 +2621,16 @@ class DailyPipeline:
         # don't run skill logic on a transient loading frame.
         try:
             if screen.is_loading():
-                self._last_action_reason = "加载中 → 暂停等待"
+                self._last_action_reason = "加载中  暂停等待"
                 return {"action": "wait", "duration_ms": 600,
-                        "reason": "加载中 → 暂停等待", "_pipeline": True,
+                        "reason": "加载中  暂停等待", "_pipeline": True,
                         "_skill": skill.name, "_tick": skill.ticks}
         except Exception:
             pass
 
         # ── L2 页面图 · v1 只观测不接管 (2026-07-25) ────────────────────
         # 每 tick 认一次"我在哪个画面", **只在页面变化时**打印(否则刷屏)。
-        # ⛔现在绝不让它接管导航 —— 全语料实测(scratchpad/pg_eval.py, 92,855
+        # 现在绝不让它接管导航 —— 全语料实测(scratchpad/pg_eval.py, 92,855
         # 帧): 覆盖率 26.6% / 矛盾率 1.33% / 时序自洽 67.1%。覆盖率低是因为
         # 大量画面还没进图(Mail/DailyMission/MomoTalk/Craft/Story/战斗内 ——
         # screen_flow_draft 当天就没录到那些帧)。先跟 skill 的 sub_state 对账
@@ -2660,7 +2660,7 @@ class DailyPipeline:
         action_reason = str(action.get("reason", "") or "")
         self._last_action_reason = action_reason
 
-        # ⭐mutate-before-ack 防线 root 信号(2026-07-21): _dedup_click 把 skill 的
+        # mutate-before-ack 防线 root 信号(2026-07-21): _dedup_click 把 skill 的
         # click/back/swipe 静默转成 wait(稳定门/hold) — 之前无痕迹, 是幻影动作
         # bug 藏这么久的原因。置 skill.action_suppressed + 打日志: skill 可据此
         # 判定"我上个动作没落地"避免假前进; 且一切 suppression 可见可调试。
@@ -2671,7 +2671,7 @@ class DailyPipeline:
         except Exception:
             pass
         if _suppressed:
-            print(f"[Pipeline] ⚠ action suppressed (settle/hold): "
+            print(f"[Pipeline]  action suppressed (settle/hold): "
                   f"{getattr(skill, 'name', '?')} '{action_reason[:60]}'",
                   flush=True)
 
@@ -2713,13 +2713,13 @@ class DailyPipeline:
         )
         _is_battle_wait = any(kw in action_reason.lower() for kw in _battle_wait_keywords)
         # NEVER ESC-burst when a popup is currently on screen.  ESC on
-        # the exit-prompt popup ("是否結束?") confirms exit → lobby,
+        # the exit-prompt popup ("是否結束?") confirms exit  lobby,
         # which is exactly the "经常点进一个地方然后就喜欢退回主界面"
         # the user complained about.  Popups have their own handler
         # (see _handle_common_popups).
         # Pure-YOLO popup detection (OCR is disabled). A "backout-able" modal
         # = a 取消/X button is detected. We must NEVER ESC such a popup: ESC on
-        # the exit prompt ("是否結束?") CONFIRMS exit → drops to lobby (the
+        # the exit prompt ("是否結束?") CONFIRMS exit  drops to lobby (the
         # "点进一个地方就退回主界面" bug). 确认键 alone is NOT treated as a
         # popup here — a stuck confirm-only screen should still ESC-recover.
         _cancel_btn = find_yolo_box(screen, ["取消键"], min_conf=0.40)
@@ -2761,7 +2761,7 @@ class DailyPipeline:
             elif _popup_on_screen:
                 # Backout-able modal stuck (exit prompt / friend-cafe-visit /
                 # unhandled dialog). Dismiss via 取消/X — SAFE. Never ESC: ESC
-                # can CONFIRM the exit dialog → quits to lobby.
+                # can CONFIRM the exit dialog  quits to lobby.
                 _btn = _cancel_btn or _x_btn
                 _which = "取消键" if _cancel_btn else "弹窗叉叉"
                 action = action_click_box(
@@ -2780,7 +2780,7 @@ class DailyPipeline:
                     f"{self._stuck_counter} ticks  sub_state='{skill.sub_state}'  "
                     f"waiting='{action_reason}'  tick={skill.ticks}  frame={screenshot_path}"
                 )
-                # action stays the original wait → bot freezes here for inspection.
+                # action stays the original wait  bot freezes here for inspection.
             else:
                 print(
                     f"[Pipeline] Skill '{skill.name}' repeating wait '{action_reason}' "
@@ -2862,9 +2862,9 @@ class DailyPipeline:
             }
             for b in screen.yolo_boxes
         ]
-        # ⭐子 skill 的真实 sub_state(2026-07-25): DailyRoutine 是委托壳, 它的
+        # 子 skill 的真实 sub_state(2026-07-25): DailyRoutine 是委托壳, 它的
         # sub_state 只是子 skill 的名字("Schedule"), 子 skill 自己的状态机位置
-        # 从没落过盘 → 7 月全部 Schedule/Cafe/Shop... tick 都无法离线重放。
+        # 从没落过盘  7 月全部 Schedule/Cafe/Shop... tick 都无法离线重放。
         # 实锤: 想给 schedule 票数 fail-closed 建 replay fixture 时, 48 个 7 月
         # run 里 Schedule 的 tick 数 = 0(全被记成 DailyRoutine)。
         inner = ""
@@ -2894,11 +2894,11 @@ class DailyPipeline:
             "image_w": screen.image_w,
             "image_h": screen.image_h,
             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-            # ts 只有 1 秒精度, 而 tick ≈0.6s → 相邻 tick 常同秒, _dedup_click
+            # ts 只有 1 秒精度, 而 tick ≈0.6s  相邻 tick 常同秒, _dedup_click
             # 的 2.5s 稳定窗在离线重放里复现不出来。补一个浮点时钟。
             "ts_f": round(time.time(), 3),
         }
-        # ⭐帧龄埋点(2026-07-25): 没有这几个字段, 复盘时"点晚了"和"帧太旧"
+        # 帧龄埋点(2026-07-25): 没有这几个字段, 复盘时"点晚了"和"帧太旧"
         # 长得一模一样 —— banner 误入上期活动就是这么查了一整晚。
         _fm = getattr(self, "_frame_meta", None) or {}
         _t_in = getattr(self, "_t_frame_in", 0.0)
@@ -2915,7 +2915,7 @@ class DailyPipeline:
         }
         _fts = getattr(screen, "fresh_ts", 0.0) or 0.0
         if _fts:
-            # fresh 通道用 perf_counter 计时, 与墙钟不同源 → 只记相对帧龄。
+            # fresh 通道用 perf_counter 计时, 与墙钟不同源  只记相对帧龄。
             try:
                 _frame_rec["fresh_age_ms"] = round(
                     (time.perf_counter() - _fts) * 1000, 1)

@@ -5,25 +5,25 @@
 `server/app.py:2330` 记着一条 2026-06-05 的纪律: trajectory 帧因 overlay 烧录
 风险**已退役, 不再进 label 队列**(2026-05-28 删过 11 个烧录 run)。
 但那条纪律是 **DXcam 当主力帧源**时定的。现在主 tick 帧源已改成
-**scrcpy → ADB**(server/app.py:1255-1275), 两者都是 **Android 内部取流**,
+**scrcpy  ADB**(server/app.py:1255-1275), 两者都是 **Android 内部取流**,
 Windows 桌面层的 overlay **物理上进不去**。只有 fallback 链的
 `hf`(可能是 DXcam) 和 `bitblt`(窗口抓取) 仍会烧。
-⇒ 前提变了, 但**保证不了 100%** —— 所以不能靠"目检两张就放行", 要逐帧检测。
+ 前提变了, 但**保证不了 100%** —— 所以不能靠"目检两张就放行", 要逐帧检测。
 
 ## 判据(来自 overlay 自己的绘制代码, 不是猜)
 `scripts/yolo_overlay.py:138-149` 的调色板是
     colorsys.hsv_to_rgb(h/360, **S=0.9, V=1.0**)
 `:369` 用 `CreatePen(PS_SOLID, 3, color)` 画 **3px 实线**矩形, `:407` 同色写标签。
-⇒ 特征 = **高饱和(S≈0.9)高亮度(V≈1.0)的轴对齐细直线**。
+ 特征 = **高饱和(S≈0.9)高亮度(V≈1.0)的轴对齐细直线**。
 游戏 UI 的边框普遍带抗锯齿/渐变/低饱和, 极少出现成片的这种线。
 
-⛔**已实测的局限(2026-07-25, 必读)**: 这个判据在**战斗帧上误报严重**。
+**已实测的局限(2026-07-25, 必读)**: 这个判据在**战斗帧上误报严重**。
 实跑 176 帧 val 候选, score 最高的 147 分那张目检**完全干净** —— 战斗画面里
 本来就全是高饱和细线: 角色血条、buff 图标条、COST 分段条、AUTO 黄按钮、
-冰面条纹。⇒ **本工具只能当粗筛/告警, 不能当准入闸。**
+冰面条纹。 **本工具只能当粗筛/告警, 不能当准入闸。**
 真正可靠的帧源闸是**按图像尺寸认帧源**(见 build_val_gap_queue.SAFE_FRAME_SIZES):
-  3840x2160=ADB / 2560x1440=scrcpy → Android 内部取流, overlay 物理进不去
-  3612x2033 / 2364x1331 → 窗口抓取, 有风险
+  3840x2160=ADB / 2560x1440=scrcpy  Android 内部取流, overlay 物理进不去
+  3612x2033 / 2364x1331  窗口抓取, 有风险
 尺寸是硬证据, 像素统计是启发式 —— 优先用前者。
 
 跑:
@@ -55,7 +55,7 @@ def burn_score(img) -> tuple:
     mask = ((s >= _S_LO) & (s <= _S_HI) & (v >= _V_LO)).astype(np.uint8)
     if mask.sum() == 0:
         return 0, 0, 0
-    # 只保留"细"的结构: 原 mask 减去粗块(大核开运算的结果) → 去掉大色块
+    # 只保留"细"的结构: 原 mask 减去粗块(大核开运算的结果)  去掉大色块
     thick = cv2.morphologyEx(
         mask, cv2.MORPH_OPEN,
         cv2.getStructuringElement(cv2.MORPH_RECT,
@@ -115,7 +115,7 @@ def selftest() -> int:
     print(f"  干净帧 score = {base}")
     print(f"  合成 8 个 overlay 框后 score = {burned} (H {bh} / V {bv})")
     ok = burned >= base + 8
-    print(f"  → 检测器{'✅有效' if ok else '⛔失灵'}"
+    print(f"   检测器{'有效' if ok else '失灵'}"
           f" (合成正样本已存 {out}, 可目检)")
     return 0 if ok else 2
 
@@ -151,7 +151,7 @@ def main() -> int:
     if scores:
         print(f"  score: min={scores[0]} 中位={scores[len(scores)//2]} "
               f"p95={scores[int(len(scores)*0.95)]} max={scores[-1]}")
-    print(f"  ⛔疑似烧录(score ≥ {a.thr}): **{len(bad)}** / {len(rows)}")
+    print(f"  疑似烧录(score ≥ {a.thr}): **{len(bad)}** / {len(rows)}")
     for p, sc, h, v in sorted(bad, key=lambda r: -r[1])[:15]:
         print(f"     {os.path.basename(p):48} score {sc} (H{h}/V{v})")
     return 0

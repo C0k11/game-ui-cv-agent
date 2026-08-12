@@ -620,7 +620,7 @@ def capture_client(hwnd: int) -> Image.Image:
                     return img
             except Exception:
                 pass
-            # locked method failed/blank → fall through to re-probe
+            # locked method failed/blank  fall through to re-probe
             _CAPTURE_LOCK.pop(hwnd, None)
 
         first_img = None

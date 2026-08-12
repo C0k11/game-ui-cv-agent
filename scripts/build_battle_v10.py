@@ -2,12 +2,12 @@
 """Build battle_v10 dataset (2026-07-17, v9九池 + DEFEAT池 + botplay实战7池).
 
 新增 vs v9:
-  defeat_candidates_v10 28帧 — 新类 战斗失败(master 484) → local 18, nc=19。
+  defeat_candidates_v10 28帧 — 新类 战斗失败(master 484)  local 18, nc=19。
   用户人审 28 框(DEFEAT 红横幅口径); botplay 侧同帧副本已移
   _defeat_dedup_backup_20260717(矛盾标签双重毒防线)。
   run_20260715_*_botplay_clean ×7 (498帧) — combat 2.0 实战飞轮(scrcpy 源):
   battle 域框由 REMAP 过滤自取, ui/头像框自动丢弃(box 级路由)。
-战斗胜利+战斗失败均稀缺 → 分层切分保 val ≥2(v9 起的惯例)。
+战斗胜利+战斗失败均稀缺  分层切分保 val ≥2(v9 起的惯例)。
 """
 import random
 import shutil
@@ -25,10 +25,10 @@ SRCS = [RAW / n for n in [
     "axis_碧蓝档案_大决战_28_赫赛德_作业考古合集_p08_8_弹甲_4003w_BV19XFNzHEup_p8",
     "axis_碧蓝档案_大决战_32_白_黑_作业考古合集_p02_2_特甲_妹爱黑子3984w_BV1PtLn6zEF4_p2",
     "axis_碧蓝档案_大决战_27_薇娜_作业考古合集_p05_5_弹甲_国家队3949w_BV1giiYBeELr_p5",
-    # v10 增量: DEFEAT 池(cls484 战斗失败×28, 用户人审✓)
+    # v10 增量: DEFEAT 池(cls484 战斗失败×28, 用户人审)
     "defeat_candidates_v10",
-    # ⛔botplay×7(498帧)撤出 v10(2026-07-20 用户抓): battle 域框=battle v9 自己预标,
-    # 未过人审 — 自蒸馏会固化 v9 系统性误检。待用户审完(flywheel_review 清单②:
+    # botplay×7(498帧)撤出 v10(2026-07-20 用户抓): battle 域框=battle v9 自己预标,
+    # 未过人审 — 自蒸馏会固化 v9 系统性误检。待用户审完(flywheel_review 清单:
     # DEFEAT 口径/瞄准态/技能卡抽查)再进 v11。
     # "run_20260715_024743_botplay_clean",
     # "run_20260715_025638_botplay_clean",

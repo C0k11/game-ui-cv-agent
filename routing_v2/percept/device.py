@@ -8,7 +8,7 @@
   `screencap()` 只在**冷路径**(存活探针 / 冻结检测)可用, 且带显式告警。
 
 内建的三个环境坑（都是实锤过的，不是防御性编程）:
-  1. **端口会漂**: MuMu 实例重启 7555 → 16384。唯一权威 = MuMuManager info。
+  1. **端口会漂**: MuMu 实例重启 7555  16384。唯一权威 = MuMuManager info。
   2. **adbd 会卡死**: 三级恢复阶梯, setprop 那级实测无效（保留只为记录）。
   3. **分辨率不能写死**: `wm size` 问设备, 不假设 3840x2160。
      (语料里实测出 19 种分辨率 —— 写死过一次就够了。)
@@ -28,7 +28,7 @@ _MANAGER = r"C:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe"
 _FALLBACK_SERIAL = "127.0.0.1:7555"
 _PKG = "com.nexon.bluearchive"
 
-# ⛔全进程唯一的 ADB IO 锁。2026-06-15 实锤: 同 transport 上并发跑多 MB 的
+# 全进程唯一的 ADB IO 锁。2026-06-15 实锤: 同 transport 上并发跑多 MB 的
 # screencap 会**丢 MotionEvent** —— 表现成"点了没反应", 是最难查的形态。
 # feed 的 watchdog / 存活探针 / tap 全部走这把锁。
 IO_LOCK = threading.RLock()
@@ -37,8 +37,8 @@ IO_LOCK = threading.RLock()
 def _run(args, timeout=15) -> str:
     """跑一条 adb 子命令, 返回 stdout。
 
-    ⚠必须显式 encoding='utf-8': text=True 在中文 Windows 上默认走 GBK,
-    MuMu 实例名是中文「MuMu安卓设备」⇒ UnicodeDecodeError ⇒ **静默回落到
+    必须显式 encoding='utf-8': text=True 在中文 Windows 上默认走 GBK,
+    MuMu 实例名是中文「MuMu安卓设备」 UnicodeDecodeError  **静默回落到
     错的端口**, 比不解析更糟（2026-07-28 当场踩到）。
     """
     try:
@@ -65,7 +65,7 @@ def resolve_serial(vmindex: int = 0) -> str:
     except Exception:
         pass
     # 兜底: adb devices 里唯一 online 的 127.0.0.1:*
-    # ⚠只认 state == "device" —— offline 条目正是事故现场的样子
+    # 只认 state == "device" —— offline 条目正是事故现场的样子
     #   (7555 offline 与 16384 device 同时列着), 认错就等于没修。
     live = []
     for line in _run([_ADB, "devices"]).splitlines()[1:]:
@@ -98,10 +98,10 @@ class Device:
     def calibrate(self, frame_w: int, frame_h: int) -> Tuple[int, int]:
         """用**scrcpy 首帧的朝向**定 tap 坐标空间。开跑前必须调一次。
 
-        ⛔⛔2026-08-08 live 实锤（新架构第一次真机单步就撞上）:
+        2026-08-08 live 实锤（新架构第一次真机单步就撞上）:
            MuMu 的 `wm size` 在 **display 0/2/3 上一律返回 `2160x3840`（竖屏）**,
            而游戏在 display 2 上是**横屏 3840x2160**, `input tap` 用的也是横屏
-           坐标空间。直接信 `wm size` ⇒ 归一化 y=0.953 换算成 **3662 > 2160**,
+           坐标空间。直接信 `wm size`  归一化 y=0.953 换算成 **3662 > 2160**,
            整发点到屏幕外, 表现成"点了没反应"。
            （老代码把 3840x2160 写死反而"碰巧对"—— 这就是为什么写死坐标能活
              那么久：它在唯一被测过的那个配置上是对的。）
@@ -114,22 +114,22 @@ class Device:
         self._size = (hi, lo) if frame_w >= frame_h else (lo, hi)
         self._log(f"[device] tap 坐标空间 {self._size[0]}x{self._size[1]}"
                   f"（物理面板报 {a}x{b}，scrcpy 帧 {frame_w}x{frame_h} "
-                  f"→ 按{'横' if frame_w >= frame_h else '竖'}屏定向）")
+                  f" 按{'横' if frame_w >= frame_h else '竖'}屏定向）")
         return self._size
 
     @property
     def size(self) -> Tuple[int, int]:
-        """tap 坐标空间。⛔别写死 —— 语料里实测 19 种分辨率。"""
+        """tap 坐标空间。别写死 —— 语料里实测 19 种分辨率。"""
         if self._size is None:
             a, b = self._physical()
             self._size = (a, b)
-            self._log(f"[device] ⚠还没 calibrate()，暂用物理面板 {a}x{b}"
+            self._log(f"[device] 还没 calibrate()，暂用物理面板 {a}x{b}"
                       f" —— 横屏游戏上这几乎肯定是错的，开跑前请先 calibrate")
         return self._size
 
     # ── 动作（唯一允许走 ADB 的热路径）───────────────────────────────────
     def tap(self, nx: float, ny: float) -> bool:
-        """归一化落点 → input tap。实测稳态 32ms。"""
+        """归一化落点  input tap。实测稳态 32ms。"""
         w, h = self.size
         px, py = int(max(0.0, min(1.0, nx)) * w), int(max(0.0, min(1.0, ny)) * h)
         with IO_LOCK:
@@ -153,15 +153,15 @@ class Device:
                 capture_output=True, timeout=20).returncode == 0
 
     def key(self, keycode: str = "KEYCODE_BACK") -> bool:
-        """⛔剧情过场**不吃** KEYCODE_BACK（2026-08-07 实测连按 5 次全无响应）。
-        剧情的退出只能靠 剧情menu → 跳过故事键 → 确认键 那条链，见
+        """剧情过场**不吃** KEYCODE_BACK（2026-08-07 实测连按 5 次全无响应）。
+        剧情的退出只能靠 剧情menu  跳过故事键  确认键 那条链，见
         `flow/story.py`。这里保留按键能力，但没有任何 flow 用它做剧情逃生。"""
         with IO_LOCK:
             return subprocess.run(
                 [_ADB, "-s", self.serial, "shell", "input", "keyevent", keycode],
                 capture_output=True, timeout=15).returncode == 0
 
-    # ── 冷路径（⚠1588ms，绝不进决策循环）────────────────────────────────
+    # ── 冷路径（1588ms，绝不进决策循环）────────────────────────────────
     def screencap(self, _reason: str = ""):
         """ADB 抓一张。**只允许**存活探针/冻结检测/离线标定用。
 
@@ -178,7 +178,7 @@ class Device:
             fr = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
         except Exception:
             fr = None
-        self._log(f"    [device] ⚠ADB screencap({_reason}) "
+        self._log(f"    [device] ADB screencap({_reason}) "
                   f"{(time.time()-t0)*1000:.0f}ms — 冷路径专用")
         return fr
 
@@ -186,7 +186,7 @@ class Device:
     def game_running(self) -> bool:
         """游戏进程在不在。
 
-        ⛔`dumpsys mCurrentFocus` **不可信**（2026-08-07 实锤）: 它报前台是
+        `dumpsys mCurrentFocus` **不可信**（2026-08-07 实锤）: 它报前台是
         `app.lawnchair`（Android 桌面），而游戏好好地停在大厅 —— MuMu + Unity
         全屏不注册 window focus。所以这里只数**进程**，页面身份交给 YOLO。
         """
@@ -206,32 +206,32 @@ class Device:
     def recover(self) -> bool:
         """adbd 卡死三级阶梯（2026-08-02 / 08-07 各救活一次）。
 
-        L1  disconnect + kill-server + start-server + connect   ← 通常够
-        L2  setprop ctl.restart adbd                            ← **实测无效**,
+        L1  disconnect + kill-server + start-server + connect    通常够
+        L2  setprop ctl.restart adbd                             **实测无效**,
             保留只为记录"这条路走不通", 别再浪费时间试
-        L3  MuMuManager control -v 0 restart                    ← 核弹, 要重拉游戏
+        L3  MuMuManager control -v 0 restart                     核弹, 要重拉游戏
         """
-        self._log("[device] ⛔adb 不通 → L1 重连")
+        self._log("[device] adb 不通  L1 重连")
         _run([_ADB, "disconnect", self.serial])
         _run([_ADB, "kill-server"], 30)
         _run([_ADB, "start-server"], 30)
         _run([_ADB, "connect", self.serial], 30)
         if self.alive():
-            self._log("[device] ✅L1 救回")
+            self._log("[device] L1 救回")
             return True
-        self._log("[device] L1 失败 → L2 setprop（实测无效，走个过场）")
+        self._log("[device] L1 失败  L2 setprop（实测无效，走个过场）")
         self.sh("setprop", "ctl.restart", "adbd")
         time.sleep(2.0)
         if self.alive():
             return True
-        self._log("[device] ⛔L3 MuMuManager restart —— 实例重启，端口会漂")
+        self._log("[device] L3 MuMuManager restart —— 实例重启，端口会漂")
         _run([_MANAGER, "control", "-v", "0", "restart"], 120)
         for _ in range(40):
             time.sleep(3.0)
-            self.serial = resolve_serial()      # ⭐端口会变，必须重解析
+            self.serial = resolve_serial()      # 端口会变，必须重解析
             self._size = None
             if self.alive():
-                self._log(f"[device] ✅实例回来了 serial={self.serial}")
+                self._log(f"[device] 实例回来了 serial={self.serial}")
                 time.sleep(5.0)
                 self.launch_game()
                 return True
@@ -240,7 +240,7 @@ class Device:
     def frozen(self) -> bool:
         """游戏画面冻死判据 —— **连续两帧 md5 完全一致**（唯一可靠判据）。
 
-        ⚠这条只在"YOLO 认不出任何页面 + 长时间不动"时才值得跑（两次 ADB 抓帧
+        这条只在"YOLO 认不出任何页面 + 长时间不动"时才值得跑（两次 ADB 抓帧
         = 3s+）。日常靠 scrcpy 的 seq 变化就够了。
         """
         import hashlib

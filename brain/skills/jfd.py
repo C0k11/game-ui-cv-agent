@@ -2,7 +2,7 @@
 
 Verified flow: data/_missions_probe_log.md (Step 13-22). Structurally identical
 to bounty (same TicketSweepSkill base), with two differences:
-- Sweeps cost BOTH tickets AND AP (~15 AP/sweep) → _COSTS_AP=True. The base AP
+- Sweeps cost BOTH tickets AND AP (~15 AP/sweep)  _COSTS_AP=True. The base AP
   gate refuses to sweep when AP is insufficient (never buys AP with pyroxene).
 - The 3 academy branch tiles (三一 / 格黑娜 / 千年) have NO YOLO cls (v6 gap,
   task #22), so we select by normalized position in the right panel (probe).
@@ -19,7 +19,7 @@ from brain.skills.ticket_sweep import TicketSweepSkill
 from brain.skills import ui_classes as UC
 
 
-# Academy → right-panel position (no cls — probe-measured; documented v6 gap).
+# Academy  right-panel position (no cls — probe-measured; documented v6 gap).
 _ACADEMY_POS = {
     "三一": (0.92, 0.253),
     "格黑娜": (0.915, 0.401),
@@ -31,12 +31,12 @@ _DEFAULT_ORDER = ["千年", "三一", "格黑娜"]
 class JointFiringDrillSkill(TicketSweepSkill):
     _TICKET_CLS = UC.TICKET_SCHOOL_EXCHANGE
     _HUB_TILE = UC.HUB_SCHOOL_EXCHANGE
-    _PAGE_NAME = ""              # JFD has no PAGE_SIGNATURE → rely on ticket cls
+    _PAGE_NAME = ""              # JFD has no PAGE_SIGNATURE  rely on ticket cls
     _CONFIG_KEY = "jfd_academy"
     # User-corrected 2026-06-11: with the monthly passes (大小月卡, active on
     # this account) JFD sweeps cost NO AP — gating on AP wrongly exited with
     # 15 free tickets unspent (live, twice). The no-pass case is still safe
-    # without the gate: an unaffordable sweep greys the confirm (defense ③
+    # without the gate: an unaffordable sweep greys the confirm (defense 
     # cancels) and the order runs JFD before batch_sweep eats the AP anyway.
     _COSTS_AP = False
 

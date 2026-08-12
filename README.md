@@ -4,14 +4,13 @@ A computer-vision agent that plays a mobile game's daily routine by *looking* at
 screen and clicking, with no game-file modification and no cloud calls. The interesting
 part isn't the automation — it's the **self-built data pipeline** behind it.
 
-**Data pipeline.** 47,057 raw frames captured from live runs (Android-internal
+**Data pipeline.** 82,590 raw frames captured from live runs (Android-internal
 `screencap`, so no overlay contamination) → automated dedup (pHash), train/val
 **leakage screening** (same-session frames are excluded by timestamp prefix, not by
 filename — renamed pools would otherwise slip through), and per-class label audits →
-**33,912 labeled images / 432,276 boxes** in the three active training sets.
+**52,750 labeled images / 749,286 boxes** across the annotation pools.
 
-**Models.** Three specialized YOLO detectors, **455 classes** with real training
-samples: a 184-class game-UI detector (98.1% mAP50), a 252-class character-portrait
+**Models.** Three specialized YOLO detectors, **492 live classes** in the shared master table: a game-UI detector (249 UI classes in the current build), a 252-class character-portrait
 detector (99.3%), and a 19-class battle-unit detector (99.2%). Digit-OCR is used only
 for reading numbers (currency, tickets, stamina) — never for deciding *what* is on
 screen; that is always the detector's job.
@@ -22,10 +21,12 @@ and if a balance can't be read, the bot does nothing rather than guess. Each gat
 false-positive rate was measured over the full 798-frame corpus of confirm dialogs
 before shipping, not reasoned about.
 
-**Known limits (stated deliberately).** The 98.1% mAP50 is measured on a validation
-set that covers **129 of the 184 learned UI classes (70%)** — 55 classes have no
-val instances at all, so their regressions are currently untestable. The val pool
-also predates the most recent event UI. Rebuilding it is the top open item.
+**Known limits (stated deliberately).** In the current UI build (train 25,375 frames / val 10,830 frames), **179 of 249
+UI classes (72%) clear the bar of >=30 train boxes and >=10 val boxes**. The rest
+are either newly added state-pair classes with only a handful of samples, or
+legacy classes with no val instances at all — their regressions stay untestable
+until more data is captured. This is stated up front rather than folded into a
+headline mAP number.
 
 ---
 
@@ -39,7 +40,7 @@ also predates the most recent event UI. Rebuilding it is the top open item.
 - ✅ 实时战斗感知:scrcpy 视频流 17.9fps(帧龄 0.02 秒、不怕窗口遮挡)+ 19 类战斗检测(我方/敌方/5 种 Boss/胜利/HUD 全套)+ 技能卡角色识别;视频流层带**预热轮换双缓冲**——实测定位到 MuMu 对每条镜像流有 17.0 秒内在寿命上限(与帧数/码率无关),流活到 10 秒即预热新流无缝接管,消灭了旧架构每 17 秒一次的 3-5 秒感知盲窗
 - ✅ AI 自己打战斗:行为树控牌(急救>集火 Boss>AOE 清群>单体循环)+ 闭环拖拽瞄准(按住后持续跟踪目标再松手),活动 Boss 关实战 71-91 秒通关
 - 🧱 架构升级中(L1→L3):列表结构化解析已上线(台账主键从**屏幕坐标**改成**关号**)、页面图 + BFS 路径规划已上线但**只观测不接管**(实测覆盖率还不够,不敢交导航)、竣工判据 `CLEAN/LEFTOVER/UNKNOWN` 三态已上线——bot 现在会在每个 skill 出口自己喊“活没干干净”,不用等人肉眼发现
-- 🚧 进行中:总力战抄轴(视频轴表→自动执行)、日常全链路视频流化(高频感知线程已上线)、UI 模型 val 补齐(184 个已学会的类里有 55 类没 val 量尺)
+- 🚧 进行中:总力战抄轴(视频轴表→自动执行)、日常全链路视频流化(高频感知线程已上线)、UI 模型 val 补齐(249 个 UI 类里 70 个未达 val 量尺门槛)
 
 ## At a Glance
 
@@ -48,7 +49,7 @@ also predates the most recent event UI. Rebuilding it is the top open item.
 | **Platform** | Windows 10 / 11, NVIDIA GPU |
 | **Game runtime** | MuMu Player 12 |
 | **Daily** | `DailyRoutine` (10 sub-skills) + event planner + sweep chain |
-| **Vision** | YOLO26m UI `v14` (485-wide head, **184 classes learned**) + YOLO26x avatar `v6` (252-cls) + YOLO26s battle `v10` (19-cls) + YOLO26n emoticon |
+| **Vision** | YOLO26m UI `v16` (528-wide head, **249 UI classes in build**) + YOLO26x avatar `v6` (252-cls) + YOLO26s battle `v10` (19-cls) + YOLO26n emoticon |
 | **OCR** | PP-OCRv4 fine-tuned on BA glyphs — numeric fields only (all page/button *decisions* are pure YOLO cls as of 2026-07) |
 | **Battle** | scrcpy feed 17.9fps (occlusion-proof) → blackboard → behavior-tree card-play (shipped: event boss 71-91s clears) + ByteTrack lock (ally idsw -66%) |
 | **Safety** | structural purchase-dialog gate (quantity-stepper signal, orthogonal to icon detection) + non-lobby pyroxene sentinel + per-game-day dispatch ledger |

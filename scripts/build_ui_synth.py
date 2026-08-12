@@ -7,11 +7,11 @@ it never learns the element independent of its background. This composites the
 element onto MANY different backgrounds instead:
 
   • SLOTS: paste random character avatars (data/captures/角色头像/) into the
-    template's slot rects → infinite BACKGROUND diversity (different students
+    template's slot rects  infinite BACKGROUND diversity (different students
     behind the same UI).
   • UI STAMPS: the FIXED UI elements (the unread badge, the bond-story button)
     stay at their template-defined rects and are LABELLED in every frame with
-    their cls. → the model learns "this element = this cls, on any background".
+    their cls.  the model learns "this element = this cls, on any background".
 
 Template schema additions (set in the dashboard synth editor):
   "target": "ui"                       # mark this template for UI-cls synth
@@ -115,7 +115,7 @@ def synth_context(ctx: str, count: int = 300, seed: int = 0, val: bool = False):
     written = 0
     for i in range(count):
         bg = bg0.copy()
-        # paste a random avatar into each slot → background diversity
+        # paste a random avatar into each slot  background diversity
         for s in slots:
             if avatars:
                 av = avatars[_rng.randint(0, len(avatars))]
@@ -138,11 +138,11 @@ def synth_context(ctx: str, count: int = 300, seed: int = 0, val: bool = False):
         written += 1
     print(f"synth '{ctx}': wrote {written} frames + labels to {out_dir}")
     print(f"  stamps: {[(int(s['cls'])) for s in stamps]}  slots: {len(slots)}  avatars: {len(avatars)}")
-    print(f"  → add '_synth_{ctx}' to build_ui_dataset TRAIN_SOURCES")
+    print(f"   add '_synth_{ctx}' to build_ui_dataset TRAIN_SOURCES")
 
 
 def _crop_sprites(src_runs, classes, per_cls_cap=400):
-    """Crop labelled instances of each cls from one or MORE src_runs → list of
+    """Crop labelled instances of each cls from one or MORE src_runs  list of
     (cls, sprite_bgr, (cx,cy,w,h) norm). Real UI-element pixels. `per_cls_cap`
     caps sprites/class so a 10k-frame class (返回键) can't crowd out the rest."""
     if isinstance(src_runs, str):
@@ -259,12 +259,12 @@ def synth_overlay(classes, src_runs=None, count=300,
         if bg is None:
             continue
         cls, spr, (cx, cy, w, h) = sprites[_rng.randint(0, len(sprites))]
-        # ① main sprite at a BIG-jittered position (break slot-memorization)
+        #  main sprite at a BIG-jittered position (break slot-memorization)
         jcx = min(0.97, max(0.03, cx + _rng.uniform(-jitter, jitter)))
         jcy = min(0.97, max(0.03, cy + _rng.uniform(-jitter, jitter)))
         ncx, ncy, nw, nh = _paste(bg, spr, jcx, jcy, w, h)
         labels = [f"{cls} {ncx:.6f} {ncy:.6f} {nw:.6f} {nh:.6f}"]
-        # ② neighbor distractors (red/yellow dots), labelled (break coupling)
+        #  neighbor distractors (red/yellow dots), labelled (break coupling)
         if distractors and _rng.uniform() < distractor_prob:
             for _ in range(_rng.randint(1, 4)):
                 dcls, dspr, (_dx, _dy, dw, dh) = distractors[_rng.randint(0, len(distractors))]
@@ -283,7 +283,7 @@ def synth_overlay(classes, src_runs=None, count=300,
     print(f"overlay synth '_synth_{out_name}': wrote {written} frames "
           f"(jitter={jitter}, distractors={list(distractor_classes)})")
     print(f"  main sprites: {dict(sc)}  distractor sprites: {len(distractors)}  bg pool: {len(bgs)}")
-    print(f"  → add '_synth_{out_name}' to build_ui_v2 REAL_SOURCES")
+    print(f"   add '_synth_{out_name}' to build_ui_v2 REAL_SOURCES")
 
 
 def main():
@@ -301,7 +301,7 @@ def main():
             if argv[i] == "--count": count = int(argv[i + 1]); i += 2; continue
             if argv[i] == "--seed": seed = int(argv[i + 1]); i += 2; continue
             i += 1
-        synth_overlay(classes, count=count, out_name=out, seed=seed)  # src_runs=None → 全 REAL_SOURCES
+        synth_overlay(classes, count=count, out_name=out, seed=seed)  # src_runs=None  全 REAL_SOURCES
         return
     ctx = argv[0]; count = 300; seed = 0; val = False
     i = 1

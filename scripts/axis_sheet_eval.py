@@ -6,9 +6,9 @@
 前提是 tracker 还锁着人 — 本脚本逐时刻回放检查:
 
   该帧我方 GT 框数(人审过的池才有) / tracker 我方轨迹数 /
-  开场站位绑定(左→右=编成序)的各 slot 主 tid 是否仍存活且没换人
+  开场站位绑定(左右=编成序)的各 slot 主 tid 是否仍存活且没换人
 
-输出逐行 ✓/✗ + 总锁定率 = 系统级 99% 的验收标准打样。
+输出逐行 / + 总锁定率 = 系统级 99% 的验收标准打样。
 
 用法:
   py scripts/axis_sheet_eval.py <pool_substr>                 # 用 data/axis_sheets/ 里同源轴表
@@ -55,7 +55,7 @@ def main():
     chains = build_gt_chains(pool, n_frames, W, H)
     tf = run_tracker(per_frame, n_frames, CFG, pool=pool)
 
-    # ── 开场站位绑定: slot i(左→右) → 主 tid(与 track_eval --slots 同源) ──
+    # ── 开场站位绑定: slot i(左右)  主 tid(与 track_eval --slots 同源) ──
     ally = [c for c in chains
             if Counter(cls for cls, _ in c.values()).most_common(1)[0][0] == 476]
     ally.sort(key=lambda c: min(c))
@@ -99,7 +99,7 @@ def main():
         alive_s = ",".join(f"s{s}" for s in alive) or "-"
         print(f"{r['t']:>7.2f} {r['cost']:>4} {r['char']:<10.10} "
               f"{r['action']:<16.16} {gt_n:>5} {len(trk_ally):>6} "
-              f"{alive_s:<14} {'✓' if good else '✗'}")
+              f"{alive_s:<14} {'' if good else ''}")
     if rows:
         print(f"\n锁定可用率: {ok}/{len(rows)} = {ok / len(rows):.1%}")
 

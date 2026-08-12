@@ -36,7 +36,7 @@ def main():
         moved = 0
         for txt in sorted(pdir.glob("frame_*.txt")):
             body = txt.read_text(encoding="utf-8").strip()
-            if body:   # has ≥1 label line → keep
+            if body:   # has ≥1 label line  keep
                 continue
             jpg = txt.with_suffix(".jpg")
             bdir = BACKUP / pool
@@ -48,7 +48,7 @@ def main():
         if moved:
             print(f"{pool}: moved {moved} empty frames")
         total += moved
-    print(f"\n[done] moved {total} empty (no-UI/立绘) frames → {BACKUP}")
+    print(f"\n[done] moved {total} empty (no-UI/立绘) frames  {BACKUP}")
 
 
 if __name__ == "__main__":

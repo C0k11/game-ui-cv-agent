@@ -4,7 +4,7 @@
 区域选择**动态扫**（夏莱办公室 / 夏莱居住区 / 格黑娜 / 阿拜多斯 / 千年 都有 cls），
 配置里没写就按屏上从左到右依次进。
 
-⛔`房间区域未解锁`(50) 在场的房间跳过。`房间区域`(42) train=0，别用。
+`房间区域未解锁`(50) 在场的房间跳过。`房间区域`(42) train=0，别用。
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from routing_v2.state import vocab as V
 class ScheduleFlow(ExitMixin, Flow):
     name = "schedule"
     module = "schedule"
-    # ⭐avatar 也要：全體課程表面板的房间卡**本身无 cls**，但卡上的学生头像
+    # avatar 也要：全體課程表面板的房间卡**本身无 cls**，但卡上的学生头像
     #    是 avatar 模型的 cls —— 点头像即跳到该房间（08-08 实测面板页）。
     yolo = ("ui", "avatar")
 
@@ -36,30 +36,30 @@ class ScheduleFlow(ExitMixin, Flow):
         高效得多 —— 点学生头像 = 直接跳进那个房间。"""
         if obs.find(V.SCHED_TICKET, 0.30, region=(0.0, 0.15, 1.0, 1.0)) is None:
             return None                      # 不是这个面板，交回去
-        # ⛔顺序：**先看有没有「課程表開始」**（房间资讯弹窗盖在面板上时，
+        # 顺序：**先看有没有「課程表開始」**（房间资讯弹窗盖在面板上时，
         #    面板的头像还检得到 —— 再点头像会把弹窗关掉，开/关乒乓）。
         start = obs.find(V.SCHED_START, 0.40)
         if start is not None:
-            # ⛔别在这里清空黑名单（第一版这么写，live 立刻打脸）：
+            # 别在这里清空黑名单（第一版这么写，live 立刻打脸）：
             #   「点了进不去」的原因是**那个房间今天已经开过课**——这是持久事实，
-            #   不会因为我在别的房间上了一节课就变回来。清空 ⇒ 每上一节课就
+            #   不会因为我在别的房间上了一节课就变回来。清空  每上一节课就
             #   把「冬」重试一遍，每轮白扔一次点击。
             #   成功上课的那位下一帧自己就带绿勾了，本来也不会再被选中。
             return tap_box(start, "課程表開始（上课）", counter="lessons")
-        # ⛔**带绿勾的头像 = 今天已经上过课**（08-08 实测：conf argmax 总选中
-        #    已完成的 0.99 那位 → 她的资讯弹窗里没有開始键 → 死循环）。
+        # **带绿勾的头像 = 今天已经上过课**（08-08 实测：conf argmax 总选中
+        #    已完成的 0.99 那位  她的资讯弹窗里没有開始键  死循环）。
         checks = obs.all(V.GREEN_CHECK, 0.40)
         def _done(b):
             return any(abs(c.cx - b.cx) < 0.06 and abs(c.cy - b.cy) < 0.08
                        for c in checks)
-        # ⛔⛔**防空转黑名单**（08-10 live 实锤：连点「冬」三次，每次都
+        # **防空转黑名单**（08-10 live 实锤：连点「冬」三次，每次都
         #    「页内生效」但页面纹丝不动，票券卡在 5/7 不再消耗）。
         #    根因是绿勾判据的**粒度错了**：绿勾长在**学生**头像上，而"还能不能
         #    上课"是**房间**级的 —— 一个没绿勾的学生，如果他所在的房间今天
         #    已经开过课，点他就是没反应。（绿勾漏检也会走到同一个死胡同。）
-        #    ⇒ 不去猜哪种，直接**点过就拉黑**：真进了房间会走到 SCHED_START
+        #     不去猜哪种，直接**点过就拉黑**：真进了房间会走到 SCHED_START
         #      分支并清空黑名单；没进去的下一帧自动换人。
-        #    ⚠这正是 memory 那条「一圈 N 区必须伴随 N-1 次帧证」的同族 ——
+        #    这正是 memory 那条「一圈 N 区必须伴随 N-1 次帧证」的同族 ——
         #      **每一发点击都必须有"确实发生了什么"的证据，否则不许重复。**
         tried = self.state.setdefault("tried", [])
         for name in (self.cfg.get("target_students") or []):
@@ -79,11 +79,11 @@ class ScheduleFlow(ExitMixin, Flow):
             # 所在房间今天都开过课），别在这儿耗着。
             x = obs.find(V.CLOSE_X, 0.55)
             if x is not None:
-                return tap_box(x, f"没绿勾的 {len(tried)} 位都试过了 → 关面板换区域")
+                return tap_box(x, f"没绿勾的 {len(tried)} 位都试过了  关面板换区域")
         # 面板上一个学生头像都没有 = 所有房间都上完课了
         x = obs.find(V.CLOSE_X, 0.55)
         if x is not None:
-            return tap_box(x, "全体课程表已空 → 关面板")
+            return tap_box(x, "全体课程表已空  关面板")
         return None
 
     def on_lobby(self, obs, st):
@@ -147,17 +147,17 @@ class ScheduleFlow(ExitMixin, Flow):
             return tap_box(roster, "打开全体课程表", once="roster")
 
         if self.stalled(st, 120):
-            # ⛔⛔2026-08-12 用户点名:「课程表游历方式有问题，**去看老的代码，
+            # 2026-08-12 用户点名:「课程表游历方式有问题，**去看老的代码，
             #    那个游历逻辑是打磨过的**」。
             #    原来这里是 `exit_step()` **退回区域选择页再挑下一个** ——
             #    而那一页能认出的区域只有 `SCHOOL_AREAS` 那 5 个 cls，
-            #    实测屏上区域数 **≥9**（[[region_switch_truth]]）⇒ 大半区域
+            #    实测屏上区域数 **≥9**（[[region_switch_truth]]） 大半区域
             #    根本进不去，08-12 live 只跑到 `[2/2]`，票用不完。
-            #    ⭐老 `brain/skills/schedule.py` 的做法（文件头注释写得很清楚）：
+            #    老 `brain/skills/schedule.py` 的做法（文件头注释写得很清楚）：
             #      **不回列表** —— 在区域内屏直接按 `ARROW_LEFT` 翻到下一个区域，
             #      列表是环绕的，一路 ARROW_LEFT 就能走遍全部，
             #      最多走 14 个（BA 约 10 个）就收工。
-            #    ⇒ 照抄这套：优先 ARROW_LEFT 翻页，翻不动（没检出箭头）才退回列表。
+            #     照抄这套：优先 ARROW_LEFT 翻页，翻不动（没检出箭头）才退回列表。
             n = int(self.state.get("regions_seen", 0)) + 1
             if n > 14:
                 return self._wrap(f"已经翻过 {n-1} 个区域（一圈都走完了）")
@@ -166,12 +166,12 @@ class ScheduleFlow(ExitMixin, Flow):
                 def _next(k=n):
                     self.state["regions_seen"] = k
                     self.once_reset()
-                return tap_box(arrow, f"这区没课可上 → ← 翻到下一个区域"
+                return tap_box(arrow, f"这区没课可上   翻到下一个区域"
                                       f"（第 {n}/14 个）", post=_next)
-            # 没有左箭头 = 不在区域内屏（或版面变了）⇒ 退回列表那条老路兜底
+            # 没有左箭头 = 不在区域内屏（或版面变了） 退回列表那条老路兜底
             self.state["area_i"] += 1
             self.once_reset()
-            self.log("这个区域没有可上的课，且没检出左切换 → 退回区域列表")
+            self.log("这个区域没有可上的课，且没检出左切换  退回区域列表")
             return self.exit_step(obs, prefer_close=False) or wait("等返回控件")
         return wait("等课程表控件")
 
@@ -183,7 +183,7 @@ class ScheduleFlow(ExitMixin, Flow):
         b = obs.find([V.GOT_REWARD, V.CONFIRM], 0.40)
         if b is None:
             return wait("等结果页")
-        # 上完一节课 → 允许重开全体课程表挑下一个房间（once 标记归还）
+        # 上完一节课  允许重开全体课程表挑下一个房间（once 标记归还）
         return tap_box(b, "关掉课程结果",
                        post=lambda: self.once_reset("roster"))
 
@@ -191,7 +191,7 @@ class ScheduleFlow(ExitMixin, Flow):
         t0, t1 = self.state["tickets0"], self.state["tickets"]
         det = f"上课 {self.state['lessons']} 次"
         if t0 is not None and t1 is not None:
-            det += f"，票 {t0}→{t1}"
+            det += f"，票 {t0}{t1}"
         if t1 is not None and t1 > 0:
             return self.finish(Outcome.LEFTOVER, f"{why}；{det}（还剩 {t1} 张票）")
         if t1 is None:

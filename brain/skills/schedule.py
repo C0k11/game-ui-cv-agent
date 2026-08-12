@@ -8,31 +8,31 @@ held-ticket digits 「持有票券 X/7」.
 
 High-level flow
 ---------------
-1. lobby → click NAV_SCHEDULE → region-select screen.
-2. Click 夏莱办公室 (list row 0 — region tiles are under-trained, GAP) → enter
-   its region-internal 選擇課程表 screen → ARROW_LEFT once = jump to the LAST
+1. lobby  click NAV_SCHEDULE  region-select screen.
+2. Click 夏莱办公室 (list row 0 — region tiles are under-trained, GAP)  enter
+   its region-internal 選擇課程表 screen  ARROW_LEFT once = jump to the LAST
    (newest) academy region (list wraps). Traverse backwards (ARROW_LEFT) from
    there.
-3. Per region: click SCHED_ALL (全體課程表) → popout. fused_avatar reads the
+3. Per region: click SCHED_ALL (全體課程表)  popout. fused_avatar reads the
    heads, clustered into rooms (≤3 heads/room, x-gap ~0.057, room-gap ~0.15;
    rows at y≈0.39 / 0.60 / 0.81). Detect ROOM_LOCKED:
      • Case A (locks present, region not max level): goal = level this region.
        Dispatch EVERY un-clicked room to spend tickets here.
      • Case B (no locks, max level): goal = only the dashboard target students.
        Dispatch a room iff a target head sits in it; else skip.
-   When no room is left to click → close popout (BTN_CLOSE_X) → ARROW_LEFT next.
-4. Per-room dispatch (one room): click a head → 課程表資訊 (SCHED_START) → click
-   SCHED_START → 課程表報告 (BTN_CONFIRM) → click confirm → heads go green, ticket
+   When no room is left to click  close popout (BTN_CLOSE_X)  ARROW_LEFT next.
+4. Per-room dispatch (one room): click a head  課程表資訊 (SCHED_START)  click
+   SCHED_START  課程表報告 (BTN_CONFIRM)  click confirm  heads go green, ticket
    −1, back to popout.
-5. End: digit-OCR 「持有票券 X/7」 == 0 → done.
+5. End: digit-OCR 「持有票券 X/7」 == 0  done.
 6. Fallback: traversed every region (wrapped to start) and targets not found but
-   tickets remain → dispatch any un-clicked room to spend the rest (don't waste).
+   tickets remain  dispatch any un-clicked room to spend the rest (don't waste).
 
 Single-step state machine (strict — one state, one action per tick; see probe
 log "自動循環寫糙的教訓"). The two dispatch popups are checked FIRST in tick(),
 above the sub-state dispatch, by priority:
-   1. report popup   : BTN_CONFIRM in center-bottom band  → click confirm
-   2. info popup      : SCHED_START                        → click start
+   1. report popup   : BTN_CONFIRM in center-bottom band   click confirm
+   2. info popup      : SCHED_START                         click start
 so they're handled identically no matter which sub_state we're in. We never
 blind-click head positions to "advance" — that lands on popup backgrounds
 (the bug that drained tickets). Ticket dispatch is confirmed by the digit-OCR
@@ -58,24 +58,24 @@ from brain.skills import ui_classes as UC
 
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
-# ⛔按游戏日累计的派遣台账(2026-07-25 事故后新增)。旧的 _dispatch_count 是
+# 按游戏日累计的派遣台账(2026-07-25 事故后新增)。旧的 _dispatch_count 是
 # **per-run** 的: 事故当天早些 session 已派 4 次, 本跑只数到 3, 于是 >=7 的硬
-# 上限形同虚设, 票早已耗尽却照点「課程表開始」→ 弹出青辉石购买框。
+# 上限形同虚设, 票早已耗尽却照点「課程表開始」 弹出青辉石购买框。
 _SCHED_STATE_FILE = _DATA_DIR / "schedule_state.json"
 
 
 def _game_day() -> str:
-    """BA 游戏日(UTC+8 03:00 刷新 = JST 04:00, 2026-08-01 帧证 2:35→3:18 任務 8/8→1/8) ISO 日期 —— 日累计台账的 key。
+    """BA 游戏日(UTC+8 03:00 刷新 = JST 04:00, 2026-08-01 帧证 2:353:18 任務 8/81/8) ISO 日期 —— 日累计台账的 key。
 
-    ⛔2026-07-27 实测事故: 旧版用**裸 `datetime.now()`(host 本地时钟)**, 而游戏
+    2026-07-27 实测事故: 旧版用**裸 `datetime.now()`(host 本地时钟)**, 而游戏
     日界锚在**设备/服务器时区**。实测 host=UTC-4 / device=Asia/Shanghai(UTC+8)
-    → **device = host + 12h**:
-        host 03:15 → _game_day() = 2026-07-26
-        host 04:32 → _game_day() = 2026-07-27     (同一个游戏日内翻了天)
-    后果: 台账 key 一翻, `_load_sched_state()` 判 game_day 不匹配 → 返回
-    `dispatched=0` → **单日上限闸(_day_dispatched >= 7)从零重新计数**。
+     **device = host + 12h**:
+        host 03:15  _game_day() = 2026-07-26
+        host 04:32  _game_day() = 2026-07-27     (同一个游戏日内翻了天)
+    后果: 台账 key 一翻, `_load_sched_state()` 判 game_day 不匹配  返回
+    `dispatched=0`  **单日上限闸(_day_dispatched >= 7)从零重新计数**。
     今晚实况: 台账 = {"game_day":"2026-07-26","dispatched":4}, 而当天真实派遣
-    **7** 次(票 7→0) —— 闸已经被打断, 而票=0 还去点開始正是弹青辉石购买框的路。
+    **7** 次(票 70) —— 闸已经被打断, 而票=0 还去点開始正是弹青辉石购买框的路。
 
     改成锚在**服务器时区**(繁中服 UTC+8), 与 host 在哪个时区无关。
     (不用 adb 读设备时钟: 那是每次调用一次 IPC, 挡在热路径上; 服务器时区是
@@ -98,7 +98,7 @@ def _load_sched_state() -> dict:
 
 
 def _save_sched_state(state: dict) -> None:
-    # ⛔回归/离线回放绝不许写生产台账(2026-07-28): _reconcile_ledger 挂进
+    # 回归/离线回放绝不许写生产台账(2026-07-28): _reconcile_ledger 挂进
     # _read_tickets 后, 票数 fixture 用的**历史帧**会在同游戏日内把真台账
     # 钳掉(测试改生产状态)。regression_suite 设 BA_REPLAY=1 全局禁写。
     import os as _os
@@ -120,19 +120,19 @@ _ROOM_X_GAP = 0.085         # heads within this x-gap belong to the same room
 _ROOM_MAX_HEADS = 3         # a room holds at most 3 students
 # Dispatched rooms render DIMMED (live calib 2026-06-09: dispatched rooms mean
 # head brightness 101-110 vs fresh 174-210 — clean bimodal split). Below this
-# ⇒ already dispatched, never re-click. Model-free, works across sessions.
+#  already dispatched, never re-click. Model-free, works across sessions.
 _DIM_DISPATCHED_MAX = 140.0
 
 # Dispatch popups (info / report) live in a center-bottom band. Both
 # SCHED_START and the report's BTN_CONFIRM sit at cx≈0.499, cy≈0.76-0.77.
 _DIALOG_BAND = (0.30, 0.66, 0.70, 0.90)
-# ★ MONEY DEFENSE: a 青辉石 icon in the dialog BODY (NOT the top-bar balance at
+#  MONEY DEFENSE: a 青辉石 icon in the dialog BODY (NOT the top-bar balance at
 # cy<0.10) = a spend-pyroxene 购买课程表券 dialog. VERIFIED on run_20260602_200900:
 # the buy-dialog pyroxene sits at cx≈0.59/0.33, cy≈0.577 (conf 0.43-0.88). This
 # band covers it with margin and stays clear of the report's _DIALOG_BAND (cy
 # 0.66+), so it never false-fires on a normal 课程表报告.
 _PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
-# ⛔购买框结构判据(2026-07-25 事故后新增, 坐标取自 run_20260724_201229
+# 购买框结构判据(2026-07-25 事故后新增, 坐标取自 run_20260724_201229
 # tick_0101 实测): 数量步进器一排在 cy≈0.480, 覆盖带留足余量。
 # 課程表報告 弹窗**没有**这排控件, 所以不会误伤正常派遣流程。
 _QTY_STEPPER_CLS = (UC.QTY_MIN, UC.QTY_MIN_GREY, UC.QTY_MAX, UC.QTY_MAX_GREY,
@@ -159,7 +159,7 @@ _OPEN_ROOM_SETTLE = 4          # (保留: 其他处引用) — 开房等待已�
 _OPEN_ROOM_SETTLE_SEC = 3.0    # 課程表資訊 弹窗渲染实测 1-2s, 3s 宽松兜底
 _SWITCH_MAX = 12
 _EXIT_MAX = 14
-# ⭐区域身份指纹(2026-07-25 帧证据修): 5 个区域的**区域内屏 cls 集合完全一样**
+# 区域身份指纹(2026-07-25 帧证据修): 5 个区域的**区域内屏 cls 集合完全一样**
 # (全体课程表/左右切换/顶栏), YOLO 分不出谁是谁 —— 唯一区分是右上「RANK N 区域名」
 # 横幅。用感知哈希当到达态判据(纯图像变化, 不是 OCR 文字匹配)。
 # 实测(run_20260724_185527, 228 tick): 同区域哈希恒定成一簇, 换区汉明距远大于 6。
@@ -168,15 +168,15 @@ _REGION_TITLE_BAND = (0.705, 0.125, 0.995, 0.178)
 # 标定(2026-07-25, 实测 6 屏目检过标题 + trajectory 231 帧):
 #   同区最大 MAD = 4.41(含背景不同/右箭头退回同一区)
 #   异区最小 MAD = 12.05
-# 取 8.0 居中。⚠popout 淡出转场帧 MAD 可达 77 → 到达判定必须**连续两帧**确认。
+# 取 8.0 居中。popout 淡出转场帧 MAD 可达 77  到达判定必须**连续两帧**确认。
 _REGION_DIFF_MAD = 8.0
-_SWITCH_GAP_SEC = 5.0          # 这么久标题还没变 → 改用坐标 GAP 落点
-_SWITCH_VERIFY_SEC = 14.0      # 再等不到 → 大声报警 fail-closed, 绝不假装切过
+_SWITCH_GAP_SEC = 5.0          # 这么久标题还没变  改用坐标 GAP 落点
+_SWITCH_VERIFY_SEC = 14.0      # 再等不到  大声报警 fail-closed, 绝不假装切过
 _POPOUT_CLOSE_SEC = 1.6        # 关 popout 后等它真关掉的墙钟(到期才允许重发)
 # 報告確認 后等报告真关掉的墙钟。取 1.2s: 实测报告弹窗淡出 ~0.6s, 留一倍余量;
 # 比 popout 短是因为它挡住的是**下一次派遣**, 卡太久会吃掉排课节奏。
 _REPORT_CONFIRM_SEC = 1.2
-# 上一发疑似被稳定门吞时的**最小**重发间隔。⚠不能是 0 —— action_suppressed
+# 上一发疑似被稳定门吞时的**最小**重发间隔。不能是 0 —— action_suppressed
 # 反映的是上一 tick 的吞, 可能陈旧, 零冷却会在报告关闭动画里连发(2026-07-28)。
 _REPORT_SUPPRESSED_RETRY_SEC = 0.5
 _REPORT_CONFIRM_MAX_FIRES = 3   # 同一份报告最多点几次(封顶后交给下游 re-scan)
@@ -198,10 +198,10 @@ _MAX_REGIONS = 14
 def _load_schedule_targets() -> List[str]:
     """Read the schedule target-student list from the active app_config profile.
 
-    Same pattern as CafeSkill._load_invite_targets: app_config.json →
-    active_profile → profiles[active].schedule_target_students. Returns a list
+    Same pattern as CafeSkill._load_invite_targets: app_config.json 
+    active_profile  profiles[active].schedule_target_students. Returns a list
     of 中文角色名 matching fused_avatar cls_name (e.g. "莉央(战斗)"). Empty list
-    ⇒ Case B has no targets, so the fallback (spend remaining tickets on any
+     Case B has no targets, so the fallback (spend remaining tickets on any
     room) takes over.
     """
     try:
@@ -231,8 +231,8 @@ class ScheduleSkill(BaseSkill):
         # Badge-gating is a LOBBY decision only: mid-flow screens (e.g. the
         # 全體課程表 popout we may be resumed on) show 课程表票 WITHOUT a dot
         # and would wrongly skip the whole skill (live 2026-06-09: resumed on
-        # the popout → "skip Schedule (no dot)" with 3 tickets left). Off-lobby
-        # ⇒ run; enter/recover handles navigation from wherever we are.
+        # the popout  "skip Schedule (no dot)" with 3 tickets left). Off-lobby
+        #  run; enter/recover handles navigation from wherever we are.
         if not screen.is_lobby():
             return True
         return self.dot_on_entry(screen, self._LOBBY_DOT_ENTRIES)
@@ -240,7 +240,7 @@ class ScheduleSkill(BaseSkill):
     def __init__(self):
         super().__init__("Schedule")
         # 一圈 ≈ 5 区 × ~25 tick ≈ 125。放开捡漏圈次数后(2026-07-25 修), 花光
-        # 7 张票最坏要 3-4 圈 = 375-500 tick → 旧值 320 会在第 3 圈被 pipeline
+        # 7 张票最坏要 3-4 圈 = 375-500 tick  旧值 320 会在第 3 圈被 pipeline
         # 判超时 reset(与 event_quest 400 同款: 上限卡在工作量之下, 活没干完
         # 就被砍)。给到 900 留足余量; 真跑飞由"某圈零派出即退"+tickets==0 收敛。
         self.max_ticks = 900
@@ -253,14 +253,14 @@ class ScheduleSkill(BaseSkill):
         self._open_room_t0: float = 0.0     # 開房等待墙钟起点(0=未开始计时)
         self._enter_attempts: int = 0
         self._targets: List[str] = []
-        # ⛔2026-07-25 三态化: 旧值是 `int = -1` 的**假三态 sentinel**, 一个 bug
-        # 两头出血 —— ①金钱侧几道闸写的是 `_tickets == 0`, -1 不等于 0 于是
-        # 源头闸哑火; ②资源侧的兜底闸写的是 `_tickets is not None and > 0`,
+        # 2026-07-25 三态化: 旧值是 `int = -1` 的**假三态 sentinel**, 一个 bug
+        # 两头出血 —— 金钱侧几道闸写的是 `_tickets == 0`, -1 不等于 0 于是
+        # 源头闸哑火; 资源侧的兜底闸写的是 `_tickets is not None and > 0`,
         # -1 既不是 None 也不 >0, 于是**捡漏永远够不着**, 剩票全废。同一个变量
         # 被两批代码按两套语义读, 因为 -1 到底算"未知"还是算"一个数"从没定义过。
         # 改成真三态: None=未知 / 0=用光 / >0=还有。语义写死在这里:
-        #   花钱类判断 → 必须 `_tickets == 0` 或 `is not None and > 0`(未知不放行)
-        #   找活类判断 → 可以 `is None or > 0`(未知时继续找, 反正花不出去)
+        #   花钱类判断  必须 `_tickets == 0` 或 `is not None and > 0`(未知不放行)
+        #   找活类判断  可以 `is None or > 0`(未知时继续找, 反正花不出去)
         self._tickets: Optional[int] = None   # None=未知 / 0=用光 / >0=还有
         self._dispatch_count: int = 0       # confirmed reports = tickets spent (hard cap)
         # 今日累计派遣(跨 run 持久, 硬上限真正的依据)
@@ -269,18 +269,18 @@ class ScheduleSkill(BaseSkill):
         self._office_clicked: bool = False  # clicked 夏莱办公室 yet?
         self._jumped_to_last: bool = False  # done the initial ARROW_LEFT jump?
         self._regions_seen: int = 0         # regions whose popout we've opened
-        self._full_circle: bool = False     # traversed all regions → fallback
+        self._full_circle: bool = False     # traversed all regions  fallback
         self._circle_start_dispatch: int = 0  # _dispatch_count at circle start(空转退出用)
         self._circle_start_switches: int = 0  # _verified_switches at circle start(假圈检测)
         self._region_count: int = 0         # 区域列表帧实测区数(0=没测到, 回落 _MAX_REGIONS)
         self._circle_first_sig = None       # 本圈起点区域的标题指纹(None=还没锚)
         self._circle_closed: bool = False   # 标题指纹已转回起点 = 一圈走完
         self._popout_close_issued: bool = False  # 关 popout 已发出, 等帧证据(after-ack)
-        # ⭐2026-07-28 live: 報告確認 也要 after-ack(与 popout 同构)。见 PRIORITY 1。
+        # 2026-07-28 live: 報告確認 也要 after-ack(与 popout 同构)。见 PRIORITY 1。
         self._report_confirm_issued: bool = False
         self._report_confirm_fires: int = 0   # 同一份报告已点几次(重发封顶)
         self._ls_recoveries: int = 0        # Location-Select bounce count (row-walk + cap)
-        # ⭐区域切换到达态验证(2026-07-25): 点 ARROW_LEFT 前的标题指纹 / 起点墙钟 /
+        # 区域切换到达态验证(2026-07-25): 点 ARROW_LEFT 前的标题指纹 / 起点墙钟 /
         # 已发 tap 数。标题真变了才算切成功 —— 绝不用"我发过点击"当证据。
         self._switch_from_sig = None          # 起点标题缩略图(np.ndarray|None)
         self._sig_pending = None              # 基线候选(需连续两帧一致)
@@ -335,21 +335,21 @@ class ScheduleSkill(BaseSkill):
 
     # 「持有票券 X/7」 sits BELOW the popout title at cy≈0.215 — the probe's
     # initial guess (cy≈0.10-0.17) was ~0.1 too HIGH, so digit-OCR read EMPTY
-    # the entire run → tickets=-1 → the ==0 money-gates never fired → 青辉石 buy
+    # the entire run  tickets=-1  the ==0 money-gates never fired  青辉石 buy
     # bug. Calibrated on run_20260602_200900 tick_0064: this band reads "1/7"
     # cleanly. screen.frame is the raw full-res BGR array (run_digit_ocr crops +
     # upscales).
-    # ⛔2026-07-28: 降级为**兜底**。它是全仓最后一个写死矩形, 实测(a-run 12 帧
+    # 2026-07-28: 降级为**兜底**。它是全仓最后一个写死矩形, 实测(a-run 12 帧
     # + b-run 3 帧)被 cls 锚定**严格压制**: 锚定读对的帧它全读对, 它读 None 的
     # 6 帧锚定照样读得出; 唯一分歧那帧它给 '11/7'(首位复读伪影)而锚定给 '1/7'。
     _TICKET_REGION = (0.48, 0.185, 0.67, 0.25)
 
-    # ⭐票数锚点(2026-07-28 实测定标)。「持有票券 X/7」左边那个票券图标就是
+    # 票数锚点(2026-07-28 实测定标)。「持有票券 X/7」左边那个票券图标就是
     # `课程表票` cls, 实测 conf 0.96~0.97 稳定。两个合法位置:
     #   cy≈0.142  全體課程表 popout 表头(区域屏可见时)
     #   cy≈0.209  popout 内那一行
-    # ⛔**必须带 y 门**: 同一个 cls 在 `課程表資訊` 弹窗里还有第三处
-    #   cy≈0.698 —— 那是「3 → 2」**派遣前后指示器**, 往右读出来是 '32'/'21'/'10',
+    # **必须带 y 门**: 同一个 cls 在 `課程表資訊` 弹窗里还有第三处
+    #   cy≈0.698 —— 那是「3  2」**派遣前后指示器**, 往右读出来是 '32'/'21'/'10',
     #   格式合法、数值荒谬。不设 y 门的"找到票图标就往右读"必然中招。
     _TICKET_ANCHOR_CY = (0.08, 0.30)
     _TICKET_SPANS = (4.5, 6.5)     # 两个窗口互为交叉复核
@@ -359,7 +359,7 @@ class ScheduleSkill(BaseSkill):
     def exit_report(self):
         """课程表的竣工判据 = 票用干净了没。
 
-        ⛔用户原话: "为什么不把课程表票用干净" —— 昨天剩 7 张、今天剩 5 张,
+        用户原话: "为什么不把课程表票用干净" —— 昨天剩 7 张、今天剩 5 张,
         两次都是**用户肉眼**发现的, 因为 skill 的出口只问"转完一圈没"。"""
         _day = self._day_dispatched
         if self._tickets == 0:
@@ -375,22 +375,22 @@ class ScheduleSkill(BaseSkill):
         return ("UNKNOWN", f"票数异常 {self._tickets}")
 
     def _reconcile_ledger(self, cur: int) -> None:
-        """⭐台账自相矛盾钳制(2026-07-28 用户点破「台账当上限误杀真实资源」)。
+        """台账自相矛盾钳制(2026-07-28 用户点破「台账当上限误杀真实资源」)。
 
-        屏上还剩 cur 张 ⇒ 本游戏日**最多**已派 _MAX_TICKETS-cur 次。台账比这
+        屏上还剩 cur 张  本游戏日**最多**已派 _MAX_TICKETS-cur 次。台账比这
         还大, 说明它是上一个票周期的残值(当天实锤: 屏上 7/7 满票, 台账
-        dispatched=7 → `max(4,7)>=7` 触顶 → **3 张真实票被误杀**, 我还报成
-        "触顶是正确判断")。屏上票数是唯一权威 → 台账钳到物理上限并落盘
+        dispatched=7  `max(4,7)>=7` 触顶  **3 张真实票被误杀**, 我还报成
+        "触顶是正确判断")。屏上票数是唯一权威  台账钳到物理上限并落盘
         (带 tickets_seen 留痕, 下次直接看得见"台账 7 屏上 7/7"这种矛盾)。
 
         方向安全: 只会把"已派次数"钳**小** = 允许把屏上真实存在的票花掉;
-        绝不放大。票=0 时 _max_possible=7 ≥ 任何合法台账值 → 不动, 上限闸
-        与 ⛔票到顶_零点击 fixture 的语义原样有效。⛔台账本体不删(2026-07-25
+        绝不放大。票=0 时 _max_possible=7 ≥ 任何合法台账值  不动, 上限闸
+        与 票到顶_零点击 fixture 的语义原样有效。台账本体不删(2026-07-25
         跨 session 事故防线): 票数读不出时它仍是唯一兜底。"""
         _max_possible = _MAX_TICKETS - cur
         if self._day_dispatched > _max_possible:
-            self.log(f"⛔台账自相矛盾: 屏上剩 {cur}/{_MAX_TICKETS}(今日最多已派 "
-                     f"{_max_possible}) 但台账记 {self._day_dispatched} → "
+            self.log(f"台账自相矛盾: 屏上剩 {cur}/{_MAX_TICKETS}(今日最多已派 "
+                     f"{_max_possible}) 但台账记 {self._day_dispatched}  "
                      f"旧周期残值, 钳到 {_max_possible}")
             self._day_dispatched = _max_possible
             _save_sched_state({"game_day": _game_day(),
@@ -413,7 +413,7 @@ class ScheduleSkill(BaseSkill):
             return None
 
         def _one(raw_s):
-            """raw → 合法票数 or None(含首位复读修正, 与下方旧逻辑同一套)。"""
+            """raw  合法票数 or None(含首位复读修正, 与下方旧逻辑同一套)。"""
             p = parse_count(raw_s)
             if p is None:
                 return None
@@ -426,7 +426,7 @@ class ScheduleSkill(BaseSkill):
                         c = f
             return c if (c is not None and 0 <= c <= _MAX_TICKETS) else None
 
-        # ── ① cls 锚定(主路径) ────────────────────────────────────────────
+        # ──  cls 锚定(主路径) ────────────────────────────────────────────
         _lo, _hi = self._TICKET_ANCHOR_CY
         anchors = [b for b in (getattr(screen, "yolo_boxes", None) or [])
                    if b.cls_name == UC.SCHED_TICKET and b.confidence >= 0.30
@@ -448,15 +448,15 @@ class ScheduleSkill(BaseSkill):
             self._reconcile_ledger(cur)
             return cur
         if len(vals) > 1:
-            # ⛔两个窗口/两个锚点读出不同的数 = 至少一个错 → 一律丢弃。
+            # 两个窗口/两个锚点读出不同的数 = 至少一个错  一律丢弃。
             # 票数是金钱闸的输入, 分歧时宁可"这帧读不出"(保留上次有效值)。
-            self.log(f"⛔tickets 交叉复核不一致 {sorted(vals)} — 弃({' '.join(dbg)})")
+            self.log(f"tickets 交叉复核不一致 {sorted(vals)} — 弃({' '.join(dbg)})")
             return None
         if anchors:
             # 有锚点但读不出(弹窗遮住数字) = 正常的 fail-closed, 不噪声刷屏
             return None
 
-        # ── ② 写死矩形(兜底, 仅在**一个锚点都没有**时) ────────────────────
+        # ──  写死矩形(兜底, 仅在**一个锚点都没有**时) ────────────────────
         # 保留它是为了"不劣于改动前"; 且加一道: 必须带 "/上限" 才认, 光秃秃一个
         # 数字可能是任何东西。
         raw = run_digit_ocr(screen.frame, self._TICKET_REGION)
@@ -467,15 +467,15 @@ class ScheduleSkill(BaseSkill):
         parsed = _p
         if parsed is None:
             if raw:
-                # ⭐拒绝必留痕(2026-07-24 workflow[30]): 静默 None 使 tickets=-1
+                # 拒绝必留痕(2026-07-24 workflow[30]): 静默 None 使 tickets=-1
                 # 的根因不可见, 今天 5 区全 -1 只能帧考古
                 self.log(f"tickets 读拒: parse_count fail (raw {raw!r})")
             return None
         cur, _tot = parsed
-        # ⭐首位复读修复(2026-07-25 live 实锤): run_digit_ocr 碎片拼接会复读首位
-        # 数字 —— 实测 raw '55/7'(真值 5/7), memory 早记过 1/7→11/7 同款。
-        # 旧码只会"读拒"→ _tickets 停在 -1 → _pick_room 的兜底闸
-        # (self._tickets is not None and > 0) 永远挡住 → **空房间+剩票全废**。
+        # 首位复读修复(2026-07-25 live 实锤): run_digit_ocr 碎片拼接会复读首位
+        # 数字 —— 实测 raw '55/7'(真值 5/7), memory 早记过 1/711/7 同款。
+        # 旧码只会"读拒" _tickets 停在 -1  _pick_room 的兜底闸
+        # (self._tickets is not None and > 0) 永远挡住  **空房间+剩票全废**。
         # 只在**已经越界**(cur>上限, 本来就要丢弃)时尝试去掉重复的首位, 且结果
         # 必须 <= 上限才接受。方向保守: 修出来的值只会更小 = 派得更少, 不会多花。
         if cur is not None and cur > _MAX_TICKETS:
@@ -483,7 +483,7 @@ class ScheduleSkill(BaseSkill):
             if len(s) >= 2 and s[0] == s[1]:
                 fixed = int(s[1:])
                 if 0 <= fixed <= _MAX_TICKETS:
-                    self.log(f"tickets 首位复读修正: {cur}→{fixed} (raw {raw!r})")
+                    self.log(f"tickets 首位复读修正: {cur}{fixed} (raw {raw!r})")
                     cur = fixed
         if cur is None or cur < 0 or cur > _MAX_TICKETS:
             self.log(f"tickets 读拒: cur={cur} 越界/复读伪值 (raw {raw!r})")
@@ -497,9 +497,9 @@ class ScheduleSkill(BaseSkill):
     # ── screen-state helpers (pure YOLO) ──────────────────────────────────
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
-        """购买/数量选择对话框判据。★ HARD money stop。
+        """购买/数量选择对话框判据。 HARD money stop。
 
-        ⛔2026-07-25 实锤事故(30 青辉石被花掉): 旧版**单点**依赖"对话框体内检出
+        2026-07-25 实锤事故(30 青辉石被花掉): 旧版**单点**依赖"对话框体内检出
         青辉石 cls"。那一帧(run_20260724_201229 tick_0101)屏上明明是
         「購買課程表票券 單價💎30 總購買價格💎30」, 但 YOLO **一个 body 青辉石
         都没检出**(小图标压在深色价格条上), 只检出顶栏余额那个 —— 判据返回
@@ -514,7 +514,7 @@ class ScheduleSkill(BaseSkill):
           C 旧的 body 青辉石(保留, 多一路零成本)。
         """
         # C: 旧路(body 青辉石)
-# ⛔2026-07-25 全量 cls 审计删除: 原来这里还并了一路 "清辉石"(master idx2),
+# 2026-07-25 全量 cls 审计删除: 原来这里还并了一路 "清辉石"(master idx2),
         # 注释写着"危险检测器多收一路零成本" —— 实测**训练 0 框 / 92k tick 实战
         # 0 检出**, 那一路从来没收到过任何东西, 只是制造"有两路信号"的假象。
         # idx2 是 idx30「青辉石」的错别字重复类(BA 官方写作 青輝石), 本就不该
@@ -564,18 +564,18 @@ class ScheduleSkill(BaseSkill):
         ):
             return True
         # The close-X flickers (live 2026-06-09: popout clearly open, X cls
-        # missed one frame → "popout closed" re-click loop). Backup signature
+        # missed one frame  "popout closed" re-click loop). Backup signature
         # that exists ONLY on the popout:
         #   • 课程表票 in the TOP-CENTER header band — the region screen's ticket
         #     counter sits top-LEFT (cx≈0.06), the popout's at cx≈0.45,cy≈0.21.
-        # ⛔ REMOVED (2026-06-13, user-caught bug): ROOM_LOCKED → open. The map's
+        #  REMOVED (2026-06-13, user-caught bug): ROOM_LOCKED  open. The map's
         #    locked BUILDING (需要RANKx, e.g. 需要RANK9) ALSO fires 房间区域未解锁
         #    (live run_20260613_051748 t13: map screen, 房间区域未解锁@0.305,0.764
-        #    conf0.95, NO popout) → _roster_open falsely True → skill scanned the
+        #    conf0.95, NO popout)  _roster_open falsely True  skill scanned the
         #    MAP heads as a roster, judged "all dispatched", and SKIPPED the whole
         #    locked region without ever opening the popout. The lock cls is NOT
         #    popout-exclusive, so it can't gate popout-open.
-        # y-band widened 0.16→0.26: the popout's centred ticket sits at cy≈0.21,
+        # y-band widened 0.160.26: the popout's centred ticket sits at cy≈0.21,
         # which the old 0.04-0.16 band missed entirely.
         if self.find_cls(screen, UC.SCHED_TICKET, conf=_CLS_CONF,
                          region=(0.30, 0.04, 0.70, 0.26)) is not None:
@@ -603,7 +603,7 @@ class ScheduleSkill(BaseSkill):
         YOLO 无从判断"我到底在哪个区" —— 于是 2026-07-25 那次 5 条 ARROW_LEFT
         日志全是空头支票也没人发现。popout 开着时标题被弹窗盖住, 所以只在
         SCHED_ALL 锚在场(popout 已关)的帧上比。
-        ⚠试过 DCT 感知哈希, **判据不成立**: 1050x115 的窄横幅压成 32x32 文字糊
+        试过 DCT 感知哈希, **判据不成立**: 1050x115 的窄横幅压成 32x32 文字糊
         掉, 实测同区 d=24-34 / 异区 d=4-16 完全混叠。改用缩略图 MAD 后干净可分
         (标定见下方 _REGION_DIFF_MAD)。
         """
@@ -712,7 +712,7 @@ class ScheduleSkill(BaseSkill):
                 marks.append((b.cx, b.cy))
 
     def _room_brightness(self, screen: ScreenState, room: List[YoloBox]) -> Optional[float]:
-        """Mean pixel brightness over this room's head crops (dim ⇒ dispatched)."""
+        """Mean pixel brightness over this room's head crops (dim  dispatched)."""
         try:
             if screen.frame is None:
                 return None
@@ -731,7 +731,7 @@ class ScheduleSkill(BaseSkill):
     def _room_dispatched_visual(self, screen: ScreenState, room: List[YoloBox]) -> bool:
         """User mechanic (2026-06-09): after a room is dispatched, OWNED heads
         get a 绿勾 overlay and un-owned heads dim out. Any ACCUMULATED green
-        mark inside the room cluster ⇒ already dispatched — never re-click
+        mark inside the room cluster  already dispatched — never re-click
         (works ACROSS sessions too: fresh entry re-sees the in-game checks)."""
         cx, cy = self._room_center(room)
         for mx, my in getattr(self, "_green_marks", []):
@@ -790,18 +790,18 @@ class ScheduleSkill(BaseSkill):
                 continue
             if self._room_dispatched_visual(screen, r):
                 cx, cy = self._room_center(r)
-                self.log(f"room@({cx:.2f},{cy:.2f}) 绿勾 → already dispatched, skip")
+                self.log(f"room@({cx:.2f},{cy:.2f}) 绿勾  already dispatched, skip")
                 continue
             br = self._room_brightness(screen, r)
             if br is not None and br < _DIM_DISPATCHED_MAX:
                 cx, cy = self._room_center(r)
-                self.log(f"room@({cx:.2f},{cy:.2f}) dim {br:.0f}<{_DIM_DISPATCHED_MAX:.0f} → dispatched, skip")
+                self.log(f"room@({cx:.2f},{cy:.2f}) dim {br:.0f}<{_DIM_DISPATCHED_MAX:.0f}  dispatched, skip")
                 continue
             candidates.append(r)
         if not candidates:
             return None, "all rooms dispatched (clicked/绿勾)"
 
-        # Case A (region has locks → level it up): fill EVERY remaining room.
+        # Case A (region has locks  level it up): fill EVERY remaining room.
         if self._region_locked:
             # top-to-bottom, left-to-right for determinism
             candidates.sort(key=lambda r: (round(self._room_center(r)[1], 2),
@@ -814,10 +814,10 @@ class ScheduleSkill(BaseSkill):
             if name:
                 return r, f"case-B target '{name}'"
 
-        # Fallback: full circle done + tickets remain → spend on any room.
+        # Fallback: full circle done + tickets remain  spend on any room.
         # Deep-dive C3 (2026-06-09): require a POSITIVE read — the old
         # `is None or > 0` treated "unknown" as "has budget" (and -1 slipped
-        # past both '==0' gates). Unknown tickets ⇒ no fallback spending.
+        # past both '==0' gates). Unknown tickets  no fallback spending.
         if self._full_circle and (self._tickets is not None and self._tickets > 0):
             candidates.sort(key=lambda r: (round(self._room_center(r)[1], 2),
                                            self._room_center(r)[0]))
@@ -835,13 +835,13 @@ class ScheduleSkill(BaseSkill):
             self.log("timeout, exiting")
             return action_done("schedule timeout")
 
-        # ⛔⛔ HARD MONEY STOP (highest priority — above every other handler):
+        #  HARD MONEY STOP (highest priority — above every other handler):
         # 青辉石 in the dialog body = a 购买课程表券 buy-ticket dialog. Ticket
-        # digit-OCR was unreliable (tickets=-1 the whole run → the ==0 gates
-        # never fired → it排课 past 0 tickets → the buy popup, whose 确认 got
+        # digit-OCR was unreliable (tickets=-1 the whole run  the ==0 gates
+        # never fired  it排课 past 0 tickets  the buy popup, whose 确认 got
         # mis-clicked by PRIORITY 1). NEVER let any confirm-handler reach it.
         if self._buy_dialog(screen):
-            self.log("⛔ 青辉石买票对话框 — 取消并退出,绝不买")
+            self.log(" 青辉石买票对话框 — 取消并退出,绝不买")
             self._goto("exit")
             cancel = self.find_cls(screen, [UC.BTN_CANCEL, UC.BTN_CLOSE_X], conf=_CLS_CONF)
             if cancel is not None:
@@ -879,64 +879,64 @@ class ScheduleSkill(BaseSkill):
         _report_up = (report_confirm is not None and self.find_cls(
             screen, UC.SCHED_START, conf=_CLS_CONF, region=_DIALOG_BAND) is None)
         if not _report_up:
-            # 报告已不在屏 → 解冻 after-ack, 下一个报告能立刻確認(不留冷却尾巴)
+            # 报告已不在屏  解冻 after-ack, 下一个报告能立刻確認(不留冷却尾巴)
             self._report_confirm_issued = False
             self._report_confirm_fires = 0   # 发数按"每份报告"计
         if _report_up:
-            # ★ Defense ③ (hard cap): each confirmed report = one ticket spent. A
+            #  Defense  (hard cap): each confirmed report = one ticket spent. A
             # day caps at _MAX_TICKETS; exceeding it means tickets ran out and the
-            # game is charging 青辉石 to continue — STOP (backstop if defense ②
+            # game is charging 青辉石 to continue — STOP (backstop if defense 
             # somehow misses the buy dialog).
             # Cap check BEFORE increment and WITHOUT clicking (deep-dive C1,
             # 2026-06-09): the old `+=1 then > cap` let the 8th dispatch through
             # (7>7 False), and the cap-hit path还 action_click_box(confirm) —
-            # 第8次那个"确认"可能正是买票框的确认键 = 亲手买票. Cap hit ⇒ wait
+            # 第8次那个"确认"可能正是买票框的确认键 = 亲手买票. Cap hit  wait
             # out, click NOTHING.
             # 上限用**今日累计**(持久台账), 不是本跑计数 —— 2026-07-25 事故当天
             # 早些 session 已派 4 次, 本跑只数到 3, 旧的 per-run 上限完全没兜住。
-            # ⭐2026-07-28: 台账在 _reconcile_ledger 被屏上票数钳制过(屏上剩
-            # cur 张 ⇒ 台账 ≤ 7-cur), 旧周期残值不再能单方面否决屏上真实票;
+            # 2026-07-28: 台账在 _reconcile_ledger 被屏上票数钳制过(屏上剩
+            # cur 张  台账 ≤ 7-cur), 旧周期残值不再能单方面否决屏上真实票;
             # 票数读不出时台账保持原值 = 跨 session 兜底原样(fail-closed)。
             if max(self._dispatch_count, self._day_dispatched) >= _MAX_TICKETS:
-                # ⚠2026-07-28 live 观察(**看到了但故意不改**): 触顶时屏上那份
-                # 課程表報告(第 7 张票的收据)也不会被关 → 转 exit → stuck 20 →
+                # 2026-07-28 live 观察(**看到了但故意不改**): 触顶时屏上那份
+                # 課程表報告(第 7 张票的收据)也不会被关  转 exit  stuck 20 
                 # 去点**背景 popout 的叉叉**(0.889,0.140, 跟报告不在一层)。出口
                 # 是脏的, 但**没有损失**: 票在「課程表開始」时就已扣、奖励已落袋,
                 # 报告只是收据, 挂着或被别的路径关掉都不掉东西。
-                # ⛔我当天写过一版"用『没有取消键』判定它是收据就允许点確認",
+                # 我当天写过一版"用『没有取消键』判定它是收据就允许点確認",
                 #   **自己驳回了**: 那是**负向**判据 = fail-OPEN —— 30 青辉石事故
                 #   的真实帧正是"该检出的 cls(青辉石)没检出", 同一个漏检发生在
                 #   取消键上, 购买框就会被判成收据然后被亲手确认。
                 #   姊妹 fixture 自己写着购买框判据必须靠**结构正向**特征。
-                #   ⇒ 到顶就是一步不动, 这条不动摇(fixture ⛔票到顶_零点击 钉着)。
+                #    到顶就是一步不动, 这条不动摇(fixture 票到顶_零点击 钉着)。
                 # 真要改善出口, 应该改 stuck-20 recover 的落点选择(让它只点
                 # **当前最上层**弹窗的叉叉), 那是另一件事, 不在金钱路径上。
-                self.log(f"⛔ 今日已排课{max(self._dispatch_count, self._day_dispatched)}次 "
+                self.log(f" 今日已排课{max(self._dispatch_count, self._day_dispatched)}次 "
                          f">= 单日上限{_MAX_TICKETS} — 票必耗尽,停止防买票(不点任何确认)")
                 self._goto("exit")
-                return action_wait(300, "at ticket cap → EXIT, do NOT confirm")
-            # ⭐dispatch 计数不再在此提前 +1(2026-07-22 实锤): 旧码
+                return action_wait(300, "at ticket cap  EXIT, do NOT confirm")
+            # dispatch 计数不再在此提前 +1(2026-07-22 实锤): 旧码
             # `if not action_suppressed: +=1` 信号语义错位 — suppressed 反映
-            # **上一 tick** 的吞, 预知不了本次点击; 上一 tick 吞标志挂着 →
-            # 派了1票计数=0 → 圈末误判"本圈零派出"退出剩6票。计数移到
+            # **上一 tick** 的吞, 预知不了本次点击; 上一 tick 吞标志挂着 
+            # 派了1票计数=0  圈末误判"本圈零派出"退出剩6票。计数移到
             # _roster 的票数重读处(票实际减少=报告确认真落地, after-ack)。
-            # ⛔after-ack(2026-07-28 live 实锤): 旧码**没有任何节流** —— 只要
+            # after-ack(2026-07-28 live 实锤): 旧码**没有任何节流** —— 只要
             # 確認 落在 _DIALOG_BAND 里就每 tick 重发。报告弹窗**关闭动画**期间
-            # bot 那一帧上 確認 还在(conf 0.98) → 连发第二发; 等它真打出去时
+            # bot 那一帧上 確認 还在(conf 0.98)  连发第二发; 等它真打出去时
             # 报告已经没了, 于是**落到背后的区域地图上**。
-            # 实测 walk_20260728_a 步 20→21: 同 reason 同落点 (0.500,0.771)
+            # 实测 walk_20260728_a 步 2021: 同 reason 同落点 (0.500,0.771)
             # 连发两次, 第二发落在山海經中央特區的水池边空地 —— 这次没压到东西,
             # 但那张图上到处是可点设施, 跟「popout 尾发误开设施」是同一个风险面。
-            # ⚠ 用显式 flag 而不是裸 `since()`: since() 首次调用会**就地打点并
+            #  用显式 flag 而不是裸 `since()`: since() 首次调用会**就地打点并
             # 返回 0.0**, 拿它当冷却判据会把**第一发**也挡掉。
-            # ⛔⛔ 2026-07-28 live 逐帧实锤: 上面那条 after-ack 只挡住了"正常"路径,
+            #  2026-07-28 live 逐帧实锤: 上面那条 after-ack 只挡住了"正常"路径,
             # 而 `elif ... 立刻重发` 这条**零冷却** —— 它信的是 `action_suppressed`,
             # 可那面旗子反映的是**上一 tick** 的吞(可能早已陈旧), 不是"这一发没出去"。
-            # 实录 tick91→92: 91 確認 已真下发(exec=36ms), 92 帧上 确认键 仍在
-            # (conf 0.977, 报告关闭动画中) → 走了 elif → **1 个 tick 内连发第二发**。
+            # 实录 tick9192: 91 確認 已真下发(exec=36ms), 92 帧上 确认键 仍在
+            # (conf 0.977, 报告关闭动画中)  走了 elif  **1 个 tick 内连发第二发**。
             # 这次第二发正好又落在同一个 確認 上(无害), 但只要报告在决策与落 tap
             # 之间关掉, 它就打到背后的区域地图 —— 与 popout 尾发误开设施同一风险面。
-            # ⇒ **任何重发路径都必须有冷却**, 且总发数封顶。
+            #  **任何重发路径都必须有冷却**, 且总发数封顶。
             if self._report_confirm_issued:
                 _w = self.since("report_confirm")
                 _min_gap = (_REPORT_SUPPRESSED_RETRY_SEC if self.action_suppressed
@@ -945,15 +945,15 @@ class ScheduleSkill(BaseSkill):
                     return action_wait(250, f"report 確認 已发 — 等报告真关掉"
                                             f"(after-ack {_w:.1f}s/{_min_gap:.1f}s)")
                 if self._report_confirm_fires >= _REPORT_CONFIRM_MAX_FIRES:
-                    self.log(f"⛔report 確認 已发 {self._report_confirm_fires} 次仍未关闭 — "
+                    self.log(f"report 確認 已发 {self._report_confirm_fires} 次仍未关闭 — "
                              f"停止重发(避免往地图上盲拍), 交给下游 re-scan")
-                    return action_wait(300, "report 確認 重发上限 → 不再点")
-                self.log(f"⚠report 確認 {_w:.1f}s 还没关掉"
+                    return action_wait(300, "report 確認 重发上限  不再点")
+                self.log(f"report 確認 {_w:.1f}s 还没关掉"
                          f"{'(上一发被吞)' if self.action_suppressed else ''} — 重发")
             self._report_confirm_issued = True
             self._report_confirm_fires += 1
             self.mark("report_confirm")
-            self.log(f"schedule report → confirm (count={self._dispatch_count}, YOLO 确认键)")
+            self.log(f"schedule report  confirm (count={self._dispatch_count}, YOLO 确认键)")
             self._ticket_read_pending = True  # re-read count back on the popout
             self._goto("roster")
             return action_click_box(report_confirm, "confirm schedule report (確認键)")
@@ -965,35 +965,35 @@ class ScheduleSkill(BaseSkill):
         if start is None:  # SCHED_START sometimes mid-frame outside the band
             start = self.find_cls(screen, UC.SCHED_START, conf=_CLS_CONF)
         if start is not None:
-            # ⛔⛔ 源头闸(2026-07-25 事故后新增): 票 == 0 时**绝不点課程表開始**。
-            # 事故链证据(run_20260724_201229): 票已 0 → 仍点開始 → 游戏弹
-            # 「購買課程表票券 單價💎30」→ 那个框的「確認」被 PRIORITY 1 当成
+            #  源头闸(2026-07-25 事故后新增): 票 == 0 时**绝不点課程表開始**。
+            # 事故链证据(run_20260724_201229): 票已 0  仍点開始  游戏弹
+            # 「購買課程表票券 單價💎30」 那个框的「確認」被 PRIORITY 1 当成
             # 報告框的確認点掉 = 花了 30 青辉石。**不点開始, 购买框根本不会出现**
             # —— 这是比"识别购买框"更靠前、更便宜的一道闸。
             # 读不出(-1/None)时不拦(fail-open)会重蹈覆辙, 但读不出就全停也会让
             # 正常日子干不了活 —— 折中: 读不出时交给 _buy_dialog + 硬上限兜底,
             # 这里只拦**确知为 0** 的情形(确知 0 还点 = 必然弹购买框)。
             if self._tickets == 0:
-                self.log("⛔ 票券已 0 — 绝不点課程表開始(点了必弹青辉石购买框)")
+                self.log(" 票券已 0 — 绝不点課程表開始(点了必弹青辉石购买框)")
                 self._goto("exit")
-                return action_wait(300, "tickets 0 → 不点開始, 退出")
-            # ⛔2026-07-27 改: 旧版靠**在 reason 里塞"確認键"**去命中 _dedup_click
+                return action_wait(300, "tickets 0  不点開始, 退出")
+            # 2026-07-27 改: 旧版靠**在 reason 里塞"確認键"**去命中 _dedup_click
             # 的关键词豁免(为了让 課程表開始 渲染好就能点、不被稳定门吞)。代价是
-            # 那条豁免 `return action` 把 **dedup hold 也一起跳过** → 本动作每次
+            # 那条豁免 `return action` 把 **dedup hold 也一起跳过**  本动作每次
             # 连发两发, 第二发落在**下一屏**上。实测第二发撞过「購買課程表票券」
             # (青辉石 30/张)的确認键旁 Δx=0.097 —— 只差一点就是真掏钱。
             # 现在改成显式 `_settle_exempt`: 稳定门照旧豁免(不被吞), same-target
-            # hold 恢复生效(第二发被 hold 成 wait, 等指纹变化后 skill 重新看帧 →
+            # hold 恢复生效(第二发被 hold 成 wait, 等指纹变化后 skill 重新看帧 
             # 那时若是购买框, _buy_dialog 三路防线接管取消)。
             # reason 也改回**如实描述点的是什么** —— 措辞不该再兼任控制信号。
-            self.log("schedule info → start (YOLO 课程表开始)")
+            self.log("schedule info  start (YOLO 课程表开始)")
             self._goto("open_room")
             act = action_click_box(start, "start schedule (課程表開始)")
             act["_settle_exempt"] = True
             return act
 
         # Generic / ticket-shortage popups — base helper is pure cls now
-        # (确认+取消/叉 结构 → 默认点取消/叉掉, 绝不盲确认). NOTE: SCHED_ALL is the
+        # (确认+取消/叉 结构  默认点取消/叉掉, 绝不盲确认). NOTE: SCHED_ALL is the
         # WORK surface, never a popup — the helper keys off dialog buttons (确认
         # 键/取消键 cls), not SCHED_ALL, so it won't touch the popout (task #3
         # dead-loop guard).
@@ -1055,18 +1055,18 @@ class ScheduleSkill(BaseSkill):
     def _navigate(self, screen: ScreenState) -> Dict[str, Any]:
         """Drive from the region-select list to a region's popout.
 
-        Sequence (once):  click 夏莱办公室 → ARROW_LEFT (jump to last region).
-        Then per region:  click SCHED_ALL → open popout → roster.
+        Sequence (once):  click 夏莱办公室  ARROW_LEFT (jump to last region).
+        Then per region:  click SCHED_ALL  open popout  roster.
         """
-        # ⭐popout 检查必须先于 _is_schedule(2026-07-31 live 帧实锤): 全屏
-        # popout 把底图 SCHOOL 瓦片/页面签名全盖住 → _is_schedule False →
+        # popout 检查必须先于 _is_schedule(2026-07-31 live 帧实锤): 全屏
+        # popout 把底图 SCHOOL 瓦片/页面签名全盖住  _is_schedule False 
         # 旧顺序走不到这里, 空等 _NAVIGATE_MAX 后 back 把**开得好好的 popout**
         # 关掉(守卫拦下才没白干)。popout 在屏本身就是"在 schedule 里"的最强
         # 证据 — 判定从强到弱排。
         if self._roster_open(screen):
             self._reset_region()
             self._goto("roster")
-            return action_wait(300, "popout already open → roster")
+            return action_wait(300, "popout already open  roster")
 
         if not self._is_schedule(screen):
             if self.detect_screen_yolo(screen) == "Lobby":
@@ -1084,11 +1084,11 @@ class ScheduleSkill(BaseSkill):
 
         # Step 1: first click 夏莱办公室 (region-select list row 0).
         if not self._office_clicked:
-            # ⭐动态区域数(2026-07-21 逐帧审修): 区域列表帧数区域名 cls (36-40) →
+            # 动态区域数(2026-07-21 逐帧审修): 区域列表帧数区域名 cls (36-40) 
             # 一圈判定用真实区数, 不再用 _MAX_REGIONS=14 兜底 — 5 区账号旧码要
             # 绕近 3 圈才触发 full-circle/exit, live 抓到 200+ tick 开关 popout
-            # 空转。检出 <2 (列表帧没抓全) → 保守回落 _MAX_REGIONS。
-            # ⚠新校区上线要加词表重训, 否则计数偏低 → fallback 提前(策略损失,
+            # 空转。检出 <2 (列表帧没抓全)  保守回落 _MAX_REGIONS。
+            # 新校区上线要加词表重训, 否则计数偏低  fallback 提前(策略损失,
             # 非金钱风险)。
             _region_cls = (UC.SCHOOL_OFFICE, UC.SCHOOL_DORM, UC.SCHOOL_GEHENNA,
                            UC.SCHOOL_ABYDOS, UC.SCHOOL_MILLENNIUM)
@@ -1102,21 +1102,21 @@ class ScheduleSkill(BaseSkill):
                 self.log("entering 夏莱办公室 (YOLO 夏莱办公室)")
                 self._office_clicked = True
                 return action_click_box(office, "enter 夏莱办公室")
-            # GAP: region tile cls under-trained → click its list-row position.
+            # GAP: region tile cls under-trained  click its list-row position.
             self.log("夏莱办公室 cls not seen — clicking list row 0 (GAP)")
             self._office_clicked = True
             return action_click(*_OFFICE_ROW_POS, "enter 夏莱办公室 (list row, GAP)")
 
-        # Step 2: inside a region now → ARROW_LEFT once = jump to last region.
+        # Step 2: inside a region now  ARROW_LEFT once = jump to last region.
         if not self._jumped_to_last:
             # Only jump once we're actually on a region-internal screen (the
             # SCHED_ALL bottom-right button is present there).
             if self._sched_all_btn(screen) is None and self._phase_ticks < 4:
                 return action_wait(400, "waiting for region-internal screen")
-            # ⭐after-ack(2026-07-25, 与 _switch 同族): 旧码点之前就置
+            # after-ack(2026-07-25, 与 _switch 同族): 旧码点之前就置
             # _jumped_to_last, 稳定门一吞就永远跳不成。后果比 _switch 轻(遍历
             # 本身是环, 只是没从最新区起步), 但同一个 mutate-before-ack 形状,
-            # 一并按"发出→下一 tick 看 action_suppressed 再落账"修。
+            # 一并按"发出下一 tick 看 action_suppressed 再落账"修。
             if self._jump_issued:
                 if self.action_suppressed:
                     self.log("jump-to-last 被稳定门吞(未落屏) — 重发")
@@ -1127,24 +1127,24 @@ class ScheduleSkill(BaseSkill):
             arrow = self._arrow_left(screen)
             self._jump_issued = True
             if arrow is not None:
-                self.log("ARROW_LEFT → jump to last (newest) region (YOLO 左切换)")
+                self.log("ARROW_LEFT  jump to last (newest) region (YOLO 左切换)")
                 return action_click_box(arrow, "jump to last region")
             self.log("ARROW_LEFT cls not seen — symmetric left-edge coord (GAP)")
             return action_click(*_ARROW_LEFT_POS, "jump to last region (GAP)")
 
-        # Step 3: on a region-internal screen → open its 全體課程表 popout.
+        # Step 3: on a region-internal screen  open its 全體課程表 popout.
         sched_all = self._sched_all_btn(screen)
         if sched_all is not None:
             self.log("opening 全體課程表 popout (YOLO 全体课程表)")
             return action_click_box(sched_all, "open 全體課程表 popout")
 
         # SCHED_ALL missing + region LIST visible = bounced to Location Select
-        # (no SCHED_ALL there, ever) → route to _switch, whose row-walk
+        # (no SCHED_ALL there, ever)  route to _switch, whose row-walk
         # recovery enters the next region directly (v2, 2026-06-11).
         if self.find_cls(screen, UC.SCHOOL_OFFICE, conf=_CLS_CONF) is not None:
-            self.log("Location Select detected (navigate) → switch row-walk")
+            self.log("Location Select detected (navigate)  switch row-walk")
             self._goto("switch")
-            return action_wait(250, "location select → switch recovery")
+            return action_wait(250, "location select  switch recovery")
 
         # SCHED_ALL button not seen — give it a few ticks (region transition),
         # then surface the gap and try the next region rather than stalling.
@@ -1178,9 +1178,9 @@ class ScheduleSkill(BaseSkill):
 
         # First ticks on a fresh popout: count this region + read tickets.
         # Lock judgment is MULTI-FRAME (live 2026-06-09: ROOM_LOCKED flickered
-        # out on the single judgment frame → a LOCKED region was judged case B
-        # and only target rooms got dispatched). One sighting ⇒ locked; only
-        # 3 consecutive lock-free frames ⇒ case B.
+        # out on the single judgment frame  a LOCKED region was judged case B
+        # and only target rooms got dispatched). One sighting  locked; only
+        # 3 consecutive lock-free frames  case B.
         if self._region_locked is None:
             locked_now = self.find_cls(screen, UC.ROOM_LOCKED, conf=_CLS_CONF) is not None
             self._lock_seen = getattr(self, "_lock_seen", False) or locked_now
@@ -1203,29 +1203,29 @@ class ScheduleSkill(BaseSkill):
             self._ticket_read_pending = False
             _prev = self._tickets
             self._read_tickets(screen)
-            # ⭐dispatch 落账(after-ack, 2026-07-22): 票数实际减少=报告确认
+            # dispatch 落账(after-ack, 2026-07-22): 票数实际减少=报告确认
             # 真落地, 按扣减量计数。旧码在点确认前看 action_suppressed 预判
             # — 信号反映的是上一 tick 的吞, 语义错位: 上一 tick 吞标志挂着
-            # → 真派了 1 票计数=0 → 圈末误判"本圈零派出"退出剩 6 票(实锤)。
+            #  真派了 1 票计数=0  圈末误判"本圈零派出"退出剩 6 票(实锤)。
             # 读不出(_prev/-1/None)不计 — 计数偏低最多多绕一圈, cap 防线仍在。
             if (_prev is not None and _prev > 0
                     and self._tickets is not None
                     and 0 <= self._tickets < _prev):
                 _spent = _prev - self._tickets
                 self._dispatch_count += _spent
-                # ⛔同步写按游戏日的持久台账 —— per-run 计数跨 session 归零,
+                # 同步写按游戏日的持久台账 —— per-run 计数跨 session 归零,
                 # 那正是 2026-07-25 硬上限没兜住 30 青辉石那次的原因之一。
                 self._day_dispatched += _spent
                 _save_sched_state({"game_day": _game_day(),
                                    "dispatched": self._day_dispatched,
-                                   # ⭐留痕(2026-07-28): 下个 session 一眼看出
+                                   # 留痕(2026-07-28): 下个 session 一眼看出
                                    # "台账 dispatched=7 但当时屏上就剩 X" 类矛盾
                                    "tickets_seen": self._tickets})
-                self.log(f"dispatch 落账: 票 {_prev}→{self._tickets}, "
+                self.log(f"dispatch 落账: 票 {_prev}{self._tickets}, "
                          f"count={self._dispatch_count} "
                          f"(今日累计 {self._day_dispatched})")
             if self._tickets == 0:
-                self.log("tickets exhausted → exit")
+                self.log("tickets exhausted  exit")
                 self._goto("exit")
                 return action_wait(300, "tickets exhausted")
 
@@ -1247,10 +1247,10 @@ class ScheduleSkill(BaseSkill):
             self._clicked_heads.append((cx, cy))
             # Click the first (left-most) head — opens the whole room's info
             # popup (not a single-student select). The dispatch popups in
-            # tick() take over from here (info → start → report → confirm).
+            # tick() take over from here (info  start  report  confirm).
             head = sorted(room, key=lambda b: b.cx)[0]
             self._goto("open_room")
-            return action_click_box(head, "click room head → 課程表資訊")
+            return action_click_box(head, "click room head  課程表資訊")
 
         # Reaction time #2: no room THIS scan. Re-scan a few frames before
         # leaving — gives fused_avatar time to surface heads/targets that
@@ -1260,17 +1260,17 @@ class ScheduleSkill(BaseSkill):
         if self._barren_scans < _BARREN_SCAN_MAX:
             return action_wait(500, f"re-scan roster {self._barren_scans}/{_BARREN_SCAN_MAX} ({reason})")
 
-        self.log(f"no room after {self._barren_scans} scans ({reason}) → close popout, next region")
-        # ⛔2026-07-28 live 实锤 —— 「修一处没 grep 全仓同形」第 N 次:
+        self.log(f"no room after {self._barren_scans} scans ({reason})  close popout, next region")
+        # 2026-07-28 live 实锤 —— 「修一处没 grep 全仓同形」第 N 次:
         # _switch 那边 2026-07-25 修好了**自己**的双发(_popout_close_issued +
         # popout_close 墙钟), 但**这条路径**关 popout 时既不置 flag 也不打点。
-        # 于是: 这里发一发 → _goto("switch") → _switch 看到"我没发过、也没计时器"
-        # → **立刻再发一发**。两发 reason 不同(`close popout (YOLO 弹窗叉叉)` vs
-        # `close popout before switch`)、落点完全相同 → step_walk 的连发守卫按
+        # 于是: 这里发一发  _goto("switch")  _switch 看到"我没发过、也没计时器"
+        #  **立刻再发一发**。两发 reason 不同(`close popout (YOLO 弹窗叉叉)` vs
+        # `close popout before switch`)、落点完全相同  step_walk 的连发守卫按
         # (reason, 落点) 配对, **换个 reason 就绕过去了**, 一次都没报警。
-        # 实测 walk_20260728_a 步 17→18 与 23→24 各复现一次, 第二发落在区域屏
+        # 实测 walk_20260728_a 步 1718 与 2324 各复现一次, 第二发落在区域屏
         # 右上角的「山海經中央特區」名牌上(这次无害)。
-        # ⇒ 关 popout 是**同一个物理动作**, 后手闸必须共享同一套 after-ack 状态。
+        #  关 popout 是**同一个物理动作**, 后手闸必须共享同一套 after-ack 状态。
         def _mark_popout_close():
             self._popout_close_issued = True
             self.mark("popout_close")
@@ -1287,7 +1287,7 @@ class ScheduleSkill(BaseSkill):
             return action_back("close popout (no X cls)")
         return action_wait(400, "waiting for popout close-X cls")
 
-    # ── open_room (info → start → report → confirm handled in tick) ────────
+    # ── open_room (info  start  report  confirm handled in tick) ────────
 
     def _open_room(self, screen: ScreenState) -> Dict[str, Any]:
         """After clicking a head, wait for the dispatch popups. The info/report
@@ -1301,10 +1301,10 @@ class ScheduleSkill(BaseSkill):
         # bot deduped 6 rooms but only 1 actually opened its info popup (live
         # 2026-06-02: clicked 6 heads, 1 start). (user: 给点击反应时间)
         if self._roster_open(screen):
-            # ⭐墙钟而非 tick 计数(2026-07-25 live 实锤): 上面注释写的是"弹窗要
+            # 墙钟而非 tick 计数(2026-07-25 live 实锤): 上面注释写的是"弹窗要
             # ~1-2s", 但实现在数 tick —— 而非 loading 的 action_wait 被 server
             # 压到 0.12s, 4 tick 可能只有 0.5-1s, 窗口在弹窗渲染完之前就过期,
-            # skill 判"没开"退回 roster 另挑一间 → 正是本常量当初要修的
+            # skill 判"没开"退回 roster 另挑一间  正是本常量当初要修的
             # "clicked 6 heads, 1 start"(2026-06-02)重现。tick 速率不可依赖
             # (7月录像全是 step 门控, 0.65~8.7 s/tick), 计时就得用墙钟。
             if not self._open_room_t0:
@@ -1313,7 +1313,7 @@ class ScheduleSkill(BaseSkill):
             if _el < _OPEN_ROOM_SETTLE_SEC:
                 return action_wait(450, f"waiting for 課程表資訊 popup "
                                         f"({_el:.1f}s/{_OPEN_ROOM_SETTLE_SEC}s)")
-            self.log(f"info popup never opened after head click ({_el:.1f}s) → back to roster")
+            self.log(f"info popup never opened after head click ({_el:.1f}s)  back to roster")
             self._goto("roster")
             return action_wait(300, "back to roster")
 
@@ -1333,7 +1333,7 @@ class ScheduleSkill(BaseSkill):
         if self._phase_ticks > _OPEN_ROOM_MAX:
             self.log("dispatch popup never appeared — back to roster")
             self._goto("roster")
-            return action_wait(300, "dispatch timeout → roster")
+            return action_wait(300, "dispatch timeout  roster")
         return action_wait(400, "waiting for SCHED_START / report cls")
 
     # ── switch (ARROW_LEFT to next region) ────────────────────────────────
@@ -1342,7 +1342,7 @@ class ScheduleSkill(BaseSkill):
         """Close any lingering popout, then ARROW_LEFT to the next region."""
         if self._tickets == 0:
             self._goto("exit")
-            return action_wait(300, "tickets exhausted → exit")
+            return action_wait(300, "tickets exhausted  exit")
 
         # Full circle: traversed every region. 2026-07-21 逐帧审修: 一整圈**没派出
         # 任何学生**(_dispatch_count 没增 = 无可派对象)就直接退出, 不再因 tickets>0
@@ -1353,11 +1353,11 @@ class ScheduleSkill(BaseSkill):
         # 时用保守下限 5(BA 满解锁 5 区; 少区账号多绕几次无害)——绝不回落
         # _MAX_REGIONS=14: 2026-07-22 实锤恢复路径 fallback 永远够不到, 零派出
         # 绕到 max_ticks 死, 6 票滞留。
-        # ⛔2026-07-25 实测: 区域数**远大于 5**。Location Select 列表可滚动, 可见
+        # 2026-07-25 实测: 区域数**远大于 5**。Location Select 列表可滚动, 可见
         # 5 行只是第一页(帐号 `地區等級總和 RANK 142`), ADB 逐个切实测至少 9 个:
         # 夏萊辦公室/夏萊居住區/格黑娜學園中央區/阿拜多斯高中/千年研究區域/
         # 狂獵綜合藝術區/春葉原/山海經中央特區/D.U.白鳥區。而上面数 SCHOOL_* cls
-        # 只认得头 5 个 → 走满 5 个就宣布 full circle, 后 4 个区里的目标学生
+        # 只认得头 5 个  走满 5 个就宣布 full circle, 后 4 个区里的目标学生
         # **从来没被排过课**(策略损失, 非金钱风险)。
         # 正解: 别数 cls, 用**回到起点**判一圈 —— _region_sig 已经能把区认出来
         # (标定见 [[region-switch-truth]])。_circle_closed 在 _switch 的到达确认
@@ -1367,17 +1367,17 @@ class ScheduleSkill(BaseSkill):
         if self._circle_closed:
             self.log(f"一圈完成: 标题指纹已转回起点(走过 {self._regions_seen} 个区)")
         elif self._regions_seen >= _MAX_REGIONS:
-            self.log(f"⚠走满硬上限 {_MAX_REGIONS} 个区仍没转回起点 — 当一圈处理")
+            self.log(f"走满硬上限 {_MAX_REGIONS} 个区仍没转回起点 — 当一圈处理")
             self._circle_closed = True
         elif self._regions_seen >= _circle_size and self._circle_first_sig is None:
-            # 指纹通道整趟没工作过(帧拿不到/cv2 缺席) → 退回旧的 cls 计数判据,
+            # 指纹通道整趟没工作过(帧拿不到/cv2 缺席)  退回旧的 cls 计数判据,
             # 保持老行为, 不至于一路绕到硬上限。
-            self.log(f"指纹通道不可用 → 回退 cls 计数判一圈 ({_circle_size} 区)")
+            self.log(f"指纹通道不可用  回退 cls 计数判一圈 ({_circle_size} 区)")
             self._circle_closed = True
         if self._circle_closed:
-            # ⛔防空转真闸(2026-07-25, 取代原来那个数圈数的 `not _full_circle`):
+            # 防空转真闸(2026-07-25, 取代原来那个数圈数的 `not _full_circle`):
             # 一圈 N 个区必须伴随 N-1 次**帧证据确认的换区**。对不上 = 我们其实
-            # 在原地反复开关同一个区的 popout(2026-07-25 那 200 tick 的形状) →
+            # 在原地反复开关同一个区的 popout(2026-07-25 那 200 tick 的形状) 
             # 立刻大声收工, 绝不靠"日志说我切过"续命。
             # 需要的换区次数按**本圈实际扫过的 popout 数**算(_regions_seen-1),
             # 不再按 cls 猜的 _circle_size —— 一圈现在可能是 9 个区而不是 5 个。
@@ -1385,30 +1385,30 @@ class ScheduleSkill(BaseSkill):
                                      - self._circle_start_switches)
             _need_switches = max(0, self._regions_seen - 1)
             if _switches_this_circle < _need_switches:
-                self.log(f"⚠假圈: 扫了 {self._regions_seen} 个 popout 但只有 "
+                self.log(f"假圈: 扫了 {self._regions_seen} 个 popout 但只有 "
                          f"{_switches_this_circle} 次帧证实换区(需 "
                          f"{_need_switches}) — 原地空转, 收工"
                          f"(剩 {self._tickets} 票)")
                 self._goto("exit")
-                return action_wait(300, "假圈(换区未落地) → exit")
+                return action_wait(300, "假圈(换区未落地)  exit")
             _dispatched_this_circle = self._dispatch_count > self._circle_start_dispatch
-            # ⛔2026-07-25 实锤: 旧闸带 `not self._full_circle`, 捡漏圈**只准跑
-            # 一次** —— 今天第1圈派1人→开捡漏→第2圈又派1人→但 _full_circle 已
-            # True → 直接退出, **5 张票原地作废**。而同一设施能派多人(教室一格
+            # 2026-07-25 实锤: 旧闸带 `not self._full_circle`, 捡漏圈**只准跑
+            # 一次** —— 今天第1圈派1人开捡漏第2圈又派1人但 _full_circle 已
+            # True  直接退出, **5 张票原地作废**。而同一设施能派多人(教室一格
             # 上 2 个绿勾实证), 7 设施十几个位置, 7 张票本该花得完。
             # 正确规则: **只要这圈还派出过人且还剩票就继续下一圈**; 收敛性由
             # "某圈零派出即退" 保证(每圈必须至少派 1 人才有资格续圈), 外加
             # tickets==0 与 max_ticks 两道硬闸, 不会空转。
-            # ⛔2026-07-25 第二轮实锤(第一版没修够): 兜底 fallback spend-leftover
+            # 2026-07-25 第二轮实锤(第一版没修够): 兜底 fallback spend-leftover
             # 要求 _full_circle=True, 而 _full_circle 又要求"某圈派出过人" ——
-            # 学生已在上一轮派完时**第1圈必然零派出 → 兜底永远够不着**, 亮着的
+            # 学生已在上一轮派完时**第1圈必然零派出  兜底永远够不着**, 亮着的
             # 空房间(实测 7 间里 4 间无目标学生但可派)+剩票全废。
             # 正解: **第1圈结束无条件开兜底模式**; 之后只要这圈还在派就续圈。
-            # 收敛: 兜底圈零派出即退 → 最坏只多绕 1 圈, 外加 tickets==0 与
+            # 收敛: 兜底圈零派出即退  最坏只多绕 1 圈, 外加 tickets==0 与
             # max_ticks 两道硬闸。
             if ((self._tickets is None or self._tickets > 0)
                     and (not self._full_circle or _dispatched_this_circle)):
-                self.log(f"full circle: 剩 {self._tickets} 票 → "
+                self.log(f"full circle: 剩 {self._tickets} 票  "
                          f"{'开' if not self._full_circle else '续'}捡漏圈")
                 self._full_circle = True
                 self._regions_seen = 0
@@ -1420,13 +1420,13 @@ class ScheduleSkill(BaseSkill):
             else:
                 _why = ("本圈零派出(无可派对象)" if not _dispatched_this_circle
                         else f"full circle done ({self._regions_seen} regions)")
-                self.log(f"{_why} → exit")
+                self.log(f"{_why}  exit")
                 self._goto("exit")
-                return action_wait(300, "schedule circle done → exit")
+                return action_wait(300, "schedule circle done  exit")
 
         # Close a lingering popout first. 双发的 X/ESC 会落到后面的区域屏上,
         # 弹回 Location Select —— 正是那个把票扣在半路的 bounce。
-        # ⛔2026-07-25 实锤: 旧的 `_phase_ticks % 2` 节流**拦不住** —— 帧滞后使
+        # 2026-07-25 实锤: 旧的 `_phase_ticks % 2` 节流**拦不住** —— 帧滞后使
         # `_roster_open` 在点击后仍为 True, 而 `_dedup_click` 看到结构指纹变了
         # 就放行重复点击, 于是 `close popout before switch` 连发两次, 第二发
         # 落在区域屏上误开了一个设施。tick 奇偶不是时间, 也不是证据。
@@ -1436,13 +1436,13 @@ class ScheduleSkill(BaseSkill):
             if self._popout_close_issued and not self.action_suppressed:
                 if self.since("popout_close") < _POPOUT_CLOSE_SEC:
                     return action_wait(300, "popout closing — 等它真关掉(after-ack)")
-                self.log(f"⚠popout {_POPOUT_CLOSE_SEC:.1f}s 还没关掉 — 重发关闭")
+                self.log(f"popout {_POPOUT_CLOSE_SEC:.1f}s 还没关掉 — 重发关闭")
             elif self._popout_close_issued:
                 self.log("关 popout 被稳定门吞(未落屏) — 立刻重发")
             elif ("popout_close" in getattr(self, "_timers", {})
                     and self.since("popout_close") < _POPOUT_CLOSE_SEC
                     and not self.action_suppressed):
-                # ⚠单帧 roster-negative 闪断(popout 淡出中)会把 _popout_close_issued
+                # 单帧 roster-negative 闪断(popout 淡出中)会把 _popout_close_issued
                 # 清掉 — 但墙钟 mark 不受闪断影响: 冷却期内绝不二次发射(2026-07-25
                 # 审计: 原来闪断一次即重置 refractory, 双发洞没堵死)。
                 return action_wait(300, "popout close 冷却中(闪断防双发)")
@@ -1456,21 +1456,21 @@ class ScheduleSkill(BaseSkill):
 
         # Location Select recovery v2 (live 2026-06-11): closing a popout can
         # bounce us to the region LIST (no ARROW_LEFT/SCHED_ALL there). v1
-        # re-entered row 0 every time → infinite loop on a fully-dispatched
+        # re-entered row 0 every time  infinite loop on a fully-dispatched
         # first region. v2 turns the bounce INTO the traversal: each bounce
         # enters the NEXT list row directly (rows sit at fixed y), capped.
-        # ⚠必须排在到达态验证**之前**: LS 屏没有 RANK 标题, 指纹一定跟区域内屏
-        # 不同 → 会被误判成"切换成功"。
+        # 必须排在到达态验证**之前**: LS 屏没有 RANK 标题, 指纹一定跟区域内屏
+        # 不同  会被误判成"切换成功"。
         if self.find_cls(screen, UC.SCHOOL_OFFICE, conf=_CLS_CONF) is not None:
             self._switch_from_sig = None
             self._ls_recoveries += 1
             if self._ls_recoveries > 8:
-                self.log("Location Select bounce cap (8) → exit with leftovers")
+                self.log("Location Select bounce cap (8)  exit with leftovers")
                 self._goto("exit")
-                return action_wait(300, "ls bounce cap → exit")
+                return action_wait(300, "ls bounce cap  exit")
             rows_y = (0.262, 0.407, 0.552, 0.697, 0.842)
             row = self._ls_recoveries % len(rows_y)
-            self.log(f"Location Select → entering list row {row} directly "
+            self.log(f"Location Select  entering list row {row} directly "
                      f"(bounce #{self._ls_recoveries})")
             self._office_clicked = True   # row click IS the region entry
             self._jumped_to_last = True   # no arrow jump; scan this region as-is
@@ -1478,12 +1478,12 @@ class ScheduleSkill(BaseSkill):
             self._goto("navigate")
             return action_click(0.70, rows_y[row], f"enter region list row {row}")
 
-        # ⭐到达态验证(2026-07-25 帧证据实锤 — 见 memory log_is_not_truth)
+        # 到达态验证(2026-07-25 帧证据实锤 — 见 memory log_is_not_truth)
         # 旧码在 click **之前**就 _reset_region()+_goto("navigate") = mutate-
         # before-ack。而 _switch 必然先关 popout, **紧接的那一 tick 结构指纹必然
-        # 剧变**(-16 个 popout/头像 cls, +4 个区域屏 cls) → _dedup_click 的
+        # 剧变**(-16 个 popout/头像 cls, +4 个区域屏 cls)  _dedup_click 的
         # frame-settle 稳定门 100% 把 ARROW_LEFT 转成 wait。点击从来没发出去,
-        # skill 却已经"前进"到 navigate → 重开同一个区域的 popout → 200 tick
+        # skill 却已经"前进"到 navigate  重开同一个区域的 popout  200 tick
         # 空转, 日志刷 5 条 ARROW_LEFT 一次也没生效, _regions_seen 假计数凑出
         # 假 full-circle。(实证: run_20260724_185527 标题哈希 228 tick 只在
         # 「夏萊辦公室」与「popout 遮挡」两簇间摆动。)
@@ -1497,7 +1497,7 @@ class ScheduleSkill(BaseSkill):
                 # 不许在这儿盲点箭头, 退回 navigate 让它重新认屏。
                 self.log("SCHED_ALL 锚迟迟不出现 — 回 navigate 重认屏")
                 self._goto("navigate")
-                return action_wait(300, "no SCHED_ALL anchor → navigate")
+                return action_wait(300, "no SCHED_ALL anchor  navigate")
             return action_wait(250, "等区域内屏渲染(SCHED_ALL 锚)")
         _sig = self._region_sig(screen)
         if self._switch_from_sig is None:
@@ -1508,7 +1508,7 @@ class ScheduleSkill(BaseSkill):
                 self._switch_t0 = self.clock()
                 self._switch_taps = 0
                 self._sig_pending = None
-                # ⭐一圈的"起点"就在这里记 —— 这是**唯一**能测准的时刻:
+                # 一圈的"起点"就在这里记 —— 这是**唯一**能测准的时刻:
                 # SCHED_ALL 正锚在场(popout 已关, RANK 标题没被盖住) + 指纹已
                 # 连续两帧一致。popout 开着时标题被遮, 在别处取指纹必然错。
                 if self._circle_first_sig is None:
@@ -1527,9 +1527,9 @@ class ScheduleSkill(BaseSkill):
                 return action_wait(200, "疑似换区 — 等第二帧确认")
             self._arrive_pending = None
             self._verified_switches += 1
-            self.log(f"✔区域切换到达确认(标题变了, {self._switch_taps} 次 tap, "
+            self.log(f"区域切换到达确认(标题变了, {self._switch_taps} 次 tap, "
                      f"累计 {self._verified_switches} 次真切换)")
-            # ⭐转回起点 = 一圈走完。这比"数了几个 SCHOOL_* cls"可靠得多:
+            # 转回起点 = 一圈走完。这比"数了几个 SCHOOL_* cls"可靠得多:
             # cls 只认得头 5 个区, 实测账号至少 9 个(Location Select 可滚动),
             # 按 cls 计数会在第 5 个区就宣布 full circle, 后面几个区里的目标
             # 学生**一次都没被排过课**。见 [[region-switch-truth]]。
@@ -1540,32 +1540,32 @@ class ScheduleSkill(BaseSkill):
             self._switch_from_sig = None
             self._reset_region()
             self._goto("navigate")
-            return action_wait(250, "region switched (verified) → navigate")
+            return action_wait(250, "region switched (verified)  navigate")
         else:
             self._arrive_pending = None
 
         _waited = self.clock() - (self._switch_t0 or self.clock())
         if _waited > _SWITCH_VERIFY_SEC:
             # 绝不假装切过: 读不出/切不动就大声收工, 把剩票如实报出来。
-            self.log(f"⚠区域切换失效: {self._switch_taps} 次 ARROW_LEFT / "
+            self.log(f"区域切换失效: {self._switch_taps} 次 ARROW_LEFT / "
                      f"{_waited:.1f}s 标题始终未变 — 收工(剩 {self._tickets} 票)")
             self._goto("exit")
-            return action_wait(300, "region switch 验证失败 → exit")
+            return action_wait(300, "region switch 验证失败  exit")
 
         if self.action_suppressed:
             # 稳定门吞掉了上一发 —— 留痕, 下一稳定帧自然重发(不计 tap)。
             self.log("ARROW_LEFT 被稳定门吞(未落屏) — 等稳定帧重发")
-            return action_wait(200, "ARROW_LEFT suppressed → 重发")
+            return action_wait(200, "ARROW_LEFT suppressed  重发")
 
         # ARROW_LEFT to the next region.
         arrow = self._arrow_left(screen)
         if arrow is not None and _waited <= _SWITCH_GAP_SEC:
             self._switch_taps += 1
-            self.log(f"ARROW_LEFT → next region (YOLO 左切换, tap "
+            self.log(f"ARROW_LEFT  next region (YOLO 左切换, tap "
                      f"#{self._switch_taps}, 等到达)")
             return action_click_box(arrow, "ARROW_LEFT next region")
         if arrow is not None or _waited > _SWITCH_GAP_SEC:
-            # cls 在但迟迟不生效 → 换坐标 GAP 落点(实测 ADB tap 0.023/0.502 有效)
+            # cls 在但迟迟不生效  换坐标 GAP 落点(实测 ADB tap 0.023/0.502 有效)
             self._switch_taps += 1
             self.log(f"ARROW_LEFT 坐标 GAP 落点 (tap #{self._switch_taps}, "
                      f"{_waited:.1f}s 未到达)")
@@ -1583,8 +1583,8 @@ class ScheduleSkill(BaseSkill):
             self.log("exit budget exhausted, reporting done")
             return action_done("schedule exit timeout")
         # Close a lingering popout before leaving.
-        # ⚠同型预防(2026-07-28, **本轮未 live 复现** — 只是机制完全相同):
-        # 关 popout 的三条路径里, roster→switch 那对今天实锤了双发(见 _roster 的
+        # 同型预防(2026-07-28, **本轮未 live 复现** — 只是机制完全相同):
+        # 关 popout 的三条路径里, rosterswitch 那对今天实锤了双发(见 _roster 的
         # 注释)。这里同样只靠 `_roster_open` 当闸 —— 而那个判据在**关闭动画期间
         # 依然为真**, 所以同样能连发, 第二发同样落在区域地图上。
         # 共用同一套 after-ack 状态, 不再各判各的。

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """活动 farm 选关推断器 v2 — 建议模式(只打印账单, 不接管配置)。
 
-⭐架构(用户 2026-07-30 定): 一切从**商店状态**推断, 零 hardcode。
+架构(用户 2026-07-30 定): 一切从**商店状态**推断, 零 hardcode。
   币种: buy_event_shop 从 YOLO 货币 tab cls 数出 K 个(4 币活动自动成立),
         最后一个 = 盒抽/小活动产物币, 不归程序管(用户手配是否刷门票关)。
   关映射: 活动 Quest 尾 K 关 = K 币专刷关按序对应(playbook 实证规律),
@@ -11,7 +11,7 @@
         亮位 = YOLO 购买按钮 det + gray 双峰(买得到的非家具位)。
   AP 分配目标 = 把商店搬空。
 
-⛔接管纪律(与 L2 同款「先建议后接管」): v2 只输出建议与账单;
+接管纪律(与 L2 同款「先建议后接管」): v2 只输出建议与账单;
   event_farm_stages 的**用户显式配置永远优先**。
 
 用法: py scripts/event_planner.py            # 打印账单+建议
@@ -59,22 +59,22 @@ def plan():
         bright = rec.get("shelf_bright")
         bal = rec.get("balance_after_buy")
         if bright is not None:
-            # ⭐主判据 = 货架(YOLO 亮位)
+            # 主判据 = 货架(YOLO 亮位)
             if bright > 0:
                 lines.append(f"tab{ti}({tag}): 货架亮位 {bright} 个 = 还有可买"
-                             f" → 刷")
+                             f"  刷")
                 verdict = True
             else:
-                lines.append(f"tab{ti}({tag}): 货架全暗/空 = 搬空 → 停刷")
+                lines.append(f"tab{ti}({tag}): 货架全暗/空 = 搬空  停刷")
                 verdict = False
         elif bal is not None:
             # 兜底 = 余额(粗信号, 只在无货架数据时用)
             verdict = bal < SATURATED_MIN
-            lines.append(f"tab{ti}({tag}): 无货架数据, 余额 {bal} 兜底 → "
+            lines.append(f"tab{ti}({tag}): 无货架数据, 余额 {bal} 兜底  "
                          f"{'刷' if verdict else '停刷'}")
         else:
             verdict = True
-            lines.append(f"tab{ti}({tag}): 无台账 → 默认继续刷(宁多刷不漏刷)")
+            lines.append(f"tab{ti}({tag}): 无台账  默认继续刷(宁多刷不漏刷)")
         if verdict and stage:
             stages.append(stage)
 
@@ -103,5 +103,5 @@ if __name__ == "__main__":
             print(" ", ln)
         print(f"建议 farm_stages = {r['suggested_stages'] or '(关号未知, 见上)'}")
         print(f"人工 farm_stages = {r['manual_stages']}"
-              + (f"  → 一致性: {'一致 ✓' if r['agree'] else '不一致 ⛔'}"
+              + (f"   一致性: {'一致 ' if r['agree'] else '不一致 '}"
                  if r["agree"] is not None else "  (未配置或关号未知, 不置评)"))

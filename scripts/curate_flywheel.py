@@ -3,7 +3,7 @@
 
 Takes the raw clean-frame run dirs (ADB screencap, overlay-free), drops
 near-duplicate frames (idle/cooldown screens repeat for minutes at 1f/2.5s),
-merges everything into ONE data/raw_images/<out> dataset (PNG→JPG), and
+merges everything into ONE data/raw_images/<out> dataset (PNGJPG), and
 pre-labels each kept frame with the current ui model (5-column YOLO txt with
 MASTER class indices — never a 6th column, see flywheel_label_import memory).
 
@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw_images"
 TRAJ = ROOT / "data" / "trajectories"
 MASTER = RAW / "_classes.txt"
-# 预标用线上模型(2026-08-01 v9→v14: 预标钉旧版=白白丢 5 代召回)。
+# 预标用线上模型(2026-08-01 v9v14: 预标钉旧版=白白丢 5 代召回)。
 UI_WEIGHTS = Path(r"D:\Project\ml_cache\models\yolo\runs\ui_yolo26m_v14\weights\best.pt")
 
 _THUMB = (48, 27)   # grayscale thumb for near-dupe metric
@@ -47,7 +47,7 @@ def _dedup_dir(args):
             continue
         thumb = cv2.resize(img, _THUMB).astype(np.float32)
         if last_thumb is not None and float(np.abs(thumb - last_thumb).mean()) < thresh:
-            continue   # near-identical to the last KEPT frame → drop
+            continue   # near-identical to the last KEPT frame  drop
         kept.append(str(p))
         last_thumb = thumb
     return src_dir, len(frames), kept

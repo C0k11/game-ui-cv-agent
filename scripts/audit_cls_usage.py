@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """cls 四象限审计 —— 谁是谁的模型 / 谁是死判据 / 谁是废案。
 
-⛔为什么要有这个脚本(2026-07-25 建, 起因见下):
+为什么要有这个脚本(2026-07-25 建, 起因见下):
 全量审计一次就逮到 **shop.py 的 4 道金钱守卫全是死码** —— 它们检的
 `青辉石商店_已选择` 训练 0 框、92k tick 实战 0 检出, 模型从来不认识它,
 守卫从加上那天(注释还标着 deep-dive C8 / r2 C4)起一次都没生效过, 却让人
@@ -43,7 +43,7 @@ def load_master() -> list:
         return [ln.strip() for ln in f if ln.strip()]
 
 
-# ⛔val 池必须排除(2026-07-25 第二次"审计工具自身有 bug"):
+# val 池必须排除(2026-07-25 第二次"审计工具自身有 bug"):
 # 旧版把 raw_images 下**所有** txt 都当训练标注统计, 包括 `_val_v8flywheel`
 # `_val_v12flywheel_0616` `_val_v15_gap` 这些**held-out val 池**。后果不只是
 # 框数虚高 —— 一个类若**只在 val 里有框、train 里没有**, 就会被误判成"有标注",
@@ -54,8 +54,8 @@ _VAL_DIR_MARKERS = ("_val", "val_pool")
 def _val_source_names() -> set:
     """build_ui_v2.VAL_SOURCES 的目录名(文本抠取, 不 exec 避免顶层副作用)。
 
-    ⛔2026-07-25 第三修: run_20260606_flywheel 这类 **v7 主 val 源**名字不带
-    `_val` 字样, 光靠 _VAL_DIR_MARKERS 认不出 → 同款"val 当 train"漏报向量
+    2026-07-25 第三修: run_20260606_flywheel 这类 **v7 主 val 源**名字不带
+    `_val` 字样, 光靠 _VAL_DIR_MARKERS 认不出  同款"val 当 train"漏报向量
     没堵死; 另有 4 个 `_labels_bak` 备份目录被双份计数(虚高 ~17%)。
     别再用目录名子串猜 val — 直接对齐构建脚本的真相。"""
     try:
@@ -102,7 +102,7 @@ def count_label_boxes(include_val: bool = False) -> Counter:
 def _strip_comments(text: str) -> str:
     """剥掉 # 注释和三引号 docstring。
 
-    ⛔为什么必须剥(2026-07-25 我自己踩的坑): 第一版直接全文匹配, 把
+    为什么必须剥(2026-07-25 我自己踩的坑): 第一版直接全文匹配, 把
     **注释里提到的类名**当成"代码在用" —— `大决战` 报 17 处引用、看着像
     承重判据, 实际全出现在我刚写的一句注释里; `升序` 更离谱, 命中的是
     中文短语"按 cy 升序"。差点据此给出一份错误的死判据清单。
@@ -153,14 +153,14 @@ def scan_detections() -> Counter:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fail-on-dead", action="store_true",
-                    help="代码引用了训练零框的 cls → exit 1")
+                    help="代码引用了训练零框的 cls  exit 1")
     ap.add_argument("--with-det", action="store_true",
                     help="同时统计 trajectory 实战检出(慢)")
     a = ap.parse_args()
 
     master = load_master()
     boxes = count_label_boxes()          # 只算 train, 不含 val 池
-    # ⛔2026-08-02 第四修(实测 10 条死判据里 5 条是误报): 原版把 scripts/ 与
+    # 2026-08-02 第四修(实测 10 条死判据里 5 条是误报): 原版把 scripts/ 与
     # 一起扫, 于是 `scripts/ocr_training/ba_vocab.py` 的 **OCR 中文词表**
     # ("总力战"/"大决战"/"好友")、`build_fused_avatar_dataset.py` 的区域名、
     # `live_capture_verify.py` 这种一次性脚本, 全被算成"bot 靠它做决策"。
@@ -177,7 +177,7 @@ def main() -> int:
     CORP = {"brain": corpora(DECISION_SUBS), "aux": corpora(AUX_SUBS)}
     det = scan_detections() if a.with_det else Counter()
 
-    # ui_classes 常量名 → 值, 用来判断"是不是真被 skill 逻辑引用"
+    # ui_classes 常量名  值, 用来判断"是不是真被 skill 逻辑引用"
     sys.path.insert(0, _ROOT)
     from brain.skills import ui_classes as UC
     const = {k: v for k, v in vars(UC).items()
@@ -189,9 +189,9 @@ def main() -> int:
         常量类走 `UC.XXX`; 字面量走**带引号的完整匹配** —— 绝不用裸子串
         匹配: `房间区域` 是 `房间区域未解锁` 的子串, 裸匹配会把后者算成前者
         的引用(第一版就这么误报了 11 处)。
-        ⛔2026-07-25 第三修(workflow 审计): 原版两类引用全盲 —
-        ① `from ui_classes import X` 后**裸用 X**(不带 UC. 前缀);
-        ② **有常量但代码写字面量**(原版 has_const 就不数字面量了)。
+        2026-07-25 第三修(workflow 审计): 原版两类引用全盲 —
+         `from ui_classes import X` 后**裸用 X**(不带 UC. 前缀);
+         **有常量但代码写字面量**(原版 has_const 就不数字面量了)。
         两类漏数都把真死判据归进"废案", --fail-on-dead 假绿(漏报比多报危险)。
         裸名与字面量都在剔除 ui_classes.py 的语料上数(定义行不算引用)。
         """
@@ -211,7 +211,7 @@ def main() -> int:
         _const_by_val.setdefault(v, []).append(k)
 
     def ref_sites(name: str):
-        """定位 brain/ 里每个引用点 → (相对路径, 行号, 同处并列的其它 cls 常量)。
+        """定位 brain/ 里每个引用点  (相对路径, 行号, 同处并列的其它 cls 常量)。
 
         并列判定按**逻辑行**做: 判据经常跨行写成
             find_cls(screen, [UC.A,
@@ -261,16 +261,16 @@ def main() -> int:
             aux_only.append((i, n, referenced(n, "aux")))
     dead.sort(key=lambda t: -t[2])
 
-    print(f"\n⛔死判据(**brain/ 决策链**在用 + 训练零框) {len(dead)} 条:")
+    print(f"\n死判据(**brain/ 决策链**在用 + 训练零框) {len(dead)} 条:")
     for n, i, r, dv in dead:
         sites = ref_sites(n)
-        # ⛔死判据分两性(memory cls_ownership_audit): 「唯一信号型」= 该 cls 是
-        # 某个判断的**独苗**, 死了 → 判断永不成立 → 真事故; 「或列表死成员」=
+        # 死判据分两性(memory cls_ownership_audit): 「唯一信号型」= 该 cls 是
+        # 某个判断的**独苗**, 死了  判断永不成立  真事故; 「或列表死成员」=
         # 和别的 cls 并列在 [..] / any_of 里, 搭档活着就没事, 只是误导读代码的人。
         # 旧版只按引用次数打「承重!」, 把后者也标成承重 —— 2026-08-02 实测 5 条
         # 全是或列表成员, 一条事故都造不成。
         solo = [s for s in sites if not s[2]]
-        mark = "  ← ⛔唯一信号!" if solo else "  (全是「或」列表成员 → 搭档活着就无害)"
+        mark = "   唯一信号!" if solo else "  (全是「或」列表成员  搭档活着就无害)"
         print(f"   idx{i:4d} {n:24} brain 引用 {r:2d} 处"
               + (f" 实战检出 {dv}" if a.with_det else "") + mark)
         for path, ln, partners in sites:
@@ -292,12 +292,12 @@ def main() -> int:
     weak = [(n, i, boxes.get(i, 0)) for i, n in enumerate(master)
             if 0 < boxes.get(i, 0) < 30 and referenced(n, "brain") > 0]
     weak.sort(key=lambda t: t[2])
-    print(f"\n⚠️低样本(<30 框且代码在用) {len(weak)} 条:")
+    print(f"\n️低样本(<30 框且代码在用) {len(weak)} 条:")
     for n, i, b in weak:
         print(f"   idx{i:4d} {n:24} 训练框 {b}")
 
     if a.fail_on_dead and dead:
-        print(f"\n❌ {len(dead)} 条死判据 —— 代码依赖模型不认识的 cls")
+        print(f"\n {len(dead)} 条死判据 —— 代码依赖模型不认识的 cls")
         return 1
     return 0
 

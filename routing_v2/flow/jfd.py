@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """学院交流会（JFD）—— 票券扫荡。
 
-⭐**三个学院现在有 cls 了**：三一 / 千年 / 格黑娜，各 84 train / 5 val
+**三个学院现在有 cls 了**：三一 / 千年 / 格黑娜，各 84 train / 5 val
    （ui_v2 实测 2026-08-08）。
 
-⛔老 `brain/skills/jfd.py` 的注释写着「三个學院 tile 没有 YOLO cls（v6 gap，
+老 `brain/skills/jfd.py` 的注释写着「三个學院 tile 没有 YOLO cls（v6 gap，
    task #22）」并用 `_ACADEMY_POS` 三个写死坐标去点。那句话在 v6 时代是对的，
    但模型早就训了 —— **写死坐标一旦落下去，就没人回头看它补上了没**（§A8）。
    这就是为什么新架构里 `tap_at()` 强制要求 `justify`。

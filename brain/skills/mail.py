@@ -8,17 +8,17 @@ old X/200 digit read was a progress crutch and is dropped (it relied on
 full-frame OCR which is disabled in pure-YOLO mode anyway).
 
 The old settings-popup-repeat / timeout bug did NOT reproduce in the probe;
-the root cause was re-tapping the envelope icon (which becomes a ⚙ gear inside
+the root cause was re-tapping the envelope icon (which becomes a  gear inside
 the mailbox). We avoid it by only clicking NAV_MAIL while on the lobby.
 
 State machine
 -------------
-enter   lobby → click NAV_MAIL (邮件箱). Envelope cls is weak (19f) so fall
+enter   lobby  click NAV_MAIL (邮件箱). Envelope cls is weak (19f) so fall
         back to the red dot in the top-right mail zone. Wait for the Mail page.
-claim   CLAIM_ONCE_YELLOW (一次领取黄色) → click (claims all). GOT_REWARD popup
-        → dismiss via header / 点击继续字样 (handled globally). Done when only
+claim   CLAIM_ONCE_YELLOW (一次领取黄色)  click (claims all). GOT_REWARD popup
+         dismiss via header / 点击继续字样 (handled globally). Done when only
         CLAIM_ONCE_GREY (一次领取灰色) remains = queue drained.
-exit    BTN_HOME / BTN_BACK → lobby → done.
+exit    BTN_HOME / BTN_BACK  lobby  done.
 
 Detectors: base "ui" only.
 """
@@ -36,12 +36,12 @@ _CLS_CONF = 0.30
 _MAIL_ZONE = (0.86, 0.0, 0.97, 0.09)   # top-right envelope + its red dot
 
 _ENTER_MAX = 20          # 跑飞兜底(tick); 真上限走墙钟 _ENTER_MAX_SEC
-# ⛔tick-vs-墙钟家族(2026-07-28): zero-wait 后 tick≈0.15-0.25s, 20 tick=3-5s
-# 根本盖不住 大厅→邮箱 的真实转场。×1.6 年代等效 = 32s。
+# tick-vs-墙钟家族(2026-07-28): zero-wait 后 tick≈0.15-0.25s, 20 tick=3-5s
+# 根本盖不住 大厅邮箱 的真实转场。×1.6 年代等效 = 32s。
 _ENTER_MAX_SEC = 32.0
 _OPEN_SETTLE_SEC = 4.8   # 点开邮箱后的开场动画驻留(旧 3 tick×1.6s=4.8s;
 #                          live 2026-06-10: 转场期 page 两不像, fallthrough 的
-#                          nav_home 把半开的邮箱关掉, open→back→open 震荡 3 轮)
+#                          nav_home 把半开的邮箱关掉, openbackopen 震荡 3 轮)
 _CLAIM_MAX = 30
 _EXIT_MAX = 14
 _CLAIM_STUCK = 4   # 一次領取 still yellow after this many taps = blocked (bag full)
@@ -79,7 +79,7 @@ class MailSkill(BaseSkill):
         return self.detect_screen_yolo(screen) == "Mail"
 
     def _dismiss_reward(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
-        """GOT_REWARD popup → tap 点击继续字样 / 获得奖励 header (NEVER center)."""
+        """GOT_REWARD popup  tap 点击继续字样 / 获得奖励 header (NEVER center)."""
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
         if cont is not None:
             return action_click_box(cont, "dismiss reward via continue")
@@ -121,17 +121,17 @@ class MailSkill(BaseSkill):
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         if self._on_mail(screen):
-            self.log("inside mailbox → claim")
+            self.log("inside mailbox  claim")
             self._goto("claim")
             return action_wait(400, "entered mail")
 
-        # ★ Settle after clicking the mailbox: during the open-transition the
+        #  Settle after clicking the mailbox: during the open-transition the
         # page reads neither Mail nor Lobby and the fallthrough action_back
-        # CLOSED the half-open mailbox (live 2026-06-10: open→back→open
+        # CLOSED the half-open mailbox (live 2026-06-10: openbackopen
         # oscillated 3 rounds before luckily landing). Same race class as the
         # arena enter fix.
         # 帧数×墙钟合取(tick-vs-墙钟家族): wait 时长被 zero-wait 压 0.12s,
-        # 纯 tick 倒数只剩 ~0.5s, 盖不住开场动画 → fallthrough nav_home 把
+        # 纯 tick 倒数只剩 ~0.5s, 盖不住开场动画  fallthrough nav_home 把
         # 半开的邮箱关掉(它要防的 2026-06-10 事故原样复发)。
         if self._enter_settle > 0 or (
                 self._open_clicked and self.since("mail_open") < _OPEN_SETTLE_SEC):
@@ -173,21 +173,21 @@ class MailSkill(BaseSkill):
                 return action_wait(300, "claim: back on lobby, re-enter")
             if self._phase_ticks > _CLAIM_MAX:
                 self._goto("exit")
-                return action_wait(300, "claim lost mail → exit")
+                return action_wait(300, "claim lost mail  exit")
             return action_wait(400, "waiting for mail UI (claim)")
 
-        # ⛔ Stuck-claim block (live-caught 2026-06-11): 一次領取 = claim the
+        #  Stuck-claim block (live-caught 2026-06-11): 一次領取 = claim the
         # WHOLE queue in one tap, so a healthy mailbox greys out after 1-2
         # claims. If it stays YELLOW past _CLAIM_STUCK taps, something blocks
         # every claim — here it was 通知「背包已滿，請整理背包」(item bag full).
         # The bot can't tidy the bag; spinning here also kept the screen off
-        # the lobby, so the global money-read left-truncated (6497→497) and
+        # the lobby, so the global money-read left-truncated (6497497) and
         # false-tripped the breach guard. Recognise the block and exit.
         if self._claims >= _CLAIM_STUCK:
-            self.log(f"⚠️ 一次領取 still yellow after {self._claims} taps "
-                     f"(背包满/被阻挡) → exit, 待用户整理背包")
+            self.log(f"️ 一次領取 still yellow after {self._claims} taps "
+                     f"(背包满/被阻挡)  exit, 待用户整理背包")
             self._goto("exit")
-            return action_wait(300, "claim blocked (bag full?) → exit")
+            return action_wait(300, "claim blocked (bag full?)  exit")
 
         # Claim-all (一次领取黄色) — one tap claims the whole unclaimed queue.
         claim_all = self.find_cls(screen, UC.CLAIM_ONCE_YELLOW, conf=_CLS_CONF)
@@ -196,7 +196,7 @@ class MailSkill(BaseSkill):
             if self._phase_ticks % 3 != 1:
                 return action_wait(500, "claim clicked — settling")
             # 被吞的点击不虚增计数(2026-07-21 mutate-before-ack 防御: 否则
-            # _claims 虚高 → 假触 _CLAIM_STUCK bag-full 早退, mail 没领完)。
+            # _claims 虚高  假触 _CLAIM_STUCK bag-full 早退, mail 没领完)。
             # "claim" 本在稳定门豁免词表, 此防御主要覆盖 ADB 丢 tap 边缘。
             if not self.action_suppressed:
                 self._claims += 1
@@ -205,15 +205,15 @@ class MailSkill(BaseSkill):
 
         # Claim-all greyed = queue drained = DONE.
         if self.find_cls(screen, UC.CLAIM_ONCE_GREY, conf=_CLS_CONF) is not None:
-            self.log(f"一次领取灰色 → mailbox drained (claims={self._claims})")
+            self.log(f"一次领取灰色  mailbox drained (claims={self._claims})")
             self._goto("exit")
-            return action_wait(300, "mail drained → exit")
+            return action_wait(300, "mail drained  exit")
 
         # Neither yellow nor grey claim-all visible yet — settle, then bail.
         if self._phase_ticks > _CLAIM_MAX:
             self.log("no claim-all cls found, exiting")
             self._goto("exit")
-            return action_wait(300, "no claim cls → exit")
+            return action_wait(300, "no claim cls  exit")
         return action_wait(400, "waiting for claim-all cls")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:

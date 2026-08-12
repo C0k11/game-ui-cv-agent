@@ -4,18 +4,18 @@
 ## 和 v10s 的区别(用户 2026-08-11 拍板"这组可以先拿去迭代一波战斗模型")
 1. **种子用全 68 帧**, 不再留 holdout。
    v10s 当初切 48 是为了**验证方法成不成立**, 那个问题已经答完了:
-   敌方召回 32.4%→85.3% / 敌→友 22.7%→0.0%(0/58)。方法既已证实,
+   敌方召回 32.4%85.3% / 敌友 22.7%0.0%(0/58)。方法既已证实,
    再扣掉 14 帧 GT 不训就是纯浪费 —— 这 68 帧是**全仓唯一的人审战斗 GT**。
 2. **val 换成 battle_v10 的 353 帧**(回归量尺)。
    v10s 的 val 只有 16 帧种子 holdout, 训完即废; 换成 v10 val 才能回答
    "其余 18 类有没有被过采样带崩"这个真问题。
-   ⛔无泄漏: botplay×7 在 2026-07-20 就被用户叫停撤出 v10 了(见
+   无泄漏: botplay×7 在 2026-07-20 就被用户叫停撤出 v10 了(见
      build_battle_v10.py:30-39 那段注释掉的源), 所以 v10 的 val 里
      **没有一帧** 025638。
 
-## ⛔纪律照旧(和 v10s 完全一致, 别因为"升级了"就松)
+## 纪律照旧(和 v10s 完全一致, 别因为"升级了"就松)
 - **过拟合是设计内的**: 目标域 = 同 session 同一张图的黄色量産型机甲。
-  ⇒ **绝不能拿它当 v11 上线**, active 保持 v10。正式 v11 等 6 池人审完重训。
+   **绝不能拿它当 v11 上线**, active 保持 v10。正式 v11 等 6 池人审完重训。
 - **真验证不在 val 上**: 这个模型好不好, 唯一口径是"给 6 池打的预标, 人眼抽查
   准不准"。val 只回答"别的类没忘"。
 """
@@ -27,7 +27,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
-SEED_POOL = RAW / "run_20260715_025638_botplay_clean"   # ⭐用户人审, 全仓唯一 GT
+SEED_POOL = RAW / "run_20260715_025638_botplay_clean"   # 用户人审, 全仓唯一 GT
 BASE_SRCS = [RAW / n for n in [
     "run_battle_material_20260708",
     "run_20260710_110430", "run_20260710_104718",
@@ -101,7 +101,7 @@ def main() -> None:
         for ln in lines:
             cnt[int(ln.split()[0])] += 1
 
-    # ⭐val 直接指向 battle_v10 的 val（绝对路径，不复制 353 帧）
+    # val 直接指向 battle_v10 的 val（绝对路径，不复制 353 帧）
     nval = len(list((VAL_FROM / "images" / "val").glob("*.jpg")))
     yaml = [f"train: {(OUT / 'images' / 'train').as_posix()}",
             f"val: {(VAL_FROM / 'images' / 'val').as_posix()}",
@@ -111,7 +111,7 @@ def main() -> None:
 
     a, e = cnt[0], cnt[1]
     print(f"train {len(train)} 帧 = base {len(base)} + 种子 {len(seed)}×{SEED_REPEAT}")
-    print(f"val   {nval} 帧 ← battle_v10 的 val（回归量尺，无 025638 泄漏）")
+    print(f"val   {nval} 帧  battle_v10 的 val（回归量尺，无 025638 泄漏）")
     print(f"\ntrain 我方 {a} : 敌方 {e} = {a/max(e,1):.2f}:1"
           f"   (v10 原 9826:2082 = 4.72:1 / v10s 3.40:1)")
     for i, n in enumerate(NAMES):

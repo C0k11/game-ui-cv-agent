@@ -12,7 +12,7 @@
 `GET /v2/scan/{name}` 在对应页面上**动态扫 cls** 拿真实可选项（悬赏分支 /
 JFD 学院 / 活动关卡）—— **不写死清单**（§A8/§A9）。
 
-⛔金钱: `safety.*` 是只读的（`config.LOCKED` 强制覆盖，写进去也不生效）。
+金钱: `safety.*` 是只读的（`config.LOCKED` 强制覆盖，写进去也不生效）。
    `POST /v2/run` 的 `money_ok` 只在**这一次运行**里有效，不落盘 ——
    金钱步必须每天重新人审。
 """
@@ -75,7 +75,7 @@ def post_config(body: ConfigIn):
             "note": "safety.* / shop.refresh_times / run.frame_source 已被锁死覆盖"}
 
 
-# ══ 动态选项（⭐进页扫 cls，不写死清单）═════════════════════════════════
+# ══ 动态选项（进页扫 cls，不写死清单）═════════════════════════════════
 _SCANS = {
     "bounty_branches": (V.BOUNTY_BRANCHES, "在悬赏分支选择页扫"),
     "jfd_academies": (V.JFD_ACADEMIES, "在学院交流会学院选择页扫"),
@@ -89,7 +89,7 @@ _SCANS = {
 def scan(name: str):
     """抓一帧，看这一页上**真的有哪些**可选项。
 
-    ⛔前端必须先把游戏切到对应页面再调 —— 这就是"动态"的代价，也是它比
+    前端必须先把游戏切到对应页面再调 —— 这就是"动态"的代价，也是它比
        写死清单强的地方：换活动/换版面/游戏更新都自动跟得上。
     """
     if name not in _SCANS:
@@ -154,7 +154,7 @@ def probe():
 class RunIn(BaseModel):
     flows: Optional[List[str]] = None
     step_mode: Optional[bool] = None
-    money_ok: bool = False           # ⛔只对这一次运行有效，不落盘
+    money_ok: bool = False           # 只对这一次运行有效，不落盘
 
 
 @router.post("/run")
@@ -179,7 +179,7 @@ def run(body: RunIn):
     def approver(act, obs) -> bool:
         """逐帧门控 / 金钱人审 —— 挂起等前端 /v2/approve。"""
         if act.money and not _state["money_ok"]:
-            _log(f"⛔金钱步「{act.reason}」本次未授权（money_ok=False）→ 拒绝")
+            _log(f"金钱步「{act.reason}」本次未授权（money_ok=False） 拒绝")
             return False
         with _LOCK:
             _state["pending"] = {"action": repr(act), "reason": act.reason,
@@ -197,7 +197,7 @@ def run(body: RunIn):
                     _state["pending"] = None
                 return bool(ans)
             time.sleep(0.05)
-        _log("⏸ 人审超时 10 分钟 → 当作不放行")
+        _log("⏸ 人审超时 10 分钟  当作不放行")
         with _LOCK:
             _state["pending"] = None
         return False
@@ -212,7 +212,7 @@ def run(body: RunIn):
             r.run_all()
         except Exception as e:
             import traceback
-            _log(f"⛔运行异常: {e}\n{traceback.format_exc()}")
+            _log(f"运行异常: {e}\n{traceback.format_exc()}")
         finally:
             _state["running"] = False
 
@@ -274,7 +274,7 @@ def health():
 
 @router.get("/", response_class=HTMLResponse)
 def console():
-    """控制台单页。⭐所有表单由 `/v2/schema` 自省生成 —— 加配置项前端自动跟，
+    """控制台单页。所有表单由 `/v2/schema` 自省生成 —— 加配置项前端自动跟，
     不用改这个 HTML（老 dashboard 把悬赏三个分支写成硬编码 checkbox 的教训）。"""
     p = Path(__file__).with_name("console.html")
     if not p.is_file():

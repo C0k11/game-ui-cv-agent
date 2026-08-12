@@ -1,8 +1,8 @@
-"""Build fused_avatar cls → EN portrait-filename map for the dashboard
+"""Build fused_avatar cls  EN portrait-filename map for the dashboard
 schedule-target picker (so each option can show a face, not just a name).
 
-Reuses build_fused_avatar_dataset's battle-tested CN→EN translation
-(COSTUME_SUFFIXES paren-insertion + 繁→简 normalization + the merged name
+Reuses build_fused_avatar_dataset's battle-tested CNEN translation
+(COSTUME_SUFFIXES paren-insertion + 繁简 normalization + the merged name
 maps). Output: data/avatar_thumb_map.json = {cls: en} for every cls that
 actually has a portrait png in 角色头像/ or 角色头像_crop/.
 
@@ -28,7 +28,7 @@ OUT = REPO / "data" / "avatar_thumb_map.json"
 
 def main() -> None:
     cls_list = json.loads(CLS_JSON.read_text(encoding="utf-8"))
-    lookup = build_cn_to_en_lookup()  # CN (many variant forms) → EN file stem
+    lookup = build_cn_to_en_lookup()  # CN (many variant forms)  EN file stem
 
     def find_en(cls: str):
         # Try the cls as-is, simplified, paren-inserted, and both combined.

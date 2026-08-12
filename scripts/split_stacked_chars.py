@@ -2,10 +2,10 @@
 """我方并框拆分器 (2026-07-12, 用户: 一框包两人怎么办/能不能直接上划分).
 
 原理 = 用户洞察「血条渲染在顶层永不重叠」的规则实现:
-  对每个「我方」框, 在框内做 HSV 亮绿血条检测(宽扁连通域) → 检出 N≥2 条
-  血条 = 框里装了 N 个学生 → 按每条血条为锚拆成 N 个子框(血条x范围定宽,
+  对每个「我方」框, 在框内做 HSV 亮绿血条检测(宽扁连通域)  检出 N≥2 条
+  血条 = 框里装了 N 个学生  按每条血条为锚拆成 N 个子框(血条x范围定宽,
   血条y向下延伸定高), 替换原并框。
-用途: ①预标后处理(prefill 后跑一遍, 人审免手拆) ②combat 2.0 运行时同款
+用途: 预标后处理(prefill 后跑一遍, 人审免手拆) combat 2.0 运行时同款
   逻辑做个体锚定。
 
 用法: py scripts/split_stacked_chars.py <pool_substr> [--apply]
@@ -32,7 +32,7 @@ SCRATCH = Path(r"C:\Users\shien\AppData\Local\Temp\claude"
 
 
 def find_hp_bars(img, x1, y1, x2, y2, min_w=None):
-    """区域内亮绿血条检测 → [(bx1,by1,bx2,by2)] 像素坐标(按 y 排序)。
+    """区域内亮绿血条检测  [(bx1,by1,bx2,by2)] 像素坐标(按 y 排序)。
     血条=高饱和草绿宽扁条(我方专属色; 敌方红/黄不命中)。
     min_w: 血条最小像素宽(全帧模式传绝对值; 默认=区域宽 1/3)。"""
     roi = img[y1:y2, x1:x2]
@@ -55,7 +55,7 @@ def find_hp_bars(img, x1, y1, x2, y2, min_w=None):
         if w / max(h, 1) >= 3.0 and w >= min_w and 4 <= h <= 28:
             bars.append((x1 + x, y1 + y, x1 + x + w, y1 + y + h))
     bars.sort(key=lambda b: b[1])
-    # 同一条血条被分割成两段(受击闪烁)→ y 相近的合并
+    # 同一条血条被分割成两段(受击闪烁) y 相近的合并
     merged = []
     for b in bars:
         if merged and abs(b[1] - merged[-1][1]) < 14:
@@ -68,7 +68,7 @@ def find_hp_bars(img, x1, y1, x2, y2, min_w=None):
 
 
 def split_box(img, x1, y1, x2, y2, bars):
-    """按 N 条血条拆 N 个子框: 血条 x 范围外扩定宽; y=血条顶 → 下一条血条顶
+    """按 N 条血条拆 N 个子框: 血条 x 范围外扩定宽; y=血条顶  下一条血条顶
     (末条到原框底)。"""
     H, W = img.shape[:2]
     out = []
@@ -89,7 +89,7 @@ IDENTITY = {476, 477, 478, 479, 480, 481}   # 我方/敌方/塞特/Boss/主教/�
 
 
 def find_orphan_bars(img, boxes_px):
-    """全帧扫血条, 剔除已被任何身份框覆盖的 → 孤儿血条(漏检人的证据)。
+    """全帧扫血条, 剔除已被任何身份框覆盖的  孤儿血条(漏检人的证据)。
     boxes_px: [(cls,x1,y1,x2,y2)]。排除顶部 12%(boss 大血条/HUD) 和底部
     14%(技能卡/UP字幕)。"""
     H, W = img.shape[:2]

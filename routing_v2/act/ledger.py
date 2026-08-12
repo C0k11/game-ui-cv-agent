@@ -4,17 +4,17 @@
 两件事，都是今天的血:
 
 【一】**每 tick 落 balance 台账**。
-   2026-08-07 那天青辉石 18,036 → 19,766（+1,730 全是收入），但**逐笔来源
+   2026-08-07 那天青辉石 18,036  19,766（+1,730 全是收入），但**逐笔来源
    追不到** —— trajectory 里根本没有 balance 字段。于是"钱是怎么变的"只能
    靠事后猜。这里把每一次确认读数连同 (页面, 正在跑的 flow) 一起落盘。
 
 【二】**kill-switch 不能靠单次读数开火**。
-   同一天 kill-switch 报 `青辉石 18036→18003 MONEY BREACH` 急停了整条
+   同一天 kill-switch 报 `青辉石 1803618003 MONEY BREACH` 急停了整条
    pipeline，而人眼看余额一分没少 —— 是**裁切窗口**读错（§A10）。
-   ⇒ 这里的规则：怀疑掉钱 **不立刻停**，而是**重新独立投票一次**；两次
+    这里的规则：怀疑掉钱 **不立刻停**，而是**重新独立投票一次**；两次
      独立投票都说掉了才停。方向仍然是安全的（真掉钱的话第二次也会掉），
      但把"OCR 抖一下就急停"这个假阳性堵死了。
-   ⚠反向危害同样存在：**会读低就会读高，读高会掩盖真实掉钱** ⇒ 读数上升
+   反向危害同样存在：**会读低就会读高，读高会掩盖真实掉钱**  读数上升
      也要落盘，异常上升（一次涨超过阈值）同样打标。
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ class Ledger:
     def feed(self, obs: Observation, page: str, flow: str) -> Optional[str]:
         """每 tick 喂一帧。返回非 None = 出事了（breach 文案）。
 
-        ⛔只在**顶栏锚点可见**的帧上采样；进不去顶栏的页面（战斗内/全屏过场）
+        只在**顶栏锚点可见**的帧上采样；进不去顶栏的页面（战斗内/全屏过场）
            自然跳过 —— 这就是"非大厅掉钱盲区"的来源，所以**下面还有一条**：
            每次 flow 切换时强制采一次，把盲区窗口压到最小。
         """
@@ -107,81 +107,81 @@ class Ledger:
             if v is None:
                 continue
             prev = self.confirmed.get(cls)
-            # ⛔千位逗号→0 误读（08-09 event_shop 页实锤）: "20,176" 被读成
+            # 千位逗号0 误读（08-09 event_shop 页实锤）: "20,176" 被读成
             #    **200176** = 恰好等于基线在千位分隔处插一个 0。结构判据一击毙:
-            #    新值字串 == 基线字串在倒数第 3 位插 "0" ⇒ 就是基线本身。
+            #    新值字串 == 基线字串在倒数第 3 位插 "0"  就是基线本身。
             if (prev is not None and len(str(prev)) >= 4
                     and str(v) == f"{str(prev)[:-3]}0{str(prev)[-3:]}"):
                 v = prev
-            # ⛔位数收缩闸：新读数**位数变少且掉了一大半** = 典型的 OCR 截断，
+            # 位数收缩闸：新读数**位数变少且掉了一大半** = 典型的 OCR 截断，
             #    不是真的变动。2026-08-08 本轮实测信用点被读成 `54,661`，
             #    真值 `54,618,001` —— 少了三位。信用点的裁切窗口至今没按人眼
             #    真值重标（README §A10 的遗留缺口，9 帧只对 3 次）。
-            #    ⚠这道闸只挡"读小"，**挡不住读大** —— 读大会掩盖真实掉钱，
+            #    这道闸只挡"读小"，**挡不住读大** —— 读大会掩盖真实掉钱，
             #      所以青辉石那格必须靠标定本身准，不能指望这道闸。
-            # ⛔信用点专用：OCR **只会截断，不会凭空多出位数** ⇒ 位数比历史
+            # 信用点专用：OCR **只会截断，不会凭空多出位数**  位数比历史
             #    最大值少的读数一律当截断丢掉。这一格的裁切窗口至今没按人眼
             #    真值重标（9 帧只对 3 次），是 §A10 的遗留缺口。
-            #    ⚠只对信用点用：AP 会从 899 真掉到 99（位数真的会少），
+            #    只对信用点用：AP 会从 899 真掉到 99（位数真的会少），
             #      青辉石更不能用这条 —— 它靠双次投票，不靠位数。
             if cls == R.CREDIT:
                 mx = self._maxdigits.get(cls, 0)
                 if len(str(v)) < mx:
-                    self._log(f"[ledger] ⚠信用点 {v} 位数({len(str(v))}) < 历史最大"
+                    self._log(f"[ledger] 信用点 {v} 位数({len(str(v))}) < 历史最大"
                               f"({mx}) — 判为 OCR 截断，不采信")
                     self._write(Entry(time.time(), cls, v, page, flow, "misread"))
                     continue
                 self._maxdigits[cls] = max(mx, len(str(v)))
             if prev is not None and len(str(v)) < len(str(prev)) and v < prev * 0.5:
-                # ⛔⛔基线自愈（08-09 实锤 A10「会读低就会读高」的反向形态）：
+                # 基线自愈（08-09 实锤 A10「会读低就会读高」的反向形态）：
                 #    某帧青辉石被读大成 200117 **入了账**，之后所有正确的
                 #    20176 全被这道"位数收缩"闸拒收 —— 中毒的是基线不是新读数。
                 #    判据：同一个"更短"的值连续 4 次出现、而旧基线再没露过面
-                #    ⇒ 基线是读大误读，纠正并大声记录。
+                #     基线是读大误读，纠正并大声记录。
                 rej = self._rejects.setdefault(cls, [])
                 rej.append(v)
                 del rej[:-6]
                 if len(rej) >= 4 and all(x == v for x in rej[-4:]):
-                    self._log(f"[ledger] ⭐基线自愈: {cls} 连续 4 次读到 {v} 而"
+                    self._log(f"[ledger] 基线自愈: {cls} 连续 4 次读到 {v} 而"
                               f"基线 {prev} 再没出现过 — 判定基线是**读大**误读，"
-                              f"纠正 {prev}→{v}")
+                              f"纠正 {prev}{v}")
                     self.confirmed[cls] = v
                     rej.clear()
                     self._write(Entry(time.time(), cls, v, page, flow,
                                       "baseline_fix"))
                     continue
-                self._log(f"[ledger] ⚠{cls} 读数 {v} 比上次 {prev} 少了位数 "
+                self._log(f"[ledger] {cls} 读数 {v} 比上次 {prev} 少了位数 "
                           f"— 判为 OCR 截断，**不采信**（裁切窗口待重标）")
                 self._write(Entry(time.time(), cls, v, page, flow, "misread"))
                 continue
             self._rejects.get(cls, []).clear()      # 正常读数 = 拒收史清零
-            # ⛔对称守卫：**位数变多**的读数 = 读大嫌疑（08-09 实锤：青辉石
-            #    20,176 被读成 200117 且跨 3 页稳定复现, 把换页复读都骗过 ⇒
+            # 对称守卫：**位数变多**的读数 = 读大嫌疑（08-09 实锤：青辉石
+            #    20,176 被读成 200117 且跨 3 页稳定复现, 把换页复读都骗过 
             #    读大入账后正确值全被位数收缩闸拒收）。要连续两次读到**同一个**
-            #    变多的值才收 —— 真实的位数增长(9999→10000)复读一致, 不受影响。
+            #    变多的值才收 —— 真实的位数增长(999910000)复读一致, 不受影响。
             if prev is not None and len(str(v)) > len(str(prev)):
                 if self._grow_pending.get(cls) != v:
                     self._grow_pending[cls] = v
-                    self._log(f"[ledger] ⚠{cls} 读数 {v} 位数多于基线 {prev} — "
+                    self._log(f"[ledger] {cls} 读数 {v} 位数多于基线 {prev} — "
                               f"读大嫌疑，等复读一致")
                     self._write(Entry(time.time(), cls, v, page, flow,
                                       "grow_suspect"))
                     continue
-                self._log(f"[ledger] {cls} 位数增长 {prev}→{v} 复读一致，收")
+                self._log(f"[ledger] {cls} 位数增长 {prev}{v} 复读一致，收")
             self._grow_pending.pop(cls, None)
             tag = ""
             if cls == GUARDED and prev is not None and v < prev:
                 if not self._recheck:
-                    # ⭐第一次发现掉 → **不停**，挂起等复读
+                    # 第一次发现掉  **不停**，挂起等复读
                     self._recheck = True
                     self._suspect = v
                     self._suspect_page = page
                     self._last_commit = 0.0     # 立刻重采
-                    self._log(f"[ledger] ⚠青辉石 {prev} → {v}（-{prev-v}）"
+                    self._log(f"[ledger] 青辉石 {prev}  {v}（-{prev-v}）"
                               f" 疑似掉钱 @page={page} — **挂起等换个页面复读**")
                     self._write(Entry(time.time(), cls, v, page, flow, "suspect"))
                     return None
-                # ⛔⛔复读**必须在另一个页面上**才算数。
+                # 复读**必须在另一个页面上**才算数。
                 #    2026-08-08 实测两次：同一页上的误读是**稳定的** ——
                 #    cafe 页把 20,176 稳定读成 20,117，于是"独立复读"每次都
                 #    复现同一个错值，把误报盖章成"两次一致"，整轮日常被急停。
@@ -192,14 +192,14 @@ class Ledger:
                     return None                 # 还在同一页，继续等
                 if v != self._suspect:
                     self._recheck = False
-                    self._log(f"[ledger] ✅换页复读得到 {v}（前一页读的是 "
+                    self._log(f"[ledger] 换页复读得到 {v}（前一页读的是 "
                               f"{self._suspect}）— 两页不一致 = OCR 误读，警报解除")
                     self._write(Entry(time.time(), cls, v, page, flow, "misread"))
                     continue
-                # 换了页面、值还是一样低 → 真的出事了
+                # 换了页面、值还是一样低  真的出事了
                 self._recheck = False
                 tag = "breach"
-                msg = (f"⛔⛔MONEY BREACH: {cls} {prev} → {v}（-{prev-v}）"
+                msg = (f"MONEY BREACH: {cls} {prev}  {v}（-{prev-v}）"
                        f" 在 {self._suspect_page} 和 {page} 两个页面上都读到"
                        f" @flow={flow}")
                 self.breach = msg
@@ -207,11 +207,11 @@ class Ledger:
             elif cls == GUARDED and prev is not None and v > prev + 20000:
                 # 读高会掩盖真实掉钱 —— 异常上涨同样打标交人看
                 tag = "spike"
-                self._log(f"[ledger] ⚠青辉石异常上涨 {prev} → {v} — 标记待人审"
+                self._log(f"[ledger] 青辉石异常上涨 {prev}  {v} — 标记待人审"
                           f"（读高会掩盖真掉钱）")
             if cls == GUARDED and self._recheck and tag != "breach":
-                self._recheck = False        # 复读结果正常 → 警报解除
-                self._log(f"[ledger] ✅复读 {v}，与 {prev} 一致/未跌 — 假警报解除")
+                self._recheck = False        # 复读结果正常  警报解除
+                self._log(f"[ledger] 复读 {v}，与 {prev} 一致/未跌 — 假警报解除")
             self.confirmed[cls] = v
             e = Entry(time.time(), cls, v, page, flow, tag)
             self.entries.append(e)
@@ -238,7 +238,7 @@ class Ledger:
             first, last = rows[0].value, rows[-1].value
             d = last - first
             sign = "+" if d >= 0 else ""
-            lines.append(f"  {cls:<6s} {first:>10,} → {last:>10,}  ({sign}{d:,})"
+            lines.append(f"  {cls:<6s} {first:>10,}  {last:>10,}  ({sign}{d:,})"
                          f"  [{len(rows)} 次确认读数]")
         # 逐笔变动明细（这就是 08-07 追不到的那部分）
         pyx = [e for e in self.entries if e.cls == GUARDED]
@@ -247,7 +247,7 @@ class Ledger:
             lines.append(f"  青辉石逐笔变动（{len(moves)} 笔）:")
             for a, b in moves:
                 d = b.value - a.value
-                lines.append(f"    {b.as_dict()['time']}  {a.value:,} → {b.value:,}"
+                lines.append(f"    {b.as_dict()['time']}  {a.value:,}  {b.value:,}"
                              f"  ({'+' if d > 0 else ''}{d:,})  flow={b.flow} page={b.page}")
         lines.append(f"  明细已落盘: {self.path}")
         return "\n".join(lines)

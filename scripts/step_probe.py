@@ -3,15 +3,15 @@
 确保逻辑以及我们的 yolo 没问题")。
 
 每一步做三件事, 缺一不可:
-  ① **抓干净帧**(ADB screencap, Android 内部取流 — overlay 物理进不去)
-  ② **跑 YOLO 看检出** —— 验感知层: 这一帧模型认出了什么, 置信度多少
-  ③ **拉 bot 的 pending 意图** —— 验逻辑层: 它想干什么, 落点在哪个 cls 上
+   **抓干净帧**(ADB screencap, Android 内部取流 — overlay 物理进不去)
+   **跑 YOLO 看检出** —— 验感知层: 这一帧模型认出了什么, 置信度多少
+   **拉 bot 的 pending 意图** —— 验逻辑层: 它想干什么, 落点在哪个 cls 上
 然后人/主对话判断"该不该放行", 对了才 go。
 
-⛔纪律(execution_doctrine #13, 用户三次纠偏): **绝不批量放行**。
+纪律(execution_doctrine #13, 用户三次纠偏): **绝不批量放行**。
 只看 reason 字符串就 go = 假审核 —— bounty 弃 6 票 / jfd 假成功 / arena 空转
 全是这么放过去的。批量只允许用于**同构且已逐帧验证过**的重复步骤。
-⛔纪律(#17): **探针帧永远比 pending 新** —— pending 是几秒前那一帧算出来的。
+纪律(#17): **探针帧永远比 pending 新** —— pending 是几秒前那一帧算出来的。
 看到"落点与当前检出对不上"先想这个, 别急着报 bug。
 
 用法:
@@ -34,7 +34,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
-# ⛔端口不写死 — MuMu 实例重启会换号(2026-07-28: 7555→16384, 全仓 16 处硬编码)
+# 端口不写死 — MuMu 实例重启会换号(2026-07-28: 755516384, 全仓 16 处硬编码)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     from brain.mumu_port import mumu_serial
@@ -58,7 +58,7 @@ def api(path: str, method: str = "GET", body=None):
 
 
 def grab() -> str:
-    """ADB 干净帧。⚠必须走 pull, 不能用 PowerShell 的 `>` 重定向(会破坏二进制)。"""
+    """ADB 干净帧。必须走 pull, 不能用 PowerShell 的 `>` 重定向(会破坏二进制)。"""
     subprocess.run([ADB, "-s", DEV, "shell", "screencap", "-p",
                     "/sdcard/_probe.png"], capture_output=True, timeout=60)
     subprocess.run([ADB, "-s", DEV, "pull", "/sdcard/_probe.png", str(TMP)],
@@ -68,11 +68,11 @@ def grab() -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    # ⛔语义: **先放行(上一轮已审过的那一步), 再展示下一步**。
+    # 语义: **先放行(上一轮已审过的那一步), 再展示下一步**。
     # 反过来(先展示后放行)等于没审就批 —— 那是铁律 #13 禁止的自动放行。
     ap.add_argument("--go", action="store_true",
                     help="先放行上一轮审过的那步, 再抓下一步给我审")
-    # ⛔硬闸(2026-07-25 live 当场补): 上一轮探针如果显示 pending=无(bot 还在
+    # 硬闸(2026-07-25 live 当场补): 上一轮探针如果显示 pending=无(bot 还在
     # 算/在 wait), 我 --go 就会把**期间新算出来的动作盲批掉** —— 实测发生过一次
     # (批了 BuyPyroxene 的 FREE 购买点击, 事后核对才确认是对的 = 靠运气不是门控)。
     # 加 --expect: 放行前先比对当前 pending 的 reason, 对不上直接拒批。
@@ -90,23 +90,23 @@ def main() -> int:
         if a.expect:
             got = str(cur.get("reason", ""))
             if not cur:
-                print(f"⛔拒批: 当前无 pending, 但我期待 {a.expect!r} —— "
+                print(f"拒批: 当前无 pending, 但我期待 {a.expect!r} —— "
                       f"上一轮看到的那步已经不在了, 重新探再审")
                 return 2
             if a.expect not in got:
-                print(f"⛔拒批: 期待 reason 含 {a.expect!r}, 实际是 {got!r} —— "
+                print(f"拒批: 期待 reason 含 {a.expect!r}, 实际是 {got!r} —— "
                       f"这不是我审过的那一步, 绝不盲批")
                 return 2
         elif not cur:
-            print("⛔拒批: 当前无 pending —— 加 --expect 或先探针看清再批")
+            print("拒批: 当前无 pending —— 加 --expect 或先探针看清再批")
             return 2
         r = api("/step/go", "POST", {})
         print(f"[放行] {r.get('approved', r)}")
         import time as _t
         _t.sleep(1.2)      # 给 bot 执行 + 算出下一步的时间
 
-    # ── ③ bot 的意图(先拉, 免得抓帧耗时后状态又变) ──────────────────────
-    # ⚠响应是**包了一层**的 {"step_mode":bool, "pending":{...}|None};
+    # ──  bot 的意图(先拉, 免得抓帧耗时后状态又变) ──────────────────────
+    # 响应是**包了一层**的 {"step_mode":bool, "pending":{...}|None};
     # pending 里 action 是动作类型**字符串**(click/back/wait/...), target 平铺。
     raw = api("/step/pending")
     pend = (raw.get("pending") or {}) if not raw.get("_error") else {}
@@ -119,7 +119,7 @@ def main() -> int:
     else:
         print(f"skill={pend.get('skill')}  sub={pend.get('sub_state')}  "
               f"tick={pend.get('tick')}")
-        print(f"意图: {pend.get('action')}  →  {pend.get('reason')}")
+        print(f"意图: {pend.get('action')}    {pend.get('reason')}")
         t = pend.get("target")
         if t:
             print(f"  落点: {t}")
@@ -127,16 +127,16 @@ def main() -> int:
     if a.no_frame:
         return 0
 
-    # ── ①② 干净帧 + YOLO 检出 ─────────────────────────────────────────
+    # ──  干净帧 + YOLO 检出 ─────────────────────────────────────────
     p = grab()
     import cv2
     img = cv2.imread(p)
     if img is None:
-        print("⛔抓帧失败")
+        print("抓帧失败")
         return 1
     h, w = img.shape[:2]
-    # ⛔跟 pipeline 用同一套检测器(2026-07-25 踩): 写死 "ui" 会看不见
-    # Schedule/Cafe 的**学生头像框(avatar 域)** → 把有支撑的落点误判成盲拍。
+    # 跟 pipeline 用同一套检测器(2026-07-25 踩): 写死 "ui" 会看不见
+    # Schedule/Cafe 的**学生头像框(avatar 域)**  把有支撑的落点误判成盲拍。
     from brain.pipeline import (BASE_DETECTORS, SKILL_YOLO_MAP,
                                 _run_yolo_on_image)
     _ctx = SKILL_YOLO_MAP.get(str(pend.get("skill") or ""), BASE_DETECTORS)
@@ -171,7 +171,7 @@ def main() -> int:
     sc = SW / w
     raw = cv2.resize(img, (SW, int(h * sc)))
     ann = raw.copy()
-    # ⚠cv2.putText 画不了中文(渲染成 ??????, 2026-07-25 当场发现) → 框上只标
+    # cv2.putText 画不了中文(渲染成 ??????, 2026-07-25 当场发现)  框上只标
     # **编号**, 编号↔类名的对照在上面的文字清单里(已按 conf 降序打印)。
     for i, b in enumerate(boxes):
         x1, y1 = int(b.x1 * w * sc), int(b.y1 * h * sc)
@@ -197,7 +197,7 @@ def main() -> int:
     cv2.putText(sheet, "YOLO", (SW + 12, 26), cv2.FONT_HERSHEY_SIMPLEX,
                 0.9, (0, 255, 255), 2)
     cv2.imwrite(out, sheet)
-    print(f"→ 对照图 {out}")
+    print(f" 对照图 {out}")
     return 0
 
 

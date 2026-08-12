@@ -171,7 +171,7 @@ def get_all_characters() -> list[str]:
 
 
 # ── Known OCR misread corrections ──
-# Maps (misread text) → (correct text) for common Blue Archive OCR errors.
+# Maps (misread text)  (correct text) for common Blue Archive OCR errors.
 # Used for auto-correcting trajectory labels during training data extraction.
 CORRECTIONS = {
     # ── Latin OCR confusions observed in trajectories (hand-curated) ──
@@ -181,15 +181,15 @@ CORRECTIONS = {
     # Traditional/Simplified mixing
     "距離结束還剩": "距離結束還剩",
     "距離结束还剩": "距離結束還剩",
-    # 辦→辨 misread
+    # 辦辨 misread
     "辨中": "辦中",
     "辨中！": "辦中！",
     "举辨中": "舉辦中",
     "举辨中！": "舉辦中！",
-    # 邀請→邀睛 misread
+    # 邀請邀睛 misread
     "邀睛": "邀請",
     "邀睛券": "邀請券",
-    # 提示→題示 misread
+    # 提示題示 misread
     "題示": "提示",
     "题示": "提示",
     # 收益 variants
@@ -210,7 +210,7 @@ CORRECTIONS = {
     "指定訪間": "指定訪問",
     "随機訪間": "隨機訪問",
     "隋機訪間": "隨機訪問",
-    # 部隊 (team tab labels) — 隊 →隧 misread
+    # 部隊 (team tab labels) — 隊 隧 misread
     "1部隧": "1部隊",
     "2部隧": "2部隊",
     "3部隧": "3部隊",
@@ -218,7 +218,7 @@ CORRECTIONS = {
     "部隧": "部隊",
     # 邀請 button label mis-OCR (observed run_20260513_112359 t114)
     "返明": "邀請",
-    # 掃蕩 (sweep) variants — 蕩→荡 was already in mined list, here
+    # 掃蕩 (sweep) variants — 蕩荡 was already in mined list, here
     # the prefix-dropped variants where OCR misses the leading 掃
     "蕩次數": "掃蕩次數",
     "荡次数": "掃蕩次數",

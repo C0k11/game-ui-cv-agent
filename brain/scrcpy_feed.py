@@ -9,18 +9,18 @@ scrcpy = Android 内部 H.264 流, 不怕遮挡, 帧龄 <150ms, 且天然无 ove
 版本地狱(playbook 4.8 实录): pip install av scrcpy-client --no-deps
 + adbutils==0.14.1 (0.16/2.x 没有 _AdbStreamConnection).
 
-⚠MuMu12 多 display 陷阱(2026-07-15 实锤): display 0 = Android 桌面
+MuMu12 多 display 陷阱(2026-07-15 实锤): display 0 = Android 桌面
 launcher, BA 等 app 跑在独立 EXTERNAL display(实测 2)。scrcpy-client
-硬编码 display_id=0 → 抓到桌面。find_app_display() 自动定位。
+硬编码 display_id=0  抓到桌面。find_app_display() 自动定位。
 
-⚠流断裂陷阱(2026-07-15 live 实锤): 出击进战斗时 MuMu 重置 encoder,
-流 frame_num 跳变+PPS 丢失 → pyav InvalidDataError 杀掉原版 stream
+流断裂陷阱(2026-07-15 live 实锤): 出击进战斗时 MuMu 重置 encoder,
+流 frame_num 跳变+PPS 丢失  pyav InvalidDataError 杀掉原版 stream
 线程; codec 原地重建也没用(丢 SPS/PPS 上下文, "non-existing PPS 0"
-死循环) → 唯一正解 = watchdog 断流超时整个 client 重启(新 socket 让
+死循环)  唯一正解 = watchdog 断流超时整个 client 重启(新 socket 让
 server 重发 SPS/PPS+IDR)。
 
 坐标系: MuMu 显示 4K(3840x2160), scrcpy 默认缩到 2560x1440;
-input tap 用 4K 系 → 本模块只出归一化坐标/原始帧, 换算归动作层.
+input tap 用 4K 系  本模块只出归一化坐标/原始帧, 换算归动作层.
 """
 import os
 import re
@@ -42,7 +42,7 @@ def _adb_io_lock():
 
 
 def _default_serial() -> str:
-    """⛔别写死端口 —— MuMu 实例重启会换号(2026-07-28: 7555→16384)。"""
+    """别写死端口 —— MuMu 实例重启会换号(2026-07-28: 755516384)。"""
     try:
         from brain.mumu_port import mumu_serial
         return mumu_serial()
@@ -53,7 +53,7 @@ def _default_serial() -> str:
 def find_app_display(serial: str | None = None,
                      pkg: str = "com.nexon.bluearchive"):
     """dumpsys window 按 display 分段找 pkg 焦点窗口所在 displayId.
-    找不到(BA 没起) → None: 调用方绝不能拿 display 0 凑数 — 0 是
+    找不到(BA 没起)  None: 调用方绝不能拿 display 0 凑数 — 0 是
     Android 桌面 launcher, feed 会永远盯着桌面且 watchdog 不报错."""
     serial = serial or _default_serial()
     with _adb_io_lock():
@@ -141,7 +141,7 @@ def _make_client(device, max_fps: int, display_id: int):
 class ScrcpyFeed:
     """后台线程持帧: latest() 返回 (frame_bgr, age_s, seq); 线程安全.
 
-    ⭐流寿命 17.0s 定律(2026-07-28 三组对照实测): MuMu12 对每个 scrcpy
+    流寿命 17.0s 定律(2026-07-28 三组对照实测): MuMu12 对每个 scrcpy
     镜像流有内在 **17.0s** 寿命上限 — 30fps/8M、10fps/8M、30fps/4M 全部
     死在 t+17.0(误差 <0.1s), 与帧数/码率/输入无关; 死后 server 进程仍活、
     socket 不断, 只是永不再出帧。这就是"每 ~20s 断流 3.5s"(task#17,
@@ -149,12 +149,12 @@ class ScrcpyFeed:
 
     修法 = 预热轮换(双缓冲): 双流并行实测 per-instance 定时器(A 死 t+17.3,
     B 起于 t+8.6 死于 t+25.6 = 自己的 17.0s), 且并存 8s+ 互不干扰。
-    ⇒ 流活到 _ROTATE_AT 时预热新流(首帧实测稳定 0.20s) → 原子交接 → 旧流
+     流活到 _ROTATE_AT 时预热新流(首帧实测稳定 0.20s)  原子交接  旧流
     收尸, 全程零盲窗。断流 watchdog 保留作兜底(轮换失败/流早死)。
     150s 验证: 11 次轮换全成, 活跃画面零 >0.5s 间隙, 兜底重启 0, 无进程残留;
     静止画面(H.264 天然不出帧)仍由 _is_static() 独立链证实内容=当前屏。
 
-    ⚠换手后的流实测最短只活过 13.5s(对照实验 V1, 可能受静止期影响),
+    换手后的流实测最短只活过 13.5s(对照实验 V1, 可能受静止期影响),
     比裸流 17.0s 短 — _ROTATE_AT 必须给最坏 13.5s 留余量, 别调回 12。"""
 
     _ROTATE_AT = 10.0    # 实际节奏 ~10.5-11s(+watchdog 1s 粒度), 对 13.5s 余量>2s
@@ -182,7 +182,7 @@ class ScrcpyFeed:
 
     def _start_client(self):
         """起一个新 client 并返回 (client, first_frame_holder).
-        ⚠不赋值 self._client — 调用方决定何时交接(轮换需要新旧并存窗口)."""
+        不赋值 self._client — 调用方决定何时交接(轮换需要新旧并存窗口)."""
         from adbutils import adb
         import scrcpy
         did = self._display_id
@@ -233,7 +233,7 @@ class ScrcpyFeed:
         按钮级变化 — 4K 按钮缩到 64x36 只占 ~10px, 贡献 ~1 << 阈值)."""
         try:
             import cv2
-            with _adb_io_lock():     # ⛔与 input tap 串行(丢 tap 同根因)
+            with _adb_io_lock():     # 与 input tap 串行(丢 tap 同根因)
                 raw = subprocess.run(
                     [_ADB, "-s", self._serial, "exec-out", "screencap",
                      "-p"], capture_output=True, timeout=10).stdout
@@ -255,7 +255,7 @@ class ScrcpyFeed:
             return False
 
     def _rotate(self):
-        """预热新流 → 首帧到达即接管 → 旧流收尸. 交接窗口两流并写
+        """预热新流  首帧到达即接管  旧流收尸. 交接窗口两流并写
         latest(内容都是当前屏, 无害), 全程不断流. 失败=沿用旧流,
         把 born 后移一轮退避, 旧流真死时由断流兜底接住."""
         with self._restart_lock:
@@ -265,14 +265,14 @@ class ScrcpyFeed:
             try:
                 new, holder = self._start_client()
             except Exception as e:
-                self._log(f"    [feed] rotate 预热失败({e}) → 退避, 交断流兜底")
+                self._log(f"    [feed] rotate 预热失败({e})  退避, 交断流兜底")
                 self._client_born = time.time()
                 return
             t0 = time.time()
             while time.time() - t0 < 3.0 and not holder["got"]:
                 time.sleep(0.05)
             if not holder["got"]:
-                self._log("    [feed] rotate 新流 3s 无首帧 → 弃, 沿用旧流")
+                self._log("    [feed] rotate 新流 3s 无首帧  弃, 沿用旧流")
                 try:
                     new.stop()
                 except Exception:
@@ -294,7 +294,7 @@ class ScrcpyFeed:
         static_streak = 0
         while not self._stopping:
             time.sleep(1.0)
-            # ⭐预热轮换: 流寿命 17.0s 定律(见类 docstring), 12s 处无缝换新
+            # 预热轮换: 流寿命 17.0s 定律(见类 docstring), 12s 处无缝换新
             if (not self._stopping and self._client is not None
                     and time.time() - self._client_born >= self._ROTATE_AT):
                 self._rotate()
@@ -304,9 +304,9 @@ class ScrcpyFeed:
             if age <= self._stale_restart_s or self._stopping:
                 static_streak = 0
                 continue
-            # 连续 N 次判静止仍无新帧 → 强制重启一次验流活性
+            # 连续 N 次判静止仍无新帧  强制重启一次验流活性
             # (死 socket 停在安静页会被静止判定无限续命 — 审计实锤)
-            # ⛔2026-07-28 实测: 旧值 20 且本循环 `time.sleep(1.0)` ⇒ 静止 **~20s**
+            # 2026-07-28 实测: 旧值 20 且本循环 `time.sleep(1.0)`  静止 **~20s**
             # 就强制重启一次(注释里写的 "~90s" 对不上代码)。step_walk 逐帧门控时
             # 画面静止几十秒是常态(人在审帧/改代码), 实录 **每 21-36s 重启一次,
             # 一段日志里 10 次** —— 每次都要在 Android 侧重建 MediaCodec +
@@ -314,9 +314,9 @@ class ScrcpyFeed:
             # 提到 120(~2min): 代价可控 —— `_is_static()` 每轮都用**独立 ADB 链**
             # 与真实屏幕比过, 判静止就意味着"feed 最后一帧 == 当前屏幕", 拿到的
             # 画面是对的; 而死 socket 一旦屏幕真变化, 下一轮 `_is_static()` 立刻
-            # 返回 False → 马上重启。所以"无限续命"的窗口只存在于屏幕也没变的
+            # 返回 False  马上重启。所以"无限续命"的窗口只存在于屏幕也没变的
             # 时候, 那时重不重启对决策毫无影响。
-            # ⚠ 这**不是**"游戏崩溃的原因"的证明(今天崩了 3 次, 未复现不断因果),
+            #  这**不是**"游戏崩溃的原因"的证明(今天崩了 3 次, 未复现不断因果),
             #   只是消除一个有量化证据的无谓压力源。
             if static_streak < 120 and self._is_static():
                 static_streak += 1
@@ -324,7 +324,7 @@ class ScrcpyFeed:
                     self._ts = time.time()
                 continue
             static_streak = 0
-            self._log(f"    [feed] 断流{age:.1f}s → 重启 scrcpy client")
+            self._log(f"    [feed] 断流{age:.1f}s  重启 scrcpy client")
             with self._restart_lock:
                 if self._stopping:    # stop() 竞态: 拿锁后二次确认
                     break             # (否则孤儿 server+非daemon线程挂死)
@@ -335,10 +335,10 @@ class ScrcpyFeed:
                     pass
                 time.sleep(0.5)
                 try:
-                    # 连续失败≥2 → display id 可能变了(MuMu/BA 重启会换
-                    # EXTERNAL display), 强制重新定位。⚠计数必须数"失败"
+                    # 连续失败≥2  display id 可能变了(MuMu/BA 重启会换
+                    # EXTERNAL display), 强制重新定位。计数必须数"失败"
                     # 而非"成功"(审计: 成功计数在失败路径冻结, %3 相位
-                    # 永不变 → 重定位永不触发)
+                    # 永不变  重定位永不触发)
                     if self._fail_streak >= 2:
                         self._display_id = None
                     self._client, _ = self._start_client()

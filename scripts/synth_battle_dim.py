@@ -6,7 +6,7 @@
 (暗态下的 HUD/小人也是有效训练信号 — 真实瞄准态就长这样)。
 
 合成量: train split 的 ~15% (synth 占比过高会让 best.pt 偏拟合合成分布,
-fused_avatar v6 教训: synth 63% → 真实场景退化)。只对含身份类框的帧合成。
+fused_avatar v6 教训: synth 63%  真实场景退化)。只对含身份类框的帧合成。
 """
 import random
 import sys
@@ -44,8 +44,8 @@ def main() -> None:
     written = 0
     for lbl, boxes in picks:
         img_p = img_dir / (lbl.stem + ".jpg")
-        # ⚠cv2.imread/imwrite 不吃中文路径(凹轴池帧带中文前缀, 静默 None
-        # → v5 首跑 142 报数实写 87 实锤) — 走 fromfile/imencode。
+        # cv2.imread/imwrite 不吃中文路径(凹轴池帧带中文前缀, 静默 None
+        #  v5 首跑 142 报数实写 87 实锤) — 走 fromfile/imencode。
         try:
             img = cv2.imdecode(np.fromfile(str(img_p), dtype=np.uint8),
                                cv2.IMREAD_COLOR)

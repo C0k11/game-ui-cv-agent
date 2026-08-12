@@ -157,7 +157,7 @@ class YoloOverlay:
     Render loop runs at ~250 Hz via Win32 timer.  Every tick:
       1. Query target window's screen rect (zero-cost Win32 call).
       2. SetWindowPos to keep overlay pixel-locked on top.
-      3. InvalidateRect → WM_PAINT draws boxes using cached normalized
+      3. InvalidateRect  WM_PAINT draws boxes using cached normalized
          coordinates multiplied by the *current* client size.
 
     Detection data is pushed from the AI thread via ``update()`` using a
@@ -175,7 +175,7 @@ class YoloOverlay:
         #   switch IDs, and the velocity coast FLINGS a box across the screen
         #   for max_age frames after a UI element vanishes (screen change /
         #   popup) — exactly the "框到处飞 / 锁不住 / 瞎预测" the user reported.
-        #   ⇒ pass track=False for static UI: boxes become the raw current-frame
+        #    pass track=False for static UI: boxes become the raw current-frame
         #   detections (rock-steady, no coast, no predict).  User rule (2026-06-09):
         #   "只要是静态就不用预测了，主要是移动目标需要。"
         # lead_ms: predictive lead-aim, only meaningful when track=True.
@@ -188,13 +188,13 @@ class YoloOverlay:
         self._wndproc_ref = None          # prevent GC of callback
         self._tx = self._ty = 0
         self._tw = self._th = 0
-        self._tracker_update_ts = None    # perf_counter of last update (→ real dt)
+        self._tracker_update_ts = None    # perf_counter of last update ( real dt)
         # track is RUNTIME-SWITCHABLE via set_track().  The overlay always owns
         # a tracker but only routes boxes through it when _track_enabled is True.
-        #   - Static UI  → False: raw current-frame boxes, no coast → a box
+        #   - Static UI   False: raw current-frame boxes, no coast  a box
         #     vanishes the instant its element does ("存在时间和游戏匹配", no
         #     leftover box when switching pages).
-        #   - cafe 摸头 → True: moving students need ByteTrack + One-Euro smooth.
+        #   - cafe 摸头  True: moving students need ByteTrack + One-Euro smooth.
         self._track_enabled = bool(track)
         self._tracker_kwargs = dict(
             max_age=max_age_frames, min_hits=1, max_center_dist=1.5,
@@ -314,7 +314,7 @@ class YoloOverlay:
                 self._overlay_hwnd, HWND_TOPMOST,
                 x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW,
             )
-            # Size changed → must repaint (boxes scale with client area)
+            # Size changed  must repaint (boxes scale with client area)
             self._dirty = True
 
         # Always repaint every tick for persistent lock-on visual.
@@ -330,7 +330,7 @@ class YoloOverlay:
         _user32.GetClientRect(hwnd, ctypes.byref(rc))
         w, h = rc.right, rc.bottom
 
-        # Fill entire client area with colour key → transparent
+        # Fill entire client area with colour key  transparent
         ck_brush = _gdi32.CreateSolidBrush(_CK)
         _user32.FillRect(hdc, ctypes.byref(rc), ck_brush)
         _gdi32.DeleteObject(ck_brush)

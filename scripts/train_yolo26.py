@@ -1,9 +1,9 @@
 """Train YOLO26n on the existing BA UI datasets.
 
 Replaces:
-  - full.pt / expanded.pt (31 UI + 282 incl. avatars)  →  ba_ui_yolo26n.pt
-  - emoticon.pt (cafe headpat bubbles)                 →  emoticon_yolo26n.pt
-  - battle_heads.pt (currently OCR-only, no dataset)   →  TODO when dataset
+  - full.pt / expanded.pt (31 UI + 282 incl. avatars)    ba_ui_yolo26n.pt
+  - emoticon.pt (cafe headpat bubbles)                   emoticon_yolo26n.pt
+  - battle_heads.pt (currently OCR-only, no dataset)     TODO when dataset
 
 YOLO26n claims: NMS-free dual-head, no DFL, ~43% faster CPU inference,
 MuSGD optimizer for small-model convergence.  For static-UI detection
@@ -80,7 +80,7 @@ TRAIN_CONFIGS = {
     },
     "static_ui_v3": {
         # imgsz=1920 retrain to fix small-icon regression (red dot / yellow
-        # dot / 青辉石 lost 30-50% mAP from v1→v2 because strict 5/18 data
+        # dot / 青辉石 lost 30-50% mAP from v1v2 because strict 5/18 data
         # reduced per-class samples for small targets).
         #
         # At imgsz=1920, an 8px source icon becomes 6.8px in network input —
@@ -173,7 +173,7 @@ TRAIN_CONFIGS = {
     },
     "fused_avatar_26m": {
         # Fused multi-class avatar DETECTOR: simultaneous bbox + character ID
-        # in one model, replaces the current 2-stage (head_detector → avatar_cls).
+        # in one model, replaces the current 2-stage (head_detector  avatar_cls).
         # 250 classes is fine-grained — yolo26n's 2.4M params can't discriminate
         # all characters reliably (~10k params/class).  yolo26m's ~20M params
         # = ~80k params/class, much more discriminative capacity.
@@ -211,7 +211,7 @@ TRAIN_CONFIGS = {
     "fused_avatar_26x_v4": {
         # v4: warm-start from v3 best.pt + lighter aug (v3 教训).
         # 目标: cafe/momotalk/schedule 维持 88-95% recall, battle/tactical
-        # 从 30% → 65-75%, 整体 mAP 0.78-0.85.
+        # 从 30%  65-75%, 整体 mAP 0.78-0.85.
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "fused_avatar_v1" / "data.yaml",
         # v3 best.pt 当 warm-start (复用 252 类特征)
@@ -225,7 +225,7 @@ TRAIN_CONFIGS = {
         "weight_decay": 0.0005,
         "dropout": 0.0,
         # Aug 大幅降低 — v3 学到的 lesson
-        "mosaic": 0.3,           # 0.7 → 0.3
+        "mosaic": 0.3,           # 0.7  0.3
         "close_mosaic": 5,       # 100 epoch 里最后 5 关 mosaic
         "mixup": 0.0,            # 直接移除 (细粒度致命毒药)
         "copy_paste": 0.0,       # 移除
@@ -237,7 +237,7 @@ TRAIN_CONFIGS = {
     "fused_avatar_26x_v5": {
         # v5: warm-start from v4 best_manual + battle_cards 技能牌 synth(多底图+灰白aug).
         # 目标: 维持 252 角色(cafe/编成 ~0.99) + 新增战斗技能牌灰彩识别.
-        # ⛔ 训练时并行 `py scripts/manual_fitness_watcher.py --run fused_avatar_yolo26x_v5`,
+        #  训练时并行 `py scripts/manual_fitness_watcher.py --run fused_avatar_yolo26x_v5`,
         #    最终取 best_manual.pt — synth 主导(synth:real~12:1), best.pt 会被 synth val 带偏.
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "fused_avatar_v2" / "data.yaml",
@@ -257,12 +257,12 @@ TRAIN_CONFIGS = {
         "fliplr": 0.5,
     },
     "fused_avatar_26x_v6": {
-        # v6: v5 同配方, 数据集 build 三处根治(2026-06-07): ①load_character_names 排 UI-B
-        #     → 纯 252 头像(不再混 60 UI cls, nc 312→252, 与 v4 base 完全对齐) ②灰牌明度修正
-        #     (实测真实灰牌是暗灰 dim0.45-0.80, 旧 v5 用 g*0.5+110 提亮成亮灰白→真实暗灰牌漏35%)
-        #     ③val 泄漏根治(VAL_SOURCE_RUNS 排除 173604, 防同帧既 train 又 val).
+        # v6: v5 同配方, 数据集 build 三处根治(2026-06-07): load_character_names 排 UI-B
+        #      纯 252 头像(不再混 60 UI cls, nc 312252, 与 v4 base 完全对齐) 灰牌明度修正
+        #     (实测真实灰牌是暗灰 dim0.45-0.80, 旧 v5 用 g*0.5+110 提亮成亮灰白真实暗灰牌漏35%)
+        #     val 泄漏根治(VAL_SOURCE_RUNS 排除 173604, 防同帧既 train 又 val).
         # 目标: 252 角色不退(cafe/编成 ~0.96) + 彩牌稳 + 灰牌 recall 从 v5 的 0.557 大升.
-        # ⛔ 用 best.pt 即可: v2 val 85% 真实主导, watcher 非必须(memory 踩坑6); 独占 GPU 防 OOM.
+        #  用 best.pt 即可: v2 val 85% 真实主导, watcher 非必须(memory 踩坑6); 独占 GPU 防 OOM.
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "fused_avatar_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
@@ -271,7 +271,7 @@ TRAIN_CONFIGS = {
         "batch": 8,
         "out_name": "fused_avatar_yolo26x_v6",
         "patience": 30,
-        "save_period": 5,        # 存中间 epoch: v6 val synth占63%(manual去虚高后180)→best.pt偏synth拟合, 训完用 manual val(cafe/编成+battle)选真实峰
+        "save_period": 5,        # 存中间 epoch: v6 val synth占63%(manual去虚高后180)best.pt偏synth拟合, 训完用 manual val(cafe/编成+battle)选真实峰
         "weight_decay": 0.0005,
         "dropout": 0.0,
         "mosaic": 0.3,
@@ -314,20 +314,20 @@ TRAIN_CONFIGS = {
         "close_mosaic": 10,
         "mixup": 0.0,
         "copy_paste": 0.0,
-        "fliplr": 0.0,            # ✗ UI has direction (X always top-right)
-        "flipud": 0.0,            # ✗
-        "degrees": 0.0,           # ✗ UI orthogonal only
-        "perspective": 0.0,       # ✗
+        "fliplr": 0.0,            #  UI has direction (X always top-right)
+        "flipud": 0.0,            # 
+        "degrees": 0.0,           #  UI orthogonal only
+        "perspective": 0.0,       # 
         "hsv_h": 0.015,
         "hsv_s": 0.3,
         "hsv_v": 0.3,
-        "scale": 0.5,             # ★ key for cross-aspect-ratio robustness
+        "scale": 0.5,             #  key for cross-aspect-ratio robustness
         "translate": 0.1,
     },
     "ui_yolo26m_v2": {
         # v2 retrain: user feedback (2026-05-28) that咖啡厅入口/邮件箱/确认键/
         # 一次領取 等关键 UI 在 v1 上 conf 太低 (some 12-19 frames only).
-        # Re-oversampled to target=60 (script bumped 770 → 7400+ copies),
+        # Re-oversampled to target=60 (script bumped 770  7400+ copies),
         # AND set all per-frame augmentation to ZERO to let the model learn
         # UI text glyphs + spatial context cleanly.  Mosaic destroys spatial
         # context (4 frames cropped together) — user explicitly said
@@ -344,7 +344,7 @@ TRAIN_CONFIGS = {
         "weight_decay": 0.0005,
         "dropout": 0.0,
         # AUG — ALL OFF (clean spatial context for UI text/icon learning)
-        "mosaic": 0.0,           # ✗ destroys spatial context
+        "mosaic": 0.0,           #  destroys spatial context
         "close_mosaic": 0,
         "mixup": 0.0,
         "copy_paste": 0.0,
@@ -352,15 +352,15 @@ TRAIN_CONFIGS = {
         "flipud": 0.0,
         "degrees": 0.0,
         "perspective": 0.0,
-        "hsv_h": 0.0,            # ✗ UI palette is fixed
+        "hsv_h": 0.0,            #  UI palette is fixed
         "hsv_s": 0.0,
         "hsv_v": 0.0,
-        "scale": 0.0,            # ✗ UI sizes are fixed
-        "translate": 0.0,        # ✗ UI positions are fixed
+        "scale": 0.0,            #  UI sizes are fixed
+        "translate": 0.0,        #  UI positions are fixed
     },
     "ui_yolo26m_v3": {
         # v3: lobby 入口 cls 改标文字(底栏8+MomoTalk+每日领奖+任务大厅) + 邮件箱
-        # 保图标, 全部 oversample target=200 (入口16→200=12x曝光)。5 训练目录
+        # 保图标, 全部 oversample target=200 (入口16200=12x曝光)。5 训练目录
         # (加 run_20260529_000756 新capture)。
         # from COCO 重训 (NOT warm-start — 续训会让大按钮退化, 已验证)。
         # patience=30 合理早停 (val 噪声但够 stop 信号)。cache=ram(~22GB) +
@@ -374,12 +374,12 @@ TRAIN_CONFIGS = {
         "batch": 12,
         "out_name": "ui_yolo26m_v3",
         # cache 决策史 (14562帧):
-        #  - cache=ram 需21GB, 空闲RAM仅13.7GB → 被跳过 → on-the-fly 1.1s/it
-        #  - cache=False+workers8 → 仍每ep decode 14562次, GPU 86%等数据, 16min/ep
+        #  - cache=ram 需21GB, 空闲RAM仅13.7GB  被跳过  on-the-fly 1.1s/it
+        #  - cache=False+workers8  仍每ep decode 14562次, GPU 86%等数据, 16min/ep
         #  - cache=disk: 21GB存D盘.npy(210GB free够), 避免重复decode, 读.npy快。
         #    首次建~15min, 之后 ~5min/ep。workers=0 (disk读单进程够, 不引入崩溃)。
         "cache": "disk",
-        # disk 读 .npy 有 IO 延迟, workers=0 单进程扛不住 → GPU 饿(18%util)。
+        # disk 读 .npy 有 IO 延迟, workers=0 单进程扛不住  GPU 饿(18%util)。
         # workers=8 多进程并行读盘喂满 GPU。(cache=disk+workers 不崩, 崩的是
         # cache=ram+workers 的 pickle)。
         "workers": 8,
@@ -392,12 +392,12 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v4": {
         # v4 修 v3 弱检测的全部根因:
-        #  ① 修 487 corrupt 标签(build sanitize 截5字段) ② 删 cls92(不可学大区域)
-        #  ③ 加 run_20260529_123209(581 YOLO预标, 含 momotalk) + synth 合成帧
-        #  ④ 开空间 aug 治"过度依赖位置/邻居"过拟合(侧栏图标随布局偏移就崩):
+        #   修 487 corrupt 标签(build sanitize 截5字段)  删 cls92(不可学大区域)
+        #   加 run_20260529_123209(581 YOLO预标, 含 momotalk) + synth 合成帧
+        #   开空间 aug 治"过度依赖位置/邻居"过拟合(侧栏图标随布局偏移就崩):
         #     translate/scale=位置+尺度不变性, mosaic=换邻居/上下文,
         #     copy_paste=治稀有 cls, close_mosaic 最后10ep关mosaic干净微调(保清晰)
-        #  ⑤ flip/rotate 保持 0 —— UI 有左右/朝向语义(左切换↔右切换), 翻转会搞反标签
+        #   flip/rotate 保持 0 —— UI 有左右/朝向语义(左切换↔右切换), 翻转会搞反标签
         # from COCO (非 warm-start)。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
@@ -421,13 +421,13 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v5": {
         # v5 = v4 成功后的正式版 (warm-start 微调):
-        #  ① 数据集 ui_v2: 旧 train 去重 (16157→2377 唯一, 砍 200x oversample 过拟合源)
+        #   数据集 ui_v2: 旧 train 去重 (161572377 唯一, 砍 200x oversample 过拟合源)
         #     + run_20260531_110516(1052 真实) + run_20260531_143201(37 商店) + bond synth
-        #  ② cls92 战术大赛对战选择区域 恢复 (v4 误删; v5 给 arena 用区域选对手)
-        #  ③ nc=451 (新增 450 选择购买); 薄类适度 oversample 到30 (450→50), 不再 200x
-        #  ④ warm-start from v4 best_real.pt: backbone/neck 特征继承, cls头因nc450→451重学;
+        #   cls92 战术大赛对战选择区域 恢复 (v4 误删; v5 给 arena 用区域选对手)
+        #   nc=451 (新增 450 选择购买); 薄类适度 oversample 到30 (45050), 不再 200x
+        #   warm-start from v4 best_real.pt: backbone/neck 特征继承, cls头因nc450451重学;
         #     lr0=0.005 (half) 保护 v4 特征不被大lr冲垮
-        #  ⑤ aug 照搬 v4 (修过拟合关键); val=_ui_val_pool 仅 early-stop 机制 (盲弱类, 真实
+        #   aug 照搬 v4 (修过拟合关键); val=_ui_val_pool 仅 early-stop 机制 (盲弱类, 真实
         #     验收看 dashboard 目检). patience=60 = 不 early-stop (盲 val 不可信), 跑满60.
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
@@ -449,16 +449,16 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v6": {
         # v6 = v5 + emoticon 折叠 (+ 飞轮补弱 cls, 当其 source 入库后一并重训):
-        #  ① 数据集 ui_v2 重建 (nc 451→452): 新增 cls451 Emoticon_Action — 把独立的
+        #   数据集 ui_v2 重建 (nc 451452): 新增 cls451 Emoticon_Action — 把独立的
         #     emoticon_yolo26n 并进 ui 模型, pipeline 每个 cafe tick 少跑一次 YOLO。
         #     emoticon 帧经 build_emoticon_ui_source.py teacher 重标 (现役 ui_v5 当老师
         #     补回 cafe UI chrome 框, 避免 200 帧把 收益/邀请卷 等弱 cls 训成负样本)。
-        #  ② warm-start from v5 best_real.pt: backbone/neck 继承, cls 头因 nc451→452
-        #     重学新增行 (同 v4→v5 的 450→451, registry 已验证可行)。lr0=0.005 护特征。
-        #  ③ aug/epochs/val 照搬 v5 (修过拟合关键)。patience=60=跑满不 early-stop
+        #   warm-start from v5 best_real.pt: backbone/neck 继承, cls 头因 nc451452
+        #     重学新增行 (同 v4v5 的 450451, registry 已验证可行)。lr0=0.005 护特征。
+        #   aug/epochs/val 照搬 v5 (修过拟合关键)。patience=60=跑满不 early-stop
         #     (盲 _ui_val_pool 不含 emoticon, mAP 不可信); emoticon 真实验收 =
         #     dashboard / live cafe 帧目检 (见 money_safety: 上线前飞轮帧实测)。
-        #  ④ 飞轮: 补弱 cls 时把新 source 加进 build_ui_v2.py REAL_SOURCES → 重建 → 训。
+        #   飞轮: 补弱 cls 时把新 source 加进 build_ui_v2.py REAL_SOURCES  重建  训。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v5" / "weights" / "best_real.pt"),
@@ -480,9 +480,9 @@ TRAIN_CONFIGS = {
     "ui_yolo26m_v7": {
         # v7 = 纯 UI+emoticon (头像归 fused v6, build_ui_v2 _keep_ui_lines drop 143-394).
         #  补真实弱类: 制造入口(v5 flywheel 0!)/活动类452-454/灰色领取 + 折叠 emoticon451.
-        #  warm v5 (m 同arch 全继承; cls头 451→455 重学新增4类). 数据: 新2run(193003+140123
+        #  warm v5 (m 同arch 全继承; cls头 451455 重学新增4类). 数据: 新2run(193003+140123
         #  两背景真实)+旧真实+_emoticon_v2, 砍全部synth(伪背景毒, v6c实锤污染lobby入口).
-        #  ⭐val=flywheel 477 纯真实(头像已过滤) → best.pt 可信(不像 fused synth-bias);
+        #  val=flywheel 477 纯真实(头像已过滤)  best.pt 可信(不像 fused synth-bias);
         #  save_period 保险, 训完仍 eval flywheel by-cls 核弱类不退. patience30 早停(真实val).
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
@@ -505,7 +505,7 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v8": {
         # v8 (2026-06-10) = v7 + 全技能飞轮素材(v8queue 2075 + 用户手标批量扫荡127):
-        #  新类455-468(批量扫荡dialog/战斗完成/立即前往, cls头 455→469 重学)。
+        #  新类455-468(批量扫荡dialog/战斗完成/立即前往, cls头 455469 重学)。
         #  补强: 制造入口544/任务大厅入口542/双倍三倍617+76(hub badge模板锚定,
         #  破位置先验)/绿勾1569/短篇网格/剧情战斗结算。红黄点已HSV仲裁全清洗
         #  (源头+queue 635处) — 位置先验毒源已断。emoticon 仍弱样本(5框), 折叠
@@ -532,7 +532,7 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v8b": {
         # v8b = v8 best(ep26) 短程微调 + _arrow_boost(旧款箭头帧×1287重编码副本):
-        #  v8 在 ep15→20 间用旧款左右切换换了双倍三倍(风格灾难遗忘, momo新款47/47
+        #  v8 在 ep1520 间用旧款左右切换换了双倍三倍(风格灾难遗忘, momo新款47/47
         #  vs 旧款15/238)。增压旧款把锚点拉回, 其余能力(双倍三倍0.51/红黄点0修复/
         #  新类455-468)从 best.pt 继承。验收: 箭头≥0.9 且 双倍三倍≥0.45 且 红黄混淆=0。
         "kind": "detect",
@@ -557,8 +557,8 @@ TRAIN_CONFIGS = {
     "ui_yolo26m_v9": {
         # v9 (2026-06-11) = v8b + 全天live干净帧18池(~1,493帧用户手标, review零问题)
         #  + 老训练集审计修复(238框auto-add回源池, HSV仲裁拦32可疑点色)。
-        #  新类469-473(战术大赛商店/货币/能量饮料, cls头 469→474 重学)。
-        #  靶子(val=冻结回归考卷, v8b PHANTOM 1,356 → 看降幅): 旧皮箭头651 /
+        #  新类469-473(战术大赛商店/货币/能量饮料, cls头 469474 重学)。
+        #  靶子(val=冻结回归考卷, v8b PHANTOM 1,356  看降幅): 旧皮箭头651 /
         #  hub活動進行中ribbon 350(452新增576实例) / dialog调暗大厅 / 451折叠
         #  (新增747实例, emoticon已退役出live管线 — v9的451就是摸头唯一来源) /
         #  格黑娜vs阿拜多斯混淆(87帧解药)。配方复刻 v8 成功版(hsv_h/s=0 保点色)。
@@ -583,9 +583,9 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v10": {
         # v10 (2026-06-12) = v9 warm + 今日整链live素材(run_20260612_191319 313帧 +
-        #  run_20260612_chainlive 452帧, ⚠ 必须 DASHBOARD 人审后才解注释入 REAL_SOURCES)。
+        #  run_20260612_chainlive 452帧,  必须 DASHBOARD 人审后才解注释入 REAL_SOURCES)。
         #  补强靶子: shop确认弹窗/战术大赛商店/能量饮料/批量扫荡 normal页/课程表popout。
-        #  ⚠ 前置: build_ui_v2 REAL_SOURCES 末两行解注释; 配方复刻 v9 成功版。
+        #   前置: build_ui_v2 REAL_SOURCES 末两行解注释; 配方复刻 v9 成功版。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v9" / "weights" / "best.pt"),
@@ -609,7 +609,7 @@ TRAIN_CONFIGS = {
         # v11 (2026-06-13) = v10 warm + 今日全天 live 素材(11 个 _clean 池/~1028 帧:
         #  整链/arena_shop/schedule/bounty/jfd step_mode walk + autonomous 尾链)。
         #  v10 预标 + 用户 dashboard 人审(无可见假阳, 仅 cafe 漏摸1)。配方复刻 v10 成功版。
-        #  ⚠ cafe 451 摸头弱本版不修(今日飞轮无 cafe 摸头帧, 老 _emoticon_v2 200 帧已在源)
+        #   cafe 451 摸头弱本版不修(今日飞轮无 cafe 摸头帧, 老 _emoticon_v2 200 帧已在源)
         #  — 451 强化待明天 cafe walk 多录摸头帧; 眼下 inference conf 0.40 stopgap 兜着。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
@@ -632,10 +632,10 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v12": {
         # v12 (2026-06-14) = v11 warm + 今日9个审过的池(任务大厅live + arena_shop walk).
-        #  ⭐核心补强: run_20260614_205540 用户手录战术大赛商店素材(245帧) → 把 cls469
+        #  核心补强: run_20260614_205540 用户手录战术大赛商店素材(245帧)  把 cls469
         #  (战术大赛商店未选中tab)从饿着的27实例大幅补足, 根治 arena_shop locate 弱检测
         #  (虽已用固定位/swipe代码绕开, 数据补上更稳)。配方复刻 v11/v10 成功版。
-        #  ⚠ cafe 451 摸头本版仍不修(今日无cafe摸头帧); 待明天cafe walk录摸头帧再强化。
+        #   cafe 451 摸头本版仍不修(今日无cafe摸头帧); 待明天cafe walk录摸头帧再强化。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v11" / "weights" / "best.pt"),
@@ -657,13 +657,13 @@ TRAIN_CONFIGS = {
     },
     "battle_yolo26n_v2": {
         # 战斗模型 v2 (2026-07-09) = battle_heads(老v8n 4cls) 的 yolo26 重生。
-        #  数据: run_battle_material_20260708 用户手标 133 帧 → battle_v2 (114/19),
+        #  数据: run_battle_material_20260708 用户手标 133 帧  battle_v2 (114/19),
         #  7 类 = 我方/敌方(新身份类, combat AI 2.0 检测层) + 战斗HUD 5 类
         #  (暂停/三倍速/自动开/自动关/胜利 — 与 ui 模型有意重复: 战斗高频循环
         #  单模型拿 AUTO gate, 不等 5s 主 tick)。
-        #  ⭐26n@640 = battle_lock_upgrade_plan 定案: 2 类身份不缺容量, 高频循环
+        #  26n@640 = battle_lock_upgrade_plan 定案: 2 类身份不缺容量, 高频循环
         #  实测 98 FPS@640(4090 half, 2026-07-09 bench); 26x 反而掉到 60。
-        #  ⚠fliplr=0 铁律: 我方永远左侧/敌方右侧, 翻转破坏方向语义。
+        #  fliplr=0 铁律: 我方永远左侧/敌方右侧, 翻转破坏方向语义。
         #  hsv 开得比 UI 大(h0.015/s0.3/v0.4): 3D 战场光效/VFX 色变打底,
         #  真 VFX 合成 augmentation 留 Phase 2。copy_paste=0(小人重叠假样本)。
         "kind": "detect",
@@ -685,12 +685,12 @@ TRAIN_CONFIGS = {
     "battle_yolo26n_v3": {
         # 战斗 v3 (2026-07-10) = v2 warm + 用户审定3池(498帧: 活动关133 +
         #  总力战賽特233[固定物传播] + 综合战术考试132[Boss 89框])。
-        #  nc 7→14: +塞特的愤怒/Boss(BOSS图标)/一倍速/二倍速/暂停菜单三键
+        #  nc 714: +塞特的愤怒/Boss(BOSS图标)/一倍速/二倍速/暂停菜单三键
         #  (重开/继续/放弃 — 用户: 战斗模型要会操作暂停菜单)。v2 idx 0-6 不动。
-        #  ⚠nc变化: head cls 分支重初始化, 早期 ep 低是正常(v13 同款)。
+        #  nc变化: head cls 分支重初始化, 早期 ep 低是正常(v13 同款)。
         #  弱类实况: 胜利7框/二倍速11/菜单三键各23 — 小样本UI固定元素, 26n
         #  历史证明能学(52帧0.995); 敌方172仍是形态类最弱项。
-        #  ⭐aug 收敛(用户 2026-07-10: 战斗本身VFX噪声大, 别叠合成噪声学歪):
+        #  aug 收敛(用户 2026-07-10: 战斗本身VFX噪声大, 别叠合成噪声学歪):
         #  hsv 几乎关(我方/敌方区分线索一半在色彩, 大抖毁特征), scale 减半;
         #  dim/选中微高亮由离线合成承担(synth_battle_dim.py, train 12%,
         #  模拟卡牌指目标瞄准态)。mosaic 0.3 保留不关: 总力战固定框大量重复,
@@ -713,7 +713,7 @@ TRAIN_CONFIGS = {
     },
     "battle_yolo26n_v4": {
         # 战斗 v4 (2026-07-11) = v3 warm + 两新池(110759总力战157帧 +
-        #  104427综合考试86帧: v3预标→用户人审身份类 + ui v13重建HUD —
+        #  104427综合考试86帧: v3预标用户人审身份类 + ui v13重建HUD —
         #  v3 的 HUD 双框/1倍速误标三倍速/暂停漏标已根治, 见
         #  fix_battle_ui_labels.py)。713对: train607+86dim合成 / val106。
         #  nc=14 不变(纯增量 warm, 无 head 重初始化)。配方=v3 aug收敛版原样。
@@ -736,9 +736,9 @@ TRAIN_CONFIGS = {
     "battle_yolo26s_v5": {
         # 战斗 v5 (2026-07-12) = v4五池 + 凹轴耶罗尼姆斯池(第一份真实视频域:
         #  B站1080p60压缩录屏/暗夜战/UP攻略条遮挡) + 新类主教(local 14, nc=15)。
-        #  train 990+142dim / val 174。**架构升级 26n@640 → 26s@960**(用户拍板:
+        #  train 990+142dim / val 174。**架构升级 26n@640  26s@960**(用户拍板:
         #  密集血条粘连/暗帧弱检出主因=容量+分辨率; 战斗模型不跑主 tick, 4090
-        #  推理开销无所谓)。nc 变(14→15)+换架构 → 不能 warm v4, 用 COCO 预训练
+        #  推理开销无所谓)。nc 变(1415)+换架构  不能 warm v4, 用 COCO 预训练
         #  yolo26s.pt。aug = v4 收敛配方原样。主教仅标可见帧(遮死不标=设计)。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "battle_v5" / "data.yaml",
@@ -759,8 +759,8 @@ TRAIN_CONFIGS = {
     "battle_yolo26s_v6": {
         # 战斗 v6 (2026-07-12) = v5 + 赫赛德池(球boss新类167框 + 敌方浮游炮
         #  2083框用户手标 + 并框拆分器过刀)。nc=16(+球 local15)。
-        #  warm v5 best(nc 15→16 head 重初始化, backbone 保留真实视频域特征,
-        #  远强于 COCO 起点) → 120ep 足。⚠训前必清 GPU 大占用(v5 教训:
+        #  warm v5 best(nc 1516 head 重初始化, backbone 保留真实视频域特征,
+        #  远强于 COCO 起点)  120ep 足。训前必清 GPU 大占用(v5 教训:
         #  server v13 4.3G 挤爆 OOM); 监控用 log 增量判活(Win dataloader
         #  死锁时进程全活但 stdout 冻结)。
         "kind": "detect",
@@ -772,8 +772,8 @@ TRAIN_CONFIGS = {
         "imgsz": 960,
         "batch": 14,   # v5 在 batch16+4.3G桌面基线下 ep74 OOM — 留峰值余量
         "out_name": "battle_yolo26s_v6",
-        # ⚠首跑爆系统 commit(RAM+pagefile, 0xC000012D): 用户桌面占70%RAM +
-        #  cache 2.3G + 8 spawn worker 承诺开销 → cache 关 + worker 减半
+        # 首跑爆系统 commit(RAM+pagefile, 0xC000012D): 用户桌面占70%RAM +
+        #  cache 2.3G + 8 spawn worker 承诺开销  cache 关 + worker 减半
         "cache": False,
         "workers": 4,
         "mosaic": 0.3, "close_mosaic": 15, "copy_paste": 0.0, "mixup": 0.0,
@@ -783,7 +783,7 @@ TRAIN_CONFIGS = {
     },
     "battle_yolo26s_v7": {
         # 战斗 v7 (2026-07-14) = v6 + 白&黑池(黑白单类155框 + HUD v13重写 +
-        #  日文暂停键全域清零 + 星野泡泡→我方 + 孤儿血条补检128)。nc=17。
+        #  日文暂停键全域清零 + 星野泡泡我方 + 孤儿血条补检128)。nc=17。
         #  warm v6 best。配方=v6 内存安全版(cache False + workers 4)。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "battle_v7" / "data.yaml",
@@ -802,7 +802,7 @@ TRAIN_CONFIGS = {
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
     "battle_yolo26s_v8": {
-        # 战斗 v8 (2026-07-14) = v7 数据 + 用户补齐黑白变身段(155→469框,
+        # 战斗 v8 (2026-07-14) = v7 数据 + 用户补齐黑白变身段(155469框,
         #  覆盖469/473战斗帧, 部分标注毒清零)。nc=17 不变, warm v7。
         #  **满配参数**(用户清场: GPU 1.4G/RAM 41%, 训练期只留 Claude Code):
         #  batch 32 / cache RAM / workers 8 / 150ep。
@@ -827,9 +827,9 @@ TRAIN_CONFIGS = {
         #  倍速投票毒100框已修 + 白亮底1倍速新形态(回归用例解药) + 并框拆分
         #  141 + 战斗胜利分层切分(val 终于≥2)。warm v8。
         #  batch16=本机验证上限(batch32 炸[17,5]张量bug)。
-        #  ⚠cache RAM+workers8 在 v9 首跑炸 error 1455(worker 共享映射 commit
+        #  cache RAM+workers8 在 v9 首跑炸 error 1455(worker 共享映射 commit
         #  瞬时峰值, RAM 全局才 24% — pagefile 扩展跟不上 spawn 突增), v6 同款
-        #  → 回归 v6 验证配方 cache=False+workers4(NVMe 直读实测无损 4.3it/s)。
+        #   回归 v6 验证配方 cache=False+workers4(NVMe 直读实测无损 4.3it/s)。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "battle_v9" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v8" / "weights" / "best.pt"),
@@ -850,7 +850,7 @@ TRAIN_CONFIGS = {
         # v14 (2026-07-17) = v13 warm + 0711 大合并池(1624) + 0717 大合并池(442,
         #  16源池: 午夜派对活动商店 evshop 77帧[103 OCR辅助165亮态/101已选择30/
         #  102x150/104x19] + idx77当期活动入口用户手标 + 451摸头span修复补标53)。
-        #  误标四类批量清零: Challenge语义框/405↔474混淆/灰购买/灰确认20→23。
+        #  误标四类批量清零: Challenge语义框/405↔474混淆/灰购买/灰确认2023。
         #  配方 = v13 args.yaml 复刻(cache=False, v13 爆盘教训后 disk 永不再用)。
         #  验收闸: by-cls 对比 v13, momo 四类+剧情类群任何一类退步不上 registry。
         "kind": "detect",
@@ -860,9 +860,9 @@ TRAIN_CONFIGS = {
         "patience": 30,
         "save_period": 5,
         "imgsz": 960,
-        # batch 12→10 (2026-07-20): nc485 下 batch12 steady 19.2G+桌面2G 贴 23G 顶,
+        # batch 1210 (2026-07-20): nc485 下 batch12 steady 19.2G+桌面2G 贴 23G 顶,
         # ep5 密集实例尖峰 CUDA OOM 实锤。nbs=64 累积: 12×5=60 vs 10×6=60 有效
-        # batch 一致, 训练动力学不变。workers 8→6 同理给 32G RAM 留余量(4K解码)。
+        # batch 一致, 训练动力学不变。workers 86 同理给 32G RAM 留余量(4K解码)。
         "batch": 10,
         "out_name": "ui_yolo26m_v14",
         "cache": False,
@@ -877,30 +877,30 @@ TRAIN_CONFIGS = {
     },
     "ui_yolo26m_v15": {
         # v15 (2026-08-04) = v14 warm + **数据集大清理**(全程用户逐页人审):
-        #  ⭐改的是标注质量, 不是加素材 —— 约 5,200 框动过, 每批独立 zip 备份在
+        #  改的是标注质量, 不是加素材 —— 约 5,200 框动过, 每批独立 zip 备份在
         #  data/_backups/。大头: 冗余GT 3,033(同帧同类 IoU≥0.9) / stepper 114·117
-        #  外延统一 765 / 55→404 选择灰 306 / 退化贴边框删 180 / 红点→黄点(色相H)160
-        #  / cls54 补标 158 / cls474 几何对齐 133 / 141 遮罩帧删 87 / 426→490 拆 84
+        #  外延统一 765 / 55404 选择灰 306 / 退化贴边框删 180 / 红点黄点(色相H)160
+        #  / cls54 补标 158 / cls474 几何对齐 133 / 141 遮罩帧删 87 / 426490 拆 84
         #  / 区域名 38·39 串标 74(宽高比判据揪出, label-noise 只报 6 条)。
-        #  新类: 490 完成_灰色 / 491 後日談 (nc 485→492; **不删废弃行**, 删了会让
+        #  新类: 490 完成_灰色 / 491 後日談 (nc 485492; **不删废弃行**, 删了会让
         #  后续全部前移导致全库错位 —— 沿用 _废弃NNN_ 占位惯例)。
         #
-        #  ⛔⛔build_ui_v2 三处静默缺陷同批修掉(它们影响的是**训练/验证口径**):
-        #   ① val 侧从来没 dedup → 2,642 帧里 442 帧字节完全相同(最大一组 96 张),
-        #      另 5 张与 train 逐像素相同 = 拿训练样本当考题。⇒ v14 的 mAP 是被
+        #  build_ui_v2 三处静默缺陷同批修掉(它们影响的是**训练/验证口径**):
+        #    val 侧从来没 dedup  2,642 帧里 442 帧字节完全相同(最大一组 96 张),
+        #      另 5 张与 train 逐像素相同 = 拿训练样本当考题。 v14 的 mAP 是被
         #      重复帧加权过的, **v15 的 mAP 不能和 v14 直接比数值**, 要看 by-cls。
-        #   ② symlink 静默退化成真拷贝(Win 建符号链接要管理员) → 白占 23.15 GiB。
+        #    symlink 静默退化成真拷贝(Win 建符号链接要管理员)  白占 23.15 GiB。
         #      改成 os.link 硬链接优先, 现在 24,723 张全硬链接零拷贝。
-        #   ③ 空标签帧无条件写入 → **505 帧被当纯背景喂训练, 屏上却全是要检的 UI**。
+        #    空标签帧无条件写入  **505 帧被当纯背景喂训练, 屏上却全是要检的 UI**。
         #      其中 335 帧来自 run_20260518_163513(源码注释写 "+335 daily-skill UI",
         #      实测 2,197 框**全是头像类 143-394, UI 零框**) —— 这批帧上有 MomoTalk
         #      弹窗 + 叉叉19 + 咖啡厅邀請32×6, 全被当"这里什么都没有"训了 N 代。
-        #      ⇒ 与 memory 两个悬案对得上: 「MomoTalk unreachable」「咖啡厅弱」。
+        #       与 memory 两个悬案对得上: 「MomoTalk unreachable」「咖啡厅弱」。
         #
         #  数据: train 22,531 / val 2,192 / nc=492 / schema 全前缀对齐 master。
-        #  warm from v14 **last.pt**(不是 best.pt): 沿用 v13→v14 的做法, cls 头
-        #  485→492 只重学新增 7 行。配方 = v14 args.yaml 原样复刻, 只动 batch。
-        #  ⚠batch 10→8: v14 定 10 时桌面基线 2G, 今天基线 4.76G(MuMu+Edge 等没关),
+        #  warm from v14 **last.pt**(不是 best.pt): 沿用 v13v14 的做法, cls 头
+        #  485492 只重学新增 7 行。配方 = v14 args.yaml 原样复刻, 只动 batch。
+        #  batch 108: v14 定 10 时桌面基线 2G, 今天基线 4.76G(MuMu+Edge 等没关),
         #   23G 顶减掉后只剩 18.2G, batch10 峰值贴脸。nbs=64 累积 8×8=64 vs 10×6=60,
         #   有效 batch 基本一致, 训练动力学不变。桌面清干净了可以调回 10。
         #  验收闸: **灰态族**(485/489/404/112/113/457/490)—— 今天改动最集中, 也是
@@ -948,22 +948,22 @@ TRAIN_CONFIGS = {
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
     "battle_yolo26s_v10s": {
-        # ⭐**标注助手**, 不是 v11 上线模型 (2026-07-25, 用户: "可以先拿我人工审核的
+        # **标注助手**, 不是 v11 上线模型 (2026-07-25, 用户: "可以先拿我人工审核的
         #  升级一波模型然后再去给那几个标注啊, 都是黄色机器人")。
         #  病灶: v10 敌方 87% 来自赫赛德池黑白机器人, botplay 的黄色量産型**没见过**
-        #  → 先验"战场小人=我方" → 敌方→我方 22.5% / 反向 0.0%。
+        #   先验"战场小人=我方"  敌方我方 22.5% / 反向 0.0%。
         #  解: 用户人审的 025638 里 我方164:敌方226(比例是反的) 当种子, ×8 过采样
-        #  (54帧只占 2001帧的 2.7%, 不放大动不了先验)。敌方 2395→3659, 比例 4.72→3.40:1,
+        #  (54帧只占 2001帧的 2.7%, 不放大动不了先验)。敌方 23953659, 比例 4.723.40:1,
         #  新增 1264 框全是黄机甲。
-        #  ⚠**过拟合是设计内的**: 目标就是标注同一 session/同一张图的其余 423 帧,
+        #  **过拟合是设计内的**: 目标就是标注同一 session/同一张图的其余 423 帧,
         #  泛化距离≈0。**绝不能拿它上线** —— 正式 v11 等 6 池人审完再重训。
-        #  ⚠val = 种子 holdout 16帧(帧号>=48, 时间切分零重叠)。不用随机切:
+        #  val = 种子 holdout 16帧(帧号>=48, 时间切分零重叠)。不用随机切:
         #  实测 battle_v10 的 val **96.0% 有 ±1 帧邻居在 train**, 那种 mAP 测的是记忆。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "battle_v10s" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "battle_yolo26s_v10" / "weights" / "best.pt"),
         "epochs": 40,
-        # ⛔patience 必须 >= epochs: v8/v9/v10 三代都在 close_mosaic 触发点(ep135)
+        # patience 必须 >= epochs: v8/v9/v10 三代都在 close_mosaic 触发点(ep135)
         #  之前就被 patience=40 早停了, 那三代**从没真正关过 mosaic**。
         #  触发点 = epochs - close_mosaic = 40-10 = ep30。
         "patience": 40,
@@ -974,8 +974,8 @@ TRAIN_CONFIGS = {
         "out_name": "battle_yolo26s_v10s",
         "cache": False,
         "workers": 4,
-        # ⛔**不写 optimizer**: trainer.py:983 的 `warmup_bias_lr = 0.0` 只在
-        #  `if name == "auto":` 分支里执行。显式锁死 optimizer 会跳过该分支 →
+        # **不写 optimizer**: trainer.py:983 的 `warmup_bias_lr = 0.0` 只在
+        #  `if name == "auto":` 分支里执行。显式锁死 optimizer 会跳过该分支 
         #  warmup 前 3 轮 bias 按 **0.1** 跑而 body 是 ~0.0004(差 250 倍),
         #  正好打在稀有类(战斗胜利19/失败28/暂停菜单各27框)最怕的地方。
         #  而 warmup_bias_lr 不在下面 :1142 的白名单里, 写了也会被静默丢掉。
@@ -989,15 +989,15 @@ TRAIN_CONFIGS = {
     },
     "unified_yolo26x_v6": {
         # 通用 26x = ui + 头像(251) + 摸头, nc=455. warm-start from fused_avatar_26x_v4:
-        #  26x backbone 已学满 251 角色脸特征 → 头像部分继承 v4 的 0.966 起点(不从零学、
-        #  压住"头像退化"风险); cls 头 251→455 重学(角色行继承, UI/emoticon 行新增).
+        #  26x backbone 已学满 251 角色脸特征  头像部分继承 v4 的 0.966 起点(不从零学、
+        #  压住"头像退化"风险); cls 头 251455 重学(角色行继承, UI/emoticon 行新增).
         #  UI 比角色脸简单, 26x 容量足 + avatar_md 把每角色填到 min31/avg70, 都学得动.
-        #  ⚠ fliplr=0: 通用模型混了 UI(左/右切换/返回键 有方向) — 翻转会破坏 UI 方向语义.
+        #   fliplr=0: 通用模型混了 UI(左/右切换/返回键 有方向) — 翻转会破坏 UI 方向语义.
         #  copy_paste/mixup=0: 角色细粒度毒药(fused v4 教训). 数据 synth:real=1.5:1.
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
-        "epochs": 70,            # warm-start: backbone 已强, cls头(252→455)重学 ~60-70 足
+        "epochs": 70,            # warm-start: backbone 已强, cls头(252455)重学 ~60-70 足
         "patience": 30,
         "imgsz": 960,
         "batch": 8,
@@ -1016,8 +1016,8 @@ TRAIN_CONFIGS = {
     "unified_yolo26x_v6b": {
         # v6 重训 (2026-06-04): v6 ep12 见顶 mAP50-95 0.748 后 ep13-18 退化到 0.63-0.66
         # (lr0=0.003 对 warm-start 偏高, 早期冲顶后持续扰动). 验收: UI 域 0.87 强,
-        # 头像域仅 0.77 (fused v4 专门干是 0.966, 整合退化 ~0.2). 改 lr0→0.0015 更护
-        # fused 头像特征 + patience→40 够到 close_mosaic. 其余同 v6. 目标 UI 保 0.87 + 头像拉回 0.9+.
+        # 头像域仅 0.77 (fused v4 专门干是 0.966, 整合退化 ~0.2). 改 lr00.0015 更护
+        # fused 头像特征 + patience40 够到 close_mosaic. 其余同 v6. 目标 UI 保 0.87 + 头像拉回 0.9+.
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
@@ -1040,9 +1040,9 @@ TRAIN_CONFIGS = {
     "unified_yolo26x_v6c": {
         # v6c (2026-06-06 用户决策): 砍 UI synth (_synth_ui_swap), UI 只真实帧根治 synth
         # 过拟合 (v6b 实锤: UI val 0.892 高 / live 崩, 咖啡厅入口 val>0.9 live 仅 0.25)。头像
-        # synth (_fused_synth_remap) 保留 (影响小)。synth:real 2.03→~0.89。同 v6b 参数
+        # synth (_fused_synth_remap) 保留 (影响小)。synth:real 2.03~0.89。同 v6b 参数
         # (lr0 0.0015 护头像 / mosaic 0.3 / close_mosaic 5 / patience 40 / from fused v4 重来)。
-        # ⚠️ 训前必须重建 ui_v2 (build_ui_v2 已砍 _synth_ui_swap)。UI 弱类暂靠 skill 兜底, v7 飞轮补。
+        # ️ 训前必须重建 ui_v2 (build_ui_v2 已砍 _synth_ui_swap)。UI 弱类暂靠 skill 兜底, v7 飞轮补。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),
@@ -1063,7 +1063,7 @@ TRAIN_CONFIGS = {
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
     "unified_yolo26x_v6b_ft": {
-        # v6b ep10 见顶 0.864 后退化(ep23 跌 0.747, R 0.773→0.656 = 过拟合非震荡).
+        # v6b ep10 见顶 0.864 后退化(ep23 跌 0.747, R 0.7730.656 = 过拟合非震荡).
         # 关 mosaic 微调救一波(v4 同款思路): from ep10 best warm-start + mosaic 全关(去拼图伪分布) +
         # 极低 lr(防扰动已收敛特征) + 短训 + 小 patience(防再退化). scale/translate 留(空间aug无害).
         "kind": "detect",
@@ -1241,7 +1241,7 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         return None
 
     if RESUME_FLAG:
-        print(f"  --resume requested but {last_pt} missing → starting fresh")
+        print(f"  --resume requested but {last_pt} missing  starting fresh")
     model = YOLO(base)
     train_kwargs = dict(
         data=str(data_arg),
@@ -1283,7 +1283,7 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         # Train and val are DIFFERENT frames of the same character
         # (different lighting, sub-pixel jitter, JPEG variance) — we
         # need generalization, not memorization.  Previous "zero aug"
-        # setup produced top1=7% (train loss → 0.08 while val loss
+        # setup produced top1=7% (train loss  0.08 while val loss
         # climbed to 10 — textbook overfit).
         #
         # Keep DISABLED:

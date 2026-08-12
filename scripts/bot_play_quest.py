@@ -6,13 +6,13 @@
 AUTO 不可靠 bot 自己放牌; 胜利才记加成; farm 只刷最后三关(Q10/11/12)。
 
 v7 架构(playbook 4.8 定案): 战斗感知走 scrcpy 视频流(~25fps, 帧龄
-<150ms) → Perception 线程写黑板(全队HP/亮卡/敌表/boss) → 行为树控牌
-(急救>集火BOSS>AOE清群>辅助增益>单体循环>攒费) → 闭环拖拽释放(拖拽
+<150ms)  Perception 线程写黑板(全队HP/亮卡/敌表/boss)  行为树控牌
+(急救>集火BOSS>AOE清群>辅助增益>单体循环>攒费)  闭环拖拽释放(拖拽
 中每步读黑板跟目标)。实现在 brain/combat_brain.py。
 导航/编队仍走 ADB 干净帧链(非实时场景, 1fps 够)。
 
-链路: Quest tab 双正锚 → 关号 OCR 入场 → 感知编队(快速编辑→自动编辑
-按钮→确认→出击) → v7 控牌 → 胜利结算+台账 / 判败重试上限。
+链路: Quest tab 双正锚  关号 OCR 入场  感知编队(快速编辑自动编辑
+按钮确认出击)  v7 控牌  胜利结算+台账 / 判败重试上限。
 
 用法: py -u scripts/bot_play_quest.py 10 11 12   (--resume 接管战斗)
 """
@@ -96,8 +96,8 @@ def main():
 
     def find_and_enter(q: int) -> bool:
         """结构化定位(词表铁律: 关号无数字cls, 但列表结构有):
-        活动 Quest 固定 12 关全解锁 → 滑到底(入场键 cy 集合两帧不变)
-        → 行序=关号, Q_q = 倒数第 (13-q) 行入场键。OCR 只辅助校验。"""
+        活动 Quest 固定 12 关全解锁  滑到底(入场键 cy 集合两帧不变)
+         行序=关号, Q_q = 倒数第 (13-q) 行入场键。OCR 只辅助校验。"""
         prev_sig = None
         for _ in range(10):
             fr = ensure_quest_tab()
@@ -189,7 +189,7 @@ def main():
     print(f"scrcpy feed OK {f0.shape[1]}x{f0.shape[0]}", flush=True)
 
     def play_battle() -> str:
-        """v7: 感知线程(scrcpy→黑板) + 行为树控牌(brain/combat_brain.py).
+        """v7: 感知线程(scrcpy黑板) + 行为树控牌(brain/combat_brain.py).
         飞轮干净帧由感知线程 1fps 直存(scrcpy=Android 内部流, 无烧录)。"""
         per = Perception(feed, battle, avatar, ui, flywheel_dir=fly_dir)
         per.start()
@@ -216,7 +216,7 @@ def main():
             tmp.write_text(json.dumps(led, ensure_ascii=False, indent=1),
                            encoding="utf-8")
             tmp.replace(LEDGER)
-            print(f"[Q{q}] ✓ 满加成入账", flush=True)
+            print(f"[Q{q}]  满加成入账", flush=True)
         else:
             print(f"[Q{q}] {result}", flush=True)
         return
@@ -241,7 +241,7 @@ def main():
                 tmp.write_text(json.dumps(led, ensure_ascii=False, indent=1),
                                encoding="utf-8")
                 tmp.replace(LEDGER)
-                print(f"[Q{q}] ✓ 满加成入账", flush=True)
+                print(f"[Q{q}]  满加成入账", flush=True)
                 break
             print(f"[Q{q}] {result}, 重试" if attempt + 1 < MAX_RETRY
                   else f"[Q{q}] {result}, 放弃(换配置再议)", flush=True)

@@ -3,7 +3,7 @@
 
 用户 2026-06-15 定的 AP 优先级: 当期活动(活动剧情/活动quest, 可扫的) > 双倍三倍加成
 板块 > 正常关。周年庆例外(战斗向, 不沾AP, 无 skill)。本 skill 处理「2x/3x bonus 在
-特殊任务」这一档 (2026-06-15 实况): 扫 特殊任务 → 信用货币回收 (用户优先, 信用点干啥都要).
+特殊任务」这一档 (2026-06-15 实况): 扫 特殊任务  信用货币回收 (用户优先, 信用点干啥都要).
 
 DYNAMIC: 进 hub 后扫 `双倍或三倍活动进行中`(452, v12@0.93) — 只有当它落在 特殊任务
 (70) 上才进去扫; 否则 graceful done (bonus 不在这, 留给 batch_sweep 扫正常关)。
@@ -11,15 +11,15 @@ DYNAMIC: 进 hub 后扫 `双倍或三倍活动进行中`(452, v12@0.93) — 只�
 batch_sweep 兜底扫正常。
 
 Flow (cls-driven; 特殊任务那几屏不在 semantizer 里):
-  enter      lobby → 任务大厅入口 → hub
-  board      hub: 452 在 特殊任务(70) 上 → 点 特殊任务; 否则 done(bonus 不在这)
-  commission Request Select → 点 信用货币回收(454)
-  stage      关卡列表 → 点一个 入场键(79)
-  sweep      任務資訊 popup → MAX(111) → 扫荡开始(108)。MAX/start 灰 = AP 耗尽 → close
-  confirm    掃蕩內容 dialog(確認+取消): ⛔青辉石 in body → 取消; 否则 確認
-  running    skip 键 → results
-  results    result page 確認 dismiss → 回 任務資訊 → AP 还够再扫 / 否则 close
-  close      任務資訊 X / 返回 → 关卡列表 → 回大厅 → lobby → done
+  enter      lobby  任务大厅入口  hub
+  board      hub: 452 在 特殊任务(70) 上  点 特殊任务; 否则 done(bonus 不在这)
+  commission Request Select  点 信用货币回收(454)
+  stage      关卡列表  点一个 入场键(79)
+  sweep      任務資訊 popup  MAX(111)  扫荡开始(108)。MAX/start 灰 = AP 耗尽  close
+  confirm    掃蕩內容 dialog(確認+取消): 青辉石 in body  取消; 否则 確認
+  running    skip 键  results
+  results    result page 確認 dismiss  回 任務資訊  AP 还够再扫 / 否则 close
+  close      任務資訊 X / 返回  关卡列表  回大厅  lobby  done
 
 Money: AP only. confirm gate 见青辉石在 body 一律取消(同 batch_sweep)。
 """
@@ -36,7 +36,7 @@ from brain.skills import ui_classes as UC
 _CLS_CONF = 0.30
 _MIN_AP = 20           # below this a sweep can't run — skip the trip
 # Per-run AP cost of a special-task stage (Lv.78 信用货币回收 = 40, live 2026-06-15).
-# 扫前 AP < 此值 → close, 绝不点扫荡开始触发「購買體力(青辉石)」框。保守取实测值。
+# 扫前 AP < 此值  close, 绝不点扫荡开始触发「購買體力(青辉石)」框。保守取实测值。
 _SWEEP_COST = 40
 _ENTER_MAX = 22
 _PHASE_MAX = 14
@@ -59,7 +59,7 @@ class SpecialSweepSkill(BaseSkill):
             from brain.pipeline import _read_topbar_clean
             ap = _read_topbar_clean(UC.TOPBAR_AP)
             if ap is not None and ap < _MIN_AP:
-                self.log(f"AP {ap} < {_MIN_AP} → nothing to sweep, skip")
+                self.log(f"AP {ap} < {_MIN_AP}  nothing to sweep, skip")
                 return False
         except Exception:
             pass
@@ -130,7 +130,7 @@ class SpecialSweepSkill(BaseSkill):
         self._enter_ticks += 1
         if self._on_hub(screen):
             self._goto("board")
-            return action_wait(300, "in hub → check bonus board")
+            return action_wait(300, "in hub  check bonus board")
         page = self.detect_screen_yolo(screen)
         if page == "Lobby":
             entry = self.find_cls(screen, UC.NAV_TASKS, conf=0.20)
@@ -140,7 +140,7 @@ class SpecialSweepSkill(BaseSkill):
                 return action_click_box(entry, "open task hall")
             return action_wait(400, "lobby: hall entry not seen")
         if self._enter_ticks > _ENTER_MAX:
-            self.log("can't reach hub → done")
+            self.log("can't reach hub  done")
             return action_done("special_sweep unreachable")
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(700, "no UI — likely loading")
@@ -152,7 +152,7 @@ class SpecialSweepSkill(BaseSkill):
         # DYNAMIC routing: only sweep 特殊任务 when the 2x/3x badge is on it.
         tile = self._bonus_on_special(screen)
         if tile is not None:
-            self.log("2x/3x bonus 在 特殊任务 → 进入扫荡")
+            self.log("2x/3x bonus 在 特殊任务  进入扫荡")
             if self._phase_ticks % 3 != 1:
                 return action_wait(500, "特殊任务 clicked — settling")
             self._goto("commission")
@@ -160,23 +160,23 @@ class SpecialSweepSkill(BaseSkill):
         if self._phase_ticks > _PHASE_MAX:
             # No bonus on 特殊任务 (moved elsewhere / not detected) — nothing for
             # this skill; batch_sweep handles normal stages.
-            self.log("2x/3x bonus 不在 特殊任务 → done (留给 batch_sweep)")
+            self.log("2x/3x bonus 不在 特殊任务  done (留给 batch_sweep)")
             return action_done("special_sweep: bonus not on 特殊任务")
         return action_wait(400, "scanning hub for 2x/3x bonus board")
 
     def _commission(self, screen: ScreenState) -> Dict[str, Any]:
         # 被吞回弹(2026-07-21 mutate-before-ack 缓解): _board 提前 goto commission,
-        # 若 特殊任务 点击被吞且未进委托列表(无 STAGE_ENTER/SPECIAL_CREDIT)→ 回
+        # 若 特殊任务 点击被吞且未进委托列表(无 STAGE_ENTER/SPECIAL_CREDIT) 回
         # board 重点, 不在旧屏上 fixed-pos 乱点。
         if (self.action_suppressed and self._phase_ticks <= 1
                 and self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF) is None
                 and self.find_cls(screen, UC.SPECIAL_CREDIT, conf=_CLS_CONF) is None):
             self._goto("board")
-            return action_wait(300, "特殊任务 open 被吞 → 回 board")
-        # On the 据点防御 stage list already? (re-entry) → stage.
+            return action_wait(300, "特殊任务 open 被吞  回 board")
+        # On the 据点防御 stage list already? (re-entry)  stage.
         if self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF) is not None:
             self._goto("stage")
-            return action_wait(250, "already on stage list → stage")
+            return action_wait(250, "already on stage list  stage")
         credit = self.find_cls(screen, UC.SPECIAL_CREDIT, conf=_CLS_CONF)
         if credit is not None:
             if self._phase_ticks % 3 != 1:
@@ -185,25 +185,25 @@ class SpecialSweepSkill(BaseSkill):
             self._goto("stage")
             return action_click_box(credit, "select 信用货币回收 commission")
         if self._phase_ticks > _PHASE_MAX:
-            # commission cls missed → fixed pos.
+            # commission cls missed  fixed pos.
             self._goto("stage")
             return action_click(*_POS_CREDIT, "select 信用货币回收 (fixed pos)")
         return action_wait(400, "waiting for 委托 select (信用货币回收)")
 
     def _stage(self, screen: ScreenState) -> Dict[str, Any]:
         # 被吞回弹(2026-07-21 mutate-before-ack 缓解): _commission 提前 goto stage,
-        # 若 信用货币回收 点击被吞且未进关卡列表/扫荡面板 → 回 commission 重点。
+        # 若 信用货币回收 点击被吞且未进关卡列表/扫荡面板  回 commission 重点。
         if (self.action_suppressed and self._phase_ticks <= 1
                 and self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX,
                                            UC.QTY_MAX_GREY], conf=_CLS_CONF) is None
                 and self.find_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF) is None):
             self._goto("commission")
-            return action_wait(300, "commission open 被吞 → 回 commission")
-        # In the sweep popup already (re-entry)? MAX/start visible → sweep.
+            return action_wait(300, "commission open 被吞  回 commission")
+        # In the sweep popup already (re-entry)? MAX/start visible  sweep.
         if self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX, UC.QTY_MAX_GREY],
                          conf=_CLS_CONF) is not None:
             self._goto("sweep")
-            return action_wait(250, "sweep panel open → sweep")
+            return action_wait(250, "sweep panel open  sweep")
         enters = self.find_all_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF)
         if enters:
             # pick the TOP-most 入场键 (lowest cy) — highest unlocked stage tends
@@ -216,18 +216,18 @@ class SpecialSweepSkill(BaseSkill):
             return action_click_box(top, "enter stage (入场键)")
         if self._phase_ticks > _PHASE_MAX:
             self._goto("close")
-            return action_wait(300, "no 入场键 → close")
+            return action_wait(300, "no 入场键  close")
         return action_wait(400, "waiting for stage list (入场键)")
 
     def _sweep(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔⛔ MONEY GATE (用户 2026-06-15 澄清 + 30青辉石事故根治): 扫荡**正常不弹**买体力/
+        #  MONEY GATE (用户 2026-06-15 澄清 + 30青辉石事故根治): 扫荡**正常不弹**买体力/
         # 买票框 —— 只有 **MAX 是灰色(QTY_MAX_GREY=资源不足)** 时点扫荡才弹「購買體力(青辉石)」。
-        # 所以最准的安全门: **只有 MAX 可点(QTY_MAX positively 检到)才扫; MAX 灰 → close,
+        # 所以最准的安全门: **只有 MAX 可点(QTY_MAX positively 检到)才扫; MAX 灰  close,
         # 绝不点扫荡。** 不确定(MAX 都没正向检到)也不盲扫(money skill 安全 > 多扫一次)。
-        # _confirm 仍保留青辉石防线③ 兜底。AP 读数只当 early-skip 优化(读不出不据此 close)。
-        # ⛔慢IO挡热路径(click_causality_gate 第二类根因, 2026-07-28 修):
+        # _confirm 仍保留青辉石防线 兜底。AP 读数只当 early-skip 优化(读不出不据此 close)。
+        # 慢IO挡热路径(click_causality_gate 第二类根因, 2026-07-28 修):
         # _read_topbar_clean 每次真抓 3-5 张 ADB 4K 帧 ≈ 阻塞 2.3-3.9s, 旧码
-        # 每 tick 无条件跑 → 同 tick 的 MAX/扫荡开始 点击全部用 2.5-4s 前的
+        # 每 tick 无条件跑  同 tick 的 MAX/扫荡开始 点击全部用 2.5-4s 前的
         # 陈旧帧。改: 每轮只读一次, 且读数 tick 本身只 wait 不点(把慢 IO 与
         # 点击决策隔离在不同 tick)。
         if self._ap_read_round != self._sweep_rounds:
@@ -239,49 +239,49 @@ class SpecialSweepSkill(BaseSkill):
                 ap = None
             self._ap_cache = ap
             if ap is not None and ap < _SWEEP_COST:
-                self.log(f"AP={ap} < 单次成本{_SWEEP_COST} → close (early-skip, 不触发买体力框)")
+                self.log(f"AP={ap} < 单次成本{_SWEEP_COST}  close (early-skip, 不触发买体力框)")
                 self._goto("close")
-                return action_wait(250, "AP 不够一次扫荡 → close (money-safe)")
+                return action_wait(250, "AP 不够一次扫荡  close (money-safe)")
             return action_wait(250, "AP snapshot taken — 下 tick 用新鲜帧决策")
         ap = self._ap_cache
 
-        # ⚠️ 灰 MAX 有歧义: **点 MAX 前**灰=资源不足(该 close); **点 MAX 后**灰=count 已设满
-        # (正常, 该继续扫)。所以 grey→close 只在 not _maxed 时判; _maxed 后不再看 MAX 状态。
+        # ️ 灰 MAX 有歧义: **点 MAX 前**灰=资源不足(该 close); **点 MAX 后**灰=count 已设满
+        # (正常, 该继续扫)。所以 greyclose 只在 not _maxed 时判; _maxed 后不再看 MAX 状态。
         if not self._maxed:
             # QTY_MAX (MAX_可点击) is a WEAK cls — live 2026-06-15 实测它在明显可点的蓝色
-            # MAX 上只 fire 到 conf 0.26 (< 0.30) → 被过滤掉 → 误判没法扫。低地板 0.20 抓它。
+            # MAX 上只 fire 到 conf 0.26 (< 0.30)  被过滤掉  误判没法扫。低地板 0.20 抓它。
             # QTY_MAX_GREY(灰=不足)用正常 0.30(灰是强信号)。
             max_ok = self.find_cls(screen, UC.QTY_MAX, conf=0.20)
             max_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
-            # ⛔ MAX 灰(未设, 无可点 MAX)= 资源不足 → close。这正是点扫荡弹买体力框的情形。
+            #  MAX 灰(未设, 无可点 MAX)= 资源不足  close。这正是点扫荡弹买体力框的情形。
             if max_grey is not None and max_ok is None:
-                self.log("⛔ MAX 灰色(未设)= 资源不足 → close (绝不点扫荡触发买体力/买票框)")
+                self.log(" MAX 灰色(未设)= 资源不足  close (绝不点扫荡触发买体力/买票框)")
                 self._goto("close")
-                return action_wait(250, "MAX grey (insufficient) → close (money-safe)")
+                return action_wait(250, "MAX grey (insufficient)  close (money-safe)")
             if max_ok is not None:
                 # 双发 latch(2026-07-21 mutate-before-ack: MAX 首发被吞时旧码已
-                # _maxed=True → MAX 没点上只扫默认次数)。连发两 tick 再 latch;
+                # _maxed=True  MAX 没点上只扫默认次数)。连发两 tick 再 latch;
                 # 同目标 hold 缓冲无连射, MAX 幂等再点无害。
                 self._max_fires = getattr(self, "_max_fires", 0) + 1
                 if self._max_fires >= 2:
                     self._maxed = True
                 self.log(f"click MAX (fire {self._max_fires}, 可点 c≥0.20); AP={ap}")
                 return action_click_box(max_ok, "sweep count MAX")
-            # ⛔⛔ 2026-06-17 fail-closed 加固(多agent审计 #1/#2 核实后): 删掉旧的
+            #  2026-06-17 fail-closed 加固(多agent审计 #1/#2 核实后): 删掉旧的
             # "AP≥成本就固定位盲点 MAX" 兜底。它在 QTY_MAX cls 全闪时凭 AP 读数盲设 MAX
-            # → 随后盲点扫荡開始, 若 AP 读错(读成够其实不够)就会弹「購買體力(青辉石)」框,
+            #  随后盲点扫荡開始, 若 AP 读错(读成够其实不够)就会弹「購買體力(青辉石)」框,
             # 而 _confirm 的青辉石黑名单是 fail-OPEN(青辉石 cls 漏检即确认买)= 30青辉石
-            # 事故同款链。根治: **只在正向检到 QTY_MAX(资源确认够)才设 _maxed→才扫**;
-            # 两个 MAX cls 全闪 → 等→超时 close, 绝不盲扫触发买体力框。漏扫的 AP 由编排
+            # 事故同款链。根治: **只在正向检到 QTY_MAX(资源确认够)才设 _maxed才扫**;
+            # 两个 MAX cls 全闪  等超时 close, 绝不盲扫触发买体力框。漏扫的 AP 由编排
             # 里紧跟的 batch_sweep 兜底(no-bonus 日同理)。宁可漏扫一次, 绝不碰青辉石风险。
             # (旧盲点兜底对应的 _POS_SPECIAL_TAB/_POS_MAX 固定位常量已删, 2026-07-17 死码清理。)
             if self._phase_ticks > _PHASE_MAX:
-                self.log(f"QTY_MAX cls 没正向检到(AP={ap}) → close (不盲扫, money fail-closed)")
+                self.log(f"QTY_MAX cls 没正向检到(AP={ap})  close (不盲扫, money fail-closed)")
                 self._goto("close")
-                return action_wait(300, "no positive QTY_MAX cls → close (fail-closed)")
+                return action_wait(300, "no positive QTY_MAX cls  close (fail-closed)")
             return action_wait(400, "waiting for positive QTY_MAX (c≥0.20)")
 
-        # MAX 已点 (资源确认够, count 设满) → 扫荡开始。MAX 此时变灰是 count 已满, 正常。
+        # MAX 已点 (资源确认够, count 设满)  扫荡开始。MAX 此时变灰是 count 已满, 正常。
         if self._phase_ticks % 3 != 1:
             return action_wait(700, "扫荡开始 clicked — settling")
         start = self.find_cls(screen, UC.SWEEP_START, conf=0.25)
@@ -293,11 +293,11 @@ class SpecialSweepSkill(BaseSkill):
             return action_click_box(start, "start special sweep")
         if self._phase_ticks > _PHASE_MAX:
             self._goto("close")
-            return action_wait(300, "扫荡开始 never seen → close")
-        # _maxed=True (资源已确认可负担) → 固定位扫荡开始兜底安全。
-        # ⛔after-ack(2026-07-28): 旧码三样全无(_started/_sweep_rounds/_goto)
-        # → skill 原地留在 _sweep 每 3 tick 盲拍一次; 第一发落地后确认框弹出
-        # 使屏幕指纹变化, same-target hold 判"页面已推进"放行第二发 → 在无 cls
+            return action_wait(300, "扫荡开始 never seen  close")
+        # _maxed=True (资源已确认可负担)  固定位扫荡开始兜底安全。
+        # after-ack(2026-07-28): 旧码三样全无(_started/_sweep_rounds/_goto)
+        #  skill 原地留在 _sweep 每 3 tick 盲拍一次; 第一发落地后确认框弹出
+        # 使屏幕指纹变化, same-target hold 判"页面已推进"放行第二发  在无 cls
         # 支撑的坐标上往刚弹出的对话框里连拍, 且迟迟不进 _confirm 的青辉石闸。
         # 与 cls 路径(上面 SWEEP_START 分支)保持一致, 让下一 tick 由 _confirm 接管。
         self._started = True
@@ -307,14 +307,14 @@ class SpecialSweepSkill(BaseSkill):
         return action_click(*_POS_SWEEP_START, "start special sweep (fixed pos)")
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
-        # ⛔ Money gate (2026-06-15 事故加强): 青辉石出现在 topbar 以下任意位置(cy>0.10)
-        # = 「購買體力」买AP框 → 取消, 绝不确认。原 region(0.15-0.85,0.12-0.75)漏了买AP框
+        #  Money gate (2026-06-15 事故加强): 青辉石出现在 topbar 以下任意位置(cy>0.10)
+        # = 「購買體力」买AP框  取消, 绝不确认。原 region(0.15-0.85,0.12-0.75)漏了买AP框
         # 的青辉石位置, 当场花了30青辉石。扩大到整个对话框区(topbar cy<0.10 仍排除)。
         # conf 用模型地板 0.20 — 危险检测要最大灵敏度。
         pyx = self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.20,
                             region=(0.08, 0.10, 0.94, 0.86))
         if pyx is not None:
-            self.log("⛔ 青辉石在对话框内(买AP框) — 取消, 绝不买青辉石")
+            self.log(" 青辉石在对话框内(买AP框) — 取消, 绝不买青辉石")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
             self._goto("close")
             if cancel is not None:
@@ -329,13 +329,13 @@ class SpecialSweepSkill(BaseSkill):
             self.log("掃蕩內容 confirm (AP only, verified)")
             self._goto("running")
             return action_click_box(confirm, "confirm special sweep (AP)")
-        # No confirm dialog (swept directly) → look for skip/result.
+        # No confirm dialog (swept directly)  look for skip/result.
         if self.find_cls(screen, UC.BATTLE_SKIP, conf=_CLS_CONF) is not None:
             self._goto("running")
-            return action_wait(150, "no confirm → running")
+            return action_wait(150, "no confirm  running")
         if self._phase_ticks > _PHASE_MAX:
             self._goto("results")
-            return action_wait(300, "confirm gone → results")
+            return action_wait(300, "confirm gone  results")
         return action_wait(400, "waiting for 掃蕩內容 dialog")
 
     def _running(self, screen: ScreenState) -> Dict[str, Any]:
@@ -346,26 +346,26 @@ class SpecialSweepSkill(BaseSkill):
             return action_click_box(skip, "skip sweep animation")
         if self._phase_ticks > _PHASE_MAX:
             self._goto("results")
-            return action_wait(300, "no skip seen → results")
+            return action_wait(300, "no skip seen  results")
         return action_wait(500, "sweep running")
 
     def _results(self, screen: ScreenState) -> Dict[str, Any]:
-        # Back at the 任務資訊 sweep panel (MAX/start visible) ⇒ the MAX sweep is
-        # done. ⛔ DO NOT re-sweep (2026-06-15 事故根治): a MAX sweep already spends
+        # Back at the 任務資訊 sweep panel (MAX/start visible)  the MAX sweep is
+        # done.  DO NOT re-sweep (2026-06-15 事故根治): a MAX sweep already spends
         # all affordable AP in ONE op; re-sweeping the same stage with the leftover
-        # (< 单次成本) is what popped the「購買體力」框 → 险些买青辉石。一次 MAX 扫完
+        # (< 单次成本) is what popped the「購買體力」框  险些买青辉石。一次 MAX 扫完
         # 就 close。剩余 AP(< 一次成本)留着, 不冒险。
         if self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX, UC.QTY_MAX_GREY],
                          conf=_CLS_CONF) is not None and \
                 self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF,
                               region=(0.30, 0.55, 0.70, 0.88)) is None:
             self._swept = True
-            self.log("MAX 扫荡完成 → close (不 re-sweep, 防低AP触发买体力框)")
+            self.log("MAX 扫荡完成  close (不 re-sweep, 防低AP触发买体力框)")
             self._goto("close")
-            return action_wait(250, "swept → close")
+            return action_wait(250, "swept  close")
         if self._result_confirms >= _RESULT_MAX:
             self._goto("close")
-            return action_wait(300, "result cap → close")
+            return action_wait(300, "result cap  close")
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF)
         if confirm is not None:
             if self._phase_ticks % 3 != 1:
@@ -400,8 +400,8 @@ class SpecialSweepSkill(BaseSkill):
             return action_click_box(close, "close popup (X)")
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
-            return action_click_box(back, "→ hub (back)")
+            return action_click_box(back, " hub (back)")
         home = self.find_cls(screen, UC.BTN_HOME, conf=_CLS_CONF)
         if home is not None:
-            return action_click_box(home, "→ lobby (home, fallback)")
+            return action_click_box(home, " lobby (home, fallback)")
         return self.nav_home(screen, "special_sweep close")

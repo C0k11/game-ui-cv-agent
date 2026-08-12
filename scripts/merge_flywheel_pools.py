@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""合并零散飞轮 _clean 池 → 单一 merged 池 (2026-07-11 用户: 不要太零散).
+"""合并零散飞轮 _clean 池  单一 merged 池 (2026-07-11 用户: 不要太零散).
 
 用法: py scripts/merge_flywheel_pools.py 20260711
-  → data/raw_images/run_20260711_*_clean (排除已是 merged 的) 全部帧
+   data/raw_images/run_20260711_*_clean (排除已是 merged 的) 全部帧
     以 <时刻>_<原名> 前缀拷入 run_<date>_merged_clean, 校验计数后删源池。
 已有标签(若有)一并带走; classes.txt 写 master 副本。
 """
@@ -36,13 +36,13 @@ def main() -> None:
                 shutil.copy2(txt, new.with_suffix(".txt"))
             n += 1
         total += n
-        print(f"  {src.name}: {n}帧 → 前缀 {tag}_")
+        print(f"  {src.name}: {n}帧  前缀 {tag}_")
     # 校验后删源
     got = len(list(dst.glob("*.jpg")))
     assert got >= total, f"merged {got} < copied {total}"
     for src in srcs:
         shutil.rmtree(src)
-    print(f"== merged {total}帧 from {len(srcs)}池 → {dst.name}; 源池已删")
+    print(f"== merged {total}帧 from {len(srcs)}池  {dst.name}; 源池已删")
 
 
 if __name__ == "__main__":

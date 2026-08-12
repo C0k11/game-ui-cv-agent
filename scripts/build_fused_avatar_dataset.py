@@ -46,7 +46,7 @@ CROP_DIR = REPO / "data" / "captures" / "角色头像_crop"                  # 5
 CROP_HARVESTED = REPO / "data" / "captures" / "角色头像_crop_harvested_named"  # 54×59 CN-named (from game OCR)
 BIG_REF_DIR = REPO / "data" / "captures" / "角色头像"                    # 404×456 EN-named (large)
 NAME_MAP_JSON = REPO / "data" / "student_name_map.json"
-HARVEST_NAME_MAP_JSON = REPO / "data" / "captures" / "harvest_name_map.json"  # additional 205 CN→EN mappings
+HARVEST_NAME_MAP_JSON = REPO / "data" / "captures" / "harvest_name_map.json"  # additional 205 CNEN mappings
 EXTENSION_NAME_MAP_JSON = REPO / "data" / "student_name_map_extension.json"  # manual BA char extensions
 MASTER_FILE = RAW_IMAGES / "_classes.txt"
 OUT_ROOT = Path(r"D:\Project\ml_cache\models\yolo\dataset\fused_avatar_v2")  # v2: +battle_cards 技能牌 synth(多底图+灰白aug); v1 保留作 v4 数据快照
@@ -58,7 +58,7 @@ STATIC_UI_MODEL = Path(r"D:\Project\ml_cache\models\yolo\runs\static_ui_v4_yolo2
 # Known costume / skin suffixes that distinguish character variants.
 # User's master uses 一花泳装, student_name_map uses 一花(泳装),
 # EN files use Ichika_(Swimsuit).  This list lets us translate
-# CN-without-parens → CN-with-parens → EN.
+# CN-without-parens  CN-with-parens  EN.
 COSTUME_SUFFIXES = (
     "泳装", "正月", "体育服", "TERROR", "私服", "应援团", "乐团", "礼服",
     "睡衣", "魔女", "武装", "战斗", "万圣节", "骑士", "女仆", "兔女郎",
@@ -72,19 +72,19 @@ COSTUME_SUFFIXES = (
 #   indices  395..454 : UI-B — 后期为 ui/unified 训练追加的 60 个 UI 类
 #                       (购买青辉石 / 领取_灰 / 获得奖励 / 选择购买 /
 #                        Emoticon_Action / 学院名 三一·千年·格黑娜 / ...)
-# ⚠️ 早期假设 "143.. 全是角色" → load_character_names 用 master[143:] 把 UI-B
-#    误吸成角色, fused_avatar_v2(v5) 因此混学 60 个 UI cls (nc 252→312)。
+# ️ 早期假设 "143.. 全是角色"  load_character_names 用 master[143:] 把 UI-B
+#    误吸成角色, fused_avatar_v2(v5) 因此混学 60 个 UI cls (nc 252312)。
 #    现在精确取 143..394 (排除 UI-B), fused 回归纯头像 + 技能牌(复用头像名)。
 MASTER_UI_BOUNDARY = 143
 MASTER_UIB_RANGE = (395, 455)   # idx 395..454 = 追加 UI 类, 非角色; 若未来加真角色到 455+, 它们仍会被收进
 
 # Battle-card val 源 run (prepare_battle_val.py SRCS 中非 _-前缀者): 原始标注帧当 val
 # (技能牌真实角色), 必须从 train manual 提取里排除, 否则 val 泄漏(同帧既 train 又 val
-# → watcher/best 虚高, memory 踩坑3)。synth 仍可用它们当 bg_runs 背景(贴合成角色, 不泄漏)。
+#  watcher/best 虚高, memory 踩坑3)。synth 仍可用它们当 bg_runs 背景(贴合成角色, 不泄漏)。
 VAL_SOURCE_RUNS = {"run_20260606_173604"}
 VAL_RATIO = 0.20
 SEED = 42
-PER_CLASS_CAP = 200    # cap synthetic samples per character (raised from 80 → 200
+PER_CLASS_CAP = 200    # cap synthetic samples per character (raised from 80  200
                        # to allow more position/scale variants per ref)
 SYNTH_PASTE_PROB = 0.70  # chance a slot gets a paste vs left empty
 USE_LARGE_REF_PROB = 0.40  # when both small & large refs are available, use
@@ -175,7 +175,7 @@ def cn_to_paren_form(cn_name: str) -> str:
 
 
 def _make_trad_to_simp():
-    """Build a 繁→简 converter.  Prefers opencc if installed, else uses a
+    """Build a 繁简 converter.  Prefers opencc if installed, else uses a
     minimal mapping covering BA character-name chars."""
     try:
         from opencc import OpenCC
@@ -203,15 +203,15 @@ _TRAD_TO_SIMP = _make_trad_to_simp()
 
 
 def build_cn_to_en_lookup() -> Dict[str, str]:
-    """Build a CN-master-name → EN-file-name table.
+    """Build a CN-master-name  EN-file-name table.
 
-    Combines THREE sources, with 繁→简 normalization so master 简体 labels
+    Combines THREE sources, with 繁简 normalization so master 简体 labels
     can match harvest_name_map's 繁体 keys:
       1. student_name_map.json — 261 variant entries
       2. harvest_name_map.json:renamed — 205 entries (mostly 繁体)
       3. For each entry, generate variants:
          a. paren-removed (both ASCII () and fullwidth （） handled)
-         b. simplified-Chinese form (亞伽里 → 亚伽里)
+         b. simplified-Chinese form (亞伽里  亚伽里)
     """
     out: Dict[str, str] = {}
 
@@ -268,7 +268,7 @@ def load_refs_multi_source(fused_names: List[str]) -> Dict[str, Dict[str, np.nda
 
     For each master CN char (一花泳装), name conversion tries 3 forms:
       1. Direct lookup in student_name_map (exact CN match)
-      2. Paren form via heuristic (一花泳装 → 一花(泳装))
+      2. Paren form via heuristic (一花泳装  一花(泳装))
       3. Best-effort base-name match (strip suffixes one by one)
 
     Returns: { char_name: { "small": np.ndarray | None, "large": np.ndarray | None } }
@@ -347,7 +347,7 @@ def _parse_label_file(
     char_set: set,
     fused_idx_map: Dict[str, int],
 ) -> Optional[Tuple[Path, List[str]]]:
-    """Parse one .txt label file → (jpg_path, [yolo_lines])."""
+    """Parse one .txt label file  (jpg_path, [yolo_lines])."""
     jpg = txt.with_suffix(".jpg")
     if not jpg.exists():
         return None
@@ -885,7 +885,7 @@ def build_template_driven_synth(
         # context before any char repeats): refill a shuffled pool when empty.
         # This is per-context, so each context sees every char ≈ N times where
         # N = (target_count × slots) / len(chars).  For schedule_popup (17 slots
-        # × 200 composites = 3400 picks / 252 chars) → 13 picks per char min.
+        # × 200 composites = 3400 picks / 252 chars)  13 picks per char min.
         ctx_char_pool: List[str] = []
         ctx_per_char_count: Counter = Counter()
         def _pick_char_balanced():
@@ -985,17 +985,17 @@ def build_template_driven_synth(
                 bri = random.uniform(float(bri_jit[0]), float(bri_jit[1]))
                 resized = np.clip(resized.astype(np.float32) * bri, 0, 255).astype(np.uint8)
                 # 灰度 aug: 技能牌 COST 不够 = 低饱和 + **压暗**的暗灰牌(NOT 提亮泛白)。
-                # ⚠️ 实测铁证(_gray_measure.py 量 _v5_card_viz 真实牌 vs synth):
+                # ️ 实测铁证(_gray_measure.py 量 _v5_card_viz 真实牌 vs synth):
                 #   真实灰牌 饱和均值仅 12-13(近灰), 明度比同帧彩牌暗 ×0.76~0.90,
                 #   暗部 p10=21~72(保留暗部)。v5 旧版 `g*0.5+110` 把灰牌做成"亮灰白"
-                #   (明度中位162/暗部p10被抬到137=暗部全丢) → 真实暗灰牌 v5 检测漏35%
+                #   (明度中位162/暗部p10被抬到137=暗部全丢)  真实暗灰牌 v5 检测漏35%
                 #   (card_00 灰牌直接漏框 / card_09 灰牌 conf 仅0.28)。
                 # 修: 降饱和(非全0)+ 压暗(随场景浮动)+ 不抬黑位(保暗部), 贴合真实。
                 if random.random() < gray_prob:
-                    # ⚠️ 实测铁证(_cardzoom 放大 card_03/09 牌1): 真实灰牌(COST不够)= 去色灰白
+                    # ️ 实测铁证(_cardzoom 放大 card_03/09 牌1): 真实灰牌(COST不够)= 去色灰白
                     # + COST 充能**扇形进度**造成的**对角强对比明暗分界**(暗侧深灰三角 ×~0.5 +
                     # 亮侧亮灰 ×1.0, 分界位置=充能进度)。这是费用不够期间的**常态**(用户实战确认),
-                    # 非稀少瞬间。旧版均匀灰/弱柔渐变没覆盖此分界 → v5 真实灰牌漏35%。
+                    # 非稀少瞬间。旧版均匀灰/弱柔渐变没覆盖此分界  v5 真实灰牌漏35%。
                     hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV).astype(np.float32)
                     hsv[:, :, 1] *= 0.12                        # 去色到极低饱和(真实 S~12)
                     desat = cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8),
@@ -1003,8 +1003,8 @@ def build_template_driven_synth(
                     desat *= random.uniform(0.72, 0.95)         # 灰白基调(轻压暗)
                     if random.random() < 0.85:                  # 85% 灰牌带充能扇形(费用不够常态)
                         # 充能扇形(用户实测确认其语义): COST 从 0 涨, 高亮扇区从 **12 点顺时针扩张**,
-                        # 张角 = 充能进度 → 扇区内=已充能高亮灰白, 扇区外=未充能暗灰。COST=0 几乎全暗,
-                        # 接近满几乎全亮。prog 全范围(0.05~0.95)→ 每角色覆盖各顺时针充能阶段。
+                        # 张角 = 充能进度  扇区内=已充能高亮灰白, 扇区外=未充能暗灰。COST=0 几乎全暗,
+                        # 接近满几乎全亮。prog 全范围(0.05~0.95) 每角色覆盖各顺时针充能阶段。
                         gh, gw = desat.shape[:2]
                         yy, xx = np.mgrid[0:gh, 0:gw].astype(np.float32)
                         cy, cx = gh * 0.5, gw * 0.5
@@ -1088,7 +1088,7 @@ def build_template_driven_synth(
                     ty1 = clip_y1 + int(ch_full * 0.05)
                     ty2 = clip_y1 + int(ch_full * 0.55)
                     if tx2 - tx1 < 8 or ty2 - ty1 < 8:
-                        # Tight crop too small → fall back to full
+                        # Tight crop too small  fall back to full
                         tx1, ty1, tx2, ty2 = clip_x1, clip_y1, clip_x2, clip_y2
                 else:
                     tx1, ty1, tx2, ty2 = clip_x1, clip_y1, clip_x2, clip_y2
@@ -1364,14 +1364,14 @@ def main() -> int:
 
     # ── 1. Manual labels (train) + dedicated val pool ──
     manual_samples = extract_manual_samples(master, char_set, fused_idx_map)
-    print(f"[manual] {len(manual_samples)} frames with character bboxes (→ train)")
+    print(f"[manual] {len(manual_samples)} frames with character bboxes ( train)")
     total_manual_boxes = sum(len(b) for _, b in manual_samples)
     print(f"[manual] total bboxes: {total_manual_boxes}")
 
     val_pool_samples = extract_val_pool_samples(master, char_set, fused_idx_map)
     if val_pool_samples:
         print(f"[val_pool] {len(val_pool_samples)} dedicated val frames found "
-              f"(→ val, 100% held out from train)")
+              f"( val, 100% held out from train)")
     else:
         print(f"[val_pool] none found at _val_fused/frames/ "
               f"— falling back to stratified split from train")
@@ -1426,7 +1426,7 @@ def main() -> int:
                 available_chars=available_chars,
             )
         else:
-            print("[synth-mode] no dashboard templates → falling back to legacy "
+            print("[synth-mode] no dashboard templates  falling back to legacy "
                   "(static_ui rooms + cross-context manual-frame swap)")
             bg_frames = find_schedule_popup_bg_frames(args.synth_bg_limit)
             print(f"[bg] found {len(bg_frames)} schedule popup backgrounds")
@@ -1470,7 +1470,7 @@ def main() -> int:
     rng = random.Random(SEED)
 
     if val_pool_samples:
-        # Dedicated val pool: 100% of manual → train, val_pool → val
+        # Dedicated val pool: 100% of manual  train, val_pool  val
         train_manual = manual_samples
         val_set = val_pool_samples
         n_classes_in_val = len({
@@ -1557,9 +1557,9 @@ def main() -> int:
     n_synth_train = n_synth_val = 0
     n_val_boxes_synth = 0
     for si, (composite, lines, tag) in enumerate(synth_samples_data):
-        # Tags: "synth_tpl_<ctx>" → train only
-        #       "synth_val_tpl_<ctx>" → val only
-        #       "synth_both_tpl_<ctx>" → both (write to train + duplicate to val)
+        # Tags: "synth_tpl_<ctx>"  train only
+        #       "synth_val_tpl_<ctx>"  val only
+        #       "synth_both_tpl_<ctx>"  both (write to train + duplicate to val)
         stem = f"synth__{si:05d}"
         if tag.startswith("synth_val_"):
             imwrite_u(OUT_ROOT / "images/val" / (stem + ".jpg"), composite)
@@ -1616,7 +1616,7 @@ def main() -> int:
     (OUT_ROOT / "data.yaml").write_text("\n".join(yaml_lines) + "\n", encoding="utf-8")
     print(f"[yaml] data.yaml — {len(fused_names)} classes")
     print()
-    print(f"[done] dataset → {OUT_ROOT}")
+    print(f"[done] dataset  {OUT_ROOT}")
     print("Next: py scripts/train_yolo26.py fused_avatar_26m")
     return 0
 

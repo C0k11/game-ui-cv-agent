@@ -4,7 +4,7 @@ Replaces the old "skill_order has 12 separate harvest skills" UX where the
 user had to toggle each one. This single skill cycles through the daily
 HARVEST sub-flows in fixed order (= `_full` in __init__, in_default subs):
 
-    buy_pyroxene → club → craft → shop → arena_shop → schedule → cafe
+    buy_pyroxene  club  craft  shop  arena_shop  schedule  cafe
 
 cafe runs LAST — its earnings grant AP, segueing into the task-hall block.
 mail / daily_mission moved OUT to the TOP-LEVEL skill_order (they run after
@@ -62,34 +62,34 @@ class DailyRoutineSkill(BaseSkill):
         # enters the plan unless its id is explicitly whitelisted.  This is a
         # money-safety isolation layer on top of schedule's own 3 guards.
         # (sub_id, skill_instance, force_run, in_default_daily)
-        # in_default_daily=False → registered (runnable via sub_only) but NOT
+        # in_default_daily=False  registered (runnable via sub_only) but NOT
         # part of the unattended daily harvest. User 2026-06-11: 剧情挖矿 +
         # momotalk 挖矿 are bond-story grinding, not 收菜 — separate triggers.
-        # Order (user 2026-06-11): 购买青辉石 → 社团 → 制造 → 商店 → 课程表 →
+        # Order (user 2026-06-11): 购买青辉石  社团  制造  商店  课程表 
         # 咖啡厅(LAST: cafe earnings grant AP, segueing straight into the task
         # hall block that spends it). mail / daily_mission moved OUT to the
         # TOP-LEVEL order (they run AFTER the hall block so hall rewards are
         # in the mailbox; daily_mission gates on n/8≥7).
         _full: List[Tuple[str, BaseSkill, bool, bool]] = [
             ("buy_pyroxene",  BuyPyroxeneSkill(), False, True),  # 免费组合包 — 红点才进
-            ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP→信箱)
+            ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP信箱)
             ("craft",         CraftSkill(), False, True),        # 制造 — 红点才进(造好可领)
             ("shop",          ShopSkill(), False, True),         # 普通商店日购(动态预算)
             # 战术大赛商店买体力 — 与信用点商店同次访问(用户2026-06-13: "应该和信用点
             # 商店一块"). 紧跟 shop, force_run(无大厅红点可门, 进店下滑到战术大赛tab买能量
             # 饮料; skill自身余额门不够则跳过). 只花战术大赛货币, 青辉石防火墙全程在岗.
             ("arena_shop",    ArenaShopSkill(), True, True),
-            ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (⚠️青辉石买票)
+            ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (️青辉石买票)
             ("cafe",          CafeSkill(), False, True),         # cafe 最后 — 收益给AP, 衔接任务大厅
             ("momo_talk",     MomoTalkSkill(), False, False),    # MomoTalk 挖矿 — 单独开(非收菜)
             ("story_mining",  StoryMiningSkill(), False, False), # 剧情挖矿 — 单独开(非收菜)
-            ("mail",          MailSkill(), False, False),        # → top-level(厅后收口)
-            ("daily_mission", DailyMissionSkill(), False, False),# → top-level(n/8≥7, 最后)
+            ("mail",          MailSkill(), False, False),        #  top-level(厅后收口)
+            ("daily_mission", DailyMissionSkill(), False, False),#  top-level(n/8≥7, 最后)
         ]
         if sub_only:
             allow = {str(s).strip() for s in sub_only}
             self._sub_only: Optional[List[str]] = sorted(allow)
-            # sub_only = the user EXPLICITLY asked for these subs → force-run
+            # sub_only = the user EXPLICITLY asked for these subs  force-run
             # them (skip the dot gate AND the in_default filter, so momo_talk /
             # story_mining run when explicitly requested). Live 2026-06-10:
             # momo_talk's counted badge ("22") isn't a DOT_RED cls, so the dot
@@ -101,14 +101,14 @@ class DailyRoutineSkill(BaseSkill):
             self._sub_only = None
             # Default unattended daily = harvest subs only (in_default=True).
             self._plan = [(sk, fr) for (_sid, sk, fr, d) in _full if d]
-        # ⛔2026-07-25 事故的**直接触发点**(run_20260725_231337 帧实锤):
+        # 2026-07-25 事故的**直接触发点**(run_20260725_231337 帧实锤):
         # shop.chain_in_shop 默认 True = "买完留在店里, 让 arena_shop 接力切
         # 战术大赛 tab"(shop.py:607/617)。pipeline.py:1228 已经给 top-level 那个
         # ShopSkill 置了 False, 但**daily_routine 内部自己 new 的这个没人管** ——
         # 于是 `sub_only=["shop"]` 跑完后 DailyRoutine 收在**信用点商店网格**上,
         # 而 arena_shop 根本不在 plan 里, 没人来接力。下一个 skill(Arena)被丢在
         # 商店页, enter 干等 24 tick 超时, 最后报成 `arena complete`(假成功)。
-        # ⇒ 判据 = 本次 plan 里到底有没有 arena_shop 来接力。语义精确, 顺带把
+        #  判据 = 本次 plan 里到底有没有 arena_shop 来接力。语义精确, 顺带把
         #   "shop 出现在任何 sub_only 组合里"这一族同形全修了。
         _plan_ids = (set(self._sub_only) if self._sub_only
                      else {sid for (sid, _sk, _fr, d) in _full if d})
@@ -163,8 +163,8 @@ class DailyRoutineSkill(BaseSkill):
                 just_entered = True
                 self._cur_started = True
                 self.sub_state = sub.name
-                self.log(f"→ entering '{sub.name}'")
-                # ★ YOLO context follows the ACTIVE SUB, not the static
+                self.log(f" entering '{sub.name}'")
+                #  YOLO context follows the ACTIVE SUB, not the static
                 # DailyRoutine loadout (which carried +cafe+avatar for the
                 # whole routine — the emoticon model then ran and drew boxes
                 # on every non-cafe screen, e.g. 每日任務, live 2026-06-10).
@@ -179,21 +179,21 @@ class DailyRoutineSkill(BaseSkill):
             # Delegate the tick to the current sub-skill
             try:
                 # root 信号传导: pipeline 把 action_suppressed(上一 tick 的点击
-                # 被稳定门吞) 置在 DailyRoutine 身上, sub 读自己的永远 False →
+                # 被稳定门吞) 置在 DailyRoutine 身上, sub 读自己的永远 False 
                 # 所有 sub 的被吞对账(mutate-before-ack 修复)形同虚设(2026-07-21
                 # 逐帧审实锤: arena_shop select 回滚从未触发)。委托前传导。
-                # ⛔只传给"本轮之前就在跑"的 sub。刚 reset 进场的 sub 没有上一个
+                # 只传给"本轮之前就在跑"的 sub。刚 reset 进场的 sub 没有上一个
                 # 动作可言, 传进去就是拿前一个 sub 被吞的点击去对账(第 1 tick 就
                 # 误回滚)。reset() 已把它清 False, 这里不再覆盖。
                 if not just_entered:
                     sub.action_suppressed = self.action_suppressed
-                    # ⛔同形第二次(2026-07-25 live 实锤): interceptor_handled 也是
+                    # 同形第二次(2026-07-25 live 实锤): interceptor_handled 也是
                     # pipeline 置在 **DailyRoutine** 身上的 root 信号, 当时只迁了
-                    # action_suppressed, 这条漏了 → sub 读自己的永远 "" →
+                    # action_suppressed, 这条漏了  sub 读自己的永远 "" 
                     # buy_pyroxene.py:308 那道"interceptor 替我关了奖励弹窗=到达证据"
                     # 的闸**从写下那天起就是死码**。
-                    # 实锤日志: `dialog shows 免費 → 確認` → `Interceptor: YOLO reward
-                    # popup → blind tap` → `confirm dialog absent, re-pressing buy`
+                    # 实锤日志: `dialog shows 免費  確認`  `Interceptor: YOLO reward
+                    # popup  blind tap`  `confirm dialog absent, re-pressing buy`
                     # —— 免費包已到账却回头重按已消失的購買键。本次无害(键没了),
                     # 但同形状落在 shop/ticket_sweep 上 = 对着**仍可点的付费键**重复购买。
                     sub.interceptor_handled = self.interceptor_handled
@@ -208,7 +208,7 @@ class DailyRoutineSkill(BaseSkill):
             # outer tick (to avoid wasting wall-clock waiting for next frame).
             act = action.get("action", "")
             if act == "done":
-                self.log(f"✓ '{sub.name}' done")
+                self.log(f" '{sub.name}' done")
                 self._cur_idx += 1
                 self._cur_started = False
                 # If there's another sub, keep looping to enter it; if this

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """白&黑池收尾手术 (2026-07-14, 用户三指令).
 
-  A. HUD 重写: 用户 shift+V 批量贴可能弄乱倍速/暂停类 → 删池内全部 HUD 框,
+  A. HUD 重写: 用户 shift+V 批量贴可能弄乱倍速/暂停类  删池内全部 HUD 框,
      ui v13 (imgsz960 conf0.35) 重写。**暂停菜单键(131重开/132继续/133放弃)
      一律不写** — 用户拍板: 视频域日文按钮不进训练(实战=繁中服)。
   B. 全 axis 池清日文暂停键残留 (赫赛德 131×6)。
-  C. 「黑白」传播: 104/473 战斗帧覆盖=部分标注毒 → 全帧模板搜索(按已标段
+  C. 「黑白」传播: 104/473 战斗帧覆盖=部分标注毒  全帧模板搜索(按已标段
      抽模板, 同 fix_axis_bishop_pool 方案), 分析模式看分布定阈值再 --apply。
 
 用法: py scripts/fix_shirokuro_pool.py [--apply] [--bw-th=0.68]
@@ -109,7 +109,7 @@ def main():
             data[n].append([mi, (x1 + x2) / 2 / W, (y1 + y2) / 2 / H,
                             (x2 - x1) / W, (y2 - y1) / H])
             n_add += 1
-    print(f"A. HUD: 删 {n_del} → v13 重写 {n_add} (暂停菜单键零写入)")
+    print(f"A. HUD: 删 {n_del}  v13 重写 {n_add} (暂停菜单键零写入)")
 
     # ── B. 其他 axis 池清日文暂停键 ──
     n_purge = 0
@@ -186,7 +186,7 @@ def main():
     if APPLY:
         for n, t in frames.items():
             save(t, data[n])
-        print(f"[apply] {len(frames)} 帧写盘, 备份 → {bak}")
+        print(f"[apply] {len(frames)} 帧写盘, 备份  {bak}")
 
 
 if __name__ == "__main__":

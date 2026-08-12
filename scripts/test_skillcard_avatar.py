@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """战斗中 EX 技能卡头像识别稳定性实测 (2026-07-14, combat 2.0 前置).
 
-战斗进行时跑: 连续抓 N 帧(ADB 干净帧) → fused_avatar(registry active)@960
-→ 底部技能卡区域(y>0.72)检出 → 按 cx 聚类成卡位 → 统计每卡位的类别稳定性
+战斗进行时跑: 连续抓 N 帧(ADB 干净帧)  fused_avatar(registry active)@960
+ 底部技能卡区域(y>0.72)检出  按 cx 聚类成卡位  统计每卡位的类别稳定性
 (翻转率/conf 分布/漏检率)。历史基线: EX 技能卡 recall 0.854 (2026-06-11)。
 
 用法: py scripts/test_skillcard_avatar.py [n_frames] [interval_s]
@@ -96,7 +96,7 @@ def main():
         print(line)
         lines.append(line)
     (OUT / "report.txt").write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n产物 → {OUT}")
+    print(f"\n产物  {OUT}")
 
 
 if __name__ == "__main__":

@@ -4,23 +4,23 @@ Verified flow (interactive probe 2026-06-01, data/_social_probe_log.md). The
 old skill was WRONG: it looked for a 領取 claim cls and relied on the OCR popup
 handler (dead in pure-YOLO mode). The probe found the real flow:
 
-  社交入口 → 社團 card → auto-pops 「社團簽到獎勵」 → tap 确认键 (centered, no
-  cancel) → sign-in done. The 10 AP goes to the MAILBOX (mail skill claims it),
+  社交入口  社團 card  auto-pops 「社團簽到獎勵」  tap 确认键 (centered, no
+  cancel)  sign-in done. The 10 AP goes to the MAILBOX (mail skill claims it),
   not immediately to the balance.
 
 Two YOLO gaps the skill works around (documented, fix in v6 — task #22):
 - The 3 social cards (社團/好友/幫手) have no reliable cls (社團/CLUB cls 51
   recall-missed at conf<0.20). We click the 社團 card via CLUB cls when seen,
   else via a normalized offset DOWN-LEFT of its red dot (probe: card body
-  ~(0.235,0.52), dot ~(0.364,0.415) ⇒ Δ(-0.13,+0.105)). Tapping the dot itself
-  is too high → lands above the card → the overlay collapses back to lobby.
+  ~(0.235,0.52), dot ~(0.364,0.415)  Δ(-0.13,+0.105)). Tapping the dot itself
+  is too high  lands above the card  the overlay collapses back to lobby.
 
 State machine
 -------------
-enter    checkin dialog up → checkin. social overlay (社團 dot / CLUB cls) →
-         tap the card. lobby → tap NAV_SOCIAL. (cooldown to avoid spam.)
-checkin  「社團簽到獎勵」 = 确认键 present with NO 取消键 → tap it → done.
-exit     BTN_HOME / BTN_BACK → lobby → done.
+enter    checkin dialog up  checkin. social overlay (社團 dot / CLUB cls) 
+         tap the card. lobby  tap NAV_SOCIAL. (cooldown to avoid spam.)
+checkin  「社團簽到獎勵」 = 确认键 present with NO 取消键  tap it  done.
+exit     BTN_HOME / BTN_BACK  lobby  done.
 
 Detectors: base "ui" only.
 """
@@ -50,7 +50,7 @@ _EXIT_MAX = 14
 class ClubSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
         # Badge-gating is a LOBBY decision only (schedule踩坑 2026-06-09: 复跑
-        # 停在中间屏时入口锚点误判 "no dot" → 整个skill被skip)。
+        # 停在中间屏时入口锚点误判 "no dot"  整个skill被skip)。
         if not screen.is_lobby():
             return True
         return self.dot_on_entry(screen, [UC.NAV_SOCIAL])
@@ -82,7 +82,7 @@ class ClubSkill(BaseSkill):
     def _checkin_dialog(self, screen: ScreenState):
         """社團簽到獎勵 = a centered 确认键 with NO 取消键 (single-button).
 
-        ⛔2026-07-25 全仓金钱审计 #4: 排除项原本**只有 取消键 一个 cls**(47f
+        2026-07-25 全仓金钱审计 #4: 排除项原本**只有 取消键 一个 cls**(47f
         训练样本, 本来就是弱类) —— 它一漏检, 任何双键代价框都会被当成簽到奖励
         直接点確認。schedule 那起 30 青辉石事故证明了"单点排除信号会整条哑火"。
         补一路正交的结构信号: body 里出现数量步进器 = 这是个要选数量付费的框,
@@ -94,7 +94,7 @@ class ClubSkill(BaseSkill):
         if self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None:
             return None  # 2-button dialog = not the checkin (don't mishandle)
         if self.has_qty_stepper(screen):
-            self.log("⛔ 数量步进器在屏 = 付费框, 不是社團簽到 — 不点確認")
+            self.log(" 数量步进器在屏 = 付费框, 不是社團簽到 — 不点確認")
             return None
         return confirm
 
@@ -132,16 +132,16 @@ class ClubSkill(BaseSkill):
         return handler(screen)
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        # Sign-in dialog already up (card auto-pops it) → checkin.
+        # Sign-in dialog already up (card auto-pops it)  checkin.
         if self._checkin_dialog(screen) is not None:
             self._goto("checkin")
-            return action_wait(200, "checkin dialog up → checkin")
+            return action_wait(200, "checkin dialog up  checkin")
 
         if self._nav_cooldown > 0:
             self._nav_cooldown -= 1
             return action_wait(450, f"club: nav cooldown ({self._nav_cooldown})")
 
-        # Social overlay open → tap the 社團 card.
+        # Social overlay open  tap the 社團 card.
         if self._on_social_overlay(screen):
             club = self.find_cls(screen, UC.CLUB, conf=_CLS_CONF)
             if club is not None:
@@ -151,7 +151,7 @@ class ClubSkill(BaseSkill):
                 return action_click_box(club, "open 社團 (cls)")
             dot = self._card_dot(screen)
             if dot is not None and self._card_taps < 5:
-                # Card body is DOWN-LEFT of the dot (dot alone is too high →
+                # Card body is DOWN-LEFT of the dot (dot alone is too high 
                 # overlay collapses). Documented under-trained-cls fallback.
                 cx = max(0.05, min(0.95, dot.cx + _DOT_TO_CARD[0]))
                 cy = max(0.05, min(0.95, dot.cy + _DOT_TO_CARD[1]))
@@ -162,10 +162,10 @@ class ClubSkill(BaseSkill):
             if self._card_taps >= 5:
                 self.log("社團 card taps exhausted, exiting")
                 self._goto("exit")
-                return action_wait(300, "card taps exhausted → exit")
+                return action_wait(300, "card taps exhausted  exit")
             return action_wait(350, "waiting for 社團 card cls/dot")
 
-        # On lobby → open the social overlay.
+        # On lobby  open the social overlay.
         if screen.is_lobby():
             social = self.find_cls(screen, UC.NAV_SOCIAL, conf=_CLS_CONF)
             if social is not None:
@@ -173,7 +173,7 @@ class ClubSkill(BaseSkill):
                 self.log("opening social overlay (YOLO 社交入口)")
                 return action_click_box(social, "open social")
             # A stray popup (e.g. buy_pyroxene's free-pack leftovers) hides the
-            # bottom nav while is_lobby() stays true → close it instead of
+            # bottom nav while is_lobby() stays true  close it instead of
             # starving (live 2026-06-12: 50 ticks waiting under a popup).
             x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
             if x is not None:
@@ -184,59 +184,59 @@ class ClubSkill(BaseSkill):
         if self._phase_ticks > _ENTER_MAX:
             self.log("enter budget exhausted, exiting")
             self._goto("exit")
-            return action_wait(300, "enter timeout → exit")
+            return action_wait(300, "enter timeout  exit")
         return self.nav_home(screen, "club recover")
 
     def _checkin(self, screen: ScreenState) -> Dict[str, Any]:
         confirm = self._checkin_dialog(screen)
         if confirm is not None:
             # 不提前 latch _checked_in(2026-07-21 mutate-before-ack 根治: 点击被吞
-            # 时旧码已置 _checked_in=True → _exit 的 badge-verify 兜底(L202 not
+            # 时旧码已置 _checked_in=True  _exit 的 badge-verify 兜底(L202 not
             # _checked_in)被骗过, 签到没成仍报 done)。
-            # ⛔reason 不再当控制 API(reason_string_as_api 家族): 旧写法靠
-            # "確認键"命中关键词豁免 → 稳定门+same-target hold 一起被跳过 ⇒
-            # ①簽到獎勵框是自动弹出的, 第一帧多为弹入动画帧, 锚上去打空
-            # ②无 hold 的第二发落在框消失后的社團页上 = 盲拍。
+            # reason 不再当控制 API(reason_string_as_api 家族): 旧写法靠
+            # "確認键"命中关键词豁免  稳定门+same-target hold 一起被跳过 
+            # 簽到獎勵框是自动弹出的, 第一帧多为弹入动画帧, 锚上去打空
+            # 无 hold 的第二发落在框消失后的社團页上 = 盲拍。
             # 改 _force_settle 老实走稳定门 + 显式 after-ack(6s 盖 step 门控节奏)。
             if self._checkin_clicked and self.since("checkin_fire") < 6.0:
                 return action_wait(300, "確認已发 — 等确认框消失的帧证据")
             self._checkin_clicked = True
             self.mark("checkin_fire")
-            self.log("社團簽到 → 確認 (10AP to mailbox)")
+            self.log("社團簽到  確認 (10AP to mailbox)")
             act = action_click_box(confirm, "confirm club sign-in")
             act["_force_settle"] = True
             return act
 
-        # Dialog gone. 若点過確認 → 签到落地 latch(到达证据, post-ack)。
+        # Dialog gone. 若点過確認  签到落地 latch(到达证据, post-ack)。
         if self._checkin_clicked:
             self._checked_in = True
-            self.log("确认框消失 → 签到落地 → exit")
+            self.log("确认框消失  签到落地  exit")
             self._goto("exit")
-            return action_wait(300, "checkin committed → exit")
+            return action_wait(300, "checkin committed  exit")
         if self._phase_ticks > _CHECKIN_MAX:
-            self.log("checkin dialog never appeared → exit")
+            self.log("checkin dialog never appeared  exit")
             self._goto("exit")
-            return action_wait(300, "no checkin dialog → exit")
+            return action_wait(300, "no checkin dialog  exit")
         return action_wait(300, "waiting for 社團簽到 dialog")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":
             # BADGE-VERIFIED completeness (cafe 同款): 社交入口还挂红点 = 签到
-            # 没成 → 重进一次。3-tick 驻留防 badge 渐入时序闪失。
-            # ⚠2026-06-16 实测: 签到成功后 navbar 社交的蓝「+」徽标被 v12 误判成
-            # 红点 → 假"dot persists"触发无谓重进(社团→空转5次才自退, 浪费~40s)。
-            # 既然本轮已签到成功(_checked_in), navbar dot 必是假阳/残留 → 不重进,
+            # 没成  重进一次。3-tick 驻留防 badge 渐入时序闪失。
+            # 2026-06-16 实测: 签到成功后 navbar 社交的蓝「+」徽标被 v12 误判成
+            # 红点  假"dot persists"触发无谓重进(社团空转5次才自退, 浪费~40s)。
+            # 既然本轮已签到成功(_checked_in), navbar dot 必是假阳/残留  不重进,
             # 直接收尾。真·漏签到(_checked_in=False)的安全重进保留。
             if not self._verify_reentered and not self._checked_in:
                 entry = self.find_cls(screen, UC.NAV_SOCIAL, conf=0.40)
                 if entry is not None and self.dot_in_region(
                         screen,
                         (entry.x1 - 0.005, entry.y1 - 0.05, entry.x2 + 0.02, entry.y2)):
-                    self.log("⚠ 社交入口 still has dot → sign-in missed, re-entering once")
+                    self.log(" 社交入口 still has dot  sign-in missed, re-entering once")
                     self._init_state()
                     self._verify_reentered = True
                     self._goto("enter")
-                    return action_wait(300, "social dot persists → re-enter")
+                    return action_wait(300, "social dot persists  re-enter")
                 self._exit_lobby_ticks += 1
                 if self._exit_lobby_ticks < 3:
                     return action_wait(350, f"lobby badge dwell ({self._exit_lobby_ticks}/3)")

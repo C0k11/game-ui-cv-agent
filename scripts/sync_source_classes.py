@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """把各源目录的 `classes.txt` 副本同步到 master —— **只同步纯改名，绝不掩盖真 drift**。
 
-⛔背景（2026-08-11 发现）：`build_ui_v2.py` 的 schema drift 校验从**废案改名那次
-   之后就一直红着**，`return 1` 直接退出 ⇒ 自那以后 build 一次都没跑成过。
+背景（2026-08-11 发现）：`build_ui_v2.py` 的 schema drift 校验从**废案改名那次
+   之后就一直红着**，`return 1` 直接退出  自那以后 build 一次都没跑成过。
    源目录里的 `classes.txt` 是**打标那一刻的快照**，master 后来把 18 个废案类
    改成 `_废弃N_原名_原因`（类表按行号索引，废案只能改名不能删行），副本没跟。
 
-⭐为什么不能简单地"全部覆盖了事"：
+为什么不能简单地"全部覆盖了事"：
    那道校验的价值是抓**顺序错乱**（源目录按另一套 idx 打的标 = 整批标注全错位，
    是会毁掉训练集的那种错）。无差别覆盖等于把这道闸拆了。
-   ⇒ 这里**逐条分类**：
-     · benign  —— master 是 `_废弃{i}_{原名}_...` 而副本正好是 `{原名}` ⇒ 纯改名
-     · benign  —— 副本比 master 短（老类表，前缀一致）⇒ 只是没跟上新增类
-     · ⛔DRIFT —— 其他任何不一致 ⇒ **打印出来并拒绝同步**，交给人判断
+    这里**逐条分类**：
+     · benign  —— master 是 `_废弃{i}_{原名}_...` 而副本正好是 `{原名}`  纯改名
+     · benign  —— 副本比 master 短（老类表，前缀一致） 只是没跟上新增类
+     · DRIFT —— 其他任何不一致  **打印出来并拒绝同步**，交给人判断
 
 用法:
     python scripts/sync_source_classes.py            # 只报告，不写盘
@@ -25,7 +25,7 @@ import re
 import sys
 from pathlib import Path
 
-# ⚠中文 Windows 控制台默认 GBK，编不出 ⛔/✓ 这类符号会直接 UnicodeEncodeError
+# 中文 Windows 控制台默认 GBK，编不出 / 这类符号会直接 UnicodeEncodeError
 #   把脚本打断（不是显示成问号，是**崩**）。errors="replace" 保证只丢字形不丢命。
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -38,7 +38,7 @@ RAW = REPO / "data" / "raw_images"
 
 def _norm(s: str) -> str:
     """去掉点/空格/下划线等分隔符 —— 改名时顺带做过规范化
-    （`D.U. 白鸟区` → `DU白鸟区`），不归一化就会把纯改名误判成 drift。"""
+    （`D.U. 白鸟区`  `DU白鸟区`），不归一化就会把纯改名误判成 drift。"""
     return re.sub(r"[\s._·・\-]+", "", s)
 
 
@@ -57,7 +57,7 @@ def is_benign(idx: int, src_name: str, master_name: str) -> bool:
     if int(m.group(1)) != idx:          # 废案编号必须就是它自己的行号
         return False
     body, src = _norm(m.group(2)), _norm(src_name)
-    # `_废弃2_清辉石_是30青辉石的错别字重复类` → 原名是第一段 `清辉石`
+    # `_废弃2_清辉石_是30青辉石的错别字重复类`  原名是第一段 `清辉石`
     return bool(src) and body.startswith(src)
 
 
@@ -93,15 +93,15 @@ def main() -> int:
                                    if not is_benign(i, s, m)]))
 
     print(f"[扫描] 已对齐 {ok} / 纯改名待同步 {len(benign)} / "
-          f"⛔真 drift {len(drift)} / 没有 classes.txt {missing}")
+          f"真 drift {len(drift)} / 没有 classes.txt {missing}")
 
     if drift:
-        print("\n⛔⛔以下目录不是改名，是真 drift —— **不同步**，请人工判断:")
+        print("\n以下目录不是改名，是真 drift —— **不同步**，请人工判断:")
         for name, bad in drift[:20]:
             print(f"  {name}")
             for i, s, m in bad[:4]:
                 print(f"     idx {i}: 副本={s!r}  master={m!r}")
-        print("   ⇒ 这类目录若真按另一套 idx 打过标，整批标注是错位的，"
+        print("    这类目录若真按另一套 idx 打过标，整批标注是错位的，"
               "**不能靠改 classes.txt 修**，要重映射 label 或剔出源列表。")
 
     if benign:

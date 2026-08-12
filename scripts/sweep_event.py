@@ -6,9 +6,9 @@
   py -u scripts/sweep_event.py 12 max   # Q12 MAX 吃剩余 AP
 
 铁律链(全 cls 驱动 fail-closed):
-  扫前正向读 AP(体力cls锚定, <20 收工绝不试探) → Q 行=滑到底倒数第
-  (13-q) 行入场键(结构化定位) → MAX_可点击 / 加号 cls 调次数 →
-  扫荡开始 cls → 确认框结构白名单闸(body 无 stepper/体力才确认)。
+  扫前正向读 AP(体力cls锚定, <20 收工绝不试探)  Q 行=滑到底倒数第
+  (13-q) 行入场键(结构化定位)  MAX_可点击 / 加号 cls 调次数 
+  扫荡开始 cls  确认框结构白名单闸(body 无 stepper/体力才确认)。
 """
 import json
 import re
@@ -56,21 +56,21 @@ def main():
             names = {n for n, *_ in d}
             # 正锚必须是「关卡得星_3」精确匹配: Challenge 行的灰星是
             # 独立类「关卡得星_0」(idx83), startswith 会在 Challenge tab
-            # 误通过→点入场=踩"Challenge 绝不自动进"铁律(2026-07-17
+            # 误通过点入场=踩"Challenge 绝不自动进"铁律(2026-07-17
             # nav 目检实锤, 差点重蹈 07-15 误入坑)
             if "活动quest_已选择" in names or "关卡得星_3" in names:
                 return fr
             p = box_center(d, "活动quest")
             if p:
                 tap(*p)
-                print("  tab≠Quest → 点「活动quest」切换", flush=True)
+                print("  tab≠Quest  点「活动quest」切换", flush=True)
             time.sleep(3)
         return None
 
     # 0. 扫前读 AP(fail-closed)
     fr = ensure_quest_tab()
     if fr is None:
-        print("⛔Quest tab 正锚拿不到 — 停")
+        print("Quest tab 正锚拿不到 — 停")
         return
     ap = None
     for n, c, x1, y1, x2, y2, W, H in dets(fr, 0.5):
@@ -90,7 +90,7 @@ def main():
         print("AP 读不出/不足 — 收工(绝不试探)")
         return
     if times != "max" and int(times) * SWEEP_COST > ap:
-        print(f"⛔ {times}次需 {int(times) * SWEEP_COST}AP > {ap} — 停")
+        print(f" {times}次需 {int(times) * SWEEP_COST}AP > {ap} — 停")
         return
 
     # 1. Q 行 = 滑到底倒数第 (13-q) 行
@@ -98,7 +98,7 @@ def main():
     for _ in range(10):
         fr = ensure_quest_tab()
         if fr is None:
-            print("⛔Quest tab 正锚丢失 — 停")
+            print("Quest tab 正锚丢失 — 停")
             return
         d = dets(fr, 0.5)
         entries = sorted(
@@ -108,17 +108,17 @@ def main():
         if entries and sig == prev_sig:
             k = TOTAL_Q + 1 - q
             if len(entries) < k:
-                print(f"⛔到底但视野{len(entries)}行 < 倒数{k} — 停")
+                print(f"到底但视野{len(entries)}行 < 倒数{k} — 停")
                 return
             tap(*entries[-k][1])
-            print(f"Q{q}=倒数第{k}行 → 入场", flush=True)
+            print(f"Q{q}=倒数第{k}行  入场", flush=True)
             time.sleep(7)
             break
         prev_sig = sig
         adb._shell("input swipe 2760 1500 2760 700 500")
         time.sleep(2.0)
     else:
-        print("⛔找不到行 — 停")
+        print("找不到行 — 停")
         return
 
     # 2. 扫荡面板(全 cls, fail-closed)
@@ -127,7 +127,7 @@ def main():
     if times == "max":
         mx = next((b for b in d if b[0] == "MAX_可点击"), None)
         if mx is None:
-            print("⛔MAX_可点击 检不出 — 不扫")
+            print("MAX_可点击 检不出 — 不扫")
             return
         tap(int((mx[2] + mx[4]) / 2), int((mx[3] + mx[5]) / 2))
         time.sleep(2.0)
@@ -135,7 +135,7 @@ def main():
         plus = next((b for b in d if b[0] == "加号"
                      and (b[3] + b[5]) / 2 / b[7] > 0.12), None)
         if plus is None:
-            print("⛔加号(body) 检不出 — 不扫")
+            print("加号(body) 检不出 — 不扫")
             return
         px, py = int((plus[2] + plus[4]) / 2), int((plus[3] + plus[5]) / 2)
         for _ in range(int(times) - 1):      # 起始=1, 点 N-1 次
@@ -146,8 +146,8 @@ def main():
     d = dets(fr, 0.20)
     # 弹框前 body 危险 cls 的"位置"基线 — 扫荡面板自带 stepper(右上
     # x~0.8/y~0.42), 确认框弹出后会透出来(2026-07-15 实锤 Q10 手动次数
-    # 时 MAX_可点击 仍亮被误拦)。⚠不能按类名差分(购买AP框的 stepper
-    # 类名与面板相同会被排除→裸奔), 按位置差分: 同 cls 同位≈面板透出
+    # 时 MAX_可点击 仍亮被误拦)。不能按类名差分(购买AP框的 stepper
+    # 类名与面板相同会被排除裸奔), 按位置差分: 同 cls 同位≈面板透出
     # (放行), 新位置(对话框中央)=购买框特征(拦)。
     _DANGER = ("加号", "MAX_可点击", "MIN_灰色", "体力")
     pre_pos = [(n, (x1 + x2) / 2 / W, (y1 + y2) / 2 / H)
@@ -155,7 +155,7 @@ def main():
                if y1 / H > 0.12 and n in _DANGER]
     sw = next((b for b in d if b[0] == "扫荡开始" and b[1] >= 0.5), None)
     if sw is None:
-        print("⛔扫荡开始 检不出 — 不扫")
+        print("扫荡开始 检不出 — 不扫")
         return
     tap(int((sw[2] + sw[4]) / 2), int((sw[3] + sw[5]) / 2))
     time.sleep(5)
@@ -175,9 +175,9 @@ def main():
     if {"取消键", "确认键"} <= names and not body_bad:
         ck = next(b for b in d if b[0] == "确认键")
         tap(int((ck[2] + ck[4]) / 2), int((ck[3] + ck[5]) / 2))
-        print("扫荡确认(纯AP闸过) ✓", flush=True)
+        print("扫荡确认(纯AP闸过) ", flush=True)
         time.sleep(6)
-        # 结果窗: 確認 cls → 关卡面板叉
+        # 结果窗: 確認 cls  关卡面板叉
         fr = adb.capture_frame()
         d = dets(fr, 0.5)
         p = box_center(d, "确认键")
@@ -194,7 +194,7 @@ def main():
         if "取消键" in names:
             ck = next(b for b in d if b[0] == "取消键")
             tap(int((ck[2] + ck[4]) / 2), int((ck[3] + ck[5]) / 2))
-        print(f"⛔确认框结构闸拦截(body={body_bad}) — 不扫, 人工看")
+        print(f"确认框结构闸拦截(body={body_bad}) — 不扫, 人工看")
 
 
 if __name__ == "__main__":

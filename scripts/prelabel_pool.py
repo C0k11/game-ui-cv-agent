@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """对指定池就地预标 + 统计弱/新 cls 的覆盖情况。
 
-⭐用户 2026-08-12:「你要去操刀下**购买_灰色**以及**新加的 cls**」「还有那些**弱 cls**」。
+用户 2026-08-12:「你要去操刀下**购买_灰色**以及**新加的 cls**」「还有那些**弱 cls**」。
    4,987 张飞轮帧里本来就混着今天 live 反复跑出来的买完态/新场景，
    先用现役模型预标一遍，再看哪些弱 cls 真的被覆盖到、哪些还得单独去采。
 
-⛔纪律:
+纪律:
  · **预标 ≠ 标注** —— 产出必须过前端人审才准进训练集（项目铁律）。
  · 权重跟 **registry 的 active**，别硬编码（老脚本写死 v14，现役已是 v15；
    memory `flywheel: 预标权重v9改v14跟线上模型` 就是为这个改过一次）。
@@ -42,7 +42,7 @@ def main():
         conf = float(sys.argv[sys.argv.index("--conf") + 1])
     d = os.path.join(RAW, pool)
     if not os.path.isdir(d):
-        sys.exit(f"⛔ 没有这个池: {d}")
+        sys.exit(f" 没有这个池: {d}")
     M = [l.strip() for l in open(os.path.join(RAW, "_classes.txt"),
                                  encoding="utf-8") if l.strip()]
     IDX = {n: i for i, n in enumerate(M)}
@@ -53,7 +53,7 @@ def main():
     t0, n_new, n_skip = time.time(), 0, 0
     for i, f in enumerate(imgs):
         t = os.path.join(d, os.path.splitext(f)[0] + ".txt")
-        if os.path.exists(t):                 # ⛔绝不覆盖人审过的
+        if os.path.exists(t):                 # 绝不覆盖人审过的
             n_skip += 1
             continue
         im = cv2.imdecode(np.fromfile(os.path.join(d, f), np.uint8),

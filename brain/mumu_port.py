@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """MuMu ADB 端口解析 —— 别再把 7555 写死。
 
-⛔为什么要有这个模块(2026-07-28 live 事故):
-跑到一半 adbd 卡死(dumpsys 15s 超时 → scrcpy 起不来 → 管线掉到 DXcam 上
+为什么要有这个模块(2026-07-28 live 事故):
+跑到一半 adbd 卡死(dumpsys 15s 超时  scrcpy 起不来  管线掉到 DXcam 上
 **零检出**), 从容器里 `setprop ctl.restart adbd` 没救回来, 只能
 `MuMuManager control -v 0 restart` 重启实例。实例回来后**adb 端口从 7555
-变成了 16384**, 而全仓 16 个文件把 `127.0.0.1:7555` 写死 ⇒ 模拟器好好地
+变成了 16384**, 而全仓 16 个文件把 `127.0.0.1:7555` 写死  模拟器好好地
 跑着, bot 却连不上, 表现成"游戏没反应"这种最难查的形态。
 
 MuMu12 的实例端口本来就不保证固定(BAAS 也专门判过 16384/7555 两种)。
@@ -32,8 +32,8 @@ _cache: dict = {}
 def _from_manager(vmindex: int = 0) -> str | None:
     """问 MuMuManager 要这个实例当前的 adb 端口(权威)。"""
     try:
-        # ⚠必须显式 utf-8(实例名是中文「MuMu安卓设备」): text=True 在中文
-        # Windows 上默认走 GBK → UnicodeDecodeError → **静默回落到错的端口**,
+        # 必须显式 utf-8(实例名是中文「MuMu安卓设备」): text=True 在中文
+        # Windows 上默认走 GBK  UnicodeDecodeError  **静默回落到错的端口**,
         # 比不解析更糟(2026-07-28 当场踩到)。
         out = subprocess.run([_MANAGER, "info", "-v", str(vmindex)],
                              capture_output=True, text=True, encoding="utf-8",
@@ -53,7 +53,7 @@ def _from_manager(vmindex: int = 0) -> str | None:
 def _from_adb_devices() -> str | None:
     """兜底: `adb devices` 里唯一 online 的 127.0.0.1:* 。
 
-    ⚠只认 state == "device" —— offline 条目正是事故现场的样子
+    只认 state == "device" —— offline 条目正是事故现场的样子
     (7555 offline 与 16384 device 同时列着), 认错就等于没修。"""
     try:
         out = subprocess.run([_ADB, "devices"], capture_output=True,

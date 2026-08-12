@@ -53,7 +53,7 @@ class Box:
                 and self.y1 - pad <= ny <= self.y2 + pad)
 
     def offset(self, dx: float = 0.0, dy: float = 0.0) -> Tuple[float, float]:
-        """相对框心的落点。⭐HUB 活动入口要 +0.075 —— 405/474 的框标的是
+        """相对框心的落点。HUB 活动入口要 +0.075 —— 405/474 的框标的是
         **倒计时气泡**，可点的是下面的卡片本体（08-07 手动实测反推）。"""
         return (self.cx + dx, self.cy + dy)
 
@@ -108,7 +108,7 @@ class Observation:
 
     def rows(self, names: Names, conf: float = 0.45, **kw) -> List[Box]:
         """按 cy 升序 —— 列表行、tab 顺位这类"从上到下"的语义用它。
-        ⛔别用 conf 排序去猜顺位（商店 tab 身份就是这么错过位的）。"""
+        别用 conf 排序去猜顺位（商店 tab 身份就是这么错过位的）。"""
         got = self.all(names, conf, **kw)
         got.sort(key=lambda b: b.cy)
         return got

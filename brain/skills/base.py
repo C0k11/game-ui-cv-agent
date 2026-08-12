@@ -120,7 +120,7 @@ class ScreenState:
         # regex syntax. A bare `?` / `+` after a literal char (e.g. "次?") is
         # syntactically valid regex but almost always a keyword author's literal-
         # punctuation typo, and `次?` matches the empty string at every position
-        # → false-positive on every OCR box. Keep regex opt-in via clear markers.
+        #  false-positive on every OCR box. Keep regex opt-in via clear markers.
         _regex_markers = (".*", ".+", "[", "\\", "|", "^", "$", "(?")
         treat_as_regex = any(m in norm_pattern for m in _regex_markers)
         results = []
@@ -208,7 +208,7 @@ class ScreenState:
         above-right of its icon). Only entries WITH a nearby dot are
         returned ('red'/'yellow'); entries with no dot are OMITTED rather
         than marked 'none', so the badge-skip optimiser treats them as
-        'unknown' → runs the skill. That's the safe choice during bring-up
+        'unknown'  runs the skill. That's the safe choice during bring-up
         (we never wrongly skip real work). The 'none'-marking optimisation
         comes back once the YOLO flow is verified end-to-end.
         """
@@ -260,7 +260,7 @@ class ScreenState:
 
 # ── Dot color posterior (2026-07-08) ────────────────────────────────────
 # v12 红点/黄点位置先验强: 社交入口的蓝「+」badge 被标红点 conf0.72, 已爬进
-# 真点 conf 区间(0.85-0.92, 闪烁真点低至 0.69) → conf 阈值不可分。但点类是
+# 真点 conf 区间(0.85-0.92, 闪烁真点低至 0.69)  conf 阈值不可分。但点类是
 # 纯色小圆, 颜色占比完美分离(同帧实测: 真红点 red%=0.67-0.75 / 真黄点
 # yellow%=0.72-0.74 / 假点(蓝+) 两者=0.00)。所有 dot 判定过此闸。
 
@@ -268,7 +268,7 @@ def classify_dot_color(frame, x1: float, y1: float, x2: float, y2: float
                        ) -> Optional[str]:
     """HSV posterior for a dot bbox (normalized coords). Returns '红点' /
     '黄点' / None (neither red nor yellow = position-prior false fire).
-    frame None → caller should treat as "cannot verify" (pass-through)."""
+    frame None  caller should treat as "cannot verify" (pass-through)."""
     if frame is None:
         return None
     try:
@@ -329,7 +329,7 @@ def action_swipe(fx: float, fy: float, tx: float, ty: float,
 def action_swipe_tap(fx: float, fy: float, tx: float, ty: float,
                      cx: float, cy: float, duration_ms: int = 150,
                      reason: str = "") -> Dict[str, Any]:
-    """原子 swipe→tap(一条 adb shell 连发, 间隔<0.5s)。
+    """原子 swipetap(一条 adb shell 连发, 间隔<0.5s)。
 
     对自动轮播 UI: swipe 把轮播拉停数秒并翻到确定项, tap 在静止期内落点
     无时序竞争(hub banner 帧龄 2.2s vs 项周期 2.6s 的错位问题唯一硬解)。
@@ -344,11 +344,11 @@ def action_done(reason: str = "") -> Dict[str, Any]:
 
 
 # ── harness-aware 墙钟 (2026-07-25) ──────────────────────────────────────
-# ⛔为什么不能直接用 time.time(): 昨天把 survey 超时从 tick 计数改成墙钟
+# 为什么不能直接用 time.time(): 昨天把 survey 超时从 tick 计数改成墙钟
 # (_SURVEY_MAX_SEC=90) 是对的, 但**逐帧门控时我每步审核要 ~60s**, 那 60s
-# 也算进了 skill 的预算 → survey 必然假超时收工 = 我自己把"AP 一点没灌"
+# 也算进了 skill 的预算  survey 必然假超时收工 = 我自己把"AP 一点没灌"
 # 的故障重新造出来一遍。step 门的停顿是 harness 偷走的时间, 不是游戏时间。
-# ⇒ 一切 skill 超时预算走 game_clock(); 只有"真实世界过了多久"(录制时间戳/
+#  一切 skill 超时预算走 game_clock(); 只有"真实世界过了多久"(录制时间戳/
 #   日志时间)才用 time.time()。
 _HARNESS_PAUSED: float = 0.0
 
@@ -391,41 +391,41 @@ class BaseSkill(ABC):
         self.max_ticks: int = 60  # timeout per skill
         self._log_lines: List[str] = []
         # pipeline 置位(2026-07-21): 上一 tick 本 skill 的 click/back/swipe 被
-        # _dedup_click 稳定门/hold 转成 wait(未落地) → True。skill 可据此避免
+        # _dedup_click 稳定门/hold 转成 wait(未落地)  True。skill 可据此避免
         # 假前进(mutate-before-ack 防线的 root 信号)。
         self.action_suppressed: bool = False
-        # ⭐pipeline 置位(2026-07-25): 上一 tick 全局 interceptor 抢先接管了本帧
+        # pipeline 置位(2026-07-25): 上一 tick 全局 interceptor 抢先接管了本帧
         # (skill.tick 那一帧**根本没被调用**), 这里记它处理掉了什么。
         # 为什么需要: 很多 skill 的"落地证据"就是奖励弹窗本身(buy_pyroxene
-        # `看到 获得奖励 → _bought=True`), 而 interceptor 的职责恰恰是关掉奖励
+        # `看到 获得奖励  _bought=True`), 而 interceptor 的职责恰恰是关掉奖励
         # 弹窗 —— **证据被截胡**, skill 永远等不到, 于是回退去重按购买键。
         # live 实锤 2026-07-25: 每日免費包已买成(信用点+10K/AP+10 已到账), 但
-        # _bought 仍 False → 下一 tick "re-press FREE buy"。这次无害(免費键已
+        # _bought 仍 False  下一 tick "re-press FREE buy"。这次无害(免費键已
         # 消失), 但同形状落在 shop/ticket_sweep 上就是对着仍可点的付费键重复购买。
         self.interceptor_handled: str = ""
         self._timers: Dict[str, float] = {}
 
     # ── 墙钟计时器 (2026-07-25) ────────────────────────────────────────────
-    # ⛔为什么必须有: 全仓大量超时写成 `self._phase_ticks > N` / `_hold = N`
+    # 为什么必须有: 全仓大量超时写成 `self._phase_ticks > N` / `_hold = N`
     # 这类 **tick 计数**, 但 tick 的墙钟长度不是常量 —— 2026-06-14 zero-wait
     # 改造把非 loading wait 的 sleep 压到 0.12s(server/app.py:1425), 那批按
     # ~1.6 s/tick 年代写的常量集体缩水。
     #
-    # ⭐实测口径(scratchpad/tickclock3.py, 28 个 run / 2646 个连续 wait tick,
+    # 实测口径(scratchpad/tickclock3.py, 28 个 run / 2646 个连续 wait tick,
     #   取每段 (t_end-t_start)/(n-1) 摊薄整秒量化误差):
     #     per-run s/tick  min 0.154 / median 0.379 / max 2.294
     #   **高位那几个是 step_mode 人工停顿的指纹**(最慢段 32s = 我在按 go),
     #   不是链路真实速度 —— 所以**绝不能用均值**(0.563, 已被污染; 我第一版
     #   就是这么算错的, 还据此错误驳回了 workflow 的正确结论)。自主跑真实
     #   区间 **0.15-0.25 s/tick**。
-    #   ⇒ 估算 tick 超时的墙钟, 必须用**最快**那一端 0.15 s/tick:
+    #    估算 tick 超时的墙钟, 必须用**最快**那一端 0.15 s/tick:
     #     超时是"最早什么时候会触发", 快 tick 让它提前到期, 那才是事故面。
-    #     N=4 → 0.6s;  N=8 → 1.2s;  N=30 → 4.5s;  N=120 → 18s。
+    #     N=4  0.6s;  N=8  1.2s;  N=30  4.5s;  N=120  18s。
     # 而且这个速率还会随帧源(scrcpy/ADB)、模型、分辨率、是否录轨迹继续漂,
     # 换句话说 **tick 数根本不是时间单位**。
-    # ⇒ 凡是"等真实世界发生某事"(动画/弹窗/战斗/网络/OCR 稳定)的超时一律
+    #  凡是"等真实世界发生某事"(动画/弹窗/战斗/网络/OCR 稳定)的超时一律
     #   走这里。仍适合 tick 计数的只有"扫了几帧都没看到东西"这种纯感知计数。
-    # ⚠时间源一律 game_clock() 而非 time.time() —— step 门的人工停顿必须扣掉,
+    # 时间源一律 game_clock() 而非 time.time() —— step 门的人工停顿必须扣掉,
     # 否则逐帧门控本身会把每个 skill 的超时预算烧光(见模块顶部注释)。
     def clock(self) -> float:
         """skill 可见的墙钟(已扣 harness 停顿)。"""
@@ -436,7 +436,7 @@ class BaseSkill(ABC):
         self._timers[key] = game_clock()
 
     def since(self, key: str) -> float:
-        """距上次 mark(key) 的秒数。没打过点 → 就地打点并返回 0.0
+        """距上次 mark(key) 的秒数。没打过点  就地打点并返回 0.0
         (让 `if self.since(k) > T` 在首次调用时天然不触发)。"""
         t = self._timers.get(key)
         if t is None:
@@ -452,17 +452,17 @@ class BaseSkill(ABC):
         self._timers.pop(key, None)
 
     # ── 购买框结构判据(全仓共用) ─────────────────────────────────────────
-    # ⛔2026-07-25 全仓金钱审计的共同结论: 各 skill 各写一份 `_buy_dialog`,
+    # 2026-07-25 全仓金钱审计的共同结论: 各 skill 各写一份 `_buy_dialog`,
     # 而它们**全都单点依赖"body 里有青辉石 cls"**。schedule 那起 30 青辉石
     # 事故的帧(run_20260724_201229 t0101)实锤: 屏上写着「購買課程表票券 單價
-    # 💎30」, YOLO **body 一个青辉石都没检出**(小图标压在深色价格条上) →
+    # 💎30」, YOLO **body 一个青辉石都没检出**(小图标压在深色价格条上) 
     # 整条防线哑火。**单点防线 = 没有防线**。
     #
     # 这里给全仓一个正交的**结构**通道: 数量步进器(MIN/MAX/加减号)。
     # 它是"要你选购买数量"这件事的物理必然, 与图标识别完全独立:
     #   購買AP 框    run_20260711_144712/t30: 加号0.963 MAX0.962 MIN_灰0.957
     #   購買课程表票框 run_20260724_201229/t0101: MAX0.97 减号灰0.97 加号0.96
-    # 顶栏那排 加号(TOPBAR_PLUS, 货币旁的"+")必须排除 → 只看 cy > 0.12。
+    # 顶栏那排 加号(TOPBAR_PLUS, 货币旁的"+")必须排除  只看 cy > 0.12。
     # 阈值 0.20 = 模型下限: 危险检测器要尽可能灵敏, 误报的代价只是取消+退出。
     _QTY_STEPPER_CLS = ("MAX_可点击", "MAX_灰色", "MIN_可点击", "MIN_灰色",
                         "加号", "加号灰色", "减号", "减号灰色")
@@ -480,7 +480,7 @@ class BaseSkill(ABC):
         return False
 
     # ── 竣工判据 exit assertion (2026-07-25 v1: 只观测不干预) ──────────────
-    # ⛔用户 2026-07-25 点破全项目最贵的盲区: "为什么不把课程表票用干净, 咖啡厅
+    # 用户 2026-07-25 点破全项目最贵的盲区: "为什么不把课程表票用干净, 咖啡厅
     # 为什么干活也不干干净, 你这测试没有意义啊" —— 我们一直在验**代码路径跑通**,
     # 从来没有验过**活干完了**。每个 skill 按自己内部循环条件退出(Schedule 问
     # "转完一圈没", Bounty 问"还有红点没", EventQuest 问"阶段走完没"), **没有
@@ -493,8 +493,8 @@ class BaseSkill(ABC):
     #
     # 子类覆写它, 返回 (verdict, detail):
     #   "CLEAN"    该消耗的都消耗干净了
-    #   "LEFTOVER" 确认还有剩(detail 写清剩多少)  ← 要人看的
-    #   "UNKNOWN"  读不出/没测量, 不知道           ← 也要人看的
+    #   "LEFTOVER" 确认还有剩(detail 写清剩多少)   要人看的
+    #   "UNKNOWN"  读不出/没测量, 不知道            也要人看的
     # 默认 UNKNOWN: 没声明判据 = 没人审计, 如实说不知道, 绝不默认 CLEAN。
     def exit_report(self) -> Tuple[str, str]:
         return ("UNKNOWN", "未声明竣工判据")
@@ -535,7 +535,7 @@ class BaseSkill(ABC):
 
         Returns None when the tile isn't visible (not in the hall — can't
         decide), True when a red/yellow dot sits at the tile's TOP-RIGHT
-        (live-measured 2026-06-11: 悬赏 tile (0.561,0.550) → dot (0.634,0.512)),
+        (live-measured 2026-06-11: 悬赏 tile (0.561,0.550)  dot (0.634,0.512)),
         False when the tile is visible with no dot (= no work today)."""
         tile = self.find_cls(screen, tile_cls, conf=0.40)
         if tile is None:
@@ -583,10 +583,10 @@ class BaseSkill(ABC):
               decide here — defer to skill's own logic), OR
           (b) Entry icon visible AND a red/yellow dot center sits inside it.
         Returns False ONLY when entry IS visible but NO dot covers it
-        (clean "no work to do" signal → skill can be skipped).
+        (clean "no work to do" signal  skill can be skipped).
         """
         if not screen.yolo_boxes:
-            return True  # detector disabled, can't decide → pass
+            return True  # detector disabled, can't decide  pass
         targets = list(entry_class_names) if isinstance(entry_class_names, (list, tuple)) else [entry_class_names]
         target_set = set(targets)
         target_lower = [t.lower() for t in targets]
@@ -602,7 +602,7 @@ class BaseSkill(ABC):
             elif b.confidence >= min_conf_dot and cn in dot_classes:
                 dots.append(b)
         if not entries:
-            return True  # not on lobby (entry not visible) → defer
+            return True  # not on lobby (entry not visible)  defer
         # Margin: red/yellow badges sit at the entry's TOP-RIGHT corner, often
         # a hair OUTSIDE the icon bbox. A strict inside-bbox test false-skips
         # (live 2026-06-02: cafe/schedule yellow dots present but skipped). Allow
@@ -619,7 +619,7 @@ class BaseSkill(ABC):
             for e in entries:
                 if (e.x1 - mx) <= dcx <= (e.x2 + mx) and (e.y1 - my) <= dcy <= (e.y2 + my):
                     return True
-        return False  # entry visible, no dot → no work
+        return False  # entry visible, no dot  no work
 
     def log(self, msg: str) -> None:
         line = f"[{self.name}] {msg}"
@@ -672,7 +672,7 @@ class BaseSkill(ABC):
         OCR is used (per spec: YOLO for everything, OCR for digits) and works
         regardless of the global _OCR_ENABLED nav-OCR switch.
 
-        ⛔2026-07-27 单位换成**图标自身尺寸**(原来是屏幕宽度比例)。屏幕比例
+        2026-07-27 单位换成**图标自身尺寸**(原来是屏幕宽度比例)。屏幕比例
         只在标定它的那个分辨率/宽高比上成立, 而本系统的帧有 scrcpy/ADB/DXcam
         三条来路、语料实测 19 种分辨率、宽高比 1.48~1.79。理由与实测见
         `brain.pipeline.icon_strip` 的注释。
@@ -757,8 +757,8 @@ class BaseSkill(ABC):
         """Navigate toward the lobby using ONLY in-game buttons — NEVER a blind
         ESC / back keyevent (user 2026-06-15 iron rule: 反复 ESC-spam recovery
         多次触发 Unity ANR「Blue Archive没有响应」, freezing the game; "只点基于游戏
-        内的返回大厅还是叉叉"). Preference: 回大厅按钮(home → lobby directly) →
-        弹窗叉叉(close popup) → 返回键(back one screen). If NONE is detected this
+        内的返回大厅还是叉叉"). Preference: 回大厅按钮(home  lobby directly) 
+        弹窗叉叉(close popup)  返回键(back one screen). If NONE is detected this
         frame, WAIT — do not blind-tap a guessed position and do not ESC; the
         caller's own _phase_ticks timeout ends the skill cleanly if truly stuck.
         """
@@ -772,7 +772,7 @@ class BaseSkill(ABC):
         back = self.find_cls(screen, UC.BTN_BACK, conf=0.30)
         if back is not None:
             return action_click_box(back, f"{reason}: 返回键")
-        return action_wait(450, f"{reason}: 无 home/X/返回键 → 等待 (绝不瞎按 ESC)")
+        return action_wait(450, f"{reason}: 无 home/X/返回键  等待 (绝不瞎按 ESC)")
 
     def detect_screen_yolo(self, screen: ScreenState) -> Optional[str]:
         """Detect current page from YOLO cls signatures (no OCR).
@@ -830,12 +830,12 @@ class BaseSkill(ABC):
         # (判断一律 cls)。新策略(用户 spec 2026-07-16):
         #   • 语境内的"该确认"由拥有语境的 skill 自己处理, 并且必须排在调用
         #     本 helper 之前:
-        #       - 咖啡厅邀请确认 → cafe._invite stage2 / _recover_invite_overlay
-        #       - 课程表报告确认 → schedule.tick PRIORITY 1 (调本 helper 前)
-        #       - 扫荡确认      → 各 sweep skill 的结构闸
-        #       - 强更下载确认   → pipeline._global_interceptor 启动期结构闸
+        #       - 咖啡厅邀请确认  cafe._invite stage2 / _recover_invite_overlay
+        #       - 课程表报告确认  schedule.tick PRIORITY 1 (调本 helper 前)
+        #       - 扫荡确认       各 sweep skill 的结构闸
+        #       - 强更下载确认    pipeline._global_interceptor 启动期结构闸
         #   • 因此能落到这个通用 helper 的「确认+取消/叉」结构弹窗, 定义上就是
-        #     当前 skill 没预期的通知弹窗 → 默认安全路径: 一律点取消/叉掉。
+        #     当前 skill 没预期的通知弹窗  默认安全路径: 一律点取消/叉掉。
         #     绝不盲点确认(2026-06-02 买票事故根因 = 盲确认, 见 money_safety)。
         #   • 只有确认键、无取消/叉的弹窗: 这里不动 (fail-closed — 交给 skill
         #     自己的 handler / tick 预算; 启动期强更框由 interceptor 接)。
@@ -846,19 +846,19 @@ class BaseSkill(ABC):
             conf=0.30, region=_POPUP_BTN_BAND,
         )
         if popup_confirm is not None:
-            # ⛔`_force_settle`(2026-07-28 live 实锤): 这条兜底**绝不许在动画帧上
+            # `_force_settle`(2026-07-28 live 实锤): 这条兜底**绝不许在动画帧上
             # 动手**。它的全部合法性建立在上面那句契约上 ——「语境内的该确认由拥有
             # 语境的 skill 排在本 helper 之前处理掉」。而 skill 的判定带是**窄**的
             # (schedule `_DIALOG_BAND` y 0.66~0.90), 本 helper 的 `_POPUP_BTN_BAND`
             # y 0.45~0.95 **宽得多** —— 弹窗**弹入动画**中確認还没落到最终位置时,
-            # 窄带漏掉、宽带接住 ⇒ 契约在动画那一两帧上必然破裂, 于是
+            # 窄带漏掉、宽带接住  契约在动画那一两帧上必然破裂, 于是
             # **skill 该点的「確認」被这里当成非预期弹窗叉掉了**。
             # 实测 2026-07-28 tick15: 課程表報告 弹出瞬间, PRIORITY 1 没命中,
-            # 这里打出 "通知弹窗(确认+叉结构) → 叉掉", 落点是全體課程表 popout 的
+            # 这里打出 "通知弹窗(确认+叉结构)  叉掉", 落点是全體課程表 popout 的
             # X (0.889,0.141) —— 报告被叉掉, PRIORITY 1 的派遣落账(_ticket_read_
             # pending / _day_dispatched)整段跳过 = 单日上限台账少记一次。
             # 同族第三例(前两: 掃蕩确认框被当完成弹窗 / cafe 領取锚在动画帧)。
-            # ⇒ 等稳定帧再判。settle 门自带 >4s 逃生放行, 不会死锁。
+            #  等稳定帧再判。settle 门自带 >4s 逃生放行, 不会死锁。
             def _settled(act):
                 act["_force_settle"] = True
                 return act
@@ -867,15 +867,15 @@ class BaseSkill(ABC):
                 screen, UC.BTN_CANCEL, conf=0.30, region=_POPUP_BTN_BAND
             )
             if popup_cancel is not None:
-                self.log("通知弹窗(确认+取消结构) → 默认安全路径: 取消(等稳定帧)")
+                self.log("通知弹窗(确认+取消结构)  默认安全路径: 取消(等稳定帧)")
                 return _settled(action_click_box(
                     popup_cancel, "dismiss notification popup (取消键)"))
             popup_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.30)
             if popup_x is not None:
-                self.log("通知弹窗(确认+叉结构) → 默认安全路径: 叉掉(等稳定帧)")
+                self.log("通知弹窗(确认+叉结构)  默认安全路径: 叉掉(等稳定帧)")
                 return _settled(action_click_box(
                     popup_x, "dismiss notification popup (弹窗叉叉)"))
-            # 只有确认、无取消/叉 → fail-closed, 这里不碰。
+            # 只有确认、无取消/叉  fail-closed, 这里不碰。
 
         return None
 
