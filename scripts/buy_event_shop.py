@@ -236,6 +236,35 @@ def main():
                 return i
         return None
 
+    def _shelf_sig():
+        """货架区域像素指纹 —— 判"这一滑到底有没有真的滚动"。"""
+        import hashlib                                       # noqa: PLC0415
+        fr = adb.capture_frame()
+        if fr is None:
+            return None
+        h, w = fr.shape[:2]
+        crop = fr[int(0.25 * h):int(0.92 * h), int(0.30 * w):int(0.95 * w)]
+        small = cv2.resize(crop, (64, 48), interpolation=cv2.INTER_AREA)
+        return hashlib.md5(small.tobytes()).hexdigest()
+
+    def _scroll_step() -> bool:
+        """滑一屏。返回 False = **画面没动 = 已到底**, 别再瞎滑。
+
+        ⛔⛔用户 2026-08-07 现场纠正: 「我们的滑动路由逻辑是死的不是变通的,
+        这个问题也发生在活动商店里面」。原码两处都是 `for si in range(5)`
+        **固定滑 5 次**, 不看内容 —— 货架短(新活动/搬空后)时纯属瞎滑, 还会
+        把已经到底的列表反复拖拽出回弹, 让 cls 检出落在抖动帧上。
+        证据判据: 滑动前后货架区像素指纹相同 = 列表没动 = 到底。
+        (与"数固定次数"相比, 这个判据不依赖货架有多长, 也不受买东西影响 ——
+         买卖改变的是**买完之后**的画面, 而这里比的是同一次滑动的前/后。)
+        """
+        before = _shelf_sig()
+        adb._shell("input swipe 2400 1300 2400 750 500")
+        time.sleep(2)
+        if before is not None and before == _shelf_sig():
+            return False
+        return True
+
     def scan_items(tab_i):
         """当前屏 → [(price, cx, ry)] 候选(价集校验+家具行剔除)。纯读不点。"""
         fr = adb.capture_frame()
@@ -462,9 +491,10 @@ def main():
         bright = dark = furn = 0
         bal = None
         for si in range(5):
-            if si:
-                adb._shell("input swipe 2400 1300 2400 750 500")
-                time.sleep(2)
+            if si and not _scroll_step():        # 同上: 滑不动=到底, 别瞎滑
+                print(f"    tab{tab_i} 货架到底(滑动无位移, 第 {si} 屏) — 停止巡检",
+                      flush=True)
+                break
             items = scan_items(tab_i)
             bright += len(items)
             dark += getattr(scan_items, "last_dark", 0)
@@ -518,9 +548,10 @@ def main():
                 # 售罄拉黑按 (px,py) 记 — 两遍间滚动相位不同, 不跨遍复用
                 _dead.clear()
                 for screen_i in range(5):
-                    if screen_i:
-                        adb._shell("input swipe 2400 1300 2400 750 500")
-                        time.sleep(2)
+                    if screen_i and not _scroll_step():
+                        print(f"  pass{pass_i} 货架到底(滑动无位移) — 停止盲滑",
+                              flush=True)
+                        break
                     n = sweep_screen(ti, min_price=floor)
                     total += n
                     print(f"  pass{pass_i} 取景{screen_i} 成交 {n}", flush=True)

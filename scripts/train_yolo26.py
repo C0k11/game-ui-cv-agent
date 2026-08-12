@@ -875,6 +875,56 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v15": {
+        # v15 (2026-08-04) = v14 warm + **数据集大清理**(全程用户逐页人审):
+        #  ⭐改的是标注质量, 不是加素材 —— 约 5,200 框动过, 每批独立 zip 备份在
+        #  data/_backups/。大头: 冗余GT 3,033(同帧同类 IoU≥0.9) / stepper 114·117
+        #  外延统一 765 / 55→404 选择灰 306 / 退化贴边框删 180 / 红点→黄点(色相H)160
+        #  / cls54 补标 158 / cls474 几何对齐 133 / 141 遮罩帧删 87 / 426→490 拆 84
+        #  / 区域名 38·39 串标 74(宽高比判据揪出, label-noise 只报 6 条)。
+        #  新类: 490 完成_灰色 / 491 後日談 (nc 485→492; **不删废弃行**, 删了会让
+        #  后续全部前移导致全库错位 —— 沿用 _废弃NNN_ 占位惯例)。
+        #
+        #  ⛔⛔build_ui_v2 三处静默缺陷同批修掉(它们影响的是**训练/验证口径**):
+        #   ① val 侧从来没 dedup → 2,642 帧里 442 帧字节完全相同(最大一组 96 张),
+        #      另 5 张与 train 逐像素相同 = 拿训练样本当考题。⇒ v14 的 mAP 是被
+        #      重复帧加权过的, **v15 的 mAP 不能和 v14 直接比数值**, 要看 by-cls。
+        #   ② symlink 静默退化成真拷贝(Win 建符号链接要管理员) → 白占 23.15 GiB。
+        #      改成 os.link 硬链接优先, 现在 24,723 张全硬链接零拷贝。
+        #   ③ 空标签帧无条件写入 → **505 帧被当纯背景喂训练, 屏上却全是要检的 UI**。
+        #      其中 335 帧来自 run_20260518_163513(源码注释写 "+335 daily-skill UI",
+        #      实测 2,197 框**全是头像类 143-394, UI 零框**) —— 这批帧上有 MomoTalk
+        #      弹窗 + 叉叉19 + 咖啡厅邀請32×6, 全被当"这里什么都没有"训了 N 代。
+        #      ⇒ 与 memory 两个悬案对得上: 「MomoTalk unreachable」「咖啡厅弱」。
+        #
+        #  数据: train 22,531 / val 2,192 / nc=492 / schema 全前缀对齐 master。
+        #  warm from v14 **last.pt**(不是 best.pt): 沿用 v13→v14 的做法, cls 头
+        #  485→492 只重学新增 7 行。配方 = v14 args.yaml 原样复刻, 只动 batch。
+        #  ⚠batch 10→8: v14 定 10 时桌面基线 2G, 今天基线 4.76G(MuMu+Edge 等没关),
+        #   23G 顶减掉后只剩 18.2G, batch10 峰值贴脸。nbs=64 累积 8×8=64 vs 10×6=60,
+        #   有效 batch 基本一致, 训练动力学不变。桌面清干净了可以调回 10。
+        #  验收闸: **灰态族**(485/489/404/112/113/457/490)—— 今天改动最集中, 也是
+        #   能否撤掉 craft `_btn_is_grey` 像素闸的前提; 另核 MomoTalk/咖啡厅那批
+        #   (335 帧毒队列移除后应有肉眼可见改善)。任何一族退步不上 registry。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v14" / "weights" / "last.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 8,
+        "out_name": "ui_yolo26m_v15",
+        "cache": False,
+        "workers": 6,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "battle_yolo26s_v10": {
         # 战斗 v10 (2026-07-17) = v9 warm + DEFEAT 池(cls484 战斗失败×28 用户人审,
         #  local18, nc=19) + botplay 实战7池(combat2.0 scrcpy 飞轮 498帧, battle 域
@@ -1059,6 +1109,49 @@ TRAIN_CONFIGS = {
         "mosaic": 0.0, "close_mosaic": 0, "mixup": 0.0, "copy_paste": 0.0,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
+    },
+    "ui_yolo26m_v16": {
+        # v16 (2026-08-12) = v15 warm + 新素材 + 标注修正。
+        # 数据: train 25,375 / val 10,830 / nc 492->528。
+        #
+        # 新增类 36 个, 主要是"同一控件的另一个状态":
+        #   511-520 任务页签 5 个 x 选中/未选中 (每个页签有自己的主题色, 互相不能泛化)
+        #   521 任务开始_灰色 / 522 清辉石宝箱 / 524 中断任务 / 525 重新挑战
+        #   526 等待时间 / 527 选择购买灰色
+        #
+        # 修掉的数据问题:
+        #   走格子 497-510 两个源池从来没接进 REAL_SOURCES, 建好的集里 train=0
+        #   1,422 张 png/jpg 同名双份, frames_in 收两种格式导致同帧进两次
+        #   cls 7 每日领奖 8,118 个框标在"任務"二字上, 迁到上方 booklet 图标
+        #   cls 142 点击继续字样 混入 19 个 NEXON logo / 剧情台词, 已删
+        #   17 个零框且无代码引用的类改名废弃 (只改名不删行, 删行会让全库 idx 错位)
+        #
+        # batch 8->16: v15 那次桌面基线 4.76G (MuMu 等没关) 只剩 18.2G,
+        # 注释里写明"桌面清干净了可以调回"。现在模拟器已关。
+        # imgsz 保持 960: v3 试过 1920, batch 被迫减半导致顶栏稀疏类回归。
+        # cache 保持 False: 实测无加速 (瓶颈是 GPU 算力不是 IO), 且在 Windows
+        # 上会引入 DataLoader spawn 崩溃。
+        #
+        # 验收看: 任务页签族 511-520 / 关卡弹窗 421·422·495·496 /
+        # 批量扫荡方案 493·494 / cls 7 迁位后是否还认得出。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v15" / "weights" / "last.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 16,
+        "out_name": "ui_yolo26m_v16",
+        "cache": False,
+        "workers": 12,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
     "avatar_cls_v2": {
         # Combined-source classifier: ~250-class BA student recognition.
