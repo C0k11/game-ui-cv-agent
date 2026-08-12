@@ -1,0 +1,155 @@
+{
+  "modules": {
+    "daily_routine": true,
+    "cafe": true,
+    "schedule": true,
+    "bounty": true,
+    "jfd": true,
+    "event": true,
+    "arena": true,
+    "mail": true,
+    "daily_mission": true,
+    "story_mining": false,
+    "momotalk": false,
+    "batch_sweep": false,
+    "special_sweep": false
+  },
+  "order": [
+    "daily_routine",
+    "cafe",
+    "schedule",
+    "bounty",
+    "jfd",
+    "event",
+    "arena",
+    "mail",
+    "daily_mission"
+  ],
+  "plan": {
+    "ap_mode": "all_in_order",
+    "ap_split": {},
+    "ap_floor": 0
+  },
+  "bounty": {
+    "branches": [
+      "教室"
+    ],
+    "difficulty": "highest",
+    "fixed_stage": null,
+    "use_tickets": "all",
+    "keep_tickets": 0,
+    "ticket_plan": {}
+  },
+  "jfd": {
+    "academies": [
+      "千年",
+      "三一",
+      "格黑娜"
+    ],
+    "difficulty": "highest",
+    "use_tickets": "all",
+    "keep_tickets": 0,
+    "ticket_plan": {}
+  },
+  "event": {
+    "clear_first_with_team": 1,
+    "bonus_team": 2,
+    "order": "clear_then_bonus",
+    "shop_plan_before_bonus": true,
+    "farm_stages": {
+      "10": 1,
+      "11": 2
+    },
+    "ap_reserve": 0,
+    "min_ap_for_sweep": 20,
+    "max_rounds": 0,
+    "shop": {
+      "auto_buy": false,
+      "currencies": [],
+      "furniture": false,
+      "skip_last_tab": true
+    }
+  },
+  "cafe": {
+    "invite_targets": [
+      "凯伊",
+      "爱丽丝(战斗)",
+      "爱丽丝"
+    ],
+    "skip_invite": false,
+    "headpat": true,
+    "headpat_dwell_s": 2.0,
+    "floors": [
+      1,
+      2
+    ]
+  },
+  "schedule": {
+    "target_students": [],
+    "relationship_first": true,
+    "areas": []
+  },
+  "craft": {
+    "use_acceleration_ticket": false,
+    "phase_priority": [
+      "光辉",
+      "花朵"
+    ],
+    "quantity": "MAX",
+    "claim_finished": true
+  },
+  "shop": {
+    "common_priority": [],
+    "tactical_priority": [],
+    "buy_free_pack": true
+  },
+  "arena": {
+    "level_diff": 0,
+    "stop_at_rank1": true,
+    "max_refresh": 0,
+    "buy_energy_drink": false
+  },
+  "story_mining": {
+    "sources": [
+      "羁绊剧情",
+      "主线剧情",
+      "支线剧情",
+      "短篇剧情"
+    ],
+    "target_students": [],
+    "max_ap": 0,
+    "max_nodes": 0,
+    "skip_cutscene": true,
+    "stop_on_battle": true
+  },
+  "momotalk": {
+    "reply_policy": "first_option",
+    "target_students": [],
+    "max_students_per_run": 0,
+    "follow_bond_story": true
+  },
+  "mail": {
+    "claim_all": true
+  },
+  "daily_mission": {
+    "claim_all": true
+  },
+  "club": {
+    "claim": true
+  },
+  "safety": {
+    "purchase_caps": {},
+    "money_step_needs_human": true
+  },
+  "run": {
+    "step_mode": false,
+    "confirm_frames": 3,
+    "retry_frames": 70,
+    "stuck_frames": 400,
+    "max_minutes": 150,
+    "max_minutes_per_flow": 10,
+    "save_frames": true,
+    "unknown_escape": true,
+    "allow_home_escape": false
+  }
+}

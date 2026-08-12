@@ -1,0 +1,6 @@
+tick0 changed=True  -> TAP  加成①进关顶纪录（要用部队2）
+tick1 changed=False -> wait 入场键已点，等关卡弹窗打开
+tick2 changed=False -> wait 入场键已点，等关卡弹窗打开
+tick3 changed=False -> wait 入场键已点，等关卡弹窗打开
+
+入场键点击次数 = 1 （期望 1；>1 说明 once 保护是死码）

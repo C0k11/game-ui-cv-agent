@@ -1,0 +1,1033 @@
+# -*- coding: utf-8 -*-
+"""离线回归 —— 不碰设备、不碰模型，纯逻辑。
+
+⛔为什么必须有这个（memory replay_harness）:
+   老仓的回放测试**测不到跨 tick 状态**（每 tick 新建 skill），于是 after-ack
+   这类改动回放出来"0 diff"是**假验证**。这里用真的 Flow 实例 + 手搓的
+   Observation 序列驱动，跨 tick 状态是真的。
+
+跑法:  py -m routing_v2.tests.test_offline
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+import routing_v2.act.money as money_rules                    # noqa: E402
+from routing_v2.act.action import Action                      # noqa: E402
+from routing_v2.act.gate import Gate                          # noqa: E402
+from routing_v2.flow.base import Ctx                          # noqa: E402
+from routing_v2.flow.registry import ALL                      # noqa: E402
+from routing_v2.percept.observe import Box, Observation       # noqa: E402
+from routing_v2.state import vocab as V                       # noqa: E402
+from routing_v2.state.machine import Machine                  # noqa: E402
+from routing_v2.state.pages import classify                   # noqa: E402
+
+FAILS = []
+
+
+def check(name, cond, detail=""):
+    print(f"{'✅' if cond else '⛔'} {name}" + (f"   {detail}" if detail else ""))
+    if not cond:
+        FAILS.append(name)
+
+
+def B(cls, conf=0.9, cx=0.5, cy=0.5, w=0.06, h=0.04):
+    return Box(cls=cls, conf=conf, x1=cx - w / 2, y1=cy - h / 2,
+               x2=cx + w / 2, y2=cy + h / 2)
+
+
+def O(*boxes, seq=1):
+    return Observation(boxes=list(boxes), seq=seq, w=3840, h=2160)
+
+
+def cfg():
+    """⛔测试**不许**读 profile.json —— 那是用户的实时配置，改一下测试就飘。
+    2026-08-08 实测：profile 里把 event.order 改成 bonus_only 之后，通关阶段
+    那条用例当场变红。回归测试的输入必须是自己声明的。"""
+    from routing_v2.config import merged
+    return merged({"event": {"order": "clear_then_bonus",
+                             "clear_first_with_team": 1, "bonus_team": 2,
+                             "shop_plan_before_bonus": False},
+                   "bounty": {"branches": ["教室"]},
+                   "jfd": {"academies": ["千年", "三一", "格黑娜"]}})
+
+
+# ══ 1. 页面身份 ════════════════════════════════════════════════════════
+def t_pages():
+    print("\n── 页面身份 ─────────────────────────────────")
+    check("大厅", classify(O(B(V.NAV_CAFE), B(V.NAV_SHOP), B(V.NAV_CRAFT))).page
+          == "lobby")
+    check("任务大厅", classify(O(B(V.HUB_BOUNTY), B(V.HUB_ARENA),
+                                B(V.HUB_JFD))).page == "task_hall")
+    check("战斗内(2个chrome)", classify(O(B(V.BATTLE_PAUSE), B(V.BATTLE_3X))).page
+          == "battle")
+    check("单个chrome不算战斗", classify(O(B(V.BATTLE_PAUSE))).page != "battle")
+
+    # ⭐§A9 新活动首日：1 关开 + 4 关锁，必须仍然认作关卡列表
+    day1 = O(B(V.EVENT_SHOP, cx=0.1), B(V.EVENT_TASK, cx=0.2),
+             B(V.STAGE_ENTER, cy=0.30),
+             *[B(V.STAGE_ENTER_LOCKED, cy=0.40 + i * 0.1) for i in range(4)])
+    check("§A9 新活动首日(1开4锁)仍是关卡列表",
+          classify(day1).page == "event_quest_list",
+          f"实际 {classify(day1).page}")
+
+    # ⭐§A1 转场帧：只有 回大厅/返回键的帧**不许**当场触发"点回大厅"。
+    #    （它现在会被认成泛化的 `facility`，但泛化页面要待够 90 帧才准走人 ——
+    #      任何转场都活不过 90 帧，所以用户现场看到的"刚要进战斗就被弹回大厅"
+    #      不会复现。行为断言比页面名断言更有意义。）
+    stray = O(B(V.HOME, cx=0.05, cy=0.05), B(V.BACK, cx=0.02, cy=0.05))
+    from routing_v2.flow import nav as _nav
+    from routing_v2.state.machine import Machine as _MM
+    _m = _MM(3)
+    for _ in range(3):
+        _s = _m.update(stray)
+    check("§A1 只有回大厅/返回键的转场帧 → **不动作**",
+          _nav.to_lobby(stray, _s) is None, f"page={_s.page} f={_s.frames_in_page}")
+    for _ in range(95):
+        _s = _m.update(stray)
+    check("同一页面待够 90 帧（真卡住了）→ 才允许走人",
+          _nav.to_lobby(stray, _s) is not None, f"f={_s.frames_in_page}")
+
+    # 编队页必须被认出（老状态机不认它 → 落 STRAY → 差点点返回）
+    form = O(B(V.SORTIE, cx=0.92, cy=0.92), B(V.SQUAD_1_HI, cx=0.06, cy=0.26),
+             B(V.HOME, cx=0.05, cy=0.05))
+    check("编队页认得出", classify(form).page == "formation",
+          f"实际 {classify(form).page}")
+
+    # 结算页：底部確認 + 无入场键
+    res = O(B(V.CONFIRM, cx=0.5, cy=0.90), B(V.HOME, cx=0.05, cy=0.05))
+    check("战斗结算认得出", classify(res).page == "battle_result",
+          f"实际 {classify(res).page}")
+
+    # ⛔金钱：弹窗体内青辉石 = 打断；顶栏青辉石不是
+    body = O(B(V.PYROXENE, cx=0.5, cy=0.55), B(V.CONFIRM, cx=0.5, cy=0.7),
+             B(V.CANCEL, cx=0.3, cy=0.7))
+    top = O(B(V.PYROXENE, cx=0.80, cy=0.045), B(V.NAV_CAFE), B(V.NAV_SHOP),
+            B(V.NAV_CRAFT))
+    check("⛔弹窗体内青辉石 → money_popup 打断",
+          classify(body).interrupt == "money_popup")
+    check("顶栏青辉石不误报", classify(top).interrupt is None,
+          f"实际 {classify(top).interrupt}")
+
+    # ⛔2026-08-08 live 实锤：大厅左侧常驻「购买青辉石」广告位 conf 0.95。
+    #    按词判会让每一轮的第一帧就 HALT。必须配上对话框控件才算购买流程。
+    banner = O(B(V.SHOP_BUY_PYROXENE, conf=0.95, cx=0.117, cy=0.360),
+               B(V.PYROXENE, cx=0.670, cy=0.053),
+               B(V.NAV_CAFE, cx=0.073, cy=0.953), B(V.NAV_SHOP, cx=0.531, cy=0.953),
+               B(V.NAV_CRAFT, cx=0.437, cy=0.953))
+    check("⛔大厅买石广告位不误报（live 实帧复现）",
+          classify(banner).interrupt is None and classify(banner).page == "lobby",
+          f"实际 页面={classify(banner).page} 打断={classify(banner).interrupt}")
+    real_buy = O(B(V.SHOP_BUY_PYROXENE, conf=0.95, cx=0.5, cy=0.4),
+                 B(V.CONFIRM, cx=0.6, cy=0.8), B(V.CANCEL, cx=0.4, cy=0.8))
+    check("购买青辉石 + 对话框控件 → 真的停",
+          classify(real_buy).interrupt == "money_popup")
+
+    # ⛔2026-08-08 live 实锤（反向误报）：活动首通的「獲得獎勵」奖励卡里
+    #    就有 **青輝石 x30**（cy=0.511 conf 0.94）—— 那是**收入**，不是价签。
+    #    打赢一场就被自己的金钱闸 HALT 掉。同一个图标，语境相反。
+    reward = O(B(V.GOT_REWARD, conf=0.98, cx=0.5, cy=0.22),
+               B(V.PYROXENE, conf=0.94, cx=0.669, cy=0.511))
+    check("⛔奖励卡里的青辉石=收入，不误报",
+          classify(reward).interrupt is None,
+          f"实际 {classify(reward).interrupt}")
+    real_dialog = O(B(V.PYROXENE, conf=0.94, cx=0.5, cy=0.45),
+                    B(V.CONFIRM, cx=0.6, cy=0.75), B(V.CANCEL, cx=0.4, cy=0.75))
+    check("真购买框（体内青辉石+确认/取消，无收入标记）→ 停",
+          classify(real_dialog).interrupt == "money_popup")
+
+    # ⛔⛔2026-08-08 连锁事故：大厅按返回键 → 弹「離開遊戲」确认框，
+    #    它的 `确认键` + 大厅常驻的 `購買青輝石` 广告位 = 误报购买流程停整轮。
+    quit_dlg = O(B(V.SHOP_BUY_PYROXENE, conf=0.96, cx=0.117, cy=0.360),
+                 B(V.CONFIRM, cx=0.60, cy=0.70), B(V.CANCEL, cx=0.40, cy=0.70),
+                 B(V.NAV_CAFE, cx=0.073, cy=0.953), B(V.NAV_SHOP, cx=0.621, cy=0.953),
+                 B(V.NAV_CRAFT, cx=0.531, cy=0.953))
+    check("⛔大厅「離開遊戲」确认框不误报成购买流程（该判 quit_dialog）",
+          classify(quit_dlg).interrupt == "quit_dialog",
+          f"实际 {classify(quit_dlg).interrupt}")
+    # 且**大厅上绝不发返回键**（那个確認是退出游戏）
+    from routing_v2.flow import nav as _nv2
+    from routing_v2.state.machine import Machine as _M2
+    _m2 = _M2(1)
+    lobby_like = O(B(V.NAV_CAFE, cx=0.073, cy=0.953), B(V.NAV_SHOP, cx=0.621, cy=0.953),
+                   B(V.NAV_CRAFT, cx=0.531, cy=0.953), B(V.CLUB, cx=0.22, cy=0.46))
+    for _ in range(120):
+        _s2 = _m2.update(lobby_like)
+    _a2 = _nv2.to_lobby(lobby_like, _s2)
+    check("⛔大厅/大厅浮层上不发 KEYCODE_BACK（会弹退出游戏）",
+          _a2 is None or _a2.kind != "key", str(_a2))
+
+    # ⛔⛔系统「是否結束？」框：確認 = 退出游戏，只许点取消
+    sysq = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
+             B(V.CANCEL, conf=0.99, cx=0.401, cy=0.701),
+             B(V.CLOSE_X, conf=0.96, cx=0.692, cy=0.230))
+    check("⛔「是否結束？」（无顶栏货币）→ quit_dialog 打断",
+          classify(sysq).interrupt == "quit_dialog",
+          f"实际 {classify(sysq).interrupt}")
+    from routing_v2.flow.interrupt import Interrupts as _I
+    _act = _I(log=lambda m: None).handle("quit_dialog", sysq)
+    check("⛔处置只能是**取消**，永不点確認",
+          _act is not None and _act.target_cls == V.CANCEL, str(_act))
+    # ⛔第二道防线：顶栏不在时，**任何 flow 的 on_confirm_dialog 都不许点確認**
+    #   （08-08 实测：取消后的关闭动画帧中 quit_dialog 掉了确认，就是这里替它
+    #     点了確認，差一点把游戏关掉）
+    _mf = ALL["mail"](Ctx(cfg=cfg(), log=lambda m: None))
+    # ⭐fixture 要还原**真实来路**：退出框只从大厅弹（08-09 起判据用 last_solid）。
+    #   先在大厅待一帧，再弹框，这样 last_solid=lobby —— 和真机一致。
+    _ml = Machine(1)
+    _pure_lobby = O(B(V.NAV_CAFE, cx=0.073, cy=0.953),
+                    B(V.NAV_SHOP, cx=0.621, cy=0.953),
+                    B(V.NAV_CRAFT, cx=0.531, cy=0.953),
+                    B(V.NAV_SCHEDULE, cx=0.165, cy=0.953))
+    _ml.update(_pure_lobby)
+    _sv = _ml.update(sysq)
+    _a3 = _mf.on_confirm_dialog(sysq, _sv)
+    check("⛔退出框（从大厅弹）→ on_confirm_dialog 绝不点確認",
+          _a3 is None or _a3.target_cls == V.CANCEL, str(_a3))
+    # ⭐反向：**游戏内**的双键框（底页是关卡弹窗）不该被当退出框拦
+    #   ——「要使用340AP掃蕩17次嗎」被误拦过，扫荡直接被取消（08-09 实锤）。
+    _mg = Machine(1)
+    _stage = O(B(V.SWEEP_START, cx=0.73, cy=0.56), B(V.TASK_START, cx=0.73, cy=0.75))
+    _mg.update(_stage)
+    _sv2 = _mg.update(sysq)
+    _a4 = _mf.on_confirm_dialog(sysq, _sv2)
+    check("⛔游戏内双键框（底页=关卡弹窗）不当退出框 → 点確認",
+          _a4 is not None and _a4.target_cls == V.CONFIRM, str(_a4))
+    # ⛔⛔⛔「退出框」判据的四向锁（08-09 多 agent 审查 + 实测复现后重写）:
+    #    历史上错过两版 ——①「顶栏没货币」误拦 340AP 扫荡框；
+    #    ②「last_solid 不在大厅系」在 **Machine 新建时 last_solid 恒为
+    #      'unknown'** 的窗口里 fail-OPEN，实测 gate.ok=True ⇒ **会点確認
+    #      关掉游戏**；而当时的测试**没传 last_solid**，给了假保证。
+    #    ⇒ 现在的判据是「这个框是不是我自己点出来的」，四个方向都要锁死。
+    from routing_v2.act.action import tap_box as _tbq
+    _cfm = _tbq(B(V.CONFIRM, cx=0.598, cy=0.699), "点確認")
+    _gq = Gate(cfg(), log=lambda m: None)
+    check("⛔⛔A 退出框 + 没点过任何会弹框的键 + last_solid=unknown → 必须拦",
+          not _gq.money(_cfm, sysq, "unknown").ok,
+          _gq.money(_cfm, sysq, "unknown").why)
+    _gq2 = Gate(cfg(), log=lambda m: None)
+    _gq2._last = (0.731, 0.563, V.SWEEP_START)      # 上一发点了「扫荡开始」
+    check("B 同一个框但上一发是「扫荡开始」→ 放行（不许误杀游戏内框）",
+          _gq2.money(_cfm, sysq, "unknown").ok)
+    _gq3 = Gate(cfg(), log=lambda m: None)
+    _gq3._last = (0.5, 0.7, V.SCHED_START)          # facility 底页 + 上课
+    check("D facility 底页 + 上一发「課程表開始」→ 放行（08-09 前会无限取消上课）",
+          _gq3.money(_cfm, sysq, "facility").ok)
+    # C：剧情「跳過」确认框不许被 quit_dialog 抢（117 帧真实帧曾 117/117 全中）
+    _story_dlg = O(B(V.CONFIRM, conf=0.97, cx=0.599, cy=0.725),
+                   B(V.CANCEL, conf=0.98, cx=0.401, cy=0.727),
+                   B(V.STORY_MENU, conf=0.98, cx=0.941, cy=0.055),
+                   B(V.CLOSE_X, conf=0.96, cx=0.704, cy=0.200))
+    check("⛔C 剧情跳過确认框 → story_cutscene，不是 quit_dialog",
+          classify(_story_dlg).interrupt == "story_cutscene",
+          f"实际 {classify(_story_dlg).interrupt}")
+
+    # ⭐組合包页：**不停机**（bot 主动进来拿免費包），但花钱的那一下仍要被拦。
+    #   08-09 前是无条件 halt ⇒ 默认配置每次自主跑都在 shop 整轮停机。
+    from routing_v2.flow.interrupt import Interrupts as _Iq
+    _combo = O(B(V.COMBO_PACK, conf=0.98, cx=0.701, cy=0.251),
+               B(V.SHOP_BUY, conf=0.98, cx=0.299, cy=0.695),
+               B(V.FREE, conf=0.97, cx=0.301, cy=0.651))
+    check("組合包页 → money_popup 不 halt（否则免費包永远拿不到）",
+          _Iq(log=lambda m: None).handle("money_popup", _combo) is None)
+    _gc = Gate(cfg(), log=lambda m: None)
+    check("⛔但組合包页上点 `购买` 仍被拦成人审",
+          not _gc.money(_tbq(B(V.SHOP_BUY, cx=0.299, cy=0.695), "买"), _combo).ok)
+
+    # ⛔⛔真正不可绕过的那道：**闸**。八个 flow 都覆写了 on_confirm_dialog，
+    #    护栏放基类会被整体绕过（08-08 craft 就这么在退出框上点了確認）。
+    from routing_v2.act.action import tap_box as _tb2
+    _g = Gate(cfg(), log=lambda m: None)
+    _bad = _tb2(B(V.CONFIRM, cx=0.598, cy=0.699), "flow 自己要点確認")
+    check("⛔⛔闸拦下「顶栏全无的双键框上点確認」（谁都绕不过）",
+          not _g.money(_bad, sysq).ok, _g.money(_bad, sysq).why)
+    _ingame = O(B(V.CONFIRM, cx=0.6, cy=0.7), B(V.CANCEL, cx=0.4, cy=0.7),
+                B(V.AP, cx=0.40, cy=0.033), B(V.CREDIT, cx=0.51, cy=0.033),
+                B(V.PYROXENE, cx=0.67, cy=0.053))
+    _ok = _tb2(B(V.CONFIRM, cx=0.6, cy=0.7), "游戏内确认")
+    check("游戏内确认框（顶栏在）照常放行", _g.money(_ok, _ingame).ok)
+
+    # 游戏内的确认框（顶栏货币在）不该被当成系统退出框
+    ingame = O(B(V.CONFIRM, cx=0.6, cy=0.7), B(V.CANCEL, cx=0.4, cy=0.7),
+               B(V.AP, cx=0.40, cy=0.033), B(V.CREDIT, cx=0.51, cy=0.033),
+               B(V.PYROXENE, cx=0.67, cy=0.053))
+    check("游戏内确认框（顶栏在）不误判成系统退出框",
+          classify(ingame).interrupt != "quit_dialog",
+          f"实际 {classify(ingame).interrupt}")
+
+    # 上期活动
+    check("後日談 → event_ended",
+          classify(O(B(V.EVENT_AFTERSTORY), B(V.EVENT_SHOP))).page == "event_ended")
+
+
+# ══ 2. 连续 N 帧确认 ═══════════════════════════════════════
+def t_machine():
+    print("\n── §A3 连续帧确认 ───────────────────────────")
+    m = Machine(confirm_frames=3)
+    lobby = O(B(V.NAV_CAFE), B(V.NAV_SHOP), B(V.NAV_CRAFT))
+    for _ in range(3):
+        st = m.update(lobby)
+    check("3 帧后确认大厅", st.page == "lobby")
+
+    # 一帧转场噪声不该翻页
+    noise = O(B(V.SORTIE))
+    st = m.update(noise)
+    check("单帧转场噪声不翻页", st.page == "lobby", f"raw={st.raw}")
+    st = m.update(lobby)
+    st = m.update(lobby)
+    check("噪声后仍是大厅", st.page == "lobby")
+
+    # 真的换页要 3 帧
+    form = O(B(V.SORTIE), B(V.SQUAD_1_HI))
+    st = m.update(form)
+    check("换页第 1 帧不认", st.page == "lobby")
+    st = m.update(form)
+    st = m.update(form)
+    check("换页第 3 帧才认", st.page == "formation", f"实际 {st.page}")
+
+    # ⛔blank 兜底只允许"上一个认得出的页面是大厅"时开火（战斗中很多帧零检出，
+    #    在那里点屏幕中央可能触发学生技能 —— 08-08 live 实锤）
+    from routing_v2.flow import nav
+    m2 = Machine(1)
+    blank = O()
+    for _ in range(3):
+        stb = m2.update(blank)
+    check("blank 且刚起进程(last_solid=unknown) → 允许唤回，别卡死",
+          nav.blank_escape(stb, 0) is not None, f"last_solid={stb.last_solid}")
+    m2b = Machine(1)
+    battle = O(B(V.BATTLE_PAUSE), B(V.BATTLE_3X))
+    m2b.update(battle)
+    for _ in range(60):
+        stb2 = m2b.update(blank)
+    check("⛔blank 但上一页是战斗 → **不点**（可能触发学生技能）",
+          nav.blank_escape(stb2, 0) is None, f"last_solid={stb2.last_solid}")
+    m3 = Machine(1)
+    m3.update(lobby)
+    for _ in range(60):
+        stb = m3.update(blank)
+    check("blank 且上一页是大厅 → 点中央唤回",
+          nav.blank_escape(stb, 45) is not None, f"last_solid={stb.last_solid}")
+
+
+# ══ 3. 三道闸 ══════════════════════════════════════════════════════
+def t_gate():
+    print("\n── 三道闸 ───────────────────────────────────")
+    g = Gate(cfg(), log=lambda m: None)
+
+    # ① 金钱
+    body = O(B(V.PYROXENE, cx=0.5, cy=0.55))
+    act = Action(kind="tap", x=0.5, y=0.7, reason="随便点", target_cls="x")
+    v = g.money(act, body)
+    check("⛔弹窗体内青辉石 → 拦下且 halt", (not v.ok) and v.halt)
+    # ⭐但**导航白名单**里的 cls 要放行 —— 否则购买页会被拦死，
+    #   免費組合包永远走不完（08-09 实锤：连"切到組合包 tab"都被 halt）。
+    #   ⛔是白名单不是黑名单：漏一个花钱按钮=真花钱，漏一个导航按钮=只是卡住。
+    _navs = [V.COMBO_PACK, V.CLOSE_X, V.BACK, V.CANCEL]
+    for _n in _navs:
+        _va = g.money(Action(kind="tap", x=0.7, y=0.25, reason="切tab/退出",
+                             target_cls=_n), body)
+        check(f"购买页上点导航 `{_n}` → 放行（不花钱）", _va.ok, _va.why)
+    _vb = g.money(Action(kind="tap", x=0.3, y=0.7, reason="点購買",
+                         target_cls=V.SHOP_BUY), body)
+    check("⛔购买页上点 `购买` → 仍拦成人审", not _vb.ok, _vb.why)
+
+    v = g.money(Action(kind="tap", x=0.5, y=0.5, reason="买", money=True,
+                       spend="青辉石"), O(B(V.NAV_CAFE)))
+    check("⛔声明花青辉石 → 直接拒", not v.ok)
+
+    # ⛔⛔购买确认框盲区（08-10 live 抓到，四向锁）
+    #   「是否購買該商品？」这一帧, 顶栏以下没有青辉石（价签是 CAD/免費）。
+    #   tab 被框盖住、也没有步进器 ⇒ money.purchase_context() **四条判据全 None**，
+    #   闸对这一帧原本完全是瞎的。真钱包的确认框和免費包**长得一模一样**。
+    _dlg = O(B(V.CONFIRM, cx=0.60, cy=0.83), B(V.CANCEL, cx=0.40, cy=0.83),
+             B(V.CREDIT, cx=0.51, cy=0.05))          # 顶栏货币在，弹窗体内没青辉石
+    check("① 这一帧 purchase_context 确实是 None（盲区成立）",
+          money_rules.purchase_context(_dlg) is None)
+    # ⚠`_last` 只在 dedup() 里落 —— 用它模拟"上一发真的发出去了"
+    _prev = lambda g, c: g.dedup(Action(kind="tap", x=0.3, y=0.7, reason="上一发",
+                                        target_cls=c), False, 0, 25)
+    g4 = Gate(cfg(), log=lambda m: None)
+    _prev(g4, V.SHOP_BUY)
+    _vc = g4.money(Action(kind="tap", x=0.60, y=0.83, reason="确认",
+                          target_cls=V.CONFIRM), _dlg)
+    check("② 上一发是 `购买` + 双键框 + 没写「免費」→ 拦成人审",
+          (not _vc.ok) and _vc.needs_human, _vc.why)
+    g5 = Gate(cfg(), log=lambda m: None)
+    _prev(g5, V.SHOP_BUY)
+    _free = O(B(V.CONFIRM, cx=0.60, cy=0.83), B(V.CANCEL, cx=0.40, cy=0.83),
+              B(V.CREDIT, cx=0.51, cy=0.05), B(V.FREE, cx=0.66, cy=0.62))
+    _vd = g5.money(Action(kind="tap", x=0.60, y=0.83, reason="确认",
+                          target_cls=V.CONFIRM), _free)
+    check("③ 同一个框写着「免費」→ 放行（免費組合包那条链不能被拦死）",
+          _vd.ok, _vd.why)
+    g6 = Gate(cfg(), log=lambda m: None)
+    _prev(g6, V.SWEEP_START)
+    _ve = g6.money(Action(kind="tap", x=0.60, y=0.83, reason="确认",
+                          target_cls=V.CONFIRM), _dlg)
+    check("④ 上一发是「掃蕩開始」(不花钱的键) → 不误拦",
+          _ve.ok, _ve.why)
+
+    # ② JIT 落地复验
+    from routing_v2.act.action import tap_box
+    g2 = Gate(cfg(), log=lambda m: None)
+    tgt = B(V.EVENT_LIVE, cx=0.5, cy=0.20)
+    a = tap_box(tgt, "进活动", dy=0.075)          # ⭐落点故意在框外
+    check("HUB 落点确实在锚点框外", not tgt.contains(a.x, a.y),
+          f"tap y={a.y:.3f} 框 y2={tgt.y2:.3f}")
+    old = O(tgt, seq=1)
+    gone = O(B(V.EVENT_ENDED, cx=0.5, cy=0.20), seq=2)      # 轮播翻页了
+    v = g2.jit(a, old, lambda: gone)
+    check("§A7 轮播翻页 → JIT 丢弃这一发", not v.ok, v.why)
+
+    moved = O(B(V.EVENT_LIVE, cx=0.5, cy=0.60), seq=3)      # 同名但位置变了
+    v = g2.jit(a, old, lambda: moved)
+    check("「附近有同名」≠「还是那一个」→ 也丢弃", not v.ok, v.why)
+
+    same = O(B(V.EVENT_LIVE, cx=0.5, cy=0.20), seq=4)
+    v = g2.jit(a, old, lambda: same)
+    check("锚点没动 → 放行（哪怕落点在框外）", v.ok, v.why)
+
+    # ③ 连发
+    g3 = Gate(cfg(), log=lambda m: None)
+    a2 = Action(kind="tap", x=0.3, y=0.3, reason="r", target_cls="btn")
+    check("第一发放行", g3.dedup(a2, False, 0, 25).ok)
+    check("同落点页面没变 → 吞掉", not g3.dedup(a2, False, 1, 25).ok)
+    check("待够 retry_frames → 补一发", g3.dedup(a2, False, 25, 25).ok)
+    # ⛔别拿 reason 措辞当控制 API：换个文案不该绕过闸
+    a3 = Action(kind="tap", x=0.3, y=0.3, reason="確認键!!", target_cls="btn")
+    check("⛔换 reason 文案绕不过连发闸", not g3.dedup(a3, False, 2, 25).ok)
+
+
+# ══ 4. flow 跨 tick 状态（真实例，不是 stateless 回放）════════════════
+def t_flows():
+    print("\n── flow 跨 tick 行为 ────────────────────────")
+    c = cfg()
+    ctx = Ctx(cfg=c, log=lambda m: None)
+
+    # craft: ⭐灰态 cls 优先（§A6 —— 模型修好不能把兜底打死）
+    craft = ALL["craft"](ctx)
+    m = Machine(1)
+    grey = O(B(V.CRAFT_START_GREY, conf=0.99, cx=0.8, cy=0.85))
+    st = m.update(grey)
+    act = craft.decide(grey, st)
+    check("§A6 检出「开始制造灰色」→ 直接收工不点",
+          act is not None and act.kind == "done", str(act))
+
+    # craft: 亮态才点
+    craft2 = ALL["craft"](ctx)
+    m2 = Machine(1)
+    bright = O(B(V.CRAFT_START, conf=0.95, cx=0.8, cy=0.85))
+    st2 = m2.update(bright)
+    act2 = craft2.decide(bright, st2)
+    check("亮态「开始制造」→ 点它", act2 is not None and act2.is_tap, str(act2))
+
+    # event: 轮播闸 —— 405 一直在场时**不点**，只在跃迁那帧点
+    ev = ALL["event"](ctx)
+    m3 = Machine(1)
+    hall_cur = O(B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
+                 B(V.HUB_JFD, cx=0.7, cy=0.4),
+                 B(V.EVENT_LIVE, conf=0.88, cx=0.5, cy=0.15))
+    hall_other = O(B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
+                   B(V.HUB_JFD, cx=0.7, cy=0.4),
+                   B(V.EVENT_ENDED, conf=0.88, cx=0.5, cy=0.15))
+    a = ev.decide(hall_cur, m3.update(hall_cur))
+    check("§轮播 405 已在场（可能在窗口尾巴）→ 不点",
+          a is not None and a.kind == "wait", str(a))
+    ev.decide(hall_other, m3.update(hall_other))          # 看见别的了
+    a = ev.decide(hall_cur, m3.update(hall_cur))
+    check("§轮播 捕到 (非405→405) 跃迁 → 点", a is not None and a.is_tap, str(a))
+    if a is not None and a.is_tap:
+        check("§HUB 落点 +0.075 打到卡片本体", abs(a.y - (0.15 + 0.075)) < 1e-6,
+              f"y={a.y:.3f}")
+        check("§落地复验锚点 = 距离结束还剩", a.require == V.EVENT_LIVE)
+
+    # event: 通关阶段从上往下打**未通关**的关（得星_0）
+    ev2 = ALL["event"](ctx)
+    m4 = Machine(1)
+    lst = O(B(V.EVENT_SHOP, cx=0.1, cy=0.5), B(V.EVENT_QUEST_SEL, cx=0.6, cy=0.15),
+            B(V.STAGE_ENTER, cx=0.9, cy=0.30), B(V.STAR_3, cx=0.6, cy=0.30),
+            B(V.STAGE_ENTER, cx=0.9, cy=0.50), B(V.STAR_0, cx=0.6, cy=0.50),
+            B(V.STAGE_ENTER, cx=0.9, cy=0.70), B(V.STAR_0, cx=0.6, cy=0.70))
+    st4 = m4.update(lst)
+    a = ev2.decide(lst, st4)
+    check("活动: 跳过已 3 星的，打第一个 得星_0 的关",
+          a is not None and a.is_tap and abs(a.y - 0.50) < 0.01, str(a))
+
+    # 编队：确认不了是哪支部队 → 不出击
+    ev3 = ALL["event"](ctx)
+    m5 = Machine(1)
+    form_unknown = O(B(V.SORTIE, cx=0.92, cy=0.92))
+    for i in range(3):
+        a = ev3.decide(form_unknown, m5.update(form_unknown))
+    check("⛔编队页看不到部队 cls → 不出击（Best Record 会被永久锁死）",
+          a is not None and a.kind == "wait", str(a))
+    form_t1 = O(B(V.SORTIE, cx=0.92, cy=0.92), B(V.SQUAD_1_HI, cx=0.06, cy=0.26))
+    a = ev3.decide(form_t1, m5.update(form_t1))
+    check("部队1 已高亮 → 出击", a is not None and a.is_tap
+          and abs(a.x - 0.92) < 0.01, str(a))
+
+    # ⛔⛔加成阶段，**没赢过就不许扫荡**（08-08 live 事故：把"点了入场键"
+    #    当成"打完一场顶好纪录"，加成队一次没上场，780 AP 按旧纪录刷掉）
+    # ⛔离线 fixture 没有真帧，OCR 读不出 AP；而 08-09 起 AP 闸是 **fail-closed**
+    #    （读不出就停手，防 AP耗尽还去点扫荡→游戏弹購買AP框）。
+    #    ⇒ 测试必须把读数打桩，否则测的是 读不出 而不是加成逻辑。
+    import routing_v2.percept.read as _RD
+    _orig_topbar = _RD.read_topbar
+    _RD.read_topbar = lambda o, c: (500 if c == _RD.AP else _orig_topbar(o, c))
+
+    evb = ALL["event"](ctx)
+    evb.state["phase"] = "bonus_clear"
+    # ⛔fixture：不许读 data/routing_v2/event_topped.json 那份真实台账
+    #    （线上顶过关之后这条测试会红 —— 08-09 已经中过一次）
+    evb.ctx.bag["event_topped"] = {}
+    m8 = Machine(1)
+    lst2 = O(B(V.EVENT_SHOP, cx=0.1, cy=0.5), B(V.EVENT_QUEST_SEL, cx=0.6, cy=0.15),
+             B(V.STAGE_ENTER, cx=0.9, cy=0.70), B(V.STAR_3, cx=0.6, cy=0.70),
+             B(V.AP, conf=0.9, cx=0.40, cy=0.033))
+    a = evb.decide(lst2, m8.update(lst2))
+    check("加成①: 先进关顶纪录", a is not None and a.is_tap
+          and "顶纪录" in a.reason, str(a))
+    a = evb.decide(lst2, m8.update(lst2))
+    check("⛔点了入场键**不算**打完 → 仍停在①，不许跳去扫荡",
+          evb.state["phase"] == "bonus_clear", f"phase={evb.state['phase']}")
+    # ⛔测试自带 plan fixture：flow 会回退读**真实的** data/routing_v2/
+    #    event_farm_plan.json（08-09 加的跨进程副本），线上有 2 个目标时
+    #    need=2，这条测试就红了。测试绝不能依赖外部可变状态。
+    evb.ctx.bag["event_farm_plan"] = [{"from_bottom": 0, "why": "fixture"}]
+    evb._bt()["win"] = 1                       # 模拟真的赢了一场
+    evb.decide(lst2, m8.update(lst2))
+    check("赢了一场后才转入②扫荡", evb.state["phase"] == "bonus_sweep",
+          f"phase={evb.state['phase']}")
+    evb2 = ALL["event"](ctx)
+    evb2.state["phase"] = "bonus_sweep"        # 直接跳到②但没赢过
+    a = evb2.decide(lst2, Machine(1).update(lst2))
+    check("⛔没赢过直接进②ate → BLOCKED，拒绝低倍率扫荡",
+          a is not None and a.kind == "done" and a.outcome == "BLOCKED", str(a))
+    # ⛔⛔进关 once 保护必须**活着**（08-09 审查抓到我把它写成死码）:
+    #    解锁 once 的时机写成了"人在关卡列表页"，而列表页会连续几十 tick
+    #    ⇒ 每 tick 都清 ⇒ 等于没有 once ⇒ 入场键重发时列表滚了就**点到隔壁关**。
+    #    正解：只在 `st.changed`（刚从别的页面切回来）那一 tick 解锁。
+    _evo = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    _evo.state["phase"] = "bonus_clear"
+    _evo.ctx.bag["event_topped"] = {}
+    _evo.ctx.bag["event_farm_plan"] = [{"from_bottom": 0, "why": "fixture"}]
+    _mo = Machine(1)
+    _taps = 0
+    for _ in range(4):                      # 连续 4 tick 停在列表页
+        _sto = _mo.update(lst2)
+        _ao = _evo.decide(lst2, _sto)
+        if _ao is not None and _ao.is_tap:
+            _taps += 1
+            if _ao.once_key:                # 模拟 runner：tap 落地才落 once
+                _evo.state["once:" + _ao.once_key] = True
+    check("⛔连续停在关卡列表页时，入场键**只点一次**（once 保护不是死码）",
+          _taps == 1, f"实际点了 {_taps} 次")
+
+    _RD.read_topbar = _orig_topbar          # 还原读数打桩
+
+    # ⛔⛔金钱，**双键框内有数量步进器 = 购买/兑换框**（08-09 差点花 30 青辉石：
+    #    AP 耗尽后又点扫荡，游戏弹「購買AP 單價💎30」，而弹窗体内的青辉石图标
+    #    一个都没检出 ⇒ 非「看见青辉石」的判据全瞎）
+    _buyap = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
+               B(V.CANCEL, conf=0.98, cx=0.402, cy=0.699),
+               B(V.QTY_MAX, conf=0.98, cx=0.687, cy=0.480),
+               B(V.PLUS, conf=0.97, cx=0.630, cy=0.480))
+    from routing_v2.act import money as _mny
+    check("⛔⛔購買AP 框（双键+步进器，青辉石图标检不出）→ 判为购买框",
+          _mny.purchase_context(_buyap) is not None,
+          str(_mny.purchase_context(_buyap)))
+    from routing_v2.act.action import tap_box as _tbx
+    _g2 = Gate(cfg(), log=lambda m: None)
+    _tapc = _tbx(B(V.CONFIRM, cx=0.598, cy=0.699), "flow 要点確認")
+    check("⛔⛔闸拦下「購買AP 框上点確認」",
+          not _g2.money(_tapc, _buyap, "stage_popup").ok,
+          _g2.money(_tapc, _buyap, "stage_popup").why)
+    # 反向：扫荡确认框是**纯文字**（无步进器）→ 不许误拦
+    _sweepc = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
+                B(V.CANCEL, conf=0.98, cx=0.402, cy=0.701),
+                B(V.CLOSE_X, conf=0.96, cx=0.692, cy=0.230))
+    check("扫荡确认框（无步进器）不误判成购买框",
+          _mny.purchase_context(_sweepc) is None,
+          str(_mny.purchase_context(_sweepc)))
+
+    # ⭐没登记的设施页 → facility（有退出控件，不会卡死）
+    fac = O(B(V.HOME, cx=0.965, cy=0.033), B(V.BACK, cx=0.045, cy=0.052),
+            B(V.PYROXENE, cx=0.67, cy=0.053), B(V.CREDIT, cx=0.51, cy=0.052))
+    check("⭐回大厅+返回键 = 「在某个设施里」，不是 unknown",
+          classify(fac).page == "facility", f"实际 {classify(fac).page}")
+    from routing_v2.flow import nav as _nv
+    from routing_v2.state.machine import Machine as _M
+    _mm = _M(1)
+    for _ in range(95):
+        _fs = _mm.update(fac)
+    check("facility 待够后 nav 能走人（不会永久卡死）",
+          _nv.to_lobby(fac, _fs) is not None, f"f={_fs.frames_in_page}")
+    # 具体页面必须盖过 facility
+    fac2 = O(*fac.boxes, B(V.CRAFT_QUICK, cx=0.7, cy=0.86))
+    check("有具体页面签名时 facility 让位", classify(fac2).page == "craft",
+          f"实际 {classify(fac2).page}")
+
+    # ⛔退出顺序：取消 > 結果框確認 > 叉叉 > 返回（2026-07-27 悬赏弃 6 票根因③）
+    from routing_v2.act.action import tap_box as _tb
+    ml = ALL["mail"](ctx)
+    modal = O(B(V.CANCEL, cx=0.40, cy=0.75), B(V.CONFIRM, cx=0.60, cy=0.75),
+              B(V.CLOSE_X, conf=0.96, cx=0.85, cy=0.20), B(V.BACK, cx=0.04, cy=0.05))
+    a = ml.exit_step(modal)
+    check("⛔模态框上退出 → 点**取消**（叉叉 conf0.96 也不吃点击）",
+          a is not None and a.target_cls == V.CANCEL, str(a))
+    result = O(B(V.CONFIRM, cx=0.5, cy=0.8), B(V.CLOSE_X, cx=0.85, cy=0.20))
+    a = ml.exit_step(result)
+    check("结果框（无取消）退出 → 点確認",
+          a is not None and a.target_cls == V.CONFIRM, str(a))
+
+    # ⛔票数越界校验：'0/6' 被读成 '9/0' 那种必须毙掉
+    from routing_v2.percept.read import read_ticket
+    import routing_v2.percept.read as _R
+    _orig = _R.read_beside
+    try:
+        _R.read_beside = lambda o, a, s=None: (9, 0)
+        check("⛔票数 9/0（分子>分母）→ 判无效返回 None",
+              read_ticket(O(), B(V.TICKET_BOUNTY)) is None)
+        _R.read_beside = lambda o, a, s=None: (6, 6)
+        check("票数 6/6 正常读出", read_ticket(O(), B(V.TICKET_BOUNTY)) == 6)
+        _R.read_beside = lambda o, a, s=None: (999, None)
+        check("⛔票数 999（超上限）→ None",
+              read_ticket(O(), B(V.TICKET_BOUNTY)) is None)
+    finally:
+        _R.read_beside = _orig
+
+    # ⭐商店推算 → "刷倒数第几关"的映射（用户 2026-08-08 口述的规则）
+    from routing_v2.flow.event_shop import farm_targets
+    tabs = [{"from_bottom": 0, "buyable": 12}, {"from_bottom": 1, "buyable": 5}]
+    withpts = farm_targets(tabs, True)
+    check("有活动点数: 点数→倒数第1关, 最下面的币→倒数第2关, 上面一个→倒数第3关",
+          [t["from_bottom"] for t in withpts] == [0, 1, 2],
+          str([t["from_bottom"] for t in withpts]))
+    nopts = farm_targets(tabs, False)
+    check("⭐无活动点数: **商店最下面的币就是最后一关**，再往上推",
+          [t["from_bottom"] for t in nopts] == [0, 1],
+          str([t["from_bottom"] for t in nopts]))
+
+    # 悬赏：分支**动态从屏上判**
+    bo = ALL["bounty"](ctx)
+    m6 = Machine(1)
+    br = O(B(V.TICKET_BOUNTY, cx=0.2, cy=0.05),
+           B(V.BRANCH_CLASSROOM, cx=0.8, cy=0.30),
+           B(V.BRANCH_HIGHWAY, cx=0.8, cy=0.50))
+    st6 = m6.update(br)
+    a = bo.decide(br, st6)
+    check("悬赏: 按配置顺序选到「教室」", a is not None and a.is_tap
+          and a.target_cls == V.BRANCH_CLASSROOM, str(a))
+
+    # JFD：⭐用 cls 不用写死坐标
+    jf = ALL["jfd"](ctx)
+    m7 = Machine(1)
+    ac = O(B(V.TICKET_JFD, cx=0.2, cy=0.05),
+           B(V.ACADEMY_TRINITY, cx=0.92, cy=0.253),
+           B(V.ACADEMY_MILLENNIUM, cx=0.93, cy=0.549),
+           B(V.ACADEMY_GEHENNA, cx=0.915, cy=0.401))
+    a = jf.decide(ac, m7.update(ac))
+    check("§A8 JFD 用 cls 选学院（配置首选 千年）", a is not None and a.is_tap
+          and a.target_cls == V.ACADEMY_MILLENNIUM, str(a))
+
+    # ── ⭐票配额（用户点名「票用在哪个地区，还是一个地区用几张」）────────
+    # 关键实现约束：用**票数差**算已用几张，不用计数器（数事实不数意图）。
+    def _bounty_with(plan, tix, branch, tix0):
+        f = ALL["bounty"](ctx)
+        f.cfg = dict(f.cfg or {})
+        f.cfg["ticket_plan"] = plan
+        f.setup()
+        f.state.update(branch_name=branch, branch_tix0=tix0, tickets0=6)
+        m = Machine(1)
+        ob = O(B(V.TICKET_BOUNTY, cx=0.2, cy=0.05),
+               B(V.STAGE_ENTER, cx=0.75, cy=0.40),
+               B(V.STAGE_ENTER, cx=0.75, cy=0.60))
+        return f, ob, m.update(ob)
+
+    f, ob, _ = _bounty_with({"教室": 3}, 6, "教室", 6)
+    check("票配额: 分支名/基线都在，配额未用完 → _quota 认得出",
+          f._quota("教室") == 3 and f._quota("沙漠铁道") is None)
+    check("票配额: 没配的分支不限流", f._quota("高架公路") is None)
+
+    f2, _, _ = _bounty_with({}, 6, "教室", 6)
+    check("⭐留空 ticket_plan = 老行为（不限流）",
+          f2._plan() == {} and f2._quota("教室") is None)
+
+    # ⛔换分支必须清 branch_tix0 —— 不清的话下一个分支拿上一个的基线，
+    #   配额会瞬间"用完"，第二个分支一张票都不打。
+    f3, _, _ = _bounty_with({"教室": 3, "高架公路": 3}, 6, "教室", 6)
+    f3.state["tickets"] = 3
+    f3._next_branch_or_done("配额用完")
+    check("⛔换分支清掉 branch_tix0（否则下个分支配额瞬间'用完'）",
+          f3.state["branch_tix0"] is None and f3.state["branch_name"] == "")
+
+    # ⛔只配 ticket_plan 不配 branches 时，分支数要按 plan 的 key 算，
+    #   否则 max(1, len([])) = 1 → 打完第一个就收工。
+    f4, _, _ = _bounty_with({"教室": 3, "高架公路": 3}, 6, "教室", 6)
+    f4.cfg["branches"] = []
+    f4.state["branch_i"] = 0
+    f4.state["tickets"] = 3
+    r = f4._next_branch_or_done("配额用完")
+    check("⛔只配 plan 不配 branches → 仍会去打第二个分支",
+          f4.state["branch_i"] == 1 and not getattr(r, "is_finish", False),
+          f"branch_i={f4.state['branch_i']} r={r}")
+
+    # ⭐⭐核心路径：票 6→3 用掉 3 张 = 配额满 → 换分支。
+    #   票数走 OCR，离线测不了 ⇒ 打桩 `_tickets`。打桩的是**读数**，
+    #   被测的是**配额判定逻辑**，不是自己测自己。
+    def _quota_hit(plan, tix_now, tix0, branch="教室", bi=0):
+        f = ALL["bounty"](ctx)
+        f.cfg = dict(f.cfg or {})
+        f.cfg.update(ticket_plan=plan, branches=["教室", "高架公路"])
+        f.setup()
+        f.state.update(branch_name=branch, branch_tix0=tix0,
+                       tickets0=tix0, branch_i=bi)
+        f._tickets = lambda _obs: tix_now
+        ob = O(B(V.TICKET_BOUNTY, cx=0.2, cy=0.05),
+               B(V.STAGE_ENTER, cx=0.75, cy=0.40))
+        return f, f._on_stage_list(ob, Machine(1).update(ob))
+
+    f5, r5 = _quota_hit({"教室": 3}, 3, 6)
+    check("⭐票 6→3 = 用满配额 3 → 换分支（不是继续打）",
+          f5.state["branch_i"] == 1, f"branch_i={f5.state['branch_i']} r={r5}")
+
+    f6, r6 = _quota_hit({"教室": 3}, 5, 6)
+    check("⭐票 6→5 = 才用 1 张，配额没满 → 不换分支",
+          f6.state["branch_i"] == 0, f"branch_i={f6.state['branch_i']} r={r6}")
+
+    # ⛔票数读不出必须 fail-closed（金钱铁律 #3：读不出不出击）
+    f7 = ALL["bounty"](ctx)
+    f7.cfg = dict(f7.cfg or {})
+    f7.cfg.update(ticket_plan={"教室": 3}, branches=["教室"])
+    f7.setup()
+    f7.state.update(branch_name="教室", branch_tix0=6, branch_i=0)
+    f7._tickets = lambda _obs: None
+    _ob7 = O(B(V.TICKET_BOUNTY, cx=0.2, cy=0.05))
+    # ⚠hold() 靠 `self.ticks` 判"连续" —— 不推 ticks 的话 cnt 永远是 1，
+    #   循环 70 次也只会一直返回"连续确认中"。第一版就是这么**假通过**的：
+    #   断言（不是 tap）碰巧成立，却根本没走到被测的那条分支。
+    for _ in range(70):
+        f7.ticks += 1
+        r7 = f7._on_stage_list(_ob7, Machine(1).update(_ob7))
+    check("⛔票数读不出 → fail-closed 不出击（且确实走到了这条分支）",
+          r7 is not None and not getattr(r7, "is_tap", False)
+          and "读不出" in str(r7), str(r7))
+
+
+# ══ 5. 配置锁死 ════════════════════════════════════════════════════════
+def t_config():
+    print("\n── 配置 ─────────────────────────────────────")
+    from routing_v2.config import merged
+    evil = {"safety": {"forbid_premium_currency": False, "ap_purchase_limit": 99},
+            "shop": {"refresh_times": 5},
+            "run": {"frame_source": "adb"}}
+    c = merged(evil)
+    check("⛔改不动 forbid_premium_currency",
+          c["safety"]["forbid_premium_currency"] is True)
+    check("⛔改不动 ap_purchase_limit", c["safety"]["ap_purchase_limit"] == 0)
+    check("⛔改不动 shop.refresh_times", c["shop"]["refresh_times"] == 0)
+    check("⛔frame_source 强制 scrcpy", c["run"]["frame_source"] == "scrcpy")
+    check("挖矿默认关", c["modules"]["story_mining"] is False)
+
+    # ── ⭐AP 百分比分配（用户点名）────────────────────────────────────
+    # 只测**算术**：给定 AP / 百分比 / 谁还没跑 → reserve 该是多少。
+    # 抓帧和 OCR 不在这一层测（那是 read.py 的活）。
+    # ⛔调**真函数**，不在测试里复制一份算法 —— 复制的话真代码改了测试照样绿。
+    from routing_v2.app.runner import ap_reserve_for
+
+    def _reserve(ap, split, me, order, floor=0):
+        got = ap_reserve_for(ap, split, me, order, floor)
+        return got[0] if got else None
+
+    od = ["event", "special_sweep", "batch_sweep"]
+    check("AP 分配: event 占 60% → 给后面留 40%",
+          _reserve(1000, {"event": 60, "special_sweep": 40}, "event", od) == 400)
+    check("AP 分配: 最后一个 flow 留 0（全花光，AP 停 240 就不回复了）",
+          _reserve(400, {"event": 60, "special_sweep": 40}, "special_sweep", od) == 0)
+    check("AP 分配: 「都刷活动」= event:100 → 留 0",
+          _reserve(800, {"event": 100}, "event", od) == 0)
+    check("AP 分配: 「都刷双三倍」= special+batch 各 50 → 第一个留一半",
+          _reserve(600, {"special_sweep": 50, "batch_sweep": 50},
+                   "special_sweep", od) == 300)
+    check("AP 分配: 留底 100 时，60% 只分剩下的 900",
+          _reserve(1000, {"event": 60, "special_sweep": 40}, "event", od,
+                   floor=100) == 460)   # 900*0.4 + 100
+    check("⛔AP 分配: 没配百分比的 flow 不参与（返回 None 表示不注入）",
+          _reserve(1000, {}, "event", od) is None)
+
+    # ── ⛔⛔死开关不许再静默（08-10：modules 有 batch_sweep/special_sweep，
+    #    ALL 里从来没有 → 前端打开后 build() 一声不吭地跳过）────────────
+    from routing_v2.flow.registry import ALL as _ALL, PLANNED, build as _build
+    said = []
+    _build({"modules": {"batch_sweep": True, "special_sweep": True,
+                        "nonexistent_flow": True},
+            "order": ["batch_sweep", "nonexistent_flow"]},
+           None, log=said.append)
+    check("⛔开着一条没实现的 flow → build() 必须出声",
+          any("batch_sweep" in s and "还没实现" in s for s in said), str(said))
+    check("⛔order 里有注册表没有的名字 → 也必须出声",
+          any("nonexistent_flow" in s for s in said), str(said))
+    check("⛔PLANNED 里的名字确实都还不在 ALL 里（实现了就该从 PLANNED 删掉）",
+          all(n not in _ALL for n in PLANNED), str(sorted(set(PLANNED) & set(_ALL))))
+    # schema 里凡是 PLANNED 的 flow，必须标在 `planned` 而不是 `options` 里
+    from routing_v2.config.schema import SCHEMA as _S
+    _sp = _S.get("plan.ap_split", {})
+    check("⛔没实现的 flow 不许出现在可选项里（会变成死配置）",
+          not (set(_sp.get("options", [])) & set(PLANNED)),
+          str(set(_sp.get("options", [])) & set(PLANNED)))
+
+    # ── ⛔⛔红点归属半径必须随框尺寸放大（08-11：奖励躺着没领的根因）────
+    #    红点画在按钮**右上角**，框越宽红点离框心越远。实测同一页：
+    #      活动任务 w=0.029 → dx≈+0.02   ；奖励资讯 w=0.076 → **dx=+0.056**
+    #    固定 0.05 对宽按钮永远判不到 ⇒ 红点驱动的领取整条失效。
+    from routing_v2.flow.event import EventFlow as _EF
+    # 数值全是 08-11 真机实测（奖励资讯 0.807@(0.877,0.898) w=0.076 h=0.035；
+    # 红点 0.931@(0.933,0.860)）
+    _wide = B(V.EVENT_REWARD_INFO, conf=0.81, cx=0.877, cy=0.898, w=0.076, h=0.035)
+    _obs_dot = O(_wide, B(V.DOT_RED, conf=0.93, cx=0.933, cy=0.860))
+    check("⛔宽按钮(奖励资讯 w=0.076)身上的红点必须判得到",
+          _EF._dot_on(_obs_dot, _wide), "实测 dx=+0.056，超出固定半径 0.05")
+    _narrow = B(V.EVENT_TASK, conf=0.89, cx=0.393, cy=0.933, w=0.029, h=0.027)
+    check("✅窄按钮(活动任务)不受影响：远处的红点不算它的",
+          not _EF._dot_on(O(_narrow, B(V.DOT_RED, conf=0.93, cx=0.60, cy=0.90)),
+                          _narrow))
+    check("✅窄按钮自己的红点照样判得到（别把下限也放宽了）",
+          _EF._dot_on(O(_narrow, B(V.DOT_RED, conf=0.93,
+                                   cx=0.413, cy=0.913)), _narrow))
+
+    # ── ⛔⛔买入分支必须有页面身份前提（08-11 审计抓到的 fail-OPEN）─────
+    #    原代码依赖 `信用点商店`(train=0, live 990 帧 0 检出) 做前置检查，
+    #    而那个 if 既没 else 也没 return ⇒ 买入分支零前提。
+    #    危险面：战术大赛货架上 `全部选择` conf 0.98(30/31 帧)，
+    #    且 arena_shop 身份有 3/34 帧掉成 shop ⇒ 会把 6 个神名文字×5 一起买走。
+    _sctx = Ctx(cfg=cfg(), log=lambda m: None)   # t_config 里没有 t_flows 的 ctx
+    _ash = ALL["shop"](_sctx)
+    _ash.setup()
+    # 战术大赛货架的样子：全部选择亮着、但**没有**信用点商店_已选中
+    _arena_shelf = O(B(V.SHOP_SELECT_ALL, conf=0.98, cx=0.931, cy=0.121),
+                     B(V.SHOP_BUY_SELECTED, conf=0.98, cx=0.909, cy=0.918),
+                     B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.749, cy=0.794),
+                     B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.866, cy=0.793))
+    _aa = _ash.on_shop(_arena_shelf, Machine(1).update(_arena_shelf))
+    check("⛔⛔认不出站在信用点货架上 → 绝不点「全部选择/选择购买」",
+          _aa is None or getattr(_aa, "target_cls", "") not in
+          (V.SHOP_SELECT_ALL, V.SHOP_BUY_SELECTED), str(_aa))
+    # 正例：信用点货架（有 信用点商店_已选中）照常买
+    _cs = ALL["shop"](_sctx)
+    _cs.setup()
+    _credit_shelf = O(B(V.SHOP_TAB_CREDIT_SEL, conf=0.98, cx=0.050, cy=0.195),
+                      B(V.SHOP_SELECT_ALL, conf=0.97, cx=0.931, cy=0.122))
+    _cc = _cs.on_shop(_credit_shelf, Machine(1).update(_credit_shelf))
+    check("✅在信用点货架上照常「全部选择」（别误伤正常流程）",
+          _cc is not None and getattr(_cc, "target_cls", "") == V.SHOP_SELECT_ALL,
+          str(_cc))
+
+    # ── ⛔⛔shop 三段做完必须收工（08-11 live：全 True 了还再进一次商店，
+    #    自主跑会死循环到 max_minutes_per_flow 超时）────────────────────
+    _sf = ALL["shop"](_sctx)
+    _sf.setup()
+    _lob = O(B(V.NAV_SHOP, conf=0.97, cx=0.621, cy=0.953),
+             B(V.SHOP_BUY_PYROXENE, conf=0.97, cx=0.116, cy=0.360))
+    _sf.state.update(pack_done=True, bought=True, arena_done=True)
+    _a = _sf.on_lobby(_lob, Machine(1).update(_lob))
+    check("⛔三段都做完 → 收工，不许再进商店（否则自主跑死循环）",
+          _a is not None and not getattr(_a, "is_tap", False), str(_a))
+    _sf2 = ALL["shop"](_sctx)
+    _sf2.setup()
+    _sf2.state.update(pack_done=True, bought=True)     # arena 还没做
+    _a2 = _sf2.on_lobby(_lob, Machine(1).update(_lob))
+    check("✅还有一段没做 → 照常进商店（别提前收工）",
+          _a2 is not None and getattr(_a2, "is_tap", False), str(_a2))
+    _sf3 = ALL["shop"](_sctx)
+    _sf3.cfg = dict(_sf3.cfg or {})
+    _sf3.cfg["buy_free_pack"] = False                  # 这段用户关了
+    _sf3.setup()
+    _sf3.state.update(bought=True, arena_done=True)
+    _a3 = _sf3.on_lobby(_lob, Machine(1).update(_lob))
+    check("⛔关掉的那段不算没做完（否则永远收不了工）",
+          _a3 is not None and not getattr(_a3, "is_tap", False), str(_a3))
+
+    # ── ⛔⛔战术大赛商店不许只靠弱 cls 认页（08-11 live：tab 已高亮但
+    #    `战术大赛商店已选择` conf 仅 0.116 ⇒ 页面判不成 arena_shop，整条支线静默失效）
+    _shelf = O(B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.749, cy=0.794),
+               B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.866, cy=0.793),
+               B(V.ENERGY_DRINK_LOW, conf=0.98, cx=0.779, cy=0.682),
+               B(V.ENERGY_DRINK_MID, conf=0.98, cx=0.896, cy=0.685))
+    check("⛔tab cls 弱到检不出时，靠货架大赛币价签仍认得出 arena_shop",
+          classify(_shelf).page == "arena_shop", classify(_shelf).page)
+    _tabonly = O(B(V.ARENA_SHOP_TAB_SEL, conf=0.95, cx=0.067, cy=0.396))
+    check("✅tab 选中态检得出时也照样认（两条判据是「或」）",
+          classify(_tabonly).page == "arena_shop", classify(_tabonly).page)
+    # 别误伤：信用点商店的价签是 `信用点`，不该被认成大赛商店
+    _credit = O(B(V.SHOP_TAB_CREDIT_SEL, conf=0.98, cx=0.050, cy=0.195),
+                B(V.SHOP_SELECT_ALL, conf=0.97, cx=0.931, cy=0.122),
+                B(V.CREDIT, conf=0.97, cx=0.749, cy=0.445),
+                B(V.CREDIT, conf=0.97, cx=0.866, cy=0.446))
+    check("⛔信用点商店不许被误判成战术大赛商店",
+          classify(_credit).page == "shop", classify(_credit).page)
+
+    # ── ⛔⛔配置乱码必须拒绝写盘（08-10 实伤：我把 profile.json 写乱了）──
+    #    乱码的 branches 永远匹配不上屏上 cls ⇒ 那条 flow **静默**选不中分支。
+    import os
+    import tempfile
+    from routing_v2.config.schema import save as _save
+    _tmp = os.path.join(tempfile.gettempdir(), "_v2_moji_test.json")
+    try:
+        # ⚠这串是**故意的乱码样本**（"教室"被当 latin-1 解出来的样子），
+        #   写成转义形式免得源码里再混进一个不可见控制字符。
+        _save({"bounty": {"branches": ["æ\x95▙å®¤"]}}, _tmp)
+        check("⛔乱码配置必须拒绝写盘", False, "居然写进去了")
+    except ValueError as e:
+        check("⛔乱码配置必须拒绝写盘", "乱码" in str(e), str(e)[:60])
+    try:
+        _save({"bounty": {"branches": ["教室", "高架公路"]},
+               "cafe": {"invite_targets": ["爱丽丝(战斗)"]}}, _tmp)
+        check("✅正常中文配置照常写盘（别误伤）", True)
+    except Exception as e:
+        check("✅正常中文配置照常写盘（别误伤）", False, str(e)[:80])
+    finally:
+        if os.path.exists(_tmp):
+            os.remove(_tmp)
+    check("MomoTalk 默认关", c["modules"]["momotalk"] is False)
+    check("回大厅兜底默认关", c["run"]["allow_home_escape"] is False)
+
+
+# ══ 6. 死判据 ══════════════════════════════════════════════════════
+def t_invariants():
+    """架构不变量 —— 扫源码，防"修一处没 grep 全仓同形"。"""
+    print("\n── 架构不变量 ───────────────────────────────")
+    import re
+    root = _ROOT / "routing_v2"
+    # ⛔返回键**只能有一个发起处**（nav.back_key）。它是唯一挡住"大厅按返回
+    #    弹退出游戏框"的地方；2026-08-08 我把闸写了两份、漏了第三处，
+    #    结果 runner 绕过闸在大厅连按 6 次，把游戏关掉了。
+    origins = []
+    for p in root.rglob("*.py"):
+        if p.name in ("device.py", "action.py") or "tests" in p.parts:
+            continue
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            s = line.strip()
+            if s.startswith("#") or '"""' in s:
+                continue
+            if re.search(r'keycode\s*=\s*["\']KEYCODE_BACK', s):
+                origins.append(f"{p.relative_to(root)}:{i}")
+    check("⛔返回键只有一个发起处（nav.back_key）", len(origins) == 1,
+          str(origins))
+
+    # ⛔OCR 只能从 read.py 发起（YOLO 主导、OCR 只读数字）
+    ocr = []
+    for p in root.rglob("*.py"):
+        if p.name == "read.py" or "tests" in p.parts:
+            continue
+        if "RapidOCR" in p.read_text(encoding="utf-8"):
+            ocr.append(str(p.relative_to(root)))
+    check("⛔OCR 只在 percept/read.py 里出现（不许进决策链）", not ocr, str(ocr))
+
+    # ⛔热路径不许 ADB 抓帧
+    grabs = []
+    for p in root.rglob("*.py"):
+        if p.name in ("device.py", "feed.py") or "tests" in p.parts:
+            continue
+        if "screencap" in p.read_text(encoding="utf-8"):
+            grabs.append(str(p.relative_to(root)))
+    check("⛔除 device/feed 外没有任何地方 ADB 抓帧", not grabs, str(grabs))
+
+    # ⛔⛔**滑动前不许改状态**（08-10 全仓抓到 5 处，含我当天自己写的一处）。
+    #    `swipes += 1` / `sig = 新指纹` / `done_rows = []` 写在 `return swipe(...)`
+    #    之前 = mutate-before-ack + 数意图不数事实：动作被闸吞掉、或 step 只是
+    #    看了一眼决策，计数照涨、防空转的基准也被污染 ⇒ 提前判「滑到底了」，
+    #    momotalk 那处更会把已聊过的行台账清空 ⇒ 重复点。
+    #    ⇒ 一律挂 `post=`（runner/cli 的 swipe 分支都会在真滑出去后执行它）。
+    bad = []
+    for p in (root / "flow").glob("*.py"):
+        lines = p.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if "return swipe(" not in line:
+                continue
+            # ⚠只看**同一条执行路径**上的语句：向上遇到别的 `return` 就停
+            #   （早退分支里的赋值跟这一发 swipe 无关，算它就是误报）。
+            for j in range(i - 1, max(-1, i - 6), -1):
+                s = lines[j].strip()
+                if s.startswith("#"):
+                    continue
+                if s.startswith("return") or s.startswith("raise"):
+                    break
+                if re.search(r"self\.state\[[^\]]+\]\s*(\+=|=)(?!=)", s):
+                    bad.append(f"{p.name}:{j+1} {s[:48]}")
+    check("⛔⛔滑动前不许改状态（计数/指纹/台账一律挂 post）", not bad,
+          " | ".join(bad))
+
+    # ⛔⛔**`任务开始` 只许出现在真的要打关卡的 flow 里**（08-10 差一步花 30 青辉石）。
+    #    实锤：`ArenaFlow.on_stage_popup` 写着
+    #      `find([TASK_START, SWEEP_START]) → tap("开始")`，
+    #    而战术大赛压根没有关卡弹窗 ⇒ event 收工停在活动关卡弹窗上、arena 接手，
+    #    一上来就点了「任务开始」，当时 AP=9 ⇒ 游戏弹「購買AP 單價💎30」，
+    #    全靠 money 闸 halt 才没成交。momotalk / mining 里也混着同一个键（已清）。
+    #    ⇒ 白名单：只有 sweep（悬赏/JFD）和 event（活动）会真的开关卡。
+    _STAGE_OK = {"sweep.py", "event.py"}
+    bad2 = []
+    for p in (root / "flow").glob("*.py"):
+        if p.name in _STAGE_OK:
+            continue
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            s = line.strip()
+            if s.startswith("#") or s.startswith('"'):
+                continue
+            if "V.TASK_START" in s:
+                bad2.append(f"{p.name}:{i}")
+    check("⛔⛔只有 sweep/event 可以引用 `任务开始`（别的 flow 点它 = 误打战斗吃 AP）",
+          not bad2, " | ".join(bad2))
+
+    # ⛔⛔flow 子类不许覆写 decide() —— 2026-08-08 悬赏 live 实锤:
+    #    TicketSweepFlow 自己写了按页派发, 把基类 **overlay→页面** 顺序整个
+    #    跳过 ⇒ 扫荡确认框开着时照样跑列表逻辑, 把对话框里的费用行票图标
+    #    当票数锚读出 0 → 伪报"票用完了"。
+    overrides = []
+    for p in (root / "flow").glob("*.py"):
+        if p.name == "base.py":
+            continue
+        for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if re.match(r"\s*def decide\s*\(", line):
+                overrides.append(f"flow/{p.name}:{i}")
+    check("⛔⛔flow 子类不许覆写 decide()（overlay 顺序会被跳过）",
+          not overrides, str(overrides))
+
+
+def t_vocab():
+    print("\n── cls 健康度 ───────────────────────────────")
+    from routing_v2.state.vocab import DEAD, require
+    check("战斗失败 已登记为死类", V.BATTLE_LOSE in DEAD)
+    try:
+        require(V.BATTLE_LOSE)
+        ok = False
+    except RuntimeError:
+        ok = True
+    check("⛔拿死类当唯一信号 → import 期就抛", ok)
+    require(V.BATTLE_LOSE, sole_signal=False)      # 当'或'成员：放行+警告
+    check("死类当'或'成员 → 放行", True)
+
+
+if __name__ == "__main__":
+    t_pages()
+    t_machine()
+    t_gate()
+    t_flows()
+    t_config()
+    t_invariants()
+    t_vocab()
+    print("\n" + "═" * 52)
+    if FAILS:
+        print(f"⛔ {len(FAILS)} 项没过:")
+        for f in FAILS:
+            print(f"   · {f}")
+        sys.exit(1)
+    print("✅ 全过")

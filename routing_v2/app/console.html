@@ -1,0 +1,519 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>routing_v2 控制台</title>
+<!--
+  routing_v2 控制台 —— 老 dashboard `agent` 页的替代品。
+
+  ⭐**全部配置项由 `/v2/schema` 自省生成**，这个文件里不写死任何 flow 名、
+     分支名、学院名、币种名。老页面把「高架公路/沙漠鐵道/教室」做成三个
+     硬编码 checkbox，换活动换版面就过期 —— 那正是 §A8/§A9 要根治的。
+  ⭐`dynamic` 字段的选项调 `/v2/scan/{name}` **进页扫 cls** 拿真实可选项。
+  ⛔`locked` 里的项只读展示：让人知道有这道闸，但改不动（`config.LOCKED`
+     在服务端强制覆盖，前端放开也没用，敞着只会误导）。
+  ⛔金钱人审 `money_ok` **每次运行单独勾，不落盘** —— 铁律：金钱步每天重审。
+
+  老页面砍掉的东西（都有理由，别"优化"回来）:
+    goal 自然语言指令 / DAILY_ROUTINE_TEMPLATE  —— LLM 时代遗留，状态机用不上
+    exploration_click 探索性点击               —— 与 §A1「认不出就什么都不做」冲突
+    dry_run                                    —— routing_v2 用 step_mode 逐帧门控
+    ap_purchase_limit / forbid_premium_currency —— 已 LOCKED，改了不生效
+-->
+<style>
+  :root{
+    --bg:#12151c; --card:#181c25; --card2:#1e2330; --line:#2a3040;
+    --fg:#dfe4ee; --muted:#8b93a7; --accent:#5aa9ff; --ok:#4ec97e;
+    --warn:#f0c05a; --bad:#ff6b6b; --gold:#ffc857;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  a{color:var(--accent)}
+  .wrap{display:grid;grid-template-columns:minmax(420px,1fr) minmax(440px,1fr);
+        gap:14px;padding:14px;height:100vh}
+  @media(max-width:1000px){.wrap{grid-template-columns:1fr;height:auto}}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+  .card h2{margin:0 0 10px;font-size:13px;letter-spacing:.4px;color:var(--accent);
+           font-weight:600;display:flex;align-items:center;gap:8px}
+  .card h2 .sub{color:var(--muted);font-weight:400;font-size:11px;letter-spacing:0}
+  button{background:var(--card2);color:var(--fg);border:1px solid var(--line);
+         border-radius:5px;padding:5px 11px;cursor:pointer;font-size:12px}
+  button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .primary{background:#1d4f8f;border-color:#2b6fc4}
+  .danger{background:#6e2626;border-color:#a03a3a}
+  .gold{background:#5d4a17;border-color:#8d7228}
+  input,select,textarea{background:#0f1219;color:var(--fg);border:1px solid var(--line);
+    border-radius:4px;padding:4px 7px;font-size:12px;font-family:inherit}
+  input[type=number]{width:78px}
+  input[type=checkbox]{accent-color:var(--accent)}
+  label{font-size:12px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .field{display:flex;gap:8px;align-items:flex-start;padding:5px 0;
+         border-bottom:1px solid #20252f}
+  .field:last-child{border-bottom:0}
+  .field>.k{flex:0 0 172px;color:var(--muted);font-size:12px;padding-top:3px}
+  .field>.v{flex:1;min-width:0}
+  .note{color:var(--muted);font-size:11px;margin-top:3px;line-height:1.45}
+  .note b{color:var(--warn);font-weight:600}
+  .pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;
+        border:1px solid var(--line)}
+  .pill.ok{color:var(--ok);border-color:#2f5f43}
+  .pill.bad{color:var(--bad);border-color:#6e3030}
+  .pill.warn{color:var(--warn);border-color:#6d5a26}
+  .pill.idle{color:var(--muted)}
+  .chip{display:inline-flex;align-items:center;gap:4px;background:var(--card2);
+        border:1px solid var(--line);border-radius:12px;padding:2px 9px;font-size:12px;
+        cursor:pointer;user-select:none}
+  .chip.on{border-color:var(--accent);color:var(--accent);background:#16263a}
+  .chip.locked{opacity:.55;cursor:not-allowed}
+  #log{background:#0c0f15;border:1px solid var(--line);border-radius:6px;
+       font:11px/1.5 var(--mono);padding:8px;height:300px;overflow:auto;
+       white-space:pre-wrap;word-break:break-all}
+  .ord{display:flex;flex-direction:column;gap:3px}
+  .ord .it{display:flex;align-items:center;gap:7px;background:var(--card2);
+           border:1px solid var(--line);border-radius:5px;padding:4px 8px;cursor:grab}
+  .ord .it.off{opacity:.42}
+  .ord .it.drag{border-color:var(--accent);opacity:.6}
+  .ord .it .nm{flex:1;font-size:12px}
+  .ord .it .ix{color:var(--muted);font-size:11px;font-family:var(--mono);width:16px}
+  #approve{border:2px solid var(--gold);background:#241e0c}
+  #approve.money{border-color:var(--bad);background:#2a1414}
+  .kv{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .maprow{display:flex;gap:6px;align-items:center;margin-bottom:4px}
+  .maprow input[type=text]{flex:1;min-width:0}
+  table.bal{border-collapse:collapse;font-family:var(--mono);font-size:11px;width:100%}
+  table.bal td{padding:2px 6px;border-bottom:1px solid #20252f}
+  table.bal td:last-child{text-align:right}
+  .warnbox{border:1px solid #6d5a26;background:#241e0c;border-radius:6px;
+           padding:8px;font-size:11px;color:var(--warn);line-height:1.5}
+</style>
+
+<div class="wrap">
+  <!-- ══ 左：配置 ═══════════════════════════════════════════════ -->
+  <div class="col">
+    <div class="card">
+      <h2>运行 <span class="sub" id="ver"></span>
+        <span style="flex:1"></span>
+        <span class="pill idle" id="stat">未连接</span></h2>
+      <div class="row" style="margin-bottom:8px">
+        <button class="primary" id="btn_run">▶ 开跑</button>
+        <button class="danger" id="btn_stop" disabled>■ 停</button>
+        <button id="btn_save">保存配置</button>
+        <button id="btn_probe" title="抓一帧看当前页面判成什么">🔍 探针</button>
+        <span style="flex:1"></span>
+        <label title="逐帧门控：每一发点击都要你放行">
+          <input type="checkbox" id="step_mode"> 逐帧门控</label>
+      </div>
+      <div class="warnbox">
+        <label style="display:flex;gap:7px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" id="money_ok" style="margin-top:2px">
+          <span><b>本次运行允许金钱步</b> —— 只对这一次有效、<b>不落盘</b>。
+          铁律：金钱步每天重新人审；bot 绝不花青辉石。不勾则所有 money 动作直接拒绝。</span>
+        </label>
+      </div>
+      <div id="probe" class="kv" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <h2>跑哪些 · 什么顺序 <span class="sub">拖动排序，点开关</span></h2>
+      <div class="ord" id="order"></div>
+      <div class="note" id="order_note"></div>
+    </div>
+
+    <div class="card">
+      <h2>配置 <span class="sub">由 /v2/schema 自省生成，不写死</span></h2>
+      <div id="form"></div>
+    </div>
+  </div>
+
+  <!-- ══ 右：人审 + 状态 + 日志 ═════════════════════════════════ -->
+  <div class="col">
+    <div class="card" id="approve" style="display:none">
+      <h2 id="approve_title">⏸ 等你放行</h2>
+      <div id="approve_body" class="kv"></div>
+      <div class="row" style="margin-top:9px">
+        <button class="primary" id="btn_yes">✓ 放行这一发</button>
+        <button class="danger" id="btn_no">✗ 拒绝</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>状态 <span class="sub" id="elapsed"></span></h2>
+      <div class="row kv" id="stats"></div>
+      <div id="reports" style="margin-top:8px"></div>
+      <table class="bal" id="bal" style="margin-top:8px"></table>
+    </div>
+
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <h2>日志
+        <span style="flex:1"></span>
+        <label class="sub"><input type="checkbox" id="follow" checked> 跟随</label>
+      </h2>
+      <div id="log" style="flex:1"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let SCHEMA = {}, LOCKED = [], CFG = {}, FLOWS = [], COMPOSITE = {}, RUNNING = false;
+
+const api = async (p, o) => {
+  const r = await fetch('/v2' + p, o);
+  if (!r.ok) throw new Error(await r.text().catch(() => r.status));
+  return r.json();
+};
+const get = (o, path) => path.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+const set = (o, path, v) => {
+  const ks = path.split('.');
+  let c = o;
+  ks.slice(0, -1).forEach(k => { if (typeof c[k] !== 'object' || c[k] === null) c[k] = {}; c = c[k]; });
+  c[ks.at(-1)] = v;
+};
+
+/* ══ 渲染器：一个 kind 一个，schema 里加字段前端自动跟 ══════════ */
+const R = {};
+
+R.toggle = (path, sc, val) => {
+  const b = document.createElement('input');
+  b.type = 'checkbox'; b.checked = !!val;
+  b.onchange = () => set(CFG, path, b.checked);
+  return b;
+};
+
+R.readonly = (path, sc, val) => {
+  const s = document.createElement('span');
+  s.className = 'pill warn';
+  s.textContent = String(val) + ' · 锁死';
+  s.title = 'config.LOCKED 在服务端强制覆盖，前端改了也不生效';
+  return s;
+};
+
+R.int = R.float = (path, sc, val) => {
+  const i = document.createElement('input');
+  i.type = 'number'; i.value = val ?? 0;
+  if (sc.min != null) i.min = sc.min;
+  if (sc.max != null) i.max = sc.max;
+  if (sc.kind === 'float') i.step = '0.1';
+  i.onchange = () => set(CFG, path, sc.kind === 'float' ? +i.value : Math.round(+i.value));
+  return i;
+};
+
+R.select = (path, sc, val) => {
+  const s = document.createElement('select');
+  (sc.options || []).forEach(o => {
+    const op = document.createElement('option');
+    op.value = String(o); op.textContent = String(o);
+    if (String(o) === String(val)) op.selected = true;
+    s.appendChild(op);
+  });
+  s.onchange = () => {
+    const raw = s.value;
+    const orig = (sc.options || []).find(o => String(o) === raw);
+    set(CFG, path, typeof orig === 'number' ? orig : raw);
+  };
+  return s;
+};
+
+R.text = (path, sc, val) => {
+  const i = document.createElement('input');
+  i.type = 'text'; i.value = val ?? ''; i.style.width = '100%';
+  i.onchange = () => set(CFG, path, i.value);
+  return i;
+};
+
+// list = 有序的自由文本列表（咖啡厅邀请 / 课程表目标 / 制造阶段）
+R.list = (path, sc, val) => {
+  const box = document.createElement('div');
+  const i = document.createElement('input');
+  i.type = 'text'; i.style.width = '100%';
+  i.value = (val || []).join(', ');
+  i.placeholder = '逗号分隔，顺序 = 优先级';
+  i.onchange = () => set(CFG, path,
+    i.value.split(/[,，]/).map(s => s.trim()).filter(Boolean));
+  box.appendChild(i);
+  return box;
+};
+
+// multi = 从固定 options 或 /v2/scan 动态取的多选
+R.multi = (path, sc, val) => {
+  const box = document.createElement('div');
+  const cur = Array.isArray(val) ? val.slice() : [];
+  const draw = opts => {
+    box.innerHTML = '';
+    const row = document.createElement('div');
+    row.className = 'row';
+    opts.forEach(o => {
+      const c = document.createElement('span');
+      c.className = 'chip' + (cur.some(x => String(x) === String(o)) ? ' on' : '');
+      c.textContent = String(o);
+      c.onclick = () => {
+        const at = cur.findIndex(x => String(x) === String(o));
+        if (at >= 0) cur.splice(at, 1); else cur.push(o);
+        set(CFG, path, cur.slice());
+        draw(opts);
+      };
+      row.appendChild(c);
+    });
+    box.appendChild(row);
+    if (sc.dynamic) box.appendChild(scanBtn(sc.dynamic, draw, cur));
+  };
+  draw(sc.options ? sc.options.slice() : cur.slice());
+  return box;
+};
+
+// ⭐map = {名字: 数值} —— 票配额 / AP 百分比 / 刷哪几关。用户点名要的那层
+R.map = (path, sc, val) => {
+  const box = document.createElement('div');
+  const cur = Object.assign({}, val || {});
+  const draw = (opts) => {
+    box.innerHTML = '';
+    const keys = Array.from(new Set([...Object.keys(cur), ...(opts || [])]));
+    if (!keys.length) {
+      const e = document.createElement('div');
+      e.className = 'note';
+      e.textContent = sc.dynamic ? '（先把游戏切到对应页面，再点下面的「扫」）' : '（空）';
+      box.appendChild(e);
+    }
+    keys.forEach(k => {
+      const r = document.createElement('div'); r.className = 'maprow';
+      const nm = document.createElement('input');
+      nm.type = 'text'; nm.value = k; nm.readOnly = true; nm.style.flex = '1';
+      const nu = document.createElement('input');
+      nu.type = 'number'; nu.min = 0; nu.value = cur[k] ?? 0;
+      nu.onchange = () => {
+        const n = Math.round(+nu.value) || 0;
+        if (n > 0) cur[k] = n; else delete cur[k];
+        set(CFG, path, Object.assign({}, cur));
+      };
+      const rm = document.createElement('button');
+      rm.textContent = '×'; rm.title = '移除';
+      rm.onclick = () => { delete cur[k]; set(CFG, path, Object.assign({}, cur)); draw(opts); };
+      r.append(nm, nu, rm);
+      box.appendChild(r);
+    });
+    if (sc.dynamic) box.appendChild(scanBtn(sc.dynamic, draw, null));
+    // ⛔schema 里标了 planned 的：flow 还没实现，填了也不会跑（registry.PLANNED）
+    if ((sc.planned || []).length) {
+      const w = document.createElement('div');
+      w.className = 'note';
+      w.innerHTML = '⛔<b>' + sc.planned.join(' / ') +
+        '</b> 这几条 flow 还没实现，填了不会跑';
+      box.appendChild(w);
+    }
+  };
+  draw(sc.options ? sc.options.slice() : null);
+  return box;
+};
+
+function scanBtn(name, draw, cur) {
+  const wrap = document.createElement('div');
+  wrap.style.marginTop = '4px';
+  const b = document.createElement('button');
+  b.textContent = '⟳ 进页扫 cls';
+  b.title = '把游戏切到对应页面再点 —— 选项从屏上真实检出，不写死清单';
+  const s = document.createElement('span');
+  s.className = 'note'; s.style.marginLeft = '7px';
+  b.onclick = async () => {
+    b.disabled = true; s.textContent = '扫描中…';
+    try {
+      const r = await api('/scan/' + name);
+      s.textContent = `页面=${r.page} · 检出 ${r.options.length} 个` +
+        (r.options.length ? '' : ' —— 是不是没切到那一页？');
+      draw(r.options);
+    } catch (e) { s.textContent = '⛔ ' + e.message; }
+    b.disabled = false;
+  };
+  wrap.append(b, s);
+  return wrap;
+}
+
+/* ══ 顺序 + 开关（合并成一个控件：老页面把它们拆成两处，很难对上）══ */
+function renderOrder() {
+  const box = $('order'); box.innerHTML = '';
+  const mods = CFG.modules || {};
+  const order = (CFG.order || []).slice();
+  // modules 里有、order 里没有的，补在后面（否则用户永远打不开它）
+  Object.keys(mods).forEach(k => { if (!order.includes(k)) order.push(k); });
+  order.forEach((name, i) => {
+    const it = document.createElement('div');
+    it.className = 'it' + (mods[name] ? '' : ' off');
+    it.draggable = true; it.dataset.name = name;
+    const ix = document.createElement('span'); ix.className = 'ix'; ix.textContent = i + 1;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = !!mods[name];
+    cb.onchange = () => { CFG.modules[name] = cb.checked; renderOrder(); };
+    const nm = document.createElement('span'); nm.className = 'nm';
+    nm.textContent = name + (COMPOSITE[name] ? ` (${COMPOSITE[name].join(' → ')})` : '');
+    if (!FLOWS.includes(name) && !COMPOSITE[name]) {
+      const p = document.createElement('span');
+      p.className = 'pill bad'; p.textContent = '未实现';
+      p.title = 'registry 里没有这条 flow，开着也不会跑';
+      nm.appendChild(document.createTextNode(' ')); nm.appendChild(p);
+    }
+    it.append(ix, cb, nm);
+    it.ondragstart = e => { it.classList.add('drag'); e.dataTransfer.setData('text', name); };
+    it.ondragend = () => it.classList.remove('drag');
+    it.ondragover = e => e.preventDefault();
+    it.ondrop = e => {
+      e.preventDefault();
+      const from = e.dataTransfer.getData('text');
+      if (!from || from === name) return;
+      const o = (CFG.order || []).filter(x => x !== from);
+      const at = o.indexOf(name);
+      o.splice(at < 0 ? o.length : at, 0, from);
+      CFG.order = o; renderOrder();
+    };
+    box.appendChild(it);
+  });
+  CFG.order = order;
+  const on = order.filter(n => mods[n]);
+  $('order_note').textContent = `启用 ${on.length} / ${order.length}：` + (on.join(' → ') || '（一个都没开）');
+}
+
+/* ══ 表单 ═══════════════════════════════════════════════════════ */
+function renderForm() {
+  const box = $('form'); box.innerHTML = '';
+  let group = '';
+  Object.entries(SCHEMA).forEach(([path, sc]) => {
+    if (sc.kind === 'toggle_group' || sc.kind === 'order') return;   // 上面那块已经管了
+    const g = path.split('.')[0];
+    if (g !== group) {
+      group = g;
+      const h = document.createElement('div');
+      h.style.cssText = 'margin:11px 0 3px;color:var(--accent);font-size:12px;font-weight:600';
+      h.textContent = g;
+      box.appendChild(h);
+    }
+    const f = document.createElement('div'); f.className = 'field';
+    const k = document.createElement('div'); k.className = 'k';
+    k.textContent = sc.label || path;
+    k.title = path;
+    const v = document.createElement('div'); v.className = 'v';
+    const locked = LOCKED.includes(path);
+    const kind = locked ? 'readonly' : (sc.kind || 'text');
+    const fn = R[kind] || R.text;
+    v.appendChild(fn(path, sc, get(CFG, path)));
+    if (sc.note) {
+      const n = document.createElement('div'); n.className = 'note';
+      n.innerHTML = sc.note.replace(/⛔([^。；]*)/g, '⛔<b>$1</b>');
+      v.appendChild(n);
+    }
+    f.append(k, v);
+    box.appendChild(f);
+  });
+}
+
+/* ══ 启动 / 轮询 ════════════════════════════════════════════════ */
+async function boot() {
+  try {
+    const s = await api('/schema');
+    SCHEMA = s.schema; LOCKED = s.locked || []; FLOWS = s.flows || [];
+    COMPOSITE = s.composite || {};
+    CFG = await api('/config');
+    $('step_mode').checked = !!get(CFG, 'run.step_mode');
+    $('ver').textContent = `${FLOWS.length} flows`;
+    renderOrder(); renderForm();
+    $('stat').textContent = '就绪'; $('stat').className = 'pill ok';
+  } catch (e) {
+    $('stat').textContent = '连不上 /v2'; $('stat').className = 'pill bad';
+    $('form').innerHTML = '<div class="note">⛔ ' + e.message +
+      '<br>起服务：<code>py -m uvicorn routing_v2.app.api:app --port 8788</code></div>';
+  }
+}
+
+let lastLog = 0;
+async function poll() {
+  try {
+    const st = await api('/status?tail=400');
+    RUNNING = st.running;
+    $('btn_run').disabled = RUNNING;
+    $('btn_stop').disabled = !RUNNING;
+    $('stat').textContent = RUNNING ? '运行中' : (st.halted || '空闲');
+    $('stat').className = 'pill ' + (RUNNING ? 'ok' : (st.halted ? 'bad' : 'idle'));
+    $('elapsed').textContent = st.elapsed_s ? st.elapsed_s + 's' : '';
+    $('stats').innerHTML =
+      `tick ${st.ticks} · tap ${st.taps}` + (st.halted ? ` · <span class="pill bad">${st.halted}</span>` : '');
+
+    const rep = $('reports'); rep.innerHTML = '';
+    (st.reports || []).forEach(r => {
+      const d = document.createElement('div');
+      d.className = 'kv';
+      const cls = /CLEAN/.test(r) ? 'ok' : /LEFTOVER|UNKNOWN/.test(r) ? 'warn' : 'idle';
+      d.innerHTML = `<span class="pill ${cls}">●</span> ` + r.replace(/</g, '&lt;');
+      rep.appendChild(d);
+    });
+
+    const bal = $('bal'); bal.innerHTML = '';
+    Object.entries(st.balances || {}).forEach(([k, v]) => {
+      const tr = bal.insertRow();
+      tr.insertCell().textContent = k;
+      tr.insertCell().textContent = v;
+    });
+
+    if (st.log && st.log.length !== lastLog) {
+      lastLog = st.log.length;
+      $('log').textContent = st.log.join('\n');
+      if ($('follow').checked) $('log').scrollTop = $('log').scrollHeight;
+    }
+
+    const p = st.pending, box = $('approve');
+    if (p) {
+      box.style.display = '';
+      box.className = 'card' + (p.money ? ' money' : '');
+      $('approve_title').textContent = p.money ? '⛔⛔ 金钱步 —— 要你亲自放行' : '⏸ 等你放行';
+      $('approve_body').innerHTML =
+        `<div style="font-size:13px;color:var(--fg);margin-bottom:5px">${(p.reason || '').replace(/</g, '&lt;')}</div>` +
+        `落点 (${(p.x ?? 0).toFixed(3)}, ${(p.y ?? 0).toFixed(3)}) · cls=${p.cls || '—'}` +
+        (p.money ? `<br><b style="color:var(--bad)">花钱: ${p.spend || '?'}</b>` : '');
+    } else box.style.display = 'none';
+  } catch (e) { /* 服务没起时静默重试 */ }
+}
+
+$('btn_run').onclick = async () => {
+  await api('/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config: CFG })
+  });
+  const flows = (CFG.order || []).filter(n => (CFG.modules || {})[n]);
+  await api('/run', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      flows, step_mode: $('step_mode').checked, money_ok: $('money_ok').checked
+    })
+  });
+};
+$('btn_stop').onclick = () => api('/stop', { method: 'POST' });
+$('btn_save').onclick = async () => {
+  set(CFG, 'run.step_mode', $('step_mode').checked);
+  const r = await api('/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config: CFG })
+  });
+  CFG = r.config; renderForm(); renderOrder();
+  $('stat').textContent = '已保存'; $('stat').className = 'pill ok';
+};
+$('btn_probe').onclick = async () => {
+  $('probe').textContent = '抓帧中…';
+  try {
+    const r = await api('/probe');
+    $('probe').innerHTML = `页面 <b style="color:var(--accent)">${r.page}</b>` +
+      (r.interrupt ? ` · 中断 <span class="pill warn">${r.interrupt}</span>` : '') +
+      ` · 帧龄 ${r.age_ms}ms<br>` +
+      r.boxes.slice(0, 14).map(b => `${b.conf.toFixed(2)} ${b.cls}`).join(' · ');
+  } catch (e) { $('probe').textContent = '⛔ ' + e.message; }
+};
+$('btn_yes').onclick = () => api('/approve', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ approve: true })
+});
+$('btn_no').onclick = () => api('/approve', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ approve: false })
+});
+
+boot();
+setInterval(poll, 700);
+</script>

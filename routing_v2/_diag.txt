@@ -1,0 +1,4 @@
+新建Machine喂5帧退出框: page=unknown int=None last_solid=unknown
+gate(last_solid=st.last_solid).ok = True
+gate(last_solid=lobby).ok    = False
+money.system_dialog(unknown) = None

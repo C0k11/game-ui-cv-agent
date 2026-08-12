@@ -1,0 +1,5 @@
+# 调试产物（probe/step 每次重生成）
+_probe.jpg
+_step_*.jpg
+config/profile.json
+__pycache__/
