@@ -97,8 +97,13 @@ class CampaignFlow(ExitMixin, Flow):
 
     # popup: 保证在「集中指挥」页签, 然后 任務開始
     def do_popup(self, obs, st):
-        if st.page == "grid_quest":
-            self.goto("grid", "进地图了")
+        # 进没进地图不能只等页面签名（2026-08-13 live: 2 章地图格子检出
+        #    断崖式掉到 0.77x1, `grid_quest` pred 不成立, page 落在 facility）。
+        #    **屏上有任何格子 = 已经在地图上**, 低阈直判。
+        if (st.page == "grid_quest"
+                or obs.has([V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_START],
+                           0.35)):
+            self.goto("grid", "进地图了（格子在屏上）")
             return wait("进相位 grid")
         # 页签两态: 未选中的 `集中指挥` 是绿底(495), 选中是 421。
         #    在「简易攻略」页签上点開始会走简化模式 -- 必须先切过来。
@@ -111,7 +116,13 @@ class CampaignFlow(ExitMixin, Flow):
             # 进关花 AP（非 premium）; 走格子地图的格子就是到达证据
             return tap_box(start, "任務開始（进关花 AP）",
                            expect=(V.GRID_CELL, V.GRID_CELL_OPEN))
-        if obs.has(V.TASK_START_GREY, 0.45) and self.hold("start_grey", 20):
+        # 灰的 任務開始 有两个语义: 弹窗上灰 = AP 不够; **部署屏上灰 = 还没
+        #    上队**（2026-08-13 live 误报实录: 人已经在地图上, 报了"AP不够"）。
+        #    只有弹窗页签还在场时才许下 AP 结论。
+        if (obs.has(V.TASK_START_GREY, 0.45)
+                and obs.has([V.TAB_COMMAND, V.TAB_COMMAND_SEL, V.TAB_GUIDE,
+                             V.TAB_GUIDE_SEL], 0.40)
+                and self.hold("start_grey", 20)):
             return self.finish(Outcome.BLOCKED,
                                "弹窗里 任務開始 是灰的（AP 不够？）-- 不硬点")
         return wait("等弹窗控件")
@@ -130,12 +141,22 @@ class CampaignFlow(ExitMixin, Flow):
             def _go():
                 self.goto("walk", "任務開始, 进回合了")
             return tap_box(start_btn, "任務開始（部署完成）", post=_go)
-        if obs.has(V.TASK_START_GREY, 0.45):
-            # 还没上队: 点起点格（黄 = 可部署）
-            sp = obs.find(V.GRID_START, 0.45)
+        if obs.has(V.TASK_START_GREY, 0.35):
+            # 还没上队: 点起点格（黄 = 可部署）。起点降到 0.35 -- 2 章地图
+            #    整族 conf 断崖（见下面那条 UNKNOWN 的理由）。
+            sp = obs.find(V.GRID_START, 0.35)
             if sp is not None:
                 return tap_box(sp, "点起点格上队", expect=(V.SORTIE,))
-            return wait("找起点格")
+            if self.hold("no_start_cell", 40):
+                # fail-closed 的**诚实版本**: 不是 AP、不是 bug, 是感知在这章
+                #    地图上不够用（2-5 实测: 起点 0 检出/格子 0.77x1/敌方 3 出 1
+                #    -- 训练素材全来自 1 章同一张图, [[grid_quest_baah]] 的债）。
+                #    这一轮采到的帧就是补这个洞的料。
+                return self.finish(
+                    Outcome.UNKNOWN,
+                    "部署屏上起点格检不出 -- 这章地图的走格子族泛化不足, "
+                    "已采帧待标注, 不瞎点")
+            return wait("找起点格（这章地图检出弱, 多看几帧）")
         return wait("等部署界面")
 
     # walk: 按 fight_plan 逐回合走
