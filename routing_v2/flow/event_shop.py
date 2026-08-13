@@ -197,10 +197,17 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         #    判据移植自 scripts/buy_event_shop.py 的 07-28 清仓实现:
         #    pass1 只吃 >=100 高价档、pass2 清低档 —— 单遍"取景内降序"不是
         #    全局降序，低档先花钱会让滚到后面的高价档落空）。
-        if self.shop_cfg.get("auto_buy", True) and buyable:
+        # **货架静止才许买**（2026-08-13 首跑实锤: 两发 tap 都打在滚动惯性
+        #    还没停的货架上，决策帧和落地时刻的按钮已错位，弹框根本没弹 --
+        #    幽灵点击家族）。判据 = 指纹连续 2 tick 没变。
+        sig_now = self._shelf_sig(obs)
+        shelf_still = (sig_now == self.state.get("sig_prev")
+                       and self.hold("shelf_still", 2))
+        self.state["sig_prev"] = sig_now     # 观测事实, decide 期可写
+        if self.shop_cfg.get("auto_buy", True) and buyable and shelf_still:
             want = self.shop_cfg.get("currencies") or []
             if not want or cur_name in want:
-                act = self._buy_visible(obs, cur_name, buyable, bal)
+                act = self._buy_visible(obs, cur_name, buyable, bal, sig_now)
                 if act is not None:
                     return act
 
@@ -242,17 +249,33 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
 
     on_shop = on_event_shop      # 万一被判成通用商店也照样处理
 
-    def _buy_visible(self, obs, cur_name, buyable, bal):
+    def _price_of(self, frame, b, pitch):
+        """单价 = 按钮上方深蓝带里的**右对齐**数字。
+
+        本期版面 2026-08-13 帧标定: det 框只框住購買二字, 数字一半在框右外;
+        07-28 那套「按钮上沿一条」窗口在这个皮上读到的是「可購買N次」黑条,
+        次数被当成单价 -- **价签窗口是随活动皮肤变的, 每期都要用实帧校准**。
+        窗口参数拿两张实帧对 [5,15,50,200]x2 真值网格扫出来(14/16, 失败向
+        =None 跳过)。单字符价("5")必须走 small_number 平铺 -- 识别引擎的
+        检测阶段拒绝孤立单字符(digit_ocr_small_number), 自带 5 票一致性。"""
+        bw = b.x2 - b.x1
+        bh = b.y2 - b.y1
+        r_edge = b.x2 + 1.3 * bw
+        if pitch is not None:                 # 别伸进右边邻卡(防幻影后缀)
+            r_edge = min(r_edge, b.cx + 0.45 * pitch)
+        return R.small_number(
+            frame, (b.x1 - 0.3 * bw, b.y1 - 1.2 * bh, r_edge, b.y1), inset=0.0)
+
+    def _buy_visible(self, obs, cur_name, buyable, bal, sig):
         """当前取景内: 读价 -> 家具行剔除 -> 单价降序买一件。None = 没有可买的。
 
-        判据全部来自 scripts/buy_event_shop.py（07-28 清仓实测标定）:
-          · 价格条紧贴按钮**上沿**一条（老码 4K: 上 95px / 下 8px，换算成
-            按钮高的 0.86 / 0.07 倍 —— 分辨率无关）。窗口再高就吃进
-            「可購買N次」黑条，次数会被当单价（07-15 实锤 95次 当 95）。
-          · **家具行判据**: 行内出现重复价 或 行内 max>1000。素材行是严格
-            递增四档，绝无重复价；价集/单价过滤挡不住 300 档家具，只有整行判。
-          · **数学闸**: 余额读不出就不买（fail-closed —— 活动币买错了这一期
-            补不回来）；单价 > 余额的位置直接不点，不许"点了才知道买不起"。
+        判据来自 scripts/buy_event_shop.py(07-28 清仓实测标定):
+          家具行判据: 行内出现重复价 或 行内 max>1000。素材行是严格递增
+            四档绝无重复价; 价集/单价过滤挡不住 300 档家具, 只有整行判。
+          数学闸: 余额读不出就不买(fail-closed -- 活动币买错了这一期补不
+            回来); 单价 > 余额的位置直接不点, 不许"点了才知道买不起"。
+        价格按**货架指纹**缓存 -- 首跑 OCR 1917 次/173s 就是每 tick 全货架
+          重读(慢 IO 挡热路径老病)。指纹没变 = 货架没变 = 价不用重读。
         """
         floor = self.state.get("buy_floor", 100)
         tries = self.state.setdefault("buy_tries", {})
@@ -260,26 +283,35 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
             return None                       # 安全帽
         bh_all = sorted(max(b.y2 - b.y1, 0.01) for b in buyable)
         bh = bh_all[len(bh_all) // 2]
-        # 行分组: cy 相差 < 1.2 倍按钮高 = 同一行（货架是网格布局）
+        xs = sorted(b.cx for b in buyable)
+        gaps = [b - a for a, b in zip(xs, xs[1:]) if b - a > 0.03]
+        pitch = min(gaps) if gaps else None   # 列距(取最小=相邻列)
+        # 行分组: cy 相差 < 1.2 倍按钮高 = 同一行(货架是网格布局)
         rows = []
         for b in sorted(buyable, key=lambda x: x.cy):
             if rows and abs(b.cy - rows[-1][-1].cy) < bh * 1.2:
                 rows[-1].append(b)
             else:
                 rows.append([b])
+        cache = self.state.setdefault("price_cache", {})
+        priced_all = cache.get(sig)
+        if priced_all is None:
+            priced_all = {}
+            for row in rows:
+                for b in row:
+                    priced_all[f"{b.cx:.2f},{b.cy:.2f}"] = self._price_of(
+                        obs.frame, b, pitch)
+            cache[sig] = priced_all
+            while len(cache) > 6:
+                cache.pop(next(iter(cache)))
         cands = []
         for row in rows:
-            priced = []
-            for b in row:
-                raw = R.digits(obs.frame,
-                               (b.x1, b.y1 - bh * 0.86, b.x2, b.y1 - bh * 0.07))
-                p = int(raw) if raw and raw.isdigit() else None
-                priced.append((p, b))
+            priced = [(priced_all.get(f"{b.cx:.2f},{b.cy:.2f}"), b) for b in row]
             vals = [p for p, _ in priced if p is not None]
             if vals and (len(vals) != len(set(vals)) or max(vals) > 1000):
                 if self.pending(f"furn{round(row[0].cy, 2)}"):
                     self.state[f"once:furn{round(row[0].cy, 2)}"] = True
-                    self.log(f"{cur_name}: 行价签 {sorted(vals)} = 家具行，整行跳过")
+                    self.log(f"{cur_name}: 行价签 {sorted(vals)} = 家具行, 整行跳过")
                 continue
             for p, b in priced:
                 if p is None or not (0 < p <= 1000):
