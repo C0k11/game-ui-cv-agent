@@ -404,9 +404,23 @@ class CampaignFlow(ExitMixin, Flow):
         # 我方回合, 发本回合的落子。绑格**只用 我方 身体框** -- 队伍箭头浮在
         #    头顶约 1.6 行高, 拿它绑格会把身后的格子认成所在格（探针实锤:
         #    箭头绑到灰起点, 而队伍明明站在下一格）。
-        unit = obs.find(V.GRID_ALLY, 0.30)
+        # 绑格锚定链: **箭头 -> 正下方最近的我方框 -> 该框正下方的格子**。
+        #    只用 我方 会中敌我单向混淆的枪（memory battle_side_confusion:
+        #    敌->我 22.5%; 本关实锤: 绑回灰起点因为某个敌方立绘被检成我方）;
+        #    只用箭头会把身后的格子认成所在格（箭头悬高不定, 0.5-1.6 行波动）。
+        #    箭头全场唯一属于我队 -> 拿它筛掉不在其正下方的假我方框。
+        arrow = obs.find(V.GRID_ARROW, 0.25)
+        allies = [b for b in obs.all(V.GRID_ALLY, 0.30)]
+        unit = None
+        if arrow is not None and allies:
+            under = [b for b in allies
+                     if b.cy > arrow.cy and abs(b.cx - arrow.cx) < 0.05]
+            if under:
+                unit = min(under, key=lambda b: b.cy - arrow.cy)
+        if unit is None and len(allies) == 1:
+            unit = allies[0]          # 只有一个我方框, 没有歧义
         if unit is None:
-            return wait("等 我方 检出（箭头不许当绑格锚）")
+            return wait("等 箭头+我方 同框（防敌我混淆的假我方框）")
         cs = grid.cells(obs, 0.35)
         stp = grid.steps(cs)
         if len(cs) < 2 or stp is None:
