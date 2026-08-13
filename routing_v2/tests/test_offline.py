@@ -1579,6 +1579,29 @@ def t_route():
           _cpc3.state.get("cycling") is not True
           and _cpc3.state["round_i"] == 0,
           f"cycling={_cpc3.state.get('cycling')} round_i={_cpc3.state['round_i']}")
+    # 位移证据时钟: 迷雾图敌方相位 HUD 闪没只有 1-2 帧, 3 帧判据抓不到
+    #    （08-13 H2-1 两轮实锤: 步走成了回合时钟没走）。单位相对起点地标的
+    #    向量是相机不变量, 位移一格量级 + 6s 内没等到 PHASE 闪 -> 判循环。
+    _cpd = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpd.goto("walk")
+    _cpd.state["answer"] = _cpc2.state["answer"]
+    _cpd.state.update(issued=True, cycling=False, pre_vec=(0.0, -0.15),
+                      dx_est=0.093, moved_frames=0)
+    _o_mv = O(B(V.PHASE_END, cx=0.92, cy=0.88),
+              B(V.GRID_START_GREY, cx=0.40, cy=0.55),
+              B(V.GRID_ARROW, cx=0.49, cy=0.35),
+              B(V.GRID_ALLY, cx=0.49, cy=0.40),
+              B(V.GRID_CELL, cx=0.49, cy=0.52))
+    for _ in range(2):
+        _cpd.decide(_o_mv, _SV(page="grid_quest", frames_in_page=8))
+    check("位移证据被观测到（相对起点移动一格量级, 连续两帧）",
+          _cpd.state.get("moved_t") is not None,
+          f"moved_t={_cpd.state.get('moved_t')} frames={_cpd.state.get('moved_frames')}")
+    _cpd.state["moved_t"] -= 7.0
+    _cpd.decide(_o_mv, _SV(page="grid_quest", frames_in_page=9))
+    check("PHASE 没闪但位移超时 -> 按位移判循环并推进回合",
+          _cpd.state["round_i"] == 1,
+          f"round_i={_cpd.state['round_i']} cycling={_cpd.state.get('cycling')}")
 
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后

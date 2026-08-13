@@ -89,7 +89,8 @@ class CampaignFlow(ExitMixin, Flow):
         #    连续 3 帧不见 PHASE 才算进循环 -- 单帧漏检不许当证据;
         #    overlay 在场不算(弹窗盖住 HUD 不是敌方回合)。
         if self.phase == "walk" and self.state.get("issued"):
-            if st.overlay or obs.has(V.CLOSE_X, 0.55):
+            covered = bool(st.overlay) or obs.has(V.CLOSE_X, 0.55)
+            if covered:
                 pass    # 弹窗盖住 HUD ≠ 相位循环（帮助/资讯面板都带叉叉）
             elif obs.has([V.PHASE_END, V.PHASE_AUTO_ON, V.PHASE_AUTO_OFF],
                          0.40):
@@ -100,6 +101,35 @@ class CampaignFlow(ExitMixin, Flow):
                 if n >= 3 and not self.state.get("cycling"):
                     self.state["cycling"] = True
                     self.log("PHASE 控件连续 3 帧不在 - 相位循环中（敌方回合/结算）")
+            # **位移证据**（第二路回合时钟, 08-13 H2-1 实锤需要）: 迷雾图上
+            #    敌方相位可能一个可见动作都没有, HUD 消失窗口只有 1-2 帧,
+            #    连续 3 帧判据抓不到 -> 时钟瞎。单位相对**起点地标**的向量是
+            #    相机不变量, 它移动了一格量级 = 这回合的落子已被游戏消费。
+            #    确认后先给 PHASE 闪没 6s 机会（正常图走原时钟）, 超时仍
+            #    没见闪 = 闪太快没抓到, 按位移推进。
+            pv = self.state.get("pre_vec")
+            if pv is not None and not covered and not self.state.get("cycling"):
+                sp = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
+                un = self._bind_unit(obs)
+                if sp is not None and un is not None:
+                    dvx, dvy = un.cx - sp.cx, un.cy - sp.cy
+                    dx0 = self.state.get("dx_est") or 0.09
+                    if ((dvx - pv[0]) ** 2 + (dvy - pv[1]) ** 2
+                            > (0.6 * dx0) ** 2):
+                        m = self.state.get("moved_frames", 0) + 1
+                        self.state["moved_frames"] = m
+                        if m >= 2 and not self.state.get("moved_t"):
+                            import time as _t
+                            self.state["moved_t"] = _t.time()
+                            self.log("位移证据: 队伍相对起点移动了一格量级")
+                    else:
+                        self.state["moved_frames"] = 0
+            if (self.state.get("moved_t") and not self.state.get("cycling")):
+                import time as _t
+                if (self.state.get("pe_absent", 0) >= 1
+                        or _t.time() - self.state["moved_t"] > 6.0):
+                    self.state["cycling"] = True
+                    self.log("按位移证据判相位循环（PHASE 闪没窗口太短没抓到）")
         if self.phase not in ("grid", "walk"):
             return
         acc = self.state.setdefault("cell_acc", [])
@@ -165,6 +195,20 @@ class CampaignFlow(ExitMixin, Flow):
         if needs.get("attrs") and self.once("attr_note"):
             self.log(f"答案推荐属性队 {'/'.join(needs['attrs'])}"
                      f"（blue=神秘 red=爆发 yellow=贯穿 purple=振动）, 打不过按这个配")
+        return None
+
+    # 绑当前队伍的身体框（observe 的位移证据和 do_walk 落子共用一份逻辑）:
+    #    箭头正下方最近的我方框; 箭头缺席时唯一的我方框（多框有歧义就 None）
+    def _bind_unit(self, obs):
+        arrow = obs.find(V.GRID_ARROW, 0.25)
+        allies = obs.all(V.GRID_ALLY, 0.30)
+        if arrow is not None and allies:
+            under = [b for b in allies
+                     if b.cy > arrow.cy and abs(b.cx - arrow.cx) < 0.05]
+            if under:
+                return min(under, key=lambda b: b.cy - arrow.cy)
+        if len(allies) == 1:
+            return allies[0]
         return None
 
     # enter
@@ -520,7 +564,8 @@ class CampaignFlow(ExitMixin, Flow):
                     and obs.has([V.TASK_START, V.TASK_START_GREY], 0.40)
                     and self.hold("redeploy", 6))):
             self.state.update(issued=False, cycling=False, start_box=None,
-                              pe_absent=0, bind_last=None)
+                              pe_absent=0, bind_last=None,
+                              pre_vec=None, moved_t=None, moved_frames=0)
             self.state["cell_acc"] = []
             self._wt_clear()
             self.goto("grid", f"回合 {self.state['round_i'] + 1} 前被要求重新部署"
@@ -566,7 +611,8 @@ class CampaignFlow(ExitMixin, Flow):
                 return wait("敌方回合/战斗中（PHASE 控件不在）")
             if self.state.get("cycling"):
                 self.state.update(issued=False, cycling=False,
-                                  pe_absent=0, bind_last=None)
+                                  pe_absent=0, bind_last=None,
+                                  pre_vec=None, moved_t=None, moved_frames=0)
                 self.state["round_i"] += 1
                 self.state.pop("hold:move_wait", None)
                 self._wt_clear()
@@ -598,16 +644,7 @@ class CampaignFlow(ExitMixin, Flow):
         #    敌->我 22.5%; 本关实锤: 绑回灰起点因为某个敌方立绘被检成我方）;
         #    只用箭头会把身后的格子认成所在格（箭头悬高不定, 0.5-1.6 行波动）。
         #    箭头全场唯一属于我队 -> 拿它筛掉不在其正下方的假我方框。
-        arrow = obs.find(V.GRID_ARROW, 0.25)
-        allies = [b for b in obs.all(V.GRID_ALLY, 0.30)]
-        unit = None
-        if arrow is not None and allies:
-            under = [b for b in allies
-                     if b.cy > arrow.cy and abs(b.cx - arrow.cx) < 0.05]
-            if under:
-                unit = min(under, key=lambda b: b.cy - arrow.cy)
-        if unit is None and len(allies) == 1:
-            unit = allies[0]          # 只有一个我方框, 没有歧义
+        unit = self._bind_unit(obs)
         if unit is None:
             if self._overdue("no_unit", 75):
                 return self.finish(Outcome.UNKNOWN,
@@ -672,9 +709,15 @@ class CampaignFlow(ExitMixin, Flow):
         opens = obs.all(V.GRID_CELL_OPEN, 0.30)
         marked = any((b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2
                      < (0.4 * dx) ** 2 for b in opens)
+        # 位移证据的基线: 落子时刻 单位相对起点地标 的向量（相机不变量）
+        self.state["dx_est"] = dx
+        sp_lm = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
+        pv = ((unit.cx - sp_lm.cx, unit.cy - sp_lm.cy)
+              if sp_lm is not None else None)
 
         def _issued():
-            self.state.update(issued=True, cycling=False, pe_absent=0)
+            self.state.update(issued=True, cycling=False, pe_absent=0,
+                              pre_vec=pv, moved_frames=0, moved_t=None)
             self._wt_clear()
         return tap_box(cell_box,
                        f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
