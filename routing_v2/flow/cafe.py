@@ -101,8 +101,17 @@ class CafeFlow(ExitMixin, Flow):
                            post=lambda: self.state.update(claimed=True))
 
         #  没得领  关掉挡路的弹窗（首进的角色说明弹窗）
+        # **邀请面板不是"挡路弹窗"**（2026-08-13 live，重复 11 次开-叉才邀请成功）:
+        #    t81 开邀请卷 -> t88 叉掉 -> t95 再开 -> t101 再叉 ... 直到 t223。
+        #    机制: 那一发带严格契约 `expect=(邀请键,)`，面板确实弹出来了、
+        #    `邀请键` 检出到 1-2 帧，契约**正常兑现**放行 —— 但**页面身份要
+        #    连续 3 帧才切**，此时 `st.page` 还是 `cafe`，`on_cafe` 继续跑，
+        #    这条分支就把自己刚开的面板叉掉了。
+        #    （`claim_panel` 早就为同一件事加过 `forbid=[邀请键]`，
+        #      而 cafe 自己这条分支没有 —— 修一处没 grep 全仓同形，第 N 次。）
+        #     屏上有邀请键 = 邀请面板开着，交给 `on_cafe_invite_list`，别叉。
         x = obs.find(V.CLOSE_X, 0.55)
-        if x is not None:
+        if x is not None and not obs.has(V.CAFE_INVITE, 0.40):
             return tap_box(x, "关掉挡路的弹窗（屏上没有可领的东西）")
 
         #  打开收益面板

@@ -1240,6 +1240,20 @@ def t_route():
     check("屏面干净时才滑左栏", _a2 is not None and _a2.kind == "swipe",
           f"{_a2 and _a2.kind}")
 
+    # 邀请面板不是"挡路弹窗"（2026-08-13 live: 开-叉重复 11 次）:
+    #   契约被「邀请键出现」正常兑现, 但页面身份要 3 帧才切, 那几帧 on_cafe
+    #   继续跑、把自己刚开的面板叉掉。
+    _cf = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _panel = O(B(V.CLOSE_X, cx=0.79, cy=0.16), B(V.CAFE_INVITE, cx=0.62, cy=0.40))
+    _a5 = _cf.on_cafe(_panel, _SV(page="cafe", frames_in_page=5))
+    check("邀请面板开着时不许叉掉（屏上有邀请键）",
+          _a5 is None or _a5.target_cls != V.CLOSE_X,
+          f"{_a5 and _a5.target_cls}")
+    _stray = O(B(V.CLOSE_X, cx=0.79, cy=0.16))
+    _a6 = _cf.on_cafe(_stray, _SV(page="cafe", frames_in_page=5))
+    check("真的挡路弹窗照常叉掉（别误伤）",
+          _a6 is not None and _a6.target_cls == V.CLOSE_X)
+
     # 绿勾归属必须 1:1 最近邻（2026-08-13 真帧量出来的）: 绿勾长在自己学生
     #   右上偏移约 (+0.028,-0.030), 而学生横向间距只有 0.057 —— 旧判据
     #   `|dx|<0.06` 比间距还大, 每个学生都能蹭到邻居的勾。实帧: 2 个绿勾
