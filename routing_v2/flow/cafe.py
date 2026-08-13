@@ -350,9 +350,13 @@ class CafeFlow(ExitMixin, Flow):
         if not self.cfg.get("headpat", True):
             return self.goto_and_wait(nxt, "配置关了摸头")
         if not self._in_cafe(obs):
-            if self.phase_ticks > 12:
+            # 要**连续** 40 tick 认不出才放弃（2026-08-13 live: 邀请完的
+            #    过场动画期主视图锚点全被盖住, 原来 12 tick 就跳走 --
+            #    优香刚被请进来, 头一次都没摸到。`hold` 是连续性计数,
+            #    中途认出一帧就归零, 不会把偶发漏检累加成放弃。）
+            if self.hold("hp_lost", 40):
                 return self.goto_and_wait(nxt, "不在咖啡厅主视图了")
-            return wait("等回到咖啡厅主视图")
+            return wait("等回到咖啡厅主视图（过场/动画中）")
         if self.state.get("pats", 0) >= MAX_PATS_PER_FLOOR:
             return self.goto_and_wait(nxt, "摸头到上限")
 
