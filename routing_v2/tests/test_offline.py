@@ -1275,6 +1275,26 @@ def t_route():
         _raised = True
     check("goto 到没声明的相位要当场报错（别默默走错路）", _raised)
 
+    # 真钱货架页: 关掉走人, **不停整轮**（2026-08-13 小号: 購買青輝石默认开在
+    #   「特別販售」, 整页 CAD 25.99/16.99, 而 414 只是没选中的页签标签）。
+    #   但双键确认框仍然要 halt —— 那才是成交前一刻。
+    from routing_v2.flow.interrupt import Interrupts as _IC
+    _ic = _IC(log=lambda m: None)
+    _cad = O(B(V.COMBO_PACK, cx=0.70, cy=0.36), B(V.CLOSE_X, cx=0.79, cy=0.28))
+    _a_c = _ic._on_money_popup(_cad)
+    check("真钱货架页关掉走人而不是停整轮",
+          _a_c is not None and _a_c.kind == "tap"
+          and _a_c.target_cls == V.CLOSE_X,
+          f"{_a_c and (_a_c.kind, _a_c.target_cls)}")
+    _dlg = O(B(V.COMBO_PACK, cx=0.70, cy=0.36), B(V.CLOSE_X, cx=0.79, cy=0.28),
+             B(V.CONFIRM, cx=0.58, cy=0.72), B(V.CANCEL, cx=0.42, cy=0.72))
+    _a_d = _ic._on_money_popup(_dlg)
+    check("双键确认框照常 halt（成交前一刻不许放行）",
+          _a_d is not None and _a_d.kind == "halt", f"{_a_d and _a_d.kind}")
+    _free = O(B(V.COMBO_PACK_SEL, cx=0.70, cy=0.36), B(V.FREE, cx=0.40, cy=0.60))
+    check("真組合包页仍然不停机（免費包这条链要走得通）",
+          _ic._on_money_popup(_free) is None)
+
     # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
     #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
     _sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))

@@ -83,6 +83,22 @@ class Interrupts:
             self._log("    組合包页（免費包入口）— 不停机，交给 flow 走，"
                       "花钱的每一下仍要过闸人审")
             return None
+        # 站在**購買青輝石页**上、但当前页签不是「組合包」——2026-08-13 小号实帧:
+        #    这一页默认开在「特別販售」，整页 CAD 25.99 / 16.99 的真钱货架，
+        #    而 `组合包未选择`(414) 只是旁边那个**没选中的页签标签**。
+        #    停整轮是**过度反应**: 我们知道自己是怎么进来的（shop 主动点了大厅
+        #    广告位），屏上就摆着叉叉，而**离开严格比站在真钱货架上更安全**。
+        #    halt 的本意是"意外撞上购买框, 停下来交人"，不是"关掉整天的日常"。
+        #     只放行**关闭**这一个动作；关不掉才 halt。
+        #    判据要排掉双键确认框（那种才是真·成交前一刻，必须停）。
+        if (obs.has(V.COMBO_PACK, money_rules.CONF)
+                and not (obs.has(V.CONFIRM, money_rules.CONF)
+                         and obs.has(V.CANCEL, money_rules.CONF))):
+            x = obs.find(V.CLOSE_X, 0.55)
+            if x is not None:
+                self._log("    購買青輝石页但页签不是組合包（真钱货架）— 关掉走人，"
+                          "不停整轮")
+                return tap_box(x, "真钱货架页 — 关掉离开（免費組合包这段跳过）")
         why = money_rules.purchase_context(obs) or "（判据已不成立）"
         return halt(f"{why} —— 立即停，交人逐帧审（青辉石只进不出）")
 
