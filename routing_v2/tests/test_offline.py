@@ -1275,6 +1275,40 @@ def t_route():
         _raised = True
     check("goto 到没声明的相位要当场报错（别默默走错路）", _raised)
 
+    # 领不到 != 领过了（用户 2026-08-13:「体力999了领不了咖啡厅收益了,
+    #   也没法辨别」）。原来"面板里没有可点的领取键"被写成 claimed=True,
+    #   收尾堂而皇之报「收益已领」—— 谎报。
+    _cf4 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf4.goto("earnings")
+    _grey = O(B(V.CLAIM_GREY, cx=0.62, cy=0.62))
+    _cf4.decide(_grey, _SV(page="cafe", frames_in_page=5))
+    check("领取键全灰时不许标 claimed", not _cf4.state.get("claimed"),
+          str(_cf4.state.get("claimed")))
+    check("领取键全灰时要标 earn_done 收敛（别开-关死循环）",
+          bool(_cf4.state.get("earn_done")))
+    # 竣工判据 = **黄点**（用户口述:「判断有没有活没干的可以靠黄点来判断」）
+    _cf4.goto("exit")
+    _cf4.state["pats"] = 3
+    _clean_scr = O(B(V.CAFE_MOVE_2F, cx=0.10, cy=0.14))
+    for _ in range(25):
+        _fin = _cf4.decide(_clean_scr, _SV(page="cafe", frames_in_page=30))
+    check("没领到收益就不许报 CLEAN", _cf4.outcome == "LEFTOVER",
+          f"{_cf4.outcome}")
+    _cf5 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf5.goto("exit")
+    _cf5.state.update(claimed=True, pats=3)
+    for _ in range(25):
+        _fin5 = _cf5.decide(_clean_scr, _SV(page="cafe", frames_in_page=30))
+    check("真领到了且无黄点才 CLEAN", _cf5.outcome == "CLEAN", f"{_cf5.outcome}")
+    _cf6 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf6.goto("exit")
+    _cf6.state.update(claimed=True, pats=3, backs=9)
+    _dotty = O(B(V.CAFE_MOVE_2F, cx=0.10, cy=0.14), B(V.DOT_YELLOW, cx=0.55, cy=0.70))
+    for _ in range(25):
+        _fin6 = _cf6.decide(_dotty, _SV(page="cafe", frames_in_page=30))
+    check("屏上还有黄点就是还有活 — 不许 CLEAN", _cf6.outcome == "LEFTOVER",
+          f"{_cf6.outcome}")
+
     # 绿勾归属必须 1:1 最近邻（2026-08-13 真帧量出来的）: 绿勾长在自己学生
     #   右上偏移约 (+0.028,-0.030), 而学生横向间距只有 0.057 —— 旧判据
     #   `|dx|<0.06` 比间距还大, 每个学生都能蹭到邻居的勾。实帧: 2 个绿勾

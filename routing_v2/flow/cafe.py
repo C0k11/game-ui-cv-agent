@@ -100,13 +100,27 @@ class CafeFlow(ExitMixin, Flow):
         "叉叉优先"会把它关掉而不是领（2026-08-08 逐帧当场抓到）。
         用户口述的"进来先点叉叉"指的是**首进的角色说明弹窗** -- 那种弹窗上
         没有领取键。所以判据是「**有领取键就领，没有才关**」。
+
+        `claimed` 和 `earn_done` 是**两件事**（2026-08-13 用户报「体力 999 了
+           领不了咖啡厅收益了，也没法辨别」后拆开的）:
+             · `claimed`   = 真的点到了**可点的**领取键 = 钱到手了（事实）
+             · `earn_done` = 这一步不用再试了（收敛用）
+           原来两者共用一个 flag，于是"面板里没有可点的领取键"被写成
+           `claimed=True`，收尾报告堂而皇之地写「收益已领」-- **谎报**。
+           体力满 999 时收益就是领不动，这条路径当场就会踩到。
         """
         claim = obs.find(V.CLAIM_ACTIVE, 0.45)
         if claim is not None:
             return tap_box(claim, f"领取（{claim.cls}）", counter="claims",
-                           post=lambda: self.state.update(claimed=True))
-        if self.state["claimed"]:
-            return self.goto_and_wait("invite", "收益已领")
+                           post=lambda: self.state.update(claimed=True,
+                                                          earn_done=True))
+        if self.state.get("earn_done"):
+            return self.goto_and_wait("invite", "收益这一步处理完了")
+        # 面板开着但领取键是灰的 = 领不了。**不许当成领过了。**
+        if obs.has(V.CLAIM_DONE, 0.45):
+            self.state.update(earn_done=True,
+                              earn_why="收益领取键是灰的（体力满了领不动？）")
+            return self.goto_and_wait("invite", "收益领不了")
         # 挡路的弹窗（首进的角色说明）-- 相位机下这里不会再误伤邀请面板:
         #    邀请面板是 `invite` 相位的事，那个相位里根本不跑这条分支。
         x = obs.find(V.CLOSE_X, 0.55)
@@ -118,9 +132,8 @@ class CafeFlow(ExitMixin, Flow):
             #    这里**不能**写 `expect=(领取键,)` -- 收益为 0 时面板里压根没有
             #    可点的领取键，严格契约会一直不兑现、把整条链按死。
             return tap_box(earn, "打开咖啡厅收益面板")
-        # 收益图标都没有，且已经在咖啡厅里稳了一会 = 这一版没有收益可领
         if self.phase_ticks > 30:
-            self.state["claimed"] = True
+            self.state.update(earn_done=True, earn_why="屏上找不到收益入口")
             return self.goto_and_wait("invite", "屏上没有收益入口，跳过")
         return wait("找收益入口")
 
@@ -364,21 +377,27 @@ class CafeFlow(ExitMixin, Flow):
         pats, inv = self.state.get("pats", 0), self.state.get("invited", 0)
         if not self.hold("cafe_done", 20):
             return wait("确认一下真的没活了")
-        if not self.state.get("claimed"):
-            return self.finish(Outcome.LEFTOVER,
-                               f"摸头 {pats} 次，邀请 {inv} 次 - **收益没领到**")
+        # **黄点是竣工的权威判据**（用户 2026-08-13:「判断有没有活没干的
+        #    可以靠黄点来判断」）。有黄点 = 还有活，不管我自己以为干完了没有。
+        det = f"摸头 {pats} 次，邀请 {inv} 次"
+        det += "，收益已领" if self.state.get("claimed") else \
+               f"，**收益没领到**（{self.state.get('earn_why', '原因不明')}）"
         if dots:
-            return self.finish(Outcome.LEFTOVER,
-                               f"摸头 {pats} 次，邀请 {inv} 次，还有黄点没消掉")
-        return self.finish(Outcome.CLEAN,
-                           f"摸头 {pats} 次，邀请 {inv} 次，收益已领，无黄点")
+            return self.finish(Outcome.LEFTOVER, f"{det}；还有 {len(dots)} 个黄点没消掉")
+        if not self.state.get("claimed"):
+            return self.finish(Outcome.LEFTOVER, f"{det}；黄点已无")
+        return self.finish(Outcome.CLEAN, f"{det}，无黄点")
 
     # overlay 处理器: 相位之上，任何相位都可能弹（老代码的 global popup guards）
     def on_claim_panel(self, obs, st):
-        """收敛性：面板**全灰** = 收益已领过（比如 bot 中途重启过）。
-        不标 `claimed` 的话会 开面板->全灰->叉掉->又开面板 无限循环。"""
-        if obs.find(V.CLAIM_ACTIVE, 0.45) is None:
-            self.state["claimed"] = True
+        """收敛性：面板**全灰** = 这一步做不下去了（领过了，或体力满领不动）。
+        不标 `earn_done` 的话会 开面板->全灰->叉掉->又开面板 无限循环。
+        **但绝不标 `claimed`** -- 全灰不等于钱到手了（见 do_earnings 的说明）。"""
+        if (self.phase in ("earnings",)
+                and obs.find(V.CLAIM_ACTIVE, 0.45) is None
+                and not self.state.get("earn_done")):
+            self.state.update(earn_done=True,
+                              earn_why="收益面板里没有可点的领取键")
         # 邀请相位里这个面板就是邀请列表，别让基类的"领完了叉掉"去关它。
         if self.phase in ("invite", "invite2") and obs.has(V.CAFE_INVITE, 0.40):
             return None

@@ -97,13 +97,23 @@ class ScheduleFlow(ExitMixin, Flow):
     # enter
     def do_enter(self, obs, st):
         if st.page == "lobby":
-            return nav.enter(obs, V.NAV_SCHEDULE, "课程表")
+            act = nav.enter(obs, V.NAV_SCHEDULE, "课程表")
+            if act is not None and act.kind == "tap":
+                # 计数挂 post = **tap 真发出去了才算点过**（被闸吞掉的那一发
+                #    不该消耗重试预算）。
+                act.post = lambda: self.bump("enter_taps")
+            return act
         if self._panel_open(obs) or obs.has(V.SCHED_ALL, 0.40):
             return self._go("roster", "已经在课程表里")
         if obs.cols(V.SCHOOL_AREAS, 0.40):
             return self._go("navigate", "落在区域选择页")
-        if self.phase_ticks > 60:
-            return self.goto_and_wait("exit", "进不去课程表")
+        # 别按 tick 数收工 —— 2026-08-13 live 实测: 进课程表要走两次加载，
+        #    转场帧全是 blank/unknown，`phase_ticks > 60` 在**还在加载**的时候
+        #    就把整条 flow 判死（当轮 schedule 一节课都没上，报 UNKNOWN）。
+        #    真正的失败判据是「**在大厅上点了入口却始终进不去**」——
+        #    数的是"点了几次没生效"这个事实，不是干等了几帧。
+        if self.state.get("enter_taps", 0) >= 4:
+            return self._go("exit", "点了 4 次课程表入口都没进去")
         return wait("等课程表加载")
 
     def _go(self, phase: str, why: str):
