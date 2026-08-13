@@ -52,10 +52,6 @@ class Entry:
                 "page": self.page, "flow": self.flow, "tag": self.tag}
 
 
-# 一次采样（8s）内余额最多能涨多少倍。超过 = 误读，复读一致也不收。
-#   领一次邮件/日常奖励顶多十几倍，50 倍以上没有合法来源。
-_MAX_GROW = 50
-
 
 class Ledger:
     def __init__(self, log=None, sample_every: float = 8.0):
@@ -164,21 +160,25 @@ class Ledger:
             #    20,176 被读成 200117 且跨 3 页稳定复现, 把换页复读都骗过 
             #    读大入账后正确值全被位数收缩闸拒收）。要连续两次读到**同一个**
             #    变多的值才收 —— 真实的位数增长(999910000)复读一致, 不受影响。
-            # **量级硬闸：复读一致也绕不过**（2026-08-13 live 实锤）。
-            #    这一轮抓到 `信用点 59,653 -> 59,653,863`：它先被"位数变多"
-            #    挂起，然后在**另一个页面**上复读到同一个值，于是被"复读一致"
-            #    放行，基线被污染成 5,965 万。
-            #    而本文件下面那段注释自己就写着「青辉石 20,176 被读成 200117
-            #    且跨 3 页稳定复现，**把换页复读都骗过**」—— 既然承认误读会
-            #    稳定复现，就不能再拿"复读一致"当放行条件。
-            #     加一条**不看复读**的量级判据：8 秒一次的采样里，余额涨
-            #      50 倍以上没有任何合法来源（领一次邮件最多十几倍）。
-            #      这条只拒收、不停机 —— 拒收的方向永远安全（基线不动）。
-            if prev is not None and prev > 0 and v > prev * _MAX_GROW:
-                self._log(f"[ledger] {cls} 读数 {v} 是基线 {prev} 的 "
-                          f"{v/prev:.0f} 倍 — 一次采样涨不了这么多，"
-                          f"**直接拒收**（复读一致也不放行）")
-                self._write(Entry(time.time(), cls, v, page, flow, "grow_absurd"))
+            # **基线自愈：旧值是新值的前缀 = 旧值被截断了**（2026-08-13 实锤，
+            #    而且是我先判反了一次的那条）。
+            #    live 抓到 `信用点 59,653 -> 59,653,863`，我第一反应是"读大"，
+            #    加了一道"涨 50 倍就拒收"的闸。**用户把那一帧贴出来才发现
+            #    屏上真值就是 59,653,863** —— 错的是**第一次读数**（截断少读
+            #    3 位），它成了基线，于是真值反而被当成读大嫌疑，
+            #    报告里凭空多出一笔 +59,594,210 的假变动。
+            #    那道量级闸方向完全反：真值恰好是截断基线的 1000 倍，会被永久拒收。
+            #     本文件上面那条原理直接给出正解:「OCR 只会截断，不会凭空多出
+            #      位数」。所以 `str(prev)` 是 `str(v)` 的**前缀**时，可疑的是
+            #      旧基线不是新读数  **静默采纳新值并修正基线，不记成变动**。
+            if (prev is not None and len(str(v)) > len(str(prev))
+                    and str(v).startswith(str(prev))):
+                self._log(f"[ledger] {cls} 基线 {prev} 是新读数 {v} 的前缀 — "
+                          f"**旧基线是截断值**，修正基线（不记成变动）")
+                self._write(Entry(time.time(), cls, v, page, flow, "baseline_fix"))
+                self.confirmed[cls] = v
+                self._maxdigits[cls] = max(self._maxdigits.get(cls, 0), len(str(v)))
+                self._grow_pending.pop(cls, None)
                 continue
             if prev is not None and len(str(v)) > len(str(prev)):
                 if self._grow_pending.get(cls) != v:
