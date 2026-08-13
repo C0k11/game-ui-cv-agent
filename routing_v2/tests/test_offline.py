@@ -1462,8 +1462,12 @@ def t_route():
         "teams": [{"name": "A", "attr": "any", "pos": "center"}],
         "rounds": [[{"team": "A", "do": "move", "dir": "right-down"}]],
         "needs": {"teams": 1, "portal": False, "exchange": False, "attrs": []}}
-    _act3 = _cp3.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
-    check("我方回合按答案点目标格心（cls 支撑的 tap）",
+    _act3 = None
+    for _ in range(3):      # 绑格两帧共识: 首帧 wait, 第二帧才许落子
+        _act3 = _cp3.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
+        if _act3 is not None and _act3.kind == "tap":
+            break
+    check("我方回合按答案点目标格心（绑格两帧共识后 tap）",
           _act3 is not None and _act3.kind == "tap"
           and abs(_act3.x - 0.429) < 0.02 and abs(_act3.y - 0.603) < 0.02,
           f"{_act3 and (_act3.kind, round(_act3.x,3), round(_act3.y,3))}")
@@ -1543,6 +1547,38 @@ def t_route():
           _a_h is not None and _a_h.kind == "tap"
           and _a_h.target_cls == V.ARROW_LEFT,
           f"{_a_h and (_a_h.kind, _a_h.target_cls)}")
+    # 相位循环是瞬时证据, observe() 粘住: PHASE 缺席 3 帧就算循环,
+    #    **页面身份抖成 unknown 也照样感知**（08-13 H2-1 live: 循环发生在
+    #    page 抖动的帧里, 旧版 do_walk 只在 grid_quest 页看 -> 时钟瞎掉）
+    _cpc2 = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpc2.goto("walk")
+    _cpc2.state["answer"] = {
+        "stage": "x", "type": "hard",
+        "teams": [{"name": "A", "attr": "any", "pos": "center"}],
+        "rounds": [[{"team": "A", "do": "move", "dir": "right-down"}],
+                   [{"team": "A", "do": "move", "dir": "right-down"}]],
+        "needs": {"teams": 1, "portal": False, "exchange": False, "attrs": []}}
+    _cpc2.state.update(issued=True, cycling=False)
+    _o_nope = O(B(V.GRID_CELL, cx=0.5, cy=0.5))      # 没有 PHASE 控件
+    for _ in range(3):
+        _cpc2.decide(_o_nope, _SV(page="unknown", frames_in_page=2))
+    check("PHASE 缺席 3 帧（页面抖成 unknown）也感知到循环",
+          _cpc2.state.get("cycling") is True,
+          f"cycling={_cpc2.state.get('cycling')} absent={_cpc2.state.get('pe_absent')}")
+    _cpc2.decide(_wo, _SV(page="grid_quest", frames_in_page=5))
+    check("PHASE 回来 -> 回合推进到 2",
+          _cpc2.state["round_i"] == 1, f"round_i={_cpc2.state['round_i']}")
+    # 反向: 单帧缺席不算循环（旧版单帧置位会造成假回合推进）
+    _cpc3 = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpc3.goto("walk")
+    _cpc3.state["answer"] = _cpc2.state["answer"]
+    _cpc3.state.update(issued=True, cycling=False)
+    _cpc3.decide(_o_nope, _SV(page="unknown", frames_in_page=2))
+    _cpc3.decide(_wo, _SV(page="grid_quest", frames_in_page=5))
+    check("单帧 PHASE 缺席不算循环, 不假推进回合",
+          _cpc3.state.get("cycling") is not True
+          and _cpc3.state["round_i"] == 0,
+          f"cycling={_cpc3.state.get('cycling')} round_i={_cpc3.state['round_i']}")
 
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后

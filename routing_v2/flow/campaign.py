@@ -80,6 +80,26 @@ class CampaignFlow(ExitMixin, Flow):
             elif self.state.get("battle_seen"):
                 self.state["battle_seen"] = False
                 self.state["battles"] = self.state.get("battles", 0) + 1
+        # **相位循环是瞬时证据, 必须在这里粘, 不能等页面身份**（08-13 H2-1
+        #    live 实锤: 第 1 步走成了、回合已进 2/4, 但敌方相位的 HUD 消失
+        #    窗口恰好撞上页面抖动(grid_quest<->unknown), do_walk 只在
+        #    page==grid_quest 才看 PHASE 控件 -> 循环发生在它没看的帧里 ->
+        #    时钟瞎掉, 拿着回合 1 的方向连发到 UNKNOWN。同 base.observe
+        #    docstring 里「战斗胜利出现在 page=unknown 帧」那条的复发。
+        #    连续 3 帧不见 PHASE 才算进循环 -- 单帧漏检不许当证据;
+        #    overlay 在场不算(弹窗盖住 HUD 不是敌方回合)。
+        if self.phase == "walk" and self.state.get("issued"):
+            if st.overlay:
+                pass
+            elif obs.has([V.PHASE_END, V.PHASE_AUTO_ON, V.PHASE_AUTO_OFF],
+                         0.40):
+                self.state["pe_absent"] = 0
+            else:
+                n = self.state.get("pe_absent", 0) + 1
+                self.state["pe_absent"] = n
+                if n >= 3 and not self.state.get("cycling"):
+                    self.state["cycling"] = True
+                    self.log("PHASE 控件连续 3 帧不在 - 相位循环中（敌方回合/结算）")
         if self.phase not in ("grid", "walk"):
             return
         acc = self.state.setdefault("cell_acc", [])
@@ -489,7 +509,8 @@ class CampaignFlow(ExitMixin, Flow):
                 or (not obs.has(V.PHASE_END, 0.40)
                     and obs.has([V.TASK_START, V.TASK_START_GREY], 0.40)
                     and self.hold("redeploy", 6))):
-            self.state.update(issued=False, cycling=False, start_box=None)
+            self.state.update(issued=False, cycling=False, start_box=None,
+                              pe_absent=0, bind_last=None)
             self.state["cell_acc"] = []
             self._wt_clear()
             self.goto("grid", f"回合 {self.state['round_i'] + 1} 前被要求重新部署"
@@ -518,7 +539,8 @@ class CampaignFlow(ExitMixin, Flow):
                            expect=(V.PHASE_AUTO_ON,))
         if self.state.get("issued"):
             if not pe:
-                self.state["cycling"] = True
+                # cycling 由 observe() 按连续 3 帧缺席判定（页面无关）,
+                #    这里不再单帧置位 -- 单帧漏检当循环会造成假回合推进
                 # 敌方回合几秒~几十秒, 敌方打我方会走上面的 battle 分支;
                 #    5 分钟不回来 = 相位时钟前提破了, 交人看
                 if self._overdue("cycle_back", 300):
@@ -526,7 +548,8 @@ class CampaignFlow(ExitMixin, Flow):
                                        "落子后 PHASE 控件消失超 300s 没回来 -- 交人看")
                 return wait("敌方回合/战斗中（PHASE 控件不在）")
             if self.state.get("cycling"):
-                self.state.update(issued=False, cycling=False)
+                self.state.update(issued=False, cycling=False,
+                                  pe_absent=0, bind_last=None)
                 self.state["round_i"] += 1
                 self.state.pop("hold:move_wait", None)
                 self._wt_clear()
@@ -592,6 +615,16 @@ class CampaignFlow(ExitMixin, Flow):
                                    "75s 内队伍绑不到格子 -- 交人看")
             return wait("队伍绑不到格子")
         self._wt_clear("no_bind")
+        # **绑格要连续两帧同格共识才许落子**（08-13 H2-1 live 实锤: 迷雾光照下
+        #    道具/敌方会闪检成 我方, 真我方恰好漏检的帧里「单我方框无歧义」
+        #    兜底信了独苗假框 -> cur 绑进雾区 -> right 解析到迷雾格连点三发）。
+        #    单帧是孤证 -- 假框闪一帧就消失, 连续两帧绑同一格基本只有真身。
+        last = self.state.get("bind_last")
+        self.state["bind_last"] = cur
+        if (last is None
+                or (cur[0] - last[0]) ** 2 + (cur[1] - last[1]) ** 2
+                > 0.03 ** 2):
+            return wait("绑格首帧, 等下一帧共识")
         moves = [m for m in plan[self.state["round_i"]]
                  if m.get("do") == "move"]
         if len(moves) != len(plan[self.state["round_i"]]) or len(moves) != 1:
@@ -624,7 +657,7 @@ class CampaignFlow(ExitMixin, Flow):
                      < (0.4 * dx) ** 2 for b in opens)
 
         def _issued():
-            self.state.update(issued=True, cycling=False)
+            self.state.update(issued=True, cycling=False, pe_absent=0)
             self._wt_clear()
         return tap_box(cell_box,
                        f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
