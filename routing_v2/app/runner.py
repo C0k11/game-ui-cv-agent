@@ -140,8 +140,23 @@ class Runner:
 
         self.feed = Feed(serial=self.device.serial, log=self.log)
         if not self.feed.start():
-            self.log("[boot] scrcpy 起不来")
-            return False
+            # **scrcpy 起不来先怀疑 adb 连接，别信它报的错**（2026-08-13 实锤）:
+            #    它报的是 `push ... : Read-only file system`，看起来像模拟器
+            #    文件系统坏了；实际 `adb disconnect + connect` 之后
+            #    `touch /data/local/tmp/x` 立刻 WRITE_OK —— 只是连接僵死。
+            #    这一级之前是缺的: `boot` 只在 `alive()` 为假时才走恢复阶梯，
+            #    而当时 `adb shell echo` 是通的、只有 push 失败，于是
+            #    Feed 自己那次"清掉挂死的 scrcpy server 再试"必然也失败
+            #    （它不重连 adb），整轮 boot 直接死掉。
+            self.log("[boot] scrcpy 起不来 — 先怀疑 adb 连接，走一次恢复阶梯再试")
+            if self.device.recover():
+                self.feed = Feed(serial=self.device.serial, log=self.log)
+                if not self.feed.start():
+                    self.log("[boot] adb 重连后 scrcpy 仍起不来")
+                    return False
+            else:
+                self.log("[boot] scrcpy 起不来，且 adb 恢复阶梯也没救回来")
+                return False
         # 必须用首帧朝向标定 tap 坐标空间（`wm size` 报的是竖屏面板，直接信
         #   会让 y 飞出屏幕 —— 08-08 新架构第一次真机单步就撞上）
         fr, _, _ = self.feed.wait_new(-1, timeout=6.0)

@@ -141,27 +141,66 @@ class Observation:
         return " | ".join(f"{b.cls}:{b.conf:.2f}" for b in top)
 
 
+_FONT = None
+
+
+def _draw_cjk(img, labels):
+    """用 PIL 把类名画上去（cv2 画不了中文）。画不了就原样返回，不拖垮主流程。"""
+    global _FONT
+    try:
+        import numpy as _np
+        from PIL import Image, ImageDraw, ImageFont
+        import cv2 as _cv
+        if _FONT is None:
+            import os
+            for fp in (r"C:\Windows\Fonts\msyh.ttc",
+                       r"C:\Windows\Fonts\simhei.ttf"):
+                if os.path.exists(fp):
+                    _FONT = ImageFont.truetype(fp, 30)
+                    break
+            if _FONT is None:
+                _FONT = ImageFont.load_default()
+        pil = Image.fromarray(_cv.cvtColor(img, _cv.COLOR_BGR2RGB))
+        d = ImageDraw.Draw(pil)
+        for x, y, text, hit in labels:
+            col = (255, 60, 60) if hit else (255, 235, 60)
+            box = d.textbbox((x, y), text, font=_FONT)
+            d.rectangle([box[0] - 3, box[1] - 2, box[2] + 3, box[3] + 2],
+                        fill=(0, 0, 0))
+            d.text((x, y), text, fill=col, font=_FONT)
+        return _cv.cvtColor(_np.array(pil), _cv.COLOR_RGB2BGR)
+    except Exception:
+        return img
+
+
 def annotate(obs: Observation, target: Optional[Box] = None,
              note: str = "", width: int = 1280):
     """画锁定框的调试图。逐帧门控时**必须看这个**，不是自己截图
-    （用户 2026-08-08: 「而且你也不看 yolo 锁定画面」）。"""
+    （用户 2026-08-08: 「而且你也不看 yolo 锁定画面」）。
+
+    ⛔ 类名必须用 PIL 画：`cv2.putText` **不支持中文**，画出来全是 `?????`。
+       这个函数的 docstring 从写下起就说"必须看这个"，而它画出来的图
+       **每一个类名都不可读** —— 等于这份调试图一直是废的。
+       memory 里同一个坑踩过一次（atlas 出图中文变问号，用户当场指出
+       「我都看不到 cls，全是问号」），当时只修了那个脚本，没回头修这里。
+    """
     import cv2
     if obs.frame is None:
         return None
     ann = obs.frame.copy()
     h, w = ann.shape[:2]
+    labels = []
     for b in obs.boxes:
         hit = target is not None and b is target
         cv2.rectangle(ann, (int(b.x1 * w), int(b.y1 * h)),
                       (int(b.x2 * w), int(b.y2 * h)),
                       (0, 0, 255) if hit else (0, 255, 0), 8 if hit else 3)
-        cv2.putText(ann, f"{b.cls} {b.conf:.2f}",
-                    (int(b.x1 * w), max(28, int(b.y1 * h) - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 3)
+        labels.append((int(b.x1 * w), max(4, int(b.y1 * h) - 34),
+                       f"{b.cls} {b.conf:.2f}", hit))
     if target is not None:
         cv2.drawMarker(ann, (int(target.cx * w), int(target.cy * h)),
                        (255, 0, 255), cv2.MARKER_CROSS, 110, 8)
     if note:
-        cv2.putText(ann, note, (24, 56), cv2.FONT_HERSHEY_SIMPLEX,
-                    1.6, (0, 255, 255), 5)
+        labels.append((24, 12, note, True))
+    ann = _draw_cjk(ann, labels)
     return cv2.resize(ann, (width, int(width * h / w)))
