@@ -1407,6 +1407,18 @@ def t_route():
     check("放弃过邀请就不再点邀请卷",
           _a_g is None or _a_g.target_cls != V.CAFE_TICKET,
           f"{_a_g and _a_g.target_cls}")
+    # 放弃时面板还开着 -> 必须先关面板, 不许直接换相位（live: goto 抢在叉叉
+    #   前面, 面板盖着屏, headpat/switch 整条尾巴全断）
+    _cf10 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf10.goto("invite")
+    _cf10.state["gaveup_f1"] = True
+    _a_x = _cf10.decide(O(B(V.CAFE_INVITE, cx=0.62, cy=0.40),
+                          B(V.CLOSE_X, cx=0.79, cy=0.16)),
+                        _SV(page="cafe_invite_list", frames_in_page=10))
+    check("放弃时面板开着要先叉掉, 不许带着面板换相位",
+          _a_x is not None and _a_x.target_cls == V.CLOSE_X
+          and _cf10.phase == "invite",
+          f"{_a_x and _a_x.target_cls} phase={_cf10.phase}")
     # 邀请列表滑动几何（用户 2026-08-13 口述）: 横坐标在头像列和按钮列**中间**
     #   的空白区（不许压在按钮列上误触）, 起点在列表垂直中心（不许从底 bound 起手）
     _cf9 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))

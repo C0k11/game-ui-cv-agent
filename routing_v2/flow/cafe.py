@@ -161,7 +161,17 @@ class CafeFlow(ExitMixin, Flow):
         #    -> 又去点邀请卷 -> 开-关无限循环。
         #    这是「负证据撤销」的同族: 退出条件写的是"这一帧没看见目标"，
         #      而"我已经找过一轮了"这个**事实**没人记。
+        # **面板还开着就先去关它, 不许直接换相位**（当天 live 二次实锤:
+        #    落账下一帧这里直接 goto, 叉叉那一步永远轮不到 -> 邀请面板
+        #    盖着屏 -> headpat 判"不在咖啡厅"跳过 -> switch 找不到换厅键
+        #    -> 摸头和 1 号厅整条尾巴全断）。
         if self.state.get(f"gaveup_f{fl}"):
+            if obs.has(V.CAFE_INVITE, 0.40):
+                x = obs.find(V.CLOSE_X, 0.55)
+                if x is not None:
+                    return tap_box(x, "放弃邀请 - 先把列表关掉再走",
+                                   expect_gone=(V.CAFE_INVITE,))
+                return wait("放弃邀请 - 等叉叉检出把面板关掉")
             return self.goto_and_wait(nxt, f"{fl} 号厅这一轮找不到邀请目标，不再开卷")
         if self.state.get(f"invited_f{fl}"):
             # `post` 只保证「**tap 指令发出去了**」，而邀请**要再点一次確認
