@@ -113,24 +113,11 @@ class CafeFlow(ExitMixin, Flow):
 
         #  摸头 —— **给足时间**（用户强调）。摸完一个要等动画走完再摸下一个，
         #    不然第二下会落在动画中途的空位上。
-        if self.cfg.get("headpat", True):
-            dwell = float(self.cfg.get("headpat_dwell_s", 2.0))
-            if time.time() - self.state["pat_ts"] < dwell:
-                return wait(f"摸头动画中（等 {dwell}s）")
-            emo = self._next_bubble(obs)
-            if emo is not None:
-                def _mark(e=emo):
-                    # 真点出去了才记「摸过」。写在 decide() 里的话，被闸吞掉的
-                    #    那个气泡会被记成已摸且永不重试（N5 同病）。
-                    self.state["pat_ts"] = time.time()
-                    self.state.setdefault("patted", []).append((e.cx, e.cy))
-                    self.state["patted"] = self.state["patted"][-HEADPAT_KEEP:]
-                return tap_box(emo, "摸头（落点在气泡右侧 = 学生身体）",
-                               dx=HEADPAT_DX, counter="pats", post=_mark)
-
-        #  邀请 —— **没配目标就不开列表**（邀请卷是消耗品，开了也只是空滑 8 次）
-        #    邀请卷是**每厅一张**（08-08 实测：1F 用掉后 2F 的还标着
-        #      「可使用」+黄点） 按厅记 flag，不是全局一次。
+        # **邀请必须排在摸头之前**（老代码 brain/skills/cafe.py 的子状态机就是
+        #    `enter -> earnings -> invite -> headpat -> switch -> headpat2 -> exit`）。
+        #    用户 2026-08-13:「应该是先点邀请卷，邀请完角色再一块摸头」——
+        #    顺序反了的后果: 邀请进来的学生**根本没机会被摸**（摸头那一轮已经
+        #    过去了）。实跑轨迹 t16/63/112/156 连摸 4 次，t203 才开邀请卷。
         if (self.cfg.get("invite_targets")
                 and not self.cfg.get("skip_invite", False)
                 and not self.state.get(f"invited_f{self.state['floor']}")):
@@ -163,6 +150,24 @@ class CafeFlow(ExitMixin, Flow):
         #   而 `_sync_floor` 校正出真实起点可能就是 2 号厅  那样 1 号厅永远不去。
         #   仍然**每个厅只主动去一次**（`visited`），之后的来回全交给  的黄点
         #     驱动，否则「去2F」和「回1F」会互相打乒乓（08-08 实测空转 3 个来回）。
+        if self.cfg.get("headpat", True):
+            dwell = float(self.cfg.get("headpat_dwell_s", 2.0))
+            if time.time() - self.state["pat_ts"] < dwell:
+                return wait(f"摸头动画中（等 {dwell}s）")
+            emo = self._next_bubble(obs)
+            if emo is not None:
+                def _mark(e=emo):
+                    # 真点出去了才记「摸过」。写在 decide() 里的话，被闸吞掉的
+                    #    那个气泡会被记成已摸且永不重试（N5 同病）。
+                    self.state["pat_ts"] = time.time()
+                    self.state.setdefault("patted", []).append((e.cx, e.cy))
+                    self.state["patted"] = self.state["patted"][-HEADPAT_KEEP:]
+                return tap_box(emo, "摸头（落点在气泡右侧 = 学生身体）",
+                               dx=HEADPAT_DX, counter="pats", post=_mark)
+
+        #  邀请 —— **没配目标就不开列表**（邀请卷是消耗品，开了也只是空滑 8 次）
+        #    邀请卷是**每厅一张**（08-08 实测：1F 用掉后 2F 的还标着
+        #      「可使用」+黄点） 按厅记 flag，不是全局一次。
         floors = self.cfg.get("floors", [1, 2])
         cur = self.state.get("floor", 1)
         vis = set(self.state.setdefault("visited_floors", []))

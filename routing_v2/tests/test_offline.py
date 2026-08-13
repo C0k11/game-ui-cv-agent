@@ -1276,10 +1276,52 @@ def t_route():
     _v3 = _g3.advance(_tap, _covered2, page_changed=False, retry_frames=25)
     check("目标消失但没冒出新 cls  按住, 不许点下一个学生",
           not _v3.ok, f"ok={_v3.ok}")
-    # 真开了面板 -> 必然带来新 cls（課程表開始）
+    # 真开了面板 -> 必然带来新 cls（課程表開始）。但**节拍闸先按住固定帧数**:
+    #   页面身份在同一个面板上会跳(facility <-> schedule_region), 而
+    #   `page_changed` 会作废契约 —— 所有兑现条件的修复都被那条绕过去。
+    #   所以在一切判定之前先无条件按住 _MIN_HOLD 帧。
+    from routing_v2.act.gate import _MIN_HOLD as _MH
     _opened = O(B("晴露营"), B("沙织"), B(V.SCHED_START))
-    _v4 = _g3.advance(_tap, _opened, page_changed=False, retry_frames=25)
-    check("面板真开了(冒出 課程表開始)  才放行", _v4.ok, _v4.why[:40])
+    _rel = None
+    for _i in range(1, 40):
+        _v4 = _g3.advance(_tap, _opened, page_changed=False, retry_frames=25)
+        if _v4.ok:
+            _rel = _i
+            break
+    check(f"面板开了也要先按住 {_MH} 帧的节拍再放行",
+          _rel is not None and _rel > 1, f"第 {_rel} 次尝试才放行")
+    # 连页面变化都绕不过节拍闸（这是抢拍能穿透所有闸的那条路）
+    _g4 = _G2(cfg())
+    _g4.arm(_tap, _before)
+    _v5 = _g4.advance(_tap, _covered2, page_changed=True, retry_frames=25)
+    check("page_changed 也不能立刻放行（页面在同一面板上跳 != 上一发生效）",
+          not _v5.ok, f"ok={_v5.ok}")
+
+    # 严格契约不该被"页面跳了一下"作废（2026-08-13 抢拍的最后一条通路）:
+    #   点了咖啡厅邀请卷(expect=邀请键) -> 面板还没渲染 -> 页面跳一下 -> 契约作废
+    #   -> 下一帧「关掉挡路的弹窗」把自己刚开的面板叉掉。
+    _g5 = _G2(cfg())
+    _inv = _A2(kind="tap", x=0.5, y=0.5, target_cls=V.CAFE_TICKET,
+               reason="开邀请卷", expect=(V.CAFE_INVITE,))
+    _g5.arm(_inv, O(B(V.CAFE_TICKET)))
+    _rel2 = None
+    for _i in range(1, 30):                    # 页面每帧都在跳
+        _vv = _g5.advance(_inv, O(B(V.CLOSE_X)), page_changed=True,
+                          retry_frames=70)
+        if _vv.ok:
+            _rel2 = _i
+            break
+    check("严格契约: 页面反复跳也不放行（等的是邀请键，不是页面动没动）",
+          _rel2 is None, f"第 {_rel2} 次就放行了")
+    # 宽松契约（没写 expect）照旧被页面变化作废 —— 那条语义是对的
+    _g6 = _G2(cfg())
+    _loose = _A2(kind="tap", x=0.5, y=0.5, target_cls="某键", reason="r")
+    _g6.arm(_loose, O(B("某键")))
+    for _i in range(_MH + 2):
+        _vl = _g6.advance(_loose, O(B("别的")), page_changed=True, retry_frames=70)
+        if _vl.ok:
+            break
+    check("宽松契约: 页面变了就作废（保留原语义）", _vl.ok)
 
     # 契约超时要退回 once 标记（2026-08-13 用户现场诊断）: 按钮还在归位时
     #   点下去, tap 确实发出去了但游戏没收到 —— `once` 的旧契约是"发出去就算

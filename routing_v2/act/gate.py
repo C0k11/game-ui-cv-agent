@@ -74,6 +74,17 @@ _SPEND_TRIGGERS = frozenset({
 # 0.02 ≈ 4K 屏上 77px，比按钮小、比框抖动大。
 _SAME_TARGET = 0.02
 
+# **一发点击之后无条件按住这么多帧** —— 谁也绕不过的节拍闸。
+#   2026-08-13 用户第三次点名「一直有抢拍」。前面两轮修的都是契约的**兑现
+#   条件**（sig0 懒设、消失不等于生效），但契约还有一条会被瞬间作废的路:
+#   `page_changed` 直接 `self._pending = None`。而页面身份在同一个面板上
+#   **本来就会跳** —— 轨迹实证: 全體課程表面板上 `facility` <-> `schedule_region`
+#   反复切（`全体课程表` 这个 cls 一漏检就掉回 facility），每跳一次刚点下去的
+#   契约就没了，下一帧立刻放行下一个学生。所有兑现条件的修复都被这条绕过去。
+#    在**所有**判定之前先按住固定帧数。它不依赖任何 cls、不依赖页面身份，
+#     所以没有任何路径能绕开。4 帧约 0.6s，正好是"点下去到画面开始响应"的量级。
+_MIN_HOLD = 4
+
 
 def _sig(obs) -> Optional[frozenset]:
     """点下去**之前**屏上有哪些 cls。契约判"生效"时要拿它当基线。
@@ -491,9 +502,26 @@ class Gate:
         p = self._pending
         if p is None:
             return Verdict(True)
-        if page_changed:
+        p["n"] += 1
+        # **节拍闸：先按住，再谈兑现**（见 `_MIN_HOLD`）。放在所有判定之前，
+        #    包括 `page_changed` —— 页面在同一个面板上跳不代表上一发生效了。
+        if p["n"] <= _MIN_HOLD and not p.get("settle"):
+            self.stats["expect_hold"] += 1
+            return Verdict(False, "")
+        # **页面变化只作废宽松契约**（2026-08-13 用户第三次点名抢拍后收紧）。
+        #    严格契约（显式写了 `expect=` 的）语义是"我在等这个**具体的东西**
+        #    出现"——页面身份动了不等于它出现了。而页面身份**在同一个面板上
+        #    本来就会跳**（全體課程表面板 facility <-> schedule_region、
+        #    咖啡厅开邀请卷时 cafe <-> cafe_invite_list 的过渡窗口），
+        #    每跳一次就作废，等于严格契约形同虚设:
+        #      · 点了「咖啡厅邀请卷」(expect=邀请键) -> 面板还没渲染出来 ->
+        #        页面跳了一下 -> 契约作废 -> 下一帧 `关掉挡路的弹窗` 分支
+        #        **把自己刚开的邀请面板叉掉**（用户 2026-08-13 现场看到的）
+        #      · 点了学生(expect=課程表開始) -> 同理 -> 立刻点下一个学生
+        #     严格契约只认三件事: 等到了 / 超时 / 目标真的消失。页面跳不算。
+        if page_changed and p["loose"]:
             self._pending = None
-            return Verdict(True, f"↗ 页面已变 — 推进契约(`{p['cls']}`)作废")
+            return Verdict(True, f"页面已变 — 宽松契约(`{p['cls']}`)作废")
         hit = next((c for c in p["expect"] if obs.has(c, 0.40)), None)
         if hit is not None:
             self._pending = None
@@ -515,7 +543,6 @@ class Gate:
                 self._pending = None
                 return Verdict(True, f"↗ `{'/'.join(p['expect_gone'])}` 已消失"
                                      f" — `{p['cls']}` 这一发生效，推进")
-        p["n"] += 1
         # 滑动契约：没有 cls 可等，只能等画面停稳。按住 8 帧（≈0.4s）——
         #   够模型把停稳后的列表扫一遍，也就实现了「滑一次  扫一次」。
         if p.get("settle"):
