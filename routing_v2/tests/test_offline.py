@@ -883,9 +883,13 @@ def t_config():
                B(V.ENERGY_DRINK_MID, conf=0.98, cx=0.896, cy=0.685))
     check("tab cls 弱到检不出时，靠货架大赛币价签仍认得出 arena_shop",
           classify(_shelf).page == "arena_shop", classify(_shelf).page)
+    # 2026-08-13 live 推翻了这条原本的「或」语义: `战术大赛商店已选择` 认的是
+    #   **左栏里被选中的那一行**，不是「战术大赛」这一行 —— 帧证是 bot 点歪到
+    #   大決戰之后，那一行照样给 0.90~0.95，页面于是判成 arena_shop、handler
+    #   照常执行，站在大決戰商店里找能量饮料。**tab 选中态单独不能成立**。
     _tabonly = O(B(V.ARENA_SHOP_TAB_SEL, conf=0.95, cx=0.067, cy=0.396))
-    check("tab 选中态检得出时也照样认（两条判据是「或」）",
-          classify(_tabonly).page == "arena_shop", classify(_tabonly).page)
+    check("光有 tab 选中态、货架没大赛币价签  **不认**（它会在大決戰上误报）",
+          classify(_tabonly).page != "arena_shop", classify(_tabonly).page)
     # 别误伤：信用点商店的价签是 `信用点`，不该被认成大赛商店
     _credit = O(B(V.SHOP_TAB_CREDIT_SEL, conf=0.98, cx=0.050, cy=0.195),
                 B(V.SHOP_SELECT_ALL, conf=0.97, cx=0.931, cy=0.122),

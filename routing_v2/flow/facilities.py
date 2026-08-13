@@ -345,6 +345,22 @@ class ShopFlow(ExitMixin, Flow):
         #    `@(0.067,0.503)` 和 `@(0.067,0.442)`（左栏滚了、落点变了，
         #    连 dedup 都当成新目标放行）。 补上 pending 闸。
         if tab is not None and self.pending("arenatab"):
+            # **滑完要等左栏停稳再点**（2026-08-13 live 实锤: t30 滑、t40 点，
+            #    那一刻列表还在惯性滚，落点落到了上一行 —— 点到了**大決戰**）。
+            #    JIT 会把落点校到最新帧的框上，但"最新帧"本身还在动，校了也白校。
+            #     要求这个 tab 的 cy 连续几帧几乎不动才允许点。
+            prev = self.state.get("tab_cy")
+            self.state["tab_cy"] = tab.cy
+            if prev is None or abs(prev - tab.cy) > 0.006:
+                self.once_reset("tabsteady")
+                self.state["tab_steady"] = 0
+                return wait(f"「戰術大賽」tab 还在动"
+                            f"（cy {prev if prev is None else round(prev,3)}"
+                            f" -> {tab.cy:.3f}）— 等停稳再点")
+            n = int(self.state.get("tab_steady", 0)) + 1
+            self.state["tab_steady"] = n
+            if n < 4:
+                return wait(f"「戰術大賽」tab 稳定 {n}/4 帧")
             return tap_box(tab, "切到「戰術大賽」商店 tab", once="arenatab")
         if tab is not None:
             return wait("已经点过「戰術大賽」tab 了 — 等页面切过去，别重复点")

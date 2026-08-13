@@ -344,11 +344,22 @@ PAGES: List[Sig] = [
     #    `on_arena_shop` 根本不被调用，整条大赛商店支线静默失效。
     #     加一条**强得多的内容判据**：货架价签上的大赛币是**多实例** 0.97。
     #      信用点商店的价签是 `信用点`、活动商店是 `货币`，都不会误命中。
+    # 2026-08-13 live 实锤，判据从「或」收紧成「必须有货架证据」:
+    #    `战术大赛商店已选择` 认的是**左栏里被选中的那一行**，不是「战术大赛」
+    #    这一行 —— 帧证：大決戰 被选中时它照样给 0.90~0.95，而 `戰術大賽`
+    #    在它下面、未选中。于是 bot 点歪到大決戰之后，页面照样判成 arena_shop、
+    #    `on_arena_shop` 照常执行，站在**大決戰商店**里找能量饮料，找不到就退出，
+    #    全程自洽而全程是错的。
+    #     tab 的选中态降级成**加分项**，货架上的大赛币价签才是准入证据
+    #      （多实例 0.95+，且信用点/活动商店的价签是别的 cls，不会误命中）。
+    #    这条 cls 的标注问题另行补（见 cls 语义表）。
     Sig("arena_shop",
-        any_of=[V.ARENA_SHOP_TAB_SEL, V.ARENA_SHOP_CURRENCY], min_any=1,
+        need=[V.ARENA_SHOP_CURRENCY],
         where={V.ARENA_SHOP_CURRENCY: (0.40, 0.20, 1.0, 0.98)},   # 只认货架区的价签
         forbid=[V.SHOP_TAB_PYROXENE_SEL],
-        priority=46, note="战术大赛商店（tab 选中态 或 货架大赛币价签）"),
+        priority=46, note="战术大赛商店：**货架区**出现大赛币价签才算数。"
+             "tab 选中态 `战术大赛商店已选择` 不可信 —— 它认的是"
+             "「左栏选中的那一行」，大決戰被选中时也给 0.95"),
     Sig("shop",
         any_of=[V.SHOP_SELECT_ALL, V.SHOP_SELECT_ALL_GREY, V.SHOP_ALL_SELECTED,
                 V.SHOP_TAB_CREDIT_SEL, V.SHOP_BUY_SELECTED],
