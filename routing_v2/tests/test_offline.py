@@ -1412,7 +1412,8 @@ def t_route():
     _cp2.goto("walk")
     # 走格子帧(fixture 同前): 我方箭头在起点上方, 回合0 = right-up... 1-2 的
     #   plan 是 right-up/right, 但 fixture 地图没有 right-up 格 -> fail-closed
-    _wb = list(_gb) + [B(V.GRID_ARROW, conf=0.91, cx=0.384, cy=0.426),
+    # 绑格锚是 我方 身体框(在自己格心上方约0.9行), 箭头已被禁止当锚
+    _wb = list(_gb) + [B(V.GRID_ALLY, conf=0.90, cx=0.385, cy=0.377),
                        B(V.PHASE_END, conf=0.90, cx=0.92, cy=0.88)]
     _wo = Observation(boxes=_wb, seq=2, w=3840, h=2160)
     _act_w = None

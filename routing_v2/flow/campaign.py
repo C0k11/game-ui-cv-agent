@@ -342,85 +342,91 @@ class CampaignFlow(ExitMixin, Flow):
 
         plan = self._plan()
         if self.state["round_i"] >= len(plan):
-            # 多区域关（H1-2 = 区域0 三步 + 区域1 两步, 各自重新部署）:
-            #    这个区域的 plan 走完且后面还有区域 -> 等游戏切图, 部署证据
-            #    (任務開始/出击键)一出现就进下一区域重新上队。
             a = self.state.get("answer") or {"areas": []}
             if self.state["area_i"] + 1 < len(a["areas"]):
                 if obs.has([V.TASK_START, V.TASK_START_GREY, V.SORTIE], 0.35):
                     self.state.update(area_i=self.state["area_i"] + 1,
-                                      round_i=0, target=None, need_end=False)
+                                      round_i=0, issued=False)
                     self.goto("grid", f"进区域 {self.state['area_i'] + 1} 重新部署")
                     return wait("下一区域部署")
                 return wait("区域间过场, 等下一张图的部署界面")
             self.goto("result", "fight_plan 走完了")
             return wait("等结算")
 
-        cs = self._acc_cells(obs)
-        stp = grid.steps(cs)
-        if len(cs) < 2 or stp is None:
-            return wait("格子检出不足, 等一帧")
-        dx, dy = stp
-        unit = (obs.find(V.GRID_ARROW, 0.45) or obs.find(V.GRID_ALLY, 0.45)
-                or obs.find(V.GRID_START, 0.45))
-        if unit is None:
-            return wait("找不到我方队伍标记")
-        cur = grid.below(unit, cs, dx)
-        if cur is None:
-            return wait("队伍绑不到格子")
-
-        tgt = self.state.get("target")
-        if tgt is not None:
-            if (cur[0] - tgt[0]) ** 2 + (cur[1] - tgt[1]) ** 2 < (REACH * dx) ** 2:
-                self.state.update(target=None, need_end=True)
+        # **回合时钟 = 相位循环**（镜头无关的事实）: PHASE結束 消失(敌方回合/
+        #    战斗把 HUD 藏起来) 再出现 = 新回合开始。坐标相等那套到位判据
+        #    已废 -- 镜头一动(开局居中/回合间/战斗前后)它就假到位（05 轮实锤:
+        #    两回合"到位"在同一坐标, 队伍没真动）。
+        #    前提: PHASE 自动结束已勾（walk 入口保证, 下面）。
+        pe = obs.has(V.PHASE_END, 0.40)
+        if pe and obs.has(V.PHASE_AUTO_OFF, 0.45):
+            # 状态钮只在检出"关"态时才点（和战斗 AUTO 同款纪律）
+            ao = obs.find(V.PHASE_AUTO_OFF, 0.45)
+            return tap_box(ao, "勾上 PHASE 自动结束（回合时钟靠相位循环）",
+                           expect=(V.PHASE_AUTO_ON,))
+        if self.state.get("issued"):
+            if not pe:
+                self.state["cycling"] = True
+                return wait("敌方回合/战斗中（PHASE 控件不在）")
+            if self.state.get("cycling"):
+                self.state.update(issued=False, cycling=False)
                 self.state["round_i"] += 1
                 self.state.pop("hold:move_wait", None)
-                self.log(f"回合 {self.state['round_i']} 移动到位 {tgt}")
-                return wait("移动到位")
-            # 移动迟迟不发生 = 那一发落子没被游戏收下（动画期/相位没到）,
-            #    别无限等 -- 清掉 target 让本回合重发（数事实: 重发上限 3）
+                self.log(f"相位循环完成 - 进回合 {self.state['round_i'] + 1}")
+                return wait("新回合")
+            # 落子发了但相位一直没走 = 那一发没被游戏收下 -> 有界重发
             if self.hold("move_wait", 150):
                 n = self.bump(f"reissue:{self.state['round_i']}")
                 if n > 3:
                     return self.finish(Outcome.UNKNOWN,
                                        f"回合 {self.state['round_i'] + 1} 落子 3 次"
                                        f"都没走动 -- 交人看")
-                self.state["target"] = None
-                self.log(f"落子 150 tick 没走动 - 重发（第 {n} 次）")
-                return wait("重发本回合落子")
-            return wait(f"移动中 -> {tgt}")
+                self.state["issued"] = False
+                self.log(f"落子后相位 150 tick 没循环 - 重发（第 {n} 次）")
+            return wait("等相位循环")
+        if not pe:
+            return wait("等我方回合（PHASE 控件出现）")
 
-        if self.state.get("need_end"):
-            if obs.has(V.PHASE_AUTO_ON, 0.45):
-                self.state["need_end"] = False
-                return wait("PHASE 自动结束已勾, 不用点")
-            pe = obs.find(V.PHASE_END, 0.45)
-            if pe is not None:
-                return tap_box(pe, "PHASE結束（本回合走完了）",
-                               post=lambda: self.state.update(need_end=False))
-            return wait("等 PHASE 控件/敌方回合")
-
-        # 我方回合: 发本回合的移动。多队/exchange/portal 先不做, fail-closed。
+        # 我方回合, 发本回合的落子。绑格**只用 我方 身体框** -- 队伍箭头浮在
+        #    头顶约 1.6 行高, 拿它绑格会把身后的格子认成所在格（探针实锤:
+        #    箭头绑到灰起点, 而队伍明明站在下一格）。
+        unit = obs.find(V.GRID_ALLY, 0.30)
+        if unit is None:
+            return wait("等 我方 检出（箭头不许当绑格锚）")
+        cs = grid.cells(obs, 0.35)
+        stp = grid.steps(cs)
+        if len(cs) < 2 or stp is None:
+            return wait("格子检出不足, 等一帧")
+        dx, dy = stp
+        cur = grid.below(unit, cs, dx)
+        if cur is None:
+            return wait("队伍绑不到格子")
         moves = [m for m in plan[self.state["round_i"]]
                  if m.get("action") == "move"]
         if not moves:
             return self.finish(Outcome.UNKNOWN,
-                               f"回合 {self.state['round_i']} 里有不认识的动作"
+                               f"回合 {self.state['round_i'] + 1} 里有不认识的动作"
                                f"（exchange/portal 还没实现）-- 不瞎走")
         d = moves[0]["target"]
-        goal = grid.resolve(cur, d, cs, dx, dy)
+        # **目的格候选排除自己站的格**（05 轮实锤: 绑格偏一格时 resolve 会解析
+        #    回自己 -> 点自己=no-op -> 假到位）
+        goal = grid.resolve(cur, d,
+                            [c for c in cs
+                             if (c[0] - cur[0]) ** 2 + (c[1] - cur[1]) ** 2
+                             > (0.4 * dx) ** 2],
+                            dx, dy)
         if goal is None:
             if self.hold("no_goal", 20):
                 return self.finish(Outcome.UNKNOWN,
                                    f"方向 {d} 落不到任何检出的格子 -- 不瞎点"
                                    f"（cur={cur} dx={dx:.3f}）")
             return wait(f"方向 {d} 暂时解析不到格子, 再看几帧")
-        cell_box = min(obs.all(grid.CELL_CLS, 0.45),
+        cell_box = min(obs.all(grid.CELL_CLS, 0.35),
                        key=lambda b: (b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2)
         return tap_box(cell_box,
                        f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
                        f"({goal[0]:.3f},{goal[1]:.3f})",
-                       post=lambda g=goal: self.state.update(target=g))
+                       post=lambda: self.state.update(issued=True, cycling=False))
 
     # result: 等结算链把我们送回关卡列表
     def do_result(self, obs, st):
