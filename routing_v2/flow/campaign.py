@@ -276,11 +276,19 @@ class CampaignFlow(ExitMixin, Flow):
                 return tap_box(s, "编队确认: 出击（队伍上到起点格）",
                                expect=(V.TASK_START, V.TASK_START_GREY))
             return wait("编队页, 等出击键")
+        # **真开局的事实 = PHASE結束 出现**（任務開始被 HUD 替掉）。
+        #    2026-08-13 live 实锤: 任務開始那一发 tap 发出去了但游戏没收
+        #    (面板收起动画期), 而 post 挂在"发出"上 -> flow 已经在 walk 相位
+        #    "走"了, 屏上任務開始还亮着 -- 数意图不数事实在新代码里复发。
+        if obs.has(V.PHASE_END, 0.40) or obs.has(V.PHASE_AUTO_ON, 0.40):
+            self.goto("walk", "PHASE 控件出现 = 真开局了")
+            return wait("进回合")
         start_btn = obs.find(V.TASK_START, 0.45)
         if start_btn is not None:
-            def _go():
-                self.goto("walk", "任務開始, 进回合了")
-            return tap_box(start_btn, "任務開始（部署完成）", post=_go)
+            # 严格契约: 等 PHASE 控件出现才算开了; 没收下会超时自动重发
+            return tap_box(start_btn, "任務開始（部署完成）",
+                           expect=(V.PHASE_END, V.PHASE_AUTO_ON,
+                                   V.PHASE_AUTO_OFF))
         if obs.has(V.TASK_START_GREY, 0.35):
             # 还没上队: 点起点格（黄 = 可部署）。起点降到 0.35 -- 2 章地图
             #    整族 conf 断崖（见下面那条 UNKNOWN 的理由）。
@@ -366,8 +374,20 @@ class CampaignFlow(ExitMixin, Flow):
             if (cur[0] - tgt[0]) ** 2 + (cur[1] - tgt[1]) ** 2 < (REACH * dx) ** 2:
                 self.state.update(target=None, need_end=True)
                 self.state["round_i"] += 1
+                self.state.pop("hold:move_wait", None)
                 self.log(f"回合 {self.state['round_i']} 移动到位 {tgt}")
                 return wait("移动到位")
+            # 移动迟迟不发生 = 那一发落子没被游戏收下（动画期/相位没到）,
+            #    别无限等 -- 清掉 target 让本回合重发（数事实: 重发上限 3）
+            if self.hold("move_wait", 150):
+                n = self.bump(f"reissue:{self.state['round_i']}")
+                if n > 3:
+                    return self.finish(Outcome.UNKNOWN,
+                                       f"回合 {self.state['round_i'] + 1} 落子 3 次"
+                                       f"都没走动 -- 交人看")
+                self.state["target"] = None
+                self.log(f"落子 150 tick 没走动 - 重发（第 {n} 次）")
+                return wait("重发本回合落子")
             return wait(f"移动中 -> {tgt}")
 
         if self.state.get("need_end"):
