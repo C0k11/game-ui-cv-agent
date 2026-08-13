@@ -107,12 +107,14 @@ class CampaignFlow(ExitMixin, Flow):
                 return tap_box(nm, "切回 Normal 页签",
                                expect=(V.STAGE_NORMAL_SEL,))
             return wait("找 Normal 页签")
-        # 整列都锁着(Normal 没打完 Hard 就全锁) -- 别在这一页耗
+        # **Hard 永远 3 关; Hard 全锁 = Normal 没打完**（用户 2026-08-13 口述
+        #    规则）。全锁列直说, 别在这一页耗。
         if (not obs.has(V.STAGE_ENTER, 0.45)
                 and obs.has(V.STAGE_ENTER_LOCKED, 0.45)
                 and self.hold("all_locked", 20)):
             return self.finish(Outcome.BLOCKED,
-                               "这一列的入場全是锁的（Hard 要先通 Normal）")
+                               "这一列的入場全是锁的 -- Hard 全锁说明 Normal "
+                               "没打完, 先推 Normal")
         star0 = obs.find(V.STAR_0, 0.45)
         if star0 is not None:
             # **关号从屏上读**（用户拍板:「每一关都有入场以及对应的关号」）:
@@ -131,6 +133,12 @@ class CampaignFlow(ExitMixin, Flow):
                             Outcome.UNKNOWN,
                             f"关号读不出（OCR 原始串 {raw!r}）-- 不进错关")
                     return wait("读关号中")
+                # **两帧共识才算读到**（用户 2026-08-13:「进的太快又没读到
+                #    关卡号」）: 列表刚弹出/还在惯性滚时单帧 OCR 是孤证,
+                #    读歪一次就进错关。连续两帧同号才放行。
+                if self.state.get("stage_vote") != got:
+                    self.state["stage_vote"] = got
+                    return wait(f"读到 {got}, 等下一帧复读确认")
                 cfgd = self.state.get("stage")
                 if cfgd and cfgd != got:
                     return self.finish(
