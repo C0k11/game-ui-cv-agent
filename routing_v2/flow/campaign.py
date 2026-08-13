@@ -148,24 +148,60 @@ class CampaignFlow(ExitMixin, Flow):
             cfgd = self.state.get("stage")
             hard = on_hard
             cands = [b for b in stars if b.cls == V.STAR_0] if not cfgd else stars
-            got = None
+            reads = []
             hit = None
+            cache = self.state.setdefault("row_reads", {})
             for sb in cands:
-                h = max(sb.y2 - sb.y1, 0.015)
-                rect = (sb.x1 - 1.25 * h, sb.y1 - 4.2 * h,
-                        sb.x1 + 5.0 * h, sb.y1 + 0.4 * h)
-                got = self._parse_stage(R.digits(obs.frame, rect), hard)
+                key = round(sb.cy, 2)
+                if key in cache:
+                    got = cache[key]
+                else:
+                    h = max(sb.y2 - sb.y1, 0.015)
+                    rect = (sb.x1 - 1.25 * h, sb.y1 - 4.2 * h,
+                            sb.x1 + 5.0 * h, sb.y1 + 0.4 * h)
+                    got = self._parse_stage(R.digits(obs.frame, rect), hard)
+                    cache[key] = got
                 if got is None:
                     continue
+                reads.append(got)
                 if not cfgd or got == cfgd:
                     hit = (sb, got)
                     break
             if hit is None:
+                # 目标不在可视区 -> **先扫后滑**: 按读到的号判方向翻列表
+                #    （2026-08-13 live: 列表自动归位在最新进度, 配置 2-1 时
+                #    可视区只有 2-2..2-5 -- 目标在上面, 要往回翻）。
+                #    方向从**读到的数字**推, 几何从星标行距推, 零写死。
+                if cfgd and reads and self.state.get("scrolls", 0) < 6:
+                    def _k(t):
+                        a, b = t.lstrip("H").split("-")
+                        return (int(a), int(b))
+                    up = _k(cfgd) < min(_k(r) for r in reads)
+                    ys = sorted(b.cy for b in stars)
+                    rowh = 0.16
+                    if len(ys) >= 2:
+                        gaps = [b - a for a, b in zip(ys, ys[1:]) if b - a > 0.05]
+                        if gaps:
+                            rowh = sorted(gaps)[len(gaps) // 2]
+                    x = sorted(b.cx for b in stars)[len(stars) // 2]
+                    y0 = ys[len(ys) // 2]
+                    y1 = min(0.92, y0 + rowh * 2.5) if up else max(0.10, y0 - rowh * 2.5)
+                    n = self.state.get("scrolls", 0) + 1
+
+                    def _sc(k=n):
+                        self.state["scrolls"] = k
+                        self.state["row_reads"] = {}
+                        self.state.pop("stage_vote", None)
+                    from routing_v2.act.action import swipe as _swipe
+                    return _swipe(x, y0, x, y1,
+                                  f"目标 {cfgd} 不在可视区({'/'.join(reads)}) -- "
+                                  f"往{'前' if up else '后'}翻列表（第 {n} 次）",
+                                  post=_sc)
                 if self.hold("stage_ocr", 30):
                     return self.finish(
                         Outcome.UNKNOWN,
                         f"逐行读号没找到目标关（配置 {cfgd or '自动'}, "
-                        f"最后读到 {got}）-- 不进错关")
+                        f"读到 {reads or '无'}）-- 不进错关")
                 return wait("逐行读关号中")
             sb, got = hit
             # **两帧共识才算读到**（用户:「进的太快又没读到关卡号」）:
