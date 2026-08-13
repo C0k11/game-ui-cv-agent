@@ -152,6 +152,41 @@ class CafeFlow(ExitMixin, Flow):
     def do_invite2(self, obs, st):
         return self._invite(obs, st, nxt="headpat2")
 
+    def _verify_floor(self, obs) -> Optional[Action]:
+        """切厅后的**到位对账** —— 返回非 None 说明还没到位（继续等/回去重切）。
+
+        2026-08-13 大号实锤: 切 2 号店的契约 `expect=(移動至一號店,)` 被**转场
+           动画帧的误检**骗兑现（「弹入动画帧必然让判据成立」家族），人根本
+           没离开 1 号厅，「2 号厅」的邀请+摸头+反向 pan 全跑在 1 号厅身上，
+           黄点挂着还报了 CLEAN。`observe` 每帧都在按屏上按钮校正 `floor`，
+           但相位推进从不回头看它 —— 这里补上闭环: 干活相位开头核对楼层，
+           身份连续对不上就回 `switch` 重试（`switch_taps` 预算 2 次）。
+        """
+        exp = self.state.get("expect_floor")
+        if exp is None:
+            return None
+        to2 = obs.has(V.CAFE_MOVE_2F, 0.45)
+        to1 = obs.has(V.CAFE_MOVE_1F, 0.45)
+        cur = 1 if (to2 and not to1) else (2 if (to1 and not to2) else None)
+        if cur == exp:
+            self.state.pop("expect_floor", None)
+            self.state.pop("switch_bounced", None)   # 重试成了就不算账
+            return None
+        if cur is not None:
+            # 帧证据说人在错的厅。别一帧定罪 -- 转场里两个按钮会轮流闪。
+            if self.hold("floor_bounce", 30):
+                self.state.pop("expect_floor", None)
+                self.state["switch_bounced"] = True
+                return self.goto_and_wait(
+                    "switch", f"楼层身份仍是 {cur} 号厅（目标 {exp}）"
+                              f"— 切换被弹回，回去重切")
+            return wait(f"楼层身份是 {cur} 号厅但目标是 {exp} — 等转场尘埃落定")
+        if self.phase_ticks > 120:
+            self.state.pop("expect_floor", None)   # 按钮长期检不出: 别锁死
+            self.log("楼层按钮 120 tick 没检出 — 放弃楼层对账，按原计划走")
+            return None
+        return wait("等楼层按钮出现（转场中）")
+
     def _invite(self, obs, st, *, nxt: str):
         """开券 -> 列表里找目标 -> 点同行邀请键 -> 等确认框。
 
@@ -159,6 +194,9 @@ class CafeFlow(ExitMixin, Flow):
            互相抢的分支 -- 这正是老代码 `_invite_stage: 0=开卷 1=列表 2=确认`
            的等价物（`brain/skills/cafe.py:236`）。
         """
+        chk = self._verify_floor(obs)
+        if chk is not None:
+            return chk
         fl = self.state.get("floor", 1)
         if (not self.cfg.get("invite_targets")
                 or self.cfg.get("skip_invite", False)):
@@ -349,6 +387,9 @@ class CafeFlow(ExitMixin, Flow):
         """
         if not self.cfg.get("headpat", True):
             return self.goto_and_wait(nxt, "配置关了摸头")
+        chk = self._verify_floor(obs)
+        if chk is not None:
+            return chk
         if not self._in_cafe(obs):
             # 要**连续** 40 tick 认不出才放弃（2026-08-13 live: 邀请完的
             #    过场动画期主视图锚点全被盖住, 原来 12 tick 就跳走 --
@@ -440,8 +481,8 @@ class CafeFlow(ExitMixin, Flow):
 
         def _moved(d=dst):
             self.bump("switch_taps")
-            self.state.update(floor=d, pat_ts=0.0, dry=0, pans=0, patted=[],
-                              invite_scrolls=0)
+            self.state.update(floor=d, expect_floor=d, pat_ts=0.0, dry=0,
+                              pans=0, patted=[], invite_scrolls=0)
             self.state.pop("saw_invite_target", None)
             # **换完厅要去干活，不是回来再判一次"该去哪"**（2026-08-13 live）:
             #    原来点完就留在 switch 相位，下一帧 `observe` 把 floor 校正成 2、
@@ -470,8 +511,8 @@ class CafeFlow(ExitMixin, Flow):
 
                 def _mv(d=dst):
                     self.state["backs"] += 1
-                    self.state.update(floor=d, pat_ts=0.0, dry=0, pans=0,
-                                      patted=[])
+                    self.state.update(floor=d, expect_floor=d, pat_ts=0.0,
+                                      dry=0, pans=0, patted=[])
                 if not self.state.get("reswept"):
                     self.state["reswept"] = True
                     self.goto("headpat2", "黄点挂在移动按钮上，过去再扫一遍")
@@ -485,6 +526,12 @@ class CafeFlow(ExitMixin, Flow):
         det = f"摸头 {pats} 次，邀请 {inv} 次"
         det += "，收益已领" if self.state.get("claimed") else \
                f"，**收益没领到**（{self.state.get('earn_why', '原因不明')}）"
+        # 切厅弹回过 = 有一个厅整个没做 -- 就算此刻黄点检不出也不许报 CLEAN
+        #    （2026-08-13 大号实锤: 2 号店没进去过, 黄点在 0.94 挂着, 收尾帧
+        #      恰好没检出黄点  堂而皇之 CLEAN）。
+        if self.state.get("switch_bounced"):
+            return self.finish(Outcome.LEFTOVER,
+                               f"{det}；**换厅被弹回过，有厅没做干净**")
         if dots:
             return self.finish(Outcome.LEFTOVER, f"{det}；还有 {len(dots)} 个黄点没消掉")
         if not self.state.get("claimed"):
