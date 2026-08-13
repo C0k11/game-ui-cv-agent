@@ -52,6 +52,11 @@ class Entry:
                 "page": self.page, "flow": self.flow, "tag": self.tag}
 
 
+# 一次采样（8s）内余额最多能涨多少倍。超过 = 误读，复读一致也不收。
+#   领一次邮件/日常奖励顶多十几倍，50 倍以上没有合法来源。
+_MAX_GROW = 50
+
+
 class Ledger:
     def __init__(self, log=None, sample_every: float = 8.0):
         self._log = log or (lambda m: print(m, flush=True))
@@ -159,6 +164,22 @@ class Ledger:
             #    20,176 被读成 200117 且跨 3 页稳定复现, 把换页复读都骗过 
             #    读大入账后正确值全被位数收缩闸拒收）。要连续两次读到**同一个**
             #    变多的值才收 —— 真实的位数增长(999910000)复读一致, 不受影响。
+            # **量级硬闸：复读一致也绕不过**（2026-08-13 live 实锤）。
+            #    这一轮抓到 `信用点 59,653 -> 59,653,863`：它先被"位数变多"
+            #    挂起，然后在**另一个页面**上复读到同一个值，于是被"复读一致"
+            #    放行，基线被污染成 5,965 万。
+            #    而本文件下面那段注释自己就写着「青辉石 20,176 被读成 200117
+            #    且跨 3 页稳定复现，**把换页复读都骗过**」—— 既然承认误读会
+            #    稳定复现，就不能再拿"复读一致"当放行条件。
+            #     加一条**不看复读**的量级判据：8 秒一次的采样里，余额涨
+            #      50 倍以上没有任何合法来源（领一次邮件最多十几倍）。
+            #      这条只拒收、不停机 —— 拒收的方向永远安全（基线不动）。
+            if prev is not None and prev > 0 and v > prev * _MAX_GROW:
+                self._log(f"[ledger] {cls} 读数 {v} 是基线 {prev} 的 "
+                          f"{v/prev:.0f} 倍 — 一次采样涨不了这么多，"
+                          f"**直接拒收**（复读一致也不放行）")
+                self._write(Entry(time.time(), cls, v, page, flow, "grow_absurd"))
+                continue
             if prev is not None and len(str(v)) > len(str(prev)):
                 if self._grow_pending.get(cls) != v:
                     self._grow_pending[cls] = v

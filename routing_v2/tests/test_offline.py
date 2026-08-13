@@ -1175,6 +1175,19 @@ def t_route():
     check("没有'写了但从来没人读'的实例字段（死字段=注释漂移的温床）",
           not _dead, str([f"{a} @{_writes[a]}" for a in _dead]))
 
+    # 台账量级硬闸（2026-08-13 live 抓到）: 信用点 59,653 被读成 59,653,863,
+    #   先被"位数变多"挂起、又在**另一个页面**复读到同一个值, 于是被
+    #   "复读一致"放行 —— 而 ledger 自己的注释就写着误读会跨页稳定复现。
+    #   这道闸不看复读, 只看量级。
+    from routing_v2.act.ledger import _MAX_GROW as _MG
+    for _a, _b, _want in ((59653, 59653863, True),      # live 实际那一幕
+                          (59653, 1059653, False),      # 领邮件的合法涨幅
+                          (9999, 10000, False),         # 真实位数增长
+                          (21256, 211256, False),       # 交给复读闸管
+                          (240, 238, False)):           # 正常减少
+        check(f"台账量级闸 {_a}->{_b} {'拒收' if _want else '放行'}",
+              (_b > _a * _MG) == _want)
+
     # Gate 的逐次上下文必须能清(跨 flow 泄漏会误拦/误放)
     from routing_v2.act.gate import Gate as _G
     g = _G(cfg())
