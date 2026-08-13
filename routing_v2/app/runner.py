@@ -798,11 +798,34 @@ class Runner:
                 flow.finish(Outcome.UNKNOWN, f"⏱超过单 flow 上限 {cap/60:.0f} 分")
                 return
             fr, age, seq = self.feed.wait_new(self._last_seq, timeout=3.0)
-            if fr is None:
-                self.log("[run] 取不到帧（scrcpy 断了？）")
+            # **帧饥饿绝不静默**（2026-08-13 实锤: 流死后 seq 不再前进,
+            #    这里原来是无声 continue, runner 空转 25 分钟一行日志没有,
+            #    用户看着"卡住一直不动"）。同 seq/None 都算饿一口, 出声 +
+            #    升级: 40 口(~2min)重建 feed 一次, 再 40 口还饿 -> halt 交人。
+            if fr is None or seq == self._last_seq:
+                self._starve = getattr(self, "_starve", 0) + 1
+                if self._starve % 20 == 0:
+                    self.log(f"[run] 已 {self._starve} 次没等到新帧"
+                             f"（seq 停在 {self._last_seq}）")
+                if self._starve >= 40:
+                    self._starve = 0
+                    if not self._feed_healed:
+                        self._feed_healed = True
+                        self.log("[run] 帧饥饿 -- 重建 feed 自愈…")
+                        try:
+                            self.feed.stop()
+                        except Exception:
+                            pass
+                        self.feed = Feed(serial=self.device.serial, log=self.log)
+                        if self.feed.start():
+                            self.ctx.feed = self.feed
+                            self._last_seq = -1
+                            self.log("[run] feed 已重建，继续")
+                            continue
+                    self.stats.halted = "帧饥饿且 feed 自愈无效 -- 交人"
+                    return
                 continue
-            if seq == self._last_seq:
-                continue                        # 同一帧不重复决策 = 对齐 fps
+            self._starve = 0
             self._last_seq = seq
             self.stats.ticks += 1
 

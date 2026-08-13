@@ -361,6 +361,8 @@ class Feed:
 
     def _watchdog_loop(self):
         static_streak = 0
+        revive = 0                 # 靠 _is_static 续命的累计轮数(真帧才清零)
+        seen_seq = -1
         while not self._stopping:
             time.sleep(1.0)
             if (not self._stopping and self._client is not None
@@ -369,18 +371,34 @@ class Feed:
                 continue
             with self._lock:
                 age = time.time() - self._ts if self._ts else 0.0
+                seq_now = self._seq
+            if seq_now != seen_seq:
+                seen_seq = seq_now
+                revive = 0         # **只有真帧到达才算活** -- 数事实
             if age <= self._stale_restart_s or self._stopping:
                 static_streak = 0
-                continue
+                # 2026-08-13 尸体复活实锤: 部署屏(静止画面)上流死 ->
+                #    _is_static 每秒刷新 _ts -> age 永远小 -> 这里把
+                #    static_streak 清零 -> 120 轮强制验活**永远攒不满** ->
+                #    死流被无限续命, runner 静默饿死 25 分钟。
+                #    修 = 续命轮数 revive 单独记账, 只有 seq 前进(真解出新帧)
+                #    才清零; 续命满 40 次(每次隔 stale阈值~3-4s, 约 2.5min)
+                #    强制走重启分支。
+                if revive < 40:
+                    continue
+                self._log("    [feed] 靠静止判据续命 40 次但没有任何新帧"
+                          " -- 强制重启验活")
             # 逐帧门控时画面静止几十秒是常态（人在审帧）。静止判据每轮都用独立
             # ADB 链跟真屏比过，所以"无限续命"的窗口只存在于屏幕也没变的时候，
             # 那时重不重启对决策毫无影响。上限 120 轮（~2min）后强制验一次活性。
-            if static_streak < 120 and self._is_static():
+            elif static_streak < 120 and self._is_static():
                 static_streak += 1
+                revive += 1
                 with self._lock:
                     self._ts = time.time()
                 continue
             static_streak = 0
+            revive = 0
             self._log(f"    [feed] 断流{age:.1f}s  重启 scrcpy client")
             with self._restart_lock:
                 if self._stopping:
