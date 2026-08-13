@@ -84,6 +84,11 @@ _SAME_TARGET = 0.02
 #    在**所有**判定之前先按住固定帧数。它不依赖任何 cls、不依赖页面身份，
 #     所以没有任何路径能绕开。4 帧约 0.6s，正好是"点下去到画面开始响应"的量级。
 _MIN_HOLD = 4
+# 节拍闸的**墙钟半边**（用户 2026-08-13:「每步间隔增加0.5s来确保稳定性」）。
+#    帧数和墙钟必须**合取** -- 自主跑快时 4 帧才 0.2s（[[tick_vs_wallclock]]:
+#    tick 不是时间单位, 零等待上线后纯帧数判据全部缩水）。
+#    不是 sleep: 帧照抓、决策照做, 只是派发按住 -- 零等待铁律不破。
+_MIN_HOLD_S = 0.5
 
 
 def _sig(obs) -> Optional[frozenset]:
@@ -444,7 +449,7 @@ class Gate:
             if self._pending and not self._pending.get("settle"):
                 return
             self._pending = {"expect": (), "expect_gone": (), "cls": "(swipe)",
-                             "reason": act.reason, "n": 0, "loose": True,
+                             "reason": act.reason, "n": 0, "t0": time.time(), "loose": True,
                              "settle": True, "sig0": _sig(obs)}
             return
         if not act.is_tap:
@@ -452,7 +457,7 @@ class Gate:
         if act.expect or act.expect_gone:
             self._pending = {"expect": act.expect, "expect_gone": act.expect_gone,
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": False, "once": act.once_key,
+                             "n": 0, "t0": time.time(), "loose": False, "once": act.once_key,
                              "sig0": _sig(obs)}
             return
         # **点了"会弹确认框"的键  契约就是"确认框出现"**（2026-08-12）。
@@ -469,7 +474,7 @@ class Gate:
         if act.target_cls in _EXPECT_DIALOG_AFTER:
             self._pending = {"expect": (V.CONFIRM, V.CANCEL), "expect_gone": (),
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": False, "once": act.once_key,
+                             "n": 0, "t0": time.time(), "loose": False, "once": act.once_key,
                              "sig0": _sig(obs)}
             return
         # 默认契约：目标 cls 该消失。没有 cls 支撑的 tap_at 不设契约
@@ -477,7 +482,7 @@ class Gate:
         if act.target_cls and act.target_cls != "(no-cls)":
             self._pending = {"expect": (), "expect_gone": (act.target_cls,),
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": not act.money,
+                             "n": 0, "t0": time.time(), "loose": not act.money,
                              "sig0": _sig(obs)}
 
     def advance(self, act: Action, obs: Observation, *,
@@ -510,7 +515,9 @@ class Gate:
         #    **契约等的是游戏画面，时钟就得跟着帧走，不能跟着动作走。**
         # **节拍闸：先按住，再谈兑现**（见 `_MIN_HOLD`）。放在所有判定之前，
         #    包括 `page_changed` —— 页面在同一个面板上跳不代表上一发生效了。
-        if p["n"] <= _MIN_HOLD and not p.get("settle"):
+        if ((p["n"] <= _MIN_HOLD
+             or time.time() - p.get("t0", 0.0) < _MIN_HOLD_S)
+                and not p.get("settle")):
             self.stats["expect_hold"] += 1
             return Verdict(False, "")
         # **页面变化只作废宽松契约**（2026-08-13 用户第三次点名抢拍后收紧）。
@@ -551,7 +558,7 @@ class Gate:
         # 滑动契约：没有 cls 可等，只能等画面停稳。按住 8 帧（≈0.4s）——
         #   够模型把停稳后的列表扫一遍，也就实现了「滑一次  扫一次」。
         if p.get("settle"):
-            if p["n"] >= 8:
+            if p["n"] >= 8 and time.time() - p.get("t0", 0.0) >= _MIN_HOLD_S:
                 self._pending = None
                 return Verdict(True)
             self.stats["expect_hold"] += 1
@@ -609,7 +616,9 @@ class Gate:
         if p is None:
             return ""
         p["n"] += 1
-        if p["n"] <= _MIN_HOLD and not p.get("settle"):
+        if ((p["n"] <= _MIN_HOLD
+             or time.time() - p.get("t0", 0.0) < _MIN_HOLD_S)
+                and not p.get("settle")):
             return ""
         if page_changed and p["loose"]:
             self._pending = None
@@ -628,7 +637,7 @@ class Gate:
                           f" -- `{p['cls']}` 这一发生效，推进")
                 return ""
         if p.get("settle"):
-            if p["n"] >= 8:
+            if p["n"] >= 8 and time.time() - p.get("t0", 0.0) >= _MIN_HOLD_S:
                 self._pending = None
             return ""
         lim = max(1, retry_frames if not p["loose"]

@@ -231,10 +231,17 @@ class ShopFlow(ExitMixin, Flow):
                 # **广告位上没红点 = 免費包今天已经拿过了，别进去**（用户
                 #    2026-08-13:「购买清辉石已经不伴随红点了，说明没东西可以拿，
                 #    没必要去，这说明我们红黄点逻辑没生效」）。
-                #    红点归属按**距离**判（memory: 大厅红点归属要按距离判 ——
-                #    mail 那次红点其实是旁边九宫格的）。有点才进，没点跳过。
-                dot = any(abs(d.cx - p.cx) < 0.07 and abs(d.cy - p.cy) < 0.06
-                          for d in obs.all(V.DOT_RED, 0.40))
+                #    归属必须 **1:1 最近邻**，不能是容差（当天二次实锤: 广告位
+                #    自己的点没了，但**每日领奖的红点** dx=0.055 落在 0.07 容差
+                #    里被算成广告位的 -> 又进去空跑一趟。和课程表绿勾蹭邻居
+                #    同一个病: 每个点只认领离它最近的那个入口）。
+                _dots = obs.all(V.DOT_RED, 0.40)
+                _anchors = [b for b in obs.boxes if b.conf >= 0.50
+                            and b.cls not in (V.DOT_RED, V.DOT_YELLOW)]
+                dot = any(
+                    min(_anchors, default=None,
+                        key=lambda a: (a.cx - d.cx) ** 2 + (a.cy - d.cy) ** 2)
+                    is p for d in _dots)
                 if dot:
                     # 严格契约: 弹窗真开了（頁签/免費标出现）才许做下一件事。
                     #    没契约的话 on_lobby 下一帧就去点 `商店入口`，三发 tap
@@ -435,6 +442,14 @@ class ShopFlow(ExitMixin, Flow):
                     V.CLOSE_X], 0.40):
             return wait("屏上还压着对话框/奖励框 — 左栏被盖住，先不滑")
         tab = obs.find(V.ARENA_SHOP_TAB, 0.40)
+        # cls469 会整帧漏检, 但 tab 行上的**币图标**检得出（2026-08-13 实帧:
+        #    滑动其实成功了、「戰術大賽」行已露出, cls469 零检出而
+        #    `战术大赛商店货币 0.72` 就打在那一行上 —— 只认 469 就误判
+        #    "没入口"收工）。左栏区域(cx<0.22)里的币图标 = tab 行本身,
+        #    点它 = 点 tab。region 排掉顶栏余额(cy<0.10)和货架价签(cx>0.4)。
+        if tab is None:
+            tab = obs.find(V.ARENA_SHOP_CURRENCY, 0.40,
+                           region=(0.0, 0.10, 0.22, 0.98))
         # 2026-08-12 用户抓到「战术大赛商店点选项打架了，我才发现原来我们
         #    今天没买能量饮料」。根因之一：这里只写了 `once="arenatab"` 却
         #    **没配 `self.pending()` 检查** —— `once=` 的作用只是"tap 真发出去

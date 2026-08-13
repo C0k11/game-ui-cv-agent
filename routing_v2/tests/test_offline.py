@@ -1317,6 +1317,7 @@ def t_route():
     _dead = _tb(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12), "全部选择",
                 once="selectall", expect=(V.GREEN_CHECK,))
     _g.arm(_dead, O(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12)))
+    _g._pending["t0"] -= 9.0
     _empty = O(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12))
     _rb = ""
     for _ in range(80):          # 只喂帧, 一发动作都不派
@@ -1325,12 +1326,21 @@ def t_route():
           f"rb={_rb!r} pending={_g._pending is not None}")
     # 兑现路径: 绿勾出现 -> 契约当帧释放
     _g.arm(_dead, _empty)
+    _g._pending["t0"] -= 9.0
     _g.heartbeat(_empty, page_changed=False, retry_frames=70)
     for _ in range(5):
         _g.heartbeat(O(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
                        B(V.GREEN_CHECK, cx=0.52, cy=0.16)),
                      page_changed=False, retry_frames=70)
     check("绿勾一出现契约就兑现释放", _g._pending is None)
+    # 节拍闸的墙钟半边（用户: 每步间隔 0.5s 保稳定）: 帧数够了墙钟没到也不放
+    _g_w = _G(cfg(), log=lambda m: None)
+    _g_w.arm(_dead, _empty)
+    for _ in range(20):                    # 20 帧瞬间跑完, 墙钟 < 0.5s
+        _g_w.heartbeat(_empty, page_changed=False, retry_frames=70)
+        _v_w = _g_w.advance(_dead, _empty, page_changed=False, retry_frames=70)
+    check("帧数够了但 0.5s 墙钟没到 — 仍然按住（帧数与墙钟合取）",
+          not _v_w.ok, f"ok={_v_w.ok}")
 
     # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
     #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
@@ -1487,6 +1497,7 @@ def t_route():
     _before = O(B("留美"), B("晴露营"), B("沙织"))          # 全体课程表面板
     _tap = _A2(kind="tap", x=0.3, y=0.4, target_cls="留美", reason="进 留美 的房间")
     _g3.arm(_tap, _before)
+    _g3._pending["t0"] -= 9.0   # 测试跑得比墙钟快, 拨回去只测帧数半边
     check("arm 时就记下点之前的 cls 基线",
           _g3._pending.get("sig0") is not None)
     # 面板盖住 -> 目标消失, 但**没有任何新 cls** = 那一下没生效
@@ -1538,6 +1549,7 @@ def t_route():
     _g6 = _G2(cfg())
     _loose = _A2(kind="tap", x=0.5, y=0.5, target_cls="某键", reason="r")
     _g6.arm(_loose, O(B("某键")))
+    _g6._pending["t0"] -= 9.0
     for _i in range(_MH + 2):
         _g6.heartbeat(O(B("别的")), page_changed=True, retry_frames=70)
         _vl = _g6.advance(_loose, O(B("别的")), page_changed=True, retry_frames=70)
@@ -1555,6 +1567,7 @@ def t_route():
     _act = _A(kind="tap", x=0.5, y=0.5, target_cls="全部选择", reason="全部选择",
               once_key="selectall", expect=("选择购买",))
     _g.arm(_act)
+    _g._pending["t0"] -= 9.0
     check("严格契约记下了 once 标记", _g._pending.get("once") == "selectall")
     # 超时和退标记归 heartbeat（时钟跟帧走 —— flow 光等待时也必须能超时）
     _rb0 = ""
@@ -1569,6 +1582,7 @@ def t_route():
     _act2 = _A(kind="tap", x=0.5, y=0.5, target_cls="某个键", reason="r",
                once_key="k2")
     _g2.arm(_act2)
+    _g2._pending["t0"] -= 9.0
     _rb2 = ""
     for _i in range(200):
         _rb2 = _g2.heartbeat(O(B("某个键")), page_changed=False,
