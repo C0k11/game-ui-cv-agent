@@ -407,6 +407,26 @@ class Runner:
             self._tr(st, act, {"blocked": v.why[:120] or "(静默)",
                                "by": v.by, "halt": v.halt,
                                "stop_flow": v.stop_flow})
+            # **金钱步被人审拒绝 = 终态，不许重试**（2026-08-13 live 实锤）:
+            #    这一批没带 `--money-ok`，战术大赛商店的「選擇購買」被拒，
+            #    而 flow 每一帧只要看到那个键就原样再发一次 —— 轨迹里
+            #    **同一发被拦了 1408 次**，flow 空转到 tap 预算/超时。
+            #    人审的答案在一次 run 内是确定的（`--money-ok` 是命令行开关），
+            #      重试**不可能**改变结果，纯烧时间。
+            #     拒绝两次就把这条 flow 收成 BLOCKED，让它在报告里红着，
+            #      后面的 flow 照跑（一条支线没授权不该让今天剩下的活全不干）。
+            if v.needs_human and not v.halt and self._flow is not None:
+                k = f"moneyno:{act.target_cls}"
+                n = self._flow.state.get(k, 0) + 1
+                self._flow.state[k] = n
+                if n >= 2:
+                    self._flow.finish(
+                        Outcome.BLOCKED,
+                        f"金钱步未授权（`{act.target_cls}`）—— 本次没带 "
+                        f"--money-ok，重试改变不了结果，收工不空转")
+                    self._save(obs, tag="MONEYNO", target=act)
+                    self._stop_flow = True
+                    return True
             if v.halt:
                 self.stats.halted = v.why
                 self._save(obs, tag="MONEYSTOP", target=act)

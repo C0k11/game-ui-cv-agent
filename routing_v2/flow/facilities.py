@@ -317,6 +317,15 @@ class ShopFlow(ExitMixin, Flow):
             return tap_box(tab, "切到「戰術大賽」商店 tab", once="arenatab")
         if tab is not None:
             return wait("已经点过「戰術大賽」tab 了 — 等页面切过去，别重复点")
+        # **点过之后就绝不再滑**（2026-08-13 live 轨迹实锤）:
+        #    t588 滑第 1 次  t596 看到 tab 并点了  t600 **又滑了第 2 次**。
+        #    根因：上面那道 `pending` 只守住了「tab 检出到」的分支，而切页面的
+        #    过渡帧上 tab 会瞬时检不出  `tab is None`  直接掉进下面"还没露出来
+        #    就滑"的分支。用户原话:「看到了就不滑了，还是有逻辑打架」。
+        #     滑动的前提不是"这一帧没看见"，而是"**从来没看见过**"。
+        #    这和 §A3「单帧当真相」是同一族：一帧没检出不等于它不在。
+        if not self.pending("arenatab"):
+            return wait("已经点过「戰術大賽」tab（这一帧没检出而已）— 不再滑")
         # 还没露出来  左栏往下滑。**滑动的 x 也要 based on cls**：
         #   拿当前选中的那个 tab 的 cx 当左栏轴线，别写死 0.068。
         col = obs.find([V.SHOP_TAB_CREDIT_SEL, V.SHOP_TAB_CREDIT,
