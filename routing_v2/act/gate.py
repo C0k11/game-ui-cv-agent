@@ -502,7 +502,12 @@ class Gate:
         p = self._pending
         if p is None:
             return Verdict(True)
-        p["n"] += 1
+        # 时钟不在这里走 —— **`heartbeat()` 每帧走表，这里只判状态**。
+        #    2026-08-13 死锁实锤: 商店加载期点了死按钮「全部選擇」，绿勾契约
+        #    永远不兑现，而计时原来写在本函数里 —— 只有 flow 又派动作时才会
+        #    被调到。flow 在等待(wait)时一发动作都不派 -> `n` 冻结 ->
+        #    永不超时 -> once 永不退回 -> 整条 flow 卡到 stalled。
+        #    **契约等的是游戏画面，时钟就得跟着帧走，不能跟着动作走。**
         # **节拍闸：先按住，再谈兑现**（见 `_MIN_HOLD`）。放在所有判定之前，
         #    包括 `page_changed` —— 页面在同一个面板上跳不代表上一发生效了。
         if p["n"] <= _MIN_HOLD and not p.get("settle"):
@@ -568,6 +573,8 @@ class Gate:
             self.stats["expect_timeout"] += 1
             if p["loose"]:
                 return Verdict(True)          # 默认契约超时属常态，别刷屏
+            # 严格契约的超时正常情况由 heartbeat 先一步处理（它每帧走表），
+            #    这里只兜"同一帧内恰好赶上"的边界。
             # **严格契约超时 = 上一发没生效**（2026-08-13 用户诊断，帧上实证）:
             #    信用点商店点「全部選擇」时按钮还在归位（连续 4 帧在
             #    `全部选择 0.97` / `全部选择灰 0.85` 之间闪），游戏没收到那一下。
@@ -587,6 +594,54 @@ class Gate:
         return Verdict(False, "")      # 静默按住，不刷屏
 
     # ══ 汇总 ═══════════════════════════════════════════════════════════
+    def heartbeat(self, obs: Observation, *, page_changed: bool,
+                  retry_frames: int = 25) -> str:
+        """契约时钟 -- **runner 主循环每帧调一次**（在 flow.decide 之前）。
+
+        为什么单独存在: 契约的兑现/超时判断原来全在 `advance()` 里，而那只在
+           flow 派动作时才被调到 -- flow 一旦进入"等待"，时钟就停了（2026-08-13
+           商店死按钮死锁的机制，见 advance 里的注释）。这里把走表拆出来，
+           **每帧必走**，advance 只负责"契约未了时按住新动作"。
+        返回值: 严格契约超时且带 `once=` 标记时返回那个 key（runner 负责退回，
+           让 flow 重试）；其余情况返回空串。
+        """
+        p = self._pending
+        if p is None:
+            return ""
+        p["n"] += 1
+        if p["n"] <= _MIN_HOLD and not p.get("settle"):
+            return ""
+        if page_changed and p["loose"]:
+            self._pending = None
+            return ""
+        hit = next((c for c in p["expect"] if obs.has(c, 0.40)), None)
+        if hit is not None:
+            self._pending = None
+            self._log(f"    [gate] 等到了 `{hit}` -- `{p['cls']}` 这一发生效，推进")
+            return ""
+        if p["expect_gone"] and not any(obs.has(c, 0.40) for c in p["expect_gone"]):
+            cur = frozenset(b.cls for b in obs.boxes)
+            base = p.get("sig0")
+            if not p["loose"] or base is None or (cur - base):
+                self._pending = None
+                self._log(f"    [gate] `{'/'.join(p['expect_gone'])}` 已消失"
+                          f" -- `{p['cls']}` 这一发生效，推进")
+                return ""
+        if p.get("settle"):
+            if p["n"] >= 8:
+                self._pending = None
+            return ""
+        lim = max(1, retry_frames if not p["loose"]
+                  else max(3, retry_frames // 6))
+        if p["n"] >= lim:
+            self._pending = None
+            self.stats["expect_timeout"] += 1
+            if not p["loose"]:
+                self._log(f"    [gate] 等 `{'/'.join(p['expect'] + p['expect_gone'])}`"
+                          f" 等了 {p['n']} 帧没等到 -- 契约超时，判定上一发没生效")
+                return p.get("once") or ""
+        return ""
+
     def allow(self, act: Action, obs: Observation, *,
               fresh: Callable[[], Optional[Observation]],
               page_changed: bool, frames_in_page: int,

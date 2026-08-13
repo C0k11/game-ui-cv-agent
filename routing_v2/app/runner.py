@@ -601,6 +601,9 @@ class Runner:
             self.stats.ticks += 1
             obs = self._observe(fr, age, seq)
             st = mac.update(obs)
+            # 归位期间契约时钟同样要走（归位的 tap 一样会 arm 契约）
+            self.gate.heartbeat(obs, page_changed=st.changed,
+                                retry_frames=int(self.run.get("retry_frames", 25)))
             # 归位期间照样喂台账 —— 少采一段就是一段掉钱盲区
             #    （memory `money_safety`: 30 青辉石就是在没采样的那一段花掉的）。
             breach = self.ledger.feed(obs, st.page, "handoff")
@@ -775,6 +778,15 @@ class Runner:
 
             obs = self._observe(fr, age, seq)
             st = self.machine.update(obs)
+
+            # 契约时钟**每帧走表**（gate.heartbeat 的注释里有死锁实录）。
+            #    超时退回 once 标记也在这里做 —— 原来退回只挂在 allow() 的
+            #    返回值上，flow 等待期一发动作都不派，退回就永远轮不到。
+            rb = self.gate.heartbeat(obs, page_changed=st.changed,
+                                     retry_frames=retry)
+            if rb and flow.state.pop(f"once:{rb}", None) is not None:
+                self.log(f"    [gate] 契约没兑现 — 退回 `{rb}` 的 once 标记，"
+                         f"允许重试")
 
             breach = self.ledger.feed(obs, st.page, flow.name)
             if breach:

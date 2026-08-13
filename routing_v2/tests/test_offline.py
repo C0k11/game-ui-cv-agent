@@ -1307,6 +1307,31 @@ def t_route():
     check("同一个框里的价签+確認 — 照常判成购买流程",
           _mr.purchase_context(_near) is not None)
 
+    # 契约时钟跟帧走, 不跟动作走（2026-08-13 商店死按钮死锁）:
+    #   点了加载期的死按钮「全部選擇」, 绿勾契约永不兑现; flow 之后每帧 wait,
+    #   没有动作过闸 -> advance 的计时冻结 -> once 永不退回 -> 卡到 stalled。
+    #   修 = gate.heartbeat 每帧走表, 超时把 once key 交还 runner 退回。
+    from routing_v2.act.gate import Gate as _G
+    from routing_v2.act.action import tap_box as _tb
+    _g = _G(cfg(), log=lambda m: None)
+    _dead = _tb(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12), "全部选择",
+                once="selectall", expect=(V.GREEN_CHECK,))
+    _g.arm(_dead, O(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12)))
+    _empty = O(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12))
+    _rb = ""
+    for _ in range(80):          # 只喂帧, 一发动作都不派
+        _rb = _g.heartbeat(_empty, page_changed=False, retry_frames=70) or _rb
+    check("flow 光等待时契约也会超时（时钟跟帧走）", _rb == "selectall",
+          f"rb={_rb!r} pending={_g._pending is not None}")
+    # 兑现路径: 绿勾出现 -> 契约当帧释放
+    _g.arm(_dead, _empty)
+    _g.heartbeat(_empty, page_changed=False, retry_frames=70)
+    for _ in range(5):
+        _g.heartbeat(O(B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
+                       B(V.GREEN_CHECK, cx=0.52, cy=0.16)),
+                     page_changed=False, retry_frames=70)
+    check("绿勾一出现契约就兑现释放", _g._pending is None)
+
     # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
     #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
     _sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))

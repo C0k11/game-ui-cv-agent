@@ -207,6 +207,15 @@ class ShopFlow(ExitMixin, Flow):
     name = "shop"
     module = "daily_routine"
 
+    def setup(self) -> None:
+        # 免費包按**游戏日台账**判领没领（用户 2026-08-13: 领完之后广告位的
+        #    红点还在 -- 那是别的页签的未读，红点不等于免費包没拿。
+        #    实测: 09:28 那轮又点进去空跑了 250 tick）。账本才是权威。
+        from routing_v2.flow import daybook
+        if daybook.done("free_pack"):
+            self.state["pack_done"] = True
+            self.log("免費包本游戏日已领过（台账）-- 广告位这段直接跳过")
+
     def on_lobby(self, obs, st):
         # 免費組合包的**正规入口 = 大厅那个 `购买青辉石` 广告位**（用户口述，
         #    08-09 再次确认）。它有 cls 且 conf≈0.95 常驻 —— 就是当初造成
@@ -227,8 +236,13 @@ class ShopFlow(ExitMixin, Flow):
                 dot = any(abs(d.cx - p.cx) < 0.07 and abs(d.cy - p.cy) < 0.06
                           for d in obs.all(V.DOT_RED, 0.40))
                 if dot:
+                    # 严格契约: 弹窗真开了（頁签/免費标出现）才许做下一件事。
+                    #    没契约的话 on_lobby 下一帧就去点 `商店入口`，三发 tap
+                    #    全打在弹窗底下（09:28 实录 t17/t87/t157）。
                     return tap_box(p, "大厅广告位有红点  進購買青輝石页拿免費包",
-                                   once="open_pack")
+                                   once="open_pack",
+                                   expect=(V.COMBO_PACK, V.COMBO_PACK_SEL,
+                                           V.FREE))
                 self.state["pack_done"] = True
                 self.state["once:open_pack"] = True
                 self.log("广告位没红点 — 免費包今天拿过了，这一段跳过")
@@ -633,7 +647,9 @@ class ShopFlow(ExitMixin, Flow):
             #     「有免費标但同列没有亮的購買键」= 已领过，收工，别干等。
             #    别去点灰键（灰态族的老坑：v14 会把灰键误检成亮态）。
             if self.hold("free_greyed", 30):
+                from routing_v2.flow import daybook
                 self.state["pack_done"] = True
+                daybook.mark("free_pack")     # 落账: 本游戏日不再进这个页
                 self.log("免費組合包今天已经领过了（購買键是灰的） 跳过")
                 return self.exit_step(obs) or wait("等退出控件")
             return wait("找不到「免費」那一列的亮購買键 — 连续确认中（可能已领过）")
