@@ -362,9 +362,12 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
             c = obs.find(V.CANCEL, 0.45)
             return tap_box(c, "灰确认  取消") if c is not None else wait("等取消")
         # 购买数量框: 先拉 MAX 再确认（老码 buy_one 同序）。MAX 变灰 = 拉满。
+        #   MAX 也标 money —— 它决定成交数量, 就该走金钱授权;
+        #   不标的话 gate.money 的「购买语境非白名单 tap」规则会 halt（实测）。
         mx = obs.find(V.QTY_MAX, 0.40, region=(0.0, 0.12, 1.0, 1.0))
         if mx is not None:
-            return tap_box(mx, "数量拉 MAX", expect_gone=(V.QTY_MAX,))
+            return tap_box(mx, "数量拉 MAX", money=True, spend="活动币",
+                           expect_gone=(V.QTY_MAX,))
         cf = obs.find(V.CONFIRM, 0.45)
         return tap_box(cf, "确认购买", money=True, spend="活动币",
                        counter="bought") if cf is not None else wait("等確認键")

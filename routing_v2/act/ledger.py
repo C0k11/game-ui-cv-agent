@@ -35,6 +35,13 @@ WATCHED = [R.PYROXENE, R.CREDIT, R.AP]
 # 只有青辉石是"只进不出"的红线货币。信用点/AP 会正常花掉。
 GUARDED = R.PYROXENE
 
+# **这些页面不采样** —— 顶栏不是标准形态, 别的数字会抢裁切窗口。
+#   2026-08-13 实锤: formation 页把青辉石稳定读成 211,286(真值 21,286),
+#   稳定错读复读一致, 把「双次投票」共识整个骗过 -> 台账凭空 +190,000
+#   又 -190,000。稳定错读跟着**页面**走, 换页就不复现 —— 所以防线是
+#   按页面关采样, 不是加投票次数。
+NO_SAMPLE_PAGES = {"formation", "battle", "battle_result", "grid_quest"}
+
 
 @dataclass
 class Entry:
@@ -86,6 +93,8 @@ class Ledger:
         due = (now - self._last_commit) >= self.sample_every
         if not (due or self._recheck):
             return None
+        if page in NO_SAMPLE_PAGES:
+            return None                     # 顶栏不是标准形态，稳定错读温床
         if obs.find(GUARDED, 0.25, region=R.TOPBAR) is None:
             return None                     # 顶栏看不见，这帧没法读
         self._vote.feed(obs, WATCHED)
@@ -128,11 +137,31 @@ class Ledger:
             if cls == R.CREDIT:
                 mx = self._maxdigits.get(cls, 0)
                 if len(str(v)) < mx:
-                    self._log(f"[ledger] 信用点 {v} 位数({len(str(v))}) < 历史最大"
-                              f"({mx}) — 判为 OCR 截断，不采信")
-                    self._write(Entry(time.time(), cls, v, page, flow, "misread"))
-                    continue
-                self._maxdigits[cls] = max(mx, len(str(v)))
+                    # **位数上限自愈**（2026-08-13 实锤）: 一次读大(57,776,160
+                    #    -> 577,776,160, 稳定复读骗过增长守卫)把上限顶到 9 位,
+                    #    之后所有正确的 8 位读数全被当「截断」拒收, 收尾余额
+                    #    是假的。判据: 连续 4 次被拒的读数**位数一致** ->
+                    #    中毒的是上限不是读数, 降回去并大声记录。
+                    hist = self._rejects.setdefault(f"{cls}:digits", [])
+                    hist.append(len(str(v)))
+                    del hist[:-6]
+                    if len(hist) >= 4 and len(set(hist[-4:])) == 1:
+                        self._log(f"[ledger] 位数上限自愈: 信用点连续 4 次读到 "
+                                  f"{hist[-1]} 位而上限 {mx} 位再没出现过 — "
+                                  f"判定上限被读大污染, 降到 {hist[-1]} 位")
+                        self._maxdigits[cls] = hist[-1]
+                        hist.clear()
+                        # 本次读数照常走后面的守卫（不直接入账）
+                    else:
+                        self._log(f"[ledger] 信用点 {v} 位数({len(str(v))}) < 历史最大"
+                                  f"({mx}) — 判为 OCR 截断，不采信")
+                        self._write(Entry(time.time(), cls, v, page, flow,
+                                          "misread"))
+                        continue
+                else:
+                    self._rejects.get(f"{cls}:digits", []).clear()
+                self._maxdigits[cls] = max(self._maxdigits.get(cls, 0),
+                                           len(str(v)))
             if prev is not None and len(str(v)) < len(str(prev)) and v < prev * 0.5:
                 # 基线自愈（08-09 实锤 A10「会读低就会读高」的反向形态）：
                 #    某帧青辉石被读大成 200117 **入了账**，之后所有正确的
