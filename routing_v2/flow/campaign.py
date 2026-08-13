@@ -54,6 +54,29 @@ class CampaignFlow(ExitMixin, Flow):
             return None
         return ("H" if hard else "") + f"{m.group(1)}-{m.group(2)}"
 
+    # 观测: 格心跨帧累积（绿勾累积同款）。同一张地图上格子是**静态**的,
+    #    单帧 conf 抖动(同图实测 0.31-0.97 帧间波动)不该抖掉我们对地图的认知。
+    #    锁定**不用**战斗那套 ReID -- 格子不动, 位置累积就够; 单位离散跳格,
+    #    每步重新按「正下方」绑格, 没有连续跟踪问题。
+    def observe(self, obs, st) -> None:
+        if self.phase not in ("grid", "walk"):
+            return
+        acc = self.state.setdefault("cell_acc", [])
+        for x, y in grid.cells(obs, 0.35):
+            if all((x - a) ** 2 + (y - b) ** 2 > 0.04 ** 2 for a, b in acc):
+                acc.append((x, y))
+        sp = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
+        if sp is not None and self.state.get("start_xy") is None:
+            self.state["start_xy"] = (sp.cx, sp.cy)
+
+    def _acc_cells(self, obs):
+        """本帧检出 + 历史累积的格心合集。"""
+        cs = grid.cells(obs, 0.35)
+        for a in self.state.get("cell_acc", []):
+            if all((a[0] - x) ** 2 + (a[1] - y) ** 2 > 0.04 ** 2 for x, y in cs):
+                cs.append(a)
+        return cs
+
     def _plan(self):
         a = self.state.get("answer")
         if not a or not a["areas"]:
@@ -115,57 +138,58 @@ class CampaignFlow(ExitMixin, Flow):
             return self.finish(Outcome.BLOCKED,
                                "这一列的入場全是锁的 -- Hard 全锁说明 Normal "
                                "没打完, 先推 Normal")
-        star0 = obs.find(V.STAR_0, 0.45)
-        if star0 is not None:
-            # **关号从屏上读**（用户拍板:「每一关都有入场以及对应的关号」）:
-            #    关号文本在得星那一行的左上, 窗口用得星框高度当尺子
-            #    （离线在真帧上验过: 读出 "2-2"）。
-            if not self.state.get("stage_seen"):
-                h = max(star0.y2 - star0.y1, 0.015)
-                rect = (star0.x1 - 1.25 * h, star0.y1 - 4.2 * h,
-                        star0.x1 + 5.0 * h, star0.y1 + 0.4 * h)
-                raw = R.digits(obs.frame, rect)
-                hard = obs.has(V.STAGE_HARD_SEL, 0.45)
-                got = self._parse_stage(raw, hard)
+        # 行模型（用户拍板:「每一关都有入场以及对应的关号」）:
+        #    行 = 星标(得星_0/得星_3) + 左上关号文本 + 右侧入場键。
+        #    没配置 -> 打 `得星_0` 那行(下一关); 配置了 -> 逐行读号找那一行
+        #    （复打已通关卡用: 测试走格子闭环拿已 3 星的关当靶, 零进度风险）。
+        anchor = self.state.get("row_anchor")
+        if anchor is None:
+            stars = obs.all([V.STAR_0, V.STAR_3], 0.45)
+            cfgd = self.state.get("stage")
+            hard = on_hard
+            cands = [b for b in stars if b.cls == V.STAR_0] if not cfgd else stars
+            got = None
+            hit = None
+            for sb in cands:
+                h = max(sb.y2 - sb.y1, 0.015)
+                rect = (sb.x1 - 1.25 * h, sb.y1 - 4.2 * h,
+                        sb.x1 + 5.0 * h, sb.y1 + 0.4 * h)
+                got = self._parse_stage(R.digits(obs.frame, rect), hard)
                 if got is None:
-                    if self.hold("stage_ocr", 30):
-                        return self.finish(
-                            Outcome.UNKNOWN,
-                            f"关号读不出（OCR 原始串 {raw!r}）-- 不进错关")
-                    return wait("读关号中")
-                # **两帧共识才算读到**（用户 2026-08-13:「进的太快又没读到
-                #    关卡号」）: 列表刚弹出/还在惯性滚时单帧 OCR 是孤证,
-                #    读歪一次就进错关。连续两帧同号才放行。
-                if self.state.get("stage_vote") != got:
-                    self.state["stage_vote"] = got
-                    return wait(f"读到 {got}, 等下一帧复读确认")
-                cfgd = self.state.get("stage")
-                if cfgd and cfgd != got:
+                    continue
+                if not cfgd or got == cfgd:
+                    hit = (sb, got)
+                    break
+            if hit is None:
+                if self.hold("stage_ocr", 30):
                     return self.finish(
-                        Outcome.BLOCKED,
-                        f"配置要打 {cfgd}, 屏上下一关是 {got} -- 不在错的关上"
-                        f"用错的答案, 交用户定")
-                ans = grid.load_answer(got)
-                if ans is None:
-                    return self.finish(Outcome.BLOCKED,
-                                       f"没有 {got} 的 BAAH 答案文件")
-                self.state.update(stage=got, answer=ans, stage_seen=True)
-                self.log(f"屏上读到下一关 = {got}"
-                         f"（fight_plan {sum(len(a['fight_plan']) for a in ans['areas'])} 回合）")
-            rows = obs.all(V.STAGE_ENTER, 0.45)
-            same = min(rows, key=lambda b: abs(b.cy - star0.cy), default=None)
-            if same is not None and abs(same.cy - star0.cy) < 0.05:
-                act = tap_box(same, f"没打过的关 {self.state['stage']}"
-                                    f"（得星_0 同行入場）",
-                              expect=(V.TASK_START, V.TASK_START_GREY))
-                act.anchor_tol = 0.030      # 行内按钮容差要小于半行距
-                return act
-            return wait("看到得星_0 但同行入場键没检出")
-        if self.phase_ticks > 90:
-            return self.finish(
-                Outcome.UNKNOWN,
-                "列表上找不到 得星_0 的关（都打过了? 还是要翻页?）-- 不瞎点")
-        return wait("等关卡列表/找得星_0")
+                        Outcome.UNKNOWN,
+                        f"逐行读号没找到目标关（配置 {cfgd or '自动'}, "
+                        f"最后读到 {got}）-- 不进错关")
+                return wait("逐行读关号中")
+            sb, got = hit
+            # **两帧共识才算读到**（用户:「进的太快又没读到关卡号」）:
+            #    列表刚弹出/惯性滚时单帧 OCR 是孤证, 连续两帧同号才放行。
+            if self.state.get("stage_vote") != got:
+                self.state["stage_vote"] = got
+                return wait(f"读到 {got}, 等下一帧复读确认")
+            ans = grid.load_answer(got)
+            if ans is None:
+                return self.finish(Outcome.BLOCKED,
+                                   f"没有 {got} 的 BAAH 答案文件")
+            self.state.update(stage=got, answer=ans,
+                              row_anchor=(sb.cx, sb.cy))
+            self.log(f"锁定目标关 = {got}"
+                     f"（fight_plan {sum(len(a['fight_plan']) for a in ans['areas'])} 回合）")
+            anchor = (sb.cx, sb.cy)
+        rows = obs.all(V.STAGE_ENTER, 0.45)
+        same = min(rows, key=lambda b: abs(b.cy - anchor[1]), default=None)
+        if same is not None and abs(same.cy - anchor[1]) < 0.05:
+            act = tap_box(same, f"目标关 {self.state['stage']}（同行入場）",
+                          expect=(V.TASK_START, V.TASK_START_GREY))
+            act.anchor_tol = 0.030      # 行内按钮容差要小于半行距
+            return act
+        return wait("目标行的入場键没检出（锁行等它）")
 
     # popup: 保证在「集中指挥」页签, 然后 任務開始
     def do_popup(self, obs, st):
@@ -218,6 +242,14 @@ class CampaignFlow(ExitMixin, Flow):
             #    整族 conf 断崖（见下面那条 UNKNOWN 的理由）。
             sp = obs.find(V.GRID_START, 0.35)
             if sp is not None:
+                # 起点框位置逐帧漂(实测 tap 打在格子边缘没开出选队面板),
+                #    有累积位置就用累积的(第一次见到时的稳定值)
+                sxy = self.state.get("start_xy")
+                if sxy is not None:
+                    act = tap_box(sp, "点起点格上队(按累积位置)",
+                                  expect=(V.SORTIE,))
+                    act.x, act.y = sxy
+                    return act
                 return tap_box(sp, "点起点格上队", expect=(V.SORTIE,))
             if self.hold("no_start_cell", 40):
                 # fail-closed 的**诚实版本**: 不是 AP、不是 bug, 是感知在这章
@@ -272,7 +304,7 @@ class CampaignFlow(ExitMixin, Flow):
             self.goto("result", "fight_plan 走完了")
             return wait("等结算")
 
-        cs = grid.cells(obs)
+        cs = self._acc_cells(obs)
         stp = grid.steps(cs)
         if len(cs) < 2 or stp is None:
             return wait("格子检出不足, 等一帧")
