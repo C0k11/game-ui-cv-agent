@@ -78,6 +78,14 @@ class CampaignFlow(ExitMixin, Flow):
         if st.page == "stage_popup":
             self.goto("popup", "关卡弹窗开了")
             return wait("进相位 popup")
+        # H 关先切到「困难」页签（config stage 以 H 开头 = 用户点名打 Hard）
+        if (self.state["stage"].startswith("H")
+                and not obs.has(V.STAGE_HARD_SEL, 0.45)):
+            hd = obs.find(V.STAGE_HARD, 0.45)
+            if hd is not None:
+                return tap_box(hd, "切到 Hard 页签",
+                               expect=(V.STAGE_HARD_SEL,))
+            return wait("找 Hard 页签")
         star0 = obs.find(V.STAR_0, 0.45)
         if star0 is not None:
             rows = obs.all(V.STAGE_ENTER, 0.45)
@@ -186,6 +194,17 @@ class CampaignFlow(ExitMixin, Flow):
 
         plan = self._plan()
         if self.state["round_i"] >= len(plan):
+            # 多区域关（H1-2 = 区域0 三步 + 区域1 两步, 各自重新部署）:
+            #    这个区域的 plan 走完且后面还有区域 -> 等游戏切图, 部署证据
+            #    (任務開始/出击键)一出现就进下一区域重新上队。
+            a = self.state.get("answer") or {"areas": []}
+            if self.state["area_i"] + 1 < len(a["areas"]):
+                if obs.has([V.TASK_START, V.TASK_START_GREY, V.SORTIE], 0.35):
+                    self.state.update(area_i=self.state["area_i"] + 1,
+                                      round_i=0, target=None, need_end=False)
+                    self.goto("grid", f"进区域 {self.state['area_i'] + 1} 重新部署")
+                    return wait("下一区域部署")
+                return wait("区域间过场, 等下一张图的部署界面")
             self.goto("result", "fight_plan 走完了")
             return wait("等结算")
 
