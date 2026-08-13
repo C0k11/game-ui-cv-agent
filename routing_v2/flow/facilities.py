@@ -265,8 +265,21 @@ class ShopFlow(ExitMixin, Flow):
                 return tap_box(buy, "批量购买（花信用点）",
                                money=True, spend="信用点",
                                post=lambda: self.state.update(bought=True))
-        if obs.has(V.SHOP_SELECT_ALL_GREY, 0.40) or obs.has(V.SHOP_ALL_SELECTED, 0.40):
+        # 「全部選擇」变灰 = **今天买过了**（用户 2026-08-13 口述定义）。语义没错，
+        #    错在**信单帧**：商店刚打开的过渡帧上这个控件还没渲染完、发白，模型
+        #    同时给出 `全部选择灰 0.864` **和** `全部选择 0.419`（两个态一起检出
+        #    正是半渲染的样子），而货架上 8 件商品的購買全是亮的、一件没买。
+        #    代码拿那一帧就把 `bought=True` 永久落死  整个信用点商店被跳过，
+        #    收尾还报 CLEAN（用户:「卡住了一直没买」的第二个根因）。
+        #     ①亮态在场就不算数（半渲染的特征就是两态同时检出）
+        #      ②要连续 20 tick 都这样才认（§A3 的内容层版本，`hold` 就是干这个的）
+        #    `已全部选择` 从判据里拿掉：v16 已把它废弃（与 `绿勾` 重复），
+        #      detect 层直接丢弃  这一支恒 False，留着只会误导。
+        if (obs.has(V.SHOP_SELECT_ALL_GREY, 0.40)
+                and not obs.has(V.SHOP_SELECT_ALL, 0.40)
+                and self.hold("selall_grey", 20)):
             self.state["bought"] = True
+            self.log("「全部選擇」持续是灰的且没有亮态 — 今天这栏买过了")
 
         #  信用点这一栏处理完  **转战术大赛商店**（同一个商店页的另一个 tab）
         act = self._goto_arena_tab(obs)
