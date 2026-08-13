@@ -1295,6 +1295,18 @@ def t_route():
     check("真組合包页仍然不停机（免費包这条链要走得通）",
           _ic._on_money_popup(_free) is None)
 
+    # 大厅广告位 + 一个八竿子打不着的单键框 != 购买流程（2026-08-13 小号实测:
+    #   制造锁着弹框, 框把底栏盖住 -> LOBBY_NAV<3 挡不住 -> 误报 HALT 停整轮）
+    import routing_v2.act.money as _mr
+    _far = O(B(V.SHOP_BUY_PYROXENE, cx=0.116, cy=0.360),
+             B(V.CONFIRM, cx=0.499, cy=0.699))
+    check("广告位和框隔半屏 — 不算购买流程",
+          _mr.purchase_context(_far) is None, str(_mr.purchase_context(_far)))
+    _near = O(B(V.SHOP_BUY_PYROXENE, cx=0.470, cy=0.520),
+              B(V.CONFIRM, cx=0.499, cy=0.699))
+    check("同一个框里的价签+確認 — 照常判成购买流程",
+          _mr.purchase_context(_near) is not None)
+
     # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
     #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
     _sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))

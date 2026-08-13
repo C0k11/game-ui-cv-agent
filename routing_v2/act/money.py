@@ -129,6 +129,16 @@ def purchase_context(obs: Observation) -> Optional[str]:
             return None
         chrome = obs.find(_DIALOG_CHROME, CONF)
         if chrome is not None:
+            # 对话框控件和「購買青輝石」得**属于同一个框**才算购买流程。
+            #    2026-08-13 小号实测的误报: 制造锁着 -> 点入口弹一个单键框
+            #    （確認 @cx=0.499），而大厅左侧广告位 `購買青輝石` @cx=0.116
+            #    还在场 -> 两个八竿子打不着的东西凑成"购买流程" -> HALT 停整轮。
+            #    上面那道 `LOBBY_NAV >= 3` 挡不住：框把底栏盖住了，数不到 3 个。
+            #    真购买框里价签和確認键是**同一个框的两部分**，横向不会隔半屏；
+            #      广告位在最左、框在正中，dx 稳定 >0.35。
+            #    这是几何**相对关系**，不是写死坐标，换分辨率同样成立。
+            if abs(buy.cx - chrome.cx) > 0.35:
+                return None
             return (f"「購買青輝石」+ 对话框控件（{chrome.cls}）= 购买流程")
         # 大厅广告位 —— 不是购买框，别停
         return None

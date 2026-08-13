@@ -88,7 +88,25 @@ class CraftFlow(ExitMixin, Flow):
     module = "daily_routine"
 
     def on_lobby(self, obs, st):
-        return nav.enter(obs, V.NAV_CRAFT, "制造")
+        """进制造。**进不去就收工，别无限重敲**。
+
+        2026-08-13 小号实测: 制造在低级号上是**锁着的** —— 点入口游戏弹一个
+           单键框（「尚未開放」之类），bot 点掉確認回到大厅、再点入口、再弹…
+           一轮里循环 8 次、烧掉 167 tick，最后还把大厅广告位 `購買青輝石`
+           和那个框的 `确认键` 凑成"购买流程"误报 HALT，把整条日常停掉。
+        用户 2026-08-13:「craft 上有个锁是进不去，但是识别不出来」——
+           锁本身没有 cls（`房间区域未解锁` 只覆盖课程表房间），泛化那个 cls
+           是后面的事。**现在先把"敲不开就别敲"这条纪律补上**。
+        数的是**事实**（tap 真发出去了几次），不是干等了几帧。
+        """
+        if self.state.get("enter_taps", 0) >= 3:
+            return self.finish(
+                Outcome.SKIPPED,
+                "点了 3 次制造入口都没进去 — 这个号的制造多半还没解锁")
+        act = nav.enter(obs, V.NAV_CRAFT, "制造")
+        if act is not None and act.kind == "tap":
+            act.post = lambda: self.bump("enter_taps")
+        return act
 
     def on_craft(self, obs, st):
         #  先收成品：`完成`(亮) 可领；`完成_灰色` 是还没好。
