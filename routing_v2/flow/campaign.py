@@ -70,19 +70,30 @@ class CampaignFlow(ExitMixin, Flow):
             return wait("进相位 grid")
         return wait("等任务大厅")
 
-    # stage_list: 点当前选中的关（游戏会自动把下一关归位过来 -- 老规矩）
+    # stage_list: 点**得星_0 那一行的入場键**（下一关就是没有星的那关 --
+    #    游戏会自动把它归位到可视区, 老规矩）。
+    #    2026-08-13 实帧纠错: `普通关卡选中` 是顶部 Normal **页签**, 不是
+    #    选中的关卡行, 点它开不了弹窗。行内按钮锚定和咖啡厅邀请键同款。
     def do_stage_list(self, obs, st):
         if st.page == "stage_popup":
             self.goto("popup", "关卡弹窗开了")
             return wait("进相位 popup")
-        sel = obs.find(V.STAGE_NORMAL_SEL, 0.45)
-        if sel is not None:
-            # 弹窗里必然有 任务开始（亮或灰）
-            return tap_box(sel, f"点选中的关（配置目标 {self.state['stage']}）",
-                           expect=(V.TASK_START, V.TASK_START_GREY))
+        star0 = obs.find(V.STAR_0, 0.45)
+        if star0 is not None:
+            rows = obs.all(V.STAGE_ENTER, 0.45)
+            same = min(rows, key=lambda b: abs(b.cy - star0.cy), default=None)
+            if same is not None and abs(same.cy - star0.cy) < 0.05:
+                act = tap_box(same, f"没打过的关（得星_0 同行入場; "
+                                    f"配置目标 {self.state['stage']}）",
+                              expect=(V.TASK_START, V.TASK_START_GREY))
+                act.anchor_tol = 0.030      # 行内按钮容差要小于半行距
+                return act
+            return wait("看到得星_0 但同行入場键没检出")
         if self.phase_ticks > 90:
-            return self.finish(Outcome.UNKNOWN, "关卡列表上找不到选中的关")
-        return wait("等关卡列表")
+            return self.finish(
+                Outcome.UNKNOWN,
+                "列表上找不到 得星_0 的关（都打过了? 还是要翻页?）-- 不瞎点")
+        return wait("等关卡列表/找得星_0")
 
     # popup: 保证在「集中指挥」页签, 然后 任務開始
     def do_popup(self, obs, st):
