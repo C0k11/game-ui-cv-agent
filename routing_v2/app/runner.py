@@ -503,6 +503,13 @@ class Runner:
                  f"{[f.name for f in flows]}")
         queue: List[Flow] = list(flows)
         budget_s = float(self.run.get("max_minutes", 90)) * 60
+        # **第一条 flow 也要归位**（2026-08-13 live 实测）: 归位原来只发生在
+        #    flow 之间，于是开跑时画面停在哪儿就在哪儿开工 —— 上一轮收尾停在
+        #    课程表页，这一轮 cafe 第一个跑，`do_enter` 只会从大厅进，
+        #    在 `schedule_region` 上干等 601 tick 报 UNKNOWN。
+        #    "上一次是怎么退出的"不该由下一次的第一条 flow 承担。
+        if queue:
+            self._handoff(getattr(queue[0], "entry_page", "lobby"))
 
         while queue:
             if time.time() - self.stats.t0 > budget_s:
