@@ -42,6 +42,13 @@ class CampaignFlow(ExitMixin, Flow):
         stage = str(self.cfg.get("stage", "") or "")
         self.state["stage"] = stage
         self.state["answer"] = grid.load_answer(stage) if stage else None
+        # 断点续走: 设备上的任务已经走完前 N 步时从第 N+1 步接着走
+        #    （中断任务在任务内没有可点的返回键, 拆不掉时用这个接上）。
+        #    一次性参数, 用完就该清回 0。
+        skip = int(self.cfg.get("skip_rounds", 0) or 0)
+        if skip:
+            self.state["round_i"] = skip
+            self.log(f"断点续走: 跳过前 {skip} 步, 从第 {skip + 1} 步开始")
 
     @staticmethod
     def _parse_stage(raw, hard: bool):
