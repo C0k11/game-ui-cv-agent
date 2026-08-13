@@ -89,8 +89,8 @@ class CampaignFlow(ExitMixin, Flow):
         #    连续 3 帧不见 PHASE 才算进循环 -- 单帧漏检不许当证据;
         #    overlay 在场不算(弹窗盖住 HUD 不是敌方回合)。
         if self.phase == "walk" and self.state.get("issued"):
-            if st.overlay:
-                pass
+            if st.overlay or obs.has(V.CLOSE_X, 0.55):
+                pass    # 弹窗盖住 HUD ≠ 相位循环（帮助/资讯面板都带叉叉）
             elif obs.has([V.PHASE_END, V.PHASE_AUTO_ON, V.PHASE_AUTO_OFF],
                          0.40):
                 self.state["pe_absent"] = 0
@@ -425,6 +425,16 @@ class CampaignFlow(ExitMixin, Flow):
 
     # grid: 部署 -- 点起点上队, 然后 任務開始
     def do_grid(self, obs, st):
+        # 帮助/教学弹窗**每次**进 Hard 部署屏都弹（08-13 实锤两轮, 不是
+        #    一次性的）: 全屏遮罩把部署控件 conf 压到检不出, 帧上只剩
+        #    顶栏 + 弹窗叉叉(0.94) -> 下面四个分支全落空, 干等到 phase_cap。
+        #    判据 = 有叉叉且部署控件一个都不在（弹窗不盖屏时两者共存,
+        #    不会误叉 任務資訊 之外的东西 -- 那个面板叉掉也无害）。
+        if (obs.has(V.CLOSE_X, 0.55)
+                and not obs.has([V.TASK_START, V.TASK_START_GREY, V.SORTIE],
+                                0.35)):
+            x = obs.find(V.CLOSE_X, 0.55)
+            return tap_box(x, "部署屏被弹窗盖住(有叉叉无部署控件) -- 叉掉")
         # 点了起点会弹编队页(出击键) -- 相位机下页面 handler 不跑, 在这处理
         if st.page == "formation" or obs.has(V.SORTIE, 0.45):
             s = obs.find(V.SORTIE, 0.45)
@@ -516,6 +526,13 @@ class CampaignFlow(ExitMixin, Flow):
             self.goto("grid", f"回合 {self.state['round_i'] + 1} 前被要求重新部署"
                               f"（多区域地图, 部署后继续同一份答案）")
             return wait("重新部署")
+        # 走位中弹窗盖屏（教学/帮助族）: 有叉叉且 PHASE 控件全不在 = 被盖住,
+        #    叉掉再走。放在 page 判定之前 -- 弹窗一盖, 页面身份多半也掉了
+        if (obs.has(V.CLOSE_X, 0.55)
+                and not obs.has([V.PHASE_END, V.PHASE_AUTO_ON,
+                                 V.PHASE_AUTO_OFF, V.CONFIRM], 0.40)):
+            x = obs.find(V.CLOSE_X, 0.55)
+            return tap_box(x, "走位中被弹窗盖住(有叉叉无PHASE控件) -- 叉掉")
         if st.page != "grid_quest":
             # 过场/动画通常几秒; 页面身份长时间不回来 = 感知或编排出事了,
             #    别静默空转到 phase_cap（4000 tick 在慢速率下是十几分钟）
