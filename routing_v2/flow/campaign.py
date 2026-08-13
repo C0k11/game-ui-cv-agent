@@ -73,8 +73,8 @@ class CampaignFlow(ExitMixin, Flow):
             if all((x - a) ** 2 + (y - b) ** 2 > 0.04 ** 2 for a, b in acc):
                 acc.append((x, y))
         sp = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
-        if sp is not None and self.state.get("start_xy") is None:
-            self.state["start_xy"] = (sp.cx, sp.cy)
+        if sp is not None and self.state.get("start_box") is None:
+            self.state["start_box"] = (sp.cx, sp.y1, sp.y2)
 
     def _acc_cells(self, obs):
         """本帧检出 + 历史累积的格心合集。"""
@@ -330,16 +330,19 @@ class CampaignFlow(ExitMixin, Flow):
             # 还没上队: 点起点格（黄 = 可部署）。起点降到 0.35 -- 2 章地图
             #    整族 conf 断崖（见下面那条 UNKNOWN 的理由）。
             sp = obs.find(V.GRID_START, 0.35)
-            if sp is not None:
-                # 起点框位置逐帧漂(实测 tap 打在格子边缘没开出选队面板),
-                #    有累积位置就用累积的(第一次见到时的稳定值)
-                sxy = self.state.get("start_xy")
-                if sxy is not None:
-                    act = tap_box(sp, "点起点格上队(按累积位置)",
-                                  expect=(V.SORTIE,))
-                    act.x, act.y = sxy
-                    return act
-                return tap_box(sp, "点起点格上队", expect=(V.SORTIE,))
+            box = self.state.get("start_box") or (
+                sp and (sp.cx, sp.y1, sp.y2))
+            if box is not None:
+                # 落点取**框的上三分之一** -- 2-5 实帧: 起点框重心偏下
+                #    (cy=0.483 而 START 六边形贴图在 y 0.30-0.42), 按框心点
+                #    会打在贴图下沿外, 选队面板不弹（两轮 fail-closed 的根因）。
+                cx, y1, y2 = box
+                anchor = sp if sp is not None else obs.find(
+                    V.TASK_START_GREY, 0.35)
+                act = tap_box(anchor, "点起点格上队(框上1/3处)",
+                              expect=(V.SORTIE,))
+                act.x, act.y = cx, y1 + 0.30 * (y2 - y1)
+                return act
             if self.hold("no_start_cell", 40):
                 # fail-closed 的**诚实版本**: 不是 AP、不是 bug, 是感知在这章
                 #    地图上不够用（2-5 实测: 起点 0 检出/格子 0.77x1/敌方 3 出 1
