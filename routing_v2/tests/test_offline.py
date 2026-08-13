@@ -1023,16 +1023,25 @@ def t_invariants():
 
 def t_vocab():
     print("\n── cls 健康度 ───────────────────────────────")
-    from routing_v2.state.vocab import DEAD, require
-    check("战斗失败 已登记为死类", V.BATTLE_LOSE in DEAD)
-    try:
-        require(V.BATTLE_LOSE)
-        ok = False
-    except RuntimeError:
-        ok = True
-    check("拿死类当唯一信号  import 期就抛", ok)
-    require(V.BATTLE_LOSE, sole_signal=False)      # 当'或'成员：放行+警告
-    check("死类当'或'成员  放行", True)
+    from routing_v2.state.vocab import DEAD, HEALTH, WEAK, require
+    # 断言**机制**，别断言某个具体类的等级 —— 等级每次重建数据集都会变。
+    #    原来这里写死「战斗失败 是死类」，v16 重建后它有 6 框了，测试当场红。
+    #    测试写死会过期的事实，和注释写死会过期的行为是同一种漂移。
+    check("DEAD/WEAK 分级和 HEALTH 表自洽",
+          DEAD == {c for c, (t, _) in HEALTH.items() if t == 0}
+          and WEAK == {c for c, (t, _) in HEALTH.items() if 0 < t < 100})
+    _dead = next(iter(DEAD), None)
+    check("表里确实还有死类（没有的话这道闸就没意义了）", _dead is not None,
+          f"死类 {len(DEAD)} 个")
+    if _dead is not None:
+        try:
+            require(_dead)
+            ok = False
+        except RuntimeError:
+            ok = True
+        check("拿死类当唯一信号  import 期就抛", ok, _dead)
+        require(_dead, sole_signal=False)           # 当'或'成员：放行+警告
+        check("死类当'或'成员  放行", True)
 
 
 def t_route():

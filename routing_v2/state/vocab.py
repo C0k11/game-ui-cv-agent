@@ -6,7 +6,9 @@
   而那个类**一框训练数据都没有**，于是"输了"这件事永远检测不到，而代码看起来
   一切正常。反过来，`_废弃77` 那种废案我又误判成"漏训"，跑去补数据。
    这里给每个用到的类标 (train, val)，并提供 `require()` 在 import 期就把
-    "拿死类当唯一信号"打回来。数据来自 ui_v2 数据集实测（2026-08-08）。
+    "拿死类当唯一信号"打回来。数字由 `scripts/sync_vocab_health.py` 从**实际构建出来的**数据集重算，
+    它自带时机闸：数据集比现役权重新时拒绝 emit（那会高估现役模型）。
+    当前值 = v16 训练用的那一份（2026-08-12 build / v16 于 08-13 上线）。
 
   DEAD  = train 0        绝不能当唯一判据，只能当"或"列表里的可选成员
   WEAK  = train < 100    可用但样本薄，别拿它做 fail-closed 的**否定**判据
@@ -284,36 +286,67 @@ STORY_ESCAPE_CHAIN = [STORY_MENU, STORY_SKIP]
 # cls  (train, val)。只登记**代码里真的会引用**的类；没登记的默认按 UNKNOWN
 # 处理（require() 会放行但打日志），不是"没登记就是死类"。
 HEALTH: Dict[str, Tuple[int, int]] = {
-    BATTLE_LOSE: (0, 0),
+    BATTLE_LOSE: (6, 28),
     EVENT_STAGE_STORY_SEEN: (0, 0),
     EVENT_STAGE_BATTLE_DONE: (0, 0),
     STORY_MENU_DEAD: (0, 0),
     CLAIM_ONEKEY_GREY: (0, 0),
-    BATTLE_WIN: (33, 0),
-    BATTLE_COMPLETE: (90, 0),
-    EVENT_AFTERSTORY: (32, 0),
-    SKIP_BATTLE_OFF: (30, 0),
-    CLUB: (48, 44),
-    BRANCH_HIGHWAY: (54, 26), BRANCH_DESERT: (52, 26), BRANCH_CLASSROOM: (55, 26),
-    ACADEMY_TRINITY: (84, 5), ACADEMY_MILLENNIUM: (84, 5), ACADEMY_GEHENNA: (84, 5),
-    CRAFT_NO_MATERIAL: (69, 0), CRAFT_START_GREY: (289, 0),
-    SHOP_BUY_GREY: (212, 1), NODE_DONE_GREY: (81, 3),
-    EVENT_LIVE: (949, 131), EVENT_ENDED: (130, 9), EVENT_REWARD_INFO: (95, 0),
-    STAGE_ENTER: (5534, 167), STAGE_ENTER_LOCKED: (2141, 12),
-    SORTIE: (449, 10), SQUAD_1_HI: (499, 16), SQUAD_2: (121, 0),
-    STAR_0: (1263, 26), STAR_3: (3765, 133),
-    MOMO_UNREAD: (6462, 241), MOMO_REPLY_OPT: (418, 21),
-    MOMO_GOTO_BOND: (36, 6), MOMO_ENTER_BOND: (38, 4),
-    STORY_MAIN: (89, 8), STORY_SHORT: (90, 9), STORY_SIDE: (88, 8),
-    STORY_NODE_UNDONE: (580, 0), STORY_NODE_DONE: (576, 0),
-    STORY_SKIP: (412, 4), STORY_MENU: (335, 10),
-    TICKET_BOUNTY: (310, 51), TICKET_JFD: (377, 30), TICKET_ARENA: (1276, 85),
-    SWEEP_START: (411, 31), TASK_START: (535, 31), SWEEP_BATCH: (800, 2),
-    CAFE_EARNINGS: (978, 152), CAFE_TICKET: (224, 73), CAFE_INVITE: (469, 15),
-    CAFE_MOVE_1F: (349, 50), CAFE_MOVE_2F: (565, 170),
-    SCHED_TICKET: (2980, 306), SCHED_ALL: (733, 112), SCHED_START: (141, 2),
-    ARENA_ROW: (2283, 177), COMBO_PACK_SEL: (147, 16), FREE: (219, 28),
-    SHOP_BUY: (2627, 155), CLAIM_ONCE_YELLOW: (145, 9), CLAIM_ALL_YELLOW: (68, 4),
+    BATTLE_WIN: (32, 20),
+    BATTLE_COMPLETE: (121, 1),
+    EVENT_AFTERSTORY: (33, 753),
+    SKIP_BATTLE_OFF: (52, 93),
+    CLUB: (50, 60),
+    BRANCH_HIGHWAY: (80, 66),
+    BRANCH_DESERT: (78, 66),
+    BRANCH_CLASSROOM: (79, 66),
+    ACADEMY_TRINITY: (100, 37),
+    ACADEMY_MILLENNIUM: (100, 37),
+    ACADEMY_GEHENNA: (100, 37),
+    CRAFT_NO_MATERIAL: (72, 81),
+    CRAFT_START_GREY: (292, 83),
+    SHOP_BUY_GREY: (1320, 753),
+    NODE_DONE_GREY: (62, 34),
+    EVENT_LIVE: (952, 378),
+    EVENT_ENDED: (156, 88),
+    EVENT_REWARD_INFO: (101, 26),
+    STAGE_ENTER: (5150, 4494),
+    STAGE_ENTER_LOCKED: (2053, 294),
+    SORTIE: (527, 255),
+    SQUAD_1_HI: (565, 309),
+    SQUAD_2: (131, 80),
+    STAR_0: (1365, 180),
+    STAR_3: (3461, 3564),
+    MOMO_UNREAD: (5015, 1824),
+    MOMO_REPLY_OPT: (353, 89),
+    MOMO_GOTO_BOND: (33, 14),
+    MOMO_ENTER_BOND: (34, 15),
+    STORY_MAIN: (69, 34),
+    STORY_SHORT: (70, 35),
+    STORY_SIDE: (68, 34),
+    STORY_NODE_UNDONE: (467, 422),
+    STORY_NODE_DONE: (451, 437),
+    STORY_SKIP: (259, 197),
+    STORY_MENU: (271, 114),
+    TICKET_BOUNTY: (402, 222),
+    TICKET_JFD: (440, 172),
+    TICKET_ARENA: (1298, 529),
+    SWEEP_START: (511, 166),
+    TASK_START: (637, 186),
+    SWEEP_BATCH: (471, 356),
+    CAFE_EARNINGS: (1233, 313),
+    CAFE_TICKET: (316, 156),
+    CAFE_INVITE: (552, 130),
+    CAFE_MOVE_1F: (387, 129),
+    CAFE_MOVE_2F: (801, 286),
+    SCHED_TICKET: (3577, 1090),
+    SCHED_ALL: (1021, 282),
+    SCHED_START: (187, 52),
+    ARENA_ROW: (2202, 843),
+    COMBO_PACK_SEL: (305, 99),
+    FREE: (384, 127),
+    SHOP_BUY: (3608, 3412),
+    CLAIM_ONCE_YELLOW: (148, 35),
+    CLAIM_ALL_YELLOW: (219, 39),
 }
 
 DEAD = {c for c, (t, _) in HEALTH.items() if t == 0}
@@ -342,7 +375,7 @@ def require(cls: str, *, sole_signal: bool = True) -> str:
 
 
 def health_report() -> str:
-    lines = ["cls 健康度（train/val, ui_v2 @2026-08-08）", "─" * 52]
+    lines = ["cls 健康度（train/val, 见模块 docstring 的来源说明）", "-" * 52]
     for c in sorted(HEALTH, key=lambda x: HEALTH[x][0]):
         t, v = HEALTH[c]
         flag = "DEAD" if t == 0 else ("WEAK" if t < 100 else "  ok ")

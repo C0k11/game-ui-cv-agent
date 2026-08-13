@@ -213,7 +213,8 @@ PAGES: List[Sig] = [
                 V.NAV_CAFE],
         priority=60,
         note="战斗结算：確認在底部 + 没有入场键。"
-             "`战斗失败` train=0  **输了看不见** —— 胜负未知时不许记 cleared"),
+             "`战斗失败` 只有 train=6（v16 重建后从 0 涨上来的，仍然是 WEAK）"
+             " —— **输了基本还是看不见**，胜负未知时不许记 cleared"),
 
     # 羁绊剧情面板盖在 MomoTalk 上（右半屏），左边列表的未读 cls 还在
     #     页面身份被 momo_list 抢走，flow 又去点未读对话，**面板永远点不进**
