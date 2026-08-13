@@ -1,0 +1,161 @@
+{
+ "stage": "20-2",
+ "type": "normal",
+ "source": "BAAH (MIT), sol=0",
+ "teams": [
+  {
+   "name": "A",
+   "attr": "red",
+   "pos": "left"
+  },
+  {
+   "name": "B",
+   "attr": "yellow",
+   "pos": "down"
+  }
+ ],
+ "rounds": [
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-up"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-up"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-up"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-up"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-up"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ]
+ ],
+ "needs": {
+  "teams": 2,
+  "portal": false,
+  "exchange": false,
+  "attrs": [
+   "red",
+   "yellow"
+  ]
+ },
+ "alts": [
+  {
+   "teams": [
+    {
+     "name": "A",
+     "attr": "red",
+     "pos": "left"
+    },
+    {
+     "name": "B",
+     "attr": "yellow",
+     "pos": "down"
+    }
+   ],
+   "rounds": [
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right-up"
+     },
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left-up"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right-up"
+     },
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right-up"
+     }
+    ],
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     },
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left"
+     }
+    ],
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right-up"
+     }
+    ],
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     }
+    ]
+   ],
+   "needs": {
+    "teams": 2,
+    "portal": false,
+    "exchange": false,
+    "attrs": [
+     "red",
+     "yellow"
+    ]
+   },
+   "sol": "1"
+  }
+ ]
+}

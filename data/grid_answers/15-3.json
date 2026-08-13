@@ -1,0 +1,73 @@
+{
+ "stage": "15-3",
+ "type": "normal",
+ "source": "BAAH (MIT), sol=0",
+ "teams": [
+  {
+   "name": "A",
+   "attr": "blue",
+   "pos": "left"
+  },
+  {
+   "name": "B",
+   "attr": "blue",
+   "pos": "right"
+  }
+ ],
+ "rounds": [
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-down"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-down"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "portal",
+    "dir": "center"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "left-down"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "right-down"
+   }
+  ],
+  [
+   {
+    "team": "B",
+    "do": "portal",
+    "dir": "right-down"
+   },
+   {
+    "team": "A",
+    "do": "exchange",
+    "dir": "right-down"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-down"
+   }
+  ]
+ ],
+ "needs": {
+  "teams": 2,
+  "portal": true,
+  "exchange": true,
+  "attrs": [
+   "blue"
+  ]
+ }
+}

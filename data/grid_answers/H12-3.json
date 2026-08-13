@@ -1,0 +1,173 @@
+{
+ "stage": "H12-3",
+ "type": "hard",
+ "source": "BAAH (MIT), sol=0",
+ "teams": [
+  {
+   "name": "A",
+   "attr": "red",
+   "pos": "up"
+  },
+  {
+   "name": "B",
+   "attr": "blue",
+   "pos": "down"
+  }
+ ],
+ "rounds": [
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   },
+   {
+    "team": "B",
+    "do": "exchange",
+    "dir": "right-up"
+   },
+   {
+    "team": "B",
+    "do": "portal",
+    "dir": "right-up"
+   }
+  ],
+  [
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-up"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "left-down"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "left-down"
+   },
+   {
+    "team": "B",
+    "do": "portal",
+    "dir": "left-up"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left"
+   }
+  ],
+  [
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-down"
+   }
+  ]
+ ],
+ "needs": {
+  "teams": 2,
+  "portal": true,
+  "exchange": true,
+  "attrs": [
+   "blue",
+   "red"
+  ]
+ },
+ "alts": [
+  {
+   "teams": [
+    {
+     "name": "A",
+     "attr": "red",
+     "pos": "up"
+    },
+    {
+     "name": "B",
+     "attr": "blue",
+     "pos": "down"
+    }
+   ],
+   "rounds": [
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     },
+     {
+      "team": "B",
+      "do": "exchange",
+      "dir": "right-up"
+     },
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right-up"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "portal",
+      "dir": "center"
+     },
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right-up"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "portal",
+      "dir": "left-up"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left-down"
+     }
+    ]
+   ],
+   "needs": {
+    "teams": 2,
+    "portal": true,
+    "exchange": true,
+    "attrs": [
+     "blue",
+     "red"
+    ]
+   },
+   "sol": "1"
+  }
+ ]
+}

@@ -1,0 +1,13 @@
+{
+ "stage": "1-1",
+ "type": "normal",
+ "source": "BAAH (MIT), sol=none",
+ "teams": [],
+ "rounds": [],
+ "needs": {
+  "teams": 0,
+  "portal": false,
+  "exchange": false,
+  "attrs": []
+ }
+}

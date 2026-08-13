@@ -21,7 +21,9 @@ from typing import Dict, List, Optional, Tuple
 from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
 
-ANSWERS = Path("data/baah_grid_solution")
+# 我们自己的答案格式（scripts/convert_baah_grid.py 从 BAAH 原始转换而来,
+#    原始件在 data/baah_grid_solution/ 只读不动）
+ANSWERS = Path("data/grid_answers")
 
 # 格子族: 所有"这里有一个六边形格子"的证据（可走/迷雾/起点都叠在格子位上）
 CELL_CLS = [V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_CELL_FOG,
@@ -113,19 +115,20 @@ def resolve(at: Tuple[float, float], direction: str,
 
 
 def load_answer(stage: str) -> Optional[dict]:
-    """读 BAAH 答案。`stage` 形如 "1-2" / "H3-1"。
+    """读走格子答案（我们的格式）。`stage` 形如 "1-2" / "H3-1"。
 
-    返回 {"areas": [ {"initial_teams": [...], "fight_plan": [round, ...]} ]}
-    （多区域关卡按数字键顺序排; `1-1` 这类没有 fight_plan 的返回 areas=[]）。
+    返回 {"stage","type","teams","rounds","needs"[,"alts"]}:
+       teams  部署方位（pos 8 向; attr 是属性要求, any=任意）
+       rounds 逐回合动作 [{"team","do","dir"}, ...]; do 属 move/exchange/portal
+       needs  能力需求汇总, flow 进关前预检用（teams/portal/exchange/attrs）
+
+    ⛔历史 bug（2026-08-13 修）: BAAH 原始文件的数字键是**按目标区分的
+       备选解法**（官方 grid_solution_format.json: requires[solN]=该解法达成
+       的目标）, 旧版把它当"多区域顺序打", 29 个多解法文件会在打完第一个
+       解法后干等第二次部署。真正的中途重新部署（如 H1-2 的双区域地图）
+       是**游戏自己弹部署屏**, 由 walk 相位接住并**继续同一份 rounds**。
     """
     p = ANSWERS / f"{stage}.json"
     if not p.exists():
         return None
-    d = json.loads(p.read_text(encoding="utf-8"))
-    areas = []
-    for k in sorted(k for k in d if k.isdigit()):
-        a = d[k]
-        areas.append({"initial_teams": a.get("initial_teams", []),
-                      "fight_plan": a.get("fight_plan", [])})
-    return {"stage": stage, "type": d.get("task_type", "normal"),
-            "areas": areas}
+    return json.loads(p.read_text(encoding="utf-8"))

@@ -1401,12 +1401,19 @@ def t_route():
     check("没有格子的方向要 fail-closed 返回 None",
           _grid.resolve((0.385, 0.482), "left", _cs, _dx, _dy) is None)
     _a12 = _grid.load_answer("1-2")
-    check("BAAH 1-2 答案解析: 1 区域 2 回合",
-          _a12 is not None and len(_a12["areas"]) == 1
-          and len(_a12["areas"][0]["fight_plan"]) == 2, str(_a12 and _a12["areas"]))
-    check("BAAH 1-1 没有 fight_plan（不用走位, 不是文件缺失）",
+    check("答案 1-2（我们的格式）: 单队 2 回合",
+          _a12 is not None and len(_a12["rounds"]) == 2
+          and _a12["needs"]["teams"] == 1, str(_a12 and _a12["rounds"]))
+    check("答案 1-1 没有 rounds（不用走位, 不是文件缺失）",
           _grid.load_answer("1-1") is not None
-          and _grid.load_answer("1-1")["areas"] == [])
+          and _grid.load_answer("1-1")["rounds"] == [])
+    # ⛔BAAH 数字键是**备选解法**不是多区域（官方 grid_solution_format.json）:
+    #    多解法文件必须只取一个主解法, 其余进 alts -- 旧版当"区域"顺序打,
+    #    打完第一个解法会干等第二次部署
+    _a21h = _grid.load_answer("H2-1")
+    check("多解法文件取主解法, 备选进 alts 不混进 rounds",
+          _a21h is not None and len(_a21h["rounds"]) == 4
+          and len(_a21h.get("alts", [])) == 1, str(_a21h and len(_a21h["rounds"])))
 
     # CampaignFlow 骨架行为
     # 关号解析（用户拍板: 找关卡用 digitOCR 读数字, 点击 cls 主导）
@@ -1450,9 +1457,11 @@ def t_route():
     # 换一个方向能解析的答案: 手工喂 plan right-down -> 应该点到 (0.429,0.603)
     _cp3 = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
     _cp3.goto("walk")
-    _cp3.state["answer"] = {"stage": "x", "type": "normal", "areas": [
-        {"initial_teams": [], "fight_plan": [
-            [{"team": "A", "action": "move", "target": "right-down"}]]}]}
+    _cp3.state["answer"] = {
+        "stage": "x", "type": "normal",
+        "teams": [{"name": "A", "attr": "any", "pos": "center"}],
+        "rounds": [[{"team": "A", "do": "move", "dir": "right-down"}]],
+        "needs": {"teams": 1, "portal": False, "exchange": False, "attrs": []}}
     _act3 = _cp3.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
     check("我方回合按答案点目标格心（cls 支撑的 tap）",
           _act3 is not None and _act3.kind == "tap"
@@ -1468,6 +1477,48 @@ def t_route():
     check("检出 AUTO 关着才点开",
           _a_off is not None and _a_off.target_cls == V.BATTLE_AUTO_OFF,
           f"{_a_off and _a_off.target_cls}")
+    # 进关前能力预检: 11-1 要 2 队 + portal + 属性队, 现有 flow 走不了 --
+    #    必须 BLOCKED 在 enter 相位（花 AP 之前）, 不是进关走到那一回合才死
+    _cfgb = cfg()
+    _cfgb["campaign"] = {"stage": "11-1"}
+    _cpb = ALL["campaign"](Ctx(cfg=_cfgb, log=lambda m: None))
+    _ab = _cpb.decide(O(), _SV(page="task_hall", frames_in_page=5))
+    check("答案要多队/portal -- 进关前预检 BLOCKED, AP 一分不花",
+          _cpb.outcome == "BLOCKED"
+          and any("进关前拦下" in l for l in _cpb.note_lines),
+          f"{_cpb.outcome} {_cpb.note_lines}")
+    # 真多区域: 计划没走完游戏弹回部署屏 -> 回 grid 相位重新部署,
+    #    round_i 不动（继续同一份答案, 不是换"下一区域的解法"）
+    _cpr = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpr.goto("walk")
+    _cpr.state["answer"] = {
+        "stage": "x", "type": "hard",
+        "teams": [{"name": "A", "attr": "any", "pos": "center"}],
+        "rounds": [[{"team": "A", "do": "move", "dir": "right"}],
+                   [{"team": "A", "do": "move", "dir": "right"}]],
+        "needs": {"teams": 1, "portal": False, "exchange": False, "attrs": []}}
+    _cpr.state["round_i"] = 1
+    _cpr.state["cell_acc"] = [(0.5, 0.5)]
+    _o_rd = O(B(V.SORTIE, cx=0.88, cy=0.92))
+    _a_rd = _cpr.decide(_o_rd, _SV(page="formation", frames_in_page=5))
+    check("走位中被要求重新部署 -> 回 grid 相位且 round_i 不重置",
+          _cpr.phase == "grid" and _cpr.state["round_i"] == 1
+          and _cpr.state["cell_acc"] == [],
+          f"phase={_cpr.phase} round_i={_cpr.state['round_i']}")
+    # 墙钟卡死闸: 感知缺位的裸等待有界（75s 等不到 箭头+我方 就诚实收工,
+    #    不再静默空转到 phase_cap -- 用户观感的「卡住不动」）
+    import time as _tm
+    _cpt = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpt.goto("walk")
+    _cpt.state["answer"] = _cp3.state["answer"]
+    _wb_nou = [b for b in _wb if b.cls != V.GRID_ALLY]
+    _cpt.state["wt:no_unit"] = _tm.time() - 80
+    _a_t = _cpt.decide(Observation(boxes=_wb_nou, seq=3, w=3840, h=2160),
+                       _SV(page="grid_quest", frames_in_page=10))
+    check("箭头+我方 75s 没同框 -> UNKNOWN 收工不空转",
+          _cpt.outcome == "UNKNOWN"
+          and any("感知不足" in l for l in _cpt.note_lines),
+          f"{_cpt.outcome} {_cpt.note_lines}")
 
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后

@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
-"""任務推图（走格子, 集中指挥模式）-- 按 BAAH 答案走一关。
+"""任務推图（走格子, 集中指挥模式）-- 按答案走一关。
 
 三层分工:
    感知层  v16 的走格子族 cls（小号实测 0.85-0.98）
    几何层  flow/grid.py（方向语义 -> 本帧检出的格心, 真实帧 6/6 验证）
-   答案层  data/baah_grid_solution/{stage}.json（MIT, normal 150 + Hard 90）
+   答案层  data/grid_answers/{stage}.json（scripts/convert_baah_grid.py
+           从 BAAH 原始转换; normal 150 + Hard 90, 全量含多队/portal/exchange）
 
 **打哪一关是用户的策略**（cfg campaign.stage）, bot 只负责走。
 战斗期靠游戏内 AUTO: 检出 `自动战斗关闭` 才点开（状态钮绝不盲 toggle）。
-BAAH 是盲走, 我们每步都验: 落点取检出的真格心, 到达靠"队伍绑格 == 目标格"。
+BAAH 是盲走, 我们每步都验: 落点取检出的真格心, 到达靠相位循环。
+能力边界（2026-08-13 转换器盘点）: 单队纯 move 33 关（1-3 章 + H1-H3）;
+   portal 最早 4-1 / 多队+属性队最早 6-1 / exchange 最早 6-4 --
+   这些在**进关花 AP 之前**由 `_capability_gate` 拦下, 不进关走到一半才死。
 """
 from __future__ import annotations
 
@@ -33,7 +37,7 @@ class CampaignFlow(ExitMixin, Flow):
     phase_cap = 4000
 
     def setup(self) -> None:
-        self.state.update(round_i=0, area_i=0, target=None, need_end=False,
+        self.state.update(round_i=0, target=None, need_end=False,
                           battles=0)
         # stage 配置是**可选的**（用户 2026-08-13 拍板:「找关卡还是需要
         #    digitOCR 读数字, 只是点击是 cls 主导」）。空 = 自动: 得星_0 那行
@@ -66,6 +70,16 @@ class CampaignFlow(ExitMixin, Flow):
     #    锁定**不用**战斗那套 ReID -- 格子不动, 位置累积就够; 单位离散跳格,
     #    每步重新按「正下方」绑格, 没有连续跟踪问题。
     def observe(self, obs, st) -> None:
+        # 战斗计数按**页面事实的边沿**记（battle -> 非battle 记一场）。
+        #    旧版把计数挂在 battle_result 里点確認那一发的 post 上 --
+        #    结算被 overlay/确认链吃掉就没路过那分支, 2-1 首通报了"战斗 0 场"
+        #    （计数=意图非事实, live_small_account_2026_08_13 记过的小虫）。
+        if self.phase in ("walk", "result"):
+            if st.page == "battle":
+                self.state["battle_seen"] = True
+            elif self.state.get("battle_seen"):
+                self.state["battle_seen"] = False
+                self.state["battles"] = self.state.get("battles", 0) + 1
         if self.phase not in ("grid", "walk"):
             return
         acc = self.state.setdefault("cell_acc", [])
@@ -86,16 +100,61 @@ class CampaignFlow(ExitMixin, Flow):
 
     def _plan(self):
         a = self.state.get("answer")
-        if not a or not a["areas"]:
-            return []
-        i = min(self.state["area_i"], len(a["areas"]) - 1)
-        return a["areas"][i]["fight_plan"]
+        return a["rounds"] if a else []
+
+    # 墙钟等待闸: 走位里的裸 wait 分支必须有界(墙钟, 不是 tick --
+    #    tick 速率实测 0.15-2.294 s/tick 差 15 倍, tick 当计时器一律是 bug)。
+    #    「经常卡住不动」的用户观感 = 这些分支在感知缺位时静默空转到 phase_cap。
+    def _overdue(self, key: str, secs: float) -> bool:
+        import time as _t
+        k = f"wt:{key}"
+        t0 = self.state.get(k)
+        if t0 is None:
+            self.state[k] = _t.time()
+            return False
+        return _t.time() - t0 > secs
+
+    def _wt_clear(self, *keys) -> None:
+        if not keys:
+            for k in [k for k in self.state if k.startswith("wt:")]:
+                self.state.pop(k, None)
+            return
+        for k in keys:
+            self.state.pop(f"wt:{k}", None)
+
+    # 进关前能力预检: 答案要什么能力, 现在的 flow 会不会 -- 不会就 BLOCKED
+    #    在花 AP 之前。旧行为是进关走到那一回合才 UNKNOWN: AP 扣了、任务挂在
+    #    半路、归位链还要去拆「任务进行中」的残局, 三重浪费。
+    def _capability_gate(self):
+        ans = self.state.get("answer")
+        if not ans:
+            return None
+        needs = ans.get("needs") or {}
+        lack = []
+        if needs.get("teams", 1) > 1:
+            lack.append(f"{needs['teams']} 队协同(缺 当前聚焦队伍/切换键 判据)")
+        if needs.get("portal"):
+            lack.append("portal 传送(确认弹窗链未 live 验证)")
+        if needs.get("exchange"):
+            lack.append("exchange 换位(交換按钮无 cls)")
+        if lack:
+            return self.finish(
+                Outcome.BLOCKED,
+                f"{ans.get('stage', '?')} 的答案需要 " + " + ".join(lack)
+                + " -- 进关前拦下, AP 一分没花")
+        if needs.get("attrs") and self.once("attr_note"):
+            self.log(f"答案推荐属性队 {'/'.join(needs['attrs'])}"
+                     f"（blue=神秘 red=爆发 yellow=贯穿 purple=振动）, 打不过按这个配")
+        return None
 
     # enter
     def do_enter(self, obs, st):
         if self.state.get("stage") and self.state.get("answer") is None:
             return self.finish(Outcome.BLOCKED,
-                               f"没有 {self.state['stage']} 的 BAAH 答案文件")
+                               f"没有 {self.state['stage']} 的答案文件")
+        g = self._capability_gate()
+        if g is not None:
+            return g
         if st.page == "lobby":
             return nav.enter(obs, V.NAV_TASKS, "任务大厅")
         if st.page == "task_hall":
@@ -252,11 +311,13 @@ class CampaignFlow(ExitMixin, Flow):
             ans = grid.load_answer(got)
             if ans is None:
                 return self.finish(Outcome.BLOCKED,
-                                   f"没有 {got} 的 BAAH 答案文件")
+                                   f"没有 {got} 的答案文件")
             self.state.update(stage=got, answer=ans,
                               row_anchor=(sb.cx, sb.cy))
-            self.log(f"锁定目标关 = {got}"
-                     f"（fight_plan {sum(len(a['fight_plan']) for a in ans['areas'])} 回合）")
+            g = self._capability_gate()
+            if g is not None:
+                return g
+            self.log(f"锁定目标关 = {got}（{len(ans['rounds'])} 回合）")
             anchor = (sb.cx, sb.cy)
         rows = obs.all(V.STAGE_ENTER, 0.45)
         same = min(rows, key=lambda b: abs(b.cy - anchor[1]), default=None)
@@ -355,11 +416,12 @@ class CampaignFlow(ExitMixin, Flow):
             return wait("找起点格（这章地图检出弱, 多看几帧）")
         return wait("等部署界面")
 
-    # walk: 按 fight_plan 逐回合走
+    # walk: 按答案 rounds 逐回合走
     def do_walk(self, obs, st):
         # 战斗期: 时钟重置(一场 2-4 分钟), 只管把 AUTO 打开
         if st.page == "battle":
             self._phase_t0 = self.ticks - 1
+            self._wt_clear()
             off = obs.find(V.BATTLE_AUTO_OFF, 0.50)
             if off is not None and self.pending(f"auto{self.state['battles']}"):
                 return tap_box(off, "AUTO 是关的 - 打开（状态钮只在检出关态时才点）",
@@ -367,31 +429,43 @@ class CampaignFlow(ExitMixin, Flow):
                                expect=(V.BATTLE_AUTO_ON,))
             return wait("战斗中（AUTO）")
         if st.page == "battle_result":
+            # 战斗计数在 observe() 按页面边沿记, 不挂在这一发的 post 上
             cf = obs.find(V.CONFIRM, 0.45)
             if cf is not None:
-                def _won():
-                    self.state["battles"] += 1
-                return tap_box(cf, "战斗结算: 確認", post=_won)
+                return tap_box(cf, "战斗结算: 確認")
             return wait("等结算確認")
         if st.page == "campaign_stage":
             # 走完之前就回到列表 = 关卡打完被送出来了
             self.goto("result", "回到关卡列表")
             return wait("进相位 result")
-        if st.page != "grid_quest":
-            return wait(f"过场/动画（page={st.page}）")
 
         plan = self._plan()
         if self.state["round_i"] >= len(plan):
-            a = self.state.get("answer") or {"areas": []}
-            if self.state["area_i"] + 1 < len(a["areas"]):
-                if obs.has([V.TASK_START, V.TASK_START_GREY, V.SORTIE], 0.35):
-                    self.state.update(area_i=self.state["area_i"] + 1,
-                                      round_i=0, issued=False)
-                    self.goto("grid", f"进区域 {self.state['area_i'] + 1} 重新部署")
-                    return wait("下一区域部署")
-                return wait("区域间过场, 等下一张图的部署界面")
-            self.goto("result", "fight_plan 走完了")
+            self.goto("result", "答案回合走完了")
             return wait("等结算")
+        # 真多区域地图（H1-2 实测有）: 计划没走完游戏就弹回部署屏 --
+        #    重新部署后**继续同一份 rounds**。⛔数字键不是"区域"（BAAH 官方
+        #    grid_solution_format.json: 数字键=按目标区分的**备选解法**,
+        #    一份 fight_plan 覆盖整关）; 中途部署是游戏自己的节奏, 别换计划。
+        if (st.page == "formation" or obs.has(V.SORTIE, 0.45)
+                or (not obs.has(V.PHASE_END, 0.40)
+                    and obs.has([V.TASK_START, V.TASK_START_GREY], 0.40)
+                    and self.hold("redeploy", 6))):
+            self.state.update(issued=False, cycling=False, start_box=None)
+            self.state["cell_acc"] = []
+            self._wt_clear()
+            self.goto("grid", f"回合 {self.state['round_i'] + 1} 前被要求重新部署"
+                              f"（多区域地图, 部署后继续同一份答案）")
+            return wait("重新部署")
+        if st.page != "grid_quest":
+            # 过场/动画通常几秒; 页面身份长时间不回来 = 感知或编排出事了,
+            #    别静默空转到 phase_cap（4000 tick 在慢速率下是十几分钟）
+            if self._overdue("offpage", 120):
+                return self.finish(
+                    Outcome.UNKNOWN,
+                    f"走位中在非地图页面滞留超 120s（page={st.page}）-- 交人看")
+            return wait(f"过场/动画（page={st.page}）")
+        self._wt_clear("offpage")
 
         # **回合时钟 = 相位循环**（镜头无关的事实）: PHASE結束 消失(敌方回合/
         #    战斗把 HUD 藏起来) 再出现 = 新回合开始。坐标相等那套到位判据
@@ -407,14 +481,21 @@ class CampaignFlow(ExitMixin, Flow):
         if self.state.get("issued"):
             if not pe:
                 self.state["cycling"] = True
+                # 敌方回合几秒~几十秒, 敌方打我方会走上面的 battle 分支;
+                #    5 分钟不回来 = 相位时钟前提破了, 交人看
+                if self._overdue("cycle_back", 300):
+                    return self.finish(Outcome.UNKNOWN,
+                                       "落子后 PHASE 控件消失超 300s 没回来 -- 交人看")
                 return wait("敌方回合/战斗中（PHASE 控件不在）")
             if self.state.get("cycling"):
                 self.state.update(issued=False, cycling=False)
                 self.state["round_i"] += 1
                 self.state.pop("hold:move_wait", None)
+                self._wt_clear()
                 self.log(f"相位循环完成 - 进回合 {self.state['round_i'] + 1}")
                 return wait("新回合")
             # 落子发了但相位一直没走 = 那一发没被游戏收下 -> 有界重发
+            #    （150 tick 是 live 验过的值: 开局动画期实测第 4 发才被收下）
             if self.hold("move_wait", 150):
                 n = self.bump(f"reissue:{self.state['round_i']}")
                 if n > 3:
@@ -425,7 +506,11 @@ class CampaignFlow(ExitMixin, Flow):
                 self.log(f"落子后相位 150 tick 没循环 - 重发（第 {n} 次）")
             return wait("等相位循环")
         if not pe:
+            if self._overdue("no_phase", 150):
+                return self.finish(Outcome.UNKNOWN,
+                                   "150s 没等到我方回合（PHASE 控件） -- 交人看")
             return wait("等我方回合（PHASE 控件出现）")
+        self._wt_clear("no_phase", "cycle_back")
 
         # 我方回合, 发本回合的落子。绑格**只用 我方 身体框** -- 队伍箭头浮在
         #    头顶约 1.6 行高, 拿它绑格会把身后的格子认成所在格（探针实锤:
@@ -446,22 +531,38 @@ class CampaignFlow(ExitMixin, Flow):
         if unit is None and len(allies) == 1:
             unit = allies[0]          # 只有一个我方框, 没有歧义
         if unit is None:
+            if self._overdue("no_unit", 75):
+                return self.finish(Outcome.UNKNOWN,
+                                   "75s 内 箭头+我方 没同框过 -- 感知不足, "
+                                   "已存帧待标注, 不瞎点")
             return wait("等 箭头+我方 同框（防敌我混淆的假我方框）")
+        self._wt_clear("no_unit")
         cs = grid.cells(obs, 0.35)
         stp = grid.steps(cs)
         if len(cs) < 2 or stp is None:
+            if self._overdue("no_cells", 75):
+                return self.finish(Outcome.UNKNOWN,
+                                   "75s 内格子检出不足 2 个 -- 这章地图感知不足, "
+                                   "已存帧待标注, 不瞎点")
             return wait("格子检出不足, 等一帧")
+        self._wt_clear("no_cells")
         dx, dy = stp
         cur = grid.below(unit, cs, dx)
         if cur is None:
+            if self._overdue("no_bind", 75):
+                return self.finish(Outcome.UNKNOWN,
+                                   "75s 内队伍绑不到格子 -- 交人看")
             return wait("队伍绑不到格子")
+        self._wt_clear("no_bind")
         moves = [m for m in plan[self.state["round_i"]]
-                 if m.get("action") == "move"]
-        if not moves:
+                 if m.get("do") == "move"]
+        if len(moves) != len(plan[self.state["round_i"]]) or len(moves) != 1:
+            # 预检在进关前就该拦掉 portal/exchange/多队 -- 走到这说明预检
+            #    漏了或答案被人改过, 照旧 fail-closed
             return self.finish(Outcome.UNKNOWN,
-                               f"回合 {self.state['round_i'] + 1} 里有不认识的动作"
-                               f"（exchange/portal 还没实现）-- 不瞎走")
-        d = moves[0]["target"]
+                               f"回合 {self.state['round_i'] + 1} 不是单队单 move"
+                               f"（应被进关预检拦下）-- 不瞎走")
+        d = moves[0]["dir"]
         # **目的格候选排除自己站的格**（05 轮实锤: 绑格偏一格时 resolve 会解析
         #    回自己 -> 点自己=no-op -> 假到位）
         goal = grid.resolve(cur, d,
@@ -477,10 +578,21 @@ class CampaignFlow(ExitMixin, Flow):
             return wait(f"方向 {d} 暂时解析不到格子, 再看几帧")
         cell_box = min(obs.all(grid.CELL_CLS, 0.35),
                        key=lambda b: (b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2)
+        # 黄描边(可走)只做**标注不做门**: 缺标记多半是漏检（2 章断崖）, 硬门
+        #    会把能走的关拦死; 但"目标格没有黄描边=真够不着=点了没反馈"是已知
+        #    最难判的失败形态, 把这个事实写进 reason, 重发耗尽时人一眼能定位
+        opens = obs.all(V.GRID_CELL_OPEN, 0.30)
+        marked = any((b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2
+                     < (0.4 * dx) ** 2 for b in opens)
+
+        def _issued():
+            self.state.update(issued=True, cycling=False)
+            self._wt_clear()
         return tap_box(cell_box,
                        f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
-                       f"({goal[0]:.3f},{goal[1]:.3f})",
-                       post=lambda: self.state.update(issued=True, cycling=False))
+                       f"({goal[0]:.3f},{goal[1]:.3f})"
+                       + ("" if marked else "（无可走标记, 若不走动多半是够不着）"),
+                       post=_issued)
 
     # result: 等结算链把我们送回关卡列表
     def do_result(self, obs, st):

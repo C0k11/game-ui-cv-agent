@@ -1,0 +1,157 @@
+{
+ "stage": "H8-1",
+ "type": "hard",
+ "source": "BAAH (MIT), sol=0",
+ "teams": [
+  {
+   "name": "A",
+   "attr": "yellow",
+   "pos": "up"
+  },
+  {
+   "name": "B",
+   "attr": "yellow",
+   "pos": "down"
+  }
+ ],
+ "rounds": [
+  [
+   {
+    "team": "A",
+    "do": "portal",
+    "dir": "right-down"
+   },
+   {
+    "team": "B",
+    "do": "portal",
+    "dir": "left-up"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "right-down"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-down"
+   },
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ]
+ ],
+ "needs": {
+  "teams": 2,
+  "portal": true,
+  "exchange": false,
+  "attrs": [
+   "yellow"
+  ]
+ },
+ "alts": [
+  {
+   "teams": [
+    {
+     "name": "A",
+     "attr": "any",
+     "pos": "up"
+    },
+    {
+     "name": "B",
+     "attr": "yellow",
+     "pos": "down"
+    }
+   ],
+   "rounds": [
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right-down"
+     },
+     {
+      "team": "B",
+      "do": "portal",
+      "dir": "left-up"
+     }
+    ],
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     },
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right-down"
+     }
+    ],
+    [
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right-down"
+     },
+     {
+      "team": "B",
+      "do": "exchange",
+      "dir": "left-up"
+     },
+     {
+      "team": "B",
+      "do": "portal",
+      "dir": "center"
+     },
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right-up"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right"
+     }
+    ]
+   ],
+   "needs": {
+    "teams": 2,
+    "portal": true,
+    "exchange": true,
+    "attrs": [
+     "yellow"
+    ]
+   },
+   "sol": "1"
+  }
+ ]
+}

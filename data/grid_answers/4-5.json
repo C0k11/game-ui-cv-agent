@@ -1,0 +1,46 @@
+{
+ "stage": "4-5",
+ "type": "normal",
+ "source": "BAAH (MIT), sol=0",
+ "teams": [
+  {
+   "name": "A",
+   "attr": "any",
+   "pos": "center"
+  }
+ ],
+ "rounds": [
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "portal",
+    "dir": "center"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "left"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "left"
+   }
+  ]
+ ],
+ "needs": {
+  "teams": 1,
+  "portal": true,
+  "exchange": false,
+  "attrs": []
+ }
+}

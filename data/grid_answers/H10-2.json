@@ -1,0 +1,171 @@
+{
+ "stage": "H10-2",
+ "type": "hard",
+ "source": "BAAH (MIT), sol=0",
+ "teams": [
+  {
+   "name": "A",
+   "attr": "red",
+   "pos": "left"
+  },
+  {
+   "name": "B",
+   "attr": "blue",
+   "pos": "right"
+  }
+ ],
+ "rounds": [
+  [
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-down"
+   },
+   {
+    "team": "A",
+    "do": "exchange",
+    "dir": "right-down"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-down"
+   }
+  ],
+  [
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-down"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "B",
+    "do": "move",
+    "dir": "left-up"
+   },
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right-up"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "right"
+   }
+  ],
+  [
+   {
+    "team": "A",
+    "do": "move",
+    "dir": "left-down"
+   }
+  ]
+ ],
+ "needs": {
+  "teams": 2,
+  "portal": false,
+  "exchange": true,
+  "attrs": [
+   "blue",
+   "red"
+  ]
+ },
+ "alts": [
+  {
+   "teams": [
+    {
+     "name": "A",
+     "attr": "red",
+     "pos": "left"
+    },
+    {
+     "name": "B",
+     "attr": "blue",
+     "pos": "right"
+    }
+   ],
+   "rounds": [
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left-down"
+     },
+     {
+      "team": "A",
+      "do": "exchange",
+      "dir": "right-down"
+     },
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right-down"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left-down"
+     },
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "left-up"
+     },
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     }
+    ],
+    [
+     {
+      "team": "B",
+      "do": "move",
+      "dir": "right-down"
+     },
+     {
+      "team": "A",
+      "do": "move",
+      "dir": "right"
+     }
+    ]
+   ],
+   "needs": {
+    "teams": 2,
+    "portal": false,
+    "exchange": true,
+    "attrs": [
+     "blue",
+     "red"
+    ]
+   },
+   "sol": "1"
+  }
+ ]
+}
