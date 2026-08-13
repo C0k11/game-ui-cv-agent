@@ -418,9 +418,16 @@ class ShopFlow(ExitMixin, Flow):
             return None
         # 计数挂 post（我自己 08-10 写的时候又犯了同一个 decide 期突变，
         #    半小时后在 sweep.py 抓到同族 bug 才回头把这处一起改了）
-        return swipe(col.cx, 0.75, col.cx, 0.35,
-                     f"左栏往下滑露出「戰術大賽」tab（第 {n+1} 次）",
-                     post=lambda: self.state.update(tabscroll=n + 1))
+        # 几何全部从检出推（x 本来就是 col.cx，y 之前还写死 0.75->0.35）。
+        #   左栏 tab 的框高就是"一行多高"，滑 3 行。
+        sw = nav.list_swipe(
+            obs, [V.SHOP_TAB_CREDIT_SEL, V.SHOP_TAB_CREDIT,
+                  V.ARENA_SHOP_TAB, V.ARENA_SHOP_TAB_SEL],
+            f"左栏往下滑露出「戰術大賽」tab（第 {n+1} 次）",
+            post=lambda: self.state.update(tabscroll=n + 1))
+        if sw is not None:
+            return sw
+        return wait("左栏没检出 tab 锚点 — 推不出滑动几何，不瞎滑")
 
     def on_arena_shop(self, obs, st):
         """**绝不用「全部選擇」**（08-10 帧证）：这一栏货架上除了两瓶

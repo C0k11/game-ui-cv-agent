@@ -174,9 +174,14 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         # 本屏没有未完成的  往下找一屏。滑到没变化就是到底了。
         if self.state["scrolls"] < 6:
             n = self.state["scrolls"] + 1             # 计数挂 post，见 sweep.py
-            return swipe(0.5, 0.72, 0.5, 0.38,
-                         f"节点图下滑找未完成（第 {n} 次）",
-                         post=lambda: self.state.update(scrolls=n))
+            # 几何从检出推：节点/入场键就是这一列的行（nav.list_swipe）。
+            sw = nav.list_swipe(
+                obs, [V.STORY_NODE_DONE, V.STORY_NODE_UNDONE, V.STAGE_ENTER],
+                f"节点图下滑找未完成（第 {n} 次）",
+                post=lambda: self.state.update(scrolls=n))
+            if sw is not None:
+                return sw
+            return wait("节点图上没检出行锚点 — 推不出滑动几何，不瞎滑")
         self.state["src_i"] += 1
         self.state["scrolls"] = 0
         self.log("这一类挖完了  换下一类")

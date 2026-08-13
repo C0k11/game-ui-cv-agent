@@ -986,6 +986,24 @@ def t_invariants():
                     break
                 if re.search(r"self\.state\[[^\]]+\]\s*(\+=|=)(?!=)", s):
                     bad.append(f"{p.name}:{j+1} {s[:48]}")
+    # **滑动的几何量必须来自检出**（用户 2026-08-13 定的全局规矩:「先扫，确定
+    #   滑的位置，也确定有没有目标然后再滑，不然怎么适配其他分辨率以及
+    #   aspect ratio」）。写死 `swipe(0.5, 0.72, 0.5, 0.40)` 是拿某一个分辨率下
+    #   量出来的比例当普适值 —— 实测设备就有 19 种分辨率。
+    #   例外: 扫荡/活动 quest 那几条另有规则（用户点名），目前它们不调 swipe。
+    import glob as _glob2
+    import re as _re2
+    _hard = []
+    for _p in _glob2.glob("routing_v2/flow/*.py"):
+        _src = open(_p, encoding="utf-8").read()
+        for _m in _re2.finditer(r"[^.\w]swipe\(([^)]*)\)", _src, _re2.S):
+            _args = _m.group(1).split(",")[:4]
+            if _src[:_m.start()].rfind("SWIPE_HARDCODED_OK") > _src[:_m.start()].rfind(chr(10) + "    def "):
+                continue                 # 具名豁免（必须在同一个方法里写明理由）
+            if sum(1 for _a in _args if _re2.match(r"\s*0\.\d+\s*$", _a)) >= 3:
+                _hard.append(f"{_p.split(chr(92))[-1]}: {_m.group(1)[:40]}")
+    check("flow 里没有写死几何的 swipe（几何必须从检出推）", not _hard, str(_hard))
+
     check("滑动前不许改状态（计数/指纹/台账一律挂 post）", not bad,
           " | ".join(bad))
 

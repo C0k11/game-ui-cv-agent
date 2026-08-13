@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from routing_v2.act.action import Action, tap_box, wait
+from routing_v2.act.action import Action, swipe, tap_box, wait
 from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
 from routing_v2.state.machine import StateView
@@ -335,6 +335,38 @@ def blank_escape(st: StateView, min_frames: int = 45) -> Optional[Action]:
                   f"  点背景唤回 UI",
                   justify="屏上零检出，没有任何按钮可被误点；且上一个认得出的"
                           "页面是大厅 —— 只有大厅点背景会收起 UI")
+
+
+def list_swipe(obs: Observation, anchors, why: str, *, rows: float = 3.0,
+               post=None) -> Optional[Action]:
+    """列表滑动 —— **几何量全部从检出推**，一个写死的数都不留。
+
+    用户 2026-08-13 定的全局规矩:「**先扫**，确定滑的位置，也确定有没有目标
+       然后**再滑**，不然怎么适配其他分辨率以及 aspect ratio」。
+       "扫"由调用方做（先找目标，找到就根本别调这里）；这里只负责把
+       **滑哪条轴、滑多远**从屏上那一列条目推出来。
+
+    在这之前全仓 5 处滑动写的都是「起点 0.72、终点 0.40」这种常量 ——
+       那是拿**某一个分辨率下量出来的比例**当普适值，正是 memory
+       [[read_layer_icon_units]] 那条「屏幕比例只在标定它的那个分辨率上成立」
+       的同族违例（实测设备就有 19 种分辨率）。
+
+    `anchors` = 和目标**同一列**的条目 cls（邀请键 / 货架价签 / 左栏 tab …）:
+       它们的 cx 给轴线、框高给"一行多高"、cy 给可视区下沿。
+    返回 None = 屏上连锚点都没有  **不许瞎滑**（fail-closed）。
+    """
+    bs = obs.all(anchors, 0.35)
+    if not bs:
+        return None
+    xs = sorted(b.cx for b in bs)
+    hs = sorted(max(b.y2 - b.y1, 0.008) for b in bs)
+    cx = xs[len(xs) // 2]                       # 中位, 别被离群锚带偏
+    rowh = hs[len(hs) // 2]
+    y0 = min(0.92, max(b.cy for b in bs) + rowh * 0.6)
+    y1 = max(0.08, y0 - rowh * rows)
+    if y0 - y1 < rowh * 0.8:                    # 推不出有效距离就别滑
+        return None
+    return swipe(cx, y0, cx, y1, why, post=post)
 
 
 def enter(obs: Observation, cls: str, why: str = "") -> Optional[Action]:

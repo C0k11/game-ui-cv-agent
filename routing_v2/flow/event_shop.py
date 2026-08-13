@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from routing_v2.act.action import swipe, tap_box, wait
+from routing_v2.flow import nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Observation
@@ -192,9 +193,14 @@ class EventShopFlow(ExitMixin, Flow):
             #    滑动没发出去就把它更新掉  下一帧比对「指纹没变」 判定到底了
             #     货架后半截永远扫不到。（正是换关假象那次的同一形态。）
             n = self.state["scrolls"] + 1
-            return swipe(0.6, 0.72, 0.6, 0.40,
-                         f"{cur_name}: 货架下滑（第 {n} 次，指纹变化  还没到底）",
-                         post=lambda: self.state.update(sig=sig, scrolls=n))
+            # 几何从检出推：货架上的購買/价签就是这一列的行（nav.list_swipe）。
+            sw = nav.list_swipe(
+                obs, [V.SHOP_BUY, V.CURRENCY],
+                f"{cur_name}: 货架下滑（第 {n} 次，指纹变化  还没到底）",
+                post=lambda: self.state.update(sig=sig, scrolls=n))
+            if sw is not None:
+                return sw
+            return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
         self.log(f"{cur_name}: 余额 {bal}，可买 {rec['buyable']}，"
                  f"售罄 {rec['soldout']} — 这个 tab 扫完")
         self.state["tab_i"] += 1

@@ -90,6 +90,15 @@ class MomoTalkFlow(ExitMixin, Flow):
             #    台账**，在 decide 期就清空 —— 滑动一旦没发出去（被闸吞/被 step
             #    只看一眼），台账没了而屏幕没动  本屏已聊过的行会被**重新点一遍**。
             n = self.state["scrolls"] + 1
+            # ⛔ SWIPE_HARDCODED_OK: 这里的几何还是写死的，理由如下 ——
+            #    别处的滑动都改成了 `nav.list_swipe`（几何从检出推，见那里的
+            #    说明），但 MomoTalk 左侧学生列表**没有可靠的行锚点**:
+            #    唯一的行内 cls 是 `未读`，而走到这一支恰恰是"本屏未读都清完了"，
+            #    锚点必然为空 —— 拿它推几何等于推不出来。
+            #    这条 flow 目前 `modules.momotalk = False`（默认关），
+            #      所以先留着并**具名豁免**，不静默放过。
+            #     要修的前提: 给学生行本身训一个 cls（或让这条 flow 也推
+            #      avatar 模型），有了行锚点就换成 list_swipe。
             return swipe(0.28, 0.72, 0.28, 0.40,
                          f"本屏未读都清完了  下滑找（第 {n} 次）",
                          post=lambda: self.state.update(scrolls=n, done_rows=[]))

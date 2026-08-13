@@ -322,9 +322,14 @@ class CafeFlow(ExitMixin, Flow):
             return wait("刚进邀请列表 — 先让头像模型把这一屏扫一遍，别急着滑")
         if self.state["invite_scrolls"] < 8:
             n = self.state["invite_scrolls"] + 1      # 计数挂 post，见 sweep.py
-            return swipe(0.5, 0.72, 0.5, 0.40,
-                         f"下滑找邀请目标（第 {n} 次）",
-                         post=lambda: self.state.update(invite_scrolls=n))
+            # 几何从检出推：邀请键就是这一列的行（见 nav.list_swipe）。
+            #   找不到锚点 = 这一屏根本没有可邀请的行  别瞎滑。
+            sw = nav.list_swipe(obs, [V.CAFE_INVITE],
+                                f"下滑找邀请目标（第 {n} 次）",
+                                post=lambda: self.state.update(invite_scrolls=n))
+            if sw is not None:
+                return sw
+            return wait("这一屏没检出邀请键行 — 推不出滑动几何，不瞎滑")
         # 配置的角色一个都没找到  别乱邀请，直接退出（邀请卷是消耗品）
         # **见过目标就不许说"没找到"**（2026-08-12 live 自相矛盾实录）：
         #    滑到底只说明"这一帧的可视区里没有"，而目标可能早就见过、
