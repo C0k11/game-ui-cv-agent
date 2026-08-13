@@ -322,6 +322,21 @@ class ShopFlow(ExitMixin, Flow):
             return None
         if not self.state.get("bought"):
             return None                    # 先把信用点那栏做完
+        # **屏上还压着东西的时候不许碰左栏**（2026-08-13 用户点名:「这次是左边
+        #    栏目该滑动了，没检测到就滑动一次**再检测**」—— 规矩没错，是执行
+        #    环境不对）。轨迹实证:
+        #      t8  点「選擇購買」(会弹确认框)
+        #      t17 滑左栏 第1次   <- 确认框还压在屏上
+        #      t25 点確認         <- 确认框到这儿才处理
+        #      t28/t38 第2/3次    <- 还在弹窗+奖励期, 3 次预算烧光
+        #    三次全滑在被盖住的屏上：滑了没动、扫也扫不到，于是
+        #    「滑一次扫一次」退化成「猛滑三次」，然后判定"没有这个 tab"。
+        #     对话框/奖励框在场就**等**，别动左栏也别消耗滑动预算。
+        #      返回 wait 而不是 None：None 会让 on_shop 一路走到 finish(CLEAN)，
+        #      把整个战术大赛商店跳过（这一轮就是这么丢的）。
+        if obs.has([V.CONFIRM, V.CANCEL, V.GOT_REWARD, V.STORY_TAP_CONTINUE,
+                    V.CLOSE_X], 0.40):
+            return wait("屏上还压着对话框/奖励框 — 左栏被盖住，先不滑")
         tab = obs.find(V.ARENA_SHOP_TAB, 0.40)
         # 2026-08-12 用户抓到「战术大赛商店点选项打架了，我才发现原来我们
         #    今天没买能量饮料」。根因之一：这里只写了 `once="arenatab"` 却

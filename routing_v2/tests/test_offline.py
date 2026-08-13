@@ -1191,6 +1191,22 @@ def t_route():
         check(f"台账 {_a}->{_b} {'判为旧基线截断' if _want else '不判截断'}",
               _is_trunc(_a, _b) == _want)
 
+    # 左栏滑动的前提: 屏上不能压着对话框/奖励框（2026-08-13 用户点名
+    #   「没检测到就滑动一次**再检测**」）。三次滑动全发生在确认框盖住左栏时,
+    #   滑了没动、扫也扫不到, 预算烧光后判"没有这个 tab", 整个大赛商店被跳过。
+    _sf = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    _sf.state["bought"] = True
+    _covered = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19),
+                 B(V.CONFIRM, cx=0.6, cy=0.79), B(V.CANCEL, cx=0.4, cy=0.79))
+    _a = _sf._goto_arena_tab(_covered)
+    check("确认框盖着左栏时不滑（也不消耗滑动预算）",
+          _a is not None and _a.kind == "wait", f"{_a and _a.kind}")
+    check("被盖住时 tabscroll 没涨", _sf.state.get("tabscroll", 0) == 0)
+    _clean = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19))
+    _a2 = _sf._goto_arena_tab(_clean)
+    check("屏面干净时才滑左栏", _a2 is not None and _a2.kind == "swipe",
+          f"{_a2 and _a2.kind}")
+
     # 契约超时要退回 once 标记（2026-08-13 用户现场诊断）: 按钮还在归位时
     #   点下去, tap 确实发出去了但游戏没收到 —— `once` 的旧契约是"发出去就算
     #   做过", 于是标记被消耗、`pending()` 永为 False、**再也不重试**。
