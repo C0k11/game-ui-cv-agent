@@ -1240,19 +1240,40 @@ def t_route():
     check("屏面干净时才滑左栏", _a2 is not None and _a2.kind == "swipe",
           f"{_a2 and _a2.kind}")
 
-    # 邀请面板不是"挡路弹窗"（2026-08-13 live: 开-叉重复 11 次）:
-    #   契约被「邀请键出现」正常兑现, 但页面身份要 3 帧才切, 那几帧 on_cafe
-    #   继续跑、把自己刚开的面板叉掉。
+    # 相位机（2026-08-13）: 分派器是 flow 自己的相位, **不是抖动的页面身份**。
+    #   原来按 st.page 分派, 于是点开邀请卷后页面身份要 3 帧才切, 那几帧
+    #   on_cafe 从头重跑、第 2 条分支把自己刚开的面板叉掉 —— live 实测
+    #   开-叉循环 11 次。断言**机制**: 相位在 invite 时, 那条叉叉分支
+    #   (它住在 do_earnings 里) 根本不在调用链上。
     _cf = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf.goto("invite")
     _panel = O(B(V.CLOSE_X, cx=0.79, cy=0.16), B(V.CAFE_INVITE, cx=0.62, cy=0.40))
-    _a5 = _cf.on_cafe(_panel, _SV(page="cafe", frames_in_page=5))
-    check("邀请面板开着时不许叉掉（屏上有邀请键）",
+    _a5 = _cf.decide(_panel, _SV(page="cafe", frames_in_page=5))
+    check("邀请相位: 页面身份还是 cafe 也不许叉掉邀请面板",
           _a5 is None or _a5.target_cls != V.CLOSE_X,
           f"{_a5 and _a5.target_cls}")
+    # 同一帧、同一个页面身份, 换个相位就该叉 —— 证明决定权在相位不在页面
+    _cf2 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf2.goto("earnings")
     _stray = O(B(V.CLOSE_X, cx=0.79, cy=0.16))
-    _a6 = _cf.on_cafe(_stray, _SV(page="cafe", frames_in_page=5))
-    check("真的挡路弹窗照常叉掉（别误伤）",
-          _a6 is not None and _a6.target_cls == V.CLOSE_X)
+    _a6 = _cf2.decide(_stray, _SV(page="cafe", frames_in_page=5))
+    check("收益相位: 真的挡路弹窗照常叉掉（别误伤）",
+          _a6 is not None and _a6.target_cls == V.CLOSE_X,
+          f"{_a6 and _a6.target_cls}")
+    # 相位机的两条结构不变量
+    _bad_ph = []
+    for _n, _cls in ALL.items():
+        for _p in getattr(_cls, "phases", ()):
+            if not hasattr(_cls, f"do_{_p}"):
+                _bad_ph.append(f"{_n}.{_p}")
+    check("声明的每个相位都有 do_ 处理器", not _bad_ph, str(_bad_ph))
+    _cf3 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    try:
+        _cf3.goto("不存在的相位")
+        _raised = False
+    except ValueError:
+        _raised = True
+    check("goto 到没声明的相位要当场报错（别默默走错路）", _raised)
 
     # 绿勾归属必须 1:1 最近邻（2026-08-13 真帧量出来的）: 绿勾长在自己学生
     #   右上偏移约 (+0.028,-0.030), 而学生横向间距只有 0.057 —— 旧判据
@@ -1265,13 +1286,35 @@ def t_route():
     _chk = [Box(cls=V.GREEN_CHECK, conf=0.96,
                 x1=cx - 0.008, y1=0.358, x2=cx + 0.008, y2=0.376)
             for cx in (0.431, 0.488)]
-    # 面板身份: 体内(cy>0.15)要有 课程表票, 否则 _roster_panel 直接交回去
+    # 面板身份: 体内(cy>0.15)要有 课程表票, 否则不认这个面板
     _tick = Box(cls=V.SCHED_TICKET, conf=0.95, x1=0.60, y1=0.20, x2=0.66, y2=0.24)
     _ob = Observation(boxes=_stu + _chk + [_tick], seq=1, w=3840, h=2160)
-    _act = _sc._roster_panel(_ob)
+    _sc.goto("roster")
+    _act = _sc.decide(_ob, _SV(page="schedule_region", frames_in_page=10))
     check("2 个绿勾只认领 2 个学生 — 没勾的那位仍会被选中",
           _act is not None and _act.target_cls == "美咲泳装",
           f"{_act and _act.target_cls}")
+    # 绿勾**会闪**（老代码 _accumulate_green_marks）: 下一帧勾没检出来,
+    #   也不许把已经上过课的两位重新当成可选 —— 累积表说了算。
+    _ob2 = Observation(boxes=_stu + [_tick], seq=2, w=3840, h=2160)
+    _act2 = _sc.decide(_ob2, _SV(page="schedule_region", frames_in_page=11))
+    check("绿勾这一帧没检出, 累积表仍然记得那两位上过课",
+          _act2 is not None and _act2.target_cls == "美咲泳装",
+          f"{_act2 and _act2.target_cls}")
+    # 房间面板一开（屏上有「課程表開始」）就必须换相位, **不许再挑学生** ——
+    #   这是「抢拍」的结构性断点（原来 t1138/1144/1147 连点 3 个学生）。
+    _sc2 = ALL["schedule"](Ctx(cfg=cfg(), log=lambda m: None))
+    _sc2.goto("roster")
+    _start = Box(cls=V.SCHED_START, conf=0.95, x1=0.55, y1=0.70, x2=0.70, y2=0.76)
+    _ob3 = Observation(boxes=_stu + [_tick, _start], seq=3, w=3840, h=2160)
+    _a_r = _sc2.decide(_ob3, _SV(page="schedule_region", frames_in_page=10))
+    check("房间面板开着时 roster 相位不许点学生",
+          _a_r is not None and _a_r.kind == "wait" and _sc2.phase == "open_room",
+          f"{_a_r and _a_r.kind} phase={_sc2.phase}")
+    _a_o = _sc2.decide(_ob3, _SV(page="schedule_region", frames_in_page=11))
+    check("换到 open_room 相位后只按「課程表開始」",
+          _a_o is not None and _a_o.target_cls == V.SCHED_START,
+          f"{_a_o and _a_o.target_cls}")
 
     # **抢拍**（用户 2026-08-13:「咖啡厅依旧抢拍乱点，课程表也是抢拍」）:
     #   点一个学生 -> 面板盖上来 -> 那个学生名消失 -> 默认契约当场"兑现" ->

@@ -51,6 +51,33 @@ class Flow:
     name: str = "flow"
     module: str = ""                    # cfg["modules"] 里的键
     yolo: tuple = ("ui",)               # 这个 flow 需要哪些模型
+    # 相位序列。**声明了就按相位分派，没声明才按页面分派。**
+    #
+    # 2026-08-13 定案，用户第 N 次报「前后点击逻辑打架」后才定位到的结构性病根:
+    #    老代码 `brain/skills/cafe.py:434` 的 tick() 是按 **flow 自己的
+    #    `sub_state`** 分派的 —— 页面识别只在相位处理器**内部**当证据用，
+    #    从来不决定走哪个分支。进了 `_invite` 就一直在 `_invite`，
+    #    只有 `_goto()` 能换出去。
+    #    新代码原来按 `st.page` 分派（见 `decide()`）—— **分派器就是感知结果**，
+    #    而感知会抖：页面身份要连续 `confirm_frames=3` 帧才切，那几帧里
+    #    `on_<旧页面>` 照常从头把所有分支重跑一遍，于是
+    #      · 咖啡厅点开邀请卷 -> 页面还是 `cafe` -> 第 2 条分支把面板叉了
+    #        （08-13 live 实测开-叉循环 **11 次**，t81 到 t223）
+    #      · 课程表房间面板开着 -> 还在跑选学生分支 -> 抢拍卡死
+    #      · 商店左栏 tab 抖一下 -> 分支翻面
+    #    这三件事**是同一件事**。我之前四个补丁（`sig0` 基线 / `_MIN_HOLD=4` /
+    #    严格契约不被页面跳作废 / cafe 那条 `not obs.has(邀请键)`）全是在给
+    #    缺失的相位机打替代品 —— 契约闸能约束「上一发生没生效」，
+    #    **约束不了「下一发该不该点这个」**，后者本来就该由相位决定。
+    #
+    # 用法: `phases = ("enter", "earnings", ...)`，每个相位写一个 `do_<相位>`。
+    #    相位内部用 `self.goto("下一相位")` 推进；证据和相位矛盾时**允许退回**
+    #    （老代码 `_headpat` 里发现不在咖啡厅就 `_goto("enter")`，这是自愈路径，
+    #     不是 bug）。空 `phases` = 保持原来的按页分派，便于逐条 flow 迁移。
+    phases: tuple = ()
+    # 一个相位最多待多少 tick。超了调 `on_phase_stuck()`，默认收工报 UNKNOWN
+    # （不许默默换相位继续跑 —— 那就成了「数意图不数事实」）。
+    phase_cap: int = 600
     # 这条 flow 的入口在哪一层（`nav._PARENT` 里的页面名）。
     #
     # 交班归位靠它（2026-08-12）:上一条 flow 收工时停在哪儿，runner 就把画面
@@ -72,6 +99,8 @@ class Flow:
         self.t0 = time.time()
         self.ticks = 0
         self.state: Dict[str, Any] = {}          # flow 自己的小状态
+        self.phase: str = ""                     # 当前相位（见 `phases`）
+        self._phase_t0: int = 0                  # 进入当前相位时的 tick
         self.setup()
 
     # ── 生命周期 ────────────────────────────────────────────────────────
@@ -89,6 +118,33 @@ class Flow:
         if why and (not self.note_lines or self.note_lines[-1] != why):
             self.note_lines.append(why)
         return done(outcome, why or outcome)
+
+    # 相位机（老代码 `_goto` 的等价物，见 `phases` 上的说明）
+    def goto(self, phase: str, why: str = "") -> None:
+        """换相位。**同名不重入** -- 处理器每帧都会跑，同名要是也重置计时，
+        `phase_ticks` 就永远是 0，卡死探针失效。要"再做一遍"就像老代码那样
+        用不同的相位名（`headpat` / `headpat2`）。"""
+        if phase == self.phase:
+            return
+        if phase not in self.phases:
+            raise ValueError(f"{self.name}: 相位 `{phase}` 没在 phases 里声明")
+        self.log(f"相位 {self.phase or '-'} -> {phase}" + (f"（{why}）" if why else ""))
+        self.phase = phase
+        self._phase_t0 = self.ticks
+        # 相位一换，`once` 标记全清：那些标记的语义是"这个相位里只做一次"。
+        #    老代码换相位时 `_phase_ticks = 0` 配合各相位自己的 flag，效果相同。
+        self.once_reset()
+
+    @property
+    def phase_ticks(self) -> int:
+        return self.ticks - self._phase_t0
+
+    def on_phase_stuck(self, obs: Observation, st: StateView) -> Optional[Action]:
+        """相位待太久。默认收工报 UNKNOWN -- **不许默默跳到下一相位**，
+        那等于谎报这一步做完了（§completion_gap）。"""
+        return self.finish(
+            Outcome.UNKNOWN,
+            f"相位 `{self.phase}` 卡了 {self.phase_ticks} tick 没推进 - 没做完就收手")
 
     def report(self) -> str:
         dur = time.time() - self.t0
@@ -121,6 +177,19 @@ class Flow:
         act = self.pre_page(obs, st)
         if act is not None:
             return act
+        # 声明了 `phases` 就**按相位分派**，页面只当证据（老代码的模型）。
+        #    这是「点击顺序打架」的结构性修法：哪个处理器在跑由 flow 自己说了算，
+        #    不再由抖动的页面身份说了算。见 `phases` 上那段说明。
+        if self.phases:
+            if not self.phase:
+                self.goto(self.phases[0], "起手")
+            if self.phase_ticks > self.phase_cap:
+                return self.on_phase_stuck(obs, st)
+            fn = getattr(self, f"do_{self.phase}", None)
+            if fn is None:      # 架构不变量测试会拦，这里只是兜底
+                return self.finish(Outcome.UNKNOWN,
+                                   f"相位 `{self.phase}` 没有 do_ 处理器")
+            return fn(obs, st)
         fn = getattr(self, f"on_{st.page}", None)
         if fn is None:
             return self.on_offsite(obs, st)
