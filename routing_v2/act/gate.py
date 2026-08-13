@@ -79,6 +79,8 @@ _SAME_TARGET = 0.02
 class Verdict:
     ok: bool
     why: str = ""
+    rollback_once: str = ""         # 契约超时 = 上一发没生效  把它的 `once`
+                                    #   标记退回去，让 flow 能重试（见 advance）
     by: str = ""                    # 是哪道闸给的判决（复盘用；静默拦下时
                                     #   `why` 是空的，没这个字段就分不清
                                     #   是"重复点"还是"上一发没兑现"）
@@ -421,7 +423,7 @@ class Gate:
         if act.expect or act.expect_gone:
             self._pending = {"expect": act.expect, "expect_gone": act.expect_gone,
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": False}
+                             "n": 0, "loose": False, "once": act.once_key}
             return
         # **点了"会弹确认框"的键  契约就是"确认框出现"**（2026-08-12）。
         #    `_EXPECT_DIALOG_AFTER` 这张表本来就登记着这类键，直接拿来用，
@@ -437,7 +439,7 @@ class Gate:
         if act.target_cls in _EXPECT_DIALOG_AFTER:
             self._pending = {"expect": (V.CONFIRM, V.CANCEL), "expect_gone": (),
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": False}
+                             "n": 0, "loose": False, "once": act.once_key}
             return
         # 默认契约：目标 cls 该消失。没有 cls 支撑的 tap_at 不设契约
         #    （连它点的是什么都不知道，无从判断"变没变"）。
@@ -520,9 +522,21 @@ class Gate:
             self.stats["expect_timeout"] += 1
             if p["loose"]:
                 return Verdict(True)          # 默认契约超时属常态，别刷屏
-            return Verdict(True, f"等 `{'/'.join(p['expect'] + p['expect_gone'])}`"
-                                 f" 等了 {p['n']} 帧没等到 — 契约超时作废，"
-                                 f"退回连发闸兜底（上一发多半丢了）")
+            # **严格契约超时 = 上一发没生效**（2026-08-13 用户诊断，帧上实证）:
+            #    信用点商店点「全部選擇」时按钮还在归位（连续 4 帧在
+            #    `全部选择 0.97` / `全部选择灰 0.85` 之间闪），游戏没收到那一下。
+            #    而 `once=` 的契约是"tap **真发出去**了就算做过" —— 那一发确实
+            #    发出去了，标记被消耗，`pending()` 从此为 False  **永不重试**，
+            #    收尾报 LEFTOVER。（craft 那次是同一个病的上一级: 被闸丢弃却
+            #    消耗了 once，当时修成"发出去才算"；这一级更深 ——
+            #    **发出去 ≠ 游戏有反应**。）
+            #     契约没兑现就把 `once` 退回去，让 flow 有机会再点一次。
+            #      重复由连发闸兜住，所以退回是安全的。
+            v = Verdict(True, f"等 `{'/'.join(p['expect'] + p['expect_gone'])}`"
+                              f" 等了 {p['n']} 帧没等到 — 契约超时，"
+                              f"判定上一发没生效")
+            v.rollback_once = p.get("once") or ""
+            return v
         self.stats["expect_hold"] += 1
         return Verdict(False, "")      # 静默按住，不刷屏
 
@@ -537,6 +551,7 @@ class Gate:
         #    照样让 dedup 记下 `_last`（等于记了一发从没发出去的点击 = 「数意图
         #    不数事实」在闸自己身上复发），也照样让 advance 的等待帧数白涨一格。
         #     包成 lambda 逐个求值，前一道拦下就不跑后面的。
+        rollback = ""
         for _name, _fn in (("money", lambda: self.money(act, obs, last_solid)),
                            ("advance", lambda: self.advance(
                                act, obs, page_changed=page_changed,
@@ -546,11 +561,15 @@ class Gate:
                            ("jit", lambda: self.jit(act, obs, fresh))):
             v = _fn()
             v.by = v.by or _name
+            rollback = rollback or v.rollback_once
             if not v.ok:
+                v.rollback_once = rollback
                 if v.why:
                     self._log(f"    [gate] {v.why}")
                 return v
             if v.why:
                 self._log(f"    [gate] {v.why}")
         self.stats["pass"] += 1
-        return Verdict(True)
+        out = Verdict(True)
+        out.rollback_once = rollback
+        return out

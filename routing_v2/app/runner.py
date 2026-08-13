@@ -403,6 +403,12 @@ class Runner:
                             frames_in_page=st.frames_in_page,
                             retry_frames=retry,
                             last_solid=getattr(st, "last_solid", None))
+        # 契约超时 = 上一发没生效  把它的 `once` 标记退回去（见 Gate.advance）。
+        #    不退的话「点了一次游戏没反应就再也不点」——用户 2026-08-13 现场诊断，
+        #    帧上实证按钮当时还在归位（两态连续闪 4 帧）。
+        if v.rollback_once and self._flow is not None:
+            if self._flow.state.pop(f"once:{v.rollback_once}", None) is not None:
+                self.log(f"    [gate] 契约没兑现 — 退回 `{v.rollback_once}` 的 once 标记，允许重试")
         if not v.ok:
             self._tr(st, act, {"blocked": v.why[:120] or "(静默)",
                                "by": v.by, "halt": v.halt,

@@ -1191,6 +1191,36 @@ def t_route():
         check(f"台账 {_a}->{_b} {'判为旧基线截断' if _want else '不判截断'}",
               _is_trunc(_a, _b) == _want)
 
+    # 契约超时要退回 once 标记（2026-08-13 用户现场诊断）: 按钮还在归位时
+    #   点下去, tap 确实发出去了但游戏没收到 —— `once` 的旧契约是"发出去就算
+    #   做过", 于是标记被消耗、`pending()` 永为 False、**再也不重试**。
+    #   发出去 != 游戏有反应, 所以严格契约超时必须把标记退回去。
+    from routing_v2.act.action import Action as _A
+    from routing_v2.act.gate import Gate as _G
+    _g = _G(cfg())
+    _act = _A(kind="tap", x=0.5, y=0.5, target_cls="全部选择", reason="全部选择",
+              once_key="selectall", expect=("选择购买",))
+    _g.arm(_act)
+    check("严格契约记下了 once 标记", _g._pending.get("once") == "selectall")
+    _v = None
+    for _i in range(200):                       # 一直等不到「选择购买」
+        _v = _g.advance(_act, O(B("信用点")), page_changed=False, retry_frames=25)
+        if _g._pending is None:
+            break
+    check("契约超时后把 once 标记退回来", _v is not None
+          and _v.rollback_once == "selectall", str(_v and _v.rollback_once))
+    # 宽松契约（没显式 expect）超时属常态, 不该退标记
+    _g2 = _G(cfg())
+    _act2 = _A(kind="tap", x=0.5, y=0.5, target_cls="某个键", reason="r",
+               once_key="k2")
+    _g2.arm(_act2)
+    for _i in range(200):
+        _v2 = _g2.advance(_act2, O(B("某个键")), page_changed=False, retry_frames=25)
+        if _g2._pending is None:
+            break
+    check("宽松契约超时不退标记（那是常态，不是没生效）",
+          not _v2.rollback_once)
+
     # Gate 的逐次上下文必须能清(跨 flow 泄漏会误拦/误放)
     from routing_v2.act.gate import Gate as _G
     g = _G(cfg())

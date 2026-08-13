@@ -258,7 +258,10 @@ class ShopFlow(ExitMixin, Flow):
         if not self.state.get("bought") and on_credit:
             sel = obs.find(V.SHOP_SELECT_ALL, 0.40)
             if sel is not None and self.pending("selectall"):
-                return tap_box(sel, "全部选择", once="selectall")
+                # 契约 = 勾上了**必然**出现「選擇購買」。没出现 = 那一下没生效
+                #   （按钮还在归位时点，游戏不收），闸会把 once 退回来让它重试。
+                return tap_box(sel, "全部选择", once="selectall",
+                               expect=(V.SHOP_BUY_SELECTED,))
             buy = obs.find(V.SHOP_BUY_SELECTED, 0.40)
             if buy is not None:
                 # bought 走 post：被金钱闸拦下时不许记成"买过"（N5 同病）
