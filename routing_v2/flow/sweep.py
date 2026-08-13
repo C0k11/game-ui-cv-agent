@@ -44,9 +44,11 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
     ap_per_sweep: int = 15
 
     def setup(self) -> None:
+        # 没有 swipes / last_low_y：关卡列表**一次都不滑**（游戏自己会把
+        #   最高那一关归位到可见处），那两个字段随滑动逻辑一起删了。
         self.state.update(sweeps=0, tickets0=None, tickets=None,
-                          last_low_y=-1.0, swipes=0, branch_i=0,
-                          branch_name="", branch_tix0=None, planned=0)
+                          branch_i=0, branch_name="", branch_tix0=None,
+                          planned=0)
         self._register_pages()
 
     # ── 票配额（用户点名：「票用在哪个地区，还是一个地区用几张」）──────
@@ -335,8 +337,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         self.state["branch_i"] += 1
         # branch_tix0 必须跟着分支一起清 —— 不清的话下一个分支拿上一个的
         #   票基线算 used，配额会瞬间"用完"直接跳过。
-        self.state.update(swipes=0, last_low_y=-1.0,
-                          branch_name="", branch_tix0=None)
+        self.state.update(branch_name="", branch_tix0=None)
         self.once_reset("maxed", "apcheck")
         if terminal:
             return self._wrap(why)

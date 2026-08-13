@@ -76,7 +76,7 @@ def load_names():
     return d["names"], d["path"], d.get("val", "images/val")
 
 
-def val_items(root, val_rel, limit=0):
+def val_items(root, val_rel, limit=0, include=""):
     img_dir = os.path.join(root, val_rel.replace("/", os.sep))
     lbl_dir = img_dir.replace(os.sep + "images" + os.sep,
                               os.sep + "labels" + os.sep)
@@ -84,6 +84,11 @@ def val_items(root, val_rel, limit=0):
         lbl_dir = re.sub(r"images", "labels", img_dir, count=1)
     files = sorted(f for f in os.listdir(img_dir)
                    if f.lower().endswith((".jpg", ".png", ".jpeg")))
+    if include:
+        # 只留匹配的来源池。用来做**对旧版公平**的子集: 旧版训练过的帧
+        #   留在集合里会让它靠记忆拿分，比出来的差距是假的。
+        rx = re.compile(include)
+        files = [f for f in files if rx.search(f)]
     if limit and limit < len(files):
         step = len(files) / float(limit)
         files = [files[int(i * step)] for i in range(limit)]
@@ -239,6 +244,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     # 训练还在跑时用 --device cpu 冒烟, 别和训练抢显存
     ap.add_argument("--device", default="0")
+    ap.add_argument("--include", default="",
+                    help="只评这些文件名匹配的帧(正则)，用于剔除旧版训练过的池")
     ap.add_argument("--out", default=os.path.join(RUNS, "cmp_v15_v16"))
     args = ap.parse_args()
 
@@ -249,7 +256,7 @@ def main():
 
     names, root, val_rel = load_names()
     nc15 = 492                                   # v15 的类数，超出的它检不出
-    items = val_items(root, val_rel, args.limit)
+    items = val_items(root, val_rel, args.limit, args.include)
     print(f"val {len(items)} 帧 / 类表 {len(names)} 类 / "
           f"匹配 IoU>={IOU_MATCH} / 主阈值 conf={MAIN_CONF}")
     gts = [read_gt(l) for _, l in items]

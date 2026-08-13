@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""三道闸 —— 全部集中在这里。**flow 里一行闸都不许写。**
+"""四道闸 —— 全部集中在这里。**flow 里一行闸都不许写。**
 
 老代码的病：同一道闸在 4 个 skill 各写一份、各有各的 bug，修好一处另外三处
-照样犯（§A2）。这里三道闸各只有一个实现:
+照样犯（§A2）。这里四道闸各只有一个实现，按 `allow()` 里的求值顺序:
 
    金钱闸    —— 弹窗体内青辉石 / 未声明的花钱动作 / 青辉石 tab
-   落地复验  —— 派发前拿**最新帧**确认目标还在，且落点还在它框里
-   连发闸    —— 同一目标短时间内不重复点；重发只认"状态没变"不认计时器
+   推进闸    —— 上一发的契约没兑现前，**一发新 tap 都不许出去**
+   连发闸    —— 同一落点按**帧间隔**重发；间隔从"上一发真发出去"那一帧算
+   落地复验  —— 派发前拿**最新帧**确认目标还在，且按新帧的框校正落点
 
 是老代码里十几个 after-ack 的集中替代（§幽灵点击）。决策帧和 tap 落地时刻
    的屏幕不是同一张，我曾在 4 个 skill 各修一个 after-ack **没看出是同一件事**。
@@ -90,7 +91,6 @@ class Gate:
         # 人审回调：返回 True 才放行金钱步。None = 一律拒绝（最安全的默认）。
         self._ask = on_money_step
         self._last: Optional[Tuple[float, float, str]] = None   # (x, y, cls)
-        self._last_ts = 0.0
         self._last_fire_frame = 0        # 上一发**真发出去**时的 frames_in_page
         self._fires = 0
         # 推进闸的待兑现契约（见 arm/advance）。None = 没有在等任何东西。
@@ -111,7 +111,6 @@ class Gate:
         """
         self._pending = None
         self._last = None
-        self._last_ts = 0.0
         self._last_fire_frame = 0
         self._fires = 0
 
@@ -283,8 +282,9 @@ class Gate:
               frames_in_page: int, retry_frames: int) -> Verdict:
         """同一落点不重复点；重发只认"状态连续 N 帧没变"。
 
-        **冷却必须显式记时间戳**：裸 `since()` 首次返回 0.0，会被当成
-           "冷却已过"直接放行（连发族三根因之一）。
+        **冷却按帧算，不按墙钟算**：重发间隔从「上一发**真的发出去**那一帧」
+           起数（`_last_fire_frame`），不是从"进这一页起数"。历史上用过
+           墙钟时间戳，但那是个只写不读的死字段，已删。
         **别拿 reason 措辞当控制 API**：老代码按 reason 子串豁免稳定门，
            于是往 reason 里塞个"確認键"就能绕过闸 —— 近失 30 青辉石那次
            就是这么来的。这里只看**落点 + cls**，不看文案。
@@ -362,7 +362,6 @@ class Gate:
                 and abs(self._last[1] - y) <= _SAME_TARGET)
         self._fires = (self._fires + 1) if same else 1
         self._last = (x, y, key)
-        self._last_ts = time.time()
         self._last_fire_frame = frames_in_page
 
     # ══  推进闸（1 step ahead）═════════════════════════════════════════

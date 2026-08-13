@@ -44,7 +44,7 @@ class CafeFlow(ExitMixin, Flow):
 
     def setup(self) -> None:
         self.state.update(claimed=False, pats=0, invited=0, floor=1, backs=0,
-                          hidden=0, pat_ts=0.0, invite_scrolls=0)
+                          pat_ts=0.0, invite_scrolls=0)
 
     def on_lobby(self, obs, st):
         return nav.enter(obs, V.NAV_CAFE, "咖啡厅")

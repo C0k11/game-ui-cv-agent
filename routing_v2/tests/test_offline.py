@@ -1131,6 +1131,41 @@ def t_route():
            and _nv.depth(getattr(c, "entry_page", "")) < 0]
     check("每条 flow 的 entry_page 都在层级图里", not bad, str(bad))
 
+    # 死字段闸（2026-08-13 用户点名「注释有误导性噪音也要修，代码和注释统一」）:
+    #    这轮审计抓到的漏洞几乎全是「注释说 A 代码做 B」，而最常见的形态就是
+    #    **字段还在、注释还在解释它，代码早就不读它了**（`Gate._last_ts` 说是
+    #    连发冷却的时间戳，实际只写不读；`sweep` 的 `swipes`/`last_low_y` 是
+    #    "滑到底"那套删掉的逻辑留下的）。
+    #    这是**语法事实**不是统计猜测 —— 我先试过"扫注释里引用的标识符存不存在"，
+    #      108 处命中全是误报（文件名/memory 名/页面名字符串），那条路是死的。
+    #    允许清单里的都是有意保留的诊断字段；**新增一个死字段就会红**。
+    import ast as _ast
+    import glob as _glob
+    _files = [f for f in sorted(_glob.glob("routing_v2/**/*.py", recursive=True))
+              if "tests" not in f and "__pycache__" not in f]
+    _reads, _writes = set(), {}
+    for _p in _files:
+        try:
+            _t = _ast.parse(open(_p, encoding="utf-8").read())
+        except (SyntaxError, OSError):
+            continue
+        for _n in _ast.walk(_t):
+            if isinstance(_n, _ast.Attribute):
+                if isinstance(_n.ctx, _ast.Load):
+                    _reads.add(_n.attr)
+                elif isinstance(_n.ctx, _ast.Store):
+                    _writes.setdefault(_n.attr, _p)
+            # getattr("x") / state["x"] / .get("x") 里的字符串一律算作读
+            if isinstance(_n, _ast.Constant) and isinstance(_n.value, str):
+                _reads.add(_n.value)
+    _ALLOW = {"cap", "last_frame", "resolution", "restarts", "rotations",
+              "last_tap_pt", "last_tap_ts"}      # 诊断/统计用，故意留着
+    _dead = sorted(a for a in _writes
+                   if a not in _reads and not a.startswith("__")
+                   and a not in _ALLOW)
+    check("没有'写了但从来没人读'的实例字段（死字段=注释漂移的温床）",
+          not _dead, str([f"{a} @{_writes[a]}" for a in _dead]))
+
     # Gate 的逐次上下文必须能清(跨 flow 泄漏会误拦/误放)
     from routing_v2.act.gate import Gate as _G
     g = _G(cfg())

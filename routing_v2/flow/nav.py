@@ -146,27 +146,18 @@ _EXITABLE = {
 }
 
 
-def to_lobby(obs: Observation, st: StateView,
-             prefer_home: bool = False) -> Optional[Action]:
-    """离开当前页面。**只在已确认的具名页面上动手。**
+def to_lobby(obs: Observation, st: StateView) -> Optional[Action]:
+    """逐层退出当前页面 —— **只在已确认的具名页面上动手，且只用返回键。**
 
-    **「什么时候返回、什么时候回大厅」由目的决定，不由"屏上有哪个键"决定**
-       （用户 2026-08-12:「不要又点返回又点大厅按钮，要么返回要么大厅，
-         **根据逻辑语义**重新修改」；我第一版只是把 HOME 删掉，
-         **那是删症状不是修根因** —— 用户当场指出）。
+    这个函数**不做「该返回还是该回大厅」的决定** —— 那个决定在 `route()` 里，
+       由目标层（`Flow.entry_page`）算出来，不看屏上有哪个键。
+       `route()` 只在**层级图里没登记的页面**（facility / unknown）上回落到这里，
+       那时候连"我在第几层"都不知道，唯一安全的动作就是逐层退一步。
 
-       两个键语义完全不同:
-         · `返回键` = 退**一层**；退到中间层就停，下一个 flow 可能正好在那儿
-                      有入口（bountyjfd 都在任务大厅，逐层退能省两步）
-         · `回大厅` = 跨越所有中间层**直达大厅**
-
-        规则（调用方声明意图，函数不猜）:
-         `prefer_home=False`（默认）= **逐层退**，全程只用返回键。
-             用在"收工后交给下一个 flow"——中间层也可能是它要的。
-         `prefer_home=True`        = **直奔大厅**，优先 HOME。
-             用在"我要回大厅重新出发"（入口只在大厅、或迷路了要归零）。
-       无论哪种，**同一次退出过程中不许换策略** —— 混用就是 live 里那串
-         「点一下返回、紧接着点一下回大厅」，前一下等于白点。
+    曾经这里有个 `prefer_home` 开关，用来切换"逐层退 / 直奔大厅"——
+       **全仓没有一个调用方传过它**，等于 `回大厅按钮` 在 live 路径上从没被点过，
+       而注释还写着"由调用方声明意图"。开关和它那段说明一起删了，
+       语义改由 `route(target=...)` 承载。
     """
     if st.page == "lobby":
         return None
@@ -208,10 +199,6 @@ def to_lobby(obs: Observation, st: StateView,
     #    这个函数的语义是**逐层退**（见上面那段注释：让下一个 flow 在中间层
     #    认出自己的入口，bountyjfd 那次白走两步就是教训）， **只用返回键**；
     #    退不动时交给  系统返回键，而不是半路换成另一套策略。
-    if prefer_home:
-        h = obs.find(V.HOME, 0.55)
-        if h is not None:
-            return tap_box(h, "nav: 直奔大厅（本次退出全程只用回大厅键）")
     b = obs.find(V.BACK, 0.55)
     if b is not None:
         return tap_box(b, "nav: 返回上一层（逐层退，本次退出全程只用返回键）")

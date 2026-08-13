@@ -65,7 +65,6 @@ class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             phase="clear",          # clear  shop_plan  bonus  done
             saw_other=False,        # 轮播: 上一帧不是 405
             cleared=0, farmed=0, swept=0, entered=0,
-            tab_tries=0, no_stage_frames=0,
             # 轮播抽错活动（进到"没有活动关卡"的引导型活动）的台账
             guide_hits=0, guide_seen=False, guide_giveup=False,
         )

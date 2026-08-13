@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """主循环 —— 零 wait，对齐 fps。
 
-    帧(scrcpy 0ms)  YOLO(23ms)  状态(连续N帧确认)  flow  三道闸  tap(32ms)
+    帧(scrcpy 0ms)  YOLO(23ms)  状态(连续N帧确认)  flow  四道闸  tap(32ms)
 
 **没有一个 sleep**。推进靠"下一步的 cls 出现"，重发靠"状态连续 N 帧没变"。
    老代码里的 `sleep(2)/sleep(4)/sleep(6)` 全部删掉了 —— 用户原话：

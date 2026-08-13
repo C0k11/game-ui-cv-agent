@@ -464,8 +464,15 @@ def frames_in(sd: Path):
        **没有任何报错**：源列表照常打印、drift 校验照常通过、[done] 照常输出。
          我是去数「建好的集里 492-494 有几框」才发现的。
         教训：接了源不等于进了集，**必须回头数建好的那一份**。
+
+        **烧了框的渲染图一律排除**（2026-08-13）: runner 早期把标注渲染图写成
+       顶层的 `*_ann.jpg`（现在改写进 `_ann/` 子目录，但磁盘上那些老的还在）。
+       `glob` 是非递归的，子目录里的扫不到；顶层那些**会被照收** ——
+       一旦把 live 录制目录接进源，等于拿"模型自己画的框"去教模型
+       （[[flywheel_label_import]] 那条 overlay 烧录陷阱的复刻版）。
     """
-    return sorted(list(sd.glob("*.jpg")) + list(sd.glob("*.png")))
+    return sorted(f for f in list(sd.glob("*.jpg")) + list(sd.glob("*.png"))
+                  if not f.stem.endswith("_ann"))
 
 
 def _keep_ui_lines(cleaned: str, nc: int):
