@@ -1519,6 +1519,30 @@ def t_route():
           _cpt.outcome == "UNKNOWN"
           and any("感知不足" in l for l in _cpt.note_lines),
           f"{_cpt.outcome} {_cpt.note_lines}")
+    # 区域对齐先于列表滚动: 配 H2-1 而列表在 Area3(读到 H3-x) -> 点 左切换
+    #    换区, 不是在区域内滚 6 次然后 UNKNOWN（2026-08-13 live 用户抓到）
+    import routing_v2.flow.campaign as _cpm_mod
+    _cfgh = cfg()
+    _cfgh["campaign"] = {"stage": "H2-1"}
+    _cph = ALL["campaign"](Ctx(cfg=_cfgh, log=lambda m: None))
+    _cph.goto("stage_list")
+    _o_h3 = Observation(
+        boxes=[B(V.STAGE_HARD_SEL, cx=0.832, cy=0.219),
+               B(V.STAR_0, cx=0.562, cy=0.369, w=0.04, h=0.03),
+               B(V.STAGE_ENTER_LOCKED, cx=0.875, cy=0.344),
+               B(V.STAGE_ENTER, cx=0.875, cy=0.503),
+               B(V.ARROW_LEFT, cx=0.028, cy=0.498)],
+        frame=_fr, seq=4, w=3840, h=2160)
+    _orig_digits = _cpm_mod.R.digits
+    _cpm_mod.R.digits = lambda frame, rect: "3-1"
+    try:
+        _a_h = _cph.decide(_o_h3, _SV(page="campaign_stage", frames_in_page=10))
+    finally:
+        _cpm_mod.R.digits = _orig_digits
+    check("目标关在别的区域 -> 点 左切换 换区, 不在区域内瞎滚",
+          _a_h is not None and _a_h.kind == "tap"
+          and _a_h.target_cls == V.ARROW_LEFT,
+          f"{_a_h and (_a_h.kind, _a_h.target_cls)}")
 
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后

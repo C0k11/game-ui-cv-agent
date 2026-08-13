@@ -244,6 +244,44 @@ class CampaignFlow(ExitMixin, Flow):
                     hit = (sb, got)
                     break
             if hit is None:
+                # **区域对齐先于列表滚动**: 关卡列表按区域(Area)分页, 列表滚动
+                #    只在区域内有效 -- 目标章号和读到的章号不同时, 滚 100 次也
+                #    到不了, 要点左右切换箭头换区（2026-08-13 live: 配 H2-1
+                #    卡在 Area3 的 Hard 列滚了 3 次, 用户当场抓到; `左切换`
+                #    在本页实测 0.97, 零新 cls）。方向由读到的章号决定。
+                if cfgd and reads:
+                    want_ch = int(cfgd.lstrip("H").split("-")[0])
+                    seen_ch = sorted({int(r.lstrip("H").split("-")[0])
+                                      for r in reads})
+                    if want_ch not in seen_ch:
+                        hops = self.state.get("area_hops", 0)
+                        if hops >= 8:
+                            return self.finish(
+                                Outcome.UNKNOWN,
+                                f"切了 {hops} 次区域还没到第 {want_ch} 区"
+                                f"（现在读到 {reads}）-- 交人看")
+                        left = want_ch < seen_ch[0]
+                        arr = obs.find(V.ARROW_LEFT if left else V.ARROW_RIGHT,
+                                       0.40)
+                        if arr is None:
+                            if self.hold("no_area_arrow", 30):
+                                return self.finish(
+                                    Outcome.UNKNOWN,
+                                    f"目标在第 {want_ch} 区(当前第 {seen_ch[0]} 区), "
+                                    f"区域切换箭头检不出 -- 交人看")
+                            return wait("目标在别的区域, 等区域切换箭头")
+
+                        def _hopped(k=hops + 1):
+                            # 换区后行位置不变数字全变 -- 读号缓存/共识/滚动
+                            #    计数全部作废, 重来
+                            self.state["area_hops"] = k
+                            self.state["row_reads"] = {}
+                            self.state["scrolls"] = 0
+                            self.state.pop("stage_vote", None)
+                        return tap_box(arr,
+                                       f"目标 {cfgd} 在第 {want_ch} 区, 当前第 "
+                                       f"{seen_ch[0]} 区 -- 切区域（第 {hops + 1} 次）",
+                                       post=_hopped)
                 # 目标不在可视区 -> **先扫后滑**: 按读到的号判方向翻列表
                 #    （2026-08-13 live: 列表自动归位在最新进度, 配置 2-1 时
                 #    可视区只有 2-2..2-5 -- 目标在上面, 要往回翻）。
