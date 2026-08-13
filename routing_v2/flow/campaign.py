@@ -230,6 +230,10 @@ class CampaignFlow(ExitMixin, Flow):
         if st.page == "campaign_stage":
             self.goto("stage_list", "到关卡列表了")
             return wait("进相位 stage_list")
+        if st.page == "stage_popup":
+            # 开局就压着关卡弹窗(上一轮残留/用户手开) -- 交给 stage_list 处理
+            self.goto("stage_list", "开局就有关卡弹窗")
+            return wait("进相位 stage_list")
         if st.page == "grid_quest":
             # 上一轮没退干净, 直接从地图接手
             self.goto("grid", "已经在走格子地图上")
@@ -252,6 +256,14 @@ class CampaignFlow(ExitMixin, Flow):
         #    复打版式上 任务开始 只有 0.22, 光靠签名会卡死(2026-08-13 实录 4001 tick)
         if (st.page == "stage_popup"
                 or obs.has([V.TAB_COMMAND_SEL, V.TAB_GUIDE_SEL], 0.45)):
+            # ⛔只认**自己点入場开的**弹窗。残留/用户手开的弹窗可能是别的关
+            #    (08-13 实录: 设备上留着 2-4 的弹窗, 配置却是 2-2) -- 在别人的
+            #    弹窗上点 任務開始 = 进错关烧 AP, 叉掉回列表重选才是对的
+            if not self.state.get("opened_popup"):
+                x = obs.find(V.CLOSE_X, 0.55)
+                if x is not None:
+                    return tap_box(x, "残留的关卡弹窗(不是本轮开的) -- 叉掉重选")
+                return wait("残留弹窗, 等叉叉检出")
             self.goto("popup", "关卡弹窗开了")
             return wait("进相位 popup")
         # 页签对齐目标: 配置以 H 开头才去 Hard, 否则必须在 Normal
@@ -425,7 +437,8 @@ class CampaignFlow(ExitMixin, Flow):
         same = min(rows, key=lambda b: abs(b.cy - anchor[1]), default=None)
         if same is not None and abs(same.cy - anchor[1]) < 0.05:
             act = tap_box(same, f"目标关 {self.state['stage']}（同行入場）",
-                          expect=(V.TASK_START, V.TASK_START_GREY))
+                          expect=(V.TASK_START, V.TASK_START_GREY),
+                          post=lambda: self.state.update(opened_popup=True))
             act.anchor_tol = 0.030      # 行内按钮容差要小于半行距
             return act
         return wait("目标行的入場键没检出（锁行等它）")
@@ -559,10 +572,14 @@ class CampaignFlow(ExitMixin, Flow):
         #    重新部署后**继续同一份 rounds**。⛔数字键不是"区域"（BAAH 官方
         #    grid_solution_format.json: 数字键=按目标区分的**备选解法**,
         #    一份 fight_plan 覆盖整关）; 中途部署是游戏自己的节奏, 别换计划。
-        if (st.page == "formation" or obs.has(V.SORTIE, 0.45)
-                or (not obs.has(V.PHASE_END, 0.40)
-                    and obs.has([V.TASK_START, V.TASK_START_GREY], 0.40)
-                    and self.hold("redeploy", 6))):
+        # 只有走过至少一步才可能是真重部署 -- 开局 任務開始 刚点完、PHASE
+        #    还没渲染出来的几帧会让 TASK_START 残留触发假重部署(H2-2 实录
+        #    walk->grid->walk 弹跳, 无害但脏)
+        if ((self.state["round_i"] > 0 or self.state.get("issued"))
+                and (st.page == "formation" or obs.has(V.SORTIE, 0.45)
+                     or (not obs.has(V.PHASE_END, 0.40)
+                         and obs.has([V.TASK_START, V.TASK_START_GREY], 0.40)
+                         and self.hold("redeploy", 6)))):
             self.state.update(issued=False, cycling=False, start_box=None,
                               pe_absent=0, bind_last=None,
                               pre_vec=None, moved_t=None, moved_frames=0)
@@ -719,11 +736,25 @@ class CampaignFlow(ExitMixin, Flow):
             self.state.update(issued=True, cycling=False, pe_absent=0,
                               pre_vec=pv, moved_frames=0, moved_t=None)
             self._wt_clear()
-        return tap_box(cell_box,
-                       f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
-                       f"({goal[0]:.3f},{goal[1]:.3f})"
-                       + ("" if marked else "（无可走标记, 若不走动多半是够不着）"),
-                       post=_issued)
+        act = tap_box(cell_box,
+                      f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
+                      f"({goal[0]:.3f},{goal[1]:.3f})"
+                      + ("" if marked else "（无可走标记, 若不走动多半是够不着）"),
+                      post=_issued)
+        # 落点校正: 可走/起点**标记**贴图重心偏下, 拿它的框心点会压到两行
+        #    格子的缝上(H2-2 r2 实锤: 目标格本体被敌人立绘挡住没检出, 4 发
+        #    全点在格界上游戏不收)。格子本体框在场就吸附它的框心;
+        #    只有标记撑着时往上收 1/4 框高(起点框上 1/3 修正的同族病)。
+        body = [b for b in obs.all([V.GRID_CELL, V.GRID_CELL_FOG], 0.35)
+                if (b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2
+                < (0.4 * dx) ** 2]
+        if body:
+            b0 = max(body, key=lambda b: b.conf)
+            act.x, act.y = b0.cx, b0.cy
+        elif cell_box.cls in (V.GRID_CELL_OPEN, V.GRID_START,
+                              V.GRID_START_GREY):
+            act.y = cell_box.cy - 0.25 * (cell_box.y2 - cell_box.y1)
+        return act
 
     # result: 等结算链把我们送回关卡列表
     def do_result(self, obs, st):
