@@ -1240,6 +1240,28 @@ def t_route():
     check("屏面干净时才滑左栏", _a2 is not None and _a2.kind == "swipe",
           f"{_a2 and _a2.kind}")
 
+    # **抢拍**（用户 2026-08-13:「咖啡厅依旧抢拍乱点，课程表也是抢拍」）:
+    #   点一个学生 -> 面板盖上来 -> 那个学生名消失 -> 默认契约当场"兑现" ->
+    #   下一帧点下一个学生。每一发目标 cls 都不同, 连发闸不管。
+    #   拦它的补丁「消失还不够, 必须伴随新 cls」原来因为 sig0 懒设而恒被短路。
+    from routing_v2.act.action import Action as _A2
+    from routing_v2.act.gate import Gate as _G2
+    _g3 = _G2(cfg())
+    _before = O(B("留美"), B("晴露营"), B("沙织"))          # 全体课程表面板
+    _tap = _A2(kind="tap", x=0.3, y=0.4, target_cls="留美", reason="进 留美 的房间")
+    _g3.arm(_tap, _before)
+    check("arm 时就记下点之前的 cls 基线",
+          _g3._pending.get("sig0") is not None)
+    # 面板盖住 -> 目标消失, 但**没有任何新 cls** = 那一下没生效
+    _covered2 = O(B("晴露营"), B("沙织"))
+    _v3 = _g3.advance(_tap, _covered2, page_changed=False, retry_frames=25)
+    check("目标消失但没冒出新 cls  按住, 不许点下一个学生",
+          not _v3.ok, f"ok={_v3.ok}")
+    # 真开了面板 -> 必然带来新 cls（課程表開始）
+    _opened = O(B("晴露营"), B("沙织"), B(V.SCHED_START))
+    _v4 = _g3.advance(_tap, _opened, page_changed=False, retry_frames=25)
+    check("面板真开了(冒出 課程表開始)  才放行", _v4.ok, _v4.why[:40])
+
     # 契约超时要退回 once 标记（2026-08-13 用户现场诊断）: 按钮还在归位时
     #   点下去, tap 确实发出去了但游戏没收到 —— `once` 的旧契约是"发出去就算
     #   做过", 于是标记被消耗、`pending()` 永为 False、**再也不重试**。

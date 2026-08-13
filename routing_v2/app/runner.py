@@ -374,7 +374,7 @@ class Runner:
             self.device.swipe(act.x, act.y, act.x2, act.y2, act.ms)
             # 滑动也 arm 推进闸：不然一帧一发连着滑（猛滑），列表还在惯性
             #   滚动时模型没机会扫干净，眼前的目标就被滑过去了。
-            self.gate.arm(act)
+            self.gate.arm(act, obs)
             # 08-10：这里原本**不执行 `act.post`** —— 于是滑动类 flow 只能把
             #    「滑了第几次 / 上次最低 y」写在 decide 里（mutate-before-ack），
             #    动作被闸吞掉时计数照样涨、防空转的基准也被污染。
@@ -471,7 +471,7 @@ class Runner:
         # 推进契约也只在**真发出去之后**才 arm（同一条「数事实」纪律）——
         #   被闸吞掉的决策若 arm 了，闸会为一发从没发出去的点击一直等下去。
         if ok:
-            self.gate.arm(act)
+            self.gate.arm(act, obs)
             # 落点/连发计数/重发基准同理 —— 原来记在 dedup 里，等于把
             #   **被 JIT 丢弃的那一发**也记成了「上一发」，而 `_last` 是金钱闸
             #   唯一的正向证据（见 Gate.note_fired）。

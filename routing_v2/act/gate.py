@@ -75,6 +75,24 @@ _SPEND_TRIGGERS = frozenset({
 _SAME_TARGET = 0.02
 
 
+def _sig(obs) -> Optional[frozenset]:
+    """点下去**之前**屏上有哪些 cls。契约判"生效"时要拿它当基线。
+
+    ⛔ 这一步原来是**懒设**的（`advance` 里第一次检查之后才填）—— 而第一次
+       检查恰恰是"刚点完、面板刚盖上来"那一帧，此时 `sig0 is None`，
+       那条「消失还不够，必须伴随新 cls」的补丁直接被 `base is None` 短路，
+       **等于从写下起就没生效过**。
+       2026-08-13 live 后果（用户:「咖啡厅依旧抢拍乱点，课程表也是抢拍」）:
+         课程表连着点 羽留奈(+6) 优香睡衣(+3) 沙织(+2) 爱莉(+1)，
+         每一发目标 cls 都不同所以连发闸不管；点学生 -> 面板盖住 ->
+         那个学生名消失 -> 契约当场"兑现" -> 下一帧点下一个。
+        在 `arm()` 就把基线记死。
+    """
+    if obs is None:
+        return None
+    return frozenset(b.cls for b in obs.boxes)
+
+
 @dataclass
 class Verdict:
     ok: bool
@@ -370,7 +388,7 @@ class Gate:
         self._last_fire_frame = frames_in_page
 
     # ══  推进闸（1 step ahead）═════════════════════════════════════════
-    def arm(self, act: Action) -> None:
+    def arm(self, act: Action, obs: Optional[Observation] = None) -> None:
         """一发 tap **真的发出去之后**调 —— 记下推进契约。
 
         和 counter/once/post 同一条纪律：**数事实，不数意图**。被闸吞掉的
@@ -416,14 +434,15 @@ class Gate:
                 return
             self._pending = {"expect": (), "expect_gone": (), "cls": "(swipe)",
                              "reason": act.reason, "n": 0, "loose": True,
-                             "settle": True}
+                             "settle": True, "sig0": _sig(obs)}
             return
         if not act.is_tap:
             return
         if act.expect or act.expect_gone:
             self._pending = {"expect": act.expect, "expect_gone": act.expect_gone,
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": False, "once": act.once_key}
+                             "n": 0, "loose": False, "once": act.once_key,
+                             "sig0": _sig(obs)}
             return
         # **点了"会弹确认框"的键  契约就是"确认框出现"**（2026-08-12）。
         #    `_EXPECT_DIALOG_AFTER` 这张表本来就登记着这类键，直接拿来用，
@@ -439,14 +458,16 @@ class Gate:
         if act.target_cls in _EXPECT_DIALOG_AFTER:
             self._pending = {"expect": (V.CONFIRM, V.CANCEL), "expect_gone": (),
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": False, "once": act.once_key}
+                             "n": 0, "loose": False, "once": act.once_key,
+                             "sig0": _sig(obs)}
             return
         # 默认契约：目标 cls 该消失。没有 cls 支撑的 tap_at 不设契约
         #    （连它点的是什么都不知道，无从判断"变没变"）。
         if act.target_cls and act.target_cls != "(no-cls)":
             self._pending = {"expect": (), "expect_gone": (act.target_cls,),
                              "cls": act.target_cls, "reason": act.reason,
-                             "n": 0, "loose": not act.money}
+                             "n": 0, "loose": not act.money,
+                             "sig0": _sig(obs)}
 
     def advance(self, act: Action, obs: Observation, *,
                 page_changed: bool, retry_frames: int) -> Verdict:
@@ -494,8 +515,6 @@ class Gate:
                 self._pending = None
                 return Verdict(True, f"↗ `{'/'.join(p['expect_gone'])}` 已消失"
                                      f" — `{p['cls']}` 这一发生效，推进")
-        if p.get("sig0") is None:
-            p["sig0"] = frozenset(b.cls for b in obs.boxes)
         p["n"] += 1
         # 滑动契约：没有 cls 可等，只能等画面停稳。按住 8 帧（≈0.4s）——
         #   够模型把停稳后的列表扫一遍，也就实现了「滑一次  扫一次」。
