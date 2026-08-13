@@ -256,7 +256,10 @@ PAGES: List[Sig] = [
         note="走格子地图（3D 俯视, 同资产不同相机域）。格子>=3 + 任一结构锚"),
 
     Sig("stage_popup",
-        any_of=[V.TASK_START, V.SWEEP_START, V.STORY_ENTER_CHAPTER],
+        any_of=[V.TASK_START, V.SWEEP_START, V.STORY_ENTER_CHAPTER,
+                # 复打关的弹窗是另一个版式(带扫荡面板), 任务开始 在上面
+                #    只有 0.22 -- 页签才是稳定锚(实测双双 0.99)
+                V.TAB_COMMAND_SEL, V.TAB_GUIDE_SEL],
         priority=55,
         note="关卡信息弹窗。首通弹的是「章節資訊 + 進入章節」而不是扫荡面板 —— "
              "老代码只认扫荡面板，新活动首日直接卡死"),

@@ -111,7 +111,10 @@ class CampaignFlow(ExitMixin, Flow):
     #    2026-08-13 实帧纠错: `普通关卡选中` 是顶部 Normal **页签**, 不是
     #    选中的关卡行, 点它开不了弹窗。行内按钮锚定和咖啡厅邀请键同款。
     def do_stage_list(self, obs, st):
-        if st.page == "stage_popup":
+        # 弹窗开没开也看**内容证据**(页签 0.99 稳), 不只等页面签名 --
+        #    复打版式上 任务开始 只有 0.22, 光靠签名会卡死(2026-08-13 实录 4001 tick)
+        if (st.page == "stage_popup"
+                or obs.has([V.TAB_COMMAND_SEL, V.TAB_GUIDE_SEL], 0.45)):
             self.goto("popup", "关卡弹窗开了")
             return wait("进相位 popup")
         # 页签对齐目标: 配置以 H 开头才去 Hard, 否则必须在 Normal
@@ -244,6 +247,11 @@ class CampaignFlow(ExitMixin, Flow):
             return tap_box(tab, "切到「集中指揮」页签",
                            expect=(V.TAB_COMMAND_SEL,))
         start = obs.find(V.TASK_START, 0.45)
+        if start is None:
+            # 复打版式的黄色大按钮欠拟合(实测 0.22) -- 带 region 降阈值:
+            #    弹窗右下那一片只有它一个大黄键, 别处不这么降
+            start = obs.find(V.TASK_START, 0.18,
+                             region=(0.55, 0.62, 1.0, 0.94))
         if start is not None:
             # 进关花 AP（非 premium）; 走格子地图的格子就是到达证据
             return tap_box(start, "任務開始（进关花 AP）",
