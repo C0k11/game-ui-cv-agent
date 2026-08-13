@@ -345,6 +345,11 @@ class CafeFlow(ExitMixin, Flow):
             self.state.update(floor=d, pat_ts=0.0, dry=0, pans=0, patted=[],
                               invite_scrolls=0)
             self.state.pop("saw_invite_target", None)
+            # **换完厅要去干活，不是回来再判一次"该去哪"**（2026-08-13 live）:
+            #    原来点完就留在 switch 相位，下一帧 `observe` 把 floor 校正成 2、
+            #    2 也进了 visited -> todo 空 -> 直接 exit。人到了 2 号厅，
+            #    邀请和摸头**一次都没做**。
+            self.goto("invite2", f"到了 {d} 号厅，接着干活")
         # 换厅必须**显式严格契约**: `observe` 每帧从屏上校正厅号，而换厅要加载
         #    好几百毫秒 -- 点击刚发出、页面还没切，下一帧就把 `floor` 校正回去，
         #    于是无限重点。到了目的厅，按钮会变成指向另一边的那个。
@@ -393,11 +398,16 @@ class CafeFlow(ExitMixin, Flow):
         """收敛性：面板**全灰** = 这一步做不下去了（领过了，或体力满领不动）。
         不标 `earn_done` 的话会 开面板->全灰->叉掉->又开面板 无限循环。
         **但绝不标 `claimed`** -- 全灰不等于钱到手了（见 do_earnings 的说明）。"""
-        if (self.phase in ("earnings",)
-                and obs.find(V.CLAIM_ACTIVE, 0.45) is None
-                and not self.state.get("earn_done")):
-            self.state.update(earn_done=True,
-                              earn_why="收益面板里没有可点的领取键")
+        if self.phase == "earnings":
+            if obs.find(V.CLAIM_ACTIVE, 0.45) is not None:
+                # 收益的领取链整条走的是**覆盖层**处理器（领取 -> 結果框確認
+                #    -> 再领），`do_earnings` 那一支根本没机会跑。所以
+                #    `claimed` 必须在**这里**落账 —— 2026-08-13 live 实测
+                #    `claims=3` 明明领到了，收尾却报「收益没领到」。
+                self.state.update(claimed=True, earn_done=True)
+            elif not self.state.get("earn_done"):
+                self.state.update(earn_done=True,
+                                  earn_why="收益面板里没有可点的领取键")
         # 邀请相位里这个面板就是邀请列表，别让基类的"领完了叉掉"去关它。
         if self.phase in ("invite", "invite2") and obs.has(V.CAFE_INVITE, 0.40):
             return None

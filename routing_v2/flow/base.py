@@ -169,6 +169,12 @@ class Flow:
             if fn is not None:
                 act = fn(obs, st)
                 if act is not None:
+                    # 覆盖层在动 = **有进展**，相位的卡死计时要跟着清。
+                    #    2026-08-13 live: 咖啡厅收益的领取链（领取 -> 结果框
+                    #    確認 -> 再领）整条走的是 overlay 处理器，而 `phase_ticks`
+                    #    照涨不误 -> `earnings` 相位在还在领的时候就超时跳走，
+                    #    报「屏上找不到收益入口」。**别人在干活的时候不许判死。**
+                    self._phase_t0 = self.ticks
                     return act
         # pre_page：阶段机之类"先于页面、但**不许先于 overlay**"的逻辑挂这。
         #    子类绝不许覆写 decide()（架构不变量测试拦）——2026-08-08 两个

@@ -1284,6 +1284,16 @@ def t_route():
     _cf4.decide(_grey, _SV(page="cafe", frames_in_page=5))
     check("领取键全灰时不许标 claimed", not _cf4.state.get("claimed"),
           str(_cf4.state.get("claimed")))
+    # 反过来: 领取链整条走 overlay 处理器, claimed 必须在**那里**落账
+    #   （2026-08-13 live: claims=3 明明领到了, 收尾却报「收益没领到」）
+    _cf7 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf7.goto("earnings")
+    _act7 = _cf7.decide(O(B(V.CLAIM_YELLOW, cx=0.50, cy=0.73)),
+                        _SV(page="cafe", overlay="claim_panel", frames_in_page=5))
+    check("覆盖层领到了就要标 claimed", bool(_cf7.state.get("claimed")),
+          f"act={_act7 and _act7.target_cls}")
+    check("覆盖层在动时相位计时要清零（别在领的时候判超时）",
+          _cf7.phase_ticks == 0, str(_cf7.phase_ticks))
     check("领取键全灰时要标 earn_done 收敛（别开-关死循环）",
           bool(_cf4.state.get("earn_done")))
     # 竣工判据 = **黄点**（用户口述:「判断有没有活没干的可以靠黄点来判断」）
