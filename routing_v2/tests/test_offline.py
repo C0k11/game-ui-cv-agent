@@ -1515,14 +1515,34 @@ def t_route():
     _cpt = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
     _cpt.goto("walk")
     _cpt.state["answer"] = _cp3.state["answer"]
-    _wb_nou = [b for b in _wb if b.cls != V.GRID_ALLY]
+    # 起点也拿掉: 起点在场时航位推算本来就该走下去(见下一条正向用例)
+    _wb_nou = [b for b in _wb
+               if b.cls not in (V.GRID_ALLY, V.GRID_START, V.GRID_START_GREY)]
     _cpt.state["wt:no_unit"] = _tm.time() - 80
     _a_t = _cpt.decide(Observation(boxes=_wb_nou, seq=3, w=3840, h=2160),
                        _SV(page="grid_quest", frames_in_page=10))
-    check("箭头+我方 75s 没同框 -> UNKNOWN 收工不空转",
+    check("起点航位和 箭头+我方 都拿不到 75s -> UNKNOWN 收工不空转",
           _cpt.outcome == "UNKNOWN"
           and any("感知不足" in l for l in _cpt.note_lines),
           f"{_cpt.outcome} {_cpt.note_lines}")
+    # 航位推算: 我方立绘全没检出(被自己格子挡/敌我混淆), 起点地标 + 已执行
+    #    方向累加照样能落子（H2-2 r2 实锤: 立绘绑格绑到隔壁起点格 ->
+    #    目标解析成自己站的格 -> 8 发全点在自己脚下）
+    _cpe = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpe.goto("walk")
+    _cpe.state["answer"] = _cp3.state["answer"]
+    _wb_noally = [b for b in _wb if b.cls != V.GRID_ALLY]
+    _a_dr = None
+    for _ in range(3):
+        _a_dr = _cpe.decide(
+            Observation(boxes=_wb_noally, seq=6, w=3840, h=2160),
+            _SV(page="grid_quest", frames_in_page=10))
+        if _a_dr is not None and _a_dr.kind == "tap":
+            break
+    check("我方立绘全没检出 -> 起点航位推算照样落子",
+          _a_dr is not None and _a_dr.kind == "tap"
+          and abs(_a_dr.x - 0.429) < 0.03,
+          f"{_a_dr and (_a_dr.kind, round(_a_dr.x, 3), round(_a_dr.y, 3))}")
     # 区域对齐先于列表滚动: 配 H2-1 而列表在 Area3(读到 H3-x) -> 点 左切换
     #    换区, 不是在区域内滚 6 次然后 UNKNOWN（2026-08-13 live 用户抓到）
     import routing_v2.flow.campaign as _cpm_mod

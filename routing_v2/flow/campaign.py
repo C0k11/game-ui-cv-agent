@@ -114,8 +114,11 @@ class CampaignFlow(ExitMixin, Flow):
                 if sp is not None and un is not None:
                     dvx, dvy = un.cx - sp.cx, un.cy - sp.cy
                     dx0 = self.state.get("dx_est") or 0.09
-                    if ((dvx - pv[0]) ** 2 + (dvy - pv[1]) ** 2
-                            > (0.6 * dx0) ** 2):
+                    dd = (dvx - pv[0]) ** 2 + (dvy - pv[1]) ** 2
+                    # 位移必须是**一步量级**(0.6~2.0 格距): 敌我混淆让绑定
+                    #    在两个立绘间跳变时, 伪位移通常远超一步 -- 不设上限
+                    #    会把绑定漂移当成走位(假回合推进)
+                    if (0.6 * dx0) ** 2 < dd < (2.0 * dx0) ** 2:
                         m = self.state.get("moved_frames", 0) + 1
                         self.state["moved_frames"] = m
                         if m >= 2 and not self.state.get("moved_t"):
@@ -511,6 +514,9 @@ class CampaignFlow(ExitMixin, Flow):
         #    (面板收起动画期), 而 post 挂在"发出"上 -> flow 已经在 walk 相位
         #    "走"了, 屏上任務開始还亮着 -- 数意图不数事实在新代码里复发。
         if obs.has(V.PHASE_END, 0.40) or obs.has(V.PHASE_AUTO_ON, 0.40):
+            # 航位推算的锚点: 本次部署时已走到第几回合（多区域地图第二次
+            #    部署后, 累加方向只从这里开始算）
+            self.state["deploy_round0"] = self.state["round_i"]
             self.goto("walk", "PHASE 控件出现 = 真开局了")
             return wait("进回合")
         start_btn = obs.find(V.TASK_START, 0.45)
@@ -668,14 +674,6 @@ class CampaignFlow(ExitMixin, Flow):
         #    敌->我 22.5%; 本关实锤: 绑回灰起点因为某个敌方立绘被检成我方）;
         #    只用箭头会把身后的格子认成所在格（箭头悬高不定, 0.5-1.6 行波动）。
         #    箭头全场唯一属于我队 -> 拿它筛掉不在其正下方的假我方框。
-        unit = self._bind_unit(obs)
-        if unit is None:
-            if self._overdue("no_unit", 75):
-                return self.finish(Outcome.UNKNOWN,
-                                   "75s 内 箭头+我方 没同框过 -- 感知不足, "
-                                   "已存帧待标注, 不瞎点")
-            return wait("等 箭头+我方 同框（防敌我混淆的假我方框）")
-        self._wt_clear("no_unit")
         cs = grid.cells(obs, 0.35)
         stp = grid.steps(cs)
         if len(cs) < 2 or stp is None:
@@ -686,13 +684,45 @@ class CampaignFlow(ExitMixin, Flow):
             return wait("格子检出不足, 等一帧")
         self._wt_clear("no_cells")
         dx, dy = stp
-        cur = grid.below(unit, cs, dx)
+        # **航位推算优先**: 当前逻辑格 = 起点地标 + 本区已确认执行的答案方向
+        #    累加（相机不变, 不依赖我方立绘检出）。H2-2 r2 实锤的病: 单位自己
+        #    的格子被立绘挡住没检出, below() 就近绑到隔壁起点格 -> "right-down"
+        #    解析出来的目标 = 自己站的格 -> 8 发全点在自己脚下(点自己=取消选中,
+        #    游戏无响应)。立绘绑定只做起点检不出时的兜底。
+        cur = None
+        unit = self._bind_unit(obs)
+        sp_lm = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
+        if sp_lm is not None:
+            ex, ey = sp_lm.cx, sp_lm.cy
+            for i in range(self.state.get("deploy_round0", 0),
+                           self.state["round_i"]):
+                mv = [m for m in plan[i] if m.get("do") == "move"]
+                if mv and mv[0]["dir"] in grid.DIRS:
+                    mul = grid.DIRS[mv[0]["dir"]]
+                    ex, ey = ex + mul[0] * dx, ey + mul[1] * dy
+            near = min(cs, key=lambda c: (c[0] - ex) ** 2 + (c[1] - ey) ** 2,
+                       default=None)
+            if (near is not None
+                    and (near[0] - ex) ** 2 + (near[1] - ey) ** 2
+                    < (0.6 * dx) ** 2):
+                cur = near
         if cur is None:
-            if self._overdue("no_bind", 75):
-                return self.finish(Outcome.UNKNOWN,
-                                   "75s 内队伍绑不到格子 -- 交人看")
-            return wait("队伍绑不到格子")
-        self._wt_clear("no_bind")
+            if unit is None:
+                if self._overdue("no_unit", 75):
+                    return self.finish(Outcome.UNKNOWN,
+                                       "75s 内起点航位和 箭头+我方 都拿不到 -- "
+                                       "感知不足, 已存帧待标注, 不瞎点")
+                return wait("等 起点地标或箭头+我方（绑当前格）")
+            self._wt_clear("no_unit")
+            cur = grid.below(unit, cs, dx)
+            if cur is None:
+                if self._overdue("no_bind", 75):
+                    return self.finish(Outcome.UNKNOWN,
+                                       "75s 内队伍绑不到格子 -- 交人看")
+                return wait("队伍绑不到格子")
+            self._wt_clear("no_bind")
+        else:
+            self._wt_clear("no_unit", "no_bind")
         # **绑格要连续两帧同格共识才许落子**（08-13 H2-1 live 实锤: 迷雾光照下
         #    道具/敌方会闪检成 我方, 真我方恰好漏检的帧里「单我方框无歧义」
         #    兜底信了独苗假框 -> cur 绑进雾区 -> right 解析到迷雾格连点三发）。
@@ -733,11 +763,11 @@ class CampaignFlow(ExitMixin, Flow):
         opens = obs.all(V.GRID_CELL_OPEN, 0.30)
         marked = any((b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2
                      < (0.4 * dx) ** 2 for b in opens)
-        # 位移证据的基线: 落子时刻 单位相对起点地标 的向量（相机不变量）
+        # 位移证据的基线: 落子时刻 单位相对起点地标 的向量（相机不变量）。
+        #    航位推算路线下立绘可能没检出 -- 那就这轮不启用位移证据(None)
         self.state["dx_est"] = dx
-        sp_lm = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
         pv = ((unit.cx - sp_lm.cx, unit.cy - sp_lm.cy)
-              if sp_lm is not None else None)
+              if (sp_lm is not None and unit is not None) else None)
 
         def _issued():
             self.state.update(issued=True, cycling=False, pe_absent=0,
