@@ -1144,10 +1144,12 @@ TRAIN_CONFIGS = {
         "batch": 12,
         "out_name": "ui_yolo26m_v16",
         "cache": False,
-        # workers 8 时 GPU 只跑到 82% / 277W(4090 满载 450W), 数据供给跟不上。
-        # 数据集比 v15 大一倍(12k->25k 帧), DataLoader 成了新瓶颈。14 是留了内存
-        # 余量的值 -- 32G 系统内存, worker 开太多会 swap。
-        "workers": 14,
+        # workers 固定 8。试过 14, DataLoader worker 直接崩:
+        #   RuntimeError: Couldn't open shared file mapping
+        # 32G 系统内存撑不住那么多 worker 的共享内存。
+        # 注: workers=8 时 GPU 82% / 277W 是 YOLO 训练的正常负载, 不是喂不饱
+        # (4090 的 450W 是推理/游戏满载的数, 训练达不到), 别照着功耗去调 workers。
+        "workers": 8,
         "lr0": 0.005,
         "weight_decay": 0.0005,
         "dropout": 0.0,
