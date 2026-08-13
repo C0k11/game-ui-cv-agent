@@ -578,6 +578,30 @@ def t_flows():
           _mny.purchase_context(_sweepc) is None,
           str(_mny.purchase_context(_sweepc)))
 
+    # 购买框有条件交回 flow（event_shop 高价优先购买, 2026-08-13）:
+    #   三重合取 —— flow 声明 + 12s 授权金钱步宽限窗 + 框体无青辉石。
+    #   缺任何一项都必须照旧 halt（08-09 那道防线不许被这次放行弄坏）。
+    import time as _tm
+    from routing_v2.flow.interrupt import Interrupts as _Itc
+    _itc = _Itc(log=lambda m: None)
+    check("购买框: 无声明无宽限  照旧 halt",
+          _itc._on_money_popup(_buyap).kind == "halt")
+    _itc.flow_handles_purchase = True
+    check("购买框: 只有声明没有宽限窗  照旧 halt",
+          _itc._on_money_popup(_buyap).kind == "halt")
+    _itc.money_grace_until = _tm.time() + 5
+    check("购买框: 声明+宽限+框内无青辉石  交回 flow（返回 None）",
+          _itc._on_money_popup(_buyap) is None)
+    _buyap_pyx = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
+                   B(V.CANCEL, conf=0.98, cx=0.402, cy=0.699),
+                   B(V.QTY_MAX, conf=0.98, cx=0.687, cy=0.480),
+                   B(V.PYROXENE, conf=0.90, cx=0.560, cy=0.470))
+    check("购买框: 框体内有青辉石  就算有声明+宽限也 halt",
+          _itc._on_money_popup(_buyap_pyx).kind == "halt")
+    _itc.money_grace_until = _tm.time() - 1
+    check("购买框: 宽限窗过期  照旧 halt",
+          _itc._on_money_popup(_buyap).kind == "halt")
+
     # 没登记的设施页  facility（有退出控件，不会卡死）
     fac = O(B(V.HOME, cx=0.965, cy=0.033), B(V.BACK, cx=0.045, cy=0.052),
             B(V.PYROXENE, cx=0.67, cy=0.053), B(V.CREDIT, cx=0.51, cy=0.052))

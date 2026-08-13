@@ -468,6 +468,11 @@ class Runner:
         ok = self.device.tap(act.x, act.y)
         self.stats.taps += 1
         self._tr(st, act, {"sent": bool(ok), "taps": self.stats.taps})
+        if ok and act.money:
+            # 已授权金钱步**真的发出去了** -> 给购买框 12s 宽限窗
+            #   （interrupt._on_money_popup 的三重合取之一, 数事实不数意图）
+            import time as _t
+            self.interrupts.money_grace_until = _t.time() + 12.0
         # 推进契约也只在**真发出去之后**才 arm（同一条「数事实」纪律）——
         #   被闸吞掉的决策若 arm 了，闸会为一发从没发出去的点击一直等下去。
         if ok:
@@ -632,6 +637,8 @@ class Runner:
                 return
             act = None
             if st.interrupt:
+                # 归位期没有"flow 主动购买"这回事 —— 购买框一律走 halt
+                self.interrupts.flow_handles_purchase = False
                 act = self.interrupts.handle(st.interrupt, obs)
             if act is None:
                 act, self._route_plan = nav.route(obs, st, target,
@@ -882,6 +889,9 @@ class Runner:
                 #   （剧情挖矿要连着推，别的 flow 撞上剧情就是要逃出来）。
                 self.interrupts.watch_next_chapter = bool(
                     getattr(flow, "watch_next_chapter", False))
+                # 购买框能不能交回 flow 也由 flow 声明（见 interrupt.py 三重合取）
+                self.interrupts.flow_handles_purchase = bool(
+                    getattr(flow, "handles_purchase_dialog", False))
                 act = self.interrupts.handle(st.interrupt, obs)
             if st.interrupt != "loading":
                 _d = self.interrupts.note_no_loading()

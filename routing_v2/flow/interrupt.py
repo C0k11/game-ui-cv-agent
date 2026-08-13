@@ -50,6 +50,13 @@ class Interrupts:
         #   默认 False = 中斷（逃生语义：别的 flow 撞上剧情就是要离开）；
         #   StoryMiningFlow 会把它置 True，因为它**就是来看剧情的**。
         self.watch_next_chapter = False
+        # 购买框有条件交回 flow（2026-08-13 event_shop 高价优先购买上线）:
+        #   三重合取, 缺一律 halt —— 1) 当前 flow 声明自己会处理购买框
+        #   (handles_purchase_dialog, 全仓只有 event_shop)  2) 12s 内刚真派发
+        #   过一发**已授权**的金钱步(runner 在 tap 落地后盖章)  3) 框体内无
+        #   青辉石。
+        self.flow_handles_purchase = False
+        self.money_grace_until = 0.0
         self._load_t0 = 0.0
         self.load_total = 0.0
         self.load_count = 0
@@ -102,6 +109,23 @@ class Interrupts:
                 self._log("    購買青輝石页停在真钱页签上 — 切到「組合包」去拿免費包")
                 return tap_box(tab, "切到組合包页签（免費包在那儿；切 tab 不花钱）",
                                expect=(V.COMBO_PACK_SEL, V.FREE))
+        # **有条件交回 flow**（event_shop 高价优先购买, 2026-08-13）:
+        #    这道 halt 的本职是拦「flow 没打算买、框自己冒出来」的局面。
+        #    flow **主动**点了已授权的金钱步、框是它点出来的结果时，交回去
+        #    由它的 on_confirm_dialog 处理（MAX/確認每一发仍是 money=True
+        #    走严格闸）。三重合取, 缺一律照旧 halt:
+        #      1) flow 声明 handles_purchase_dialog（全仓只有 event_shop）
+        #      2) 12s 宽限窗内刚**真派发**过一发已授权金钱步（runner 盖章;
+        #         購買AP 那类框跟在 扫荡开始 后面, 扫荡开始不是金钱步 ->
+        #         没有宽限窗 -> 照旧 halt, 08-09 那条防线不受影响）
+        #      3) 框体内没有青辉石（有 = 真钱风险, 无条件 halt）
+        if (self.flow_handles_purchase
+                and time.time() < self.money_grace_until
+                and obs.find(V.PYROXENE, money_rules.CONF,
+                             region=money_rules.BODY) is None):
+            self._log("    购买框 = 刚授权的金钱步点出来的 — 交回 flow 处理"
+                      "（MAX/確認仍逐发过严格闸）")
+            return None
         why = money_rules.purchase_context(obs) or "（判据已不成立）"
         return halt(f"{why} —— 立即停，交人逐帧审（青辉石只进不出）")
 

@@ -64,6 +64,9 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
     name = "event_shop"
     module = "event"
     entry_page = "event_page"
+    # 购买框由本 flow 自己处理（interrupt 三重合取之一; 全仓只有这里敢开）。
+    #   反向保险在 on_confirm_dialog: 框内有青辉石或体力图标 -> 一律取消。
+    handles_purchase_dialog = True
 
     def setup(self) -> None:
         self.state.update(tab_i=0, scrolls=0, sig="", plan={}, bought=0)
@@ -345,6 +348,16 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
                        post=_tried, expect=(V.CONFIRM,))
 
     def on_confirm_dialog(self, obs, st):
+        # **反向保险**: 活动商店的商品框价签是活动币。框体内出现 青辉石
+        #    （真钱风险）或 体力图标（購買AP 框 —— 青辉石图标在那个框上
+        #    检不出, 08-09 实锤, 但体力图标在）都不是我点出来的商品框,
+        #    一律取消, 绝不确认。
+        bad = obs.find([V.PYROXENE, V.AP], 0.40, region=(0.12, 0.12, 1.0, 1.0))
+        if bad is not None:
+            c = obs.find(V.CANCEL, 0.45)
+            if c is not None:
+                return tap_box(c, f"框内检出 `{bad.cls}` — 不是活动币商品框，取消")
+            return wait(f"框内检出 `{bad.cls}` 但没找到取消键 — 绝不点確認")
         if obs.has(V.CONFIRM_GREY, 0.45):
             c = obs.find(V.CANCEL, 0.45)
             return tap_box(c, "灰确认  取消") if c is not None else wait("等取消")
