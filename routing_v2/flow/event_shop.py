@@ -214,6 +214,12 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
                 if act is not None:
                     return act
 
+        # **货架不可见时不许下「到底/扫完」的结论**（2026-08-13 round6 实锤:
+        #    买完一件的确认框把货架整个盖住 -> 购买键全检不出 -> 指纹为空 ->
+        #    被当「到底了」提前收 tab, tab1 剩 8 件 tab2 剩 6 件没吃完）。
+        #    货架可见的判据 = 屏上有 购买/购买灰色 任意一个。
+        if not buyable and not soldout:
+            return wait(f"{cur_name}: 货架不可见（面板盖住/加载中）— 不下结论")
         # 货架滑动：指纹没变 = 到底了
         sig = self._shelf_sig(obs)
         if sig and sig != self.state["sig"] and self.state["scrolls"] < 10:
@@ -392,6 +398,13 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         self.ctx.bag["event_shop_plan"] = plan
         lines = [f"{k}: 余额={v['balance']} 可买={v['buyable']} 售罄={v['soldout']}"
                  for k, v in plan.items()]
+        # `_wrap` 会被多次走到（收工被推进闸按回 -> 下一 tick 又收工）——
+        #    note 只记第一次, 别把报告刷成 12 遍复读（2026-08-13 实锤）。
+        if self.state.get("wrap_noted"):
+            return self.finish(
+                Outcome.CLEAN if plan else Outcome.UNKNOWN,
+                f"{why}；购买 {self.state['bought']} 次；" + "；".join(lines))
+        self.state["wrap_noted"] = True
         for l in lines:
             self.note_lines.append(l)
 
