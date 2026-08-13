@@ -172,19 +172,34 @@ class EventShopFlow(ExitMixin, Flow):
         rec["buyable"] = max(rec["buyable"], len(buyable))
         rec["soldout"] = max(rec["soldout"], len(soldout))
 
-        # 买（可选）
+        # 回顶中（两遍策略的 pass1 到 pass2 之间）: 反向滑到指纹不再变化 = 到顶
+        if self.state.get("back_to_top"):
+            sig_now = self._shelf_sig(obs)
+            if sig_now and sig_now == self.state.get("bt_sig"):
+                self.state.pop("back_to_top", None)
+                self.state.pop("bt_sig", None)
+                self.state.update(scrolls=0, sig="")
+                self.log(f"{cur_name}: 已回顶，开始第二遍（清低价档）")
+            else:
+                bs = obs.all([V.SHOP_BUY, V.SHOP_BUY_GREY], 0.30, region=SHELF)
+                if bs:
+                    xs = sorted(b.cx for b in bs)
+                    cx = xs[len(xs) // 2]
+                    return swipe(
+                        cx, 0.30, cx, 0.85, f"{cur_name}: 回顶（第二遍前）",
+                        post=lambda s=sig_now: self.state.update(bt_sig=s))
+                return wait(f"{cur_name}: 回顶中没检出货架锚点")
+
+        # 买（可选）—— **非家具、单价最高优先，两遍扫**（用户 2026-08-13 拍板；
+        #    判据移植自 scripts/buy_event_shop.py 的 07-28 清仓实现:
+        #    pass1 只吃 >=100 高价档、pass2 清低档 —— 单遍"取景内降序"不是
+        #    全局降序，低档先花钱会让滚到后面的高价档落空）。
         if self.shop_cfg.get("auto_buy", True) and buyable:
             want = self.shop_cfg.get("currencies") or []
             if not want or cur_name in want:
-                sel = obs.find(V.SHOP_SELECT_ALL, 0.35)
-                if sel is not None and self.pending(f"sel{i}"):
-                    return tap_box(sel, f"{cur_name}: 全部选择", once=f"sel{i}")
-                go = obs.find(V.SHOP_BUY_SELECTED, 0.35)
-                if go is not None:
-                    return tap_box(go, f"{cur_name}: 批量购买",
-                                   money=True, spend=cur_name, counter="bought")
-                return tap_box(buyable[0], f"{cur_name}: 购买单项",
-                               money=True, spend=cur_name)
+                act = self._buy_visible(obs, cur_name, buyable, bal)
+                if act is not None:
+                    return act
 
         # 货架滑动：指纹没变 = 到底了
         sig = self._shelf_sig(obs)
@@ -201,10 +216,21 @@ class EventShopFlow(ExitMixin, Flow):
             if sw is not None:
                 return sw
             return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
+        # 到底了。开着自动买且第一遍（高价档）刚扫完的话，回顶来第二遍。
+        buying = (self.shop_cfg.get("auto_buy", True)
+                  and (not (self.shop_cfg.get("currencies") or [])
+                       or cur_name in (self.shop_cfg.get("currencies") or [])))
+        if buying and self.state.get("buy_floor", 100) >= 100:
+            self.state["buy_floor"] = 0
+            self.state["back_to_top"] = True
+            self.state.pop("bt_sig", None)
+            return wait(f"{cur_name}: 第一遍（高价档）到底 — 回顶清低价档")
         self.log(f"{cur_name}: 余额 {bal}，可买 {rec['buyable']}，"
                  f"售罄 {rec['soldout']} — 这个 tab 扫完")
         self.state["tab_i"] += 1
-        self.state.update(scrolls=0, sig="")
+        self.state.update(scrolls=0, sig="", buy_floor=100)
+        self.state.pop("dead_spots", None)
+        self.state.pop("buy_tries", None)
         self.once_reset()
         # 单档回退模式下没有"下一个 tab"，直接收工出推算
         if self.state.get("single_fallback"):
@@ -213,13 +239,87 @@ class EventShopFlow(ExitMixin, Flow):
 
     on_shop = on_event_shop      # 万一被判成通用商店也照样处理
 
+    def _buy_visible(self, obs, cur_name, buyable, bal):
+        """当前取景内: 读价 -> 家具行剔除 -> 单价降序买一件。None = 没有可买的。
+
+        判据全部来自 scripts/buy_event_shop.py（07-28 清仓实测标定）:
+          · 价格条紧贴按钮**上沿**一条（老码 4K: 上 95px / 下 8px，换算成
+            按钮高的 0.86 / 0.07 倍 —— 分辨率无关）。窗口再高就吃进
+            「可購買N次」黑条，次数会被当单价（07-15 实锤 95次 当 95）。
+          · **家具行判据**: 行内出现重复价 或 行内 max>1000。素材行是严格
+            递增四档，绝无重复价；价集/单价过滤挡不住 300 档家具，只有整行判。
+          · **数学闸**: 余额读不出就不买（fail-closed —— 活动币买错了这一期
+            补不回来）；单价 > 余额的位置直接不点，不许"点了才知道买不起"。
+        """
+        floor = self.state.get("buy_floor", 100)
+        tries = self.state.setdefault("buy_tries", {})
+        if self.state.get("bought", 0) >= 60:
+            return None                       # 安全帽
+        bh_all = sorted(max(b.y2 - b.y1, 0.01) for b in buyable)
+        bh = bh_all[len(bh_all) // 2]
+        # 行分组: cy 相差 < 1.2 倍按钮高 = 同一行（货架是网格布局）
+        rows = []
+        for b in sorted(buyable, key=lambda x: x.cy):
+            if rows and abs(b.cy - rows[-1][-1].cy) < bh * 1.2:
+                rows[-1].append(b)
+            else:
+                rows.append([b])
+        cands = []
+        for row in rows:
+            priced = []
+            for b in row:
+                raw = R.digits(obs.frame,
+                               (b.x1, b.y1 - bh * 0.86, b.x2, b.y1 - bh * 0.07))
+                p = int(raw) if raw and raw.isdigit() else None
+                priced.append((p, b))
+            vals = [p for p, _ in priced if p is not None]
+            if vals and (len(vals) != len(set(vals)) or max(vals) > 1000):
+                if self.pending(f"furn{round(row[0].cy, 2)}"):
+                    self.state[f"once:furn{round(row[0].cy, 2)}"] = True
+                    self.log(f"{cur_name}: 行价签 {sorted(vals)} = 家具行，整行跳过")
+                continue
+            for p, b in priced:
+                if p is None or not (0 < p <= 1000):
+                    continue
+                k = f"{b.cx:.2f},{b.cy:.2f}"
+                if tries.get(k, 0) >= 3:
+                    continue                  # 点了 3 次都没弹框: 拉黑防死磕
+                cands.append((p, b, k))
+        if not cands:
+            return None
+        if bal is None:
+            if self.pending("no_bal"):
+                self.state["once:no_bal"] = True
+                self.log(f"{cur_name}: 余额读不出 — **不自动买**（fail-closed）")
+            return None
+        afford = [c for c in cands if floor <= c[0] <= bal]
+        if not afford:
+            return None
+        p, b, k = max(afford, key=lambda c: c[0])
+
+        def _tried(kk=k):
+            t = self.state.setdefault("buy_tries", {})
+            t[kk] = t.get(kk, 0) + 1
+        # 严格契约: 购买确认框弹出来才算这一发生效（没弹 = 买不起/售罄，
+        #    heartbeat 超时后重试，3 次拉黑该位置）。
+        # `bought` 只在确认框真的按下確認时才 +1（on_confirm_dialog 那一发）
+        #    —— 这里点货架只算"尝试"，没弹框的尝试不算成交（数事实）。
+        return tap_box(b, f"{cur_name}: 买单价 {p}（非家具最高价优先，"
+                          f"余额 {bal}）",
+                       money=True, spend=f"{cur_name}单价{p}",
+                       post=_tried, expect=(V.CONFIRM,))
+
     def on_confirm_dialog(self, obs, st):
         if obs.has(V.CONFIRM_GREY, 0.45):
             c = obs.find(V.CANCEL, 0.45)
             return tap_box(c, "灰确认  取消") if c is not None else wait("等取消")
+        # 购买数量框: 先拉 MAX 再确认（老码 buy_one 同序）。MAX 变灰 = 拉满。
+        mx = obs.find(V.QTY_MAX, 0.40, region=(0.0, 0.12, 1.0, 1.0))
+        if mx is not None:
+            return tap_box(mx, "数量拉 MAX", expect_gone=(V.QTY_MAX,))
         cf = obs.find(V.CONFIRM, 0.45)
-        return tap_box(cf, "确认购买", money=True,
-                       spend="活动币") if cf is not None else wait("等確認键")
+        return tap_box(cf, "确认购买", money=True, spend="活动币",
+                       counter="bought") if cf is not None else wait("等確認键")
 
     # on_reward 一律继承基类：`find([A, B])` 是全屏 conf argmax，会永远
     #   选中 `获得奖励` 那条**横幅**而不是能点的 `点击继续字样`（实锤见
