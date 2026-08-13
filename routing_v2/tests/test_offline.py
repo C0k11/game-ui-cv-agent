@@ -1251,7 +1251,9 @@ def t_route():
     _chk = [Box(cls=V.GREEN_CHECK, conf=0.96,
                 x1=cx - 0.008, y1=0.358, x2=cx + 0.008, y2=0.376)
             for cx in (0.431, 0.488)]
-    _ob = Observation(boxes=_stu + _chk, seq=1, w=3840, h=2160)
+    # 面板身份: 体内(cy>0.15)要有 课程表票, 否则 _roster_panel 直接交回去
+    _tick = Box(cls=V.SCHED_TICKET, conf=0.95, x1=0.60, y1=0.20, x2=0.66, y2=0.24)
+    _ob = Observation(boxes=_stu + _chk + [_tick], seq=1, w=3840, h=2160)
     _act = _sc._roster_panel(_ob)
     check("2 个绿勾只认领 2 个学生 — 没勾的那位仍会被选中",
           _act is not None and _act.target_cls == "美咲泳装",
