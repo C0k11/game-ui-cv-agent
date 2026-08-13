@@ -1500,8 +1500,10 @@ def t_route():
     #   所以在一切判定之前先无条件按住 _MIN_HOLD 帧。
     from routing_v2.act.gate import _MIN_HOLD as _MH
     _opened = O(B("晴露营"), B("沙织"), B(V.SCHED_START))
+    # 时钟归 heartbeat（每帧走表, 模拟 runner 主循环）, advance 只判状态
     _rel = None
     for _i in range(1, 40):
+        _g3.heartbeat(_opened, page_changed=False, retry_frames=25)
         _v4 = _g3.advance(_tap, _opened, page_changed=False, retry_frames=25)
         if _v4.ok:
             _rel = _i
@@ -1524,6 +1526,7 @@ def t_route():
     _g5.arm(_inv, O(B(V.CAFE_TICKET)))
     _rel2 = None
     for _i in range(1, 30):                    # 页面每帧都在跳
+        _g5.heartbeat(O(B(V.CLOSE_X)), page_changed=True, retry_frames=70)
         _vv = _g5.advance(_inv, O(B(V.CLOSE_X)), page_changed=True,
                           retry_frames=70)
         if _vv.ok:
@@ -1536,6 +1539,7 @@ def t_route():
     _loose = _A2(kind="tap", x=0.5, y=0.5, target_cls="某键", reason="r")
     _g6.arm(_loose, O(B("某键")))
     for _i in range(_MH + 2):
+        _g6.heartbeat(O(B("别的")), page_changed=True, retry_frames=70)
         _vl = _g6.advance(_loose, O(B("别的")), page_changed=True, retry_frames=70)
         if _vl.ok:
             break
@@ -1552,24 +1556,26 @@ def t_route():
               once_key="selectall", expect=("选择购买",))
     _g.arm(_act)
     check("严格契约记下了 once 标记", _g._pending.get("once") == "selectall")
-    _v = None
+    # 超时和退标记归 heartbeat（时钟跟帧走 —— flow 光等待时也必须能超时）
+    _rb0 = ""
     for _i in range(200):                       # 一直等不到「选择购买」
-        _v = _g.advance(_act, O(B("信用点")), page_changed=False, retry_frames=25)
+        _rb0 = _g.heartbeat(O(B("信用点")), page_changed=False,
+                            retry_frames=25) or _rb0
         if _g._pending is None:
             break
-    check("契约超时后把 once 标记退回来", _v is not None
-          and _v.rollback_once == "selectall", str(_v and _v.rollback_once))
+    check("契约超时后把 once 标记退回来", _rb0 == "selectall", repr(_rb0))
     # 宽松契约（没显式 expect）超时属常态, 不该退标记
     _g2 = _G(cfg())
     _act2 = _A(kind="tap", x=0.5, y=0.5, target_cls="某个键", reason="r",
                once_key="k2")
     _g2.arm(_act2)
+    _rb2 = ""
     for _i in range(200):
-        _v2 = _g2.advance(_act2, O(B("某个键")), page_changed=False, retry_frames=25)
+        _rb2 = _g2.heartbeat(O(B("某个键")), page_changed=False,
+                             retry_frames=25) or _rb2
         if _g2._pending is None:
             break
-    check("宽松契约超时不退标记（那是常态，不是没生效）",
-          not _v2.rollback_once)
+    check("宽松契约超时不退标记（那是常态，不是没生效）", not _rb2)
 
     # Gate 的逐次上下文必须能清(跨 flow 泄漏会误拦/误放)
     from routing_v2.act.gate import Gate as _G
