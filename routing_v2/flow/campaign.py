@@ -252,6 +252,13 @@ class CampaignFlow(ExitMixin, Flow):
     #    2026-08-13 实帧纠错: `普通关卡选中` 是顶部 Normal **页签**, 不是
     #    选中的关卡行, 点它开不了弹窗。行内按钮锚定和咖啡厅邀请键同款。
     def do_stage_list(self, obs, st):
+        # 证据和相位矛盾时退回（base.phases 文档里的自愈路径, 08-13 实录:
+        #    归位的返回键其实生效了但死路检测误报, 交班时页面还是旧的
+        #    campaign_stage -> 相位进了 stage_list, 而真实画面已经是任务大厅
+        #    -> 对着大厅等关卡列表 4001 tick）
+        if st.page in ("task_hall", "lobby"):
+            self.goto("enter", "画面在任务大厅/大厅, 相位退回 enter 重进")
+            return wait("退回 enter")
         # 弹窗开没开也看**内容证据**(页签 0.99 稳), 不只等页面签名 --
         #    复打版式上 任务开始 只有 0.22, 光靠签名会卡死(2026-08-13 实录 4001 tick)
         if (st.page == "stage_popup"
