@@ -573,13 +573,17 @@ class ShopFlow(ExitMixin, Flow):
                               R.STRIP[R.ARENA_COIN])
             bal = r[0] if r and r[0] is not None else None
         if bal is None:
-            if self.hold("coin_unknown", 25):
-                self.state["arena_done"] = True
-                return wait("战术大赛货币余额连续 25 帧读不出  fail-closed，不买")
-            return wait("战术大赛货币余额这一帧读不出 — 连续确认中")
-        self.state.pop("hold:coin_unknown", None)
+            # 读不出不再一票否决（勾选探针上线后, 成交判据是「選擇購買」的
+            #    亮灰, 那是游戏自己的授权; 花的又是非 premium 的大赛币,
+            #    真钱防线在 money=True 的人审闸上）。读数降级成参考。
+            self.log("战术大赛货币余额读不出 — 不拦, 以勾选后的按钮状态为准")
 
         #  白名单逐件点选（未勾选的才点；勾选后 `选择购买` 会出现）
+        #    **余额读数不许一票否决**（用户 2026-08-13:「也没选饮料然后辨别
+        #    是否买得起啊？」）。读数是 OCR，错一次就永远不买；真判据是
+        #    你定的那条链: **勾选 -> 看「選擇購買」亮还是灰**。勾选本身
+        #    不花一分钱（钱只在 選擇購買+確認 那两步动），拿它当探针是安全的。
+        #    余额只降级成日志。
         for cls_, price in ((V.ENERGY_DRINK_MID, 30), (V.ENERGY_DRINK_LOW, 15)):
             if self.state.get(f"picked:{cls_}"):
                 continue
@@ -587,10 +591,9 @@ class ShopFlow(ExitMixin, Flow):
             if it is None:
                 self.state[f"picked:{cls_}"] = True     # 售罄/不在货架上
                 continue
-            if bal < price:
-                self.state[f"picked:{cls_}"] = True
-                self.log(f"余额 {bal} < {cls_} 单价 {price}  跳过")
-                continue
+            if bal is not None and bal < price:
+                self.log(f"余额读数 {bal} < {cls_} 单价 {price} — 大概率买不起，"
+                         f"但以勾选后的按钮状态为准（读数只是参考）")
             # 2026-08-12 用户实测:「两瓶饮料是 **dim 状态说明买过了**，
             #    但 agent 不知道，**还是点了然后傻等了一会儿就跑**」。
             #    根因：已买过的商品只是**变灰**，cls 照样检出  照样点  点不动。
@@ -599,16 +602,30 @@ class ShopFlow(ExitMixin, Flow):
             #    用**结构判据**：勾选成功**必然**让「選擇購買」出现。
             #       契约 `expect=(选择购买,)`；契约超时 = 根本没勾上 = 已买过/买不了。
             #      这就是「看下一步 cls 再判断」在这里的正确落地。
-            return tap_box(it, f"勾选 {cls_}（{price} 大赛币，余额 {bal}）",
-                           expect=(V.SHOP_BUY_SELECTED,),
+            # 契约加两个备份证据: 卡上的**绿勾**(勾选成功的直接产物, 0.97)
+            #    和**灰的選擇購買**(勾上了但买不起, 本页实测只有 0.33,
+            #    低于全局 0.40 -- 所以下面判灰要带 region 降阈值)。
+            return tap_box(it, f"勾选 {cls_}（{price} 大赛币，余额读数 {bal}）",
+                           expect=(V.SHOP_BUY_SELECTED,
+                                   V.SHOP_BUY_SELECTED_GREY, V.GREEN_CHECK),
                            post=lambda c=cls_: self.state.update({f"picked:{c}": True}))
 
-        #  成交
+        #  成交 / 买不起 -- 判据就是「選擇購買」的亮灰（用户口述的链条）
         buy = obs.find(V.SHOP_BUY_SELECTED, 0.40)
         if buy is not None:
-            return tap_box(buy, f"購買所選能量飲料（余额 {bal} 大赛币）",
+            return tap_box(buy, f"購買所選能量飲料（余额读数 {bal} 大赛币）",
                            money=True, spend="战术大赛货币",
                            post=lambda: self.state.update(arena_done=True))
+        # 灰态判定带 region 降阈值（按钮固定在右下角; 本页灰态实测仅 0.33,
+        #    全局 0.40 门槛看不见它 -- [[routing_v2_live_day4]] 大赛币余额锚
+        #    「带region降阈值」同一个方法）。亮态在场不算（半渲染两态同检）。
+        grey = obs.find(V.SHOP_BUY_SELECTED_GREY, 0.25,
+                        region=(0.70, 0.80, 1.0, 1.0))
+        if grey is not None and self.hold("arena_short", 8):
+            self.state["arena_done"] = True
+            self.state["arena_short"] = True
+            self.log("「選擇購買」是灰的 - 大赛币不够，这一段没得买（勾选探针给的结论）")
+            return wait("大赛币不够，收工")
         # 等待缩短到 12 帧（用户:「点了然后**傻等了一会儿**就跑」）:
         #   勾选的契约已经在等「選擇購買」了，走到这儿说明契约都超时了，
         #   再干等只是把时间烧掉。**dim 态（已买过）就该快速判定并收工。**

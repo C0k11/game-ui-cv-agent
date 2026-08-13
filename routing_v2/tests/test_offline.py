@@ -1342,6 +1342,34 @@ def t_route():
     check("帧数够了但 0.5s 墙钟没到 — 仍然按住（帧数与墙钟合取）",
           not _v_w.ok, f"ok={_v_w.ok}")
 
+    # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
+    #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后
+    #   由「選擇購買」的亮/灰给结论。
+    _as = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    _shelf = O(B(V.ARENA_SHOP_TAB_SEL, cx=0.06, cy=0.51),
+               B(V.ARENA_SHOP_CURRENCY, cx=0.56, cy=0.08),   # 顶栏余额锚(读不出数)
+               B(V.ARENA_SHOP_CURRENCY, cx=0.74, cy=0.55),
+               B(V.ARENA_SHOP_CURRENCY, cx=0.86, cy=0.55),
+               B(V.ENERGY_DRINK_LOW, cx=0.76, cy=0.49),
+               B(V.ENERGY_DRINK_MID, cx=0.90, cy=0.49))
+    _a_p = _as.on_arena_shop(_shelf, _SV(page="arena_shop", frames_in_page=10))
+    check("余额读不出/为0 也要勾选饮料当探针（不许看一眼就走）",
+          _a_p is not None and _a_p.kind == "tap"
+          and _a_p.target_cls in (V.ENERGY_DRINK_LOW, V.ENERGY_DRINK_MID),
+          f"{_a_p and (_a_p.kind, _a_p.target_cls)}")
+    # 勾上了、右下角出灰（本页实测 0.33, 判据带 region 降到 0.25）-> 买不起收工
+    _as.state.update({f"picked:{V.ENERGY_DRINK_LOW}": True,
+                      f"picked:{V.ENERGY_DRINK_MID}": True})
+    _grey_shelf = O(B(V.ARENA_SHOP_TAB_SEL, cx=0.06, cy=0.51),
+                    B(V.ARENA_SHOP_CURRENCY, cx=0.74, cy=0.55),
+                    B(V.ARENA_SHOP_CURRENCY, cx=0.86, cy=0.55),
+                    B(V.SHOP_BUY_SELECTED_GREY, conf=0.30, cx=0.91, cy=0.92))
+    for _ in range(10):
+        _a_g2 = _as.decide(_grey_shelf, _SV(page="arena_shop", frames_in_page=20))
+    check("灰的選擇購買(0.30) = 大赛币不够, 探针给结论收工",
+          _as.state.get("arena_done") and _as.state.get("arena_short"),
+          f"done={_as.state.get('arena_done')}")
+
     # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
     #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
     _sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
