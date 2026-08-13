@@ -302,6 +302,8 @@ class ShopFlow(ExitMixin, Flow):
                                   else "未处理"))
         if not self.cfg.get("arena_shop", True):
             seg.append("战术大赛商店 已关")
+        elif self.state.get("arena_short"):
+            seg.append("战术大赛商店 **买不起**（大赛币不够）")
         elif self.state.get("arena_done"):
             seg.append("战术大赛商店 已处理")
         elif self.state.get("arena_skip"):
@@ -631,6 +633,14 @@ class ShopFlow(ExitMixin, Flow):
         #   再干等只是把时间烧掉。**dim 态（已买过）就该快速判定并收工。**
         if self.hold("no_buy_btn", 12):
             self.state["arena_done"] = True
+            # 「买不起」和「已买过」是两个结论, 靠**绿勾**区分（2026-08-13 实帧:
+            #    余额 0 勾上饮料后 選擇購買 灰得肉眼可见, 但 cls527 在这页
+            #    连 0.25 都不到 -- 上面那条灰态判据是瞎的。而绿勾 0.96 稳定:
+            #    勾选成功了 + 亮的選擇購買始终不出现 = 买不起;
+            #    连勾都勾不上（无绿勾）= dim 态, 今天已买过）。
+            if obs.has(V.GREEN_CHECK, 0.40, region=(0.45, 0.15, 1.0, 0.75)):
+                self.state["arena_short"] = True
+                return wait("勾上了但「選擇購買」一直不亮 — 大赛币不够，收工")
             return wait("勾不上、也没出现「選擇購買」— 饮料是 dim 态（今天已买过），收工")
         return wait("等「選擇購買」出现")
 
