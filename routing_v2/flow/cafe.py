@@ -79,8 +79,16 @@ class CafeFlow(ExitMixin, Flow):
             self.state["floor"] = real
 
     def _in_cafe(self, obs: Observation) -> bool:
-        """人在咖啡厅主视图里 -- 判据是那对互斥的换厅按钮（见 observe）。"""
-        return (obs.has(V.CAFE_MOVE_2F, 0.45) or obs.has(V.CAFE_MOVE_1F, 0.45))
+        """人在咖啡厅主视图里。
+
+        只认换厅按钮不够（2026-08-13 小号实帧）: 2 号店锁着时那个按钮
+           是锁态、conf 抖在 0.45 上下 -- pan 完连着 40+ tick 判"不在咖啡厅"，
+           摸头和换厅整条尾巴被跳过。收益图标/邀请卷是**主视图专属**的硬锚
+           （0.96 稳定），面板盖住时它们也检不出，语义正好。
+        """
+        return (obs.has(V.CAFE_MOVE_2F, 0.45) or obs.has(V.CAFE_MOVE_1F, 0.45)
+                or obs.has(V.CAFE_EARNINGS, 0.45)
+                or obs.has(V.CAFE_TICKET, 0.45))
 
     # enter
     def do_enter(self, obs, st):
@@ -414,6 +422,12 @@ class CafeFlow(ExitMixin, Flow):
         if not todo:
             return self.goto_and_wait("exit", "配置的厅都去过了")
         dst = todo[0]
+        # 点了 2 次都没到（契约超时 2 轮）= 按钮多半是**锁态**（小号 2 号店
+        #    没解锁, 锁态按钮被误检成正常换厅键, 点了游戏不响应 -- 锁 cls
+        #    泛化是补标清单里的事, 这里先保证不锁死）。
+        if self.state.get("switch_taps", 0) >= 2:
+            return self.goto_and_wait(
+                "exit", f"去 {dst} 号厅点了 2 次都没反应（多半锁着）- 收工")
         btn = obs.find(V.CAFE_MOVE_2F if dst == 2 else V.CAFE_MOVE_1F, 0.45)
         if btn is None:
             if self.phase_ticks > 30:
@@ -421,6 +435,7 @@ class CafeFlow(ExitMixin, Flow):
             return wait(f"找去 {dst} 号厅的按钮")
 
         def _moved(d=dst):
+            self.bump("switch_taps")
             self.state.update(floor=d, pat_ts=0.0, dry=0, pans=0, patted=[],
                               invite_scrolls=0)
             self.state.pop("saw_invite_target", None)
