@@ -187,10 +187,19 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         #   勾选是**幂等的开关**：只在检出**未选态**时点，绝不盲 toggle
         #     （[[execution_doctrine]]「状态钮绝不盲 toggle」——已勾上时再点
         #      会把它关掉，正好反过来）。
+        # **每场都认状态，不做 once**（2026-08-13 用户抓到: 游戏每场战斗会把
+        #    勾选重置，once-per-flow 让第 2-5 场看着「未选 0.98」也不点，
+        #    照样进战斗画面点快进）。盲 toggle 防线改成**状态互斥**:
+        #      只在「未选」在场且「已选」不在场时点，两态同时检出就等一帧。
+        #    严格契约 `expect=(已选,)` 还兼了**页面死区**（配队页刚进来整页
+        #      半透明淡入，按钮 cls 照检 0.98 但游戏不收 tap —— 帧证
+        #      0005758）：契约没兑现就一直重发勾选，勾上了 = 页面活了，
+        #      这之后再点出击就绝不会打在死按钮上。
         off = obs.find(V.SKIP_BATTLE_OFF, 0.40)
-        if off is not None and self.pending("skipbattle"):
-            return tap_box(off, "勾上「跳過戰鬥」（出击前，免得进战斗画面干等）",
-                           once="skipbattle")
+        on = obs.find(V.SKIP_BATTLE, 0.40)
+        if off is not None and on is None:
+            return tap_box(off, "勾上「跳過戰鬥」（每场都会被游戏重置，逐场认状态）",
+                           expect=(V.SKIP_BATTLE,))
         # 2026-08-12 用户实测：**出击后有 20 秒倒计时冷却**，冷却没走完再点
         #    出击只会弹提示框  bot 反复「点出击点掉提示」空转。
         #    这跟上面勾「跳過戰鬥」**直接冲突**：勾了战斗瞬间结束，倒计时反而
@@ -208,6 +217,10 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         go = obs.find(V.SORTIE, 0.45)
         if go is None:
             return wait("等出击键")
+        # 勾选本来就是勾好的时（上面那支没机会当"页面活了"的探针），
+        #    出击也不许抢在淡入死区里发 —— 连续 8 帧都在配队页再点。
+        if not self.hold("form_ready", 8):
+            return wait("配队页刚进来（淡入死区）— 稳 8 帧再出击")
         return tap_box(go, "出击（大赛）",
                        post=lambda: self.state.__setitem__("sortie_ts", _t.time()))
 
