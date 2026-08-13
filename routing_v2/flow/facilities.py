@@ -346,6 +346,19 @@ class ShopFlow(ExitMixin, Flow):
 
         if st.frames_in_page < 40:
             return wait("确认商店没东西可买了")
+        # **信用点这一栏完了不等于整条 flow 完了**（用户 2026-08-13:「也没去
+        #    战术大赛商店那边接着选择饮料然后检测」）。
+        #    原来只要 `bought` 一 True 就 `finish` —— 而 `_goto_arena_tab` 上面
+        #    那一步返回 None（滑不出 tab / 推不出滑动几何）时就直接掉到这里，
+        #    **大赛商店整段被跳过，报告还写 CLEAN**。
+        #    收工判据必须是「三段都有交代」，不是「第一段做完了」。
+        if (self.cfg.get("arena_shop", True)
+                and not self.state.get("arena_done")
+                and not self.state.get("arena_skip")):
+            if not self.hold("no_arena_tab", 60):
+                return wait("信用点这栏完了 — 找战术大赛 tab（还没放弃）")
+            self.state["arena_skip"] = True
+            self.log("左栏里滑不出战术大赛 tab — 这一段记成没找到入口，不谎报")
         if self.state.get("bought"):
             return self.finish(Outcome.CLEAN, self._segments())
         # 2026-08-12 live 实锤：**「没买成」不等于「没得买」**。

@@ -1282,9 +1282,9 @@ def t_route():
     _ic = _IC(log=lambda m: None)
     _cad = O(B(V.COMBO_PACK, cx=0.70, cy=0.36), B(V.CLOSE_X, cx=0.79, cy=0.28))
     _a_c = _ic._on_money_popup(_cad)
-    check("真钱货架页关掉走人而不是停整轮",
+    check("停在真钱页签上要切到組合包，不是关掉走人也不是停整轮",
           _a_c is not None and _a_c.kind == "tap"
-          and _a_c.target_cls == V.CLOSE_X,
+          and _a_c.target_cls == V.COMBO_PACK,
           f"{_a_c and (_a_c.kind, _a_c.target_cls)}")
     _dlg = O(B(V.COMBO_PACK, cx=0.70, cy=0.36), B(V.CLOSE_X, cx=0.79, cy=0.28),
              B(V.CONFIRM, cx=0.58, cy=0.72), B(V.CANCEL, cx=0.42, cy=0.72))
@@ -1321,6 +1321,29 @@ def t_route():
           _a_s is None or _a_s.target_cls != V.SHOP_BUY_SELECTED_GREY,
           f"{_a_s and _a_s.target_cls}")
     check("买不起要落 credit_short 收敛", bool(_sh.state.get("credit_short")))
+    # 信用点这栏完了 **不等于** 整条 flow 完了 —— 大赛商店那段必须有交代
+    #   （用户 2026-08-13:「也没去战术大战商店那边接着选择饮料然后检测」）
+    _sh2 = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    _sh2.state.update(pack_done=True, bought=True)
+    _a_ar = None
+    for _ in range(30):
+        _a_ar = _sh2.decide(O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.12)),
+                            _SV(page="shop", frames_in_page=60))
+    check("信用点买完但还没去大赛商店 — 不许收工（还在找 tab）",
+          _sh2.outcome is None, f"outcome={_sh2.outcome}")
+    _sh2.state["arena_skip"] = True
+    check("大赛 tab 找不到要记成「没找到入口」，不谎报已处理",
+          "没找到入口" in _sh2._segments(), _sh2._segments())
+    # 咖啡厅: 放弃邀请后**不许再开卷**（用户: 找两下没找到就关了又打开继续抽风）
+    _cf8 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cf8.goto("invite")
+    _cf8.state["gaveup_f1"] = True
+    _a_g = _cf8.decide(O(B(V.CAFE_TICKET, cx=0.90, cy=0.80),
+                         B(V.CAFE_MOVE_2F, cx=0.10, cy=0.14)),
+                       _SV(page="cafe", frames_in_page=10))
+    check("放弃过邀请就不再点邀请卷",
+          _a_g is None or _a_g.target_cls != V.CAFE_TICKET,
+          f"{_a_g and _a_g.target_cls}")
     check("报告要说「买不起」不是「已处理」", "买不起" in _sh._segments(),
           _sh._segments())
 

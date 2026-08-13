@@ -155,6 +155,14 @@ class CafeFlow(ExitMixin, Flow):
         if (not self.cfg.get("invite_targets")
                 or self.cfg.get("skip_invite", False)):
             return self.goto_and_wait(nxt, "没配邀请目标")
+        # **放弃过就别再开卷**（用户 2026-08-13:「找人找两下没找到就直接关了
+        #    邀请卷然后又打开继续抽风」）。原来放弃分支只是 tap 叉叉关面板，
+        #    没留任何标记 -> 下一帧 `_invite` 从头跑、`panel` 已经 False
+        #    -> 又去点邀请卷 -> 开-关无限循环。
+        #    这是「负证据撤销」的同族: 退出条件写的是"这一帧没看见目标"，
+        #      而"我已经找过一轮了"这个**事实**没人记。
+        if self.state.get(f"gaveup_f{fl}"):
+            return self.goto_and_wait(nxt, f"{fl} 号厅这一轮找不到邀请目标，不再开卷")
         if self.state.get(f"invited_f{fl}"):
             # `post` 只保证「**tap 指令发出去了**」，而邀请**要再点一次確認
             #    才算数**。退出前先给确认框 25 帧时间弹出来（overlay 优先级
@@ -222,10 +230,14 @@ class CafeFlow(ExitMixin, Flow):
             if sw is not None:
                 return sw
             return wait("这一屏没检出邀请键行 - 推不出滑动几何，不瞎滑")
+        # 放弃：**先落标记再关面板**。标记是"我已经找过一轮"这个事实，
+        #    关不关得掉面板都不影响它 —— 否则关面板那一发被闸吞掉，下一帧
+        #    又从"没找过"重来（用户实测的抽风）。
         if self.pending("no_invite_note"):
             self.state["once:no_invite_note"] = True
-            self.log("配置的邀请目标都没找到 - 不乱邀请，退出列表")
-            self.note_lines.append("邀请：配置的角色没找到，未消耗邀请卷")
+            self.state[f"gaveup_f{fl}"] = True
+            self.log(f"{fl} 号厅：配置的邀请目标都没找到 - 不乱邀请，退出列表")
+            self.note_lines.append(f"邀请：{fl} 号厅没找到配置的角色，未消耗邀请卷")
         x = obs.find(V.CLOSE_X, 0.55)
         if x is not None:
             return tap_box(x, "关掉邀请列表", expect_gone=(V.CAFE_INVITE,))

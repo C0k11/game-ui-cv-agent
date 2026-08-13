@@ -84,21 +84,24 @@ class Interrupts:
                       "花钱的每一下仍要过闸人审")
             return None
         # 站在**購買青輝石页**上、但当前页签不是「組合包」——2026-08-13 小号实帧:
-        #    这一页默认开在「特別販售」，整页 CAD 25.99 / 16.99 的真钱货架，
-        #    而 `组合包未选择`(414) 只是旁边那个**没选中的页签标签**。
-        #    停整轮是**过度反应**: 我们知道自己是怎么进来的（shop 主动点了大厅
-        #    广告位），屏上就摆着叉叉，而**离开严格比站在真钱货架上更安全**。
-        #    halt 的本意是"意外撞上购买框, 停下来交人"，不是"关掉整天的日常"。
-        #     只放行**关闭**这一个动作；关不掉才 halt。
-        #    判据要排掉双键确认框（那种才是真·成交前一刻，必须停）。
-        if (obs.has(V.COMBO_PACK, money_rules.CONF)
-                and not (obs.has(V.CONFIRM, money_rules.CONF)
-                         and obs.has(V.CANCEL, money_rules.CONF))):
-            x = obs.find(V.CLOSE_X, 0.55)
-            if x is not None:
-                self._log("    購買青輝石页但页签不是組合包（真钱货架）— 关掉走人，"
-                          "不停整轮")
-                return tap_box(x, "真钱货架页 — 关掉离开（免費組合包这段跳过）")
+        #    这一页默认开在「特別販售」（整页 CAD 25.99 / 16.99 的真钱货架），
+        #    而 `组合包未选择`(414) 正是右边那个**没选中的「組合包」页签**。
+        #    我们**本来就是来拿免費包的**，免費包在組合包页签里（「每日免費組合包」
+        #    的價签写着「免費」）—— 所以正解是**切过去**，不是关掉走人
+        #    （用户 2026-08-13 当场纠正: 「我们是去组合包，然后买免费的，
+        #      你这个门控又写歪了」）。
+        #    切页签**不花一分钱**，而且 `组合包未选择` 早就在 gate 的 `_NAV_SAFE`
+        #      白名单里（那张表的注释写着"切 tab"）—— 闸放行它是设计好的。
+        #    切过去之后 `组合包已选择` + `免费` 出现 -> `is_combo_pack_page` 成立
+        #      -> 上面那个 return None 接管 -> `on_combo_pack` 才有机会跑。
+        #    判据排掉双键确认框（那种是真·成交前一刻，必须 halt）。
+        if not (obs.has(V.CONFIRM, money_rules.CONF)
+                and obs.has(V.CANCEL, money_rules.CONF)):
+            tab = obs.find(V.COMBO_PACK, money_rules.CONF)
+            if tab is not None:
+                self._log("    購買青輝石页停在真钱页签上 — 切到「組合包」去拿免費包")
+                return tap_box(tab, "切到組合包页签（免費包在那儿；切 tab 不花钱）",
+                               expect=(V.COMBO_PACK_SEL, V.FREE))
         why = money_rules.purchase_context(obs) or "（判据已不成立）"
         return halt(f"{why} —— 立即停，交人逐帧审（青辉石只进不出）")
 

@@ -206,9 +206,15 @@ class ScheduleFlow(ExitMixin, Flow):
         start = obs.find(V.SCHED_START, 0.40)
         if start is not None:
             def _did():
-                # 上完这一节, 回去挑下一个房间。绿勾累积表不清 -- 刚上课的
-                #    那位下一帧自己就带勾了。
-                self.state.pop("room_of", None)
+                # **上过课的房间必须自己记，不能只等绿勾**（用户 2026-08-13:
+                #    「这些角色我没获得，所以你给那个房间用了票没有绿勾」）。
+                #    绿勾只长在**已获得**的学生头像上；房间里摆的是没获得的角色时,
+                #    票照样消耗、课照样上，屏上却什么都不变 -> 光靠绿勾的话
+                #    roster 下一帧又挑中同一个房间，票一张张烧光在同一间屋子里。
+                #     记在 `tried` 里 —— 它本来就是"这一区别再点这个"的台账。
+                n = self.state.pop("room_of", None)
+                if n:
+                    self.state.setdefault("tried", []).append(n)
                 self.goto("roster", "课上完了, 挑下一个")
             return tap_box(start, "課程表開始（上课）", counter="lessons",
                            post=_did)
