@@ -174,8 +174,18 @@ def is_combo_pack_page(obs: Observation) -> bool:
        `on_combo_pack` 那整段代码永远执行不到）。
     放行的只是"别停机"，真正的钱仍被 Gate 拦：
        `_NAV_SAFE` 白名单外的点击一律人审，`money=True` 还要再过一道。
+
+    ⛔⛔ 判据必须是**选中态**，不能是页签按钮（2026-08-13 cls 审计逼出来的）:
+       原来写的是 `组合包未选择 或 组合包已选择` —— 而 `组合包未选择`(414) 是
+       **另一个页签的标签**，站在「特別販售」页（整页 CAD 真钱货架）上它照样在场。
+       后果：金钱 HALT 打断在一整页真钱商品上被**关掉**，而那一页没有任何 handler。
+       同一次审计还查出 **1,549 个 `购买` 框标在 CAD 真钱键上**、v16 对真钱键给
+       0.98 —— 两件事叠起来就是"模型最自信地认得真钱键 + 那一页不停机"。
+        改成认**已选中态**，或屏上白纸黑字有 `免费`。实测今天 13 帧里，
+         真組合包页 8 帧两者都在（0.976 / 0.964），另外 3 帧只有 414
+         —— 那正是**切换前站在别的页签上**的帧，本来就该停机。
     """
-    return obs.find([V.COMBO_PACK, V.COMBO_PACK_SEL], CONF) is not None
+    return obs.find([V.COMBO_PACK_SEL, V.FREE], CONF) is not None
 
 
 def system_dialog(obs: Observation, last_solid: Optional[str] = None,

@@ -1197,6 +1197,17 @@ def t_route():
     check("没有'写了但从来没人读'的实例字段（死字段=注释漂移的温床）",
           not _dead, str([f"{a} @{_writes[a]}" for a in _dead]))
 
+    # 組合包页的"不停机"豁免必须认**选中态**，不能认页签按钮（2026-08-13 审计）:
+    #   `组合包未选择` 是另一个页签的标签，站在「特別販售」页（整页 CAD 真钱货架）
+    #   上它照样在场 —— 拿它当豁免 = 在一整页真钱商品上关掉金钱 HALT。
+    check("只有页签按钮(未选中) 不算組合包页  金钱打断照常生效",
+          not money_rules.is_combo_pack_page(O(B(V.COMBO_PACK, conf=0.97),
+                                               B(V.SHOP_BUY, conf=0.98))))
+    check("选中态 = 真的在組合包页  豁免",
+          money_rules.is_combo_pack_page(O(B(V.COMBO_PACK_SEL, conf=0.97))))
+    check("屏上有「免費」也算（免費包那一列的正向证据）",
+          money_rules.is_combo_pack_page(O(B(V.FREE, conf=0.96))))
+
     # 台账基线自愈（2026-08-13 live，**我先判反了一次**）: 抓到
     #   `信用点 59,653 -> 59,653,863`，我按"读大"处理加了量级闸；用户把那一帧
     #   贴出来才发现**屏上真值就是 59,653,863**，错的是第一次读数（截断）。
