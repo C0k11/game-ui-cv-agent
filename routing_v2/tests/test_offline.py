@@ -1014,7 +1014,9 @@ def t_invariants():
     #    一上来就点了「任务开始」，当时 AP=9  游戏弹「購買AP 單價💎30」，
     #    全靠 money 闸 halt 才没成交。momotalk / mining 里也混着同一个键（已清）。
     #     白名单：只有 sweep（悬赏/JFD）和 event（活动）会真的开关卡。
-    _STAGE_OK = {"sweep.py", "event.py"}
+    # campaign 是合法例外: 它的本职就是花 AP 打关, 且 stage 由用户配置、
+    #   没配就 BLOCKED（策略是用户的, bot 只负责走）
+    _STAGE_OK = {"sweep.py", "event.py", "campaign.py"}
     bad2 = []
     for p in (root / "flow").glob("*.py"):
         if p.name in _STAGE_OK:
@@ -1381,6 +1383,49 @@ def t_route():
     check("BAAH 1-1 没有 fight_plan（不用走位, 不是文件缺失）",
           _grid.load_answer("1-1") is not None
           and _grid.load_answer("1-1")["areas"] == [])
+
+    # CampaignFlow 骨架行为
+    _cp = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
+    _a_cp = _cp.decide(O(), _SV(page="lobby", frames_in_page=5))
+    check("campaign 没配 stage 就 BLOCKED（打哪关是用户的策略, 不猜）",
+          _cp.outcome == "BLOCKED", f"{_cp.outcome}")
+    _cfg2 = cfg()
+    _cfg2["campaign"] = {"stage": "1-2"}
+    _cp2 = ALL["campaign"](_Ctx2 := Ctx(cfg=_cfg2, log=lambda m: None))
+    _cp2.goto("walk")
+    # 走格子帧(fixture 同前): 我方箭头在起点上方, 回合0 = right-up... 1-2 的
+    #   plan 是 right-up/right, 但 fixture 地图没有 right-up 格 -> fail-closed
+    _wb = list(_gb) + [B(V.GRID_ARROW, conf=0.91, cx=0.384, cy=0.426),
+                       B(V.PHASE_END, conf=0.90, cx=0.92, cy=0.88)]
+    _wo = Observation(boxes=_wb, seq=2, w=3840, h=2160)
+    _act_w = None
+    for _ in range(25):
+        _act_w = _cp2.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
+        if _cp2.outcome:
+            break
+    check("答案方向落不到检出格子 — fail-closed 收 UNKNOWN 不瞎点",
+          _cp2.outcome == "UNKNOWN", f"{_cp2.outcome} act={_act_w}")
+    # 换一个方向能解析的答案: 手工喂 plan right-down -> 应该点到 (0.429,0.603)
+    _cp3 = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cp3.goto("walk")
+    _cp3.state["answer"] = {"stage": "x", "type": "normal", "areas": [
+        {"initial_teams": [], "fight_plan": [
+            [{"team": "A", "action": "move", "target": "right-down"}]]}]}
+    _act3 = _cp3.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
+    check("我方回合按答案点目标格心（cls 支撑的 tap）",
+          _act3 is not None and _act3.kind == "tap"
+          and abs(_act3.x - 0.429) < 0.02 and abs(_act3.y - 0.603) < 0.02,
+          f"{_act3 and (_act3.kind, round(_act3.x,3), round(_act3.y,3))}")
+    # 战斗期: 检出 AUTO 关着才点它（状态钮绝不盲 toggle）
+    _bt_on = O(B(V.BATTLE_AUTO_ON, cx=0.9, cy=0.05), B(V.BATTLE_PAUSE, cx=0.95, cy=0.05))
+    _a_on = _cp3.decide(_bt_on, _SV(page="battle", frames_in_page=10))
+    check("AUTO 已开就不碰（战斗期只等待）",
+          _a_on is not None and _a_on.kind == "wait", f"{_a_on and _a_on.kind}")
+    _bt_off = O(B(V.BATTLE_AUTO_OFF, cx=0.9, cy=0.05), B(V.BATTLE_PAUSE, cx=0.95, cy=0.05))
+    _a_off = _cp3.decide(_bt_off, _SV(page="battle", frames_in_page=10))
+    check("检出 AUTO 关着才点开",
+          _a_off is not None and _a_off.target_cls == V.BATTLE_AUTO_OFF,
+          f"{_a_off and _a_off.target_cls}")
 
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后

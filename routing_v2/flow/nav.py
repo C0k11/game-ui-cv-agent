@@ -39,6 +39,7 @@ from routing_v2.state.machine import StateView
 _PARENT = {
     "task_hall": "lobby",
     "campaign_stage": "task_hall",
+    "grid_quest": "campaign_stage",
     "bounty_branch": "task_hall",
     "bounty_stage": "bounty_branch",
     "jfd_academy": "task_hall",

@@ -7,6 +7,7 @@ from typing import Dict, List, Type
 from routing_v2.flow.arena import ArenaFlow
 from routing_v2.flow.base import Ctx, Flow
 from routing_v2.flow.bounty import BountyFlow
+from routing_v2.flow.campaign import CampaignFlow
 from routing_v2.flow.cafe import CafeFlow
 from routing_v2.flow.event import EventFlow
 from routing_v2.flow.event_shop import EventShopFlow
@@ -32,6 +33,7 @@ ALL: Dict[str, Type[Flow]] = {
     "daily_mission": DailyMissionFlow,
     "story_mining": StoryMiningFlow,
     "momotalk": MomoTalkFlow,
+    "campaign": CampaignFlow,
 }
 
 # `daily_routine` 这个模块开关管着三条小链

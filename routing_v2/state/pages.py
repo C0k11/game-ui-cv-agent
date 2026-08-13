@@ -242,6 +242,19 @@ PAGES: List[Sig] = [
         note="编队页。老状态机不认它  落到 STRAY  差点去点返回键。"
              "1部队高亮/2部队 都有且好用，部队选择走 cls 不写死坐标"),
 
+    # 走格子(集中指挥)地图。结构判据 = 格子数 + 起点/箭头/任务开始灰
+    #    （2026-08-13 小号实测: 这页零专属锚点, 原来在 facility(score2)/unknown
+    #    之间摆 -- 而格子族 cls 0.93-0.97 稳定, 数量就是最硬的证据）。
+    #    priority 要压过 stage_popup(55): 部署完、`任务开始` 变亮的那几帧
+    #    两个签名同时满足, 这时人在地图上不在弹窗上。
+    Sig("grid_quest", pred=lambda obs: (
+            len(obs.all([V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_CELL_FOG],
+                        0.45)) >= 3
+            and obs.has([V.GRID_START, V.GRID_START_GREY, V.GRID_ARROW,
+                         V.GRID_ALLY, V.TASK_START_GREY], 0.45)),
+        priority=58,
+        note="走格子地图（3D 俯视, 同资产不同相机域）。格子>=3 + 任一结构锚"),
+
     Sig("stage_popup",
         any_of=[V.TASK_START, V.SWEEP_START, V.STORY_ENTER_CHAPTER],
         priority=55,
