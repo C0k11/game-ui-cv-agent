@@ -79,6 +79,9 @@ _SAME_TARGET = 0.02
 class Verdict:
     ok: bool
     why: str = ""
+    by: str = ""                    # 是哪道闸给的判决（复盘用；静默拦下时
+                                    #   `why` 是空的，没这个字段就分不清
+                                    #   是"重复点"还是"上一发没兑现"）
     halt: bool = False              # 停**整条链**（只给金钱异常用）
     stop_flow: bool = False         # 只结束**当前 flow**，后面的照跑
     needs_human: bool = False
@@ -534,13 +537,15 @@ class Gate:
         #    照样让 dedup 记下 `_last`（等于记了一发从没发出去的点击 = 「数意图
         #    不数事实」在闸自己身上复发），也照样让 advance 的等待帧数白涨一格。
         #     包成 lambda 逐个求值，前一道拦下就不跑后面的。
-        for _fn in (lambda: self.money(act, obs, last_solid),
-                    lambda: self.advance(act, obs, page_changed=page_changed,
-                                         retry_frames=retry_frames),
-                    lambda: self.dedup(act, page_changed, frames_in_page,
-                                       retry_frames),
-                    lambda: self.jit(act, obs, fresh)):
+        for _name, _fn in (("money", lambda: self.money(act, obs, last_solid)),
+                           ("advance", lambda: self.advance(
+                               act, obs, page_changed=page_changed,
+                               retry_frames=retry_frames)),
+                           ("dedup", lambda: self.dedup(
+                               act, page_changed, frames_in_page, retry_frames)),
+                           ("jit", lambda: self.jit(act, obs, fresh))):
             v = _fn()
+            v.by = v.by or _name
             if not v.ok:
                 if v.why:
                     self._log(f"    [gate] {v.why}")

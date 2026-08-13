@@ -371,17 +371,20 @@ class Runner:
             # 按键要过**推进闸 + 连发闸**。原来只过连发闸 —— 于是上一发 tap 的
             #    契约还挂着时，一次系统返回键照样发得出去，正是
             #    「確認框没人点、直接点返回键跑了」那个形态残留的通道。
-            for _fn in (lambda: self.gate.advance(act, obs,
-                                                  page_changed=st.changed,
-                                                  retry_frames=retry),
-                        lambda: self.gate.dedup(act, st.changed,
-                                                st.frames_in_page, retry)):
+            for _nm, _fn in (("advance", lambda: self.gate.advance(
+                                 act, obs, page_changed=st.changed,
+                                 retry_frames=retry)),
+                             ("dedup", lambda: self.gate.dedup(
+                                 act, st.changed, st.frames_in_page, retry))):
                 v = _fn()
+                v.by = v.by or _nm
                 if not v.ok:
                     if v.why:
                         self.log(f"    [gate] {v.why}")
                     # stop_flow 也要写清楚是谁停的、为什么（tap 路径一直有，
                     #    按键路径原来只留一个默认 UNKNOWN，原因一个字没有）。
+                    self._tr(st, act, {"blocked": v.why[:120] or "(静默)",
+                                       "by": v.by})
                     if v.stop_flow and self._flow is not None:
                         self._flow.finish(Outcome.UNKNOWN, v.why)
                         self._stop_flow = True
@@ -401,8 +404,9 @@ class Runner:
                             retry_frames=retry,
                             last_solid=getattr(st, "last_solid", None))
         if not v.ok:
-            self._tr(st, act, {"blocked": v.why[:120] or "(静默吞掉)",
-                               "halt": v.halt, "stop_flow": v.stop_flow})
+            self._tr(st, act, {"blocked": v.why[:120] or "(静默)",
+                               "by": v.by, "halt": v.halt,
+                               "stop_flow": v.stop_flow})
             if v.halt:
                 self.stats.halted = v.why
                 self._save(obs, tag="MONEYSTOP", target=act)
