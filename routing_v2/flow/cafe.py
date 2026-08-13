@@ -308,11 +308,15 @@ class CafeFlow(ExitMixin, Flow):
             return self.goto_and_wait(nxt, "两个方向都扫干净了")
         fl = self.state.get("floor", 1)
         done = lambda n=pans + 1, d=dwell: self._after_pan(n, d)
-        if pans == 0:
-            return swipe(0.80, 0.45, 0.10, 0.45,
-                         f"左滑露出右侧的学生（{fl} 号厅）", post=done)
-        return swipe(0.10, 0.45, 0.90, 0.45,
-                     f"右滑露出左侧的学生（{fl} 号厅）", post=done)
+        # **2 号厅的扫视方向和 1 号厅相反**（用户 2026-08-13:「1号是左到右，
+        #    那2号应该是右到左，应该是反着的」）。两个厅的默认镜头落点不同，
+        #    照抄 1 号厅的顺序等于第一刀先扫已经在屏上的那半边，白费一次 pan
+        #    （每厅只有 `MAX_PANS_PER_FLOOR=2` 次预算，浪费一次就漏一整边）。
+        LEFT = (0.80, 0.45, 0.10, 0.45, "左滑露出右侧的学生")
+        RIGHT = (0.10, 0.45, 0.90, 0.45, "右滑露出左侧的学生")
+        seq = (LEFT, RIGHT) if fl == 1 else (RIGHT, LEFT)
+        x1, y1, x2, y2, why = seq[min(pans, 1)]
+        return swipe(x1, y1, x2, y2, f"{why}（{fl} 号厅）", post=done)
 
     def _after_pan(self, n: int, dwell: float) -> None:
         """pan **真的发出去了**才记账（数事实不数意图）。"""
