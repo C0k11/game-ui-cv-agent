@@ -1385,10 +1385,27 @@ def t_route():
           and _grid.load_answer("1-1")["areas"] == [])
 
     # CampaignFlow 骨架行为
-    _cp = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
-    _a_cp = _cp.decide(O(), _SV(page="lobby", frames_in_page=5))
-    check("campaign 没配 stage 就 BLOCKED（打哪关是用户的策略, 不猜）",
-          _cp.outcome == "BLOCKED", f"{_cp.outcome}")
+    # 关号解析（用户拍板: 找关卡用 digitOCR 读数字, 点击 cls 主导）
+    _P = ALL["campaign"]._parse_stage
+    check("关号解析: '2-5' 直读 / 带噪 '.12-3.' 也收 / Hard 加前缀 / 垃圾拒收",
+          _P("2-5", False) == "2-5" and _P(".12-3.", False) == "12-3"
+          and _P("2-5", True) == "H2-5" and _P("25", False) is None
+          and _P(None, False) is None,
+          f"{_P('2-5',False)},{_P('.12-3.',False)},{_P('2-5',True)},{_P('25',False)}")
+    # 配置了 stage 但屏上读到的不一致 -> BLOCKED（不在错的关上用错的答案）
+    _cfgm = cfg()
+    _cfgm["campaign"] = {"stage": "3-1"}
+    _cpm = ALL["campaign"](Ctx(cfg=_cfgm, log=lambda m: None))
+    _cpm.goto("stage_list")
+    _cpm.state["stage_seen"] = False
+    import numpy as _np
+    _fr = _np.zeros((216, 384, 3), dtype=_np.uint8)   # OCR 会读空 -> 走 hold
+    _st0 = Box(cls=V.STAR_0, conf=0.95, x1=0.545, y1=0.795, x2=0.585, y2=0.825)
+    _ent = Box(cls=V.STAGE_ENTER, conf=0.96, x1=0.84, y1=0.78, x2=0.91, y2=0.82)
+    _obs_sl = Observation(boxes=[_st0, _ent], frame=_fr, seq=1, w=3840, h=2160)
+    _a_sl = _cpm.decide(_obs_sl, _SV(page="campaign_stage", frames_in_page=10))
+    check("关号读不出时不点入場（等 OCR, 不进错关）",
+          _a_sl is not None and _a_sl.kind == "wait", f"{_a_sl and _a_sl.kind}")
     _cfg2 = cfg()
     _cfg2["campaign"] = {"stage": "1-2"}
     _cp2 = ALL["campaign"](_Ctx2 := Ctx(cfg=_cfg2, log=lambda m: None))

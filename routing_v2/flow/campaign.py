@@ -15,6 +15,7 @@ from __future__ import annotations
 from routing_v2.act.action import Action, tap_box, wait
 from routing_v2.flow import grid, nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome
+from routing_v2.percept import read as R
 from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
 from routing_v2.state.machine import StateView
@@ -34,9 +35,24 @@ class CampaignFlow(ExitMixin, Flow):
     def setup(self) -> None:
         self.state.update(round_i=0, area_i=0, target=None, need_end=False,
                           battles=0)
+        # stage 配置是**可选的**（用户 2026-08-13 拍板:「找关卡还是需要
+        #    digitOCR 读数字, 只是点击是 cls 主导」）。空 = 自动: 得星_0 那行
+        #    的关号从屏上读, 答案按读到的关号查。配置了 = 用户点名, 读出来的
+        #    必须和配置一致才进（防止在错的关上用错的答案走）。
         stage = str(self.cfg.get("stage", "") or "")
         self.state["stage"] = stage
         self.state["answer"] = grid.load_answer(stage) if stage else None
+
+    @staticmethod
+    def _parse_stage(raw, hard: bool):
+        """OCR 原始串 -> 关号。"2-5" / 带噪 "12-5." 都收；解析不出返回 None。"""
+        import re as _re
+        if not raw:
+            return None
+        m = _re.search(r"(\d{1,2})-(\d)", raw)
+        if m is None:
+            return None
+        return ("H" if hard else "") + f"{m.group(1)}-{m.group(2)}"
 
     def _plan(self):
         a = self.state.get("answer")
@@ -47,10 +63,7 @@ class CampaignFlow(ExitMixin, Flow):
 
     # enter
     def do_enter(self, obs, st):
-        if not self.state.get("stage"):
-            return self.finish(Outcome.BLOCKED,
-                               "没配 campaign.stage -- 打哪关是用户的策略, 不猜")
-        if self.state.get("answer") is None:
+        if self.state.get("stage") and self.state.get("answer") is None:
             return self.finish(Outcome.BLOCKED,
                                f"没有 {self.state['stage']} 的 BAAH 答案文件")
         if st.page == "lobby":
@@ -88,11 +101,39 @@ class CampaignFlow(ExitMixin, Flow):
             return wait("找 Hard 页签")
         star0 = obs.find(V.STAR_0, 0.45)
         if star0 is not None:
+            # **关号从屏上读**（digit OCR）: 关号文本就在得星那一行的正上方,
+            #    窗口几何全部用得星框自身的高度当尺子（分辨率无关）。
+            if not self.state.get("stage_seen"):
+                h = max(star0.y2 - star0.y1, 0.015)
+                rect = (star0.x1 - h, star0.y1 - 2.2 * h,
+                        star0.x1 + 7 * h, star0.y1 - 0.1 * h)
+                raw = R.digits(obs.frame, rect)
+                hard = obs.has(V.STAGE_HARD_SEL, 0.45)
+                got = self._parse_stage(raw, hard)
+                if got is None:
+                    if self.hold("stage_ocr", 30):
+                        return self.finish(
+                            Outcome.UNKNOWN,
+                            f"关号读不出（OCR 原始串 {raw!r}）-- 不进错关")
+                    return wait("读关号中")
+                cfgd = self.state.get("stage")
+                if cfgd and cfgd != got:
+                    return self.finish(
+                        Outcome.BLOCKED,
+                        f"配置要打 {cfgd}, 屏上下一关是 {got} -- 不在错的关上"
+                        f"用错的答案, 交用户定")
+                ans = grid.load_answer(got)
+                if ans is None:
+                    return self.finish(Outcome.BLOCKED,
+                                       f"没有 {got} 的 BAAH 答案文件")
+                self.state.update(stage=got, answer=ans, stage_seen=True)
+                self.log(f"屏上读到下一关 = {got}"
+                         f"（fight_plan {sum(len(a['fight_plan']) for a in ans['areas'])} 回合）")
             rows = obs.all(V.STAGE_ENTER, 0.45)
             same = min(rows, key=lambda b: abs(b.cy - star0.cy), default=None)
             if same is not None and abs(same.cy - star0.cy) < 0.05:
-                act = tap_box(same, f"没打过的关（得星_0 同行入場; "
-                                    f"配置目标 {self.state['stage']}）",
+                act = tap_box(same, f"没打过的关 {self.state['stage']}"
+                                    f"（得星_0 同行入場）",
                               expect=(V.TASK_START, V.TASK_START_GREY))
                 act.anchor_tol = 0.030      # 行内按钮容差要小于半行距
                 return act

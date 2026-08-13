@@ -252,7 +252,10 @@ def digits(frame, rect: Rect) -> Optional[str]:
             if [g for g in groups if g != longest and g not in longest]:
                 return None
             return longest.replace(",", "").replace(".", "")
-        kept = re.sub(r"[^0-9/.]", "", raw_n.replace(",", ""))
+        # '-' 也保留: 关卡号是 "2-5" 这种形态（2026-08-13 推关定位用户拍板
+        #    「找关卡还是需要 digitOCR 读数字, 只是点击是 cls 主导」）。
+        #    此前的调用方读的都是余额/票数, 屏上不会有 '-', 不受影响。
+        kept = re.sub(r"[^0-9/.-]", "", raw_n.replace(",", ""))
         return kept or None
     except Exception as e:
         print(f"[read] digit-OCR 异常: {e}", flush=True)
