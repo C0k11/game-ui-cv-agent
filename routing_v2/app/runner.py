@@ -37,6 +37,10 @@ from routing_v2.state.pages import classify
 
 _ROOT = Path(__file__).resolve().parents[2]
 
+# 密集采集的两个常量（见主循环里那段"一闪而过的界面"）
+_SHOT_CONF = 0.55        # 算"新 cls"时的 conf 门，避开 0.45 那条线上的抖动
+_SHOT_GAP = 3            # 两张之间至少隔几个 tick，兜住磁盘上限
+
 
 def ap_reserve_for(ap: int, split: dict, me: str, on_order: List[str],
                    floor: int = 0):
@@ -93,6 +97,18 @@ class Runner:
         self._recover_n = 0
         self._blank_taps = 0
         self._route_plan: Optional[dict] = None
+        self._shot_sig: frozenset = frozenset()
+        self._shot_tick = 0
+        self._dense_shots = bool(self.run.get("dense_shots", True))
+        # 门控用的两件东西（2026-08-13 用户要「一阵一看一动，门控点击、
+        #   看 flow 的路由以及决策」）:
+        #   `max_taps`  跑够这么多 tap 就**干净收手**（不是 kill）——
+        #               人看完这一批的路由再放下一批。0 = 不限。
+        #   `_trace`    每个产生动作的 tick 落一行 jsonl: 页面身份/覆盖层/
+        #               打断/是哪条 flow/动作/落点/理由。日志是给人读的，
+        #               这份是给复盘用的（[[log_is_not_truth]]: 要的是事实不是叙述）。
+        self._max_taps = int(self.run.get("max_taps", 0) or 0)
+        self._trace = None
 
     def state_blank_taps(self) -> int:
         self._blank_taps += 1
@@ -140,6 +156,9 @@ class Runner:
                               / f"v2_{time.strftime('%Y%m%d_%H%M%S')}")
             self._shot_dir.mkdir(parents=True, exist_ok=True)
 
+        if self._shot_dir is not None:
+            self._trace = open(self._shot_dir / "_trace.jsonl", "w",
+                               encoding="utf-8")
         self.ctx = Ctx(cfg=self.cfg, device=self.device, feed=self.feed,
                        ledger=self.ledger, log=self.log)
         return True
@@ -214,6 +233,28 @@ class Runner:
             return str(fp)
         except Exception:
             return None
+
+    def _tr(self, st, act, extra=None):
+        """一行决策轨迹。绝不抛异常打断主循环。"""
+        if self._trace is None:
+            return
+        try:
+            rec = {"tick": self.stats.ticks,
+                   "flow": getattr(self._flow, "name", None),
+                   "page": st.page, "raw": st.raw,
+                   "overlay": st.overlay, "interrupt": st.interrupt,
+                   "f_in_page": st.frames_in_page,
+                   "kind": getattr(act, "kind", None),
+                   "cls": getattr(act, "target_cls", None),
+                   "x": round(getattr(act, "x", -1.0), 4),
+                   "y": round(getattr(act, "y", -1.0), 4),
+                   "reason": getattr(act, "reason", "")[:120]}
+            if extra:
+                rec.update(extra)
+            self._trace.write(json.dumps(rec, ensure_ascii=False) + chr(10))
+            self._trace.flush()
+        except Exception:
+            pass
 
     # ══ 兜底恢复（唯一允许发起"退出类"动作的地方）════════════════════
     def _recover(self, obs: Observation, st) -> Optional[Action]:
@@ -314,6 +355,7 @@ class Runner:
                     self.log(f"    [gate] {v.why}")
                 return True
             self.log(f"    {act.reason}")
+            self._tr(st, act, {"x2": round(act.x2, 4), "y2": round(act.y2, 4)})
             self.device.swipe(act.x, act.y, act.x2, act.y2, act.ms)
             # 滑动也 arm 推进闸：不然一帧一发连着滑（猛滑），列表还在惯性
             #   滚动时模型没机会扫干净，眼前的目标就被滑过去了。
@@ -345,6 +387,7 @@ class Runner:
                         self._stop_flow = True
                     return True
             self.log(f"    key {act.keycode}  {act.reason}")
+            self._tr(st, act, {"keycode": act.keycode})
             self.device.key(act.keycode)
             self.gate.note_fired(act, st.frames_in_page)
             self.stats.taps += 1
@@ -358,6 +401,8 @@ class Runner:
                             retry_frames=retry,
                             last_solid=getattr(st, "last_solid", None))
         if not v.ok:
+            self._tr(st, act, {"blocked": v.why[:120] or "(静默吞掉)",
+                               "halt": v.halt, "stop_flow": v.stop_flow})
             if v.halt:
                 self.stats.halted = v.why
                 self._save(obs, tag="MONEYSTOP", target=act)
@@ -377,6 +422,7 @@ class Runner:
 
         ok = self.device.tap(act.x, act.y)
         self.stats.taps += 1
+        self._tr(st, act, {"sent": bool(ok), "taps": self.stats.taps})
         # 推进契约也只在**真发出去之后**才 arm（同一条「数事实」纪律）——
         #   被闸吞掉的决策若 arm 了，闸会为一发从没发出去的点击一直等下去。
         if ok:
@@ -649,6 +695,8 @@ class Runner:
         self._recover_n = 0
         self._blank_taps = 0
         self._route_plan = None
+        self._shot_sig = frozenset()
+        self._shot_tick = 0
         # Gate 是整轮只建一次的，逐次上下文必须跟着 flow 一起清（见 Gate.reset）
         self.gate.reset()
         self._stop_flow = False
@@ -709,6 +757,22 @@ class Runner:
 
             if st.changed:
                 self._save(obs, tag=st.page)
+                self._shot_sig = frozenset(b.cls for b in obs.boxes
+                                           if b.conf >= _SHOT_CONF)
+                self._shot_tick = self.stats.ticks
+            # **一闪而过的界面**也要录（2026-08-13 用户点名:「可以让采集频繁点，
+            #    免得有些界面一闪而过没采集到」）。
+            #    触发条件不能是"定时"（4K jpg 一张 1.5MB，按 fps 录半小时就是几个 GB），
+            #      也不能是"cls 集合有任何变化"（0.45 阈值上的 conf 抖动会让它几乎每帧都触发）。
+            #     判据 = **出现了上一张存帧里没有的 cls**。新界面必然带新 cls；
+            #      而单纯的消失、抖动、遮挡都不触发。再加一道最小间隔兜住上限。
+            #    conf 门抬到 0.55 而不是用 0.45：正好避开页面签名那条线上的抖动带。
+            elif self._dense_shots and self.stats.ticks - self._shot_tick >= _SHOT_GAP:
+                sig = frozenset(b.cls for b in obs.boxes if b.conf >= _SHOT_CONF)
+                if sig - self._shot_sig:
+                    self._save(obs, tag=f"new_{st.raw}")
+                    self._shot_sig = sig
+                    self._shot_tick = self.stats.ticks
             # 战斗中**定期录帧**（2026-08-12 用户点名:「打的这几次加成录制
             #    下来没，可以喂给最新的战斗模型」）。
             #    上面那句 `if st.changed` 是**页面变化**才存 —— 而战斗全程
@@ -784,6 +848,13 @@ class Runner:
                 return
             if not self._dispatch(act, obs, st):
                 return
+            if self._max_taps and self.stats.taps >= self._max_taps:
+                flow.finish(Outcome.UNKNOWN,
+                            f"tap 预算 {self._max_taps} 用完 — 门控收手，"
+                            f"不是跑完了（--max-taps）")
+                self.stats.halted = f"tap 预算 {self._max_taps} 用完（门控收手）"
+                self._save(obs, tag="BUDGET")
+                return
             if self._stop_flow:
                 self.log(f"   {flow.name}  {flow.outcome}: {flow.note_lines[-1]}"
                          if flow.note_lines else f"   {flow.name} 提前收工")
@@ -791,6 +862,11 @@ class Runner:
 
     # ══ 收尾 ═══════════════════════════════════════════════════════════
     def _teardown(self) -> None:
+        try:
+            if self._trace:
+                self._trace.close()
+        except Exception:
+            pass
         try:
             if self.feed:
                 self.feed.stop()

@@ -380,6 +380,10 @@ def cmd_run(args):
                 cfg["modules"][_ALL[f].module] = True
     if args.auto:
         cfg["run"]["step_mode"] = False
+    if args.max_taps:
+        # 门控用：跑够这么多 tap 就**干净收手**（收尾报告照出、帧照存），
+        #   人看完这一批的路由决策再放下一批。不是 kill，中途状态是干净的。
+        cfg["run"]["max_taps"] = int(args.max_taps)
 
     money_ok = bool(args.money_ok)
 
@@ -453,6 +457,8 @@ def main(argv=None):
     a.set_defaults(fn=cmd_step)
 
     a = sub.add_parser("run", help="跑")
+    a.add_argument("--max-taps", type=int, default=0,
+                   help="跑够 N 个 tap 就干净收手（门控用，0=不限）")
     a.add_argument("--flows", default="", help="只跑这几个，逗号分隔")
     a.add_argument("--auto", action="store_true", help="放开逐帧门控")
     a.add_argument("--money-ok", action="store_true",
