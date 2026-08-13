@@ -91,22 +91,37 @@ class CampaignFlow(ExitMixin, Flow):
         if st.page == "stage_popup":
             self.goto("popup", "关卡弹窗开了")
             return wait("进相位 popup")
-        # H 关先切到「困难」页签（config stage 以 H 开头 = 用户点名打 Hard）
-        if (self.state["stage"].startswith("H")
-                and not obs.has(V.STAGE_HARD_SEL, 0.45)):
+        # 页签对齐目标: 配置以 H 开头才去 Hard, 否则必须在 Normal
+        #    （2026-08-13 实帧: Normal 没打完 Hard 整列 `入场键没解锁`,
+        #    上一轮的 Hard 页签还留在屏上, 不切回去会干等）。
+        want_hard = self.state["stage"].startswith("H")
+        on_hard = obs.has(V.STAGE_HARD_SEL, 0.45)
+        if want_hard and not on_hard:
             hd = obs.find(V.STAGE_HARD, 0.45)
             if hd is not None:
-                return tap_box(hd, "切到 Hard 页签",
-                               expect=(V.STAGE_HARD_SEL,))
+                return tap_box(hd, "切到 Hard 页签", expect=(V.STAGE_HARD_SEL,))
             return wait("找 Hard 页签")
+        if not want_hard and on_hard:
+            nm = obs.find(V.STAGE_NORMAL, 0.45)
+            if nm is not None:
+                return tap_box(nm, "切回 Normal 页签",
+                               expect=(V.STAGE_NORMAL_SEL,))
+            return wait("找 Normal 页签")
+        # 整列都锁着(Normal 没打完 Hard 就全锁) -- 别在这一页耗
+        if (not obs.has(V.STAGE_ENTER, 0.45)
+                and obs.has(V.STAGE_ENTER_LOCKED, 0.45)
+                and self.hold("all_locked", 20)):
+            return self.finish(Outcome.BLOCKED,
+                               "这一列的入場全是锁的（Hard 要先通 Normal）")
         star0 = obs.find(V.STAR_0, 0.45)
         if star0 is not None:
-            # **关号从屏上读**（digit OCR）: 关号文本就在得星那一行的正上方,
-            #    窗口几何全部用得星框自身的高度当尺子（分辨率无关）。
+            # **关号从屏上读**（用户拍板:「每一关都有入场以及对应的关号」）:
+            #    关号文本在得星那一行的左上, 窗口用得星框高度当尺子
+            #    （离线在真帧上验过: 读出 "2-2"）。
             if not self.state.get("stage_seen"):
                 h = max(star0.y2 - star0.y1, 0.015)
-                rect = (star0.x1 - h, star0.y1 - 2.2 * h,
-                        star0.x1 + 7 * h, star0.y1 - 0.1 * h)
+                rect = (star0.x1 - 1.25 * h, star0.y1 - 4.2 * h,
+                        star0.x1 + 5.0 * h, star0.y1 + 0.4 * h)
                 raw = R.digits(obs.frame, rect)
                 hard = obs.has(V.STAGE_HARD_SEL, 0.45)
                 got = self._parse_stage(raw, hard)
