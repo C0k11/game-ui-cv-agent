@@ -189,6 +189,29 @@ class CampaignFlow(ExitMixin, Flow):
                 #    （2026-08-13 live: 列表自动归位在最新进度, 配置 2-1 时
                 #    可视区只有 2-2..2-5 -- 目标在上面, 要往回翻）。
                 #    方向从**读到的数字**推, 几何从星标行距推, 零写死。
+                # auto 模式(没配置)同样要翻: 通关回来列表停在已清行附近,
+                #    得星_0 可能在视野下方 -> 往后翻找（当天实锤: 2-1 清完
+                #    视野里全是 3 星行, 读到 无 直接 UNKNOWN 收工）。
+                if (not cfgd) and stars and self.state.get("scrolls", 0) < 6:
+                    ys = sorted(b.cy for b in stars)
+                    rowh = 0.16
+                    if len(ys) >= 2:
+                        gaps = [b - a for a, b in zip(ys, ys[1:]) if b - a > 0.05]
+                        if gaps:
+                            rowh = sorted(gaps)[len(gaps) // 2]
+                    x = sorted(b.cx for b in stars)[len(stars) // 2]
+                    y0 = ys[len(ys) // 2]
+                    y1 = max(0.10, y0 - rowh * 2.5)
+                    n = self.state.get("scrolls", 0) + 1
+
+                    def _sc2(k=n):
+                        self.state["scrolls"] = k
+                        self.state["row_reads"] = {}
+                        self.state.pop("stage_vote", None)
+                    from routing_v2.act.action import swipe as _swipe
+                    return _swipe(x, y0, x, y1,
+                                  f"视野里没有得星_0 行 -- 往后翻找下一关"
+                                  f"（第 {n} 次）", post=_sc2)
                 if cfgd and reads and self.state.get("scrolls", 0) < 6:
                     def _k(t):
                         a, b = t.lstrip("H").split("-")
