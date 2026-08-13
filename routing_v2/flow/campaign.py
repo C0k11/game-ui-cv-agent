@@ -111,6 +111,13 @@ class CampaignFlow(ExitMixin, Flow):
             # 上一轮没退干净, 直接从地图接手
             self.goto("grid", "已经在走格子地图上")
             return wait("进相位 grid")
+        # 任務資訊框压在任务上（back 键会弹它, 三键: 中斷任務/重新挑戰/確認;
+        #    中断/重挑 两个 cls 欠拟合, 框常被判成 battle_result）——
+        #    点確認关掉继续, 关掉后地图露出来走上面的接管分支。
+        if (st.page in ("battle_result", "unknown")
+                and obs.has(V.CONFIRM, 0.45) and obs.has(V.CLOSE_X, 0.45)):
+            cf = obs.find(V.CONFIRM, 0.45)
+            return tap_box(cf, "关掉任務資訊框（点確認, 任务继续）")
         return wait("等任务大厅")
 
     # stage_list: 点**得星_0 那一行的入場键**（下一关就是没有星的那关 --

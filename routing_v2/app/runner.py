@@ -509,7 +509,8 @@ class Runner:
         #    在 `schedule_region` 上干等 601 tick 报 UNKNOWN。
         #    "上一次是怎么退出的"不该由下一次的第一条 flow 承担。
         if queue:
-            self._handoff(getattr(queue[0], "entry_page", "lobby"))
+            self._handoff(getattr(queue[0], "entry_page", "lobby"),
+                              nxt=queue[0].name)
 
         while queue:
             if time.time() - self.stats.t0 > budget_s:
@@ -545,7 +546,8 @@ class Runner:
             #    **插队来的不归位**：请求方是**故意**把画面留在那儿交给它的
             #      （event 停在活动页把控制权交给 event_shop），归位反而拆掉入口。
             if queue and not requested:
-                self._handoff(getattr(queue[0], "entry_page", "lobby"))
+                self._handoff(getattr(queue[0], "entry_page", "lobby"),
+                              nxt=queue[0].name)
 
             # **AP 复盘**（用户 2026-08-10 提议，当天就有实证）:
             #    order 是 …eventarenamaildaily_mission，而 **mail / 每日领奖
@@ -565,12 +567,13 @@ class Runner:
                     # 复盘追加的这条也要归位 —— 上面那次归位发生在
                     #   queue 还空着的时候，等于没做。不归位它就会在
                     #   daily_mission 的页面上开工。
-                    self._handoff(getattr(extra, "entry_page", "lobby"))
+                    self._handoff(getattr(extra, "entry_page", "lobby"),
+                                  nxt=extra.name)
 
         self._teardown()
         return self.stats
 
-    def _handoff(self, target: str) -> None:
+    def _handoff(self, target: str, nxt: str = "") -> None:
         """交班归位 —— 把画面带到 `target` 那一层，带不到就如实报告。
 
         为什么不能"就地交班"（2026-08-12 体外复现，scratchpad/repro_handoff.py）:
@@ -592,6 +595,11 @@ class Runner:
         self.gate.reset()
         mac = Machine(int(self.run.get("confirm_frames", 3)), log=self.log)
         t0 = time.time()
+        # 同一目标连点保险（2026-08-13 实录: 任务进行中归位链认不出路,
+        #    back 键弹任務資訊框 -> 框被判 ack_dialog 点確認关掉 -> back 又弹
+        #    -> 乒乓 60 发烧光整轮预算）。同一 (cls, 落点) 连发 6 次画面身份
+        #    还没变 -> 这条归位路是死的, 停下来交班, 别把预算烧光。
+        same_tap = {"key": None, "n": 0}
         self.log(f"[run] 归位到 `{target}` 再交班")
         while time.time() - t0 < budget:
             fr, age, seq = self.feed.wait_new(self._last_seq, timeout=3.0)
@@ -616,6 +624,12 @@ class Runner:
             if st.page == target and not st.overlay:
                 self.log(f"[run] 已到 `{target}`，交班")
                 return
+            # 任务进行中 + 下一条就是 campaign -> 别拆任务, 直接交班给它接管
+            #    （campaign.do_enter 有 grid_quest 接管分支; 拆任务 = 白扔 AP）
+            if nxt == "campaign" and obs.has(
+                    ["PHASE结束", "PHASE自动结束_已勾选", "走格子_格子"], 0.40):
+                self.log("[run] 走格子任务进行中且下一条是 campaign — 直接交班续走")
+                return
             act = None
             if st.interrupt:
                 act = self.interrupts.handle(st.interrupt, obs)
@@ -639,6 +653,15 @@ class Runner:
                         or nav.back_key(obs, "归位: 屏上无退出控件，系统返回键")
             if act is None or act.kind == "done":
                 continue
+            # 同一 (目标, 落点) 连发保险 -- 见上面 same_tap 的注释
+            if act.kind == "tap":
+                k = (act.target_cls, round(act.x, 2), round(act.y, 2))
+                same_tap["n"] = same_tap["n"] + 1 if same_tap["key"] == k else 1
+                same_tap["key"] = k
+                if same_tap["n"] > 6:
+                    self.log(f"[run] 归位在 `{k[0]}` 上连发 {same_tap['n']} 次"
+                             f"没变化 — 这条路是死的, 就地交班")
+                    return
             if not self._dispatch(act, obs, st):
                 return
         # 归位失败必须**出声**：接下来那条 flow 会在一个非预期的页面上开工。
