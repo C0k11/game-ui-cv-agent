@@ -234,6 +234,28 @@ class ShopFlow(ExitMixin, Flow):
             return tap_box(t, "切回信用点商店 tab")
         return self.exit_step(obs, prefer_close=False) or wait("等切 tab 控件")
 
+    def _segments(self) -> str:
+        """收尾说清**三段各自**做没做（2026-08-13）。
+
+        原来两处都写死「信用点商店已处理」—— 而这一轮实际成交的是**大赛商店**
+           （屏上大赛币 3,133->3,088、体力 +90），报告却只字未提。
+        竣工判据要说清干了什么，不是报个 CLEAN 就算（[[completion_gap]]）。
+        """
+        seg = []
+        seg.append("免費組合包 " + ("已处理" if self.state.get("pack_done")
+                                  else "未处理"))
+        seg.append("信用点商店 " + ("已处理" if self.state.get("bought")
+                                  else "未处理"))
+        if not self.cfg.get("arena_shop", True):
+            seg.append("战术大赛商店 已关")
+        elif self.state.get("arena_done"):
+            seg.append("战术大赛商店 已处理")
+        elif self.state.get("arena_skip"):
+            seg.append("战术大赛商店 **没找到入口**")
+        else:
+            seg.append("战术大赛商店 未处理")
+        return " / ".join(seg)
+
     def on_shop(self, obs, st):
         # "我到底站在哪个货架上" —— 只认**活着的** cls。
         #   `信用点商店`(SHOP_TAB_CREDIT) **train=0 / live 990 帧 0 检出**，
@@ -292,7 +314,7 @@ class ShopFlow(ExitMixin, Flow):
         if st.frames_in_page < 40:
             return wait("确认商店没东西可买了")
         if self.state.get("bought"):
-            return self.finish(Outcome.CLEAN, "信用点商店已处理")
+            return self.finish(Outcome.CLEAN, self._segments())
         # 2026-08-12 live 实锤：**「没买成」不等于「没得买」**。
         #    `bought` 走 post，被金钱闸拦下时**正确地**保持 False（数事实）——
         #    但这里直接把 False 读成"没有可买项"报 CLEAN，于是 24 件商品
@@ -306,7 +328,7 @@ class ShopFlow(ExitMixin, Flow):
             return self.finish(Outcome.LEFTOVER,
                                f"货架上还有可买项（`{left.cls}` conf {left.conf:.2f}）"
                                f"但一件都没买成 — 多半是金钱步没放行")
-        return self.finish(Outcome.CLEAN, "信用点商店没有可买项")
+        return self.finish(Outcome.CLEAN, "信用点商店没有可买项；" + self._segments())
 
     # ══ 战术大赛商店 ═══════════════════════════════════════════════════
     # 用户 2026-08-10 点名的缺失板块：「战术大赛商店应该也是商店部分的」。
