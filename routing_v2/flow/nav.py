@@ -363,6 +363,20 @@ def list_swipe(obs: Observation, anchors, why: str, *, rows: float = 3.0,
     hs = sorted(max(b.y2 - b.y1, 0.008) for b in bs)
     cx = xs[len(xs) // 2]                       # 中位, 别被离群锚带偏
     rowh = hs[len(hs) // 2]
+    # **行距优先用相邻行的 cy 间距**，锚框自身高度只是兜底（2026-08-13 用户
+    #    抓到: 活动商店的商品卡比上面的「購買」按钮高好几倍，拿按钮高度当
+    #    行高，3 行按钮高 = 半张卡，滑动幅度太小、同一屏反复扫）。
+    #    cy 间距才是"下一行离这一行多远"的事实; 网格布局下同排多列的 cy
+    #    相近，先按 rowh*0.5 聚成行再取相邻行距的中位数。
+    row_cys = []
+    for cy in sorted(b.cy for b in bs):
+        if not row_cys or cy - row_cys[-1] > rowh * 0.5:
+            row_cys.append(cy)
+    gaps = [b - a for a, b in zip(row_cys, row_cys[1:])]
+    if gaps:
+        gap = sorted(gaps)[len(gaps) // 2]
+        if rowh < gap < 0.35:                   # 间距离谱(跨栏/漏检)就不采
+            rowh = gap
     y0 = min(0.92, max(b.cy for b in bs) + rowh * 0.6)
     y1 = max(0.08, y0 - rowh * rows)
     if y0 - y1 < rowh * 0.8:                    # 推不出有效距离就别滑
