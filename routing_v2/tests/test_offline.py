@@ -1275,6 +1275,23 @@ def t_route():
         _raised = True
     check("goto 到没声明的相位要当场报错（别默默走错路）", _raised)
 
+    # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
+    #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
+    _sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    _sh.state["pack_done"] = True
+    _short = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.12),
+               B(V.SHOP_BUY_SELECTED_GREY, cx=0.91, cy=0.92))
+    for _ in range(10):
+        # 走 decide 而不是直调 on_shop —— `hold()` 数的是 self.ticks，
+        #   只有 decide 会推进它（直调等于每帧都是第 1 帧，hold 永远不满）
+        _a_s = _sh.decide(_short, _SV(page="shop", frames_in_page=20))
+    check("「選擇購買」是灰的就不许点它",
+          _a_s is None or _a_s.target_cls != V.SHOP_BUY_SELECTED_GREY,
+          f"{_a_s and _a_s.target_cls}")
+    check("买不起要落 credit_short 收敛", bool(_sh.state.get("credit_short")))
+    check("报告要说「买不起」不是「已处理」", "买不起" in _sh._segments(),
+          _sh._segments())
+
     # 领不到 != 领过了（用户 2026-08-13:「体力999了领不了咖啡厅收益了,
     #   也没法辨别」）。原来"面板里没有可点的领取键"被写成 claimed=True,
     #   收尾堂而皇之报「收益已领」—— 谎报。

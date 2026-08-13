@@ -244,7 +244,11 @@ class ShopFlow(ExitMixin, Flow):
         seg = []
         seg.append("免費組合包 " + ("已处理" if self.state.get("pack_done")
                                   else "未处理"))
-        seg.append("信用点商店 " + ("已处理" if self.state.get("bought")
+        # 「买不起」和「买过了」是两件事 —— 都靠 `bought` 收敛，但报告要分开说，
+        #    否则小号上那句「信用点商店 已处理」就是谎报（同 cafe 领收益那条）。
+        seg.append("信用点商店 " + ("**买不起**（信用点不够）"
+                                  if self.state.get("credit_short")
+                                  else "已处理" if self.state.get("bought")
                                   else "未处理"))
         if not self.cfg.get("arena_shop", True):
             seg.append("战术大赛商店 已关")
@@ -280,10 +284,21 @@ class ShopFlow(ExitMixin, Flow):
         if not self.state.get("bought") and on_credit:
             sel = obs.find(V.SHOP_SELECT_ALL, 0.40)
             if sel is not None and self.pending("selectall"):
-                # 契约 = 勾上了**必然**出现「選擇購買」。没出现 = 那一下没生效
-                #   （按钮还在归位时点，游戏不收），闸会把 once 退回来让它重试。
+                # 契约 = 勾上了**必然**出现「選擇購買」——**亮的或灰的都算**。
+                #   2026-08-13 小号实测: 余额不够时只出 `选择购买灰色`(0.78)，
+                #   而契约只认亮态 -> 永远不兑现 -> `全部选择` 无限重试。
+                #   契约要的是"我那一下生效了"这个**事实**，不是"我买得起"。
                 return tap_box(sel, "全部选择", once="selectall",
-                               expect=(V.SHOP_BUY_SELECTED,))
+                               expect=(V.SHOP_BUY_SELECTED,
+                                       V.SHOP_BUY_SELECTED_GREY))
+            # 买不起就**别点** —— 灰按钮点了也不动，点就是空转。
+            #   判据要求亮态不在场（半渲染帧会两态同时检出，见下面那段的教训）。
+            if (obs.has(V.SHOP_BUY_SELECTED_GREY, 0.40)
+                    and not obs.has(V.SHOP_BUY_SELECTED, 0.40)
+                    and self.hold("cant_afford", 8)):
+                self.state["bought"] = True
+                self.state["credit_short"] = True
+                self.log("「選擇購買」是灰的 - 信用点不够，这一段没得买")
             buy = obs.find(V.SHOP_BUY_SELECTED, 0.40)
             if buy is not None:
                 # bought 走 post：被金钱闸拦下时不许记成"买过"（N5 同病）
