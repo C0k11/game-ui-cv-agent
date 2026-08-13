@@ -22,6 +22,7 @@ from typing import Optional
 from routing_v2.act.action import swipe, tap_box, wait
 from routing_v2.flow import nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome
+from routing_v2.flow.event import EventEntryMixin
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
@@ -57,7 +58,9 @@ def farm_targets(tabs_bottom_up, has_event_points: bool):
     return out
 
 
-class EventShopFlow(ExitMixin, Flow):
+class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
+    """进场链（大厅/任务大厅/认错活动）继承 EventEntryMixin —— 2026-08-13
+    实锤: 单独跑（不经 event 交棒）时在 lobby 401 帧没有任何可执行动作。"""
     name = "event_shop"
     module = "event"
     entry_page = "event_page"

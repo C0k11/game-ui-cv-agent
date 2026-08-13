@@ -55,30 +55,15 @@ ROW_TOL = 0.055          # 入场键 与 得星 认为"同一行"的 cy 容差
 GUIDE_HUB_MAX_TRIES = 3
 
 
-class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
-    name = "event"
-    module = "event"
-    entry_page = "task_hall"
+class EventEntryMixin:
+    """大厅 -> 任务大厅(轮播闸) -> 活动页 的进场链，event / event_shop 共用。
 
-    def setup(self) -> None:
-        self.state.update(
-            phase="clear",          # clear  shop_plan  bonus  done
-            saw_other=False,        # 轮播: 上一帧不是 405
-            cleared=0, farmed=0, swept=0, entered=0,
-            # 轮播抽错活动（进到"没有活动关卡"的引导型活动）的台账
-            guide_hits=0, guide_seen=False, guide_giveup=False,
-        )
-        self.want_team = int(self.cfg.get("clear_first_with_team", 1))
-        order = self.cfg.get("order", "clear_then_bonus")
-        if order == "bonus_only":
-            # 阶段名必须和 `_bonus_step` 认的那两个对上（"bonus_clear" /
-            #    "bonus_sweep"）。第一版这里写的是 "bonus"，派发处认不出 
-            #    flow 在关卡列表前干等到超时，一个 tap 都没有（08-08 实测）。
-            self.state["phase"] = "shop_plan" if self.cfg.get(
-                "shop_plan_before_bonus", True) else "bonus_clear"
-            self.want_team = int(self.cfg.get("bonus_team", 2))
+    2026-08-13 实锤: event_shop 单独跑（不经 event 交棒）时在 lobby 上
+       401 帧没有任何可执行动作 -- 它压根没有进场的手。轮播闸这套判据
+       （405 跃迁窗口 / 引导型活动认错退出）只能有一份，抽 mixin 共用。
+    状态键全部用 .get / setdefault 惰性取 -- mixin 不依赖宿主 setup 初始化。
+    """
 
-    # ══ 大厅 / 任务大厅 ════════════════════════════════════════════════
     def on_lobby(self, obs, st):
         return nav.enter(obs, V.NAV_TASKS, "任务大厅")
 
@@ -93,34 +78,34 @@ class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
                     Outcome.SKIPPED,
                     "任务大厅盯了很久都没等到「距离结束还剩」— 当前没有进行中的活动")
             return wait("等轮播翻到「距离结束还剩」")
-        if not self.state["saw_other"]:
-            # 405 已经显示一会儿了，可能正处在窗口尾巴上 —— 等下一轮跃迁
+        if not self.state.get("saw_other"):
+            # 405 已经显示一会儿了，可能正处在窗口尾巴上 -- 等下一轮跃迁
             return wait("405 在场但不是刚翻过来的 — 等下一次跃迁（避开轮播尾巴）")
         # `saw_other=False` **必须挂 post**（08-10 live 实锤，同族第 7 处）：
         #    写在这里 = 「决策了要点」就把跃迁标记清掉，而这一发未必真发得出去
-        #    —— gate 可能吞掉它，`--ticks N` 循环里前 N-1 个 tick 的 decide
+        #    -- gate 可能吞掉它，`--ticks N` 循环里前 N-1 个 tick 的 decide
         #    结果更是**直接丢弃**。实测表现：连试 4 次都停在
         #    「405 在场但不是刚翻过来的」，**窗口全被那些丢弃的 decide 吃掉了**。
         #    注意上面那句 `saw_other=True` 留在 decide 期是**对的**：那是
         #      「我这一帧看见了别的入口」这个**观测事实**，不是动作副作用。
-        #      观测可以在 decide 期记，动作后果只能挂 post —— 这条界线要分清。
+        #      观测可以在 decide 期记，动作后果只能挂 post -- 这条界线要分清。
         return tap_box(cur, "进当期活动（捕到 405 跃迁）",
                        dy=HUB_TILE_DY, counter="entered",
                        post=lambda: self.state.update(saw_other=False))
 
-    # ══ 进错活动 ══════════════════════════════════════════════════════
+    # -- 进错活动: 上期余韵 ------------------------------------------------
     def on_event_ended(self, obs, st):
         """`後日談` 在场 = 上期活动余韵期。退出去重进，别在这里刷。"""
         self.log("进到上期活动了（检出 後日談） 退出去重进")
         self.note_lines.append("误入上期活动一次，已退出重进")
         return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
 
-    # ══ 进错活动 · 引导型（**没有活动关卡**的那种）════════════════════════
+    # -- 进错活动: 引导型（没有活动关卡的那种）------------------------------
     def on_event_guide_hub(self, obs, st):
-        """进到「引导型活动」了（夏萊總結算这类）—— 这不是我要打的活动。
+        """进到「引导型活动」了（夏萊總結算这类）-- 这不是我要打的活动。
 
         2026-08-11 live：任务大厅左上**一个轮播位轮流显示两个活动**，
-        「夏萊總結算」和「CODE BOX(复刻)」**都只检出 405 距离结束还剩** 
+        「夏萊總結算」和「CODE BOX(复刻)」**都只检出 405 距离结束还剩**
         点哪个纯看运气，实测连进两次都进了夏萊。时序赛跑赢不了（轮播 3.0s，
         转场帧上的点击还会被稳定门吞）， 只能进去之后按内容认出来再退。
 
@@ -144,8 +129,8 @@ class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             self.state["guide_seen"] = True
             n = self.bump("guide_hits")
             self.log(f"进到**引导型活动**了（第 {n} 次）：这个活动没有活动关卡，"
-                     f"页面上那两个「入場」通向普通 任務/特殊任務 —— 退出去重进")
-            # 竣工报告里要看得见（§completion_gap：跑完了 ≠ 活干完了）
+                     f"页面上那两个「入場」通向普通 任務/特殊任務 -- 退出去重进")
+            # 竣工报告里要看得见（completion_gap：跑完了 != 活干完了）
             if self.once("guide_note"):
                 self.note_lines.append(
                     "轮播抽中了没有活动关卡的引导型活动（夏萊總結算这类），已退出重进")
@@ -154,20 +139,44 @@ class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         if n >= int(self.cfg.get("guide_hub_max_tries", GUIDE_HUB_MAX_TRIES)
                     or GUIDE_HUB_MAX_TRIES):
             # 先**走出去**再收工，别把 bot 丢在这一页上：新页面名不在
-            #    `nav._EXITABLE` 里  runner 的兜底导航对它返回 None 
+            #    `nav._EXITABLE` 里  runner 的兜底导航对它返回 None
             #    下一条 flow 会在这儿空转到自己超时（08-11 shop 死循环同形）。
             #    真正的 finish 在 `pre_page` 里、等页面换走之后才发。
             if self.once("guide_giveup_log"):
                 self.log("连续进错到达上限  先退出这一页，然后收工交人审")
             self.state["guide_giveup"] = True
             if self.stalled(st, 200):
-                # 退不出去（退出控件全检不出）—— 那就当场收工，别无限耗着
+                # 退不出去（退出控件全检不出）-- 那就当场收工，别无限耗着
                 return self.finish(
                     Outcome.BLOCKED,
                     "连续进到引导型活动（夏萊總結算这类，没有活动关卡），"
                     "而且退不出这一页 — 停手交人审")
 
         return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
+
+
+class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
+    name = "event"
+    module = "event"
+    entry_page = "task_hall"
+
+    def setup(self) -> None:
+        self.state.update(
+            phase="clear",          # clear  shop_plan  bonus  done
+            saw_other=False,        # 轮播: 上一帧不是 405
+            cleared=0, farmed=0, swept=0, entered=0,
+            # 轮播抽错活动（进到"没有活动关卡"的引导型活动）的台账
+            guide_hits=0, guide_seen=False, guide_giveup=False,
+        )
+        self.want_team = int(self.cfg.get("clear_first_with_team", 1))
+        order = self.cfg.get("order", "clear_then_bonus")
+        if order == "bonus_only":
+            # 阶段名必须和 `_bonus_step` 认的那两个对上（"bonus_clear" /
+            #    "bonus_sweep"）。第一版这里写的是 "bonus"，派发处认不出 
+            #    flow 在关卡列表前干等到超时，一个 tap 都没有（08-08 实测）。
+            self.state["phase"] = "shop_plan" if self.cfg.get(
+                "shop_plan_before_bonus", True) else "bonus_clear"
+            self.want_team = int(self.cfg.get("bonus_team", 2))
 
     # ══ 活动页：切到 Quest 页签 ════════════════════════════════════════
     def on_event_page(self, obs, st):
