@@ -43,6 +43,46 @@ class ScheduleFlow(ExitMixin, Flow):
 
     def setup(self) -> None:
         self.state.update(lessons=0, tickets0=None, tickets=None, area_i=0)
+        # **上过课的房间落本地台账，按游戏日对齐**（用户 2026-08-13 拍板:
+        #    「辨别不出这个角色的房间选没选过，因为没拥有的角色摸了头像只会
+        #    dim，拥有的角色摸了才会有勾，我认为的解决办法是本地记录，
+        #    然后根据游戏每日刷新对齐，这样就很简单了」）。
+        #    绿勾只是**已拥有角色**的副产品，唯一可靠的"用过没"是自己记。
+        #    游戏日 = UTC+8 减 3 小时（繁中服 JST04:00 刷新，[[game_day_timezone]]
+        #    那次 12h 错窗就是拿裸 now() 惹的）。跨 run 有效，同一天不重复点。
+        self.state["tried"] = self._load_rooms()
+
+    @staticmethod
+    def _game_day() -> str:
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone(timedelta(hours=8)))
+                - timedelta(hours=3)).strftime("%Y%m%d")
+
+    _ROOMS_FILE = "data/routing_v2/schedule_rooms.json"
+
+    def _load_rooms(self) -> list:
+        import json
+        from pathlib import Path
+        p = Path(self._ROOMS_FILE)
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if d.get("day") == self._game_day():
+                rooms = list(d.get("rooms", []))
+                if rooms:
+                    self.log(f"本游戏日已上过课的房间 {len(rooms)} 间（台账续用）")
+                return rooms
+        except Exception:
+            pass
+        return []
+
+    def _save_rooms(self) -> None:
+        import json
+        from pathlib import Path
+        p = Path(self._ROOMS_FILE)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"day": self._game_day(),
+                                 "rooms": self.state.get("tried", [])},
+                                ensure_ascii=False), encoding="utf-8")
 
     # 观测: 每帧都跑, 跟当前相位无关
     def observe(self, obs, st) -> None:
@@ -135,8 +175,17 @@ class ScheduleFlow(ExitMixin, Flow):
             if self.phase_ticks > 90:
                 return self._go("exit", "区域选择页一个区域 cls 都没检出")
             return wait("等区域 cls")
+        # **起点是硬规则: 夏莱办公室**（用户 2026-08-13 纠正:「我们应该最先去的
+        #    就是夏莱办公室然后开课程表找人，然后往左箭头路由，我们起点都进错了」）。
+        #    老代码 brain/skills/schedule.py:1058 白纸黑字:
+        #      `Sequence (once): click 夏莱办公室 -> ARROW_LEFT (jump to last region)`
+        #    —— 办公室是列表第 0 行的**全环锚点**，从它起跳 ARROW_LEFT 一圈才闭合。
+        #    我上一版写成"按屏上从左到右取第一个"，于是进了夏莱居住区。
         want = self.cfg.get("areas") or []
-        ordered = [b for n in want for b in seen if b.cls == n] or seen
+        ordered = [b for n in want for b in seen if b.cls == n] if want else []
+        if not ordered:
+            office = [b for b in seen if b.cls == V.SCHOOL_OFFICE]
+            ordered = office + [b for b in seen if b.cls != V.SCHOOL_OFFICE]
         i = self.state["area_i"]
         if i >= len(ordered):
             return self._go("exit", f"{len(ordered)} 个区域都跑过了")
@@ -215,6 +264,7 @@ class ScheduleFlow(ExitMixin, Flow):
                 n = self.state.pop("room_of", None)
                 if n:
                     self.state.setdefault("tried", []).append(n)
+                    self._save_rooms()      # 写穿: 掉线/重启也不丢今天的账
                 self.goto("roster", "课上完了, 挑下一个")
             return tap_box(start, "課程表開始（上课）", counter="lessons",
                            post=_did)
@@ -226,6 +276,7 @@ class ScheduleFlow(ExitMixin, Flow):
             n = self.state.pop("room_of", None)
             if n:
                 self.state.setdefault("tried", []).append(n)
+                self._save_rooms()
                 self.log(f"{n} 的房间今天已经开过课（等不到「開始」）- 拉黑")
             return self._go("roster", "换一个房间")
         return wait(f"等「課程表開始」（{self.phase_ticks}/{ROOM_OPEN_CAP}）")
@@ -254,10 +305,11 @@ class ScheduleFlow(ExitMixin, Flow):
         arrow = obs.find(V.ARROW_LEFT, 0.40)
         if arrow is not None:
             def _next(k=n):
-                # 换区域 = 换了一批房间，绿勾累积表和黑名单都要清。
+                # 换区域清绿勾累积表（位置相关）。**`tried` 不清** —— 它现在是
+                #    按游戏日落盘的房间台账，学生名全服唯一，跨区域仍然有效；
+                #    清了就等于把今天的账撕了（本地记录方案的要点）。
                 self.state["regions_seen"] = k
                 self.state["green_acc"] = []
-                self.state["tried"] = []
                 self.goto("roster", f"翻到第 {k} 个区域")
             return tap_box(arrow, f"这区没课可上 - 翻到下一个区域"
                                   f"（第 {n}/{MAX_REGIONS} 个）", post=_next)

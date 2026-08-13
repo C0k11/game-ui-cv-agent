@@ -221,15 +221,31 @@ class CafeFlow(ExitMixin, Flow):
         # **进去先扫，扫完没有才滑**（用户口述的正确节奏）。
         if self.phase_ticks < 12:
             return wait("刚开邀请列表 - 先让头像模型把这一屏扫一遍，别急着滑")
-        if self.state["invite_scrolls"] < 8:
+        # **到底判据 = 列表指纹重复，不是滑动次数**（用户 2026-08-13:「主要是
+        #    看程序会不会路由完整个邀请卷列表，但是失败了而且一半不到就跑了」）。
+        #    老代码 brain/skills/cafe.py:920-926 的原话:
+        #      `bottom = self._invite_sig_repeat >= 2`（滑完屏上内容没变 = 到底），
+        #    滑动次数只是安全帽（防指纹判据失灵时无限滑）。
+        #    我上一版写成「滑 8 次就算找完」—— 次数是**意图**，指纹才是**事实**。
+        sig = "|".join(sorted(
+            [b.cls for b in obs.boxes if b.model == "avatar" and b.conf >= 0.45]
+            + [f"{b.cy:.2f}" for b in obs.all(V.CAFE_INVITE, 0.45)]))
+        bottom = self.state.get("sig_repeat", 0) >= 2
+        if not bottom and self.state["invite_scrolls"] < 20:
             n = self.state["invite_scrolls"] + 1
-            # 几何从检出推：邀请键就是这一列的行（见 nav.list_swipe）。
-            sw = nav.list_swipe(obs, [V.CAFE_INVITE],
-                                f"下滑找邀请目标（第 {n} 次）",
-                                post=lambda: self.state.update(invite_scrolls=n))
+
+            def _swiped(s=sig, k=n):
+                # 指纹在**滑之前**记；下一轮滑之前对比 —— 没变 = 这一滑没推动列表
+                if s == self.state.get("last_sig"):
+                    self.state["sig_repeat"] = self.state.get("sig_repeat", 0) + 1
+                else:
+                    self.state["sig_repeat"] = 0
+                self.state["last_sig"] = s
+                self.state["invite_scrolls"] = k
+            sw = self._invite_swipe(obs, f"下滑找邀请目标（第 {n} 次）", _swiped)
             if sw is not None:
                 return sw
-            return wait("这一屏没检出邀请键行 - 推不出滑动几何，不瞎滑")
+            return wait("这一屏推不出滑动几何 - 不瞎滑")
         # 放弃：**先落标记再关面板**。标记是"我已经找过一轮"这个事实，
         #    关不关得掉面板都不影响它 —— 否则关面板那一发被闸吞掉，下一帧
         #    又从"没找过"重来（用户实测的抽风）。
@@ -242,6 +258,43 @@ class CafeFlow(ExitMixin, Flow):
         if x is not None:
             return tap_box(x, "关掉邀请列表", expect_gone=(V.CAFE_INVITE,))
         return self.goto_and_wait(nxt, "邀请列表处理完")
+
+    def _invite_swipe(self, obs, why: str, post):
+        """邀请列表专用滑动 —— 几何全部从检出推，零写死。
+
+        用户 2026-08-13 指出的两条病:
+          1. 「滑动的位置是靠邀请按钮定位的，很容易误触」—— 按钮列上按下再拖，
+             游戏可能把它认成 tap = 误邀请。
+          2. 「有时候是从最下面的 bound 滑动，都没在栏目里滑」——
+             `nav.list_swipe` 的起点取 `max(cy)+rowh*0.6`，最下一行贴近面板
+             下缘时起点就落到面板外面去了。
+        修法（用户口述）: **横坐标取头像列和邀请键列的中点**（两列之间的空白区，
+          按下去什么都点不到），**起点取列表的垂直中心**（行 cy 的中位数），
+          往上滑 2.5 行的距离。全部量取自本帧检出。
+        """
+        btns = obs.all(V.CAFE_INVITE, 0.45)
+        if not btns:
+            return None
+        studs = [b for b in obs.boxes if b.model == "avatar" and b.conf >= 0.45]
+        bxs = sorted(b.cx for b in btns)
+        btn_cx = bxs[len(bxs) // 2]
+        if studs:
+            sxs = sorted(b.cx for b in studs)
+            av_cx = sxs[len(sxs) // 2]
+        else:
+            av_cx = btn_cx - 0.30       # 头像这一帧全漏检: 取按钮列左侧空白
+        x = (av_cx + btn_cx) / 2.0
+        cys = sorted(b.cy for b in btns)
+        rowh = 0.107                     # 兜底; 有两行以上就用真行距
+        if len(cys) >= 2:
+            gaps = [b - a for a, b in zip(cys, cys[1:]) if b - a > 0.02]
+            if gaps:
+                rowh = sorted(gaps)[len(gaps) // 2]
+        y0 = cys[len(cys) // 2]          # 起点 = 列表垂直中心（用户: 起始点居中）
+        y1 = max(0.10, y0 - rowh * 2.5)
+        if y0 - y1 < rowh * 0.8:
+            return None
+        return swipe(x, y0, x, y1, why, post=post)
 
     # headpat (含 pan 扫视)
     def do_headpat(self, obs, st):

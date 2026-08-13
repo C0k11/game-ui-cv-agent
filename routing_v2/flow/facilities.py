@@ -219,8 +219,19 @@ class ShopFlow(ExitMixin, Flow):
                 and not self.state.get("pack_done") and self.pending("open_pack"):
             p = obs.find(V.SHOP_BUY_PYROXENE, 0.40)
             if p is not None:
-                return tap_box(p, "大厅广告位  購買青輝石页（去拿免費組合包）",
-                               once="open_pack")
+                # **广告位上没红点 = 免費包今天已经拿过了，别进去**（用户
+                #    2026-08-13:「购买清辉石已经不伴随红点了，说明没东西可以拿，
+                #    没必要去，这说明我们红黄点逻辑没生效」）。
+                #    红点归属按**距离**判（memory: 大厅红点归属要按距离判 ——
+                #    mail 那次红点其实是旁边九宫格的）。有点才进，没点跳过。
+                dot = any(abs(d.cx - p.cx) < 0.07 and abs(d.cy - p.cy) < 0.06
+                          for d in obs.all(V.DOT_RED, 0.40))
+                if dot:
+                    return tap_box(p, "大厅广告位有红点  進購買青輝石页拿免費包",
+                                   once="open_pack")
+                self.state["pack_done"] = True
+                self.state["once:open_pack"] = True
+                self.log("广告位没红点 — 免費包今天拿过了，这一段跳过")
         # 三段都干完了就收工 —— 08-11 live 实锤：`pack_done`/`bought`/
         #    `arena_done` 全 True，退回大厅后这里仍然无条件 `nav.enter(商店)`，
         #    于是**再进一次商店**。step 模式下我一眼看见，自主跑时它会一直
@@ -302,12 +313,16 @@ class ShopFlow(ExitMixin, Flow):
         if not self.state.get("bought") and on_credit:
             sel = obs.find(V.SHOP_SELECT_ALL, 0.40)
             if sel is not None and self.pending("selectall"):
-                # 契约 = 勾上了**必然**出现「選擇購買」——**亮的或灰的都算**。
-                #   2026-08-13 小号实测: 余额不够时只出 `选择购买灰色`(0.78)，
-                #   而契约只认亮态 -> 永远不兑现 -> `全部选择` 无限重试。
-                #   契约要的是"我那一下生效了"这个**事实**，不是"我买得起"。
+                # 契约 = 点成功的**直接证据是货架上冒出一排绿勾**（用户
+                #   2026-08-13 口述:「点了一次应该清楚会识别到一堆绿勾才说明
+                #   点成功了，然后才有后续的按钮」）。实测: 商店刚开的加载期
+                #   这个按钮已经 popout 但**是死的**，点了没反应 —— 靠绿勾
+                #   契约，超时会退回 once 重试（136c3dc 那条通用机制），
+                #   等页面真活了那一发才算数。
+                #   「選擇購買」亮/灰也算兑现（绿勾万一漏检时的备份证据）。
                 return tap_box(sel, "全部选择", once="selectall",
-                               expect=(V.SHOP_BUY_SELECTED,
+                               expect=(V.GREEN_CHECK,
+                                       V.SHOP_BUY_SELECTED,
                                        V.SHOP_BUY_SELECTED_GREY))
             # 买不起就**别点** —— 灰按钮点了也不动，点就是空转。
             #   判据要求亮态不在场（半渲染帧会两态同时检出，见下面那段的教训）。

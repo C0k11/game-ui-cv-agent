@@ -1344,6 +1344,26 @@ def t_route():
     check("放弃过邀请就不再点邀请卷",
           _a_g is None or _a_g.target_cls != V.CAFE_TICKET,
           f"{_a_g and _a_g.target_cls}")
+    # 邀请列表滑动几何（用户 2026-08-13 口述）: 横坐标在头像列和按钮列**中间**
+    #   的空白区（不许压在按钮列上误触）, 起点在列表垂直中心（不许从底 bound 起手）
+    _cf9 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+    _rows = [B(V.CAFE_INVITE, cx=0.780, cy=c) for c in (0.31, 0.42, 0.53, 0.63)]
+    _avs = [Box(cls=n, conf=0.95, model="avatar",
+                x1=0.415, y1=c - 0.03, x2=0.455, y2=c + 0.03)
+            for n, c in (("凯伊", 0.31), ("季(战斗)", 0.42), ("冬", 0.53))]
+    _obl = Observation(boxes=_rows + _avs, seq=9, w=3840, h=2160)
+    _sw = _cf9._invite_swipe(_obl, "test", None)
+    check("滑动横坐标在头像列(0.435)和按钮列(0.780)之间",
+          _sw is not None and 0.50 < _sw.x < 0.72, f"x={_sw and _sw.x:.3f}")
+    check("滑动起点在列表垂直中心, 不在底 bound",
+          _sw is not None and 0.35 < _sw.y < 0.55, f"y={_sw and _sw.y:.3f}")
+    # 到底判据 = 指纹重复 2 次（老代码 _invite_sig_repeat >= 2）, 次数只是安全帽
+    _cf9.state.update(sig_repeat=2)
+    _cf9.goto("invite")
+    _cf9.cfg["invite_targets"] = ["优香"]
+    _a_b = _cf9.decide(_obl, _SV(page="cafe_invite_list", frames_in_page=20))
+    check("指纹重复 2 次 = 到底, 走放弃分支不再滑",
+          _a_b is not None and _a_b.kind != "swipe", f"{_a_b and _a_b.kind}")
     check("报告要说「买不起」不是「已处理」", "买不起" in _sh._segments(),
           _sh._segments())
 
