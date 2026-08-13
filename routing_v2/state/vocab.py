@@ -161,6 +161,29 @@ SQUAD_TABS = {1: (SQUAD_1, SQUAD_1_HI), 2: (SQUAD_2, SQUAD_2_HI),
 SKIP_BATTLE = "跳过战斗"
 SKIP_BATTLE_OFF = "跳过战斗未选"
 
+# -- 走格子（集中指挥, v16 新增族; 2026-08-13 小号实测 conf 0.85-0.98）--
+GRID_CELL = "走格子_格子"
+GRID_CELL_FOG = "走格子_格子_迷雾"
+GRID_CELL_OPEN = "走格子_格子_可走"       # 叠在格子上的标记, 数格子要去重
+GRID_START = "走格子_起点_黄"
+GRID_START_GREY = "走格子_起点_灰"
+GRID_ARROW = "走格子_队伍箭头"
+GRID_BOSS = "走格子_BOSS标记"
+GRID_ITEM = "走格子_道具"
+GRID_ALLY = "走格子_我方"
+GRID_ENEMY = "走格子_敌方"
+PHASE_END = "PHASE结束"
+PHASE_AUTO_ON = "PHASE自动结束_已勾选"
+PHASE_AUTO_OFF = "PHASE自动结束_未勾选"
+TASK_START_GREY = "任务开始_灰色"
+TASK_ABORT = "中断任务"
+TASK_RETRY = "重新挑战"
+# 关卡弹窗两页签（两态; 496/421 是各自的选中态）
+TAB_COMMAND = "集中指挥"
+TAB_COMMAND_SEL = "集中指挥已选中"
+TAB_GUIDE = "简易攻略"
+TAB_GUIDE_SEL = "简易攻略_已选中"
+
 # ══ 战斗内 ═════════════════════════════════════════════════════════════
 BATTLE_PAUSE = "战斗暂停"
 BATTLE_1X = "战斗1倍速"

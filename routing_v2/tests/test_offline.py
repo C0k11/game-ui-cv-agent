@@ -1342,6 +1342,46 @@ def t_route():
     check("帧数够了但 0.5s 墙钟没到 — 仍然按住（帧数与墙钟合取）",
           not _v_w.ok, f"ok={_v_w.ok}")
 
+    # 走格子几何层（fixture = walk_20260813_083604 帧119 的真实检出, 人工核对过）
+    from routing_v2.flow import grid as _grid
+    _gb = [B(V.GRID_START, conf=0.96, cx=0.385, cy=0.482),
+           B(V.GRID_CELL_OPEN, conf=0.96, cx=0.385, cy=0.488),   # 叠在起点上
+           B(V.GRID_CELL, conf=0.95, cx=0.429, cy=0.603),
+           B(V.GRID_CELL, conf=0.96, cx=0.525, cy=0.602),
+           B(V.GRID_CELL, conf=0.94, cx=0.616, cy=0.603),
+           B(V.GRID_CELL, conf=0.96, cx=0.477, cy=0.722),
+           B(V.GRID_ENEMY, conf=0.95, cx=0.424, cy=0.512),
+           B(V.GRID_ENEMY, conf=0.92, cx=0.469, cy=0.627),
+           B(V.GRID_BOSS, conf=0.85, cx=0.599, cy=0.522)]
+    _go = Observation(boxes=_gb, seq=1, w=3840, h=2160)
+    _cs = _grid.cells(_go)
+    check("可走/起点叠在同一格上要去重（5 个格心不是 6 个）", len(_cs) == 5,
+          str(len(_cs)))
+    _st = _grid.steps(_cs)
+    check("步长从检出现量（dx~0.096 dy~0.12）",
+          _st is not None and 0.08 < _st[0] < 0.11 and 0.10 < _st[1] < 0.14,
+          str(_st))
+    _dx, _dy = _st
+    # 单位不站格心: 立绘框心比格心高 ~0.09, 朴素最近邻会把敌方绑到起点(0.048)
+    #   而不是真格子(0.091) -- 归属必须「正下方最近」
+    _e1 = next(b for b in _gb if b.cls == V.GRID_ENEMY and b.cy < 0.55)
+    _c1 = _grid.below(_e1, _cs, _dx)
+    check("敌方绑到正下方的格子, 不是欧氏最近的起点",
+          _c1 is not None and abs(_c1[0] - 0.429) < 0.01
+          and abs(_c1[1] - 0.603) < 0.01, str(_c1))
+    _rd = _grid.resolve((0.385, 0.482), "right-down", _cs, _dx, _dy)
+    check("right-down 解析到真格心（不是推算点）",
+          _rd is not None and abs(_rd[0] - 0.429) < 0.01, str(_rd))
+    check("没有格子的方向要 fail-closed 返回 None",
+          _grid.resolve((0.385, 0.482), "left", _cs, _dx, _dy) is None)
+    _a12 = _grid.load_answer("1-2")
+    check("BAAH 1-2 答案解析: 1 区域 2 回合",
+          _a12 is not None and len(_a12["areas"]) == 1
+          and len(_a12["areas"][0]["fight_plan"]) == 2, str(_a12 and _a12["areas"]))
+    check("BAAH 1-1 没有 fight_plan（不用走位, 不是文件缺失）",
+          _grid.load_answer("1-1") is not None
+          and _grid.load_answer("1-1")["areas"] == [])
+
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后
     #   由「選擇購買」的亮/灰给结论。
