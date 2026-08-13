@@ -66,13 +66,18 @@ class ScheduleFlow(ExitMixin, Flow):
             hit = obs.find(name, 0.45, model="avatar")
             if hit is not None and not _done(hit) and name not in tried:
                 return tap_box(hit, f"全体课程表: 进目标 {name} 的房间",
+                               expect=(V.SCHED_START,),
                                post=lambda n=name: tried.append(n))
         studs = [b for b in obs.boxes
                  if b.model == "avatar" and b.conf >= 0.45
                  and 0.20 < b.cy < 0.92 and not _done(b) and b.cls not in tried]
         if studs:
             b = max(studs, key=lambda x: x.conf)
+            # 契约 = 真进了房间**必然**出现「課程表開始」。它同时给了节流
+            #   （兑现前一发新 tap 都出不去）和**证据**（没兑现 = 这个学生
+            #   所在的房间今天已经开过课，拉黑是对的）。
             return tap_box(b, f"全体课程表: 进 {b.cls} 的房间",
+                           expect=(V.SCHED_START,),
                            post=lambda n=b.cls: tried.append(n))
         if tried:
             # 面板上没绿勾的都点过一轮了 —— 这一区的课上完了（剩下的学生
@@ -128,13 +133,21 @@ class ScheduleFlow(ExitMixin, Flow):
                 return self._wrap("课程表票用完了")
 
         # 全体课程表面板可能被判成本页（身份摆动）——先试面板逻辑
-        act = self._roster_panel(obs)
-        if act is not None:
-            return act
-
+        # **「課程表開始」必须排在选学生之前**（2026-08-13 用户:「课程表这边
+        #    也是抢拍，乱点然后卡死」）。轨迹实证: t1138 晴露营 -> t1144 羽留奈
+        #    -> t1147 优香睡衣，间隔 6/3 tick，中间**一次 課程表開始 都没有**。
+        #    根因不是节流，是**优先级倒置**: 点了学生、房间面板开出来了，可
+        #    roster 列表还在屏上，于是下一帧 `_roster_panel` 又去点下一个学生。
+        #    配上「点过就拉黑」，一发没兑现的点击就永久拉黑一个学生 ——
+        #    和商店那次 `once` 被一发无效点击消耗掉是同一个形状。
+        #     屏上有 `課程表開始` = 房间面板已经开了 = 这一步该上课，不是换人。
         start = obs.find(V.SCHED_START, 0.40)
         if start is not None:
             return tap_box(start, "开始课程", counter="lessons")
+
+        act = self._roster_panel(obs)
+        if act is not None:
+            return act
 
         # 房间：优先配置里的学生（学生头像有 cls），其次任意可用房间
         for name in (self.cfg.get("target_students") or []):
