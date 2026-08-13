@@ -180,7 +180,14 @@ class ScheduleFlow(ExitMixin, Flow):
         return tap_box(cf, "确认上课") if cf is not None else wait("等確認键")
 
     def on_reward(self, obs, st):
-        b = obs.find([V.GOT_REWARD, V.CONFIRM], 0.40)
+        # `find([A, B])` 是**全屏 conf argmax**，不是"先 A 后 B"。
+        #    base.py 的 on_reward 里有实锤:「獲得獎勵！」全屏 overlay 上
+        #    `获得奖励` 0.98 是**横幅**、`点击继续字样` 0.93 才是能点的，
+        #    argmax 永远选横幅，连点 11 次画面纹丝不动。
+        #    这里只保留本 flow 特有的副作用，优先级链和基类一致。
+        b = (obs.find(V.CONFIRM, 0.40)
+             or obs.find(V.STORY_TAP_CONTINUE, 0.40)
+             or obs.find(V.GOT_REWARD, 0.40))
         if b is None:
             return wait("等结果页")
         # 上完一节课  允许重开全体课程表挑下一个房间（once 标记归还）

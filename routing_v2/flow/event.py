@@ -58,6 +58,7 @@ GUIDE_HUB_MAX_TRIES = 3
 class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     name = "event"
     module = "event"
+    entry_page = "task_hall"
 
     def setup(self) -> None:
         self.state.update(
@@ -595,7 +596,21 @@ class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             #    「購買AP 單價💎30」。**花钱动作的闸必须贴着那一下点击**。
             ap_now = R.read_topbar(obs, R.AP)
             need = int(self.cfg.get("min_ap_for_sweep", 20) or 20)
-            if ap_now is not None and ap_now < need:
+            # 读不出必须 fail-CLOSED。原来写的是 `ap_now is not None and
+            #    ap_now < need` —— 读不出时整条闸**直接跳过**，照样往下
+            #    拉 MAX、点掃蕩開始。而扫荡面板恰恰会把顶栏压暗，读不出
+            #    是常态；AP 真为 0 时那一下点出去，游戏弹的就是
+            #    「購買AP 單價 30 青辉石」。同文件的 `_bonus_step` 对同一个
+            #    读数是 fail-CLOSED 的 —— 一条链两套口径，就差这两行。
+            if ap_now is None:
+                if not self.hold("ap_unknown_pop", 20):
+                    return wait("扫荡面板: AP 读不出，连续确认中")
+                return self.finish(
+                    Outcome.UNKNOWN,
+                    "扫荡面板上 AP 读不出 — 不点掃蕩開始（AP 为 0 时点下去"
+                    "弹的是購買AP 框）；"
+                    f"{self.battle_stats()} / 扫荡 {self.state['swept']} 次")
+            if ap_now < need:
                 return self.finish(
                     Outcome.LEFTOVER,
                     f"AP {ap_now} < 一轮 {need} — 收工，**绝不买 AP**；"
@@ -606,8 +621,19 @@ class EventFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
                                once="sweepmax")
             sw = obs.find(V.SWEEP_START, 0.35)
             if sw is not None:
+                # 数量 0 时「掃蕩開始」**照样是亮的**（实测 conf 0.986，
+                #    不是灰态），点下去弹的就是購買AP 框。sweep.py 早就
+                #    有这道闸，活动这条链一直没有 —— 补齐。
+                n = R.read_qty(obs)
+                if n == 0:
+                    return self.finish(
+                        Outcome.LEFTOVER,
+                        "步进器数量读出来是 0 — 一次也扫不了，掃蕩鍵亮着"
+                        "也不点（点下去就是買 AP 的框）；"
+                        f"扫荡 {self.state['swept']} 次")
                 self.once_reset("sweepmax")
-                return tap_box(sw, "扫荡开始", counter="swept")
+                return tap_box(sw, f"扫荡开始（数量 {n if n is not None else chr(63)}）",
+                               counter="swept")
             if obs.has(V.CONFIRM_GREY, 0.45):
                 return self.finish(
                     Outcome.LEFTOVER,

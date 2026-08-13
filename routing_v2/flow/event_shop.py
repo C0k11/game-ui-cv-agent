@@ -59,6 +59,7 @@ def farm_targets(tabs_bottom_up, has_event_points: bool):
 class EventShopFlow(ExitMixin, Flow):
     name = "event_shop"
     module = "event"
+    entry_page = "event_page"
 
     def setup(self) -> None:
         self.state.update(tab_i=0, scrolls=0, sig="", plan={}, bought=0)
@@ -214,9 +215,9 @@ class EventShopFlow(ExitMixin, Flow):
         return tap_box(cf, "确认购买", money=True,
                        spend="活动币") if cf is not None else wait("等確認键")
 
-    def on_reward(self, obs, st):
-        b = obs.find([V.CONFIRM, V.GOT_REWARD], 0.40)
-        return tap_box(b, "关掉购买结果") if b is not None else wait("等结果页")
+    # on_reward 一律继承基类：`find([A, B])` 是全屏 conf argmax，会永远
+    #   选中 `获得奖励` 那条**横幅**而不是能点的 `点击继续字样`（实锤见
+    #   base.py 的 on_reward），覆写没有任何收益。
 
     # ── 收尾：推算「该刷哪一关」并交给 event flow ───────────────────────
     def _wrap(self, why):

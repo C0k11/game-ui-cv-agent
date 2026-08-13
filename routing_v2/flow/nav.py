@@ -21,6 +21,118 @@ from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
 from routing_v2.state.machine import StateView
 
+# 页面层级 —— 「谁是谁的上一层」。
+#
+# 为什么必须显式建这张表（2026-08-12 用户点名:「返回和大厅按钮要结合位置语义
+#   来判断是返回还是回大厅，要根据板块来的，比方说我们打完学园交流会，
+#   这个时候就是返回任务大厅就行」）:
+#   在这张表之前，退出逻辑只知道"屏上有哪个键"，不知道"我要去哪一层"。
+#   于是 `prefer_home` 那个开关全仓没有一个调用点、`Flow.home_pages` 声明了
+#   零引用 —— 也就是说「这条 flow 该退到哪儿」这个概念根本不存在，
+#   `回大厅按钮` 事实上从来没被点过（另一个调用点挂在默认 False 的
+#   `allow_home_escape` 后面）。留下的是"一路按返回退到底"，
+#   而正确答案取决于**下一条 flow 的入口在哪一层**。
+#
+# 有了层级之后，「返回 还是 回大厅」不再是看屏幕猜，而是一道算术:
+#   目标在祖先链上 -> 往上退；隔一层用返回键，隔两层以上且目标是大厅就用回大厅键。
+#   目标不在祖先链上（在 cafe 里要去任务大厅）-> 先回大厅，再从大厅进。
+_PARENT = {
+    "task_hall": "lobby",
+    "campaign_stage": "task_hall",
+    "bounty_branch": "task_hall",
+    "bounty_stage": "bounty_branch",
+    "jfd_academy": "task_hall",
+    "jfd_stage": "jfd_academy",
+    "arena": "task_hall",
+    "event_page": "task_hall",
+    "event_quest_list": "task_hall",
+    "event_guide_hub": "task_hall",
+    "event_ended": "task_hall",
+    "event_shop": "event_page",
+    "cafe": "lobby",
+    "cafe_invite_list": "cafe",
+    "schedule_area": "lobby",
+    "schedule_region": "schedule_area",
+    "craft": "lobby",
+    "shop": "lobby",
+    "arena_shop": "shop",
+    "shop_pyroxene_tab": "shop",
+    "combo_pack": "shop",
+    "mail": "lobby",
+    "daily_mission": "lobby",
+    "club": "lobby",
+    "momo_list": "lobby",
+    "momo_chat": "momo_list",
+    "story_hub": "lobby",
+    "story_chapter_map": "story_hub",
+    "story_nodes": "story_chapter_map",
+}
+
+# 从大厅进某一层的入口 cls。只登记**大厅直达**的那些；再深的一层靠逐层进。
+_ENTRY = {"task_hall": V.NAV_TASKS}
+
+# 模态/弹窗类**底页** —— 它们没有"层级"，只能关掉，关掉后回到它盖着的那一页。
+#   归位时必须先把它们关干净，否则下一条 flow 会在**别人的弹窗**上动手
+#   （2026-08-12 体外复现: bounty 从 `on_stage_popup` 收工时弹窗还开着，
+#    jfd 接手第一帧就在悬赏的关卡上点了「扫荡开始」；event 留下的编队页
+#    被 arena 接手，第一帧就去勾「跳過戰鬥」准备出击）。
+#   只放 `overlay=False` 的。覆盖层走 `close_overlay` —— 它们根本不会出现在
+#     `st.page` 上，我第一版把它们混进这张表，等于写了一堆永不成立的分支，
+#     而真正的覆盖层照样被留给下一条 flow。
+_MODAL = {"stage_popup", "sweep_dialog", "formation", "squad_quick_edit"}
+
+
+def close_overlay(obs: Observation, overlay: str) -> Optional[Action]:
+    """关掉盖在底页上的覆盖层（确认框/奖励框/领取面板/结算动画）。
+
+    顺序沿用 `ExitMixin.exit_step` 那条流血换来的:
+      取消 > (结算动画的 SKIP) > 结果框确认 > 叉叉 > 返回键
+      取消最优先：**结果弹窗永远没有取消键**（全语料 44,669 帧实证），
+        所以有取消键 = 这是个决策框，退它只能点取消。
+      叉叉排在确认后面：模态框上 conf 0.96 的叉叉照样可能完全不吃点击
+        （悬赏弃 6 票的第三个根因，连点 6 次画面纹丝不动）。
+    `确认键` 的安全性由金钱闸兜底 —— 真是购买框的话 `act/money.py` 先拦成 halt。
+    """
+    c = obs.find(V.CANCEL, 0.45)
+    if c is not None:
+        return tap_box(c, "归位: 取消（决策框唯一有效出口）")
+    if overlay == "sweep_results":
+        sk = obs.find(V.BATTLE_SKIP, 0.45)
+        if sk is not None:
+            return tap_box(sk, "归位: SKIP 掉结算奖励动画")
+    b = (obs.find(V.CONFIRM, 0.45)
+         or obs.find(V.STORY_TAP_CONTINUE, 0.40)
+         or obs.find(V.GOT_REWARD, 0.40))
+    if b is not None:
+        return tap_box(b, f"归位: 关掉 {overlay}（结果框没有取消键）")
+    x = obs.find(V.CLOSE_X, 0.55)
+    if x is not None:
+        return tap_box(x, f"归位: 叉掉 {overlay}")
+    return None
+
+
+def depth(page: str) -> int:
+    """离大厅几层。大厅=0，未登记的页面返回 -1。"""
+    if page == "lobby":
+        return 0
+    n, cur = 0, page
+    while cur in _PARENT:
+        cur = _PARENT[cur]
+        n += 1
+        if cur == "lobby":
+            return n
+    return -1
+
+
+def ancestors(page: str) -> list:
+    """从近到远的祖先链，末尾是 lobby。未登记页面返回空。"""
+    out, cur = [], page
+    while cur in _PARENT:
+        cur = _PARENT[cur]
+        out.append(cur)
+    return out if out and out[-1] == "lobby" else []
+
+
 # 这些页面上，"退出"是安全且有意义的
 _EXITABLE = {
     "cafe", "cafe_invite_list", "schedule_region", "schedule_area", "craft",
@@ -107,6 +219,83 @@ def to_lobby(obs: Observation, st: StateView,
     #   2026-08-08 实测：大厅上的「社交」浮层（社團/好友/幫手 三张卡）**一个
     #   退出控件都没有** —— 底栏被压暗所以 YOLO 检不到。bot 进去就出不来。
     return back_key(obs, "nav: 屏上没有任何退出控件  系统返回键（浮层专用）")
+
+
+def route(obs: Observation, st: StateView, target: str = "lobby",
+          plan: Optional[dict] = None):
+    """朝 `target` 那一层走**一步**。返回 `(Action|None, plan)`。
+
+    和 `to_lobby` 的区别: `to_lobby` 只知道"离开这儿"，`route` 知道"去哪儿"。
+       目标由**下一条 flow 的入口在哪一层**决定（`Flow.entry_page`），
+       所以 jfd 打完、下一条是同在任务大厅的 event 时，只退到任务大厅就停；
+       而 arena 打完、下一条 mail 的入口在大厅时，直接一步回大厅。
+
+    `plan` 是本次归位选定的策略，调用方原样保存并回传（首次传 None）。
+       用户 2026-08-12 的硬规矩:「要么返回要么大厅，同一次退出过程中不许换策略」。
+       策略在归位开始时算一次，中途屏上冒出/消失哪个键都不改 —— 混用的表现
+       就是 live 里那串「点一下返回、紧接着点一下回大厅」，前一下等于白点。
+    """
+    plan = dict(plan) if plan else {}
+    # 覆盖层先关 —— 它盖在底页上，**不参与"我在哪一页"的竞争**，所以
+    #    `st.page` 完全可能已经等于目标层而屏上还压着一个确认框/奖励框。
+    #    不关就交班 = 下一条 flow 第一帧就在别人的框上点確認。
+    if st.overlay:
+        a = close_overlay(obs, st.overlay)
+        if a is not None:
+            return a, plan
+        if st.page == target:
+            # 已经在目标层，只是这一帧关不掉那个覆盖层（控件还没渲染出来）。
+            #    绝不能因此掉头往别的层走 —— 等它。
+            return wait(f"归位({target}): 已到位，等 {st.overlay} 上的控件"), plan
+    if st.page == target:
+        return None, {}                    # 到位，策略作废
+    # 模态框没有层级，只能关掉。**必须先关干净**：不关就交班，下一条 flow
+    #   会在别人的弹窗上动手（体外复现: jfd 在悬赏关卡上点了扫荡开始）。
+    if st.page in _MODAL:
+        c = obs.find(V.CANCEL, 0.45)
+        if c is not None:
+            return tap_box(c, f"归位({target}): 取消（模态框唯一有效出口）"), plan
+        x = obs.find(V.CLOSE_X, 0.55)
+        if x is not None:
+            return tap_box(x, f"归位({target}): 关掉弹窗"), plan
+        b = obs.find(V.BACK, 0.55)
+        if b is not None:
+            return tap_box(b, f"归位({target}): 返回键关掉弹窗"), plan
+        return back_key(obs, f"归位({target}): 弹窗上没有退出控件"), plan
+    if st.page == "lobby":
+        e = _ENTRY.get(target)
+        if e is None:
+            return None, plan              # 大厅到不了的目标，交给 flow 自己进
+        box = obs.find(e, 0.45)
+        return (tap_box(box, f"归位({target}): 从大厅进入") if box is not None
+                else None), plan
+    chain = ancestors(st.page)
+    if not chain:
+        # 未登记的页面（facility / unknown / blank）—— 沿用老的保守行为。
+        return to_lobby(obs, st), plan
+    if target not in chain:
+        # 目标不在祖先链上（在咖啡厅里要去任务大厅）: 先回大厅，到了再从大厅进。
+        target = "lobby"
+    dist = chain.index(target) + 1
+    if not plan.get("mode"):
+        # 隔两层以上、且要一路回到大厅 —— 回大厅键一步到位，胜过按 N 次返回。
+        plan["mode"] = "home" if (target == "lobby" and dist >= 2) else "back"
+        plan["misses"] = 0
+    if plan["mode"] == "home":
+        h = obs.find(V.HOME, 0.55)
+        if h is not None:
+            return tap_box(h, f"归位(大厅): 回大厅键，跨过 {dist} 层"
+                              f"（本次退出全程只用这一种）"), plan
+        plan["misses"] = plan.get("misses", 0) + 1
+        if plan["misses"] < 30:
+            return wait(f"归位(大厅): 这一帧没检出回大厅键，等它"
+                        f"（{plan['misses']}/30，不改用返回键）"), plan
+        plan["mode"] = "back"              # 等不到就明说降级，不悄悄换
+    b = obs.find(V.BACK, 0.55)
+    if b is not None:
+        return tap_box(b, f"归位({target}): 返回键退一层，还差 {dist} 层"
+                          f"（本次退出全程只用这一种）"), plan
+    return back_key(obs, f"归位({target}): 屏上没有返回键，用系统返回键"), plan
 
 
 def back_key(obs: Observation, why: str) -> Optional[Action]:

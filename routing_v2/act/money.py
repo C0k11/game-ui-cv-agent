@@ -54,18 +54,36 @@ _DIALOG_CHROME = [V.CONFIRM, V.CONFIRM_GREY, V.CANCEL, V.QTY_MAX, V.QTY_MAX_GREY
 #    （cy=0.511, conf 0.94） 打赢一场就被自己的金钱闸 HALT 掉。
 #    这是 N2「信号≠场景」的**反向**形态：N2 是把广告位当购买框，这次是把
 #    收款单当付款单。同一个青辉石图标，语境相反。
-_INCOME_MARKERS = [V.GOT_REWARD, V.BATTLE_WIN, V.BATTLE_COMPLETE,
-                   V.CLAIM_REWARD_YELLOW, V.CLAIM_YELLOW, V.CLAIM_BLUE,
-                   V.CLAIM_ALL_YELLOW, V.CLAIM_ONCE_YELLOW, V.STORY_TAP_CONTINUE,
-                   # 羁绊剧情面板：「羈絆劇情獎勵 青辉石x40 + 学生卡」是
-                   #   **奖励预览**（08-09 帧证）。有这个键在场 = 在看奖励，
-                   #   不是在付钱 —— 不排除的话每次进羁绊剧情都会误报 halt。
-                   V.MOMO_ENTER_BOND, V.MOMO_GOTO_BOND]
+# **强信号**：只在"屏幕正在给你东西"那一屏出现，整屏可信。
+_INCOME_STRONG = [V.GOT_REWARD, V.BATTLE_WIN, V.BATTLE_COMPLETE,
+                  V.STORY_TAP_CONTINUE,
+                  # 羁绊剧情面板：「羈絆劇情獎勵 青辉石x40 + 学生卡」是
+                  #   **奖励预览**（08-09 帧证）。有这个键在场 = 在看奖励，
+                  #   不是在付钱 —— 不排除的话每次进羁绊剧情都会误报 halt。
+                  V.MOMO_ENTER_BOND, V.MOMO_GOTO_BOND]
+
+# **弱信号**：这些是**页面上的常驻按钮**，不是"这一屏在给你东西"的证据。
+#   2026-08-12 审计实锤：`领取奖励_黄` 是 arena 列表 / 每日任务页的常驻键
+#   （pages.py 自己的注释就这么写的），而 arena 的「時間獎勵 +90/分」是持续
+#   累积、永远领不完的 —— 也就是这个 cls 在战术大赛页上近乎每帧在场。
+#   离线复现：拿仓库自己那张「購買AP 框」fixture，只额外加一个 `领取奖励_黄`
+#   框，`purchase_context` 就从"购买框"变成 **None**，money_popup 打断跟着
+#   不触发 —— 一个角落里的领取键关掉了三条判据。
+#   所以它们只对**最松的那条**（"弹窗体内看见青辉石"）豁免，
+#     对**结构性**判据（購買青輝石+对话框控件 / 双键框内有数量步进器）不豁免。
+#     结构性判据本来就是为了治"青辉石检不出"的盲区，不能被一个词关掉。
+_INCOME_WEAK = [V.CLAIM_REWARD_YELLOW, V.CLAIM_YELLOW, V.CLAIM_BLUE,
+                V.CLAIM_ALL_YELLOW, V.CLAIM_ONCE_YELLOW]
+
+_INCOME_MARKERS = _INCOME_STRONG + _INCOME_WEAK
 
 
-def income_context(obs: Observation) -> Optional[str]:
-    """屏幕正在**给**你东西（奖励页/结算页/领取页）。此时的青辉石是收入。"""
-    m = obs.find(_INCOME_MARKERS, 0.35)
+def income_context(obs: Observation, strong_only: bool = False) -> Optional[str]:
+    """屏幕正在**给**你东西（奖励页/结算页/领取页）。此时的青辉石是收入。
+
+    `strong_only=True` 只认整屏可信的强信号，用在结构性判据上（见 `_INCOME_WEAK`）。
+    """
+    m = obs.find(_INCOME_STRONG if strong_only else _INCOME_MARKERS, 0.35)
     return f"{m.cls} conf {m.conf:.2f}" if m is not None else None
 
 
@@ -84,6 +102,8 @@ def purchase_context(obs: Observation) -> Optional[str]:
     if obs.has(V.LOADING, 0.40):
         return None
     inc = income_context(obs)
+    # 结构性判据只认强收入信号 —— 常驻领取按钮不许关掉它们
+    inc_s = income_context(obs, strong_only=True)
     pyx = obs.find(V.PYROXENE, CONF, region=BODY)
     if pyx is not None:
         if inc is not None:
@@ -94,7 +114,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
     if combo is not None:
         return f"组合包页（{combo.cls} conf {combo.conf:.2f}）— 旁边就是真钱包"
     buy = obs.find(V.SHOP_BUY_PYROXENE, CONF)
-    if buy is not None and inc is None:
+    if buy is not None and inc_s is None:
         # 屏上还看得到 ≥3 个大厅底栏入口 = 我们在**大厅**上，那个
         #    `購買青輝石` 就是左侧常驻广告位，不是购买框。
         #    2026-08-08 实测：大厅按返回键弹出「離開遊戲」确认框，它的
@@ -119,7 +139,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
     #    误拦的代价只是停下来交人审；漏拦的代价是花青辉石 —— 不对称，宁可误拦。
     cf = obs.find(V.CONFIRM, CONF)
     cc = obs.find(V.CANCEL, CONF)
-    if cf is not None and cc is not None and inc is None:
+    if cf is not None and cc is not None and inc_s is None:
         band = (0.0, max(0.0, cf.cy - 0.35), 1.0, max(0.0, cf.cy - 0.02))
         step = obs.find([V.QTY_MAX, V.QTY_MAX_GREY, V.QTY_MIN, V.QTY_MIN_GREY,
                          V.PLUS, V.PLUS_GREY, V.QTY_MINUS, V.QTY_MINUS_GREY],

@@ -91,11 +91,29 @@ class Gate:
         self._ask = on_money_step
         self._last: Optional[Tuple[float, float, str]] = None   # (x, y, cls)
         self._last_ts = 0.0
+        self._last_fire_frame = 0        # 上一发**真发出去**时的 frames_in_page
         self._fires = 0
         # 推进闸的待兑现契约（见 arm/advance）。None = 没有在等任何东西。
         self._pending: Optional[dict] = None
         self.stats = {"pass": 0, "money": 0, "jit_drop": 0, "dedup": 0,
                       "expect_hold": 0, "expect_timeout": 0}
+
+    def reset(self) -> None:
+        """换 flow / 交班归位时清掉逐次上下文（统计不清）。
+
+        Gate 是**整轮只建一次**的（Machine 每条 flow 重建），所以这三个字段
+           会跨 flow 泄漏:
+           `_pending` 上一条 flow 没兑现的推进契约会把下一条 flow 的第一发挡掉
+           `_last`    money 闸拿它当"上一发点的是什么"的正向证据（gate.py:121）
+                        —— 跨 flow 留着等于用别人的动作给这条 flow 的确认框背书
+           `_fires`   连发计数跨 flow 累加，下一条 flow 可能一上来就被判"重发 6 次"
+        清空的方向都是**更保守**（没有正向证据时 money 闸退回结构判据）。
+        """
+        self._pending = None
+        self._last = None
+        self._last_ts = 0.0
+        self._last_fire_frame = 0
+        self._fires = 0
 
     # ══  金钱闸 ═══════════════════════════════════════════════════════
     def money(self, act: Action, obs: Observation,
@@ -290,17 +308,21 @@ class Gate:
                 and abs(self._last[0] - act.x) <= _SAME_TARGET
                 and abs(self._last[1] - act.y) <= _SAME_TARGET)
         if not same:
-            self._last = (act.x, act.y, act.target_cls)
-            self._last_ts, self._fires = time.time(), 1
             return Verdict(True)
         # 同一落点：页面变了 = 上一发生效了，这是新的一发
         if page_changed:
-            self._last_ts, self._fires = time.time(), 1
+            self._fires = 0
+            self._last_fire_frame = 0
             return Verdict(True)
-        # 页面没变：只有"待够了 retry_frames 帧"才允许补一发
-        if frames_in_page >= retry_frames:
-            self._fires += 1
-            self._last_ts = time.time()
+        # 页面没变：距离**上一发真的发出去**够了 retry_frames 帧才允许补一发。
+        #    原来判的是 `frames_in_page >= retry_frames` —— 那是**电平**不是
+        #      **边沿**：`frames_in_page` 只在换页时归零，一旦跨过 retry_frames
+        #      这个条件就恒真。实测（frames_in_page 从 200 起、retry=70）
+        #      **连续 6 帧放行 6 发，第 7 帧判 stop_flow** —— 设计意图是
+        #      6 x 70 帧约 21 秒的重试预算，实际只有 0.3 秒，而且那 6 发正是
+        #      这道闸存在的理由（连发族）。
+        #    记住上一发的帧号，判**间隔**。
+        if frames_in_page - self._last_fire_frame >= retry_frames:
             if self._fires > 6:
                 # 只结束当前 flow，别停整条链 —— 一条支线走不通不该让今天
                 #    剩下的活全不干（老代码就是这么"一个 skill 卡死全盘皆输"的）。
@@ -309,9 +331,39 @@ class Gate:
                 return Verdict(False, f"同一落点已重发 {_n} 次仍无变化"
                                       f" — 这条 flow 走不通，收工换下一个",
                                stop_flow=True)
-            return Verdict(True, f"↻ 重发({frames_in_page}帧未变) {act.target_cls}")
+            return Verdict(True, f"重发（距上一发 "
+                                 f"{frames_in_page - self._last_fire_frame} 帧"
+                                 f"仍无变化）{act.target_cls}")
         self.stats["dedup"] += 1
         return Verdict(False, "")      # 静默吞掉，不刷屏
+
+    def note_fired(self, act: Action, frames_in_page: int) -> None:
+        """一发**真的发出去之后**才记账：落点 / 连发计数 / 重发基准。
+
+        和 `arm()` / counter / once / post 同一条纪律（数事实不数意图）。
+        这段原来写在 `dedup()` 里 —— 于是**被 JIT 丢弃的那一发照样被记成
+           「上一发」**（allow 的顺序是 money, advance, dedup, jit，dedup 在
+           jit 前面）。实测后果不是"多记一笔"这么轻：
+             `_last` 是 money 闸判断「这个确认框是不是我自己点出来的」的**唯一
+             正向证据**。一发被丢弃的 `领取_黄` 写进 `_last` 之后，同一个 Gate
+             在**真的退出游戏框**上点確認会返回 `ok=True`（干净 Gate 正确拦下）
+             —— 08-08「真把游戏关掉」那次的复活通道。
+           反方向同样坏：一发被丢弃的无关 tap 会**冲掉**花钱键的记忆，让
+             「上一发是花钱键，那这个双键框就是购买确认框」那道盲区补丁失效。
+        """
+        if act.kind == "key":
+            key, x, y = f"KEY:{act.keycode}", -1.0, -1.0
+        elif act.is_tap:
+            key, x, y = act.target_cls, act.x, act.y
+        else:
+            return
+        same = (self._last is not None and self._last[2] == key
+                and abs(self._last[0] - x) <= _SAME_TARGET
+                and abs(self._last[1] - y) <= _SAME_TARGET)
+        self._fires = (self._fires + 1) if same else 1
+        self._last = (x, y, key)
+        self._last_ts = time.time()
+        self._last_fire_frame = frames_in_page
 
     # ══  推进闸（1 step ahead）═════════════════════════════════════════
     def arm(self, act: Action) -> None:
@@ -350,6 +402,14 @@ class Gate:
         #      不能用 cls 契约：滑动没有 target_cls，也没有"该出现/该消失"的东西，
         #        能约束的只有**时间**（等画面停稳）。
         if act.kind == "swipe":
+            # 滑动的节流契约**不许顶掉一个真契约**（2026-08-12 审计）:
+            #    活动商店点了「選擇購買」(money=True) 建的是严格契约；确认框要
+            #    3 帧才被认成 overlay，那几帧 `_scan_shelf` 发现货架被盖住、
+            #    指纹变了就返回 swipe —— 滑动**不过任何一道闸**直接发出去，
+            #    紧接着 arm 把购买的严格契约整个覆盖掉。那道注释里写着
+            #    「落点偏一列就是 CAD$16.99」的保护当场消失。
+            if self._pending and not self._pending.get("settle"):
+                return
             self._pending = {"expect": (), "expect_gone": (), "cls": "(swipe)",
                              "reason": act.reason, "n": 0, "loose": True,
                              "settle": True}

@@ -50,10 +50,18 @@ class Ctx:
 class Flow:
     name: str = "flow"
     module: str = ""                    # cfg["modules"] 里的键
-    entry: Optional[str] = None         # 大厅入口 cls（None = 不从大厅进）
     yolo: tuple = ("ui",)               # 这个 flow 需要哪些模型
-    # 这个 flow "在自己地盘上"的页面。用于判断"该退出去了"。
-    home_pages: tuple = ()
+    # 这条 flow 的入口在哪一层（`nav._PARENT` 里的页面名）。
+    #
+    # 交班归位靠它（2026-08-12）:上一条 flow 收工时停在哪儿，runner 就把画面
+    #    带到下一条 flow 的 `entry_page` 再交班。在这之前没有这个概念 ——
+    #    `entry` / `home_pages` 两个字段声明了但全仓零引用，收工就地交班，
+    #    于是下一条 flow 在**别人的页面**上开工。体外复现（scratchpad/repro_handoff.py）:
+    #      bounty 从 `on_stage_popup` 收工时弹窗还开着 -> jfd 接手第一帧
+    #        就在悬赏的关卡上 tap `扫荡开始`
+    #      event 留下编队页 -> arena 接手第一帧就去勾「跳過戰鬥」准备出击
+    #    页面 handler 是按**页面名**匹配的，而页面名不带"这是谁的页面"。
+    entry_page: str = "lobby"
 
     def __init__(self, ctx: Ctx):
         self.ctx = ctx
@@ -76,7 +84,9 @@ class Flow:
 
     def finish(self, outcome: str, why: str = "") -> Action:
         self.outcome = outcome
-        if why:
+        # 同一句不重复记（`finish()` 在赋值时就写 note，而收工可能被推进闸
+        #    按住好几帧、每帧重进同一个分支 —— 不去重的话报告里会刷屏）。
+        if why and (not self.note_lines or self.note_lines[-1] != why):
             self.note_lines.append(why)
         return done(outcome, why or outcome)
 

@@ -18,6 +18,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
+import routing_v2.act.money as _money
 from routing_v2.percept.observe import Observation
 from routing_v2.state.pages import Match, classify
 
@@ -41,7 +42,14 @@ _INSTANT_INTERRUPTS = {"money_popup", "quit_dialog", "loading"}
 #      **漏判**（真退出框没认出）还有第二道防线 —— base.on_confirm_dialog 里
 #      的 `money.system_dialog()`（顶栏货币全无 + 不在设施页  只点取消）。
 #     所以这里宁可收紧。
-_LOBBY_LIKE = {"lobby", "facility"}
+# 这张表**只能有一份**（§A2）。原来这里是 {"lobby", "facility"}，而
+#   `money.LOBBY_LIKE` 是 ("lobby",) 且注释明写「不含 facility」并附了事故:
+#   facility 是常态页（schedule 的全體課程表面板 / mining / club 掉 cls
+#   都落到它），把它算进"可能弹退出框的底页"，会让设施页里的
+#   「确认上课 / 确认制造」被当成退出框点取消，flow 再点再取消，
+#   乒乓到超时。而这里是 **instant 打断**、优先于 flow —— 两份取值相反时，
+#   危险的正是这一份。
+_LOBBY_LIKE = set(_money.LOBBY_LIKE)
 
 
 @dataclass

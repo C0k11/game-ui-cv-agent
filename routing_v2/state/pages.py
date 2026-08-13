@@ -122,7 +122,12 @@ INTERRUPTS: List[Sig] = [
              "屏上有 `返回键`/`回大厅按钮` = 在设施页里 = 游戏内对话框。"
              "处置：**只允许点取消**，永不点確認"),
 
-    Sig("loading", need=[V.LOADING], priority=80, interrupt=True,
+    # 阈值必须和 `money.purchase_context` 里那句 `obs.has(V.LOADING, 0.40)`
+    #   **对齐**：那里一旦认定"这是加载帧"就整段不判金钱风险；如果这边的
+    #   打断用 0.45，[0.40,0.45) 这一段就是**金钱闸全瞎、而 flow 照常动作**。
+    #   对齐之后：money 认为不可判的帧，flow 也一定被打断按住。
+    Sig("loading", pred=lambda o: o.has(V.LOADING, 0.40),
+        priority=80, interrupt=True,
         note="起跑必须过预热闸：冷启动的加载帧会把收菜预算烧光（08-01 事故）"),
 ]
 

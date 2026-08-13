@@ -352,9 +352,11 @@ def t_gate():
              B(V.CREDIT, cx=0.51, cy=0.05))          # 顶栏货币在，弹窗体内没青辉石
     check(" 这一帧 purchase_context 确实是 None（盲区成立）",
           money_rules.purchase_context(_dlg) is None)
-    # `_last` 只在 dedup() 里落 —— 用它模拟"上一发真的发出去了"
-    _prev = lambda g, c: g.dedup(Action(kind="tap", x=0.3, y=0.7, reason="上一发",
-                                        target_cls=c), False, 0, 25)
+    # `_last` 由 `note_fired` 落 —— 它只在 tap **真的发出去之后**才被调用
+    #   （原来写在 dedup 里，等于把被 JIT 丢弃的那一发也记成「上一发」，
+    #    而 `_last` 是金钱闸唯一的正向证据，见 Gate.note_fired）
+    _prev = lambda g, c: g.note_fired(Action(kind="tap", x=0.3, y=0.7,
+                                             reason="上一发", target_cls=c), 0)
     g4 = Gate(cfg(), log=lambda m: None)
     _prev(g4, V.SHOP_BUY)
     _vc = g4.money(Action(kind="tap", x=0.60, y=0.83, reason="确认",
@@ -400,11 +402,28 @@ def t_gate():
     g3 = Gate(cfg(), log=lambda m: None)
     a2 = Action(kind="tap", x=0.3, y=0.3, reason="r", target_cls="btn")
     check("第一发放行", g3.dedup(a2, False, 0, 25).ok)
+    g3.note_fired(a2, 0)                 # 真发出去了才记账
     check("同落点页面没变  吞掉", not g3.dedup(a2, False, 1, 25).ok)
     check("待够 retry_frames  补一发", g3.dedup(a2, False, 25, 25).ok)
     # 别拿 reason 措辞当控制 API：换个文案不该绕过闸
     a3 = Action(kind="tap", x=0.3, y=0.3, reason="確認键!!", target_cls="btn")
     check("换 reason 文案绕不过连发闸", not g3.dedup(a3, False, 2, 25).ok)
+    # 重发必须按**边沿**算间隔: 原来判的是 `frames_in_page >= retry`,
+    #   那是电平 —— 跨过一次就恒真，实测连续 6 帧连发 6 下（设计意图是
+    #   6 x retry 帧的重试预算，实际缩水到 1/70）。
+    g7 = Gate(cfg(), log=lambda m: None)
+    a4 = Action(kind="tap", x=0.4, y=0.4, reason="r", target_cls="btn2")
+    _fired = []
+    for _f in range(0, 400):
+        _v = g7.dedup(a4, False, _f, 70)
+        if _v.stop_flow:
+            break
+        if _v.ok:
+            _fired.append(_f)
+            g7.note_fired(a4, _f)
+    check("重发按边沿算: 间隔恒为 retry_frames，不是每帧连发",
+          all(b - a == 70 for a, b in zip(_fired, _fired[1:])) and len(_fired) >= 5,
+          f"放行帧 {_fired}")
 
 
 # ══ 4. flow 跨 tick 状态（真实例，不是 stateless 回放）════════════════
@@ -1016,11 +1035,121 @@ def t_vocab():
     check("死类当'或'成员  放行", True)
 
 
+def t_route():
+    """交班归位 -- 「该返回还是该回大厅」由**下一条 flow 的入口层**决定。
+
+    用户 2026-08-12:「返回和大厅按钮要结合位置语义来判断是返回还是回大厅，
+       要根据板块来的，比方说我们打完学园交流会，这个时候就是返回任务大厅就行。」
+    """
+    print("\n-- 交班归位 --------------------------------")
+    from routing_v2.flow import nav as _nv
+    from routing_v2.state.machine import StateView as _SV
+
+    ctrl = [B(V.BACK, cx=0.05, cy=0.06), B(V.HOME, cx=0.12, cy=0.06)]
+
+    def go(page, target, extra=(), plan=None):
+        st = _SV(page=page, frames_in_page=10)
+        return _nv.route(O(*ctrl, *extra), st, target, plan)
+
+    # 层级图本身
+    check("jfd_stage 深度 3", _nv.depth("jfd_stage") == 3)
+    check("jfd_stage 祖先链经过任务大厅",
+          _nv.ancestors("jfd_stage") == ["jfd_academy", "task_hall", "lobby"])
+    check("未登记页面 depth=-1", _nv.depth("facility") == -1)
+
+    # 用户点名的那条：打完学园交流会只需退回任务大厅
+    a, p = go("jfd_stage", "task_hall")
+    check("jfd 打完去任务大厅, 用返回键", a is not None
+          and a.target_cls == V.BACK and p.get("mode") == "back",
+          f"{getattr(a, 'target_cls', None)} mode={p.get('mode')}")
+    # 隔两层且目标是大厅, 一步回大厅, 别按两次返回
+    a, p = go("arena", "lobby")
+    check("arena 打完去大厅, 用回大厅键(隔 2 层)", a is not None
+          and a.target_cls == V.HOME and p.get("mode") == "home",
+          f"{getattr(a, 'target_cls', None)} mode={p.get('mode')}")
+    # 只隔一层, 返回键就够
+    a, p = go("mail", "lobby")
+    check("mail 打完去大厅, 用返回键(只隔 1 层)",
+          a is not None and a.target_cls == V.BACK)
+    # 目标不在祖先链上, 先回大厅再从大厅进
+    a, _ = go("cafe_invite_list", "task_hall")
+    check("咖啡厅里要去任务大厅, 先回大厅",
+          a is not None and a.target_cls == V.HOME)
+    a, _ = go("lobby", "task_hall", extra=[B(V.NAV_TASKS, cx=0.5, cy=0.9)])
+    check("大厅去任务大厅, 点入口",
+          a is not None and a.target_cls == V.NAV_TASKS)
+    a, _ = go("task_hall", "task_hall")
+    check("已经在目标层, 不动", a is None)
+
+    # 覆盖层不参与页面身份竞争: 底页可以早就是目标层而屏上还压着确认框。
+    #    不关就交班 = 下一条 flow 第一帧在别人的框上点确认。
+    st_ov = _SV(page="task_hall", overlay="confirm_dialog", frames_in_page=10)
+    a, _ = _nv.route(O(*ctrl, B(V.CONFIRM, cx=0.6, cy=0.7),
+                       B(V.CANCEL, cx=0.4, cy=0.7)), st_ov, "task_hall", None)
+    check("已到目标层但压着决策框, 先点取消", a is not None
+          and a.target_cls == V.CANCEL, f"{getattr(a, 'target_cls', None)}")
+    st_ov = _SV(page="task_hall", overlay="ack_dialog", frames_in_page=10)
+    a, _ = _nv.route(O(*ctrl, B(V.CONFIRM, cx=0.5, cy=0.7)),
+                     st_ov, "task_hall", None)
+    check("已到目标层但压着单键通知框, 点掉它",
+          a is not None and a.target_cls == V.CONFIRM)
+    st_ov = _SV(page="task_hall", overlay="sweep_results", frames_in_page=10)
+    a, _ = _nv.route(O(*ctrl, B(V.BATTLE_SKIP, cx=0.5, cy=0.9)),
+                     st_ov, "task_hall", None)
+    check("结算奖励动画期, 点 SKIP 而不是干等",
+          a is not None and a.target_cls == V.BATTLE_SKIP)
+    st_ov = _SV(page="task_hall", overlay="claim_panel", frames_in_page=10)
+    a, _ = _nv.route(O(*ctrl), st_ov, "task_hall", None)
+    check("覆盖层这一帧关不掉, 等它而不是掉头往别处走",
+          a is not None and a.kind == "wait", f"{a.kind if a else None}")
+
+    # 模态框必须先关干净, 否则下一条 flow 会在别人的弹窗上动手
+    for page, extra, want in [
+            ("stage_popup", [B(V.TASK_START, cy=0.85)], V.BACK),
+            ("formation", [B(V.SORTIE, cx=0.85, cy=0.9)], V.BACK),
+            ("sweep_dialog", [B(V.SWEEP_BATCH_START, cy=0.85),
+                              B(V.CLOSE_X, cx=0.9, cy=0.15)], V.CLOSE_X)]:
+        a, _ = go(page, "task_hall", extra=extra)
+        check(f"{page} 归位时先关掉, 绝不留给下一条 flow",
+              a is not None and a.target_cls == want,
+              f"{getattr(a, 'target_cls', None)}")
+
+    # 同一次归位不许换策略(用户点名: 不要又点返回又点大厅)
+    a1, p1 = _nv.route(O(B(V.BACK, cx=0.05, cy=0.06)),
+                       _SV(page="arena", frames_in_page=10), "lobby", None)
+    check("选了回大厅但屏上暂时没有, 等它而不是改用返回键",
+          a1 is not None and a1.kind == "wait" and p1.get("mode") == "home",
+          f"{a1.kind if a1 else None}")
+    a2, p2 = go("arena", "lobby", plan=p1)
+    check("回大厅键出现后按原策略点它",
+          a2 is not None and a2.target_cls == V.HOME and p2.get("mode") == "home")
+
+    # 每条 flow 都得声明入口层, 且必须是层级图里认得的页面
+    from routing_v2.flow.registry import ALL as _ALL
+    bad = [n for n, c in _ALL.items()
+           if getattr(c, "entry_page", "") != "lobby"
+           and _nv.depth(getattr(c, "entry_page", "")) < 0]
+    check("每条 flow 的 entry_page 都在层级图里", not bad, str(bad))
+
+    # Gate 的逐次上下文必须能清(跨 flow 泄漏会误拦/误放)
+    from routing_v2.act.gate import Gate as _G
+    g = _G(cfg())
+    g._pending = {"cls": "x"}
+    g._last = (0.1, 0.2, "旧flow点的键")
+    g._fires = 5
+    g.stats["pass"] = 7
+    g.reset()
+    check("Gate.reset 清掉 _pending/_last/_fires 但保留统计",
+          g._pending is None and g._last is None and g._fires == 0
+          and g.stats["pass"] == 7)
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
     t_gate()
     t_flows()
+    t_route()
     t_config()
     t_invariants()
     t_vocab()

@@ -41,6 +41,7 @@ _TICKET_RAIL = (0.0, 0.10, 0.30, 1.0)
 class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     name = "arena"
     module = "arena"
+    entry_page = "task_hall"
 
     def setup(self) -> None:
         self.state.update(fights=0, tickets0=None, tickets=None,

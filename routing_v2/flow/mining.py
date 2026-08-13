@@ -33,14 +33,18 @@ _SOURCE_CLS = {
 class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     name = "story_mining"
     module = "story_mining"
+    # 撞到「下一章節」框时点 觀看 而不是 中斷（只对这条 flow 成立）
+    watch_next_chapter = True
+    entry_page = "task_hall"
 
     def setup(self) -> None:
         self.state.update(nodes=0, src_i=0, ap0=None, scrolls=0)
         self.want_team = 1
-        # 用户 2026-08-11:「要连着推的话可以不用中断出来」——
-        #   这条 flow 就是来看剧情的，撞到「下一章節」框应该点 **觀看** 连着推，
-        #   而不是像别的 flow 那样逃出来。意图放 bag 里传给全局 interceptor。
-        self.ctx.bag["watch_next_chapter"] = True
+        # 「下一章節」框点 觀看 还是 中斷 —— 这条 flow 是来看剧情的，
+        #   要连着推。**这个意图属于本 flow，不能写进全局 ctx.bag**:
+        #   所有 flow 在 `build()` 时就一次性构造完，`setup()` 里往 bag 一写，
+        #   整轮每条 flow 的剧情逃生语义都被反转成「觀看」，而且没有清除路径。
+        #   改成类属性，由 runner 按**当前**flow 读（见 runner 主循环）。
 
     # ── 进场 ────────────────────────────────────────────────────────────
     def on_lobby(self, obs, st):

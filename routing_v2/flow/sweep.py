@@ -34,6 +34,7 @@ CONFIRM_BAND = (0.20, 0.55, 0.95, 0.92)
 
 
 class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
+    entry_page = "task_hall"
     ticket_cls: str = ""
     hub_tile: str = ""
     branch_cls: tuple = ()
@@ -93,6 +94,8 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         return ordered + (rest if not want else [])
 
     def _on_branch(self, obs, st):
+        # 真回到分支页了，换分支这件事才算做成（数事实不数意图）
+        self.state["switching"] = False
         if obs.has([V.STAGE_ENTER, V.STAGE_ENTER_LOCKED], 0.45, region=STAGE_PANEL):
             return None                      # 已经在关卡列表了
         opts = self._branch_order(obs)
@@ -139,6 +142,18 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
 
     # ── 关卡列表 ────────────────────────────────────────────────────────
     def _on_stage_list(self, obs, st):
+        # 换分支**必须真的走回去**，不能只把索引加一（2026-08-12 体外复现）:
+        #    原来 `_next_branch_or_done` 只 `branch_i += 1` 然后 return wait，
+        #    而 wait 不产生任何动作、页面身份不变，于是**同一个判据下一 tick
+        #    原样再成立** —— 实测 tick61/62/63 连着把 branch_i 推到 3 收工，
+        #    日志连打三行「换下一个分支」，屏幕从头到尾停在第一个学院的关卡列表，
+        #    千年/格黑娜一张票没打就报了结果。
+        #    （用户 08-12:「学园交流会也有黄点说明之前也没打好」的另一半原因。）
+        #     latch + 真导航：置 `switching` 后先退回分支页，`_on_branch` 里
+        #      真到了才清掉 latch，期间判据再成立也不许重复自增。
+        if self.state.get("switching"):
+            return self.exit_step(obs, prefer_close=False) \
+                or wait("换分支: 等退回分支页的控件")
         tix = self._tickets(obs)
         if tix is not None:
             if self.state["tickets0"] is None:
@@ -166,7 +181,8 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 if self.cfg.get("use_tickets") == "keep_n" else 0
             if tix <= keep:
                 return self._next_branch_or_done(
-                    f"票用完了（剩 {tix}，保留线 {keep}）— 绝不买票")
+                    f"票用完了（剩 {tix}，保留线 {keep}）— 绝不买票",
+                    terminal=True)
 
         enters = obs.all(V.STAGE_ENTER, 0.45, region=STAGE_PANEL)
         if not enters:
@@ -177,7 +193,8 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 return self._next_branch_or_done("这个分支只有锁着的关")
             if tix is None:
                 # 票数读不出  fail-closed 不出击（金钱铁律 #3）
-                return self._next_branch_or_done("票数读不出  fail-closed，不出击")
+                return self._next_branch_or_done(
+                    "票数读不出  fail-closed，不出击", terminal=True)
             return self._next_branch_or_done("列表里没有入场键")
 
         # 滑到底：最低那个入场键的 y 不再变化 = 到底了。**不数次数。**
@@ -223,6 +240,9 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
 
     # ── 任務資訊  MAX  扫荡 ───────────────────────────────────────────
     def on_stage_popup(self, obs, st):
+        if self.state.get("switching"):
+            return (self.exit_step(obs, prefer_close=False)
+                    or wait("换分支: 先关掉这个面板"))
         # AP 闸（JFD 那类要 AP 的）。游戏自己会把 MAX 钳到付得起的次数，
         # 所以只要够一次就可以放心 MAX —— 老代码那道
         # `ap ≥ 票数×每次AP` 的闸会在票多 AP 少时退化成"只扫 1 次"。
@@ -230,7 +250,8 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
             ap = R.read_topbar(obs, R.AP)
             if ap is not None and ap < self.ap_per_sweep:
                 return self._next_branch_or_done(
-                    f"AP {ap} < 一次扫荡 {self.ap_per_sweep} — 收工（绝不买 AP）")
+                    f"AP {ap} < 一次扫荡 {self.ap_per_sweep} — 收工（绝不买 AP）",
+                    terminal=True)
 
         # 没票守卫：**数量步进整行全灰**（减号灰+加号灰、行内无亮态）= 票 0。
         #    08-08 实测：MAX 排干 6 票回到面板，flow 还想再扫 —— 0 票按下去
@@ -250,7 +271,8 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 if x is not None and self.pending("noticket_x"):
                     return tap_box(x, "步进器整行全灰 = 没票可扫  关面板",
                                    once="noticket_x")
-                return self._next_branch_or_done("数量步进全灰 — 没票可扫了")
+                return self._next_branch_or_done(
+                    "数量步进全灰 — 没票可扫了", terminal=True)
 
         mx = obs.find(V.QTY_MAX, 0.20)      # 弱类，蓝 MAX 上只到 conf≈0.26
         if mx is not None and self.pending("maxed"):
@@ -274,7 +296,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 self.state["tickets"] = 0
                 return self._next_branch_or_done(
                     "步进器数量读出来是 0 —— 一次也扫不了（掃蕩鍵亮着也不点，"
-                    "点下去就是买 AP/买票的框）")
+                    "点下去就是买 AP/买票的框）", terminal=True)
             self.once_reset("maxed", "apcheck")
             return tap_box(go, f"扫荡开始（数量 {n if n is not None else '?'}）")
         if obs.has(V.TASK_START, 0.35):
@@ -299,18 +321,31 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         return self.on_stage_popup(obs, st)
 
     # ── 收尾 ────────────────────────────────────────────────────────────
-    def _next_branch_or_done(self, why: str) -> Action:
+    def _next_branch_or_done(self, why: str, terminal: bool = False) -> Action:
+        """换下一个分支；`terminal=True` 表示这条理由对**所有分支**都成立。
+
+        票是分支共用的（悬赏 1/6 总数、交流会同理），所以「票用完 / 票读不出 /
+           AP 不够」在别的分支上一样成立 —— 挨个走过去只是白跑三趟导航。
+           只有「这个分支没关可打 / 只有锁着的关 / 这个分支配额用完」才该换。
+        """
+        if self.state.get("switching"):
+            return wait("已经在换分支了，别重复自增")
+        want = (self.cfg.get("branches") or self.cfg.get("academies")
+                or list(self._plan().keys()))
         self.state["branch_i"] += 1
         # branch_tix0 必须跟着分支一起清 —— 不清的话下一个分支拿上一个的
         #   票基线算 used，配额会瞬间"用完"直接跳过。
         self.state.update(swipes=0, last_low_y=-1.0,
                           branch_name="", branch_tix0=None)
         self.once_reset("maxed", "apcheck")
-        want = (self.cfg.get("branches") or self.cfg.get("academies")
-                or list(self._plan().keys()))
+        if terminal:
+            return self._wrap(why)
         if self.state["branch_i"] < max(1, len(want)):
-            self.log(f"{why}  换下一个分支")
+            self.log(f"{why}  换下一个分支（先退回分支页）")
             self.note_lines.append(why)
+            # 只置 latch，真正的导航动作由 `_on_stage_list` / `on_stage_popup`
+            #   下一帧发出（那里能看到当前屏上有哪个退出控件）。
+            self.state["switching"] = True
             return wait(f"换分支: {why}")
         return self._wrap(why)
 
