@@ -48,10 +48,27 @@ class ScheduleFlow(ExitMixin, Flow):
             return tap_box(start, "課程表開始（上课）", counter="lessons")
         # **带绿勾的头像 = 今天已经上过课**（08-08 实测：conf argmax 总选中
         #    已完成的 0.99 那位  她的资讯弹窗里没有開始键  死循环）。
+        # 归属必须是 **1:1 最近邻**，不能是"附近有勾就算"（2026-08-13 实测）:
+        #    绿勾长在自己学生的右上角、偏移约 (+0.028, -0.030)，而**学生横向
+        #    间距只有 0.057** —— 原判据的容差 `|dx| < 0.06` 比间距还大，
+        #    于是每个学生都能蹭到**邻居**的勾。真帧实证: 屏上只有 2 个绿勾，
+        #    却判出 3 个学生"已选"，`美咲泳装` 蹭了 `花子` 的勾（dx=-0.036）
+        #    被当成上过课直接跳过。
+        #     换成"每个绿勾只认领离它最近的那一个学生"。这条**不含任何写死的
+        #      比例**，换分辨率/宽高比都成立（用户 2026-08-13 定的规矩）。
         checks = obs.all(V.GREEN_CHECK, 0.40)
+        _studs_all = [b for b in obs.boxes
+                      if b.model == "avatar" and b.conf >= 0.45]
+        _owned = set()
+        for c in checks:
+            if not _studs_all:
+                break
+            near = min(_studs_all,
+                       key=lambda s: (s.cx - c.cx) ** 2 + (s.cy - c.cy) ** 2)
+            _owned.add(id(near))
+
         def _done(b):
-            return any(abs(c.cx - b.cx) < 0.06 and abs(c.cy - b.cy) < 0.08
-                       for c in checks)
+            return id(b) in _owned
         # **防空转黑名单**（08-10 live 实锤：连点「冬」三次，每次都
         #    「页内生效」但页面纹丝不动，票券卡在 5/7 不再消耗）。
         #    根因是绿勾判据的**粒度错了**：绿勾长在**学生**头像上，而"还能不能

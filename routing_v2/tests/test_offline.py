@@ -1240,6 +1240,23 @@ def t_route():
     check("屏面干净时才滑左栏", _a2 is not None and _a2.kind == "swipe",
           f"{_a2 and _a2.kind}")
 
+    # 绿勾归属必须 1:1 最近邻（2026-08-13 真帧量出来的）: 绿勾长在自己学生
+    #   右上偏移约 (+0.028,-0.030), 而学生横向间距只有 0.057 —— 旧判据
+    #   `|dx|<0.06` 比间距还大, 每个学生都能蹭到邻居的勾。实帧: 2 个绿勾
+    #   判出 3 个"已选", `美咲泳装` 蹭了 `花子` 的勾被跳过。
+    _sc = ALL["schedule"](Ctx(cfg=cfg(), log=lambda m: None))
+    _stu = [Box(cls=n, conf=0.95, model="avatar",
+                x1=cx - 0.02, y1=0.38, x2=cx + 0.02, y2=0.42)
+            for n, cx in (("斯大萝", 0.403), ("花子", 0.460), ("美咲泳装", 0.524))]
+    _chk = [Box(cls=V.GREEN_CHECK, conf=0.96,
+                x1=cx - 0.008, y1=0.358, x2=cx + 0.008, y2=0.376)
+            for cx in (0.431, 0.488)]
+    _ob = Observation(boxes=_stu + _chk, seq=1, w=3840, h=2160)
+    _act = _sc._roster_panel(_ob)
+    check("2 个绿勾只认领 2 个学生 — 没勾的那位仍会被选中",
+          _act is not None and _act.target_cls == "美咲泳装",
+          f"{_act and _act.target_cls}")
+
     # **抢拍**（用户 2026-08-13:「咖啡厅依旧抢拍乱点，课程表也是抢拍」）:
     #   点一个学生 -> 面板盖上来 -> 那个学生名消失 -> 默认契约当场"兑现" ->
     #   下一帧点下一个学生。每一发目标 cls 都不同, 连发闸不管。
