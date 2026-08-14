@@ -30,7 +30,9 @@ import numpy as np
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, r"D:\Project\ai game secretary")
+sys.path.insert(0, r"D:\Project\ai game secretary\scripts")
 from vision.io_utils import imread_any  # noqa: E402
+import cls_domains as _D  # noqa: E402  域边界唯一权威
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 
@@ -49,9 +51,9 @@ def _latest_battle_weights() -> str:
 
 
 WEIGHTS = _latest_battle_weights()
-MASTER = [l.strip() for l in
-          open(RAW / "_classes.txt", encoding="utf-8") if l.strip()]
-NAME2IDX = {n: i for i, n in enumerate(MASTER)}
+# 按行号原样读(剔空行会让 idx 整体错位 -- cls_domains.load_master 的坑注)
+MASTER = _D.load_master(str(RAW / "_classes.txt"))
+NAME2IDX = {n: i for i, n in enumerate(MASTER) if n}
 MIN_TRACK_LEN = 3
 MAX_GAP = 3
 
@@ -72,6 +74,8 @@ def main():
     tracks = defaultdict(list)   # tid -> [(fi, mi, conf, xc,yc,w,h)] 身份类
     hud_frames = defaultdict(list)   # fi -> [(mi, xc,yc,w,h)] HUD 单帧直写
     per_frame_plain = []         # 单帧基线: conf 0.35 会保留的框数
+    # 丢弃计数: 静默丢弃是缺陷(2026-08-13 猎杀), 每个丢弃分支必须出声
+    n_unmapped = n_off_domain = n_no_tid = 0
     for fi, p in enumerate(jpgs):
         img = imread_any(str(p))
         r = model.track(img, persist=True, conf=0.10, iou=0.5, imgsz=960,
@@ -84,6 +88,7 @@ def main():
             for b in r.boxes:
                 mi = n2m.get(int(b.cls[0]))
                 if mi is None:
+                    n_unmapped += 1      # 权重词表名不在 master: 出声, 不静默扔
                     continue
                 conf = float(b.conf[0])
                 if conf >= 0.35:
@@ -91,11 +96,18 @@ def main():
                 x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
                 box = ((x1 + x2) / 2 / W, (y1 + y2) / 2 / H,
                        (x2 - x1) / W, (y2 - y1) / H)
-                if mi < 476:                 # HUD 状态类: 单帧直写不进轨迹
+                # HUD 状态类单帧直写不进轨迹; 身份类按域表判(旧 `mi < 476`
+                #    在新 battle 身份类落到 484+ 时会把它当 HUD, 静默不进轨迹
+                #    -- 2026-08-13 猎杀静默噪音: 边界一律走 cls_domains)
+                if mi in _D.BATTLE_HUD:
                     if conf >= 0.35:
                         hud_frames[fi].append((mi, *box))
                     continue
+                if not (_D.BATTLE_ID[0] <= mi <= _D.BATTLE_ID[1]):
+                    n_off_domain += 1        # 非 battle 域检出: 出声, 不静默扔
+                    continue
                 if b.id is None:
+                    n_no_tid += 1
                     continue
                 tracks[int(b.id[0])].append((fi, mi, conf, *box))
         per_frame_plain.append(n_plain)
@@ -136,6 +148,13 @@ def main():
     print(f"track版 总框: {total_track}  "
           f"(轨迹捞回低分框 {n_lowconf_saved} + 插值补 {n_interp})")
     print(f"短命轨迹丢弃 {n_short} 条 | 类别投票纠正 {n_vote} 框")
+    print(f"pass1 丢弃: 词表不在master {n_unmapped} | 非battle域检出 "
+          f"{n_off_domain} | 无轨迹id {n_no_tid}")
+    if n_unmapped or n_off_domain:
+        total_in = total_track + n_unmapped + n_off_domain
+        if total_in and (n_unmapped + n_off_domain) / total_in > 0.30:
+            print("WARN: 丢弃占比超过 30% -- 权重词表和 master/域表多半错位了, "
+                  "先查再写盘")
 
     if apply:
         stamp = time.strftime("%Y%m%d_%H%M%S")

@@ -38,8 +38,26 @@ def done(key: str) -> bool:
 
 
 def mark(key: str) -> None:
-    """记账（写穿 -- 掉线/重启不丢今天的账）。"""
-    d = _load()
-    d[key] = True
+    """记账（写穿 -- 掉线/重启不丢今天的账）。
+
+    ⛔「读-改-整份写回」的台账, **读失败时必须放弃写**(event_topped 2026-08-12
+    数据丢失同型: 读失败吞成空字典, 加一条写回去把当天已有的账全抹了)。
+    只有三种情况允许写: 文件不存在 / 正常读到今天的账 / 真的换游戏日了。
+    """
     _FILE.parent.mkdir(parents=True, exist_ok=True)
+    if _FILE.exists():
+        try:
+            d = json.loads(_FILE.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                raise ValueError("daybook 不是 dict")
+        except Exception:
+            # 文件在但读不出 = 损坏/写一半 -- 宁可少记这一条, 绝不用
+            #    空表覆盖真实台账
+            print(f"[daybook] 读失败, 放弃记账 {key}（不覆盖现有文件）")
+            return
+        if d.get("day") != game_day():
+            d = {"day": game_day()}      # 真换日: 开新账本
+    else:
+        d = {"day": game_day()}
+    d[key] = True
     _FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")

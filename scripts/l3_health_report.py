@@ -81,19 +81,18 @@ def scan_run(run_dir_str: str):
 
 
 def load_domains() -> dict:
-    """master 表  cls 名  域(ui/avatar/battle)。与 audit_cls_usage 同口径。"""
-    master = (REPO / "data" / "raw_images" / "_classes.txt").read_text(
-        encoding="utf-8").splitlines()
+    """master 表  cls 名  域(ui/avatar/battle)。
+
+    唯一权威 = scripts/cls_domains.py(2026-08-13 修: 旧写法把 476 起全划
+    battle, 484-527 的 41 个活 UI 类被错分, 健康报告的域统计全歪)。
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(REPO / "scripts"))
+    from cls_domains import domain, load_master
     out = {}
-    for i, name in enumerate(n.strip() for n in master):
-        if not name:
-            continue
-        if 143 <= i <= 394:
-            out[name] = "avatar"
-        elif i >= 476:
-            out[name] = "battle"
-        else:
-            out[name] = "ui"
+    for i, name in enumerate(load_master()):
+        if name:
+            out[name] = domain(i)
     return out
 
 

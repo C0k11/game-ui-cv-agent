@@ -80,17 +80,19 @@ def fam(n: str) -> str:
 
 
 def owner(i: int) -> str:
-    """这个 idx 归哪个模型。
+    """这个 idx 归哪个模型。唯一权威 = scripts/cls_domains.py。
 
     ⛔ `_classes.txt` 是**三个模型共用的 master 表**（memory val_set_crisis:
        「485 是三模型共用 master 表别拿它当 UI 分母」）。不分段就会把 252 个
        学生名当成「UI 模型 train=0 的缺口」—— ui_v2 数据集里本来就不该有它们。
+    2026-08-13 修: 旧本地写法 `476..483 -> battle` 漏了 484 战斗失败
+       (build_battle_v11 REMAP 在训它), UI 分母虚高 1。
     """
-    if 143 <= i <= 394:
-        return "avatar"          # 学生名, fused_avatar 模型
-    if 476 <= i <= 483:
-        return "battle"          # 战场实体, battle 模型（用户点名不进 UI）
-    return "ui"
+    import os as _os
+    import sys as _sys
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from cls_domains import domain
+    return domain(i)
 
 
 families = defaultdict(list)

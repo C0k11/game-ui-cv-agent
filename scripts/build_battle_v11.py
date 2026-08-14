@@ -26,9 +26,14 @@ v11 是正式的：那 6 池已经**全部人审完**，连同今天新采的走
 import random
 import shutil
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+sys.path.insert(0, str(Path(__file__).parent))
+import cls_domains as _D  # noqa: E402
+
+DROPPED = Counter()      # 不在 REMAP 被丢的标注, 按 master idx 计数
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 VAL_POOL = RAW / "run_20260715_025638_botplay_clean"     # 纯人工标, 主量尺
@@ -65,8 +70,16 @@ def load(txt: Path):
     out = []
     for raw in txt.read_text(encoding="utf-8").splitlines():
         p = raw.split()
-        if len(p) >= 5 and int(p[0]) in REMAP:
-            out.append(" ".join([str(REMAP[int(p[0])])] + p[1:5]))
+        if len(p) < 5:
+            continue
+        mi = int(p[0])
+        if mi in REMAP:
+            out.append(" ".join([str(REMAP[mi])] + p[1:5]))
+        else:
+            # 不在 REMAP 的标注被丢弃是**设计**(混合池里的 UI/头像标注不属于
+            #    battle 域), 但丢弃必须出声 -- 新加的 battle 身份类忘了进
+            #    REMAP 就是 41% 静默丢框那个病(2026-08-13 猎杀静默噪音)
+            DROPPED[mi] += 1
     return out
 
 
@@ -138,6 +151,24 @@ def main() -> None:
         if cnt["train"][i] or cnt["val"][i]:
             flag = "  val=0" if cnt["train"][i] and not cnt["val"][i] else ""
             print(f"{n:<12}{cnt['train'][i]:>8}{cnt['val'][i]:>7}{flag}")
+
+    # 丢弃对账: 非 battle 域(UI/头像混在池里)被丢是设计; battle 域被丢
+    #    = REMAP 漏了类, 这就是"静默丢 41%"那个病, 必须喊出来
+    if DROPPED:
+        master = _D.load_master()
+        total_drop = sum(DROPPED.values())
+        print(f"\n丢弃(不在 REMAP) 共 {total_drop} 框:")
+        bad = []
+        for mi, c in DROPPED.most_common(12):
+            nm = master[mi] if mi < len(master) else "?"
+            dom = _D.domain(mi)
+            print(f"  {mi:>4} {nm[:24]:<26} {c:>6}  域={dom}")
+            if dom == "battle":
+                bad.append((mi, nm, c))
+        if bad:
+            print("WARN: 以上有 battle 域标注被丢 -- REMAP 漏类了, 训练前必须修:")
+            for mi, nm, c in bad:
+                print(f"  REMAP 缺 {mi}({nm}) 丢了 {c} 框")
 
 
 if __name__ == "__main__":

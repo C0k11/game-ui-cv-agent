@@ -25,22 +25,15 @@ from collections import Counter
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _MASTER = os.path.join(_ROOT, "data", "raw_images", "_classes.txt")
 
-# master 索引域划分(与训练路由约定一致)
-_AVATAR_LO, _AVATAR_HI = 143, 394
-_BATTLE_LO = 476
-
-
-def domain(i: int) -> str:
-    if _AVATAR_LO <= i <= _AVATAR_HI:
-        return "avatar"
-    if i >= _BATTLE_LO:
-        return "battle"
-    return "ui"
+# master 索引域划分: 唯一权威在 scripts/cls_domains.py(2026-08-13 修:
+#    旧写法 `i >= 476 -> battle` 把 484-527 共 44 槽/41 个活 UI 类错分成
+#    battle -- 常设审计自己在撒谎; 旧 load_master 还会剔空行造成 idx 错位)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cls_domains import domain, load_master as _load_master_indexed  # noqa: E402
 
 
 def load_master() -> list:
-    with open(_MASTER, encoding="utf-8") as f:
-        return [ln.strip() for ln in f if ln.strip()]
+    return _load_master_indexed(_MASTER)
 
 
 # val 池必须排除(2026-07-25 第二次"审计工具自身有 bug"):

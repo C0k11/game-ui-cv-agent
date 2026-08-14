@@ -273,7 +273,12 @@ class Ledger:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(e.as_dict(), ensure_ascii=False) + "\n")
         except Exception:
-            pass
+            # 金钱台账的磁盘审计链断了必须出声(内存里的账还在, 但落盘的
+            #    对账记录会缺条 -- 静默缺条比报错危险)
+            self._wfail = getattr(self, "_wfail", 0) + 1
+            if self._wfail == 1:
+                self._log(f"[ledger] 台账落盘失败(路径 {self.path}) -- "
+                          f"内存账不受影响, 但磁盘审计链在缺条")
 
     # ── 报告 ────────────────────────────────────────────────────────────
     def report(self) -> str:
@@ -299,5 +304,9 @@ class Ledger:
                 d = b.value - a.value
                 lines.append(f"    {b.as_dict()['time']}  {a.value:,}  {b.value:,}"
                              f"  ({'+' if d > 0 else ''}{d:,})  flow={b.flow} page={b.page}")
+        wfail = getattr(self, "_wfail", 0)
+        if wfail:
+            lines.append(f"  WARN: 落盘失败 {wfail} 条 -- 磁盘明细不完整, "
+                         f"以上内存账才是全量")
         lines.append(f"  明细已落盘: {self.path}")
         return "\n".join(lines)

@@ -247,6 +247,8 @@ class Runner:
                         .tofile(str(ad / f"{name}_ann.jpg"))
             return str(fp)
         except Exception:
+            # 飞轮素材静默缺帧比报错危险: 计数, 收尾时出声
+            self.stats.save_fails = getattr(self.stats, "save_fails", 0) + 1
             return None
 
     def _tr(self, st, act, extra=None):
@@ -996,8 +998,10 @@ class Runner:
         self.log("\n══ 本轮报告 ══════════════════════════════════════")
         for r in self.stats.reports:
             self.log("  " + r)
+        sf = getattr(self.stats, "save_fails", 0)
         self.log(f"\n  用时 {dur:.1f} 分 / {self.stats.ticks} tick / "
-                 f"{self.stats.taps} tap / 存帧 {self.stats.frames_saved}")
+                 f"{self.stats.taps} tap / 存帧 {self.stats.frames_saved}"
+                 + (f" / 存帧失败 {sf}(飞轮素材有缺, 查磁盘/路径)" if sf else ""))
         self.log(f"  闸: {self.gate.stats}")
         # 分工体检：YOLO 主导、OCR 只读数字。ocr/tick 比值应该很低（<5%）；
         #   接近 1 就说明有人把 OCR 塞进决策热路径了。
