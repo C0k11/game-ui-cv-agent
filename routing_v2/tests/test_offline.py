@@ -1065,6 +1065,18 @@ def t_invariants():
         for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
             if re.match(r"\s*def decide\s*\(", line):
                 overrides.append(f"flow/{p.name}:{i}")
+    # 数据集卫生(v17 修复战役的常设闸): val 无泄漏/无同坐标异类/单实例无双标。
+    #    --fast = 用哈希缓存 + train 抽样; 数据集不在本机就跳过(别绑死环境)。
+    import subprocess as _sp
+    _ds = Path("D:/Project/ml_cache/models/yolo/dataset/ui_v2")
+    if _ds.is_dir():
+        _r = _sp.run([sys.executable, "-X", "utf8",
+                      str(_ROOT / "scripts" / "audit_dataset_hygiene.py"),
+                      "--fast"], capture_output=True, text=True,
+                     encoding="utf-8", errors="replace")
+        check("ui_v2 数据集卫生（泄漏/同坐标异类/单实例双标）",
+              _r.returncode == 0,
+              (_r.stdout or "").strip().splitlines()[-1] if _r.stdout else "")
     check("flow 子类不许覆写 decide()（overlay 顺序会被跳过）",
           not overrides, str(overrides))
 
