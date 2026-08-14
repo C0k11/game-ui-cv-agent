@@ -7,7 +7,7 @@
   2. 同一 label 文件内无同坐标异类框: val 违例 = FAIL;
      train 违例暂 WARN(剩余 25 框等 P1 看图裁决, 裁完把 _TRAIN_STRICT 翻 True)。
   3. 单实例类(每日领奖7/点击继续字样142)无同帧多标(IoU>0.5 视为同物):
-     train+val 一律 FAIL(dedup_label_boxes 已清零, 再出现=回归)。
+     train+val 一律 FAIL(label_dedup 已清零, 再出现=回归)。
 
 用法: py -X utf8 scripts/audit_dataset_hygiene.py [--fast]
 --fast 跳过检查1的哈希现算(缓存缺失时直接 WARN 而不算, 给 test_offline 用)。
@@ -119,7 +119,7 @@ def check_labels(fast: bool = False) -> None:
             ok(f"{split} 无同坐标异类框")
         if n_single:
             fail(f"{split} 单实例类同帧多标 {n_single} 处 -- "
-                 f"跑 dedup_label_boxes --apply")
+                 f"跑 label_dedup --apply")
         else:
             ok(f"{split} 单实例类无同帧多标")
 
