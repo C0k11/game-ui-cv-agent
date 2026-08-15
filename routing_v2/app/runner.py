@@ -75,6 +75,21 @@ class RunStats:
     reports: List[str] = field(default_factory=list)
 
 
+def _dead_tap(same_tap: dict, key, sent: bool, cap: int = 4) -> bool:
+    """归位死路判定: 同一 (cls, 落点) **真发出去** cap 次画面仍没变才算死。
+
+    只数 sent=true（08-15 复盘）: 原来数提案, 被 advance/dedup 按住的空提案
+       也 +1 —— 12 次"连发 7 次"里典型只有 1 发真 tap, 闸的正常工作被数成
+       "按钮死了", 真按钮只挨一下就被放弃。换目标即清零。
+    """
+    if same_tap.get("key") != key:
+        same_tap["key"] = key
+        same_tap["n"] = 0
+    if sent:
+        same_tap["n"] += 1
+    return same_tap["n"] >= cap
+
+
 class Runner:
     def __init__(self, cfg: Optional[dict] = None, log: Callable = print,
                  approver: Optional[Callable[[Action, Observation], bool]] = None):
@@ -109,6 +124,7 @@ class Runner:
         #               这份是给复盘用的（[[log_is_not_truth]]: 要的是事实不是叙述）。
         self._max_taps = int(self.run.get("max_taps", 0) or 0)
         self._trace = None
+        self._sent_seq = 0        # 真发出去的 tap 总数（归位死路判定只数它）
 
     def state_blank_taps(self) -> int:
         self._blank_taps += 1
@@ -469,6 +485,8 @@ class Runner:
 
         ok = self.device.tap(act.x, act.y)
         self.stats.taps += 1
+        if ok:
+            self._sent_seq += 1
         self._tr(st, act, {"sent": bool(ok), "taps": self.stats.taps})
         if ok and act.money:
             # 已授权金钱步**真的发出去了** -> 给购买框 12s 宽限窗
@@ -604,8 +622,13 @@ class Runner:
         t0 = time.time()
         # 同一目标连点保险（2026-08-13 实录: 任务进行中归位链认不出路,
         #    back 键弹任務資訊框 -> 框被判 ack_dialog 点確認关掉 -> back 又弹
-        #    -> 乒乓 60 发烧光整轮预算）。同一 (cls, 落点) 连发 6 次画面身份
-        #    还没变 -> 这条归位路是死的, 停下来交班, 别把预算烧光。
+        #    -> 乒乓 60 发烧光整轮预算）。同一 (cls, 落点) **真发出去** 4 次
+        #    画面还没变 -> 这条归位路是死的, 停下来交班, 别把预算烧光。
+        # 08-15 复盘改法: 原来数的是**提案**且在 _dispatch 之前数 —— 昨晚
+        #    12 次"连发 7 次"里典型形态是 1 发真 tap + 5 发被 advance/dedup
+        #    按住的提案, 第 7 个提案就地交班: **把闸的正常工作数成了按钮死了**,
+        #    真按钮只挨了一下就被判死(jfd 残留任務資訊的叉叉, event 接手后
+        #    同一坐标点开了)。现在只数 sent=true(_dead_tap), 判死档降到 4 发。
         same_tap = {"key": None, "n": 0}
         self.log(f"[run] 归位到 `{target}` 再交班")
         while time.time() - t0 < budget:
@@ -662,16 +685,17 @@ class Runner:
                         or nav.back_key(obs, "归位: 屏上无退出控件，系统返回键")
             if act is None or act.kind == "done":
                 continue
-            # 同一 (目标, 落点) 连发保险 -- 见上面 same_tap 的注释
-            if act.kind == "tap":
-                k = (act.target_cls, round(act.x, 2), round(act.y, 2))
-                same_tap["n"] = same_tap["n"] + 1 if same_tap["key"] == k else 1
-                same_tap["key"] = k
-                if same_tap["n"] > 6:
-                    self.log(f"[run] 归位在 `{k[0]}` 上连发 {same_tap['n']} 次"
-                             f"没变化 — 这条路是死的, 就地交班")
-                    return
+            # 同一 (目标, 落点) 连发保险 -- 见上面 same_tap 的注释。
+            #    先发再数: 只有**真发出去**的那发才进计数。
+            k = ((act.target_cls, round(act.x, 2), round(act.y, 2))
+                 if act.kind == "tap" else None)
+            before = self._sent_seq
             if not self._dispatch(act, obs, st):
+                return
+            if k is not None and _dead_tap(same_tap, k,
+                                           self._sent_seq > before):
+                self.log(f"[run] 归位在 `{k[0]}` 上真发了 {same_tap['n']} 次"
+                         f"仍没变化 — 这条路是死的, 就地交班")
                 return
         # 归位失败必须**出声**：接下来那条 flow 会在一个非预期的页面上开工。
         self.log(f"[run] 归位到 `{target}` 超了 {budget:.0f}s — 就地交班，"

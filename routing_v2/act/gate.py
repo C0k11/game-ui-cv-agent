@@ -44,6 +44,26 @@ _EXPECT_DIALOG_AFTER = frozenset({
     V.CLAIM_ALL_YELLOW, V.CLAIM_ONCE_YELLOW, V.CLAIM_YELLOW,
 })
 
+# arm 的严格档只认「点了**必然**弹确认框」的键（08-15 复盘: 昨晚 29 次契约
+#    超时里 26 次在死等确认/取消, 元凶是把整张 _EXPECT_DIALOG_AFTER 当严格
+#    契约表用 —— 那张表的本职是"眼前的框是 bot 请求的"正向证据(见 allow),
+#    表越全越安全; 但拿来当契约, 表里混着的**不弹框**成员就成了假超时:
+#      领取_黄族  下一层是奖励明细(点击继续), 从来没有确认框
+#        (trace t608 领取_黄 -> 70 帧死等 -> t678 才点到点击继续);
+#      任务开始  直接进编队页; 課程表開始  有时直接羁绊升级过场
+#        (t2022 -> t2092 羁绊升级, 无确认框)。
+#    两张表分开: 证据表**一个成员都不动**, 契约严格档用这张窄的。
+_ALWAYS_DIALOG = frozenset({
+    V.SWEEP_START, V.CRAFT_START,
+    V.SHOP_BUY, V.SHOP_BUY_SELECTED, V.SHOP_SELECT_ALL,
+    V.STORY_SKIP, V.STORY_MENU,
+    V.CAFE_INVITE, V.SORTIE,
+})
+# 步进器类: 点了之后**屏上不该出现任何等待物**, 自己也不消失 -- 默认契约
+#    expect_gone=(自己,) 对它永不兑现(MAX 点完还亮着), 也是 70 帧假超时。
+#    不设契约: 真正的检查点是下一发业务键(扫荡开始), 它在严格档里兜着。
+_FIRE_AND_FORGET = frozenset({V.QTY_MAX})
+
 _NAV_SAFE = frozenset({
     V.COMBO_PACK, V.CURRENCY, V.CURRENCY_SEL,          # 切 tab
     V.SHOP_TAB_CREDIT, V.SHOP_TAB_PYROXENE,
@@ -460,9 +480,10 @@ class Gate:
                              "n": 0, "t0": time.time(), "loose": False, "once": act.once_key,
                              "sig0": _sig(obs)}
             return
-        # **点了"会弹确认框"的键  契约就是"确认框出现"**（2026-08-12）。
-        #    `_EXPECT_DIALOG_AFTER` 这张表本来就登记着这类键，直接拿来用，
-        #    不用在每个 flow 里一处处手写。
+        # 步进器类不设契约（见 _FIRE_AND_FORGET 注释）。
+        if act.target_cls in _FIRE_AND_FORGET:
+            return
+        # **点了"必然弹确认框"的键  契约就是"确认框出现"**（2026-08-12）。
         #    为什么默认契约在这里**必然误判**：确认框一弹出来就把按钮盖住了
         #       `expect_gone=(自己,)` 立刻"兑现"放行  flow 下一帧决策时
         #      确认框还没被识别成 overlay，就一路走到退出分支 ——
@@ -471,7 +492,10 @@ class Gate:
         #        **战术大赛商店「選擇購買」 弹確認框  直接点返回键跑了**
         #        （用户:「体力饮料选了购买的时候…然后就有跑了」，能量饮料没买成）。
         #     走严格档（loose=False）：确认框真出现才算这一发生效。
-        if act.target_cls in _EXPECT_DIALOG_AFTER:
+        #    08-15 收窄: 这里原来用整张 _EXPECT_DIALOG_AFTER, 把领取_黄/任务
+        #    开始/課程表開始这些**不弹框**的键也锁进"死等确认/取消"（26/29 次
+        #    假超时）。它们现在落到下面的默认契约（自己消失 = 生效）。
+        if act.target_cls in _ALWAYS_DIALOG:
             self._pending = {"expect": (V.CONFIRM, V.CANCEL), "expect_gone": (),
                              "cls": act.target_cls, "reason": act.reason,
                              "n": 0, "t0": time.time(), "loose": False, "once": act.once_key,

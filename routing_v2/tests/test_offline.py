@@ -2214,6 +2214,66 @@ def t_event_bonus_shop():
         _RD.read_topbar = _orig_topbar
 
 
+def t_deadbtn():
+    """死按钮复盘（08-15）: 假超时 = 契约把不弹框的键锁进死等确认/取消;
+    归位假死 = 把被闸按住的提案数成连发。两刀分别在 gate.arm 和 _dead_tap。"""
+    print("\n── 死按钮: 契约拆档 + 归位只数真发 ─────────────")
+    from routing_v2.act.action import tap_box as _tb
+    from routing_v2.act.gate import _EXPECT_DIALOG_AFTER as _DLG_EVIDENCE
+
+    ga = Gate(cfg(), log=lambda m: None)
+    ga.arm(_tb(B(V.CLAIM_YELLOW, cx=0.50, cy=0.73), "领取"),
+           O(B(V.CLAIM_YELLOW, cx=0.50, cy=0.73)))
+    check("领取_黄 点完不再死等确认框(契约=自己消失)",
+          ga._pending is not None and ga._pending["expect"] == ()
+          and V.CLAIM_YELLOW in ga._pending["expect_gone"],
+          str(ga._pending))
+    _nxt = Action(kind="tap", x=0.50, y=0.88, reason="继续",
+                  target_cls=V.STORY_TAP_CONTINUE)
+    ga._pending["n"] = 5              # 拨过节拍闸(_MIN_HOLD): 只测兑现语义
+    ga._pending["t0"] -= 5.0
+    _v = ga.advance(_nxt, O(B(V.GOT_REWARD, cx=0.50, cy=0.22),
+                            B(V.STORY_TAP_CONTINUE, cx=0.51, cy=0.88)),
+                    page_changed=False, retry_frames=70)
+    check("奖励层盖住领取键 = 契约几帧内兑现, 不再空等 70 帧", _v.ok, _v.why)
+
+    gb = Gate(cfg(), log=lambda m: None)
+    gb.arm(_tb(B(V.QTY_MAX, cx=0.85, cy=0.42), "MAX"), O())
+    check("MAX_可点击=步进器不设契约(自己不消失, expect_gone 永不兑现)",
+          gb._pending is None, str(gb._pending))
+
+    gc2 = Gate(cfg(), log=lambda m: None)
+    gc2.arm(_tb(B(V.SWEEP_START, cx=0.73, cy=0.56), "扫荡"), O())
+    check("扫荡开始仍是严格档(真会弹确认框, 回归护栏)",
+          gc2._pending is not None and V.CONFIRM in gc2._pending["expect"],
+          str(gc2._pending))
+
+    gd = Gate(cfg(), log=lambda m: None)
+    gd.arm(_tb(B(V.TASK_START, cx=0.73, cy=0.75), "任务开始"), O())
+    check("任务开始契约=弹窗自己关(直进编队, 不等确认框)",
+          gd._pending is not None and gd._pending["expect"] == (),
+          str(gd._pending))
+    check("确认合法性证据表一个成员不动(领取/任务开始仍算 bot 请求过框)",
+          V.CLAIM_YELLOW in _DLG_EVIDENCE and V.TASK_START in _DLG_EVIDENCE
+          and V.QTY_MAX in _DLG_EVIDENCE)
+
+    from routing_v2.app.runner import _dead_tap
+    stp = {"key": None, "n": 0}
+    kk = ("确认键", 0.5, 0.68)
+    _seq = [_dead_tap(stp, kk, True)] + [_dead_tap(stp, kk, False)
+                                         for _ in range(5)]
+    check("1 发真 tap + 5 发被闸按住 != 死路(闸的正常工作不算按钮死)",
+          not any(_seq), str(stp))
+    check("真发满 4 次仍无变化才判死",
+          not _dead_tap(stp, kk, True) and not _dead_tap(stp, kk, True)
+          and _dead_tap(stp, kk, True), str(stp))
+    stp2 = {"key": None, "n": 0}
+    _dead_tap(stp2, kk, True)
+    _dead_tap(stp2, kk, True)
+    check("换了目标计数清零", not _dead_tap(stp2, ("返回键", 0.04, 0.05), True),
+          str(stp2))
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -2224,6 +2284,7 @@ if __name__ == "__main__":
     t_invariants()
     t_vocab()
     t_ledger()
+    t_deadbtn()
     t_event_bonus_shop()
     print("\n" + "═" * 52)
     if FAILS:
