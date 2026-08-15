@@ -528,6 +528,10 @@ def t_flows():
           f"phase={evb.state['phase']}")
     evb2 = ALL["event"](ctx)
     evb2.state["phase"] = "bonus_sweep"        # 直接跳到但没赢过
+    # 08-15 起 _topped_mark 对 bag fixture 只写内存（不再污染真实台账文件）,
+    #    上面 evb 那场胜利会把 "0" 记进**共享的** ctx.bag —— 这条用例的前提
+    #    是"台账里什么都没有", 必须自带干净台账。
+    ctx.bag["event_topped"] = {}
     a = evb2.decide(lst2, Machine(1).update(lst2))
     check("没赢过直接进ate  BLOCKED，拒绝低倍率扫荡",
           a is not None and a.kind == "done" and a.outcome == "BLOCKED", str(a))
@@ -2056,6 +2060,120 @@ def t_ledger():
         led.path.unlink(missing_ok=True)
 
 
+def t_event_bonus_shop():
+    """08-15 复盘三修: 兜底过台账 / 台账写入口防测试污染 / 商店拒买不拒推算。"""
+    print("\n── 活动加成台账与商店扫买 ───────────────────")
+    import routing_v2.percept.read as _RD
+    _orig_topbar = _RD.read_topbar
+    _RD.read_topbar = lambda o, c: (500 if c == _RD.AP else _orig_topbar(o, c))
+    lst2 = O(B(V.EVENT_SHOP, cx=0.1, cy=0.5), B(V.EVENT_QUEST_SEL, cx=0.6, cy=0.15),
+             B(V.STAGE_ENTER, cx=0.9, cy=0.70), B(V.STAR_3, cx=0.6, cy=0.70),
+             B(V.AP, conf=0.9, cx=0.40, cy=0.033))
+    try:
+        # ── 修1: plan 空(推算被金钱闸拦掉/文件过期)时, 兜底关也要过台账 ──
+        #    08-15 实锤: 台账里 02:24 刚顶过倒数第 1 关, 第三通道 plan 空,
+        #    跳过循环被 `plan and ...` 短路 -> 又打了一场(20AP 白花)。
+        _ev = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+        _ev.state["phase"] = "bonus_clear"
+        _ev.ctx.bag["event_topped"] = {"0": "fixture 已顶"}
+        _ev.ctx.bag["event_farm_plan"] = []
+        _ev._plan_from_file = lambda: None       # 隔离真实计划文件
+        _m = Machine(1)
+        _ev.decide(lst2, _m.update(lst2))
+        check("plan 空 + 台账已顶: 兜底关不再重打, 直接转扫荡",
+              _ev.state["phase"] == "bonus_sweep",
+              f"phase={_ev.state['phase']}")
+        a = _ev.decide(lst2, _m.update(lst2))
+        check("兜底通道对上台账: 扫荡放行而不是 BLOCKED",
+              a is not None and a.kind != "done" and getattr(a, "is_tap", False)
+              and "扫荡" in (a.reason or ""), str(a))
+
+        # ── 修2: _topped_mark 对 bag fixture 只写内存, 真实台账文件不许碰 ──
+        #    08-12/08-15(x2) 三次实锤: 离线套件驱动"赢一场"路径把
+        #    data/routing_v2/event_topped.json 真写了。
+        _ev2 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+        _ev2.ctx.bag["event_topped"] = {}
+        _tp = _ev2._topped_path()
+        _before = _tp.read_bytes() if _tp.exists() else None
+        _ev2._topped_mark(7, "fixture 打赢")
+        check("bag fixture 台账: 落账写进内存",
+              "7" in _ev2.ctx.bag["event_topped"])
+        _after = _tp.read_bytes() if _tp.exists() else None
+        check("真实台账文件未被测试写过", _before == _after)
+
+        # ── 修3: event_shop 金钱被拒后不再试买, 但扫描推算照做 ──────────
+        #    附带回归: 滑动后停稳闸(假到底) + 自底向上单遍 + 双向滑幅同尺。
+        _orig_coin = _RD.read_event_coin
+        _RD.read_event_coin = lambda o: 189
+        _pf = _ROOT / "data" / "routing_v2" / "event_farm_plan.json"
+        _pf_bytes = _pf.read_bytes() if _pf.exists() else None
+        try:
+            es = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
+            es.state["moneyno:购买"] = 1          # 模拟第一发已被人审拒绝
+            v1 = O(B(V.SHOP_BUY, cx=0.5, cy=0.40, w=0.05, h=0.03),
+                   B(V.SHOP_BUY, cx=0.5, cy=0.62, w=0.05, h=0.03),
+                   B(V.CURRENCY_SEL, cx=0.08, cy=0.30, w=0.06, h=0.04))
+            v2 = O(B(V.SHOP_BUY, cx=0.5, cy=0.30, w=0.05, h=0.03),
+                   B(V.SHOP_BUY, cx=0.5, cy=0.52, w=0.05, h=0.03),
+                   B(V.CURRENCY_SEL, cx=0.08, cy=0.30, w=0.06, h=0.04))
+            _stq = Machine(1).update(v1)
+            acts = []
+
+            def step(o):
+                es.ticks += 1
+                a = es.on_event_shop(o, _stq)
+                acts.append(a)
+                if a is not None and getattr(a, "post", None):
+                    a.post()
+                return a
+
+            a1 = step(v1)
+            check("下行第一滑是向下(起点在下终点在上)",
+                  a1 is not None and a1.kind == "swipe" and a1.y > a1.y2,
+                  str(a1))
+            a2 = step(v1)
+            check("滑动后 10 tick 内不下结论(停稳闸, 根治一滑就假到底)",
+                  a2 is not None and a2.kind == "wait" and "停稳" in a2.reason,
+                  str(a2))
+            es.ticks += 10
+            step(v2)                              # 指纹变了 -> 继续下滑
+            es.ticks += 10
+            step(v2)                              # 指纹停变 -> 到底, 转上行
+            check("到底后转入自底向上购买", es.state.get("shelf_phase") == "up",
+                  str(es.state.get("shelf_phase")))
+            a5 = None
+            for _ in range(4):                    # 拒买状态下: 不出 money 步
+                a5 = step(v2)
+                if a5 is not None and a5.kind == "swipe":
+                    break
+            check("上行滑动方向相反(起点在上终点在下)",
+                  a5 is not None and a5.kind == "swipe" and a5.y < a5.y2,
+                  str(a5))
+            es.ticks += 10
+            step(v1)                              # 指纹变 -> 还在上行
+            es.ticks += 10
+            step(v1)                              # 指纹停变 -> 到顶, tab 扫完
+            fin = None
+            for _ in range(3):
+                fin = step(v1)
+                if fin is not None and fin.kind == "done":
+                    break
+            check("金钱被拒也要扫完出推算(不再整条 BLOCKED 死掉)",
+                  fin is not None and fin.kind == "done"
+                  and es.outcome == "CLEAN"
+                  and bool(es.ctx.bag.get("event_farm_plan")), str(fin))
+            check("拒买状态下全程零 money 动作",
+                  not any(getattr(x, "money", False) for x in acts if x))
+        finally:
+            _RD.read_event_coin = _orig_coin
+            if _pf_bytes is not None:
+                _pf.write_bytes(_pf_bytes)        # 计划文件不许被测试搞新鲜
+            else:
+                _pf.unlink(missing_ok=True)
+    finally:
+        _RD.read_topbar = _orig_topbar
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -2066,6 +2184,7 @@ if __name__ == "__main__":
     t_invariants()
     t_vocab()
     t_ledger()
+    t_event_bonus_shop()
     print("\n" + "═" * 52)
     if FAILS:
         print(f" {len(FAILS)} 项没过:")

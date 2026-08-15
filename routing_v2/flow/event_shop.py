@@ -20,7 +20,6 @@ import time
 from typing import Optional
 
 from routing_v2.act.action import swipe, tap_box, wait
-from routing_v2.flow import nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome
 from routing_v2.flow.event import EventEntryMixin
 from routing_v2.percept import read as R
@@ -161,12 +160,54 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         cur_name = f"tab{i+1}/{n}(自下第{from_bottom+1})"
         return self._scan_shelf(obs, st, cur_name, from_bottom, i, n, cur=sel)
 
+    def _shelf_swipe(self, obs, up: bool, why: str, post=None):
+        """货架滑动 —— 几何全从检出推，**双向共用同一把尺**。
+
+        锚只用货架里的 购买/购买灰色（老写法把 [SHOP_BUY, CURRENCY] 混着喂
+           nav.list_swipe：左栏 tab 的行距和货架行距差一倍，哪帧多检出谁、
+           滑幅就跟谁走 —— 用户 08-15 看到的「滑动幅度一下大一下小」就是它）。
+        行距进 rowh_hist 取中位（单帧检出抖动不再改变滑幅），距离钳在
+           [0.24, 0.60] 屏内。"""
+        bs = obs.all([V.SHOP_BUY, V.SHOP_BUY_GREY], 0.30, region=SHELF)
+        if not bs:
+            return None
+        xs = sorted(b.cx for b in bs)
+        cx = xs[len(xs) // 2]
+        hs = sorted(max(b.y2 - b.y1, 0.008) for b in bs)
+        rowh = hs[len(hs) // 2]
+        row_cys = []
+        for cy in sorted(b.cy for b in bs):
+            if not row_cys or cy - row_cys[-1] > rowh * 0.5:
+                row_cys.append(cy)
+        gaps = [b - a for a, b in zip(row_cys, row_cys[1:])]
+        if gaps:
+            g = sorted(gaps)[len(gaps) // 2]
+            if rowh < g < 0.35:
+                rowh = g
+        hist = self.state.setdefault("rowh_hist", [])
+        hist.append(round(rowh, 4))
+        del hist[:-9]
+        rowh = sorted(hist)[len(hist) // 2]
+        dist = min(0.60, max(0.24, rowh * 3.0))
+        if up:
+            y0 = max(0.16, min(b.cy for b in bs) - rowh * 0.2)
+            y1 = min(0.90, y0 + dist)
+        else:
+            y0 = min(0.90, max(b.cy for b in bs) + rowh * 0.6)
+            y1 = max(0.12, y0 - dist)
+        return swipe(cx, y0, cx, y1, why, post=post)
+
     def _scan_shelf(self, obs, st, cur_name, from_bottom, i, n, cur=None):
-        """扫当前货架（滑到底 + 记账 + 可选购买）。tab 检出与否都走这里。"""
-        # 旧写法 `R.read_beside(obs, cur)` 拿**左栏币种 tab** 当锚 —— 那玩意
-        #    右边是币种名字、没有数字  余额恒 None  余额闸 fail-closed 
-        #    **活动商店一件都买不了**（08-10 实测两个 tab 都是 `余额=None`）。
-        #    真锚是右上角的 `货币数量显示区域`，判据封装在 read.read_event_coin。
+        """扫当前货架: **先滑到底，再从最底部边买边上滑**。
+
+        用户 2026-08-15:「从最底部开始买起然后开始对比大小」—— 替换掉旧的
+           高价档/低价档两遍回顶策略（07-28 移植版）。旧结构当天实锤两条病:
+           ①下滑发出去 8 tick 内动画还没走、指纹和滑前一样 -> 被当「到底了」
+             一次下滑就回顶，第二屏永远没人看过（"一会儿下一会儿上"）;
+           ②回顶+两遍 = 三趟往返，方向来回换。
+           新结构: 下行只扫不买（顺路记 buyable/soldout 全量）; 到真底后
+           每个取景内仍按**单价降序**买，买完一屏上滑一格接着比 —— 家具行、
+           余额 fail-closed、黑名单、金钱闸全部原样保留。"""
         bal = R.read_event_coin(obs)
 
         buyable = obs.all(V.SHOP_BUY, 0.35, region=SHELF)
@@ -178,76 +219,79 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         rec["buyable"] = max(rec["buyable"], len(buyable))
         rec["soldout"] = max(rec["soldout"], len(soldout))
 
-        # 回顶中（两遍策略的 pass1 到 pass2 之间）: 反向滑到指纹不再变化 = 到顶
-        if self.state.get("back_to_top"):
-            sig_now = self._shelf_sig(obs)
-            if sig_now and sig_now == self.state.get("bt_sig"):
-                self.state.pop("back_to_top", None)
-                self.state.pop("bt_sig", None)
-                self.state.update(scrolls=0, sig="")
-                self.log(f"{cur_name}: 已回顶，开始第二遍（清低价档）")
-            else:
-                bs = obs.all([V.SHOP_BUY, V.SHOP_BUY_GREY], 0.30, region=SHELF)
-                if bs:
-                    xs = sorted(b.cx for b in bs)
-                    cx = xs[len(xs) // 2]
-                    return swipe(
-                        cx, 0.30, cx, 0.85, f"{cur_name}: 回顶（第二遍前）",
-                        post=lambda s=sig_now: self.state.update(bt_sig=s))
-                return wait(f"{cur_name}: 回顶中没检出货架锚点")
+        # **滑动后先等货架停稳，再下任何结论**（08-15 日常 live 实锤:
+        #    判「到底」的指纹比对发生在滑动动画启动之前，指纹自然没变 ->
+        #    假到底）。10 tick 约 0.7s，盖住滚动动画。
+        if self.ticks - self.state.get("swipe_tick", -99) < 10:
+            return wait(f"{cur_name}: 滑动后等货架停稳")
 
-        # 买（可选）—— **非家具、单价最高优先，两遍扫**（用户 2026-08-13 拍板；
-        #    判据移植自 scripts/buy_event_shop.py 的 07-28 清仓实现:
-        #    pass1 只吃 >=100 高价档、pass2 清低档 —— 单遍"取景内降序"不是
-        #    全局降序，低档先花钱会让滚到后面的高价档落空）。
-        # **货架静止才许买**（2026-08-13 首跑实锤: 两发 tap 都打在滚动惯性
-        #    还没停的货架上，决策帧和落地时刻的按钮已错位，弹框根本没弹 --
-        #    幽灵点击家族）。判据 = 指纹连续 2 tick 没变。
+        # **货架不可见时不许下「到底/扫完」的结论**（2026-08-13 round6 实锤:
+        #    买完一件的确认框把货架整个盖住 -> 购买键全检不出 -> 指纹为空 ->
+        #    被当「到底了」提前收 tab, tab1 剩 8 件 tab2 剩 6 件没吃完）。
+        if not buyable and not soldout:
+            return wait(f"{cur_name}: 货架不可见（面板盖住/加载中）— 不下结论")
+
+        # 金钱步被人审拒绝过 = 本轮没带 --money-ok，买不成。**不再试买，
+        #    但扫描推算照做** —— 08-15 实锤: 原来第二发被拒就把整条 flow 收成
+        #    BLOCKED，_wrap 没跑 -> event 拿不到计划 -> 兜底关绕过顶纪录台账
+        #    又打了一场加成。推算是免费的，授权只该拦「花钱」这一步。
+        denied = any(k.startswith("moneyno:") for k in self.state)
+        if denied and self.pending("deny_note"):
+            self.state["once:deny_note"] = True
+            self.log(f"{cur_name}: 购买未授权(--money-ok 没带) — "
+                     f"本轮只扫描出推算，不再试买")
+            self.note_lines.append("购买未授权 — 本轮只扫描出推算")
+
         sig_now = self._shelf_sig(obs)
+        if self.state.get("shelf_phase", "down") == "down":
+            # 下行: 指纹还在变 = 还没到底，接着滑（这一段不买）
+            if sig_now and sig_now != self.state["sig"] \
+                    and self.state["scrolls"] < 12:
+                # mutate-before-ack 在这里最毒：`sig` 是防空转基准，滑动没
+                #    发出去就更新掉 -> 下一帧「指纹没变」-> 假到底。只在 post 写。
+                k = self.state["scrolls"] + 1
+                sw = self._shelf_swipe(
+                    obs, up=False,
+                    why=f"{cur_name}: 货架下滑（第 {k} 次，还没到底）",
+                    post=lambda s=sig_now, kk=k: self.state.update(
+                        sig=s, scrolls=kk, swipe_tick=self.ticks))
+                if sw is not None:
+                    return sw
+                return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
+            # 指纹停变（且已过停稳闸）= 真到底 -> 转入自底向上购买
+            self.state.update(shelf_phase="up", sig="", upscrolls=0)
+            self.log(f"{cur_name}: 到底了 — 从最底部开始买起，边上滑边比价")
+            return wait(f"{cur_name}: 转入自底向上购买")
+
+        # 上行: 先把当前取景买干净，再上滑一格
+        # **货架静止才许买**（2026-08-13 首跑实锤: tap 打在滚动惯性没停的
+        #    货架上，按钮已错位，弹框根本没弹 -- 幽灵点击家族）。
         shelf_still = (sig_now == self.state.get("sig_prev")
                        and self.hold("shelf_still", 2))
         self.state["sig_prev"] = sig_now     # 观测事实, decide 期可写
-        if self.shop_cfg.get("auto_buy", True) and buyable and shelf_still:
+        if (not denied) and self.shop_cfg.get("auto_buy", True) \
+                and buyable and shelf_still:
             want = self.shop_cfg.get("currencies") or []
             if not want or cur_name in want:
                 act = self._buy_visible(obs, cur_name, buyable, bal, sig_now)
                 if act is not None:
                     return act
-
-        # **货架不可见时不许下「到底/扫完」的结论**（2026-08-13 round6 实锤:
-        #    买完一件的确认框把货架整个盖住 -> 购买键全检不出 -> 指纹为空 ->
-        #    被当「到底了」提前收 tab, tab1 剩 8 件 tab2 剩 6 件没吃完）。
-        #    货架可见的判据 = 屏上有 购买/购买灰色 任意一个。
-        if not buyable and not soldout:
-            return wait(f"{cur_name}: 货架不可见（面板盖住/加载中）— 不下结论")
-        # 货架滑动：指纹没变 = 到底了
-        sig = self._shelf_sig(obs)
-        if sig and sig != self.state["sig"] and self.state["scrolls"] < 10:
-            # 这里的 mutate-before-ack 比别处更毒：`sig` 是**防空转的基准**，
-            #    滑动没发出去就把它更新掉  下一帧比对「指纹没变」 判定到底了
-            #     货架后半截永远扫不到。（正是换关假象那次的同一形态。）
-            n = self.state["scrolls"] + 1
-            # 几何从检出推：货架上的購買/价签就是这一列的行（nav.list_swipe）。
-            sw = nav.list_swipe(
-                obs, [V.SHOP_BUY, V.CURRENCY],
-                f"{cur_name}: 货架下滑（第 {n} 次，指纹变化  还没到底）",
-                post=lambda: self.state.update(sig=sig, scrolls=n))
+        if sig_now and sig_now != self.state["sig"] \
+                and self.state.get("upscrolls", 0) < 12:
+            k = self.state.get("upscrolls", 0) + 1
+            sw = self._shelf_swipe(
+                obs, up=True,
+                why=f"{cur_name}: 这屏买完 — 回看上一屏（第 {k} 次）",
+                post=lambda s=sig_now, kk=k: self.state.update(
+                    sig=s, upscrolls=kk, swipe_tick=self.ticks))
             if sw is not None:
                 return sw
             return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
-        # 到底了。开着自动买且第一遍（高价档）刚扫完的话，回顶来第二遍。
-        buying = (self.shop_cfg.get("auto_buy", True)
-                  and (not (self.shop_cfg.get("currencies") or [])
-                       or cur_name in (self.shop_cfg.get("currencies") or [])))
-        if buying and self.state.get("buy_floor", 100) >= 100:
-            self.state["buy_floor"] = 0
-            self.state["back_to_top"] = True
-            self.state.pop("bt_sig", None)
-            return wait(f"{cur_name}: 第一遍（高价档）到底 — 回顶清低价档")
+        # 指纹停变 = 回到顶 = 这个 tab 完了
         self.log(f"{cur_name}: 余额 {bal}，可买 {rec['buyable']}，"
                  f"售罄 {rec['soldout']} — 这个 tab 扫完")
         self.state["tab_i"] += 1
-        self.state.update(scrolls=0, sig="", buy_floor=100)
+        self.state.update(scrolls=0, upscrolls=0, sig="", shelf_phase="down")
         self.state.pop("dead_spots", None)
         self.state.pop("buy_tries", None)
         self.once_reset()
@@ -285,8 +329,9 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
             回来); 单价 > 余额的位置直接不点, 不许"点了才知道买不起"。
         价格按**货架指纹**缓存 -- 首跑 OCR 1917 次/173s 就是每 tick 全货架
           重读(慢 IO 挡热路径老病)。指纹没变 = 货架没变 = 价不用重读。
+        08-15 起没有 buy_floor 两档了(自底向上单遍替代两遍, 见 _scan_shelf),
+          取景内仍是单价降序。
         """
-        floor = self.state.get("buy_floor", 100)
         tries = self.state.setdefault("buy_tries", {})
         if self.state.get("bought", 0) >= 60:
             return None                       # 安全帽
@@ -336,7 +381,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
                 self.state["once:no_bal"] = True
                 self.log(f"{cur_name}: 余额读不出 — **不自动买**（fail-closed）")
             return None
-        afford = [c for c in cands if floor <= c[0] <= bal]
+        afford = [c for c in cands if c[0] <= bal]
         if not afford:
             return None
         p, b, k = max(afford, key=lambda c: c[0])

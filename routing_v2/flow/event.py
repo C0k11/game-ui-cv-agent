@@ -397,6 +397,15 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         """
         import json as _json
         import time as _t
+        # bag 注入的 fixture 台账: **只写内存, 绝不碰真实文件**。
+        #    08-12 与 08-15 两次实锤同一事故: 离线套件驱动"赢一场"路径时,
+        #    读走的是 bag fixture, 写却落进真 data/routing_v2/event_topped.json
+        #    （08-15 02:58 的 "0" 就是测试盖的; 08-12 那次整份被覆盖后人工补回）。
+        #    读写必须同源, 从写入口根治, 测试永远污染不到生产台账。
+        b = self.ctx.bag.get("event_topped")
+        if b is not None:
+            b[str(from_bottom)] = f"{_t.strftime('%m-%d %H:%M')} {detail}"
+            return
         p = self._topped_path()
         d = None
         if p.exists():
@@ -462,6 +471,14 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #   没有推算结果时兜底打最后一关（产出最高）。
         #   bag 空（runner 崩过/step 跨进程） 读**权威文件副本**。
         plan = self.ctx.bag.get("event_farm_plan") or self._plan_from_file() or []
+        if not plan:
+            # 兜底目标也必须过台账（08-15 日常 live 实锤）: event_shop 被金钱闸
+            #    拦在推算落盘之前 -> plan 空 -> 下面"已顶过就跳过"的 while 挂在
+            #    `plan and ...` 上被整个短路 -> 对着台账里几分钟前刚顶过的
+            #    倒数第 1 关**又打了一场**（20AP 白花, 用户当场看见
+            #    "莫名其妙又打加成"）。合成单目标计划, 让跳过闸和扫荡闸
+            #    走同一条路, 不再有裸 fb=0 旁路。
+            plan = [{"from_bottom": 0, "why": "无推算结果，兜底打最后一关"}]
         # 用户口径（08-09）：**推算出的每一关都先各打一场顶好纪录，最后再统一
         #    扫荡**。`ti` = 当前在打第几个目标；每赢一场推进一个。
         ti = self.state.setdefault("target_i", 0)
@@ -560,7 +577,10 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #       本轮赢过 **或** 计划里的关在台账里都顶过  放行扫荡。
         #    台账为空且本轮没赢  仍然 BLOCKED（原来的保护一分不减）。
         _topped = self._topped_load()
-        _plan = self.ctx.bag.get("event_farm_plan") or self._plan_from_file() or []
+        # 和上面同一条兜底合成: plan 空时扫荡闸也按"倒数第 1 关"这一个通道
+        #    对台账（不然 `bool(_plan)` 恒 False, 台账里明明顶过也拒绝扫荡）。
+        _plan = (self.ctx.bag.get("event_farm_plan") or self._plan_from_file()
+                 or [{"from_bottom": 0, "why": "无推算结果，兜底打最后一关"}])
         _all_topped = bool(_plan) and all(
             str(x["from_bottom"]) in _topped for x in _plan)
         if self._bt()["win"] < 1 and not _all_topped:
