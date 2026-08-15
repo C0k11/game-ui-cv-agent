@@ -551,6 +551,42 @@ def t_flows():
     check("连续停在关卡列表页时，入场键**只点一次**（once 保护不是死码）",
           _taps == 1, f"实际点了 {_taps} 次")
 
+    # ── 08-15 日常 live 复发：once 解锁不能挂在 st.changed 上 ──────────
+    #    活动页身份抖（event_quest_list/facility/unknown 来回翻），每次翻回
+    #    列表 changed 边沿都全清 once  16 tick 内重发两处不同入场键，
+    #    第二发离「掃蕩開始」只差 2% 屏高。现在解锁只按事实：
+    #    「点了入场键、又攒了 40 个列表帧还没等到弹窗」才重武装。
+    _flap = O(B(V.HOME, cx=0.05, cy=0.05), B(V.BACK, cx=0.02, cy=0.05))
+    _mo.update(_flap)                       # 身份翻走
+    _sto = _mo.update(lst2)                 # 翻回来 = changed 边沿
+    _ao = _evo.decide(lst2, _sto)
+    check("身份抖动翻回列表页, 进关 once **不被清**(不再连发第二处)",
+          not (_ao is not None and _ao.is_tap), str(_ao))
+    _taps2 = 0
+    for _ in range(45):                     # 列表页干等, 弹窗一直不来
+        _sto = _mo.update(lst2)
+        _ao = _evo.decide(lst2, _sto)
+        if _ao is not None and _ao.is_tap:
+            _taps2 += 1
+            if _ao.once_key:
+                _evo.state["once:" + _ao.once_key] = True
+    check("40 个列表帧等不到弹窗  重武装恰好补一发(不死等也不机关枪)",
+          _taps2 == 1, f"补了 {_taps2} 发")
+
+    # ── 08-15 日常 live：快速编辑面板收起窗口不许交 None ────────────────
+    #    確認提交后面板自收有动画、页面身份还滞后, None 会落到 nav 归位 
+    #    点返回键, 和自收赛跑输了就把编队页整层退掉（当天连环三圈白工）。
+    _qe = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    for _k in ("af_edit", "af_auto", "af_ins", "af_confirm"):
+        _qe.state["once:" + _k] = True      # 链已走完
+    _stq = Machine(1).update(O(B(V.HOME, cx=0.05, cy=0.05)))
+    _aq = _qe.on_squad_quick_edit(O(), _stq)   # 面板上已无確認键
+    check("確認已提交、面板收起中: 等它自收, **不交 None**(不落归位点返回)",
+          _aq is not None and _aq.kind == "wait", str(_aq))
+    _qe.state["qe_close_wait"] = 59
+    check("收起窗口有界(60 tick 后放回兜底, 防真卡死)",
+          _qe.on_squad_quick_edit(O(), _stq) is None)
+
     _RD.read_topbar = _orig_topbar          # 还原读数打桩
 
     # 金钱，**双键框内有数量步进器 = 购买/兑换框**（08-09 差点花 30 青辉石：
@@ -1937,6 +1973,53 @@ def t_route():
           and g.stats["pass"] == 7)
 
 
+def t_ledger():
+    """余额台账的 OCR 结构闸（08-15 日常 live: 信用点收尾报 +5.99 亿假账）。"""
+    print("\n── 余额台账读数闸 ───────────────────────────")
+    import routing_v2.percept.read as _RD
+    from routing_v2.act.ledger import Ledger, _one_insert
+
+    led = Ledger(log=lambda m: None)
+    led.path = _ROOT / "data" / "routing_v2" / "_test_ledger_tmp.jsonl"
+
+    class _VS:                       # 打桩投票器: 直接喂确定读数
+        vals: dict = {}
+        def result(self):
+            return dict(self.vals)
+        def reset(self):
+            pass
+
+    led._vote = _VS()
+
+    def push(v):
+        _VS.vals = {_RD.CREDIT: v}
+        led._commit("lobby", "test")
+
+    try:
+        # 首读双确认: 开跑第一读截断成 18,991, 不许直接立成基线
+        push(18991)
+        check("首读不立基线(要两次一致)", _RD.CREDIT not in led.confirmed)
+        push(58723911)
+        push(58723911)
+        check("两次一致才立基线", led.confirmed.get(_RD.CREDIT) == 58723911,
+              str(led.confirmed.get(_RD.CREDIT)))
+        # 插位读大: 同页同渲染稳定复读, "复读一致"闸拦不住 —— 结构闸咬回
+        push(588723911)
+        push(588723911)
+        check("插位读大稳定复读也咬得回(58,723,911->588,723,911)",
+              led.confirmed.get(_RD.CREDIT) == 58723911,
+              str(led.confirmed.get(_RD.CREDIT)))
+        push(59227991)
+        check("咬回后位数上限没被顶坏, 真读数照常入账",
+              led.confirmed.get(_RD.CREDIT) == 59227991,
+              str(led.confirmed.get(_RD.CREDIT)))
+        check("千位逗号0形态(20,176->200176)被同一道闸覆盖",
+              _one_insert("20176", "200176"))
+        check("真实等长变动不误伤", not _one_insert("59227991", "59252667"))
+    finally:
+        led.path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -1946,6 +2029,7 @@ if __name__ == "__main__":
     t_config()
     t_invariants()
     t_vocab()
+    t_ledger()
     print("\n" + "═" * 52)
     if FAILS:
         print(f" {len(FAILS)} 项没过:")

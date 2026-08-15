@@ -215,17 +215,20 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
 
     def on_event_quest_list(self, obs, st):
         self.state["in_event"] = True      # 到过活动页（stage_popup 上下文守卫用）
-        # **从别的页面回到关卡列表** = 上一轮那次进关已经结束（弹窗关了/
-        #    打完回来了） 解锁进关 once + 编队子链 once。
+        # **从别的页面回到关卡列表** = 上一轮编队子链已经翻篇  解锁 af_* once。
         #    必须用 `st.changed`（页面**刚切**过来那一 tick）而不是"人在
         #    列表页"（08-09 审查抓到）：列表页会连续几十 tick，每 tick 都清
-        #    等于**把 once 保护打成死码** —— 那正是我加它要防的
-        #    「入场键重发时列表滚了、点到隔壁关」。
+        #    等于**把 once 保护打成死码**。
+        # ⛔ 进关 once（enter*/sweep_enter*）**不在这里清**（08-15 日常 live
+        #    实锤）: 活动页身份会抖（event_quest_list/unknown/facility 来回翻,
+        #    收尾日志整屏「3s 内页面身份变了 5 次」）, 每次翻回来 changed 边沿
+        #    都触发一次全清 —— 入场键点完 16 tick 内就被重武装再点一发,
+        #    第二发落在**滚动后的列表**上, 离「掃蕩開始」只差 2% 屏高。
+        #    进关 once 的解锁改在 `_bonus_step`/扫荡分支里**按事实**做:
+        #    「点了入场键却 40 个列表帧等不到弹窗」才重武装（有界, 抖动免疫）。
         if st.changed:
             for k in [k for k in list(self.state)
-                      if k.startswith("once:enter")
-                      or k.startswith("once:sweep_enter")
-                      or k.startswith("once:af_")]:
+                      if k.startswith("once:af_")]:
                 self.state.pop(k, None)
         ph = self.state["phase"]
         # "这个活动有没有活动点数通道"只有在关卡列表页看得到（`奖励资讯`
@@ -527,12 +530,25 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                     f" 纪录顶没顶上去无法确认，**拒绝扫荡**（低倍率扫荡等于浪费 AP）")
             # once 保护（08-09 实锤）：入场键点完弹窗在开、状态"没变"  重发，
             #    而列表这时会滚动  实测点成 0.732**0.573**0.732，
-            #    **第二发点到了隔壁关**。once 键带目标序号，换目标时自然解锁。
-            if not self.pending(f"enter{ti}_{idx}"):
+            #    **第二发点到了隔壁关**。
+            # 08-15 复发（同一根病的另一条腿）: once 键原来带**屏上行号** idx,
+            #    且 st.changed 会全清 —— 页面身份一抖, 键一换/一清, 保护就穿,
+            #    16 tick 内连发两处不同的入场键。改法:
+            #    ①键只带目标序号 ti（行号会漂, 不进键）;
+            #    ②解锁**按事实**: 点了入场键、又在列表页攒了 40 帧还没等到
+            #      关卡弹窗 = 那一发被吞了, 才重武装（计数只在列表帧涨,
+            #      弹窗一开自然停, 页面抖动打不断它）。
+            if not self.pending(f"enter{ti}"):
+                if self.bump(f"enter_miss{ti}") >= 40:
+                    self.state[f"enter_miss{ti}"] = 0
+                    self.state.pop(f"once:enter{ti}", None)
+                    self.log("入场键点了 40 个列表帧还没见到关卡弹窗 — "
+                             "判定被吞, 重武装再点一次")
                 return wait("入场键已点，等关卡弹窗打开")
+            self.state[f"enter_miss{ti}"] = 0
             return tap_box(target,
                            f"加成进关顶纪录（要用部队{self.want_team}）",
-                           counter="bonus_enters", once=f"enter{ti}_{idx}")
+                           counter="bonus_enters", once=f"enter{ti}")
 
         #  扫荡 —— 进这一步的前提是「**这些关的纪录确实是加成队顶的**」
         #    2026-08-12 用户实测「**体力感知没有触发**」的真根因就在这:
@@ -574,12 +590,20 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             _i = len(rows) - 1 - sfb
             if 0 <= _i < len(rows):
                 sidx, target = _i, rows[_i][0]
-        if not self.pending(f"sweep_enter{si}_{sidx}"):
+        # once 键只带 sweep 序号（同 bonus 侧 08-15 的修法: 行号会漂不进键,
+        #    解锁按「40 个列表帧等不到弹窗」的事实做, 不靠 st.changed）。
+        if not self.pending(f"sweep_enter{si}"):
+            if self.bump(f"sweep_miss{si}") >= 40:
+                self.state[f"sweep_miss{si}"] = 0
+                self.state.pop(f"once:sweep_enter{si}", None)
+                self.log("扫荡入场键点了 40 个列表帧还没见到弹窗 — "
+                         "判定被吞, 重武装再点一次")
             return wait("扫荡入场键已点，等关卡弹窗打开")
+        self.state[f"sweep_miss{si}"] = 0
         why = (plan[order[si]].get("why", "") if plan and si < len(order) else "兜底")
         return tap_box(target,
                        f"加成进关准备扫荡（{si+1}/{max(1,len(plan))}  {why}）",
-                       once=f"sweep_enter{si}_{sidx}")
+                       once=f"sweep_enter{si}")
 
     # ══ 弹窗 / 编队 / 战斗 ════════════════════════════════════════════
     def on_stage_popup(self, obs, st):

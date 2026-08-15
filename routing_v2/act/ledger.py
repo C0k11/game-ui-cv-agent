@@ -31,6 +31,22 @@ from routing_v2.percept.observe import Observation
 _ROOT = Path(__file__).resolve().parents[2]
 _OUT = _ROOT / "data" / "routing_v2"
 
+
+def _one_insert(base: str, big: str) -> bool:
+    """big 是否等于 base 插入了恰好一个字符（顺序不变）。"""
+    if len(big) != len(base) + 1:
+        return False
+    i = 0
+    skipped = False
+    for ch in big:
+        if i < len(base) and ch == base[i]:
+            i += 1
+        elif not skipped:
+            skipped = True
+        else:
+            return False
+    return i == len(base)
+
 WATCHED = [R.PYROXENE, R.CREDIT, R.AP]
 # 只有青辉石是"只进不出"的红线货币。信用点/AP 会正常花掉。
 GUARDED = R.PYROXENE
@@ -76,6 +92,8 @@ class Ledger:
         self._maxdigits: Dict[str, int] = {}
         self._rejects: Dict[str, list] = {}   # 位数闸拒收史（基线自愈用）
         self._grow_pending: Dict[str, int] = {}   # 位数变多的待复读值
+        self._first_pending: Dict[str, int] = {}  # 初始基线的待复读值
+        self._ins_fix: Dict[str, int] = {}    # 插位读大被结构闸咬回的次数
         _OUT.mkdir(parents=True, exist_ok=True)
         self.path = _OUT / f"ledger_{time.strftime('%Y%m%d')}.jsonl"
 
@@ -117,11 +135,29 @@ class Ledger:
             if v is None:
                 continue
             prev = self.confirmed.get(cls)
-            # 千位逗号0 误读（08-09 event_shop 页实锤）: "20,176" 被读成
-            #    **200176** = 恰好等于基线在千位分隔处插一个 0。结构判据一击毙:
-            #    新值字串 == 基线字串在倒数第 3 位插 "0"  就是基线本身。
+            # **初始基线要两次一致才立**（08-15 实锤: 开跑第一读信用点截断成
+            #    18,991 直接成了基线, 收尾报表的起点就是假的）。首读没有 prev
+            #    可对照, 全部结构闸都使不上劲, 只能靠复读。
+            if prev is None:
+                if self._first_pending.get(cls) != v:
+                    self._first_pending[cls] = v
+                    self._write(Entry(time.time(), cls, v, page, flow,
+                                      "first_suspect"))
+                    continue
+            # 读大 = 在真值里多认出一个字形。两种实锤形态:
+            #    ①千位逗号读成 0（08-09 event_shop "20,176" -> 200176）;
+            #    ②紧排数字读成双（08-15 顶栏 58,723,911 -> 588,723,911,
+            #      同页同渲染**稳定复读**, "复读一致"闸拦不住 —— 位数上限被
+            #      顶到 9 后, 后续所有真 8 位读数反被当截断整场拒收）。
+            #    结构判据一击毙: 新值删掉**任意一个**字符能还原基线字串 ->
+            #    就是基线本身。不设自动采信出口: 万一真涨了一位且恰好构成
+            #    插位关系, 也只是短暂粘住 —— 下一笔真实变动就破坏该关系,
+            #    从增长闸正常入账（信用点只作报表, 方向保守无害）。
             if (prev is not None and len(str(prev)) >= 4
-                    and str(v) == f"{str(prev)[:-3]}0{str(prev)[-3:]}"):
+                    and _one_insert(str(prev), str(v))):
+                self._ins_fix[cls] = self._ins_fix.get(cls, 0) + 1
+                self._write(Entry(time.time(), cls, v, page, flow,
+                                  "insert_fix"))
                 v = prev
             # 位数收缩闸：新读数**位数变少且掉了一大半** = 典型的 OCR 截断，
             #    不是真的变动。2026-08-08 本轮实测信用点被读成 `54,661`，
@@ -308,5 +344,9 @@ class Ledger:
         if wfail:
             lines.append(f"  WARN: 落盘失败 {wfail} 条 -- 磁盘明细不完整, "
                          f"以上内存账才是全量")
+        if self._ins_fix:
+            det = " / ".join(f"{k} x{n}" for k, n in self._ins_fix.items())
+            lines.append(f"  插位读大被结构闸咬回: {det}"
+                         f"（同页稳定复读的多一位误读, 详见 jsonl 的 insert_fix）")
         lines.append(f"  明细已落盘: {self.path}")
         return "\n".join(lines)

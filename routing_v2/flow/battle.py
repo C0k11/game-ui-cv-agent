@@ -97,10 +97,23 @@ class FormationMixin:
         这里**绝不能**落到通用的"点確認"处理器 —— 那会把旧阵容原样提交。"""
         act = self._auto_form_chain(obs)
         if act is not None:
+            self.state["qe_close_wait"] = 0
             return act
         # 链已走完但面板还开着  只点確認提交（此时自動已经点过了）
         cf = obs.find(V.CONFIRM, 0.45)
-        return tap_box(cf, "加成编队: 確認（提交）") if cf is not None else None
+        if cf is not None:
+            self.state["qe_close_wait"] = 0
+            return tap_box(cf, "加成编队: 確認（提交）")
+        # 確認已提交、面板自收动画/页面身份滞后的窗口。**这里绝不能返回 None**:
+        #    None 会落到 nav 归位, 它在"弹窗页"上找不到叉叉就点返回键 —— 和
+        #    面板自收赛跑, 输了就把编队页整层退掉（08-15 日常 live 实锤:
+        #    確認 -> 被踢回关卡列表 -> 重进 -> 再編隊, 连环三圈全是白工,
+        #    每圈 ~40s; 赢了才轮到出击）。面板正常 <1s 自收; 有界等待,
+        #    真卡死（60 个本页 tick）才放回老路兜底。
+        if self.bump("qe_close_wait") >= 60:
+            self.state["qe_close_wait"] = 0
+            return None
+        return wait("確認已提交，等快速编辑面板自己收起")
 
     def _auto_form_chain(self, obs: Observation) -> Optional[Action]:
         """加成自动编队子链（老 event_quest.py:1363 子步机原样搬）：
