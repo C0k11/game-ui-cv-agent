@@ -26,6 +26,13 @@ PROFILE = _ROOT / "routing_v2" / "config" / "profile.json"
 # ══════════════════════════════════════════════════════════════════════
 DEFAULTS: Dict[str, Any] = {
 
+    # ── 账号（台账分桶键）──────────────────────────────────────────────
+    # 08-15 复盘: event_topped/daybook/课程表房间账/ledger 过去全挤在同一批
+    #    文件里, 键只有游戏日/倒数第几关 —— 大小号换着跑会互相把「今天做过/
+    #    本期顶过」当成自己的账（ledger_20260813.jsonl 里 05:48 大号 59M,
+    #    08:49 小号 35,544, 同一份文件）。空 = 拒绝开跑（fail-closed）。
+    "account": {"id": ""},
+
     # ── 总开关：每个玩法跑不跑 ────────────────────────────────────────
     "modules": {
         "daily_routine": True,     # 收菜：免费包 / 社团 / 制造 / 信用点商店
@@ -339,6 +346,27 @@ def merged(user: dict | None = None) -> dict:
     for path, val in LOCKED.items():
         _set_path(cfg, path, val)
     return cfg
+
+
+DATA_ROOT = _ROOT / "data" / "routing_v2"
+
+
+def data_dir(cfg: dict) -> Path:
+    """本账号的落盘桶: data/routing_v2/<account.id>/。
+
+    所有会被"换号"污染的台账（ledger / daybook / event_topped /
+    课程表房间账 / event_farm_plan）一律写进桶里, **禁止再往根路径写**。
+    account.id 缺失/非法 = 拒绝开跑（fail-closed）: 没有桶键宁可不跑,
+    也不能把两个号的「今天做过/本期顶过」记进同一本账。
+    """
+    aid = str(((cfg or {}).get("account") or {}).get("id") or "").strip()
+    if not aid or any(c in aid for c in "\\/:*?\"<>|"):
+        raise ValueError(
+            "profile.json 缺 account.id（台账分桶键）— 拒绝开跑: "
+            "大小号共用台账会互相把「今天做过/本期顶过」当成自己的账")
+    p = DATA_ROOT / aid
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def load(path: Path | str | None = None) -> dict:

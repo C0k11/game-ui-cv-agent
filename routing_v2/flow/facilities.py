@@ -212,7 +212,7 @@ class ShopFlow(ExitMixin, Flow):
         #    红点还在 -- 那是别的页签的未读，红点不等于免費包没拿。
         #    实测: 09:28 那轮又点进去空跑了 250 tick）。账本才是权威。
         from routing_v2.flow import daybook
-        if daybook.done("free_pack"):
+        if daybook.done("free_pack", self.ctx.cfg):
             self.state["pack_done"] = True
             self.log("免費包本游戏日已领过（台账）-- 广告位这段直接跳过")
 
@@ -691,7 +691,7 @@ class ShopFlow(ExitMixin, Flow):
             if self.hold("free_greyed", 30):
                 from routing_v2.flow import daybook
                 self.state["pack_done"] = True
-                daybook.mark("free_pack")     # 落账: 本游戏日不再进这个页
+                daybook.mark("free_pack", self.ctx.cfg)   # 落账进账号桶
                 self.log("免費組合包今天已经领过了（購買键是灰的） 跳过")
                 return self.exit_step(obs) or wait("等退出控件")
             return wait("找不到「免費」那一列的亮購買键 — 连续确认中（可能已领过）")

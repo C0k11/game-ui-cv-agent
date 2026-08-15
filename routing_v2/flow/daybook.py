@@ -14,7 +14,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-_FILE = Path("data/routing_v2/daybook.json")
+
+def _file(cfg: dict) -> Path:
+    """账号桶里的 daybook（08-15 分桶: 键只有游戏日, 大小号同一天会把
+    对方的「免費包领过了」当成自己的账）。cfg 必须是**全量配置**。"""
+    from routing_v2.config import data_dir
+    return data_dir(cfg) / "daybook.json"
 
 
 def game_day() -> str:
@@ -22,9 +27,9 @@ def game_day() -> str:
             - timedelta(hours=3)).strftime("%Y%m%d")
 
 
-def _load() -> dict:
+def _load(cfg: dict) -> dict:
     try:
-        d = json.loads(_FILE.read_text(encoding="utf-8"))
+        d = json.loads(_file(cfg).read_text(encoding="utf-8"))
         if d.get("day") == game_day():
             return d
     except Exception:
@@ -32,22 +37,23 @@ def _load() -> dict:
     return {"day": game_day()}
 
 
-def done(key: str) -> bool:
+def done(key: str, cfg: dict) -> bool:
     """这件事本游戏日做过没。"""
-    return bool(_load().get(key))
+    return bool(_load(cfg).get(key))
 
 
-def mark(key: str) -> None:
+def mark(key: str, cfg: dict) -> None:
     """记账（写穿 -- 掉线/重启不丢今天的账）。
 
     ⛔「读-改-整份写回」的台账, **读失败时必须放弃写**(event_topped 2026-08-12
     数据丢失同型: 读失败吞成空字典, 加一条写回去把当天已有的账全抹了)。
     只有三种情况允许写: 文件不存在 / 正常读到今天的账 / 真的换游戏日了。
     """
-    _FILE.parent.mkdir(parents=True, exist_ok=True)
-    if _FILE.exists():
+    f = _file(cfg)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    if f.exists():
         try:
-            d = json.loads(_FILE.read_text(encoding="utf-8"))
+            d = json.loads(f.read_text(encoding="utf-8"))
             if not isinstance(d, dict):
                 raise ValueError("daybook 不是 dict")
         except Exception:
@@ -60,4 +66,4 @@ def mark(key: str) -> None:
     else:
         d = {"day": game_day()}
     d[key] = True
-    _FILE.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")

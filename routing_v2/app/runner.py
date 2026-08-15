@@ -101,7 +101,14 @@ class Runner:
         self.feed: Optional[Feed] = None
         self.machine = Machine(int(self.run.get("confirm_frames", 3)), log=log)
         self.interrupts = Interrupts(log=log)
-        self.ledger = Ledger(log=log)
+        # 台账账号桶（08-15）: 算不出桶就先记 None, boot 里拒绝开跑 ——
+        #    __init__ 不 raise 是为了 config/health 这类只读命令还能用。
+        try:
+            from routing_v2.config import data_dir as _data_dir
+            self._data_dir = _data_dir(self.cfg)
+        except ValueError:
+            self._data_dir = None
+        self.ledger = Ledger(log=log, out_dir=self._data_dir)
         self.gate = Gate(self.cfg, log=log, on_money_step=self._money_review)
         self.stats = RunStats()
         self.ctx: Optional[Ctx] = None
@@ -133,6 +140,11 @@ class Runner:
     # ══ 启动 ═══════════════════════════════════════════════════════════
     def boot(self) -> bool:
         self.log("── routing_v2 启动 ──────────────────────────────────")
+        if self._data_dir is None:
+            self.log("[boot] profile.json 缺 account.id（台账分桶键）— 拒绝开跑:"
+                     " 大小号共用台账会互相把「今天做过/本期顶过」当成自己的账")
+            return False
+        self.log(f"[boot] 台账桶: {self._data_dir.name}")
         self.device = Device(log=self.log)
         if not self.device.alive():
             self.log("[boot] adb 不通  走恢复阶梯")

@@ -58,14 +58,16 @@ class ScheduleFlow(ExitMixin, Flow):
         return (datetime.now(timezone(timedelta(hours=8)))
                 - timedelta(hours=3)).strftime("%Y%m%d")
 
-    _ROOMS_FILE = "data/routing_v2/schedule_rooms.json"
+    def _rooms_file(self):
+        """账号桶里的房间台账（08-15 分桶: 键只有游戏日+学生名, 大小号同一天
+        会把对方上过的课当成自己上过的）。"""
+        from routing_v2.config import data_dir
+        return data_dir(self.ctx.cfg) / "schedule_rooms.json"
 
     def _load_rooms(self) -> list:
         import json
-        from pathlib import Path
-        p = Path(self._ROOMS_FILE)
         try:
-            d = json.loads(p.read_text(encoding="utf-8"))
+            d = json.loads(self._rooms_file().read_text(encoding="utf-8"))
             if d.get("day") == self._game_day():
                 rooms = list(d.get("rooms", []))
                 if rooms:
@@ -77,8 +79,7 @@ class ScheduleFlow(ExitMixin, Flow):
 
     def _save_rooms(self) -> None:
         import json
-        from pathlib import Path
-        p = Path(self._ROOMS_FILE)
+        p = self._rooms_file()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"day": self._game_day(),
                                  "rooms": self.state.get("tried", [])},

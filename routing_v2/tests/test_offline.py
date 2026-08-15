@@ -54,7 +54,8 @@ def cfg():
     2026-08-08 实测：profile 里把 event.order 改成 bonus_only 之后，通关阶段
     那条用例当场变红。回归测试的输入必须是自己声明的。"""
     from routing_v2.config import merged
-    return merged({"event": {"order": "clear_then_bonus",
+    return merged({"account": {"id": "_test"},   # 台账进 _test 桶, 不碰生产账
+                   "event": {"order": "clear_then_bonus",
                              "clear_first_with_team": 1, "bonus_team": 2,
                              "shop_plan_before_bonus": False},
                    "bounty": {"branches": ["教室"]},
@@ -2145,7 +2146,8 @@ def t_event_bonus_shop():
         #    附带回归: 滑动后停稳闸(假到底) + 自底向上单遍 + 双向滑幅同尺。
         _orig_coin = _RD.read_event_coin
         _RD.read_event_coin = lambda o: 189
-        _pf = _ROOT / "data" / "routing_v2" / "event_farm_plan.json"
+        from routing_v2.config import data_dir as _dd
+        _pf = _dd(cfg()) / "event_farm_plan.json"   # 08-15 分桶后在 _test 桶
         _pf_bytes = _pf.read_bytes() if _pf.exists() else None
         try:
             es = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
@@ -2303,6 +2305,40 @@ def t_ocr_geom():
           58.0 < pad < 64.0, f"{pad:.1f}px")
 
 
+def t_bucket():
+    """台账账号分桶（08-15）: 落盘键过去只有游戏日/倒数第几关, 大小号换着跑
+    互相把「今天做过/本期顶过」当成自己的账（ledger_20260813 同一份文件里
+    05:48 大号 59M / 08:49 小号 35,544）。现在一切按 account.id 分桶。"""
+    print("\n── 台账账号分桶 ─────────────────────────────")
+    from routing_v2.act.ledger import Ledger
+    from routing_v2.config import data_dir, merged
+    d = data_dir(cfg())
+    check("台账桶 = data/routing_v2/<account.id>",
+          d.name == "_test" and d.parent.name == "routing_v2", str(d))
+    try:
+        data_dir(merged({}))          # DEFAULTS 里 id 为空
+        _refused = False
+    except ValueError:
+        _refused = True
+    check("缺 account.id 拒绝开跑(fail-closed, 不往共享路径写账)", _refused)
+    led = Ledger(log=lambda m: None, out_dir=d)
+    check("ledger 落盘进账号桶", str(led.path).startswith(str(d)),
+          str(led.path))
+    e1 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    check("event_topped 进账号桶", e1._topped_path().parent == d,
+          str(e1._topped_path()))
+    from routing_v2.flow import daybook as _db
+    check("daybook 进账号桶", _db._file(cfg()).parent == d,
+          str(_db._file(cfg())))
+    s1 = ALL["schedule"](Ctx(cfg=cfg(), log=lambda m: None))
+    check("课程表房间账进账号桶", s1._rooms_file().parent == d,
+          str(s1._rooms_file()))
+    d2 = data_dir(merged({"account": {"id": "_test2"}}))
+    check("换号 = 换桶(互不可见)", d2 != d and d2.name == "_test2", str(d2))
+    import shutil
+    shutil.rmtree(d2, ignore_errors=True)
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -2315,6 +2351,7 @@ if __name__ == "__main__":
     t_ledger()
     t_deadbtn()
     t_ocr_geom()
+    t_bucket()
     t_event_bonus_shop()
     print("\n" + "═" * 52)
     if FAILS:

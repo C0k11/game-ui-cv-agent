@@ -350,12 +350,11 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
     #      我第一版只写了，是漏的。
     #    纪录**不可逆**：用错队伍首通，那一关这一期就永远是低倍率。
     def _plan_from_file(self):
-        """推算计划的权威文件副本（event_shop 落盘）。8h 内的才认。"""
+        """推算计划的权威文件副本（event_shop 落盘, 账号桶内）。8h 内的才认。"""
         try:
             import json as _json, time as _t
-            from pathlib import Path as _P
-            f = (_P(__file__).resolve().parents[2] / "data" / "routing_v2"
-                 / "event_farm_plan.json")
+            from routing_v2.config import data_dir
+            f = data_dir(self.ctx.cfg) / "event_farm_plan.json"
             d = _json.loads(f.read_text(encoding="utf-8"))
             if _t.time() - float(d.get("ts", 0)) < 8 * 3600:
                 return d.get("plan") or None
@@ -364,11 +363,11 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         return None
 
     # ── 「哪些关的 Best Record 本期已顶过」台账（落盘，跨进程/重启）──────
+    # 08-15 分桶: 键只有 from_bottom, 大小号会把对方顶过的关当成自己顶过的
+    #    （顶纪录跳过 = 少打一场加成, 扫荡按旧纪录低倍率刷 —— 真金白银的 AP）。
     def _topped_path(self):
-        from pathlib import Path as _P
-        p = _P(__file__).resolve().parents[2] / "data" / "routing_v2"
-        p.mkdir(parents=True, exist_ok=True)
-        return p / "event_topped.json"
+        from routing_v2.config import data_dir
+        return data_dir(self.ctx.cfg) / "event_topped.json"
 
     def _topped_load(self) -> dict:
         # bag 优先（测试注入 fixture 用；线上没人设就读文件）——

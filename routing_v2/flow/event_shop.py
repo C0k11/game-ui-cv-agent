@@ -470,11 +470,11 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         self.ctx.bag["event_shop_tabs"] = tabs_bottom_up
         # 计划落盘（08-09）：ctx.bag 是进程内存 —— runner 崩溃/step 模式跨
         #    进程都会把推算丢掉，event 只能"兜底打最后一关"。文件是权威副本。
+        #    08-15 起写进账号桶（读侧 event._plan_from_file 同桶）。
         try:
             import json as _json
-            from pathlib import Path as _P
-            _out = _P(__file__).resolve().parents[2] / "data" / "routing_v2"
-            _out.mkdir(parents=True, exist_ok=True)
+            from routing_v2.config import data_dir
+            _out = data_dir(self.ctx.cfg)
             (_out / "event_farm_plan.json").write_text(
                 _json.dumps({"ts": time.time(), "has_points": has_pts,
                              "plan": ordered}, ensure_ascii=False, indent=1),

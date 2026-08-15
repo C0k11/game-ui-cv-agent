@@ -77,7 +77,12 @@ class Entry:
 
 
 class Ledger:
-    def __init__(self, log=None, sample_every: float = 8.0):
+    def __init__(self, log=None, sample_every: float = 8.0,
+                 out_dir: Optional[Path] = None):
+        """out_dir = 账号桶（config.data_dir）。08-15 起生产路径一律分桶:
+        ledger 文件名只有日历日, 大小号同一天会写进同一份（ledger_20260813
+        实锤 05:48 大号 59M / 08:49 小号 35,544 混在一起）。None 只给
+        测试/离线工具用（它们自己改 self.path）。"""
         self._log = log or (lambda m: print(m, flush=True))
         self.sample_every = sample_every
         self._vote = R.Vote()
@@ -94,8 +99,9 @@ class Ledger:
         self._grow_pending: Dict[str, int] = {}   # 位数变多的待复读值
         self._first_pending: Dict[str, int] = {}  # 初始基线的待复读值
         self._ins_fix: Dict[str, int] = {}    # 插位读大被结构闸咬回的次数
-        _OUT.mkdir(parents=True, exist_ok=True)
-        self.path = _OUT / f"ledger_{time.strftime('%Y%m%d')}.jsonl"
+        out = Path(out_dir) if out_dir else _OUT
+        out.mkdir(parents=True, exist_ok=True)
+        self.path = out / f"ledger_{time.strftime('%Y%m%d')}.jsonl"
 
     # ── 采样 ────────────────────────────────────────────────────────────
     def feed(self, obs: Observation, page: str, flow: str) -> Optional[str]:
