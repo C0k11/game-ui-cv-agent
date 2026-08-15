@@ -164,6 +164,11 @@ class Flow:
         """
         self.ticks += 1
         self.observe(obs, st)
+        # 奖励层的出口锁只活在这一层里：层一掉（或换成别的 overlay）就复位。
+        #    放 decide 里是因为 on_reward 只有 ov=reward 时才被调，层掉了它
+        #    自己没机会清（08-15 抢拍修法的配套件，见 _reward_exit）。
+        if st.overlay != "reward":
+            self.state.pop("reward_exit", None)
         if st.overlay:
             fn = getattr(self, f"on_{st.overlay}", None)
             if fn is not None:
@@ -258,17 +263,41 @@ class Flow:
         # 语义优先级，不是 conf argmax（`获得奖励` 是横幅不是按钮，见 battle.py）
         # **子类绝不许用 `obs.find([A, B])` 覆写这个方法**（08-11 live 实锤）：
         #    `find(列表)` 的语义是**全屏 conf argmax**，不是"先 A 后 B"——
-        #    只有这里这种 `or` 链才是优先级。daily_mission/mail 各自抄了一份
+        #    只有这里这种优先级链才对。daily_mission/mail 各自抄了一份
         #    `find([GOT_REWARD, CONFIRM], 0.40)`，于是在「獲得獎勵！」全屏
         #    overlay 上（`获得奖励` **0.98** 横幅 @(0.500,0.224) vs
         #    `点击继续字样` **0.93** @(0.501,0.877)，帧上没有確認键）
         #    永远选中横幅  连点 11 次画面纹丝不动（02:00:4102:02:59），
         #    而 `点击继续字样` 这一档**根本没进过候选**。
         #     覆写没有收益，一律继承本方法。
-        b = (obs.find(V.CONFIRM, 0.40)
-             or obs.find(V.STORY_TAP_CONTINUE, 0.40)
-             or obs.find(V.GOT_REWARD, 0.40))
-        return tap_box(b, "关掉奖励明细") if b is not None else None
+        # 08-15 再收口：横幅从候选里**整个删掉**（原来是兜底档，t10726 还是
+        #    点了它一次，默认契约 expect_gone 等它消失，永不兑现  70 帧超时
+        #    后换目标，就是用户看到的「点了那个 cls 又去点点击继续」）。
+        return self._reward_exit(obs, allow=(V.CONFIRM, V.STORY_TAP_CONTINUE))
+
+    def _reward_exit(self, obs: Observation, allow) -> Optional[Action]:
+        """奖励 overlay 的唯一合法动作：点**真按钮**，同一层锁死一个出口。
+
+        规矩（08-15 日常 live 复盘, trace t13901t13953 三连换目标）:
+          1. 「获得奖励」是横幅不是按钮，**永不点**；
+          2. 没有真按钮就 wait —— 不许落回底页让归位/页面处理器来抢
+             （返回键/回大厅在奖励过场里全是拆台）；
+          3. 点过一个出口后，这一层（ov=reward）没掉之前**不换目标**——
+             锁在 tap 真发出去后由 post 落下，层掉了 decide 里复位。
+        """
+        locked = self.state.get("reward_exit")
+        if locked:
+            b = obs.find(locked, 0.40)
+            if b is not None:
+                return tap_box(b, f"关掉奖励层（锁定出口 {locked}）")
+            return wait("奖励层锁定出口暂不可见 — 等这一层自己掉")
+        for cls in allow:
+            b = obs.find(cls, 0.40)
+            if b is not None:
+                def _lock(c=cls):
+                    self.state["reward_exit"] = c
+                return tap_box(b, "关掉奖励层", post=_lock)
+        return wait("奖励层上还没有真按钮（获得奖励是横幅，不点）")
 
     def on_sweep_results(self, obs: Observation, st: StateView) -> Optional[Action]:
         """掃蕩完成面板的奖励动画期：点 SKIP 直达总账（08-09 实锤缺口）。"""

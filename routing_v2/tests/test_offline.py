@@ -629,6 +629,46 @@ def t_flows():
 
     _RD.read_topbar = _orig_topbar          # 还原读数打桩
 
+    # ── 08-15 活动奖励同层抢拍（trace t13901t13953 三连换目标）──────────
+    #    规矩: 横幅「获得奖励」永不点; 「前往大厅」在奖励层禁点(点了回 lobby
+    #    拆断活动链); 同层锁一个出口; 没真按钮就 wait 不落底页。
+    _rw = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    _st_rw = Machine(1).update(O(B(V.GOT_REWARD, cx=0.50, cy=0.22)))
+    _a = _rw.on_reward(O(B(V.GOT_REWARD, conf=0.98, cx=0.50, cy=0.22)), _st_rw)
+    check("奖励层只有横幅  wait，不许点横幅",
+          _a is not None and _a.kind == "wait", str(_a))
+    _o2 = O(B(V.GOT_REWARD, conf=0.98, cx=0.50, cy=0.22),
+            B(V.STORY_TAP_CONTINUE, conf=0.85, cx=0.51, cy=0.88))
+    _a = _rw.on_reward(_o2, _st_rw)
+    check("横幅+点击继续  只点继续（conf 高的横幅不进候选）",
+          _a is not None and _a.is_tap
+          and _a.target_cls == V.STORY_TAP_CONTINUE, str(_a))
+    if _a.post:
+        _a.post()                       # 模拟 runner: tap 真发出去才落锁
+    _o3 = O(B(V.GOT_REWARD, cx=0.50, cy=0.22),
+            B(V.STORY_TAP_CONTINUE, cx=0.51, cy=0.88),
+            B(V.CONFIRM, cx=0.60, cy=0.91))
+    _a = _rw.on_reward(_o3, _st_rw)
+    check("同层已锁出口  确认键冒出来也不换目标",
+          _a is not None and ((_a.is_tap
+                               and _a.target_cls == V.STORY_TAP_CONTINUE)
+                              or _a.kind == "wait"), str(_a))
+    _rw2 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    _o4 = O(B(V.GOT_REWARD, conf=0.99, cx=0.50, cy=0.22),
+            B(V.GOTO_LOBBY_TEXT, conf=0.99, cx=0.40, cy=0.95),
+            B(V.CONFIRM, conf=0.97, cx=0.60, cy=0.91))
+    _a = _rw2.on_reward(_o4, _st_rw)
+    check("横幅+前往大厅+确认  只点确认，永不点前往大厅",
+          _a is not None and _a.is_tap and _a.target_cls == V.CONFIRM, str(_a))
+    # 层掉了锁必须复位（decide 里做, 因为 on_reward 在层掉之后不再被调）
+    _rw2.state["reward_exit"] = V.CONFIRM
+    _mlob = Machine(1)
+    _lob_o = O(B(V.NAV_CAFE, cx=0.07, cy=0.95), B(V.NAV_SHOP, cx=0.53, cy=0.95),
+               B(V.NAV_CRAFT, cx=0.44, cy=0.95))
+    _rw2.decide(_lob_o, _mlob.update(_lob_o))
+    check("奖励层掉了  出口锁复位（下一层重新选）",
+          "reward_exit" not in _rw2.state)
+
     # 金钱，**双键框内有数量步进器 = 购买/兑换框**（08-09 差点花 30 青辉石：
     #    AP 耗尽后又点扫荡，游戏弹「購買AP 單價💎30」，而弹窗体内的青辉石图标
     #    一个都没检出  非「看见青辉石」的判据全瞎）

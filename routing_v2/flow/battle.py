@@ -254,19 +254,17 @@ class BattleMixin:
 
     # ── 奖励页 ──────────────────────────────────────────────────────────
     def on_reward(self, obs: Observation, st: StateView) -> Optional[Action]:
-        """顺序很重要：**先找真按钮，再退而求其次点横幅**。
-        `获得奖励` 是**横幅文字**不是按钮，点它常常没反应 —— 08-08 实测被
-        连点了 8 次才蒙对。有 確認 就点 確認。"""
-        # 顺序是**语义优先级**，不是 conf argmax：
-        #   確認 > 前往大厅 > **点击继续字样**（真的可点提示）> 获得奖励（横幅）
-        #   2026-08-08 实测：把后两个放一个列表里让 argmax 选，会选中
-        #   `获得奖励` conf 0.98 那个**横幅文字**（不是按钮），点了没反应，
-        #   而 `点击继续字样` 0.93 才是真的能点的。conf 高 ≠ 该点它。
-        b = (obs.find(V.CONFIRM, 0.40)
-             or obs.find(V.GOTO_LOBBY_TEXT, 0.40)
-             or obs.find(V.STORY_TAP_CONTINUE, 0.40)
-             or obs.find(V.GOT_REWARD, 0.40))
-        return tap_box(b, "奖励: 点掉") if b is not None else wait("奖励页")
+        """奖励层出口收口到 `Flow._reward_exit`（08-15 抢拍复盘）:
+
+        原来的链是 確認 > **前往大厅** > 点击继续 > **获得奖励（横幅兜底）**，
+        两个都出过事（trace t13901t13953）:
+          · 横幅兜底真的点下去了（08-08 写"点它常常没反应"却留着当兜底），
+            默认契约 expect_gone 等横幅消失，永不兑现  70 帧超时换目标；
+          · 「前往大厅」在活动结算上是**回大厅导航**不是点掉奖励，t13939
+            点完人直接被送回 lobby，活动链当场拆断。
+        现在：只认 確認/点击继续 两个真按钮，同层锁一个出口，没按钮就 wait。
+        """
+        return self._reward_exit(obs, allow=(V.CONFIRM, V.STORY_TAP_CONTINUE))
 
     # ── 工具 ────────────────────────────────────────────────────────────
     def battle_stats(self) -> str:
