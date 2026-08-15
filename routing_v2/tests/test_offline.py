@@ -587,6 +587,42 @@ def t_flows():
     check("收起窗口有界(60 tick 后放回兜底, 防真卡死)",
           _qe.on_squad_quick_edit(O(), _stq) is None)
 
+    # ── 08-15 大赛冷却闸: 读「等待時間」, 不再编队页盲等 ────────────────
+    #    老 brain/skills/arena.py 本来就 OCR 这个倒计时(06-13 用户拍板
+    #    "倒计时早没了别傻等"), 新架构重写时丢了  盲等 20s < 真冷却 ~25s,
+    #    每场第一发出击都打早撞提示框, 确认吃掉后墙钟重置再蹲 ~36s。
+    #    cls 526 只框标签四个字, READY 态「--:--」标签仍在屏上 
+    #    判据 = 读标签右侧数字; 无读数连续 2 帧才放行。
+    from routing_v2.percept.read import _mmss_secs as _mm
+    check("mm:ss 解析", _mm("01:25") == 85 and _mm("0025") == 25
+          and _mm("25") == 25)
+    check("--:--/垃圾数不当真", _mm("--:--") is None and _mm(None) is None
+          and _mm("999999") is None)
+    _arf = ALL["arena"](Ctx(cfg=cfg(), log=lambda m: None))
+    _arf.setup()
+    _arf.state.update(entry_claims=3, claims=8)
+    _apg = O(B(V.ARENA_WAIT, cx=0.074, cy=0.732, w=0.052, h=0.024),
+             B(V.ARENA_ROW, cx=0.66, cy=0.35, w=0.40, h=0.10),
+             B(V.ARENA_ROW, cx=0.66, cy=0.79, w=0.40, h=0.10))
+    _sar = Machine(1).update(_apg)
+    _orig_ws = _RD.read_wait_secs
+    _RD.read_wait_secs = lambda o, a: 21
+    _arf.ticks += 1
+    _aa = _arf.on_arena(_apg, _sar)
+    check("等待時間 21s 可见  在对手页等冷却, 不进编队",
+          _aa is not None and _aa.kind == "wait" and "等待時間" in _aa.reason,
+          str(_aa))
+    _RD.read_wait_secs = lambda o, a: None
+    _arf.ticks += 1
+    _a1 = _arf.on_arena(_apg, _sar)
+    check("--:-- 第 1 帧只确认不放行(单帧误读不放跑)",
+          _a1 is not None and _a1.kind == "wait", str(_a1))
+    _arf.ticks += 1
+    _a2 = _arf.on_arena(_apg, _sar)
+    check("--:-- 连续 2 帧  放行点对手", _a2 is not None and _a2.is_tap,
+          str(_a2))
+    _RD.read_wait_secs = _orig_ws
+
     _RD.read_topbar = _orig_topbar          # 还原读数打桩
 
     # 金钱，**双键框内有数量步进器 = 购买/兑换框**（08-09 差点花 30 青辉石：

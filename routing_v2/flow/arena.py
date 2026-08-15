@@ -127,6 +127,38 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             if tix <= 0:
                 return self._wrap("大赛票用完了（绝不买票）")
 
+        # 出击冷却闸（08-15 用户点名"arena 是读等待時間来判断的" -- 这是
+        #    老 brain/skills/arena.py 的原能力: OCR 左栏「等待時間 mm:ss」,
+        #    读到 --:-- 才打, 2026-06-13 用户拍板"倒计时早没了别傻等"。
+        #    routing_v2 重写时把它丢了, 回退成编队页盲等 20s -- 而真冷却
+        #    ~25s, 08-15 日常 live 每场第一发出击都打早撞提示框, 确认吃掉
+        #    后墙钟又被那次假出击重置, 每场平白多蹲 ~36s, 全程 6 场全中）。
+        # cls 526 `等待时间`(train 1092/val 358) v16 起已训好: **只框标签
+        #    四个字**, READY 态「--:--」标签仍在屏上（08-15 帧证 5/5 票 +
+        #    --:-- 的对手页照检 0.97） 判据 = read_wait_secs 读标签右侧
+        #    数字, 不是 cls 存在性; 读不出要连续 2 帧才放行（单帧误读不放跑）。
+        w = obs.find(V.ARENA_WAIT, 0.40, region=(0.0, 0.55, 0.35, 0.90))
+        if w is not None and not self.state.get("cd_gate_off"):
+            secs = R.read_wait_secs(obs, w)
+            if secs:
+                import time as _t
+                t0 = self.state.setdefault("cd_t0", _t.time())
+                if _t.time() - t0 > 60.0:
+                    # 读数 60s 都下不来 = 数字可疑（真冷却 ~25s）。别拿垃圾数
+                    #    死等: 放行, 打早了顶多撞提示框（on_ack_dialog 点掉,
+                    #    出击会重试）, 下次出击后闸自动复位再试读。
+                    self.state["cd_gate_off"] = True
+                    self.log(f"等待時間读数 {secs}s 挂了 60s 不清零 — 可疑, 放行")
+                else:
+                    self.state.pop("hold:cd_clear", None)
+                    self.state.pop("hold:cd_clear:t", None)
+                    return wait(f"等待時間 {secs}s — 冷却没走完, 在对手页等它清零"
+                                f"（老规矩: 读到 --:-- 才打）")
+            elif not self.hold("cd_clear", 2):
+                return wait("等待時間无读数（--:--?）— 连续确认第 2 帧再放行")
+            else:
+                self.state.pop("cd_t0", None)
+
         # 点对手行后是**对手详情面板**（页面身份同为 arena，08-09 帧证）：
         #    `攻击编制` 在场 = 详情面板开着  点它进编队。第一版不认识这个态，
         #    点了两次对手行就干等到 LEFTOVER（票 55 一场没打）。
@@ -200,20 +232,19 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         if off is not None and on is None:
             return tap_box(off, "勾上「跳過戰鬥」（每场都会被游戏重置，逐场认状态）",
                            expect=(V.SKIP_BATTLE,))
-        # 2026-08-12 用户实测：**出击后有 20 秒倒计时冷却**，冷却没走完再点
+        # 2026-08-12 用户实测：**出击后有 ~25 秒冷却**，冷却没走完再点
         #    出击只会弹提示框  bot 反复「点出击点掉提示」空转。
-        #    这跟上面勾「跳過戰鬥」**直接冲突**：勾了战斗瞬间结束，倒计时反而
-        #      没走完（这次没勾，看过场动画正好耗掉冷却，误打误撞对上了）。
-        #    **屏上没有倒计时的 cls**（master 表里一条都没有） 感知层暂时
-        #      看不见这个冷却，只能用**显式墙钟**兜住。
+        #    冷却的**主闸已经搬去 on_arena**（08-15: cls 526 `等待时间` 训好
+        #    了, 对手页读「等待時間 mm:ss」清零才放行 —— 老 brain 代码的原
+        #    能力回迁）。这里的墙钟降级成**纯保险**: 只防"没路过对手页直接
+        #    站上编队页"的病态路径（比如提示框确认后原地重试）。20s 故意比
+        #    真冷却短 —— 主闸在的话它根本不该触发, 触发了也只是撞一次提示框。
         #      [[tick_vs_wallclock]]：墙钟必须显式 mark，绝不能拿 tick 计数当秒。
-        #     待补 cls：大赛出击倒计时（补上之后就能改成"看得见才点"，
-        #      把这个墙钟兜底撤掉）。
         import time as _t
         last = self.state.get("sortie_ts")
         if last is not None and _t.time() - last < 20.0:
             return wait(f"大赛出击冷却中（还剩 {20.0 - (_t.time() - last):.0f}s）"
-                        f" — 现在点只会弹提示框")
+                        f" — 现在点只会弹提示框（保险层, 主闸在对手页读等待時間）")
         go = obs.find(V.SORTIE, 0.45)
         if go is None:
             return wait("等出击键")
@@ -221,8 +252,13 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         #    出击也不许抢在淡入死区里发 —— 连续 8 帧都在配队页再点。
         if not self.hold("form_ready", 8):
             return wait("配队页刚进来（淡入死区）— 稳 8 帧再出击")
-        return tap_box(go, "出击（大赛）",
-                       post=lambda: self.state.__setitem__("sortie_ts", _t.time()))
+
+        def _sortied():
+            self.state["sortie_ts"] = _t.time()
+            # 冷却闸复位: 下一场重新读等待時間（含 60s 可疑放行的复位）。
+            for k in ("cd_t0", "cd_gate_off", "hold:cd_clear", "hold:cd_clear:t"):
+                self.state.pop(k, None)
+        return tap_box(go, "出击（大赛）", post=_sortied)
 
     # **删掉了 `on_stage_popup`**（2026-08-10 live 差一步花 30 青辉石）。
     #    原实现是:

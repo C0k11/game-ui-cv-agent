@@ -331,6 +331,39 @@ def read_ticket(obs: Observation, anchor: Box, hard_max: int = 99) -> Optional[i
     return cur
 
 
+def _mmss_secs(raw: Optional[str]) -> Optional[int]:
+    """mm:ss 原始 OCR 串 -> 剩余秒; 无数字(--:--)/不可解析/离谱 -> None。
+
+    >600s 视为误读: 大赛出击冷却实测 ~25s, 读出十分钟以上只可能是
+    条带里混进了别的数字 -- 拿 None 交给调用方的连续确认, 别拿垃圾数死等。
+    """
+    if not raw:
+        return None
+    d = "".join(c for c in raw if c.isdigit())
+    if not d:
+        return None
+    try:
+        secs = int(d[:-2] or 0) * 60 + int(d[-2:]) if len(d) >= 3 else int(d)
+    except ValueError:
+        return None
+    return secs if 0 <= secs <= 600 else None
+
+
+def read_wait_secs(obs: Observation, anchor: Box) -> Optional[int]:
+    """「等待時間」标签右侧的 mm:ss 剩余秒数。
+
+    cls 526 `等待时间` **只框标签文字, 不含数字**（08-15 帧证:
+    渲框正好卡在「等待時間」四个字上），数字在右侧同一行 --
+    和上一行「持有票券 N/M」同构, 条带几何同 read_ticket 族。
+    READY 态是「等待時間 --:--」**标签仍在屏上**, 所以判据必须是读数
+    不是 cls 存在性。返回 None = 无数字/读不出（调用方连续确认再放行）。
+    """
+    fh = obs.h or (obs.frame.shape[0] if obs.frame is not None else None)
+    return _mmss_secs(digits(obs.frame,
+                             icon_strip(anchor, 0.10, 1.8, 0.80,
+                                        fh, 30.0, 46.0)))
+
+
 QTY_MINUS, QTY_MINUS_GREY = "减号", "减号灰色"
 QTY_PLUS, QTY_PLUS_GREY = "加号", "加号灰色"
 
