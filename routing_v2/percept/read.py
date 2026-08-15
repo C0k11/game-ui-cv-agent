@@ -51,7 +51,10 @@ ARENA_COIN = "战术大赛商店货币"
 # 青辉石 y_pad 的失效是**几何性**的：≤0.35 纵向切掉数字读成 `36`；
 #   ≥0.55 吃进邻居读成 `18003`；0.40~0.50 是安全块，取中心 0.45。
 # (x_from, x_to, y_pad_icon, pad_px_min, pad_px_max)
-# 后两个是 y 留白的**绝对像素**上下限 —— 见 PAD_FLOOR_PX 那段的实测依据。
+# 后两个是 y 留白的上下限, **单位不同**（08-15 复盘拆开的, 见 icon_strip）:
+#   pad_px_min = **真绝对像素**(DB 文本检测器"不足 ~30 真实像素不出框"的物性);
+#   pad_px_max = **1440p 标定参考像素**(布局量: 别吃进邻居行 -- 邻居距离随
+#     UI 整体缩放, 换分辨率按比例走, 不再是写死的绝对像素)。
 # None = 不设限。
 STRIP = {
     #  AP 的 1.60 是刻意放很松的（要连 "/240" 一起框住），**不设上限**，
@@ -181,6 +184,15 @@ def _engine():
 #   1440p 下青辉石从 23.2 补到 30，实测回到 12/12。
 #   （不加天花板是因为 AP 的 y_pad=1.60 本来就是刻意放很松的，压它会伤 AP。）
 PAD_FLOOR_PX = 30.0
+# 天花板的标定基准分辨率。所有 pad_px_max 都是在 scrcpy 1440p 上按人眼真值
+#    标出来的; 它防的是"吃进邻居行", 而邻居距离随 UI **等比缩放** ——
+#    所以换分辨率时天花板必须跟着比例走, 不能当绝对像素用。
+#    08-15 实锤(0616 4K val 帧): 信用点 y_pad 0.65 x 图标高 73px ≈ 47px,
+#    被写死的 42 绝对像素夹瘦 -> 首位纵向切掉, 47,143,185 读成 433185 /
+#    7,555 读成 555。同一组参数 1440p 全对 —— 是天花板单位错, 不是标定错。
+#    地板不换算: 那是 DB 检测器的像素域物性(见 PAD_FLOOR_PX 上面那段),
+#    08-08 青辉石 1440p 12/12 依赖的就是绝对 30px。
+_PAD_CALIB_H = 1440.0
 
 
 def icon_strip(box: Box, x_from: float, x_to: float, y_pad: float,
@@ -189,17 +201,18 @@ def icon_strip(box: Box, x_from: float, x_to: float, y_pad: float,
                pad_max_px: Optional[float] = None) -> Rect:
     """锚点图标右侧的数字 strip。
 
-    x 单位 = 图标宽 iw（从 box.x2 起算）；y 单位 = 图标高 bh，
-    再按**绝对像素**上下限夹一次（这一步才是跨分辨率的关键，见上面那段）。
+    x 单位 = 图标宽 iw（从 box.x2 起算）；y 单位 = 图标高 bh，再夹两道:
+    地板按**真绝对像素**（OCR 检测器物性, 要 frame_h 才能换算），
+    天花板按 **1440p 标定参考像素**（布局量, 归一化后是常数,
+    换分辨率自动等比 —— 08-15 前它也是绝对像素, 4K 顶栏被夹瘦切首位）。
     """
     iw = max(1e-6, box.w)
     bh = max(1e-6, box.h)
     pad = y_pad * bh
-    if frame_h:
-        if pad_min_px:
-            pad = max(pad, pad_min_px / float(frame_h))
-        if pad_max_px:
-            pad = min(pad, pad_max_px / float(frame_h))
+    if frame_h and pad_min_px:
+        pad = max(pad, pad_min_px / float(frame_h))
+    if pad_max_px:
+        pad = min(pad, pad_max_px / _PAD_CALIB_H)
     return (min(1.0, box.x2 + x_from * iw),
             max(0.0, box.y1 - pad),
             min(1.0, box.x2 + x_to * iw),

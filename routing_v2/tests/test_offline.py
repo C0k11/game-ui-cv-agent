@@ -2274,6 +2274,35 @@ def t_deadbtn():
           str(stp2))
 
 
+def t_ocr_geom():
+    """icon_strip 天花板单位修复（08-15）: 天花板是布局量(别吃邻居行), 该随
+    UI 等比缩放; 写成绝对像素后 4K 顶栏被夹瘦切首位(47,143,185->433185 /
+    7,555->555), 而 1440p 全对 —— 单位错, 不是标定错。地板仍是真绝对像素
+    (DB 检测器物性)。"""
+    print("\n── OCR 裁片几何 ─────────────────────────────")
+    from routing_v2.percept.read import CREDIT, PYROXENE, STRIP, icon_strip
+    xf, xt, yp, pmin, pmax = STRIP[CREDIT]
+    b = Box(cls=CREDIT, conf=0.9, x1=0.500, y1=(720 - 24.7) / 1440,
+            x2=0.500 + 54 / 2560, y2=(720 + 24.7) / 1440)
+    r = icon_strip(b, xf, xt, yp, 1440, pmin, pmax)
+    pad = (b.y1 - r[1]) * 1440
+    check("1440p 信用点留白=图标倍数(~32px), 标定分辨率行为不动",
+          31.0 < pad < 33.0, f"{pad:.1f}px")
+    b4 = Box(cls=CREDIT, conf=0.9, x1=0.500, y1=(540 - 36.5) / 2160,
+             x2=0.500 + 82 / 3840, y2=(540 + 36.5) / 2160)
+    r = icon_strip(b4, xf, xt, yp, 2160, pmin, pmax)
+    pad = (b4.y1 - r[1]) * 2160
+    check("4K 信用点留白 ~47px 不再被 42 绝对像素天花板切首位",
+          46.0 < pad < 49.0, f"{pad:.1f}px")
+    xf, xt, yp, pmin, pmax = STRIP[PYROXENE]
+    b4g = Box(cls=PYROXENE, conf=0.9, x1=0.700, y1=(115 - 38.5) / 2160,
+              x2=0.700 + 77 / 3840, y2=(115 + 38.5) / 2160)
+    r = icon_strip(b4g, xf, xt, yp, 2160, pmin, pmax)
+    pad = (b4g.y1 - r[1]) * 2160
+    check("4K 青辉石留白 ~62px, 天花板按 1440 参考等比放开(实测 555->7555)",
+          58.0 < pad < 64.0, f"{pad:.1f}px")
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -2285,6 +2314,7 @@ if __name__ == "__main__":
     t_vocab()
     t_ledger()
     t_deadbtn()
+    t_ocr_geom()
     t_event_bonus_shop()
     print("\n" + "═" * 52)
     if FAILS:
