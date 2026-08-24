@@ -172,3 +172,12 @@ data/raw_images/_val_v15_gap/
 /data/event_topped.json
 /data/routing_v2/
 /gate_scan_rows.json
+
+# 本地工作目录与分步运行状态, 不入库
+/scratchpad/
+routing_v2/_step_state_*.json
+routing_v2/_*.py
+routing_v2/_*.txt
+routing_v2/_*.json
+routing_v2/_*.jpg
+routing_v2/_*.png
