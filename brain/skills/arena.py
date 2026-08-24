@@ -9,14 +9,14 @@ Step 23-34). Arena is PVP — NOT a sweep. Key probe findings vs the old skill:
 - ~25s 等待時間 cooldown after each fight (blind tick wait here; OCR mm:ss is
   unreliable — v6 could refine).
 
- pyroxene protection 
+ pyroxene protection
   digit-OCR 战术大赛票 X/5. Ticket 0  STOP challenging (a 0-ticket 出击 pops a
   購買戰術大賽券 青辉石 dialog). The buy-dialog guard requires a 取消键 present
   (a cost dialog has cancel) so it never misfires on the cancel-less
   達成賽季最高紀錄 REWARD popup.
 
 State machine
--------------
+----
 enter   lobby  NAV_TASKS  hub  HUB_ARENA  arena main.
 claim   click every 领取奖励_黄 (获得奖励  点击继续字样 dismiss). 领取奖励_灰
         ignored. Done when no 领取奖励_黄 remains.
@@ -149,7 +149,7 @@ class ArenaSkill(BaseSkill):
         self._phase_ticks = 0
         self.mark("phase")                 # _phase_ticks 的墙钟版
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _on_arena(self, screen: ScreenState) -> bool:
         return self.find_cls(
             screen, [UC.TICKET_ARENA, UC.ATTACK_FORMATION, UC.SORTIE,
@@ -164,7 +164,7 @@ class ArenaSkill(BaseSkill):
          Runs on a CLEAN ADB frame, not screen.frame: the overlay burns a
         tight box+label onto the small ticket icon in every DXcam frame, which
         killed ui_v7's detection of it outright (live 2026-06-09: 0 detections
-        on burned frames vs conf 0.95 on the clean frame  every read None 
+        on burned frames vs conf 0.95 on the clean frame  every read None
         fail-closed exit with tickets unspent). Falls back to screen.frame
         only if no clean source is registered."""
         try:
@@ -243,7 +243,7 @@ class ArenaSkill(BaseSkill):
 
         2026-07-25 全仓金钱审计: 旧版是 `body青辉石 AND 取消键` —— 一条
         **合取的单点链**, 任一环漏检整条防线哑火。schedule 那起 30 青辉石事故
-        的帧就是反例: 屏上明写「單價💎30」而 YOLO body **零青辉石检出**。
+        的帧就是反例: 屏上明写「單價30」而 YOLO body **零青辉石检出**。
         arena 这里是逐字同型, 只是还没轮到它出事。
         改成**析取的正交多信号**(任一命中即判买票框):
           A 数量步进器在 body(has_qty_stepper, 与图标识别完全独立)
@@ -263,7 +263,7 @@ class ArenaSkill(BaseSkill):
         return self.find_cls(screen, UC.TOPBAR_PYROXENE, conf=0.20,
                              region=_PYROXENE_BODY_REGION) is not None
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -365,7 +365,7 @@ class ArenaSkill(BaseSkill):
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
             #  Hall scan (user iron rule 2026-06-11): the 战术大赛 tile's own
-            # red/yellow dot is the work signal — visible only here. No dot 
+            # red/yellow dot is the work signal — visible only here. No dot
             # nothing to claim/fight today  graceful exit.
             has_work = self.hall_tile_dot(screen, UC.HUB_ARENA)
             if has_work is False:

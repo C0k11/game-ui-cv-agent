@@ -2,7 +2,7 @@
 """战斗链 + 编队 —— 活动/悬赏/JFD/大赛/推图/挖矿全都复用这一份。
 
 链路 2026-08-08 真机逐帧验过（10 次出击 / 3.6 分钟，全 cls 驱动零 wait）:
-    编队(出击)  战斗内(三倍速/暂停/自动战斗开启)  **战斗胜利** 
+    编队(出击)  战斗内(三倍速/暂停/自动战斗开启)  **战斗胜利**
     确认键  跳过故事键  获得奖励  回到入场键
 
  `战斗失败` **train=0，UI 模型一框都没有  输了看不见**。
@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from routing_v2.act.action import Action, tap_box, wait
@@ -31,6 +32,72 @@ from routing_v2.state.machine import StateView
 # 真值 105%/110% 两格  读出 `'105110'`（两格连读，不拆）。判据"只认干净的 0"
 # 在这种连读下仍然安全：有任何加成就不可能是纯 "0"。
 _R_SQUAD_PCT = (0.005, 0.92, 0.085, 0.99)
+
+# 编队页六个槽位的固定 UI 条带。UI/目标部队仍由 YOLO cls 判断，这里只做
+# 槽位占用的正向证明，不读文字，也不量角色立绘的明暗或颜色。
+#
+# 08-15 实帧标定:
+#   STRIKER 取每槽底部角色名牌和 FRONT/BACK 彩带区域。
+#   SPECIAL 取白名牌顶部固定的武器和防御类型彩条。
+#   满槽饱和像素占比下限分别为 0.100 和 0.176，空槽、淡入空槽均为 0。
+_STRIKER_SLOTS = (
+    (0.16, 0.665, 0.32, 0.790),
+    (0.33, 0.665, 0.49, 0.790),
+    (0.50, 0.665, 0.67, 0.790),
+    (0.68, 0.665, 0.84, 0.790),
+)
+_SPECIAL_SLOTS = (
+    (0.315, 0.845, 0.490, 0.910),
+    (0.595, 0.845, 0.770, 0.910),
+)
+_STRIKER_SAT_MIN = 0.06
+_SPECIAL_SAT_MIN = 0.08
+_FORMATION_UNREADY_TICKS = 40
+_FORMATION_UNREADY_SECONDS = 5.0
+
+
+def formation_slot_saturation(obs: Observation):
+    """返回四个 STRIKER 和两个 SPECIAL 固定条带的高饱和像素占比。"""
+    fr = getattr(obs, "frame", None)
+    if fr is None:
+        return None
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    arr = np.asarray(fr)
+    if arr.ndim != 3 or arr.shape[0] < 8 or arr.shape[1] < 8:
+        return None
+    h, w = arr.shape[:2]
+
+    def _ratio(rect):
+        x1, y1, x2, y2 = rect
+        xa, ya = int(x1 * w), int(y1 * h)
+        xb, yb = int(x2 * w), int(y2 * h)
+        if xb <= xa or yb <= ya:
+            return None
+        roi = arr[ya:yb, xa:xb]
+        if roi.size == 0:
+            return None
+        saturation = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 1]
+        return float((saturation > 120).mean())
+
+    striker = tuple(_ratio(rect) for rect in _STRIKER_SLOTS)
+    special = tuple(_ratio(rect) for rect in _SPECIAL_SLOTS)
+    if any(value is None for value in striker + special):
+        return None
+    return striker, special
+
+
+def formation_ready(obs: Observation) -> bool:
+    """仅当四个 STRIKER 和两个 SPECIAL 都有固定 UI 彩条证据时返回 True。"""
+    metrics = formation_slot_saturation(obs)
+    if metrics is None:
+        return False
+    striker, special = metrics
+    return (all(value >= _STRIKER_SAT_MIN for value in striker)
+            and all(value >= _SPECIAL_SAT_MIN for value in special))
 
 
 class FormationMixin:
@@ -46,12 +113,43 @@ class FormationMixin:
     want_team: int = 1
     _FORM_GIVEUP_FRAMES = 120
 
+    def _reset_formation_guard(self) -> None:
+        for key in ("hold:formation_unready",
+                    "hold:formation_unready:t",
+                    "formation_unready_since"):
+            self.state.pop(key, None)
+
+    def _formation_guard(self, obs: Observation, subject: str) -> Optional[Action]:
+        """六槽未获正向证明时，满足 tick 和墙钟双门槛才终结。"""
+        if formation_ready(obs):
+            self._reset_formation_guard()
+            return None
+        now = time.monotonic()
+        started = self.state.setdefault("formation_unready_since", now)
+        enough_ticks = self.hold("formation_unready", _FORMATION_UNREADY_TICKS)
+        elapsed = now - started
+        if enough_ticks and elapsed >= _FORMATION_UNREADY_SECONDS:
+            return self.finish(
+                "BLOCKED",
+                f"{subject}六个编队槽连续 {_FORMATION_UNREADY_TICKS} tick 且"
+                f" {_FORMATION_UNREADY_SECONDS:.0f}s 无法全部证明有人，拒绝出击")
+        return wait(
+            f"{subject}六个编队槽尚未全部证明有人，继续确认"
+            f"（至少 {_FORMATION_UNREADY_TICKS} tick 且"
+            f" {_FORMATION_UNREADY_SECONDS:.0f}s 才终结）")
+
+    def observe(self, obs: Observation, st: StateView) -> None:
+        if st.page != "formation" or st.changed:
+            self._reset_formation_guard()
+        super().observe(obs, st)
+
     def formation_step(self, obs: Observation, st: StateView,
                        team: Optional[int] = None) -> Optional[Action]:
         team = team or self.want_team
         auto_form = (team == 2)          # 唯一定义点：部队2  自动编队
         tab, hi = V.SQUAD_TABS.get(team, (None, None))
         if tab is None:
+            self._reset_formation_guard()
             return wait(f"部队{team} 没登记")
 
         # 已经选中目标部队  （部队2 先走自动编队子链） 出击
@@ -59,9 +157,13 @@ class FormationMixin:
             if auto_form:
                 act = self._auto_form_chain(obs)
                 if act is not None:
+                    self._reset_formation_guard()
                     return act
             go = obs.find(V.SORTIE, 0.45)
             if go is not None:
+                blocked = self._formation_guard(obs, "")
+                if blocked is not None:
+                    return blocked
                 if auto_form:
                     # 加成% 闸（老 event_quest.py:1437 原样搬）：编队屏左下
                     #   「活動編輯效果」第一格。这个读数很脏（"90%"读成'06'）
@@ -74,11 +176,13 @@ class FormationMixin:
                             f"自动编队后加成仍是干净的 0%（raw={pct!r}）— 不出击")
                 def _new_episode():
                     self._bt()["seen_win"] = False      # 新一场，横幅重新算
-                return tap_box(go, f"⚔ 出击（部队{team}）", counter="sorties",
+                return tap_box(go, f"出击（部队{team}）", counter="sorties",
                                post=_new_episode)
+            self._reset_formation_guard()
             return wait("已选中目标部队，等出击键")
 
         # 没选中  切过去
+        self._reset_formation_guard()
         t = obs.find(tab, 0.45)
         if t is not None:
             return tap_box(t, f"切到部队{team}")
@@ -191,7 +295,7 @@ class BattleMixin:
 
         win 计数也必须在**这里**转正（08-09 live 实锤）：原来写成
         「on_battle_result 里 seen_win  win+=1」，但结算屏大多数帧被判成
-        unknown/blank，確認键全走了 ack_dialog/reward 的处理器 
+        unknown/blank，確認键全走了 ack_dialog/reward 的处理器
         on_battle_result **一次都没跑到**  win 永远 0  加成阶段以为
         没赢过，把 Q12 又打了一遍（会无限循环）。
         横幅锁存的那一刻就是胜利事实；`seen_win` 在**下一次出击**时清。"""
@@ -216,7 +320,7 @@ class BattleMixin:
                 self.log(f" 捕到胜利  第 {bt['win']} 场胜利"
                          f"（page={st.page}）")
 
-    # ── 战斗内 ──────────────────────────────────────────────────────────
+    #  战斗内
     def on_battle(self, obs: Observation, st: StateView) -> Optional[Action]:
         bt = self._bt()
         # 三倍速：只在明确看到 1x/2x 时才切（看到 3x 说明已经是了）
@@ -230,7 +334,7 @@ class BattleMixin:
             return tap_box(off, "战斗: 开自动战斗", once="autoon")
         return wait("战斗中 — 等结算")
 
-    # ── 结算 ────────────────────────────────────────────────────────────
+    #  结算
     def on_battle_result(self, obs: Observation, st: StateView) -> Optional[Action]:
         # win 计数在 observe() 里转正（结算页身份靠不住，这里常跑不到）。
         #    这里只负责：没见过横幅的场次记"胜负未知" + 点確認。
@@ -252,7 +356,7 @@ class BattleMixin:
                          f"— 不记为已通关")
         return tap_box(cf, "结算: 確認", post=_mark)
 
-    # ── 奖励页 ──────────────────────────────────────────────────────────
+    #  奖励页
     def on_reward(self, obs: Observation, st: StateView) -> Optional[Action]:
         """奖励层出口收口到 `Flow._reward_exit`（08-15 抢拍复盘）:
 
@@ -266,7 +370,7 @@ class BattleMixin:
         """
         return self._reward_exit(obs, allow=(V.CONFIRM, V.STORY_TAP_CONTINUE))
 
-    # ── 工具 ────────────────────────────────────────────────────────────
+    #  工具
     def battle_stats(self) -> str:
         bt = self._bt()
         return f"胜 {bt['win']} / 胜负未知 {bt['unknown']}"

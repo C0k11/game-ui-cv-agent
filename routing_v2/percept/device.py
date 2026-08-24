@@ -86,7 +86,7 @@ class Device:
         self.last_tap_ts = 0.0
         self.last_tap_pt: Optional[Tuple[float, float]] = None
 
-    # ── 基础 ────────────────────────────────────────────────────────────
+    #  基础
     def sh(self, *args, timeout=15) -> str:
         with IO_LOCK:
             return _run([_ADB, "-s", self.serial, "shell", *args], timeout)
@@ -127,7 +127,7 @@ class Device:
                       f" —— 横屏游戏上这几乎肯定是错的，开跑前请先 calibrate")
         return self._size
 
-    # ── 动作（唯一允许走 ADB 的热路径）───────────────────────────────────
+    #  动作（唯一允许走 ADB 的热路径）
     def tap(self, nx: float, ny: float) -> bool:
         """归一化落点  input tap。实测稳态 32ms。"""
         w, h = self.size
@@ -161,7 +161,7 @@ class Device:
                 [_ADB, "-s", self.serial, "shell", "input", "keyevent", keycode],
                 capture_output=True, timeout=15).returncode == 0
 
-    # ── 冷路径（1588ms，绝不进决策循环）────────────────────────────────
+    #  冷路径（1588ms，绝不进决策循环）
     def screencap(self, _reason: str = ""):
         """ADB 抓一张。**只允许**存活探针/冻结检测/离线标定用。
 
@@ -182,7 +182,7 @@ class Device:
                   f"{(time.time()-t0)*1000:.0f}ms — 冷路径专用")
         return fr
 
-    # ── 存活 / 恢复 ─────────────────────────────────────────────────────
+    #  存活 / 恢复
     def game_running(self) -> bool:
         """游戏进程在不在。
 

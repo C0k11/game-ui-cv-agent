@@ -13,8 +13,8 @@ clicking — YOLO gives exact coords, no grid math:
        剧情new node (skip 入场键没解锁 = locked).  进入章节  scene.
   短篇/支线 grids: find a `new` card; none on this page  右切换 to the next.
 
-Skip flow (story auto-PLAYS — menuskip ASAP): 剧情menu  跳过故事键  确认键 
-获得奖励 (≈80💎)  点击继续字样  剧情中断退出 (中断) to leave the node.
+Skip flow (story auto-PLAYS — menuskip ASAP): 剧情menu  跳过故事键  确认键
+获得奖励 (≈80)  点击继续字样  剧情中断退出 (中断) to leave the node.
 
 NO OCR. ️ Main MAY contain battle nodes (no 剧情menu) — the cutscene timeout
 backs out of those (user to verify; v6 may add battle-node handling).
@@ -35,7 +35,7 @@ from brain.skills import ui_classes as UC
 _CLS_CONF = 0.30
 _CONTENT_REGION = (0.05, 0.12, 0.99, 0.92)   # exclude top HUD + bottom nav
 _NODE_PANEL = (0.30, 0.12, 1.0, 0.95)        # node/chapter list (right side)
-_ROW_DY = 0.06                               # node-icon ↔ 入场键 same-row gap
+_ROW_DY = 0.06                               # node-icon <-> 入场键 same-row gap
 
 _MAX_PAGE_TURNS = 6      # 右切换 paging cap per category (short/side grids)
 _MAX_MAIN_SWIPES = 5     # 卷-list swipe-left cap (main)
@@ -98,7 +98,7 @@ class StoryMiningSkill(BaseSkill):
         self._tried_enters: List[tuple] = []   # node 入场键 positions already entered
                                                # (battle nodes we back out of  skip next)
         self._tried_chapters: List[float] = [] # chapter 黄点 cy already opened (a
-                                               # battle-only chapter keeps its dot 
+                                               # battle-only chapter keeps its dot
                                                # don't reopen it forever)
         self._tried_cards: List[tuple] = []    # new-篇/卡 positions already selected
                                                # (a battle-gated 篇 keeps its New badge
@@ -157,7 +157,7 @@ class StoryMiningSkill(BaseSkill):
         self._settle_sec = sec
         self.mark("settle")
 
-    # ── tick: reactive priority chain ─────────────────────────────────────
+    #  tick: reactive priority chain
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         if self._skill_t0 is None:
@@ -199,7 +199,7 @@ class StoryMiningSkill(BaseSkill):
         reward = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
         if reward is not None:
             self._cut_ticks = 0
-            return action_click_box(reward, "dismiss reward (≈80💎)")
+            return action_click_box(reward, "dismiss reward (≈80)")
 
         # P0.5: 下一章節 prompt after an episode.  觀看 chains STRAIGHT into
         # the next episode (user 2026-06-10: battle win/lose are both scripted
@@ -378,7 +378,7 @@ class StoryMiningSkill(BaseSkill):
         # P7: navigation (lobby  mission hub).
         return self._navigate(screen)
 
-    # ── cutscene skip ──────────────────────────────────────────────────────
+    #  cutscene skip
     def _handle_cutscene(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         # Skip-confirm dialog (是否略過此劇情? 取消/確認)  確認. Recognized by
         # confirm-in-band + story chrome (MENU/skip top-right stays rendered
@@ -427,7 +427,7 @@ class StoryMiningSkill(BaseSkill):
             self._cut_ticks = max(0, self._cut_ticks - 1)
         return None
 
-    # ── mining (drill deepest-first) ───────────────────────────────────────
+    #  mining (drill deepest-first)
     def _mine_action(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         #  Mine ONLY on a real story page. A 黄点 (DOT_YELLOW) on the LOBBY / 任务
         # 大厅 is a nav badge (student / campaign_nav / cafe), NOT an unplayed
@@ -498,7 +498,7 @@ class StoryMiningSkill(BaseSkill):
                 and not any(abs(c - d.cy) < 0.05 for c in self._tried_chapters)]
         return min(dots, key=lambda b: b.cy) if dots else None
 
-    # ── reveal more (page-turn grids / swipe-left main 卷 list) ─────────────
+    #  reveal more (page-turn grids / swipe-left main 卷 list)
     def _reveal_more(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         # Short/side grids paginate with 右切换.
         arrow = self.find_cls(screen, UC.ARROW_RIGHT, conf=_CLS_CONF, region=(0.85, 0.30, 1.0, 0.70))
@@ -536,7 +536,7 @@ class StoryMiningSkill(BaseSkill):
         return (action_click_box(back, "back to hub for next category")
                 if back else action_back("back to hub for next category"))
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _on_any_story_page(self, screen: ScreenState) -> bool:
         return self.find_cls(
             screen,

@@ -112,7 +112,7 @@ def main():
     if "--emit" in sys.argv:
         if stale:
             sys.exit(3)
-        print("\n\n# ══ 粘回 vocab.py（数据集实测）══")
+        print("\n\n#  粘回 vocab.py（数据集实测）")
         print("HEALTH: Dict[str, Tuple[int, int]] = {")
         for cls, t, v in rows:
             const = next((k for k, val in vars(V).items()

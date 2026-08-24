@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# ── Detection boxes ────────────────────────────────────────────────────
+#  Detection boxes
 
 @dataclass
 class YoloBox:
@@ -71,7 +71,7 @@ class OcrBox:
         return self.y2 - self.y1
 
 
-# ── Screen state ────────────────────────────────────────────────────────
+#  Screen state
 
 @dataclass
 class ScreenState:
@@ -93,7 +93,7 @@ class ScreenState:
     fresh_frame: Any = field(default=None, repr=False, compare=False)
     fresh_ts: float = 0.0
 
-    # ── OCR text search helpers ──
+    #  OCR text search helpers
 
     def find_text(self, pattern: str, *, min_conf: float = 0.5,
                   region: Optional[Tuple[float, float, float, float]] = None) -> List[OcrBox]:
@@ -160,7 +160,7 @@ class ScreenState:
                 return hit
         return None
 
-    # ── Region constants for Blue Archive ──
+    #  Region constants for Blue Archive
 
     # Center dialog area
     CENTER = (0.25, 0.15, 0.75, 0.85)
@@ -258,7 +258,7 @@ class ScreenState:
         return False
 
 
-# ── Dot color posterior (2026-07-08) ────────────────────────────────────
+#  Dot color posterior (2026-07-08)
 # v12 红点/黄点位置先验强: 社交入口的蓝「+」badge 被标红点 conf0.72, 已爬进
 # 真点 conf 区间(0.85-0.92, 闪烁真点低至 0.69)  conf 阈值不可分。但点类是
 # 纯色小圆, 颜色占比完美分离(同帧实测: 真红点 red%=0.67-0.75 / 真黄点
@@ -292,7 +292,7 @@ def classify_dot_color(frame, x1: float, y1: float, x2: float, y2: float
         return None
 
 
-# ── Action helpers ──────────────────────────────────────────────────────
+#  Action helpers
 
 def action_click(nx: float, ny: float, reason: str = "") -> Dict[str, Any]:
     """Click at normalized coordinates (0-1)."""
@@ -343,7 +343,7 @@ def action_done(reason: str = "") -> Dict[str, Any]:
     return {"action": "done", "reason": reason}
 
 
-# ── harness-aware 墙钟 (2026-07-25) ──────────────────────────────────────
+#  harness-aware 墙钟 (2026-07-25)
 # 为什么不能直接用 time.time(): 昨天把 survey 超时从 tick 计数改成墙钟
 # (_SURVEY_MAX_SEC=90) 是对的, 但**逐帧门控时我每步审核要 ~60s**, 那 60s
 # 也算进了 skill 的预算  survey 必然假超时收工 = 我自己把"AP 一点没灌"
@@ -369,7 +369,7 @@ def game_clock() -> float:
     return time.time() - _HARNESS_PAUSED
 
 
-# ── Base Skill ──────────────────────────────────────────────────────────
+#  Base Skill
 
 class BaseSkill(ABC):
     """Abstract base for all agent skills.
@@ -405,7 +405,7 @@ class BaseSkill(ABC):
         self.interceptor_handled: str = ""
         self._timers: Dict[str, float] = {}
 
-    # ── 墙钟计时器 (2026-07-25) ────────────────────────────────────────────
+    #  墙钟计时器 (2026-07-25)
     # 为什么必须有: 全仓大量超时写成 `self._phase_ticks > N` / `_hold = N`
     # 这类 **tick 计数**, 但 tick 的墙钟长度不是常量 —— 2026-06-14 zero-wait
     # 改造把非 loading wait 的 sleep 压到 0.12s(server/app.py:1425), 那批按
@@ -451,11 +451,11 @@ class BaseSkill(ABC):
     def clear_timer(self, key: str) -> None:
         self._timers.pop(key, None)
 
-    # ── 购买框结构判据(全仓共用) ─────────────────────────────────────────
+    #  购买框结构判据(全仓共用)
     # 2026-07-25 全仓金钱审计的共同结论: 各 skill 各写一份 `_buy_dialog`,
     # 而它们**全都单点依赖"body 里有青辉石 cls"**。schedule 那起 30 青辉石
     # 事故的帧(run_20260724_201229 t0101)实锤: 屏上写着「購買課程表票券 單價
-    # 💎30」, YOLO **body 一个青辉石都没检出**(小图标压在深色价格条上) 
+    # 30」, YOLO **body 一个青辉石都没检出**(小图标压在深色价格条上)
     # 整条防线哑火。**单点防线 = 没有防线**。
     #
     # 这里给全仓一个正交的**结构**通道: 数量步进器(MIN/MAX/加减号)。
@@ -479,7 +479,7 @@ class BaseSkill(ABC):
                 return True
         return False
 
-    # ── 竣工判据 exit assertion (2026-07-25 v1: 只观测不干预) ──────────────
+    #  竣工判据 exit assertion (2026-07-25 v1: 只观测不干预)
     # 用户 2026-07-25 点破全项目最贵的盲区: "为什么不把课程表票用干净, 咖啡厅
     # 为什么干活也不干干净, 你这测试没有意义啊" —— 我们一直在验**代码路径跑通**,
     # 从来没有验过**活干完了**。每个 skill 按自己内部循环条件退出(Schedule 问
@@ -512,7 +512,7 @@ class BaseSkill(ABC):
         self.action_suppressed = False
         self.interceptor_handled = ""
 
-    # ── Dot-driven skip check (overridden by daily-harvest skills) ──
+    #  Dot-driven skip check (overridden by daily-harvest skills)
     # When pipeline is about to start this skill, it first calls should_run()
     # on the current ScreenState. Default = True (always run). Daily-harvest
     # skills (cafe / mail / schedule / club / daily_tasks / event_activity)
@@ -626,15 +626,15 @@ class BaseSkill(ABC):
         self._log_lines.append(line)
         print(line)
 
-    # ── Shared helpers: reusable mini-flows used by multiple skills ──
+    #  Shared helpers: reusable mini-flows used by multiple skills
 
-    # ════════════════════════════════════════════════════════════════
+    #
     # YOLO-only UI resolution (canonical — use these, NOT OCR text match).
     # cls names come from brain/skills/ui_classes.py. Exact-match only
     # (substring matching would mis-match e.g.
     # "领取_黄" vs "全部领取_黄"). No OCR fallback by design: if YOLO
     # can't see a cls, surface the gap (log+wait) instead of hiding it.
-    # ════════════════════════════════════════════════════════════════
+    #
     def find_cls(
         self,
         screen: ScreenState,
@@ -757,7 +757,7 @@ class BaseSkill(ABC):
         """Navigate toward the lobby using ONLY in-game buttons — NEVER a blind
         ESC / back keyevent (user 2026-06-15 iron rule: 反复 ESC-spam recovery
         多次触发 Unity ANR「Blue Archive没有响应」, freezing the game; "只点基于游戏
-        内的返回大厅还是叉叉"). Preference: 回大厅按钮(home  lobby directly) 
+        内的返回大厅还是叉叉"). Preference: 回大厅按钮(home  lobby directly)
         弹窗叉叉(close popup)  返回键(back one screen). If NONE is detected this
         frame, WAIT — do not blind-tap a guessed position and do not ESC; the
         caller's own _phase_ticks timeout ends the skill cleanly if truly stuck.
@@ -823,21 +823,21 @@ class BaseSkill(ABC):
                      f"'{bond_screen.cls_name}', tap to dismiss")
             return action_click(0.5, 0.5, "dismiss bond level-up")
 
-        # ── 通知弹窗 (pure YOLO, 2026-07-16 重构) ────────────────────────
+        #  通知弹窗 (pure YOLO, 2026-07-16 重构)
         # 旧版在这里用 OCR 文字给弹窗分类(通知/提示标题 + 邀.*咖啡=确认 /
         # 更新通知+下載=确认 / 掃蕩=确认 / 訪問好友=取消 / 是否結束=取消 …),
         # _OCR_ENABLED=False 后全是死代码, 且"读文字定动作"违反感知铁律
         # (判断一律 cls)。新策略(用户 spec 2026-07-16):
-        #   • 语境内的"该确认"由拥有语境的 skill 自己处理, 并且必须排在调用
+        #   - 语境内的"该确认"由拥有语境的 skill 自己处理, 并且必须排在调用
         #     本 helper 之前:
         #       - 咖啡厅邀请确认  cafe._invite stage2 / _recover_invite_overlay
         #       - 课程表报告确认  schedule.tick PRIORITY 1 (调本 helper 前)
         #       - 扫荡确认       各 sweep skill 的结构闸
         #       - 强更下载确认    pipeline._global_interceptor 启动期结构闸
-        #   • 因此能落到这个通用 helper 的「确认+取消/叉」结构弹窗, 定义上就是
+        #   - 因此能落到这个通用 helper 的「确认+取消/叉」结构弹窗, 定义上就是
         #     当前 skill 没预期的通知弹窗  默认安全路径: 一律点取消/叉掉。
         #     绝不盲点确认(2026-06-02 买票事故根因 = 盲确认, 见 money_safety)。
-        #   • 只有确认键、无取消/叉的弹窗: 这里不动 (fail-closed — 交给 skill
+        #   - 只有确认键、无取消/叉的弹窗: 这里不动 (fail-closed — 交给 skill
         #     自己的 handler / tick 预算; 启动期强更框由 interceptor 接)。
         from brain.skills import ui_classes as UC
         _POPUP_BTN_BAND = (0.20, 0.45, 0.80, 0.95)  # 居中对话框按钮带

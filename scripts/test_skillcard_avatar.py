@@ -76,7 +76,7 @@ def main():
         if dt < iv:
             time.sleep(iv - dt)
 
-    # ── 卡位聚类(cx 量化到 0.04 桶)+ 稳定性 ──
+    #  卡位聚类(cx 量化到 0.04 桶)+ 稳定性
     slots = defaultdict(list)   # cx_bucket -> [name]
     for dets in frames_dets:
         for name, conf, cx, cy in dets:

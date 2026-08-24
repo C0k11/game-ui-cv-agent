@@ -17,7 +17,7 @@ campaign). We only ever click the exact 全部领取_黄 / 领取_黄 claim cls,
 unfinished task's go-button is never clicked.
 
 State machine
--------------
+----
 enter         lobby  NAV_DAILY_REWARD  任務 screen (全體 tab).
 claim_all     全部领取_黄 (CLAIM_ALL_YELLOW)  reward dismiss. Loop until it
               greys (全部领取_灰色 / 一键领取灰色).
@@ -72,7 +72,7 @@ class DailyMissionSkill(BaseSkill):
         try:
             from brain.pipeline import run_digit_ocr
             # 2026-07-27 单位换成**入口框自身尺寸**(原来 0.02/0.055/0.035/0.005
-            # 都是屏幕比例)。每日领奖 框实测 iw 0.0252 / ih 0.0231 (n=2207) 
+            # 都是屏幕比例)。每日领奖 框实测 iw 0.0252 / ih 0.0231 (n=2207)
             # 0.020.79 框宽, 0.0552.38 框高, 0.0351.39 框宽, 0.0050.22 框高。
             # 16:9 下几何等价, 换分辨率/窗口不再漂(见 brain.pipeline.icon_strip)。
             _bw = max(1e-6, entry.x2 - entry.x1)
@@ -88,7 +88,7 @@ class DailyMissionSkill(BaseSkill):
 
     def should_run(self, screen: ScreenState) -> bool:
         # Run when a red dot sits by the 每日领奖 entry AND the n/8 daily-task
-        # counter says enough dailies are finished (n ≥ 7). Entry not visible 
+        # counter says enough dailies are finished (n ≥ 7). Entry not visible
         # defer (True). (Rewards unlock as other dailies finish — run it last.)
         entry = self.find_cls(screen, UC.NAV_DAILY_REWARD, conf=0.40)
         if entry is None:
@@ -134,7 +134,7 @@ class DailyMissionSkill(BaseSkill):
         # No claim cls (all done) but we clicked our entry and we're off-lobby.
         return self._entered
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1

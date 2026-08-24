@@ -35,7 +35,7 @@ from typing import List, Optional
 
 from routing_v2.act.action import Action, swipe, tap_box, wait
 from routing_v2.flow import nav
-from routing_v2.flow.base import ExitMixin, Flow, Outcome
+from routing_v2.flow.base import ExitMixin, Flow, Outcome, qty_max_ok
 from routing_v2.flow.battle import BattleMixin, FormationMixin
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Box, Observation
@@ -65,7 +65,8 @@ class EventEntryMixin:
     """
 
     def on_lobby(self, obs, st):
-        return nav.enter(obs, V.NAV_TASKS, "任务大厅")
+        return nav.lobby_enter(self, obs, V.NAV_TASKS, "任务大厅",
+                               expect=(V.HUB_CAMPAIGN, V.EVENT_LIVE))
 
     def on_task_hall(self, obs, st):
         """轮播闸：只在「刚翻成 距离结束还剩」那一帧动手。"""
@@ -93,14 +94,14 @@ class EventEntryMixin:
                        dy=HUB_TILE_DY, counter="entered",
                        post=lambda: self.state.update(saw_other=False))
 
-    # -- 进错活动: 上期余韵 ------------------------------------------------
+    # -- 进错活动: 上期余韵 ----
     def on_event_ended(self, obs, st):
         """`後日談` 在场 = 上期活动余韵期。退出去重进，别在这里刷。"""
         self.log("进到上期活动了（检出 後日談） 退出去重进")
         self.note_lines.append("误入上期活动一次，已退出重进")
         return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
 
-    # -- 进错活动: 引导型（没有活动关卡的那种）------------------------------
+    # -- 进错活动: 引导型（没有活动关卡的那种）----
     def on_event_guide_hub(self, obs, st):
         """进到「引导型活动」了（夏萊總結算这类）-- 这不是我要打的活动。
 
@@ -167,18 +168,19 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             cleared=0, farmed=0, swept=0, entered=0,
             # 轮播抽错活动（进到"没有活动关卡"的引导型活动）的台账
             guide_hits=0, guide_seen=False, guide_giveup=False,
+            tab_tries=0,
         )
         self.want_team = int(self.cfg.get("clear_first_with_team", 1))
         order = self.cfg.get("order", "clear_then_bonus")
         if order == "bonus_only":
             # 阶段名必须和 `_bonus_step` 认的那两个对上（"bonus_clear" /
-            #    "bonus_sweep"）。第一版这里写的是 "bonus"，派发处认不出 
+            #    "bonus_sweep"）。第一版这里写的是 "bonus"，派发处认不出
             #    flow 在关卡列表前干等到超时，一个 tap 都没有（08-08 实测）。
             self.state["phase"] = "shop_plan" if self.cfg.get(
                 "shop_plan_before_bonus", True) else "bonus_clear"
             self.want_team = int(self.cfg.get("bonus_team", 2))
 
-    # ══ 活动页：切到 Quest 页签 ════════════════════════════════════════
+    #  活动页：切到 Quest 页签
     def on_event_page(self, obs, st):
         """别用写死坐标点页签（`_POS_QUEST_TAB=(0.635,0.151)` 是**另一个
         活动的版面**上标的，CODE:BOX 两页签版面下正好落在 Story 上）。
@@ -188,7 +190,9 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             return wait("已在 Quest 页签，等关卡行渲染")
         tab = obs.find(V.EVENT_QUEST, 0.35, region=(0.0, 0.0, 1.0, 0.34))
         if tab is not None:
-            self.state["tab_tries"] += 1
+            # 08-20 复盘崩: setup 漏 tab_tries 时 `state["tab_tries"] += 1`
+            #    KeyError, 无本轮报告. 只 .get, 不依赖 setup 必有这个键.
+            self.state["tab_tries"] = int(self.state.get("tab_tries") or 0) + 1
             return tap_box(tab, "切到 Quest 页签")
         if self.stalled(st, 120):
             return self.finish(Outcome.UNKNOWN,
@@ -196,7 +200,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                                " — 这个活动的版面没见过，交人看")
         return wait("等 Quest 页签 cls")
 
-    # ══ 关卡列表 ══════════════════════════════════════════════════════
+    #  关卡列表
     def _rows(self, obs: Observation):
         """把 (入场键, 得星) 配成行。**一行就够**，绝不要求"至少 N 行"。"""
         enters = obs.rows(V.STAGE_ENTER, 0.45, region=STAGE_PANEL)
@@ -219,7 +223,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #    必须用 `st.changed`（页面**刚切**过来那一 tick）而不是"人在
         #    列表页"（08-09 审查抓到）：列表页会连续几十 tick，每 tick 都清
         #    等于**把 once 保护打成死码**。
-        # ⛔ 进关 once（enter*/sweep_enter*）**不在这里清**（08-15 日常 live
+        # 禁 进关 once（enter*/sweep_enter*）**不在这里清**（08-15 日常 live
         #    实锤）: 活动页身份会抖（event_quest_list/unknown/facility 来回翻,
         #    收尾日志整屏「3s 内页面身份变了 5 次」）, 每次翻回来 changed 边沿
         #    都触发一次全清 —— 入场键点完 16 tick 内就被重武装再点一发,
@@ -295,7 +299,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         return self.finish(Outcome.UNKNOWN,
                            f"内部阶段名 '{ph}' 没有对应处理器 — 这是代码 bug")
 
-    # ── 通关阶段 ────────────────────────────────────────────────────────
+    #  通关阶段
     def _clear_step(self, obs, st, rows, locked):
         # 得星_0 = 没打过。`活动站斗关卡_已打` train=0，用不了，只能这么判。
         undone = [e for e, star in rows if star == V.STAR_0]
@@ -337,7 +341,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             return wait("转入商店推算阶段")
         return self._start_bonus()
 
-    # ── 加成阶段 ────────────────────────────────────────────────────────
+    #  加成阶段
     #
     # **Best Record 机制**（memory event_ops_playbook:17，这条决定整个打法）:
     #    「完成關卡時套用的獎勵獲得量的最高數值會在該關卡中持續套用」
@@ -362,7 +366,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             pass
         return None
 
-    # ── 「哪些关的 Best Record 本期已顶过」台账（落盘，跨进程/重启）──────
+    #  「哪些关的 Best Record 本期已顶过」台账（落盘，跨进程/重启）
     # 08-15 分桶: 键只有 from_bottom, 大小号会把对方顶过的关当成自己顶过的
     #    （顶纪录跳过 = 少打一场加成, 扫荡按旧纪录低倍率刷 —— 真金白银的 AP）。
     def _topped_path(self):
@@ -422,7 +426,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         try:
             p.write_text(_json.dumps(d, ensure_ascii=False, indent=1),
                          encoding="utf-8")
-            self.log(f"📒顶纪录台账已记：倒数第 {from_bottom+1} 关"
+            self.log(f"顶纪录台账已记：倒数第 {from_bottom+1} 关"
                      f"（本期共 {len(d)} 条）")
         except Exception as e:
             self.log(f"顶纪录台账落盘失败: {e}")
@@ -436,6 +440,20 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         self.log(f"加成阶段：用部队{self.want_team} 首通，把 Best Record 顶上去")
         return wait("转入加成阶段（顶纪录）")
 
+    def _ap_read(self, obs) -> Optional[int]:
+        """顶栏 AP. 08-16 remain: 列表帧 909, 扫荡面板读成 9 当不够一轮.
+        位数少 2 位且是旧读后缀 = OCR 截断, 不采信; 读不出走原 fail-closed."""
+        ap = R.read_topbar(obs, R.AP)
+        prev = self.state.get("ap_seen")
+        if ap is not None:
+            if prev is not None:
+                sa, sp = str(ap), str(prev)
+                if ap > 0 and len(sa) + 2 <= len(sp) and sp.endswith(sa):
+                    self.log(f"AP {ap} 疑似 {prev} 截断（remain 909->9），不采信")
+                    return None
+            self.state["ap_seen"] = ap if prev is None else max(int(prev), ap)
+        return ap
+
     def _bonus_step(self, obs, st, rows):
         # want_team 必须**每帧从配置推导**，不能只在 `_start_bonus()` 里设
         #    一次（08-09 实测）：step 模式每次都是新实例，从 state 恢复
@@ -444,18 +462,19 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #    「加成阶段  部队2」是配置事实，不是一次性副作用。
         self.want_team = int(self.cfg.get("bonus_team", 2))
         ph = self.state["phase"]
-        ap = R.read_topbar(obs, R.AP)
+        ap = self._ap_read(obs)
         reserve = int(self.cfg.get("ap_reserve", 0) or 0)
         need = int(self.cfg.get("min_ap_for_sweep", 20) or 20)
         if ap is None:
             # **fail-CLOSED**（08-09 血泪）：旧写法是 `ap is not None and ...`，
-            #    顶栏被弹窗压暗时 AP 读不出（实测 conf 0.22） 闸整条跳过 
-            #    AP 已经 0 了还去点「掃蕩開始」 游戏弹「購買AP 單價💎30」，
+            #    顶栏被弹窗压暗时 AP 读不出（实测 conf 0.22） 闸整条跳过
+            #    AP 已经 0 了还去点「掃蕩開始」 游戏弹「購買AP 單價30」，
             #    差一步就花青辉石。**刷关是纯消耗动作，读不出就不许推进。**
             if self.hold("ap_unknown", 20):
                 return self.finish(
                     Outcome.UNKNOWN,
-                    f"顶栏 AP 连续 20 帧读不出  fail-closed 停手（绝不买 AP）；"
+                    f"顶栏 AP 连续 20 帧 **OCR 失败** — fail-closed 停手"
+                    f"（绝不买 AP）；**这不等于没 AP**, jpg 上多半读得出；"
                     f"{self.battle_stats()} / 扫荡 {self.state['swept']} 次")
             return wait("顶栏 AP 这一帧读不出 — 连续确认中，先不推进")
         self.state.pop("hold:ap_unknown", None)
@@ -486,7 +505,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         topped = self._topped_load()
         while (ph == "bonus_clear" and plan and ti < len(plan)
                and str(plan[ti]["from_bottom"]) in topped):
-            self.log(f"↷ 倒数第 {plan[ti]['from_bottom']+1} 关的纪录本期已顶过"
+            self.log(f" 倒数第 {plan[ti]['from_bottom']+1} 关的纪录本期已顶过"
                      f"（{topped[str(plan[ti]['from_bottom'])]}）— 跳过")
             ti += 1
             self.state["target_i"] = ti
@@ -550,8 +569,8 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             # 08-15 复发（同一根病的另一条腿）: once 键原来带**屏上行号** idx,
             #    且 st.changed 会全清 —— 页面身份一抖, 键一换/一清, 保护就穿,
             #    16 tick 内连发两处不同的入场键。改法:
-            #    ①键只带目标序号 ti（行号会漂, 不进键）;
-            #    ②解锁**按事实**: 点了入场键、又在列表页攒了 40 帧还没等到
+            #    1)键只带目标序号 ti（行号会漂, 不进键）;
+            #    2)解锁**按事实**: 点了入场键、又在列表页攒了 40 帧还没等到
             #      关卡弹窗 = 那一发被吞了, 才重武装（计数只在列表帧涨,
             #      弹窗一开自然停, 页面抖动打不断它）。
             if not self.pending(f"enter{ti}"):
@@ -588,7 +607,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                 "没有确认过加成队赢下一场、台账里也没有本期顶纪录的记录，"
                 "拒绝扫荡（会按旧纪录的低倍率刷）")
         if self._bt()["win"] < 1:
-            self.log(f"↷ 本轮没打，但台账显示这 {len(_plan)} 个通道的纪录"
+            self.log(f" 本轮没打，但台账显示这 {len(_plan)} 个通道的纪录"
                      f"本期都由加成队顶过  允许扫荡（高倍率纪录会被自动套用）")
         budget = int(self.cfg.get("max_rounds", 0) or 0)
         if budget and self.state["swept"] >= budget:
@@ -624,7 +643,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                        f"加成进关准备扫荡（{si+1}/{max(1,len(plan))}  {why}）",
                        once=f"sweep_enter{si}")
 
-    # ══ 弹窗 / 编队 / 战斗 ════════════════════════════════════════════
+    #  弹窗 / 编队 / 战斗
     def on_stage_popup(self, obs, st):
         """首通弹的是「章節資訊 + 進入章節」，不是扫荡面板。两种都认。
 
@@ -644,8 +663,8 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             # AP 闸也要在**这一页**再判一次（08-09 血泪）：闸原来只写在
             #    `_bonus_step`（关卡列表页的处理器），而扫荡面板是另一个
             #    处理器  AP 已经 0 了照样点「掃蕩開始」 游戏弹
-            #    「購買AP 單價💎30」。**花钱动作的闸必须贴着那一下点击**。
-            ap_now = R.read_topbar(obs, R.AP)
+            #    「購買AP 單價30」。**花钱动作的闸必须贴着那一下点击**。
+            ap_now = self._ap_read(obs)
             need = int(self.cfg.get("min_ap_for_sweep", 20) or 20)
             # 读不出必须 fail-CLOSED。原来写的是 `ap_now is not None and
             #    ap_now < need` —— 读不出时整条闸**直接跳过**，照样往下
@@ -658,19 +677,21 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                     return wait("扫荡面板: AP 读不出，连续确认中")
                 return self.finish(
                     Outcome.UNKNOWN,
-                    "扫荡面板上 AP 读不出 — 不点掃蕩開始（AP 为 0 时点下去"
-                    "弹的是購買AP 框）；"
+                    "扫荡面板上 AP **OCR 失败**（顶栏被面板压暗, jpg 上"
+                    "多半读得出 — 08-20 `0029057` 目视 AP 4）— fail-closed "
+                    "不点掃蕩開始（真为 0 时点下去弹的是購買AP 框）；"
+                    "**这不等于没 AP**；"
                     f"{self.battle_stats()} / 扫荡 {self.state['swept']} 次")
             if ap_now < need:
                 return self.finish(
                     Outcome.LEFTOVER,
                     f"AP {ap_now} < 一轮 {need} — 收工，**绝不买 AP**；"
                     f"{self.battle_stats()} / 扫荡 {self.state['swept']} 次")
-            mx = obs.find(V.QTY_MAX, 0.20)          # 弱类，蓝 MAX 上 conf≈0.26
+            mx = qty_max_ok(obs, 0.20)
             if mx is not None and self.pending("sweepmax"):
                 return tap_box(mx, "扫荡数量拉 MAX（游戏钳到 AP 付得起的次数）",
                                once="sweepmax")
-            sw = obs.find(V.SWEEP_START, 0.35)
+            sw = nav.real_sweep_start(obs, 0.35)
             if sw is not None:
                 # 数量 0 时「掃蕩開始」**照样是亮的**（实测 conf 0.986，
                 #    不是灰态），点下去弹的就是購買AP 框。sweep.py 早就
@@ -705,7 +726,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             return wait("关卡弹窗里没有「任务开始/进入章节」— 不瞎点扫荡")
         return wait("等关卡弹窗按钮")
 
-    # ══ 活动任务（红点驱动，纯收入不花 AP）════════════════════════════
+    #  活动任务（红点驱动，纯收入不花 AP）
     def on_daily_mission(self, obs, st):
         """活动任务页 —— 页面身份复用 `daily_mission`（都是"整页领取列表"，
         08-09 实测点「活動任務」进去就判成它）。
@@ -723,7 +744,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                        post=lambda: self.state.update(task_done=True)) \
             if obs.find(V.BACK, 0.45) is not None else wait("等返回键")
 
-    # ══ 活动点数奖励（红点驱动，纯收入不花 AP）════════════════════════
+    #  活动点数奖励（红点驱动，纯收入不花 AP）
     def on_facility(self, obs, st):
         """「獎勵資訊」弹窗 —— 页面身份落在通用 `facility` 上（屏上只剩
         返回键/回大厅 + 一个弹窗），所以靠 `in_reward` 标记认领这一页，
@@ -733,7 +754,12 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
            在**战术大赛领奖**上也是 0.9+（day3 用过）—— 会串页。
         """
         if not self.state.get("in_reward"):
-            return None                    # 不是我打开的，这个 facility 不归我管
+            # 任务大厅的页面签名会因锁着的玩法磁贴缺失而掉成 facility。
+            # 只有当前帧仍有两个大厅专属磁贴时才转发进场逻辑；没有正向证据
+            # 就保持 no-op，不能点返回键制造 facility 和大厅之间的乒乓。
+            if nav.task_hall_evidence(obs):
+                return self.on_task_hall(obs, st)
+            return None
         y = obs.find(V.CLAIM_REWARD_YELLOW, 0.40)
         if y is not None:
             return tap_box(y, "活动点数奖励: 領取獎勵", counter="point_claims")
@@ -788,7 +814,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
     def on_shop(self, obs, st):
         return None          # 商店推算由 event_shop flow 负责
 
-    # ══ 阶段机（商店推算阶段把控制权交出去）════════════════════════════
+    #  阶段机（商店推算阶段把控制权交出去）
     # 挂 pre_page 不覆写 decide —— overlay（对话框/奖励框）必须先处理，
     #    第一版覆写 decide 把这个顺序跳过了（架构不变量测试现在拦）。
     def pre_page(self, obs: Observation, st: StateView) -> Optional[Action]:
@@ -806,7 +832,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         if self.state["phase"] == "shop_plan":
             # 交给 runner：把 event_shop flow 插到队列最前面，回来后继续。
             # 必须**结束本轮**而不是 wait（08-09 实锤）：runner 只在 flow
-            #    收尾后才处理插队请求，挂着请求继续跑  插队永不发生 
+            #    收尾后才处理插队请求，挂着请求继续跑  插队永不发生
             #    推算被跳过、加成目标落到"兜底打最后一关"。
             #    同一实例会被塞回队列（runner queue.insert(1, f)），state 原样。
             self.ctx.bag["request_flow"] = "event_shop"

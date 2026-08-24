@@ -183,7 +183,7 @@ class CombatBrain:
         self.fail_n = {}            # 卡名连续释放失败次数
         self.cooldown = {}          # 卡名冷却截止时刻(防误判亮卡死循环)
 
-    # ── 目标函数(闭环拖拽中反复调用, 每次读最新黑板) ──────────────
+    #  目标函数(闭环拖拽中反复调用, 每次读最新黑板)
     def tgt_boss(self, s: Snapshot):
         b = s.boss
         if b:
@@ -226,7 +226,7 @@ class CombatBrain:
         cy = sum(a[1] for a in s.allies) / len(s.allies)
         return (cx, cy), f"我方群x{len(s.allies)}"
 
-    # ── 行为树: 从上往下第一个命中的规则执行(顺序=优先级, 直接改) ──
+    #  行为树: 从上往下第一个命中的规则执行(顺序=优先级, 直接改)
     def decide(self, s: Snapshot):
         """返回 (规则名, card, target_fn) 或 None(攒费).
         sat 判亮对部分卡失真(优香卡面天然高饱和, 亮灰 sat 重叠,
@@ -267,7 +267,7 @@ class CombatBrain:
             return "辅助增益", c, fn
         return None
 
-    # ── 释放(闭环拖拽: DOWN  每步读黑板 MOVE 跟目标  UP) ──────────
+    #  释放(闭环拖拽: DOWN  每步读黑板 MOVE 跟目标  UP)
     def play(self, rule: str, card, target_fn) -> bool:
         name = card[0]
         inf = self.skills.get(name, {})
@@ -277,7 +277,7 @@ class CombatBrain:
         if inf.get("aim") == "auto":          # 点卡即放(阳葵类)
             time.sleep(0.6)
             ok = self._card_gone(name)
-            self.log(f"    ⚡[{rule}]{name}(auto, sat{card[3]:.0f}) "
+            self.log(f"    [{rule}]{name}(auto, sat{card[3]:.0f}) "
                      f"释放={'' if ok else ''}")
             self.last_card = name
             self._book(name, ok)
@@ -301,7 +301,7 @@ class CombatBrain:
         self.last_tgt = (tx / TAP_W, ty / TAP_H)
         time.sleep(0.5)
         ok = self._card_gone(name)
-        self.log(f"    ⚡[{rule}]{name}[{inf.get('role', '?')}"
+        self.log(f"    [{rule}]{name}[{inf.get('role', '?')}"
                  f"{'|AOE' if inf.get('aoe') else ''}](sat{card[3]:.0f})"
                  f"{desc}@({tx},{ty}) 瞄准={'Y' if aimed else 'N'} "
                  f"释放={'' if ok else ''}")
@@ -338,7 +338,7 @@ class CombatBrain:
             time.sleep(0.05)
         return False
 
-    # ── 主战斗循环 ──────────────────────────────────────────────
+    #  主战斗循环
     def run_battle(self, timeout_s: float = 300.0,
                    auto_xy=(3621, 2023)) -> str:
         t0 = time.time()

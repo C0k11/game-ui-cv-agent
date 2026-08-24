@@ -10,9 +10,9 @@ memory 里这条结论挂了很久，全仓零使用（老代码只有 `brain/sk
 `data/raw_images/v2step_20260811/013124_000162_task_hall.png` 就一目了然。
  **它的位置就指明了是哪个磁贴**，配合同屏的磁贴 cls 就能说清是哪一类。
 
-    ┌ 活動進行中 ┐           452 的框（红标）
-    │  懸賞通緝  │           V.HUB_BOUNTY 的框（只框住标题文字，不是整张卡）
-    └────────────┘
+     活動進行中            452 的框（红标）
+      懸賞通緝             V.HUB_BOUNTY 的框（只框住标题文字，不是整张卡）
+
 
 ## 本模块只做感知，不碰策略
 
@@ -36,7 +36,7 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
 **"最近磁贴 == 人眼真值" 89/89**：
 
   | 量                       | 真归属 (n=89)        | 同帧其它磁贴 (n=445) |
-  |--------------------------|----------------------|----------------------|
+  |----|----|----|
   | 中心距 dc                | 0.0373 ~ 0.0543      | **0.0898** ~ 0.6192  |
   | dc ÷ 磁贴框高            | 0.93 ~ 1.30          | **2.50** ~ 19.85     |
   | dy = 452.cy − 磁贴.cy    | −0.0526 ~ −0.0366    | （全负 = 恒在上方）  |
@@ -97,7 +97,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
 
-# ── 标定常量（上面表格的落地值，改之前先重跑 `python -m routing_v2.percept.boost`）──
+#  标定常量（上面表格的落地值，改之前先重跑 `python -m routing_v2.percept.boost`）
 MAX_DIST = 0.070          # 中心距绝对上限：真 ≤0.0543 / 假 ≥0.0898，取几何中点
 MAX_DIST_TILE_H = 1.80    # 中心距 ÷ 磁贴框高：真 ≤1.30 / 假 ≥2.50，取几何中点
 BADGE_CONF = 0.20         # 452 的下限 = detect 层 ui 地板（再低也进不了 Observation）
@@ -319,7 +319,7 @@ def consensus(reports: Iterable[BoostReport], *,
             if v / total >= min_ratio}
 
 
-# ── 自检：把上面文档里的标定重跑一遍。改常量后必须跑这个 ──────────────────
+#  自检：把上面文档里的标定重跑一遍。改常量后必须跑这个
 def _selftest() -> int:
     """`python -m routing_v2.percept.boost` —— 对实测帧复算归属准确率。
 

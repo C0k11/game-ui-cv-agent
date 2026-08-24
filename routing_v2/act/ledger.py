@@ -16,6 +16,29 @@
      但把"OCR 抖一下就急停"这个假阳性堵死了。
    反向危害同样存在：**会读低就会读高，读高会掩盖真实掉钱**  读数上升
      也要落盘，异常上升（一次涨超过阈值）同样打标。
+
+【三】**用户自己抽卡/升级不是事故**（2026-08-15）。
+   旧 kill-switch 把「青辉石只进不出」做成：两次换页复读都低于基线就
+   MONEY BREACH 停整轮。用户上线抽卡、升级角色、手点商店时余额会变，
+   bot 没点付费键也被当成自己花了石，日常/推图整轮 HALT。
+   现在：无 bot 付费/刷新/确认付费 tap 的下降记 EXTERNAL，更新基线，
+   不 HALT。有 bot 付费窗的青辉石下降仍走换页复读 + BREACH。
+   OCR 读不出（-1）仍然不点花钱键；读数对不上只拒收/自愈，不杀进程。
+
+【四】**台账是事后账，不是防线**（2026-08-21 用户定 + 全库实测）。
+   信用点/青辉石扫描的职责是**对账**：玩家自己要抽卡、升角色，余额本来就会
+   动；只有体力（AP）才是拿来做动态规划的输入。
+   实测支撑：全库 5,751 行台账里 `MONEY BREACH` 一共只出过 **2 次**（08-08），
+     两次都是青辉石 `20,176` 被稳定读成 `20,117` —— 钱一分没动，却把整轮停了。
+     换页复读那道闸挡不住它：稳定误读跨页一样稳定。**命中率 0/2**。
+   真正拦住花钱的是 `act/gate.py` 里 tap **之前**那两条（`spend=青辉石` 直接
+     halt / `purchase_context` 拦成交键）—— 钱还没动就否掉了。台账在钱**已经**
+     动了之后才开口，停轮救不回这一笔，只能防"接着再花第二笔"。
+    首条掉钱 -> `WARN_MONEY`：大声记账 + 存证帧 + 进收工报告，**不停轮**；
+     第二条起 -> `MONEY BREACH` 停轮（防连环失血）。
+   注意：**不要**再加"同位数单字符不同就当 OCR 混淆"这类闸（08-21 我加过又
+     拆了）：`20176->20117` 差的是两位，它根本抓不到；而 `20176->20146`
+     （真花 30 石买 AP，就是 money_safety 那条血泪）恰好是一位，会被静默吃掉。
 """
 from __future__ import annotations
 
@@ -48,8 +71,21 @@ def _one_insert(base: str, big: str) -> bool:
     return i == len(base)
 
 WATCHED = [R.PYROXENE, R.CREDIT, R.AP]
-# 只有青辉石是"只进不出"的红线货币。信用点/AP 会正常花掉。
+# 青辉石: bot 绝不花。用户外部消费记 EXTERNAL, 不 HALT。
+# 信用点/AP 会正常花掉, 下降从不 BREACH。
 GUARDED = R.PYROXENE
+
+# 台账 8s 采一次, 「本 tick 有没有付费 tap」太窄: bot 点完, 余额下一拍才变。
+# 20s 盖住采样+换页复读; 只给 note_bot_spend 开过窗的那一种货币。
+_SPEND_WINDOW_S = 20.0
+_SPEND_TO_WATCH = {
+    "青辉石": R.PYROXENE,
+    "青辉石(premium)": R.PYROXENE,
+    "信用点": R.CREDIT,
+}
+_SPEND_IGNORE = frozenset({
+    "免费", "活動幣", "活动币", "战术大赛货币", "战术大赛币",
+})
 
 # **这些页面不采样** —— 顶栏不是标准形态, 别的数字会抢裁切窗口。
 #   2026-08-13 实锤: formation 页把青辉石稳定读成 211,286(真值 21,286),
@@ -66,7 +102,7 @@ class Entry:
     value: int
     page: str
     flow: str
-    tag: str = ""            # "" / "suspect" / "breach" / "spike"
+    tag: str = ""            # "" / "suspect" / "breach" / "spike" / "external" / "spend"
 
     def as_dict(self) -> dict:
         return {"ts": round(self.ts, 3),
@@ -99,13 +135,19 @@ class Ledger:
         self._grow_pending: Dict[str, int] = {}   # 位数变多的待复读值
         self._first_pending: Dict[str, int] = {}  # 初始基线的待复读值
         self._ins_fix: Dict[str, int] = {}    # 插位读大被结构闸咬回的次数
+        self._breaches: List[str] = []        # 本轮真掉钱告警（第 2 条才停轮）
+        self._bot_spend_ts: Dict[str, float] = {}
+        self._bot_spend_why: Dict[str, str] = {}
         out = Path(out_dir) if out_dir else _OUT
         out.mkdir(parents=True, exist_ok=True)
         self.path = out / f"ledger_{time.strftime('%Y%m%d')}.jsonl"
 
-    # ── 采样 ────────────────────────────────────────────────────────────
+    #  采样
     def feed(self, obs: Observation, page: str, flow: str) -> Optional[str]:
-        """每 tick 喂一帧。返回非 None = 出事了（breach 文案）。
+        """每 tick 喂一帧。返回:
+           None = 无事件
+           'EXTERNAL:...' = 用户外部变动, 已更新基线, runner 不许 HALT
+           'MONEY BREACH:...' = bot 付费窗内青辉石下降, runner 停整轮
 
         只在**顶栏锚点可见**的帧上采样；进不去顶栏的页面（战斗内/全屏过场）
            自然跳过 —— 这就是"非大厅掉钱盲区"的来源，所以**下面还有一条**：
@@ -131,7 +173,38 @@ class Ledger:
         self._last_commit = 0.0
         self._vote.reset()
 
-    # ── 落账 + kill-switch ─────────────────────────────────────────────
+    def note_bot_spend(self, reason: str = "", cls: str = "",
+                       spend: str = "") -> None:
+        """runner 在付费/刷新/确认付费 tap 之后调用。
+
+        真发出去、tap 返回失败、JIT 丢掉都可能走到这里。漏记窗会把
+        bot 花石当成 EXTERNAL。只给对应货币开 20s 窗。信用点商店的
+        成功购买不许污染青辉石窗，否则用户接着抽卡会被误判成 bot 花了石。
+        """
+        cur = _SPEND_TO_WATCH.get(spend)
+        if cur is None:
+            if spend in _SPEND_IGNORE:
+                return
+            if cls == "购买青辉石" or "刷新" in (reason or ""):
+                cur = GUARDED
+            elif spend:
+                cur = GUARDED
+            elif cls in ("购买", "选择购买"):
+                cur = R.CREDIT
+            elif cls == "确认键":
+                cur = GUARDED
+            else:
+                return
+        self._bot_spend_ts[cur] = time.time()
+        why = f"{cls} {reason} spend={spend}".strip()
+        self._bot_spend_why[cur] = why
+        self._log(f"[ledger] 记下 bot 付费 tap ({cur}): {why}")
+
+    def _bot_spent_recently(self, cls: str) -> bool:
+        ts = float(self._bot_spend_ts.get(cls, 0.0) or 0.0)
+        return ts > 0.0 and (time.time() - ts) < _SPEND_WINDOW_S
+
+    #  落账 + kill-switch
     def _commit(self, page: str, flow: str) -> Optional[str]:
         vals = self._vote.result()
         self._vote.reset()
@@ -151,8 +224,8 @@ class Ledger:
                                       "first_suspect"))
                     continue
             # 读大 = 在真值里多认出一个字形。两种实锤形态:
-            #    ①千位逗号读成 0（08-09 event_shop "20,176" -> 200176）;
-            #    ②紧排数字读成双（08-15 顶栏 58,723,911 -> 588,723,911,
+            #    1)千位逗号读成 0（08-09 event_shop "20,176" -> 200176）;
+            #    2)紧排数字读成双（08-15 顶栏 58,723,911 -> 588,723,911,
             #      同页同渲染**稳定复读**, "复读一致"闸拦不住 —— 位数上限被
             #      顶到 9 后, 后续所有真 8 位读数反被当截断整场拒收）。
             #    结构判据一击毙: 新值删掉**任意一个**字符能还原基线字串 ->
@@ -228,7 +301,7 @@ class Ledger:
                 continue
             self._rejects.get(cls, []).clear()      # 正常读数 = 拒收史清零
             # 对称守卫：**位数变多**的读数 = 读大嫌疑（08-09 实锤：青辉石
-            #    20,176 被读成 200117 且跨 3 页稳定复现, 把换页复读都骗过 
+            #    20,176 被读成 200117 且跨 3 页稳定复现, 把换页复读都骗过
             #    读大入账后正确值全被位数收缩闸拒收）。要连续两次读到**同一个**
             #    变多的值才收 —— 真实的位数增长(999910000)复读一致, 不受影响。
             # **基线自愈：旧值是新值的前缀 = 旧值被截断了**（2026-08-13 实锤，
@@ -262,48 +335,94 @@ class Ledger:
                 self._log(f"[ledger] {cls} 位数增长 {prev}{v} 复读一致，收")
             self._grow_pending.pop(cls, None)
             tag = ""
+            this = None
             if cls == GUARDED and prev is not None and v < prev:
-                if not self._recheck:
-                    # 第一次发现掉  **不停**，挂起等复读
-                    self._recheck = True
-                    self._suspect = v
-                    self._suspect_page = page
-                    self._last_commit = 0.0     # 立刻重采
-                    self._log(f"[ledger] 青辉石 {prev}  {v}（-{prev-v}）"
-                              f" 疑似掉钱 @page={page} — **挂起等换个页面复读**")
-                    self._write(Entry(time.time(), cls, v, page, flow, "suspect"))
-                    return None
-                # 复读**必须在另一个页面上**才算数。
-                #    2026-08-08 实测两次：同一页上的误读是**稳定的** ——
-                #    cafe 页把 20,176 稳定读成 20,117，于是"独立复读"每次都
-                #    复现同一个错值，把误报盖章成"两次一致"，整轮日常被急停。
-                #    换个页面，顶栏背景/渲染都不同，稳定误读不会跟着走；
-                #    而**真的掉钱在哪一页读都是掉的**。
-                if page == self._suspect_page:
-                    self._last_commit = 0.0
-                    return None                 # 还在同一页，继续等
-                if v != self._suspect:
+                # _recheck 只在 bot 付费窗内首读下降时挂起。换页复读
+                # 可能超过 20s, 不许半路改 EXTERNAL。
+                if self._bot_spent_recently(cls) or self._recheck:
+                    if not self._recheck:
+                        # bot 刚点过付费键, 第一次发现掉: 不停, 挂起等换页复读
+                        self._recheck = True
+                        self._suspect = v
+                        self._suspect_page = page
+                        self._last_commit = 0.0
+                        self._log(f"[ledger] 青辉石 {prev} 降到 {v}（-{prev-v}）"
+                                  f" 疑似 bot 花石 @page={page} "
+                                  f"({self._bot_spend_why.get(cls, '?')}) "
+                                  f"-- 挂起等换个页面复读")
+                        self._write(Entry(time.time(), cls, v, page, flow,
+                                          "suspect"))
+                        return None
+                    # 复读必须在另一个页面上才算数。
+                    #    2026-08-08 实测两次：同一页上的误读是稳定的 --
+                    #    cafe 页把 20,176 稳定读成 20,117，独立复读每次都
+                    #    复现同一个错值，把误报盖章成两次一致。
+                    if page == self._suspect_page:
+                        self._last_commit = 0.0
+                        return None
+                    if v != self._suspect:
+                        self._recheck = False
+                        self._log(f"[ledger] 换页复读得到 {v}（前一页读的是 "
+                                  f"{self._suspect}）-- 两页不一致 = OCR 误读，"
+                                  f"警报解除")
+                        self._write(Entry(time.time(), cls, v, page, flow,
+                                          "misread"))
+                        continue
                     self._recheck = False
-                    self._log(f"[ledger] 换页复读得到 {v}（前一页读的是 "
-                              f"{self._suspect}）— 两页不一致 = OCR 误读，警报解除")
-                    self._write(Entry(time.time(), cls, v, page, flow, "misread"))
-                    continue
-                # 换了页面、值还是一样低  真的出事了
-                self._recheck = False
-                tag = "breach"
-                msg = (f"MONEY BREACH: {cls} {prev}  {v}（-{prev-v}）"
-                       f" 在 {self._suspect_page} 和 {page} 两个页面上都读到"
-                       f" @flow={flow}")
-                self.breach = msg
-                self._log(f"[ledger] {msg}")
+                    tag = "breach"
+                    body = (f"{cls} {prev} 降到 {v}（-{prev-v}）"
+                            f" 在 {self._suspect_page} 和 {page} 两个页面上都读到"
+                            f" @flow={flow}（本窗有 bot 付费 tap: "
+                            f"{self._bot_spend_why.get(cls, '?')}）")
+                    self._breaches.append(body)
+                    # **台账是事后账，不是防线**（2026-08-21 用户定 + 实测支撑）。
+                    #    真正拦住花钱的是 act/gate.py 两条 tap 前的闸
+                    #    (spend=青辉石 直接 halt / purchase_context 拦成交键)，
+                    #    它们在钱动之前就否掉了。台账在钱**已经**动了之后才开口，
+                    #    停轮救不回这一笔，只能防"接着再花第二笔"。
+                    #    而它的历史命中率是 **0/2**: 全库 5,751 行台账里
+                    #    MONEY BREACH 只出过 2 次(08-08), 两次都是青辉石
+                    #    20176 被稳定读成 20117 -- 钱没动却停了整轮。
+                    #    假阳性停整轮的代价天天在付，真阳性一次没有。
+                    #     第一条: 大声记账 + 进收工报告，**不停轮**；
+                    #      第二条起: 才当"在连续掉钱"停轮（防连环失血）。
+                    if len(self._breaches) >= 2:
+                        this = f"MONEY BREACH: {body}（本轮第 "
+                        this += f"{len(self._breaches)} 次，连续掉钱，停轮）"
+                        self.breach = this
+                    else:
+                        this = (f"WARN_MONEY: {body} -- 台账首条掉钱告警，"
+                                f"已记账并进收工报告，不停轮；"
+                                f"再出一条才停（tap 前的金钱闸不受影响）")
+                    self._log(f"[ledger] {this}")
+                else:
+                    # 用户抽卡/手点: 记外部变动, 更新基线, 不 HALT。
+                    # 投票已经 settled; 不再换页复读, 免得停在同一页像死循环。
+                    tag = "external"
+                    this = (f"EXTERNAL: {cls} {prev} 降到 {v}（-{prev-v}）"
+                            f" 无 bot 付费/刷新/确认付费 tap -- 用户抽卡或手点，"
+                            f"更新基线，不 HALT @flow={flow} page={page}")
+                    self._log(f"[ledger] {this}")
+            elif cls == R.CREDIT and prev is not None and v < prev:
+                if self._bot_spent_recently(cls):
+                    tag = "spend"
+                else:
+                    tag = "external"
+                    this = (f"EXTERNAL: {cls} {prev} 降到 {v}（-{prev-v}）"
+                            f" 无 bot 付费 tap -- 用户升级等，更新基线，不 HALT "
+                            f"@flow={flow} page={page}")
+                    self._log(f"[ledger] {this}")
             elif cls == GUARDED and prev is not None and v > prev + 20000:
                 # 读高会掩盖真实掉钱 —— 异常上涨同样打标交人看
                 tag = "spike"
                 self._log(f"[ledger] 青辉石异常上涨 {prev}  {v} — 标记待人审"
                           f"（读高会掩盖真掉钱）")
+            if this:
+                if this.startswith("MONEY BREACH") or msg is None:
+                    msg = this
             if cls == GUARDED and self._recheck and tag != "breach":
                 self._recheck = False        # 复读结果正常  警报解除
-                self._log(f"[ledger] 复读 {v}，与 {prev} 一致/未跌 — 假警报解除")
+                self._log(f"[ledger] 复读 {v}，与 {prev} 一致/未跌 -- 假警报解除")
             self.confirmed[cls] = v
             e = Entry(time.time(), cls, v, page, flow, tag)
             self.entries.append(e)
@@ -322,7 +441,7 @@ class Ledger:
                 self._log(f"[ledger] 台账落盘失败(路径 {self.path}) -- "
                           f"内存账不受影响, 但磁盘审计链在缺条")
 
-    # ── 报告 ────────────────────────────────────────────────────────────
+    #  报告
     def report(self) -> str:
         if not self.entries:
             return "台账: 一次都没读到（顶栏锚点全程不可见？）"
@@ -354,5 +473,13 @@ class Ledger:
             det = " / ".join(f"{k} x{n}" for k, n in self._ins_fix.items())
             lines.append(f"  插位读大被结构闸咬回: {det}"
                          f"（同页稳定复读的多一位误读, 详见 jsonl 的 insert_fix）")
+        if self._breaches:
+            lines.append(f"  **掉钱告警 {len(self._breaches)} 条**"
+                         f"（第 1 条只记账不停轮; 第 2 条起停轮）:")
+            for b in self._breaches:
+                lines.append(f"    {b}")
+        ext_n = sum(1 for e in self.entries if e.tag == "external")
+        if ext_n:
+            lines.append(f"  外部变动 {ext_n} 笔（用户抽卡/升级等，已更新基线，未停轮）")
         lines.append(f"  明细已落盘: {self.path}")
         return "\n".join(lines)

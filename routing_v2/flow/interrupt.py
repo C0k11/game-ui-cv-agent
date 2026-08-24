@@ -78,36 +78,20 @@ class Interrupts:
             return None
         return fn(obs)
 
-    # ── 金钱 ─────────────────────────────────────────────────────────
+    #  金钱
     def _on_money_popup(self, obs: Observation) -> Optional[Action]:
         import routing_v2.act.money as money_rules
-        # **組合包页不停机**（08-09 审查实锤）：bot 是**主动**进来拿免費包的，
-        #    不是意外撞上购买框。旧代码无条件 halt  默认配置下每次自主跑
-        #    都在 shop 这一步整轮停机，`on_combo_pack` 永远执行不到。
-        #    放行的只是"别停机"：真正的钱仍被 Gate 拦死 —— 购买页上只有
-        #      `_NAV_SAFE` 里的导航键放行，其余一律人审；`money=True` 再过一道。
+        # 组合包已选中: 交给 FreePackFlow, 不停机。
         if money_rules.is_combo_pack_page(obs):
-            self._log("    組合包页（免費包入口）— 不停机，交给 flow 走，"
-                      "花钱的每一下仍要过闸人审")
+            self._log("    组合包页 — 不停机，交给 free_pack 领免费")
             return None
-        # 站在**購買青輝石页**上、但当前页签不是「組合包」——2026-08-13 小号实帧:
-        #    这一页默认开在「特別販售」（整页 CAD 25.99 / 16.99 的真钱货架），
-        #    而 `组合包未选择`(414) 正是右边那个**没选中的「組合包」页签**。
-        #    我们**本来就是来拿免費包的**，免費包在組合包页签里（「每日免費組合包」
-        #    的價签写着「免費」）—— 所以正解是**切过去**，不是关掉走人
-        #    （用户 2026-08-13 当场纠正: 「我们是去组合包，然后买免费的，
-        #      你这个门控又写歪了」）。
-        #    切页签**不花一分钱**，而且 `组合包未选择` 早就在 gate 的 `_NAV_SAFE`
-        #      白名单里（那张表的注释写着"切 tab"）—— 闸放行它是设计好的。
-        #    切过去之后 `组合包已选择` + `免费` 出现 -> `is_combo_pack_page` 成立
-        #      -> 上面那个 return None 接管 -> `on_combo_pack` 才有机会跑。
-        #    判据排掉双键确认框（那种是真·成交前一刻，必须 halt）。
+        # 默认停在特别贩售: 切到组合包。切 tab 不是成交。
         if not (obs.has(V.CONFIRM, money_rules.CONF)
                 and obs.has(V.CANCEL, money_rules.CONF)):
             tab = obs.find(V.COMBO_PACK, money_rules.CONF)
             if tab is not None:
-                self._log("    購買青輝石页停在真钱页签上 — 切到「組合包」去拿免費包")
-                return tap_box(tab, "切到組合包页签（免費包在那儿；切 tab 不花钱）",
+                self._log("    购买青辉石页不在组合包 — 切到组合包领免费")
+                return tap_box(tab, "切到组合包页签（领免费；切 tab 不花钱）",
                                expect=(V.COMBO_PACK_SEL, V.FREE))
         # **有条件交回 flow**（event_shop 高价优先购买, 2026-08-13）:
         #    这道 halt 的本职是拦「flow 没打算买、框自己冒出来」的局面。
@@ -127,9 +111,9 @@ class Interrupts:
                       "（MAX/確認仍逐发过严格闸）")
             return None
         why = money_rules.purchase_context(obs) or "（判据已不成立）"
-        return halt(f"{why} —— 立即停，交人逐帧审（青辉石只进不出）")
+        return halt(f"{why} —— 成交框停，交人审")
 
-    # ── 系统退出确认框 ─────────────────────────────────────────────
+    #  系统退出确认框
     def _on_quit_dialog(self, obs: Observation) -> Optional[Action]:
         """「是否結束？」—— **確認就是退出游戏**，只许点取消。
 
@@ -145,7 +129,7 @@ class Interrupts:
             return tap_box(x, "系统退出框  关掉")
         return wait("系统退出框，但取消键没检出 — 绝不点確認")
 
-    # ── 剧情过场 ───────────────────────────────────────────────────────
+    #  剧情过场
     def _on_story_cutscene(self, obs: Observation) -> Optional[Action]:
         """BA 的过场**不吃 KEYCODE_BACK**（08-07 连按 5 次实测全无响应）。
         唯一有效链: 剧情menu(右上)  跳过故事键  确认键。
@@ -188,7 +172,7 @@ class Interrupts:
             return tap_box(tap_cont, "剧情逃生: 点击继续")
         return wait("剧情过场，但逃生链的 cls 一个都没检出 — 不瞎点")
 
-    # ── 升级过场 ───────────────────────────────────────────────────────
+    #  升级过场
     def _on_levelup(self, obs: Observation) -> Optional[Action]:
         """全屏升级过场：点掉。
 
@@ -206,7 +190,7 @@ class Interrupts:
             return tap_box(b, "升级过场: 点掉")
         return wait("升级过场还锁着，但这一帧没检出可点的横幅 — 等，不交回 flow 乱点")
 
-    # ── 加载 ───────────────────────────────────────────────────────────
+    #  加载
     def _on_loading(self, obs: Observation) -> Action:
         """用户 2026-08-08 定死的等待语义:
 

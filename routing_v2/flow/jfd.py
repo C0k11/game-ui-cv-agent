@@ -24,6 +24,9 @@ class JfdFlow(TicketSweepFlow):
     module = "jfd"
     ticket_cls = V.TICKET_JFD
     hub_tile = V.HUB_JFD
+    # 學園交流會 卡在 08-20 `0000322_new_task_hall` 上**没有红/黄点**,
+    #    所以不给 hub_dot_region(硬套会点到隔壁卡)。等 v19 训回 tile 真名。
+    hub_dot_region = ()
     branch_cls = tuple(V.JFD_ACADEMIES)        # 三一 / 千年 / 格黑娜
     branch_page = "jfd_academy"
     stage_page = "jfd_stage"

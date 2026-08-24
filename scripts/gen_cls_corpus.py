@@ -5,7 +5,7 @@
    哪些 flow 引用 / 是不是废案 / 同族的兄弟状态。
 语义层(人写): 老 `data/ui_cls_semantics.md` 里还成立的段落照搬, 其余标 TODO。
 
-⭐ 分族规则: cls 是「物件 x 状态」不是独立目标（memory ui_cls_semantics）。
+* 分族规则: cls 是「物件 x 状态」不是独立目标（memory ui_cls_semantics）。
    按类名去掉状态后缀归族 —— **同族的 val 覆盖情况必须一起看**,
    一个族只有一个状态有 val, 状态混淆就永远测不出来。
 """
@@ -82,7 +82,7 @@ def fam(n: str) -> str:
 def owner(i: int) -> str:
     """这个 idx 归哪个模型。唯一权威 = scripts/cls_domains.py。
 
-    ⛔ `_classes.txt` 是**三个模型共用的 master 表**（memory val_set_crisis:
+    禁 `_classes.txt` 是**三个模型共用的 master 表**（memory val_set_crisis:
        「485 是三模型共用 master 表别拿它当 UI 分母」）。不分段就会把 252 个
        学生名当成「UI 模型 train=0 的缺口」—— ui_v2 数据集里本来就不该有它们。
     2026-08-13 修: 旧本地写法 `476..483 -> battle` 漏了 484 战斗失败
@@ -132,10 +132,10 @@ A(f"| UI 类 **train=0**（模型没学过） | **{t0}** |")
 A(f"| UI 类 **val=0**（测不出来） | **{v0}** |")
 A(f"| UI 类 **不在 vocab**（代码用不上） | **{nov}** |")
 A("")
-A("⛔ **`_classes.txt` 是三个模型共用的 master 表** —— 拿 528 当 UI 分母会")
+A("禁 **`_classes.txt` 是三个模型共用的 master 表** —— 拿 528 当 UI 分母会")
 A("   把 252 个学生名算成「UI 缺口」（[[val_set_crisis]] 那条教训）。上表已分段。")
-A("⛔ **train=0 不一定是漏训, 也可能是废案没标名**（[[live_daily_2026_08_07]]）。")
-A("⛔ **val=0 的族状态混淆永远测不出来** —— 同族必须成对补 val。")
+A("禁 **train=0 不一定是漏训, 也可能是废案没标名**（[[live_daily_2026_08_07]]）。")
+A("禁 **val=0 的族状态混淆永远测不出来** —— 同族必须成对补 val。")
 A("")
 A("## 按族看（cls 是「物件 x 状态」，不是独立目标）")
 A("")
@@ -154,9 +154,9 @@ for f in sorted(families, key=lambda k: (-len(families[k]), k)):
         head = f"**{f}**" if j == 0 and len(idxs) > 1 else ("" if j else f)
         warn = ""
         if tr == 0:
-            warn = " ⛔train=0"
+            warn = " 禁train=0"
         elif va == 0:
-            warn = " ⚠val=0"
+            warn = " 注意val=0"
         A(f"| {head} | {i} | `{n}`{warn} | {tr:,} | {va:,} | {vk} | {us} |")
 A("")
 A("## 现役但代码里用不上（不在 vocab）")
@@ -170,7 +170,7 @@ for i, n in ui_live:
     if n not in vocab_names:
         A(f"| {i} | `{n}` | {TR.get(i,0):,} | {VA.get(i,0):,} |")
 A("")
-A("## 废案（⛔ 只能改名不能删行 —— `_classes.txt` 按行号索引）")
+A("## 废案（禁 只能改名不能删行 —— `_classes.txt` 按行号索引）")
 A("")
 A("| idx | 类名 |")
 A("|---|---|")

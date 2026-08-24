@@ -4,8 +4,8 @@ Two-stage pipeline applied to both OCR output (`box.text`) and match
 patterns before substring comparison:
 
   1. Apply a learned CORRECTIONS dictionary — maps known misreads back
-     to the canonical form (e.g. "Duest" → "Quest", "辨中！" → "辦中！").
-  2. Fold Traditional ↔ Simplified CJK via a small char table covering
+     to the canonical form (e.g. "Duest" -> "Quest", "辨中！" -> "辦中！").
+  2. Fold Traditional <-> Simplified CJK via a small char table covering
      every char that appears in the BA vocabulary. This eliminates the
      "任務資讯" (mixed Trad/Simp) failure class without needing to list
      every permutation in keyword literals.
@@ -29,7 +29,7 @@ _REPO = Path(__file__).resolve().parents[1]
 _CORR_JSON = _REPO / "data" / "ocr_corrections.json"
 
 
-# ── Traditional → Simplified char folding table ─────────────────────
+#  Traditional -> Simplified char folding table
 # Covers every TC char that appears in brain/skills/ keyword literals.
 # Kept inline (no external dep) because we only need ~200 pairs.
 # Build this by inspecting TC ba_vocab entries; SC is the canonical form
@@ -88,7 +88,7 @@ def _tc_to_sc(text: str) -> str:
     return "".join(out)
 
 
-# ── Corrections loading ─────────────────────────────────────────────
+#  Corrections loading
 # Merges hand-curated ba_vocab.CORRECTIONS with auto-mined
 # data/ocr_corrections.json. Cached at import.
 
@@ -138,7 +138,7 @@ def apply_corrections(text: str) -> str:
 
 @lru_cache(maxsize=4096)
 def normalize(text: str) -> str:
-    """Run corrections → Trad→Simp fold. Safe for both patterns and OCR text."""
+    """Run corrections -> Trad->Simp fold. Safe for both patterns and OCR text."""
     if not text:
         return text
     return _tc_to_sc(apply_corrections(text))

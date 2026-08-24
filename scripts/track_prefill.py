@@ -70,7 +70,7 @@ def main():
     model = YOLO(WEIGHTS)
     n2m = {i: NAME2IDX[n] for i, n in model.names.items() if n in NAME2IDX}
 
-    # ── pass 1: 按帧序 track (conf 放低到 0.10, 让 ByteTrack 捞低分框) ──
+    #  pass 1: 按帧序 track (conf 放低到 0.10, 让 ByteTrack 捞低分框)
     tracks = defaultdict(list)   # tid -> [(fi, mi, conf, xc,yc,w,h)] 身份类
     hud_frames = defaultdict(list)   # fi -> [(mi, xc,yc,w,h)] HUD 单帧直写
     per_frame_plain = []         # 单帧基线: conf 0.35 会保留的框数
@@ -114,7 +114,7 @@ def main():
         if fi % 100 == 0:
             print(f"  track {fi}/{len(jpgs)}", flush=True)
 
-    # ── pass 2: 轨迹后处理(仅身份类; HUD 已单帧直写) ──
+    #  pass 2: 轨迹后处理(仅身份类; HUD 已单帧直写)
     out_frames = defaultdict(list)   # fi -> [(mi, xc,yc,w,h)]
     for fi, boxes in hud_frames.items():
         out_frames[fi].extend(boxes)

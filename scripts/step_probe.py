@@ -105,7 +105,7 @@ def main() -> int:
         import time as _t
         _t.sleep(1.2)      # 给 bot 执行 + 算出下一步的时间
 
-    # ──  bot 的意图(先拉, 免得抓帧耗时后状态又变) ──────────────────────
+    #   bot 的意图(先拉, 免得抓帧耗时后状态又变)
     # 响应是**包了一层**的 {"step_mode":bool, "pending":{...}|None};
     # pending 里 action 是动作类型**字符串**(click/back/wait/...), target 平铺。
     raw = api("/step/pending")
@@ -127,7 +127,7 @@ def main() -> int:
     if a.no_frame:
         return 0
 
-    # ──  干净帧 + YOLO 检出 ─────────────────────────────────────────
+    #   干净帧 + YOLO 检出
     p = grab()
     import cv2
     img = cv2.imread(p)
@@ -163,7 +163,7 @@ def main() -> int:
     except Exception as e:                                    # noqa: BLE001
         print(f"[PageGraph] 不可用: {type(e).__name__}: {e}")
 
-    # ── 对照图: 左=原始游戏画面, 右=YOLO 框 + 落点十字 ──────────────────
+    #  对照图: 左=原始游戏画面, 右=YOLO 框 + 落点十字
     # 用户 2026-07-25: "走一步你就看一下游戏画面然后再看一下带有yolo框的画面"。
     # 拼成一张是为了一次 Read 就能同时看到两边(逐帧审时每多一次调用都是成本)。
     out = a.shot or str(Path(os.environ.get("TEMP", ".")) / "_step_view.png")
@@ -172,7 +172,7 @@ def main() -> int:
     raw = cv2.resize(img, (SW, int(h * sc)))
     ann = raw.copy()
     # cv2.putText 画不了中文(渲染成 ??????, 2026-07-25 当场发现)  框上只标
-    # **编号**, 编号↔类名的对照在上面的文字清单里(已按 conf 降序打印)。
+    # **编号**, 编号<->类名的对照在上面的文字清单里(已按 conf 降序打印)。
     for i, b in enumerate(boxes):
         x1, y1 = int(b.x1 * w * sc), int(b.y1 * h * sc)
         x2, y2 = int(b.x2 * w * sc), int(b.y2 * h * sc)

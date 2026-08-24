@@ -8,7 +8,7 @@ This serves as:
 Organized by game screen / UI context.
 """
 
-# ── Lobby & Navigation ──
+#  Lobby & Navigation
 LOBBY = [
     "任務", "任务", "咖啡廳", "咖啡厅", "咖啡", "商店", "社團", "社团",
     "製作", "制作", "競技場", "竞技场", "課程", "课程", "工作", "工坊",
@@ -18,7 +18,7 @@ LOBBY = [
     "MoMoTalk", "郵件", "邮件", "好友", "公告", "通知",
 ]
 
-# ── Common Buttons ──
+#  Common Buttons
 BUTTONS = [
     "確認", "确认", "確定", "确定", "取消", "關閉", "关闭",
     "是", "否", "OK", "確", "确",
@@ -28,7 +28,7 @@ BUTTONS = [
     "SKIP", "Skip", "MENU", "AUTO", "NEXT",
 ]
 
-# ── Campaign / Mission ──
+#  Campaign / Mission
 CAMPAIGN = [
     "任務", "任务", "劇情", "剧情", "通常", "困難", "困难",
     "Hard", "Normal", "Area", "入場", "入场",
@@ -40,7 +40,7 @@ CAMPAIGN = [
     "特殊任務", "特殊任务",
 ]
 
-# ── Event Activity ──
+#  Event Activity
 EVENT = [
     "Story", "Quest", "Challenge", "道具獲得方法", "道具获得方法",
     "獲得獎勵", "获得奖励", "獲得獎", "獲得奖",
@@ -53,7 +53,7 @@ EVENT = [
     "獎勵結束", "奖励结束", "獎勵領取", "奖励领取",
 ]
 
-# ── Cafe ──
+#  Cafe
 CAFE = [
     "咖啡廳", "咖啡厅", "咖啡廳收益", "咖啡厅收益",
     "每小時收益", "收益現況", "收益現况",
@@ -71,7 +71,7 @@ CAFE = [
     "基本情報", "EX技能", "神秘解放",
 ]
 
-# ── Schedule ──
+#  Schedule
 SCHEDULE = [
     "課程表", "课程表", "選擇時間", "选择时间",
     "票券", "門票", "开始上课", "開始上課",
@@ -79,7 +79,7 @@ SCHEDULE = [
     "更新消息", "更新資訊", "更新资讯",
 ]
 
-# ── Shop ──
+#  Shop
 SHOP = [
     "商店", "一般", "軍需", "軍需品",
     "購買", "购买", "補充", "补充",
@@ -87,33 +87,33 @@ SHOP = [
     "剩餘", "剩余",
 ]
 
-# ── Club ──
+#  Club
 CLUB = [
     "社團", "社团", "簽到", "签到",
     "已簽到", "已签到", "加入", "探索",
 ]
 
-# ── Craft ──
+#  Craft
 CRAFT = [
     "製作", "制作", "工作", "工坊",
     "製造", "制造", "收取", "完成",
     "節點", "节点", "素材",
 ]
 
-# ── Bounty / Wanted ──
+#  Bounty / Wanted
 BOUNTY = [
     "懸賞通緝", "悬赏通缉", "指名手配",
     "掃蕩", "扫荡", "討伐", "讨伐",
 ]
 
-# ── Total Assault / Grand Assault ──
+#  Total Assault / Grand Assault
 RAIDS = [
     "總力戰", "总力战", "大決戰", "大决战",
     "舉辦中", "举办中", "辨中",  # OCR misread of 辦中
     "Clear", "Score",
 ]
 
-# ── Generic / System ──
+#  Generic / System
 SYSTEM = [
     "TOUCH TO START", "Touch to Start", "TOUCH TO CONTINUE", "TAP TO CONTINUE",
     "是否結束", "是否结束", "是否退出", "是否离开",
@@ -123,20 +123,20 @@ SYSTEM = [
     "題示", "提示",  # 題示 = OCR misread of 提示
 ]
 
-# ── Numbers / Time Patterns ──
+#  Numbers / Time Patterns
 NUMBERS = [
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
     "/", ":", "：",
     "AM", "PM",
 ]
 
-# ── MomoTalk ──
+#  MomoTalk
 MOMOTALK = [
     "MoMoTalk", "未讀", "未读",
     "回覆", "回复", "選項", "选项",
 ]
 
-# ── Story ──
+#  Story
 STORY = [
     "主線", "主线", "支線", "支线",
     "劇情", "剧情", "Story", "Episode",
@@ -170,11 +170,11 @@ def get_all_characters() -> list[str]:
     return sorted(chars)
 
 
-# ── Known OCR misread corrections ──
+#  Known OCR misread corrections
 # Maps (misread text)  (correct text) for common Blue Archive OCR errors.
 # Used for auto-correcting trajectory labels during training data extraction.
 CORRECTIONS = {
-    # ── Latin OCR confusions observed in trajectories (hand-curated) ──
+    #  Latin OCR confusions observed in trajectories (hand-curated)
     "Ouest": "Quest",    # O / Q at game font size
     "Duest": "Quest",    # D / Q  (trace: run_20260423_033417 tick 33)
     "Ouest02": "Quest",

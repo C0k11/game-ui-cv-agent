@@ -82,7 +82,7 @@ def main():
     cleared = 0
 
     for round_i in range(max_q):
-        # ── 列表页: 找 0 星可入场行 ──
+        #  列表页: 找 0 星可入场行
         fr = adb.capture_frame()
         d = dets(ui, fr, 0.5)
         enters = sorted([(cy, cx) for n, c, cx, cy in d if n == "入场键"])
@@ -108,8 +108,8 @@ def main():
         tap(3533, 1976)                     # 出擊
         print("  出击, 等战斗HUD...")
 
-        # ── 战斗: AUTO 状态门(盲 tap=toggle, AUTO 已开再点会关掉 —
-        # 用户实锤 bug)  检出「自动战斗关闭」cls 才点; 战斗胜利  结算 ──
+        #  战斗: AUTO 状态门(盲 tap=toggle, AUTO 已开再点会关掉 —
+        # 用户实锤 bug)  检出「自动战斗关闭」cls 才点; 战斗胜利  结算
         t0 = time.time()
         frame_i = 0
         while time.time() - t0 < 240:
@@ -125,7 +125,7 @@ def main():
             if "战斗胜利" in names:
                 print(f"  战斗胜利({time.time()-t0:.0f}s)  结算链")
                 break
-            # ── 技能卡操作试验: 点亮卡  点敌方框中心释放 ──
+            #  技能卡操作试验: 点亮卡  点敌方框中心释放
             if skill_test and frame_i % 8 == 0 and "我方" in names:
                 cards = [(c, cx, cy) for n, c, cx, cy in dets(avatar, fr, 0.5)
                          if cy > 0.78]
@@ -138,7 +138,7 @@ def main():
                             dets(battle, fr2, 0.5) if n == "敌方"]
                     tx, ty = (foes and max(foes)[1:]) or (0.5, 0.5)
                     tap(int(tx * 3840), int(ty * 2160))
-                    print(f"  ⚡技能试验: 卡({kx:.2f},{ky:.2f})  "
+                    print(f"  技能试验: 卡({kx:.2f},{ky:.2f})  "
                           f"目标({tx:.2f},{ty:.2f}) {'敌方' if foes else '中央'}")
         else:
             print("  战斗 240s 超时 — 停(人工看)")

@@ -84,7 +84,7 @@ def main():
         shutil.copyfile(os.path.join(RAW, "_classes.txt"),
                         os.path.join(d, "classes.txt"))
 
-    # ── 弱/新 cls 覆盖 ──────────────────────────────────────────────
+    #  弱/新 cls 覆盖
     try:
         from routing_v2.state import vocab as V
         weak = {c for c, (t_, _) in V.HEALTH.items() if t_ < 100}

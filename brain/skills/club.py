@@ -16,8 +16,8 @@ Two YOLO gaps the skill works around (documented, fix in v6 — task #22):
   is too high  lands above the card  the overlay collapses back to lobby.
 
 State machine
--------------
-enter    checkin dialog up  checkin. social overlay (社團 dot / CLUB cls) 
+----
+enter    checkin dialog up  checkin. social overlay (社團 dot / CLUB cls)
          tap the card. lobby  tap NAV_SOCIAL. (cooldown to avoid spam.)
 checkin  「社團簽到獎勵」 = 确认键 present with NO 取消键  tap it  done.
 exit     BTN_HOME / BTN_BACK  lobby  done.
@@ -78,7 +78,7 @@ class ClubSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _checkin_dialog(self, screen: ScreenState):
         """社團簽到獎勵 = a centered 确认键 with NO 取消键 (single-button).
 
@@ -107,7 +107,7 @@ class ClubSkill(BaseSkill):
         return (self._card_dot(screen) is not None
                 or self.find_cls(screen, UC.CLUB, conf=_CLS_CONF) is not None)
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -151,7 +151,7 @@ class ClubSkill(BaseSkill):
                 return action_click_box(club, "open 社團 (cls)")
             dot = self._card_dot(screen)
             if dot is not None and self._card_taps < 5:
-                # Card body is DOWN-LEFT of the dot (dot alone is too high 
+                # Card body is DOWN-LEFT of the dot (dot alone is too high
                 # overlay collapses). Documented under-trained-cls fallback.
                 cx = max(0.05, min(0.95, dot.cx + _DOT_TO_CARD[0]))
                 cy = max(0.05, min(0.95, dot.cy + _DOT_TO_CARD[1]))
@@ -194,7 +194,7 @@ class ClubSkill(BaseSkill):
             # 时旧码已置 _checked_in=True  _exit 的 badge-verify 兜底(L202 not
             # _checked_in)被骗过, 签到没成仍报 done)。
             # reason 不再当控制 API(reason_string_as_api 家族): 旧写法靠
-            # "確認键"命中关键词豁免  稳定门+same-target hold 一起被跳过 
+            # "確認键"命中关键词豁免  稳定门+same-target hold 一起被跳过
             # 簽到獎勵框是自动弹出的, 第一帧多为弹入动画帧, 锚上去打空
             # 无 hold 的第二发落在框消失后的社團页上 = 盲拍。
             # 改 _force_settle 老实走稳定门 + 显式 after-ack(6s 盖 step 门控节奏)。

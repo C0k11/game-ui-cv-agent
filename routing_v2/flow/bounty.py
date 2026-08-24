@@ -15,6 +15,8 @@ class BountyFlow(TicketSweepFlow):
     module = "bounty"
     ticket_cls = V.TICKET_BOUNTY
     hub_tile = V.HUB_BOUNTY
+    # 懸賞通緝 卡: 08-20 `0000322_new_task_hall` 黄点 0.88 @(0.61,0.545)
+    hub_dot_region = (0.50, 0.46, 0.66, 0.64)
     branch_cls = tuple(V.BOUNTY_BRANCHES)      # 高架公路 / 沙漠铁道 / 教室
     branch_page = "bounty_branch"
     stage_page = "bounty_stage"

@@ -1,39 +1,29 @@
 # -*- coding: utf-8 -*-
 """金钱判据 —— **全 bot 唯一的一份**（pages / gate / interrupt 共用）。
 
-铁律: 青辉石**只进不出**。bot 绝不花青辉石、绝不碰真钱。
+花钱 = 点确认成交（买AP / 买票 / CAD）。
+站在购买青辉石页、组合包页、特别贩售，不是花钱。
+给购买键标框、日常第一枪进页领免费包，不是花钱。
+程序不会点 CAD 购买键，也不会发 spend=青辉石。
 
-判据设计的两难，以及为什么长这样:
+08-17 用户定: 把组合包页写成真钱包停机，会让路由不敢进、标不敢做。
+那条已删。purchase_context 只认成交框，不认货架页。
 
-  【假阴性的代价】漏判 = 真的花掉青辉石，不可逆。
-  【假阳性的代价】误判 = 每次开跑第一帧就 HALT，整条链跑不起来。
-                 ——2026-08-07 已经吃过一次（顶栏 OCR 抖动误报 MONEY BREACH
-                 急停整条 pipeline，而余额一分没少）。
+判据（加载中的帧不判）:
 
-   所以判据必须**结构化**，不能靠"屏上出现某个词就停"。
-   2026-08-08 live 实测打脸的那一版: 我写的是"`购买青辉石` 在屏上  停"。
-     结果**大厅左侧常驻一个买石广告位**，`购买青辉石` conf **0.95** 稳定在场
-      每一轮的第一帧就 HALT。这是"把一个词当成一个场景"的典型错误。
-     （和 §A9「把内容多当页面前提」是同一族病：**信号 ≠ 场景**。）
+   弹窗体内出现 青辉石（cy > 0.12）
+     顶栏余额必须排掉。买AP/买票确认框的价签走这条。
 
-现在的判据 = 四条，任一成立就是"真的站在花钱的位置上"（`purchase_context`
-  按这个顺序求值，`加载中` 的帧一律不判 —— 半渲染的检出不可信）:
+   购买青辉石 且 对话框控件同框（确认/取消/步进/货币数量区）
+     大厅左侧广告位单独在场不算。隔半屏的确认框也不算。
 
-   弹窗体内出现 `青辉石`（cy > 0.12）
-     —— 顶栏 cy<0.12 那个是余额显示，正常帧每帧都有，必须靠 region 排掉。
-        这条是主判据，live 验过：购买框里商品价签就是弹窗体内的青辉石图标。
+   双键框内有数量步进器 = 购买/兑换框
+     青辉石图标漏检时的结构闸。扫荡纯文字确认没有步进器，不误拦。
 
-   `组合包` / `组合包已选择` 在场
-     —— 组合包页，免費包旁边就是 CAD$16.99 / $3.99 的**真钱包**。
+   组合包/组合包已选择 在场: 不再是购买语境。
+     FreePackFlow 日常第一枪要进这一页。CAD 键由 flow 不点、闸拒未授权购买键。
 
-   `购买青辉石` **且**有对话框控件（确认/取消/数量步进/货币数量区）
-     —— 单独的 `购买青辉石` 只是大厅广告位；配上对话框控件才是真的购买流程。
-
-   **双键框内有数量步进器** = 购买/兑换框
-     —— 治的是"青辉石一个都没检出"的盲区（購買AP 框实测四条判据全 None）。
-        靠结构不靠看见钱：带取消键的框还配了步进器，那就是在让你买东西。
-
-   另外 `青辉石商店_已选择` 在场 = 站在花青辉石的 tab 上（不 halt，但只许退出）
+   青辉石商店_已选择: 不 halt，只许退出/切回信用点 tab
 """
 from __future__ import annotations
 
@@ -92,8 +82,31 @@ def income_context(obs: Observation, strong_only: bool = False) -> Optional[str]
     return f"{m.cls} conf {m.conf:.2f}" if m is not None else None
 
 
+def signin_book_context(obs: Observation) -> Optional[str]:
+    """阿罗娜签到簿/日历。板上的青辉石是 day 奖励图标，不是成交价签。
+
+    全仓无「签到簿」专属 cls。签到相关只有 `每日领奖`(7, booklet 图标)。
+    08-20 HALT 0003243: booklet 0；板上 BODY 同时有青辉石+信用点+体力。
+    双键框 / 购买青辉石 不走这里，留给结构性判据。
+    """
+    if obs.find(V.SHOP_BUY_PYROXENE, CONF) is not None:
+        return None
+    if obs.find(V.CONFIRM, CONF) is not None and obs.find(V.CANCEL, CONF) is not None:
+        return None
+    pyx = obs.find(V.PYROXENE, CONF, region=BODY)
+    if pyx is None:
+        return None
+    booklet = obs.find(V.NAV_DAILY_REWARD, CONF)
+    if booklet is not None and obs.count(V.LOBBY_NAV, 0.35) < 3:
+        return f"{V.NAV_DAILY_REWARD} conf {booklet.conf:.2f}"
+    if (obs.find(V.CREDIT, CONF, region=BODY) is not None
+            or obs.find(V.AP, CONF, region=BODY) is not None):
+        return "签到簿日历奖励格"
+    return None
+
+
 def purchase_context(obs: Observation) -> Optional[str]:
-    """返回非 None = **真的**站在会花青辉石/真钱的位置上。文案即证据。"""
+    """非 None = 眼前是成交框（买AP/买票/付费确认），不是货架页。"""
     # 2026-08-12 live 误报急停：daily_mission 在「完成每日任務8次以上 8/8
     #    青辉石x20」那一帧被 halt —— 那是**奖励图标**（收入），不是价签。
     #    收入豁免本来是有的，但那一帧上 `全部領取` 黄键**被 Now Loading 盖住**
@@ -113,11 +126,10 @@ def purchase_context(obs: Observation) -> Optional[str]:
     if pyx is not None:
         if inc is not None:
             return None          # 收入语境：奖励卡里的青辉石，不是价签
+        if signin_book_context(obs) is not None:
+            return None          # 签到簿日历格：进簿不是花钱
         return (f"弹窗体内出现青辉石 @({pyx.cx:.3f},{pyx.cy:.3f}) "
                 f"conf {pyx.conf:.2f} = 购买框")
-    combo = obs.find([V.COMBO_PACK, V.COMBO_PACK_SEL], CONF)
-    if combo is not None:
-        return f"组合包页（{combo.cls} conf {combo.conf:.2f}）— 旁边就是真钱包"
     buy = obs.find(V.SHOP_BUY_PYROXENE, CONF)
     if buy is not None and inc_s is None:
         # 屏上还看得到 ≥3 个大厅底栏入口 = 我们在**大厅**上，那个
@@ -145,7 +157,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
 
     #  **双键框内有数量步进器 = 购买/兑换框**（08-09 血泪，差点花 30 青辉石）
     #    实锤：AP 耗尽后 flow 又点了「掃蕩開始」，游戏弹「購買AP 是否購買AP120?
-    #    單價💎30」，而**弹窗体内那两个青辉石图标一个都没检出**（判据 全瞎，
+    #    單價30」，而**弹窗体内那两个青辉石图标一个都没检出**（判据 全瞎，
     #    memory 早记过这一格 v15 也只有 0.429 检出率） 闸放行了「確認」。
     #     不能只靠"看见青辉石"，要靠**结构**：游戏里带取消键的框如果还配了
     #      数量步进器，那就是在让你**买东西/换东西**。
@@ -176,24 +188,10 @@ LOBBY_LIKE = ("lobby",)
 
 
 def is_combo_pack_page(obs: Observation) -> bool:
-    """当前是不是**組合包页**（免費組合包所在的那一页）。
+    """组合包已选中，或屏上有免费标。特别贩售上只有未选中页签，不算。
 
-    它和别的购买语境有本质区别：**bot 是主动进来拿免費包的**，而不是
-       "意外撞上购买框"。 这一页不该无条件 halt 整轮（08-09 审查实锤：
-       ShopFlow 点大厅广告位进来，下一帧就被 money_popup 停机，
-       `on_combo_pack` 那整段代码永远执行不到）。
-    放行的只是"别停机"，真正的钱仍被 Gate 拦：
-       `_NAV_SAFE` 白名单外的点击一律人审，`money=True` 还要再过一道。
-
-    ⛔⛔ 判据必须是**选中态**，不能是页签按钮（2026-08-13 cls 审计逼出来的）:
-       原来写的是 `组合包未选择 或 组合包已选择` —— 而 `组合包未选择`(414) 是
-       **另一个页签的标签**，站在「特別販售」页（整页 CAD 真钱货架）上它照样在场。
-       后果：金钱 HALT 打断在一整页真钱商品上被**关掉**，而那一页没有任何 handler。
-       同一次审计还查出 **1,549 个 `购买` 框标在 CAD 真钱键上**、v16 对真钱键给
-       0.98 —— 两件事叠起来就是"模型最自信地认得真钱键 + 那一页不停机"。
-        改成认**已选中态**，或屏上白纸黑字有 `免费`。实测今天 13 帧里，
-         真組合包页 8 帧两者都在（0.976 / 0.964），另外 3 帧只有 414
-         —— 那正是**切换前站在别的页签上**的帧，本来就该停机。
+    08-17: 这一页不再是 purchase_context。本函数只给 interrupt 决定
+    要不要把 money_popup 交回 flow（选中了就交回，没选中就切 tab）。
     """
     return obs.find([V.COMBO_PACK_SEL, V.FREE], CONF) is not None
 

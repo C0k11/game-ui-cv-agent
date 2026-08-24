@@ -29,7 +29,7 @@ OUT_DIR = REPO / "data" / "ocr_training"
 SYNTH_DIR = OUT_DIR / "synthetic"
 FONTS_DIR = REPO / "data" / "fonts"
 
-# ── Font discovery ──
+#  Font discovery
 def find_system_fonts() -> list[Path]:
     """Find CJK-capable fonts on the system."""
     candidates = []
@@ -60,7 +60,7 @@ def find_system_fonts() -> list[Path]:
     return cjk_fonts
 
 
-# ── Blue Archive color palettes ──
+#  Blue Archive color palettes
 # (text_color, bg_color) tuples
 BA_PALETTES = [
     # White text on dark blue (battle HUD, headers)

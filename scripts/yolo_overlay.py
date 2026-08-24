@@ -32,7 +32,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-# ── Win32 via ctypes ────────────────────────────────────────────────────
+#  Win32 via ctypes
 _user32 = ctypes.windll.user32
 _gdi32 = ctypes.windll.gdi32
 _kernel32 = ctypes.windll.kernel32
@@ -112,7 +112,7 @@ class PAINTSTRUCT(ctypes.Structure):
     ]
 
 
-# ── Color key & palette ────────────────────────────────────────────────
+#  Color key & palette
 # RGB(1,2,3) as COLORREF (0x00BBGGRR).  Every pixel filled with this
 # colour becomes fully transparent via SetLayeredWindowAttributes.
 _CK = 0x00030201
@@ -149,7 +149,7 @@ def _class_colorref(cls_name: str) -> int:
     return _cls_colors[cls_name]
 
 
-# ── Overlay class ──────────────────────────────────────────────────────
+#  Overlay class
 
 class YoloOverlay:
     """Transparent overlay window for real-time YOLO bbox visualisation.
@@ -226,7 +226,7 @@ class YoloOverlay:
         self._track_enabled = enabled
         self._tracker = self._new_tracker()
 
-    # ── Public API ──────────────────────────────────────────────────
+    #  Public API
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -279,7 +279,7 @@ class YoloOverlay:
             self._boxes = parsed
             self._dirty = True
 
-    # ── Win32 internals ─────────────────────────────────────────────
+    #  Win32 internals
 
     def _target_rect(self) -> Tuple[int, int, int, int]:
         """Screen-space client rect of target window.
@@ -414,7 +414,7 @@ class YoloOverlay:
         _gdi32.DeleteObject(font)
         _user32.EndPaint(hwnd, ctypes.byref(ps))
 
-    # ── Thread entry point ──────────────────────────────────────────
+    #  Thread entry point
 
     def _run(self) -> None:
         # DPI awareness (per-monitor v2 for accurate positioning)
@@ -503,7 +503,7 @@ class YoloOverlay:
         print("[Overlay] Stopped.")
 
 
-# ── Standalone test ────────────────────────────────────────────────────
+#  Standalone test
 
 def _test_main():
     import argparse, sys, os

@@ -15,7 +15,14 @@
 区域选择**动态扫**（夏莱办公室 / 夏莱居住区 / 格黑娜 / 阿拜多斯 / 千年 都有 cls），
 配置里没写就按屏上从左到右依次进。
 
-`房间区域未解锁`(50) 在场的房间跳过。`房间区域`(42) train=0，别用。
+上锁区域**结构上碰不到**(2026-08-21 用户口述 + live 复核): 路由是
+   夏莱办公室 -> 全体课程表面板选学生 -> 開始 -> 关面板 -> **ARROW_LEFT 翻下一区**,
+   全程不回区域选择列表; 而选人是从面板列表里选的, 锁房间根本不在面板上。
+   所以这里**没有也不需要**显式查锁 —— 早先写的「`房间区域未解锁`(50) 在场的
+   房间跳过」是过时说法, 代码里从来没有那一步, 别照着它去加。
+cls 50 本身是好的: 区域内页那种绿锁 live 0.95-0.97(小号 Lv30 实测 5 个锁房间全中);
+   区域选择列表上「招募XX學生」那种灰锁 0 检出, 但路由不走那儿, 不影响。
+`房间区域`(42) train=0，别用。
 """
 from __future__ import annotations
 
@@ -219,12 +226,14 @@ class ScheduleFlow(ExitMixin, Flow):
         tried = self.state.setdefault("tried", [])
         for name in (self.cfg.get("target_students") or []):
             hit = obs.find(name, 0.45, model="avatar")
-            if hit is not None and id(hit) not in owned and name not in tried:
+            if (hit is not None and id(hit) not in owned and name not in tried
+                    and not self._on_locked_card(obs, hit)):
                 return self._enter_room(hit, f"进目标 {name} 的房间")
         studs = [b for b in obs.boxes
                  if b.model == "avatar" and b.conf >= 0.45
                  and 0.20 < b.cy < 0.92 and id(b) not in owned
-                 and b.cls not in tried]
+                 and b.cls not in tried
+                 and not self._on_locked_card(obs, b)]
         if studs:
             b = max(studs, key=lambda x: x.conf)
             return self._enter_room(b, f"进 {b.cls} 的房间")
@@ -235,6 +244,25 @@ class ScheduleFlow(ExitMixin, Flow):
                    if tried else "全体课程表已空 - 关面板")
             return tap_box(x, why, post=lambda: self.goto("switch", why))
         return self._go("switch", "这一区没人可选了")
+
+    # 全體課程表面板是 3 列 x N 行的房间卡。锁图标在卡的**标题行**, 学生头像在
+    #   它下面同一张卡里。实测卡宽约 0.26 / 高约 0.20(锁 cx 落在 .2339/.5028/.7718
+    #   三列, cy 落在 .3310/.5411/.7512 三行), 所以「同一张卡」= 横向 <0.13
+    #   且在锁**下方** 0.15 以内。不含写死坐标, 只用锁框本身的相对位置。
+    _CARD_DX = 0.13
+    _CARD_DY = 0.15
+
+    def _on_locked_card(self, obs, box) -> bool:
+        """这个头像是不是长在一张**锁着的**房间卡上。
+
+        锁着的房间点进去没反应, 早先只能靠 `ROOM_OPEN_CAP` 超时拉黑,
+        每个白烧 30 tick。锁本身 live 0.98, 直接拿它当负判据便宜得多。
+        """
+        for lk in obs.all(V.ROOM_LOCKED, 0.45):
+            if (abs(box.cx - lk.cx) < self._CARD_DX
+                    and 0.0 < box.cy - lk.cy < self._CARD_DY):
+                return True
+        return False
 
     def _enter_room(self, box, why: str):
         """点学生头像进房间。契约 = 真进了房间**必然**出现「課程表開始」。
@@ -339,15 +367,3 @@ class ScheduleFlow(ExitMixin, Flow):
     def on_confirm_dialog(self, obs, st):
         cf = obs.find(V.CONFIRM, 0.45)
         return tap_box(cf, "确认上课") if cf is not None else wait("等確認键")
-
-    def on_reward(self, obs, st):
-        # `find([A, B])` 是**全屏 conf argmax**，不是"先 A 后 B"。
-        #    「獲得獎勵！」全屏 overlay 上 `获得奖励` 0.98 是**横幅**、
-        #    `点击继续字样` 0.93 才是能点的，argmax 永远选横幅，
-        #    连点 11 次画面纹丝不动。
-        b = (obs.find(V.CONFIRM, 0.40)
-             or obs.find(V.STORY_TAP_CONTINUE, 0.40)
-             or obs.find(V.GOT_REWARD, 0.40))
-        if b is None:
-            return wait("等结果页")
-        return tap_box(b, "关掉课程结果")

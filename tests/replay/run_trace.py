@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 from tests.replay.harness import (find_runs, iter_run,  # noqa: E402
                                   replay_skill)
 
-# skill 名(录像里的 skill 字段) → 构造器
+# skill 名(录像里的 skill 字段) -> 构造器
 _SKILLS = {
     "EventQuest": ("brain.skills.event_quest", "EventQuestSkill"),
     "TicketSweep": ("brain.skills.ticket_sweep", "TicketSweepSkill"),
@@ -78,11 +78,11 @@ def cmd_trace(a) -> int:
     errs = [r for r in all_rows if r["error"]]
     print(f"\n共 {len(all_rows)} tick, 异常 {len(errs)}")
     for e in errs[:10]:
-        print(f"  ⚠ {e['run']}#{e['tick']} {e['error']}")
+        print(f"  注意 {e['run']}#{e['tick']} {e['error']}")
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump({"skill": a.skill, "mode": a.mode, "rows": all_rows}, f,
                   ensure_ascii=False)
-    print(f"→ {a.out}")
+    print(f"-> {a.out}")
     return 0
 
 
@@ -102,15 +102,15 @@ def cmd_diff(before: str, after: str) -> int:
             changed.append((k, rb, ra))
     print(f"tick 总数 before={len(bi)} after={len(ai)} | 决策变化 {len(changed)}")
     if not changed:
-        print("✅ 零变化 —— 这次改动没有改变任何历史 tick 的决策")
+        print("OK 零变化 —— 这次改动没有改变任何历史 tick 的决策")
         return 0
     print()
     for (run, tick), rb, ra in changed[:80]:
-        print(f"── {run}#{tick}  in_state={((rb or ra) or {}).get('in_sub_state')!r}")
+        print(f" {run}#{tick}  in_state={((rb or ra) or {}).get('in_sub_state')!r}")
         if rb:
-            print(f"   before: {rb['sig']} → {rb['out_sub_state']!r}  {rb['reason']}")
+            print(f"   before: {rb['sig']} -> {rb['out_sub_state']!r}  {rb['reason']}")
         if ra:
-            print(f"   after : {ra['sig']} → {ra['out_sub_state']!r}  {ra['reason']}")
+            print(f"   after : {ra['sig']} -> {ra['out_sub_state']!r}  {ra['reason']}")
         rec = (ra or rb).get("recorded_reason")
         if rec:
             print(f"   (当时实际: {rec})")

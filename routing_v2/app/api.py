@@ -1,33 +1,28 @@
 # -*- coding: utf-8 -*-
 """前端 API（FastAPI router）—— 挂到 `server/app.py` 上，或独立起。
 
-    # server/app.py 里加一行
     from routing_v2.app.api import router as v2_router
     app.include_router(v2_router)
 
-    # 或者独立跑
-    py -m uvicorn routing_v2.app.api:app --port 8788
-
-前端不用手写表单：`GET /v2/schema` 吐出每个配置项的类型/标签/取值来源，
-`GET /v2/scan/{name}` 在对应页面上**动态扫 cls** 拿真实可选项（悬赏分支 /
-JFD 学院 / 活动关卡）—— **不写死清单**（§A8/§A9）。
-
-金钱: `safety.*` 是只读的（`config.LOCKED` 强制覆盖，写进去也不生效）。
-   `POST /v2/run` 的 `money_ok` 只在**这一次运行**里有效，不落盘 ——
-   金钱步必须每天重新人审。
+选项写死在 SCHEMA / 词表，不靠扫屏生成。
+金钱: safety.* 只读（LOCKED 强制覆盖）。
+POST /v2/run 的 money_ok 只对这一次有效，不落盘。
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from routing_v2.config import LOCKED, SCHEMA, load, merged, save
+from routing_v2.config import (LOCKED, SCHEMA, load, merged, save,
+                               DAILY_ORDER, DAILY_CHAIN, EXTRA_MODULES,
+                               EXTRA_LABELS, pin_daily, write_account_cafe)
 from routing_v2.flow.registry import ALL, COMPOSITE
 from routing_v2.state import vocab as V
 
@@ -50,12 +45,16 @@ def _log(m: str) -> None:
             del _state["log"][:len(_state["log"]) - _LOG_CAP]
 
 
-# ══ 配置 ═══════════════════════════════════════════════════════════════
+#  配置
 @router.get("/schema")
 def get_schema():
-    """前端渲染表单用。`dynamic` 字段的取值要调 /v2/scan/{name}。"""
+    """前端用。选项已写死，日常顺序固定。"""
     return {"schema": SCHEMA, "locked": list(LOCKED),
-            "flows": sorted(ALL), "composite": COMPOSITE}
+            "flows": sorted(ALL), "composite": COMPOSITE,
+            "daily_order": list(DAILY_ORDER),
+            "daily_chain": list(DAILY_CHAIN),
+            "extra_modules": list(EXTRA_MODULES),
+            "extra_labels": dict(EXTRA_LABELS)}
 
 
 @router.get("/config")
@@ -69,13 +68,18 @@ class ConfigIn(BaseModel):
 
 @router.post("/config")
 def post_config(body: ConfigIn):
-    cfg = merged(body.config)          # LOCKED 在这里被强制盖回来
+    raw = dict(body.config or {})
+    write_account_cafe(raw)
+    pin_daily(raw)
+    cfg = merged(raw)
+    pin_daily(cfg)
+    write_account_cafe(cfg)
     save(cfg)
     return {"ok": True, "config": cfg,
             "note": "safety.* / shop.refresh_times / run.frame_source 已被锁死覆盖"}
 
 
-# ══ 动态选项（进页扫 cls，不写死清单）═════════════════════════════════
+#  动态选项（进页扫 cls，不写死清单）
 _SCANS = {
     "bounty_branches": (V.BOUNTY_BRANCHES, "在悬赏分支选择页扫"),
     "jfd_academies": (V.JFD_ACADEMIES, "在学院交流会学院选择页扫"),
@@ -150,7 +154,7 @@ def probe():
                       for b in sorted(obs.boxes, key=lambda x: -x.conf)[:60]]}
 
 
-# ══ 运行 ═══════════════════════════════════════════════════════════════
+#  运行
 class RunIn(BaseModel):
     flows: Optional[List[str]] = None
     step_mode: Optional[bool] = None
@@ -170,7 +174,7 @@ def run(body: RunIn):
         cfg["order"] = list(body.flows)
         for k in cfg["modules"]:
             cfg["modules"][k] = k in body.flows
-        for k in ("club", "craft", "shop"):
+        for k in ("free_pack", "club", "craft", "shop"):
             if k in body.flows:
                 cfg["modules"]["daily_routine"] = True
     if body.step_mode is not None:
@@ -272,10 +276,80 @@ def health():
     return {"dead": sorted(DEAD), "weak": sorted(WEAK), "report": health_report()}
 
 
+@router.get("/characters")
+def list_characters():
+    """fused_avatar cls + 老前端同一套 角色头像 文件名。"""
+    root = Path(__file__).resolve().parents[2]
+    cls_file = root / "data" / "fused_avatar_classes.json"
+    thumb_file = root / "data" / "avatar_thumb_map.json"
+    classes = []
+    thumbs = {}
+    if cls_file.is_file():
+        try:
+            raw = json.loads(cls_file.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                classes = [str(x) for x in raw if x]
+        except Exception:
+            classes = []
+    if thumb_file.is_file():
+        try:
+            raw = json.loads(thumb_file.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                thumbs = {str(k): str(v) for k, v in raw.items() if v}
+        except Exception:
+            thumbs = {}
+    out = []
+    for cn in classes:
+        en = thumbs.get(cn) or ""
+        out.append({"cls": cn, "file": (en + ".png") if en else ""})
+    return {"characters": out}
+
+
+# 本机 Wallpaper Engine 包，不进仓库。只读这一目录。
+_WE_DIR = Path(r"D:\SteamLibrary\steamapps\workshop\content\431960\2799877694")
+_WE_VIDEO_EXT = {".mp4", ".webm", ".gif"}
+_WE_MEDIA = {".mp4": "video/mp4", ".webm": "video/webm", ".gif": "image/gif"}
+
+
+def _wallpaper_path() -> Path:
+    """project.json 的 file；没有就用目录里最大的循环视频。"""
+    root = _WE_DIR.resolve()
+    if not root.is_dir():
+        raise HTTPException(404, "workshop wallpaper dir missing")
+    named = ""
+    pj = root / "project.json"
+    if pj.is_file():
+        try:
+            obj = json.loads(pj.read_text(encoding="utf-8"))
+            named = str(obj.get("file") or "").strip()
+        except Exception:
+            named = ""
+    if named:
+        p = (root / named).resolve()
+        try:
+            p.relative_to(root)
+        except ValueError:
+            p = None
+        if p is not None and p.is_file():
+            return p
+    cands = [p for p in root.iterdir()
+             if p.is_file() and p.suffix.lower() in _WE_VIDEO_EXT]
+    if not cands:
+        raise HTTPException(404, "no wallpaper video")
+    return max(cands, key=lambda x: x.stat().st_size)
+
+
+@router.get("/wallpaper")
+def wallpaper():
+    """本机 2799877694 循环视频，限该 workshop 目录。"""
+    p = _wallpaper_path()
+    mt = _WE_MEDIA.get(p.suffix.lower(), "application/octet-stream")
+    return FileResponse(path=str(p), media_type=mt)
+
+
 @router.get("/", response_class=HTMLResponse)
 def console():
-    """控制台单页。所有表单由 `/v2/schema` 自省生成 —— 加配置项前端自动跟，
-    不用改这个 HTML（老 dashboard 把悬赏三个分支写成硬编码 checkbox 的教训）。"""
+    """日常 / 推图 / 角色 / 商店策略 单页。"""
     p = Path(__file__).with_name("console.html")
     if not p.is_file():
         raise HTTPException(404, f"找不到 {p}")

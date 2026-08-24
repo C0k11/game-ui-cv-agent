@@ -1,6 +1,6 @@
-"""MuMu Runner: High-FPS capture → YOLO+OCR → Pipeline → ADB click.
+"""MuMu Runner: High-FPS capture -> YOLO+OCR -> Pipeline -> ADB click.
 
-⚠ standalone runner 已被 server/app.py 取代 — skill 行为不完整(无 swipe_tap/
+注意 standalone runner 已被 server/app.py 取代 — skill 行为不完整(无 swipe_tap/
 scroll), 日常请用 `py -m uvicorn server.app:app`; 本文件的 AdbInput 是全项目
 核心, 继续被 server 侧引用, 保留.
 
@@ -29,7 +29,7 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
-# ── Repo setup ──────────────────────────────────────────────────────────
+#  Repo setup
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -42,7 +42,7 @@ from scripts.win_capture import (
 )
 
 
-# ── ADB Input ───────────────────────────────────────────────────────────
+#  ADB Input
 
 _MUMU_ADB_CANDIDATES = [
     Path(r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"),
@@ -64,19 +64,19 @@ def _find_adb() -> str:
 class AdbInput:
     """Send touch/key events to MuMu via ADB."""
 
-    # ★ ADB I/O serialization (live 2026-06-15: bounty/jfd swept 0 tickets).
+    #  ADB I/O serialization (live 2026-06-15: bounty/jfd swept 0 tickets).
     # Root cause: the clean-flywheel worker's `exec-out screencap` (streaming a
     # multi-MB 3840x2160 PNG ~200-300ms) and the main-tick `input tap` hit the
     # same adbd transport concurrently with NO lock — the tap's MotionEvent got
     # dropped/timed-out, so the game never saw the 入場 press (manual same-pos
-    # tap DID open the popup → not a coordinate bug). One class-wide lock makes
+    # tap DID open the popup -> not a coordinate bug). One class-wide lock makes
     # every adb subprocess (capture/tap/swipe/back) mutually exclusive: a tap
     # now waits ≤1 in-flight screencap instead of racing it. The old comment
     # "each capture is thread-safe vs input taps" was a wrong assumption.
     _IO_LOCK = threading.Lock()
 
     def __init__(self, host: str | None = None, port: int | None = None):
-        # ⛔端口不写死(2026-07-28 事故: MuMu 实例重启后端口 7555→16384,
+        # 禁端口不写死(2026-07-28 事故: MuMu 实例重启后端口 7555->16384,
         # 模拟器好好跑着 bot 却连不上)。见 brain/mumu_port 的长注释。
         if host is None or port is None:
             try:
@@ -128,7 +128,7 @@ class AdbInput:
 
     def swipe_tap(self, x1: int, y1: int, x2: int, y2: int, dur_ms: int,
                   tx: int, ty: int) -> bool:
-        # 原子连发(一条 adb shell 内 swipe→tap, 间隔≈input进程启动~0.3s):
+        # 原子连发(一条 adb shell 内 swipe->tap, 间隔≈input进程启动~0.3s):
         # 对自动轮播类 UI, 手动 swipe 会把轮播拉停数秒(2026-07-09 hub banner
         # 实锤), tap 在静止期内落点无时序竞争 — 分两次 adb 调用则间隔 >1s
         # 会耗尽暂停期(0709 败因)。
@@ -142,7 +142,7 @@ class AdbInput:
         return self._shell("input keyevent 4")  # KEYCODE_BACK
 
     def capture_frame(self) -> Optional[np.ndarray]:
-        # ⭐RAW screencap 优先 (2026-07-11 实测: PNG 1.50s vs RAW 0.77s @4K —
+        # *RAW screencap 优先 (2026-07-11 实测: PNG 1.50s vs RAW 0.77s @4K —
         # 设备端 PNG 编码是大头, localhost 传 33MB 反而快)。RAW 头=w,h,format
         # (+colorspace) uint32 LE, 后跟 RGBA8888。解析失败回退 PNG。
         try:
@@ -237,7 +237,7 @@ class AdbInput:
         return w, h
 
 
-# ── Window Capture ──────────────────────────────────────────────────────
+#  Window Capture
 
 class MuMuCapture:
     """Capture frames from MuMu emulator.
@@ -373,7 +373,7 @@ class MuMuCapture:
             self._adb_fallback_count = 0
             return frame
 
-        # BitBlt returned black/None → try ADB
+        # BitBlt returned black/None -> try ADB
         if self._adb is not None:
             adb_frame = self._grab_adb()
             if adb_frame is not None:
@@ -386,7 +386,7 @@ class MuMuCapture:
         return frame  # return whatever we have
 
 
-# ── Overlay Drawing ─────────────────────────────────────────────────────
+#  Overlay Drawing
 
 # Class-based color palette (consistent colors per class)
 _CLASS_COLORS: Dict[str, Tuple[int, int, int]] = {}
@@ -394,7 +394,7 @@ _CLASS_COLORS: Dict[str, Tuple[int, int, int]] = {}
 def _color_for_class(cls_name: str) -> Tuple[int, int, int]:
     if cls_name not in _CLASS_COLORS:
         h = hash(cls_name) % 360
-        # HSV → BGR for vivid colors
+        # HSV -> BGR for vivid colors
         hsv = np.array([[[h / 2, 200, 255]]], dtype=np.uint8)
         bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0][0]
         _CLASS_COLORS[cls_name] = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
@@ -414,7 +414,7 @@ def draw_overlay(
     overlay = frame.copy()
     h, w = overlay.shape[:2]
 
-    # ── YOLO bounding boxes ──
+    #  YOLO bounding boxes
     for box in yolo_boxes:
         x1 = int(box.x1 * w)
         y1 = int(box.y1 * h)
@@ -428,7 +428,7 @@ def draw_overlay(
         cv2.putText(overlay, label, (x1 + 2, y1 - 4),
                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
-    # ── OCR text (small, semi-transparent) ──
+    #  OCR text (small, semi-transparent)
     for box in ocr_boxes:
         x1 = int(box.x1 * w)
         y1 = int(box.y1 * h)
@@ -436,7 +436,7 @@ def draw_overlay(
         y2 = int(box.y2 * h)
         cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 200, 0), 1)
 
-    # ── Action click target crosshair ──
+    #  Action click target crosshair
     action_type = action.get("action", "")
     if action_type == "click":
         tx, ty = action.get("target", [0.5, 0.5])
@@ -444,7 +444,7 @@ def draw_overlay(
         cv2.drawMarker(overlay, (px, py), (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
         cv2.circle(overlay, (px, py), 20, (0, 0, 255), 2)
 
-    # ── HUD bar ──
+    #  HUD bar
     hud_h = 36
     cv2.rectangle(overlay, (0, 0), (w, hud_h), (0, 0, 0), -1)
     reason = action.get("reason", "")[:80]
@@ -455,7 +455,7 @@ def draw_overlay(
     return overlay
 
 
-# ── Action Executor ─────────────────────────────────────────────────────
+#  Action Executor
 
 def execute_action(
     action: Dict[str, Any],
@@ -486,10 +486,10 @@ def execute_action(
         )
 
 
-# ── Main Loop ───────────────────────────────────────────────────────────
+#  Main Loop
 
 def main() -> None:
-    print("⚠ standalone runner 已被 server/app.py 取代, skill 行为不完整(无 swipe_tap/scroll), "
+    print("注意 standalone runner 已被 server/app.py 取代, skill 行为不完整(无 swipe_tap/scroll), "
           "建议 py -m uvicorn server.app:app")
     parser = argparse.ArgumentParser(description="MuMu Runner: BA automation via emulator")
     parser.add_argument("--title", default="MuMu", help="Window title substring (default: MuMu)")
@@ -509,7 +509,7 @@ def main() -> None:
                              "skill enters (for testing a skill with no dot today)")
     parser.add_argument("--skills", default="",
                         help="Comma-separated skill names to run (override default order). "
-                             "e.g. --skills daily_routine  (mail→cafe→schedule→... harvest only)")
+                             "e.g. --skills daily_routine  (mail->cafe->schedule->... harvest only)")
     parser.add_argument("--capture-mode", choices=["auto", "bitblt", "adb", "wgc"], default="auto",
                         help="Screen capture mode: auto (BitBlt+ADB fallback), bitblt (fast, needs visible window), adb (works minimized)")
     args = parser.parse_args()
@@ -567,7 +567,7 @@ def main() -> None:
     frame_interval = 1.0 / max(1, args.fps)
     # ADB capture is ~200ms; no need to tick faster than capture allows
     tick_interval = 0.8 if using_adb_capture else 0.5
-    pipe_done_at: Optional[float] = None   # set when pipeline completes → auto-exit
+    pipe_done_at: Optional[float] = None   # set when pipeline completes -> auto-exit
     last_tick_time = 0.0
     last_action: Dict[str, Any] = {"action": "wait", "reason": "starting"}
     cached_yolo_boxes: list = []  # cached from last pipeline tick
@@ -679,7 +679,7 @@ def main() -> None:
             # ROBUST completion = no current skill. The pipeline does NOT clear
             # is_running when a finite skill list finishes (current_skill just
             # goes None as _current_idx passes the last skill), so the earlier
-            # `not pipe.is_running` check never fired → 3-4 orphan windows piled
+            # `not pipe.is_running` check never fired -> 3-4 orphan windows piled
             # up (live 2026-06-02).
             if pipe_done_at is None and pipe.current_skill is None:
                 print("[Info] Pipeline complete (no current skill) — auto-exit soon.")

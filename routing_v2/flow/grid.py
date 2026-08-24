@@ -28,6 +28,8 @@ ANSWERS = Path("data/grid_answers")
 # 格子族: 所有"这里有一个六边形格子"的证据（可走/迷雾/起点都叠在格子位上）
 CELL_CLS = [V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_CELL_FOG,
             V.GRID_START, V.GRID_START_GREY]
+# 无格框时只记补标, 不许拿 BOSS/道具/敌方当落点（用户 08-15 否掉硬搞）。
+LABEL_HINT = "走格子_格子 / 走格子_格子_可走（含 BOSS 格本体）"
 
 # BAAH 的 6 方向 -> (列步数的倍率, 行步数的倍率)。六边形没有 up/down。
 DIRS: Dict[str, Tuple[float, float]] = {
@@ -82,11 +84,22 @@ def steps(cs: List[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
 
 def below(unit: Box, cs: List[Tuple[float, float]], dx: float
           ) -> Optional[Tuple[float, float]]:
-    """这个单位站在哪个格子上 = **正下方**最近的格心（见模块 docstring）。"""
+    """这个单位站在哪个格子上 = **正下方**最近的格心（见模块 docstring）。
+
+    同排邻格 |dy|<0.03 不是脚下（阈值与 steps() 同行定义一致）。
+    2026-08-15 3-2 原分辨率帧 0000567: 我方 (0.4036,0.5020), 脚下可走
+    (0.4085,0.6121) dist=0.110, 右上邻格 (0.4591,0.4972) dist=0.056;
+    旧判据 `y > unit.cy-0.01` 把邻格算进 under, 欧氏最近绑到邻格,
+    right-up 从邻格再走一步落空。必须先要求格心明显低于立绘框心。
+    """
     under = [(x, y) for x, y in cs
-             if y > unit.cy - 0.01 and abs(x - unit.cx) < dx * 0.6]
+             if y > unit.cy + 0.03 and abs(x - unit.cx) < dx * 0.6]
     if under:
-        return min(under,
+        return min(under, key=lambda c: (abs(c[0] - unit.cx), c[1] - unit.cy))
+    # x 带内没有正下方: 放宽 x, 仍只收明显更低的格, 不退回同排邻格
+    under2 = [(x, y) for x, y in cs if y > unit.cy + 0.03]
+    if under2:
+        return min(under2,
                    key=lambda c: (c[0] - unit.cx) ** 2 + (c[1] - unit.cy) ** 2)
     # 全都不在正下方(格子本体漏检) -> 退回普通最近邻, 但调用方该当心
     return min(cs, key=lambda c: (c[0] - unit.cx) ** 2 + (c[1] - unit.cy) ** 2,
@@ -100,6 +113,7 @@ def resolve(at: Tuple[float, float], direction: str,
 
     落点取检出的格心而不是推算点（BAAH 是盲走, 我们每步验真格子）。
     推算点附近没有检出的格子 -> None（fail-closed, 宁可停别乱点）。
+    不许拿 BOSS/道具/敌方框心当格, 缺格就补标重训。
     """
     mul = DIRS.get(direction)
     if mul is None:
@@ -114,6 +128,24 @@ def resolve(at: Tuple[float, float], direction: str,
     return near
 
 
+def dir_miss_report(obs: Observation, at: Tuple[float, float],
+                    direction: str, dx: float, dy: float) -> str:
+    """无格停手时的补标说明。BOSS/道具只记账, 不当落点。"""
+    mul = DIRS.get(direction)
+    if mul is None:
+        return f" 该补 {LABEL_HINT}"
+    ex, ey = at[0] + mul[0] * dx, at[1] + mul[1] * dy
+    near = []
+    for b in obs.boxes:
+        if not str(b.cls).startswith("走格子"):
+            continue
+        if ((b.cx - ex) ** 2 + (b.cy - ey) ** 2) ** 0.5 < 0.20:
+            near.append(f"{b.cls} {b.conf:.2f}@({b.cx:.3f},{b.cy:.3f})")
+    seen = (", ".join(near) if near else "0")
+    return (f" 期望({ex:.3f},{ey:.3f}) 附近走格子框: {seen}"
+            f"; 该补 {LABEL_HINT}")
+
+
 def load_answer(stage: str) -> Optional[dict]:
     """读走格子答案（我们的格式）。`stage` 形如 "1-2" / "H3-1"。
 
@@ -122,7 +154,7 @@ def load_answer(stage: str) -> Optional[dict]:
        rounds 逐回合动作 [{"team","do","dir"}, ...]; do 属 move/exchange/portal
        needs  能力需求汇总, flow 进关前预检用（teams/portal/exchange/attrs）
 
-    ⛔历史 bug（2026-08-13 修）: BAAH 原始文件的数字键是**按目标区分的
+    禁历史 bug（2026-08-13 修）: BAAH 原始文件的数字键是**按目标区分的
        备选解法**（官方 grid_solution_format.json: requires[solN]=该解法达成
        的目标）, 旧版把它当"多区域顺序打", 29 个多解法文件会在打完第一个
        解法后干等第二次部署。真正的中途重新部署（如 H1-2 的双区域地图）

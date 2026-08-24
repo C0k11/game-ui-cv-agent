@@ -32,7 +32,7 @@ def _log(m):
     print(m, flush=True)
 
 
-# ══ probe ══════════════════════════════════════════════════════════════
+#  probe
 def cmd_probe(args):
     import cv2
     from routing_v2.percept import detect
@@ -68,7 +68,7 @@ def cmd_probe(args):
     feed.stop()
 
 
-# ══ step ═══════════════════════════════════════════════════════════════
+#  step
 def cmd_step(args):
     """单步驱动 —— 「带着 bot 走一步」。
 
@@ -362,7 +362,7 @@ def _ask(act) -> bool:
         return False
 
 
-# ══ run ════════════════════════════════════════════════════════════════
+#  run
 def cmd_run(args):
     from routing_v2.app.runner import Runner
     from routing_v2.config import load as load_cfg
@@ -419,7 +419,7 @@ def cmd_run(args):
     Runner(cfg, log=_log, approver=approver).run_all()
 
 
-# ══ 其他 ═══════════════════════════════════════════════════════════════
+#  其他
 def cmd_config(args):
     from routing_v2.config import LOCKED, SCHEMA, load
     cfg = load()

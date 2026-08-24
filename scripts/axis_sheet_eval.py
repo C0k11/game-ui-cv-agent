@@ -55,7 +55,7 @@ def main():
     chains = build_gt_chains(pool, n_frames, W, H)
     tf = run_tracker(per_frame, n_frames, CFG, pool=pool)
 
-    # ── 开场站位绑定: slot i(左右)  主 tid(与 track_eval --slots 同源) ──
+    #  开场站位绑定: slot i(左右)  主 tid(与 track_eval --slots 同源)
     ally = [c for c in chains
             if Counter(cls for cls, _ in c.values()).most_common(1)[0][0] == 476]
     ally.sort(key=lambda c: min(c))
@@ -77,7 +77,7 @@ def main():
             slot_tid[si] = Counter(tids).most_common(1)[0][0]
     print(f"开场绑定: " + " ".join(f"slot{s}=tid{t}" for s, t in slot_tid.items()))
 
-    # ── 逐决策时刻检查 ──
+    #  逐决策时刻检查
     ok = 0
     print(f"\n{'t':>7} {'cost':>4} {'char':<10} {'action':<16} "
           f"{'GT我方':>5} {'trk我方':>6} {'slot存活':<14} 判定")
@@ -91,7 +91,7 @@ def main():
         alive = {s: t for s, t in slot_tid.items()
                  if any(tid == t for tid, _ in trk_ally)}
         # 打样判定: 该时刻 tracker 我方数 ≥ GT 我方数的 80%, 且开场 slot
-        # 至少一半仍锁着(轴表尚无 char↔slot 映射, 有了编成序后收紧成
+        # 至少一半仍锁着(轴表尚无 char<->slot 映射, 有了编成序后收紧成
         # "目标 char 的 slot 必须存活")
         good = (gt_n == 0 or len(trk_ally) >= 0.8 * gt_n) and \
                (not slot_tid or len(alive) * 2 >= len(slot_tid))

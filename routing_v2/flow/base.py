@@ -33,6 +33,17 @@ class Outcome:
     BLOCKED = "BLOCKED"
 
 
+def qty_max_ok(obs: Observation, conf: float = 0.20):
+    """点 MAX 前的灰负门. 灰 MAX 在场就不点 111.
+
+    v17 把 0.20 当拐杖 (蓝 MAX 只到 ~0.26). v18 头重装后那条分布作废,
+    阈值未重标定前先挡住灰上误火. 20+ 帧两态分布出来再改 conf.
+    """
+    if obs.has(V.QTY_MAX_GREY, 0.30):
+        return None
+    return obs.find(V.QTY_MAX, conf)
+
+
 @dataclass
 class Ctx:
     """跨 flow 共享的运行时。flow 之间要传话（比如商店推算结果给加成队用）
@@ -103,7 +114,7 @@ class Flow:
         self._phase_t0: int = 0                  # 进入当前相位时的 tick
         self.setup()
 
-    # ── 生命周期 ────────────────────────────────────────────────────────
+    #  生命周期
     def setup(self) -> None:
         """子类覆盖：初始化自己的计数器。"""
 
@@ -154,7 +165,7 @@ class Flow:
             return head + "\n" + "\n".join(f"      · {l}" for l in self.note_lines)
         return head
 
-    # ── 派发 ────────────────────────────────────────────────────────────
+    #  派发
     def decide(self, obs: Observation, st: StateView) -> Optional[Action]:
         """派发顺序：**覆盖层  底页  offsite**。
 
@@ -185,6 +196,11 @@ class Flow:
         #    子类绝不许覆写 decide()（架构不变量测试拦）——2026-08-08 两个
         #    子类各自写了按页派发, overlay 顺序全被跳过（sweep 把确认框里的
         #    费用图标当票数锚; event 同形）。
+        if not st.overlay:
+            from routing_v2.flow.nav import wake_hidden_lobby
+            act = wake_hidden_lobby(obs, st, self)
+            if act is not None:
+                return act
         act = self.pre_page(obs, st)
         if act is not None:
             return act
@@ -220,7 +236,7 @@ class Flow:
             这类**瞬时证据**必须在 observe 里粘住，不能等到对应页面才看。
         """
 
-    # ── 全 flow 共享的通用页面处理（§A2：写一次，不是每个 flow 抄一遍）──
+    #  全 flow 共享的通用页面处理（§A2：写一次，不是每个 flow 抄一遍）
     def on_confirm_dialog(self, obs: Observation, st: StateView) -> Optional[Action]:
         """双键决策框的**默认**处理：灰确认  取消；否则确认。
 
@@ -285,14 +301,30 @@ class Flow:
           3. 点过一个出口后，这一层（ov=reward）没掉之前**不换目标**——
              锁在 tap 真发出去后由 post 落下，层掉了 decide 里复位。
         """
+        # 08-16 live 免费包: 点击继续字样常 <0.40 或 0, 弹窗叉叉 0.94 却不在
+        #    allow, 卡死奖励层。继续认低置信字样; 叉叉高置信可点; 购买/花石仍禁。
+        def _thr(cls):
+            if cls == V.STORY_TAP_CONTINUE:
+                return 0.15
+            if cls == V.CLOSE_X:
+                return 0.70
+            return 0.40
+
         locked = self.state.get("reward_exit")
         if locked:
-            b = obs.find(locked, 0.40)
+            b = obs.find(locked, _thr(locked))
             if b is not None:
                 return tap_box(b, f"关掉奖励层（锁定出口 {locked}）")
             return wait("奖励层锁定出口暂不可见 — 等这一层自己掉")
-        for cls in allow:
-            b = obs.find(cls, 0.40)
+        seen = set()
+        exits = []
+        for cls in list(allow) + [V.CLOSE_X]:
+            if cls in seen:
+                continue
+            seen.add(cls)
+            exits.append(cls)
+        for cls in exits:
+            b = obs.find(cls, _thr(cls))
             if b is not None:
                 def _lock(c=cls):
                     self.state["reward_exit"] = c
@@ -329,7 +361,7 @@ class Flow:
         """
         return None
 
-    # ── 小工具（子类常用；都不含闸，闸在 act/gate.py）────────────────────
+    #  小工具（子类常用；都不含闸，闸在 act/gate.py）
     def tap(self, box, why: str, **kw) -> Action:
         return tap_box(box, f"{self.name}: {why}", **kw)
 
@@ -399,7 +431,7 @@ class ExitMixin:
     **顺序是 取消 > 结果框確認 > 叉叉 > 返回键**，这个顺序是流血换的
        （2026-07-27 悬赏弃 6 票的第三个根因）:
        停在「要使用6票掃蕩6次嗎?」这种**模态框**上时，屏上那个被检成
-       `弹窗叉叉` conf **0.96** 的小 ✕ **根本不吃点击** —— 连点 6 次画面
+       `弹窗叉叉` conf **0.96** 的小  **根本不吃点击** —— 连点 6 次画面
        纹丝不动。模态框唯一正解是它自己的「取消」。
        **高 conf 检出 ≠ 可点击**：0.96 的框照样可能是装饰层/被遮挡层。
 

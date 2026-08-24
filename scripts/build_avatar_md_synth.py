@@ -6,10 +6,10 @@ RE-SYNTHESIZE from frames that ALREADY carry BOTH ui + avatar master labels —
 keep every UI/emoticon box's label intact, and rotate the AVATAR boxes through
 all 252 characters. Output frames are multi-domain (ui+avatar) by construction,
 master-idx, so:
-  • no negative-label毒化 (UI boxes are labelled)
-  • no fused_avatar局部master remap (we emit master idx directly)
-  • no teacher pass (background frame already carries the UI labels)
-  • bonus: label a few dozen multi-domain momo/cafe frames  synth covers all 252
+  - no negative-label毒化 (UI boxes are labelled)
+  - no fused_avatar局部master remap (we emit master idx directly)
+  - no teacher pass (background frame already carries the UI labels)
+  - bonus: label a few dozen multi-domain momo/cafe frames  synth covers all 252
     characters by rotating refs into the avatar slots.
 
 Background source = raw_images TRAIN frames (excl. _-dirs and VAL_SOURCES) that

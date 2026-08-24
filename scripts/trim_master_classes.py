@@ -133,7 +133,7 @@ def main() -> int:
         return 1
     print(f"[old] master has {len(old_master)} classes")
 
-    # ── 1. Build new master from seed datasets ──
+    #  1. Build new master from seed datasets
     new_master: List[str] = []
     seen: Set[str] = set()
     for seed_name in args.seed:
@@ -183,7 +183,7 @@ def main() -> int:
     print(f"[drop] first 10 to be removed: {dropped[:10]}")
     print(f"[drop] last 10 to be removed: {dropped[-10:]}")
 
-    # ── 2. Build remap: old_idx -> new_idx (or None if class is dropped) ──
+    #  2. Build remap: old_idx -> new_idx (or None if class is dropped)
     remap: Dict[int, int] = {}
     for old_idx, name in enumerate(old_master):
         if name in seen:
@@ -199,13 +199,13 @@ def main() -> int:
         print(f"[dry-run] would save {len(new_master)} classes to master")
         return 0
 
-    # ── Safety: snapshot every label file before mutating anything ──
+    #  Safety: snapshot every label file before mutating anything
     backup_dir = backup_all_labels()
     print(f"[safety] rollback command if anything looks wrong:")
     print(f"         (manually restore .txt files from {backup_dir})")
     print()
 
-    # ── 3. Migrate every dataset ──
+    #  3. Migrate every dataset
     total_files_touched = 0
     total_lines_dropped = 0
     total_files_emptied = 0
@@ -249,11 +249,11 @@ def main() -> int:
           f"{total_files_touched} files")
     print(f"[migrate] removed {total_files_emptied} now-empty label files")
 
-    # ── 4. Save new master ──
+    #  4. Save new master
     save_classes(MASTER_FILE, new_master)
     print(f"[save] master  {MASTER_FILE} ({len(new_master)} classes)")
 
-    # ── 5. Sync every dataset's local classes.txt to the new master ──
+    #  5. Sync every dataset's local classes.txt to the new master
     synced = 0
     for dirp in label_dirs():
         cf = dirp / "classes.txt"

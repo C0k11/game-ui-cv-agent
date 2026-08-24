@@ -35,7 +35,7 @@ if CROP_DIR.is_dir():
         crop_names.add(f.stem)
 print(f"Crop avatars available: {len(crop_names)}")
 
-# Traditional Chinese ↔ Simplified Chinese conversion for common BA chars
+# Traditional Chinese <-> Simplified Chinese conversion for common BA chars
 # We'll use opencc if available, else manual table
 try:
     import opencc

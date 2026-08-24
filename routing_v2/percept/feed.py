@@ -159,7 +159,7 @@ class Feed:
         self.rotations = 0
         self._fail_streak = 0
 
-    # ── 生命周期 ────────────────────────────────────────────────────────
+    #  生命周期
     def _start_client(self):
         from adbutils import adb
         import scrcpy
@@ -259,7 +259,7 @@ class Feed:
                     pass
                 self._client = None
 
-    # ── 取帧 ────────────────────────────────────────────────────────────
+    #  取帧
     def _on_frame(self, frame):
         if frame is None:
             return
@@ -299,7 +299,7 @@ class Feed:
             time.sleep(0.005)
         return self.latest()
 
-    # ── watchdog：轮换 + 断流兜底 ───────────────────────────────────────
+    #  watchdog：轮换 + 断流兜底
     def _is_static(self) -> bool:
         """age 大时区分「画面静止」vs「真断流」。
 

@@ -90,6 +90,39 @@ def _dead_tap(same_tap: dict, key, sent: bool, cap: int = 4) -> bool:
     return same_tap["n"] >= cap
 
 
+def money_watch_should_halt(watch: Optional[str]) -> bool:
+    """台账 watch: None / EXTERNAL / WARN_MONEY 继续跑; MONEY BREACH 才停整轮。
+
+    2026-08-21: `WARN_MONEY` 是台账**首条**掉钱告警。台账是事后账 ——
+      钱已经动了，停轮救不回来；真防线是 act/gate.py 里 tap **之前**那两条。
+      信用点/青辉石扫描的职责是对账（用户自己抽卡、升角色都会让余额变），
+      不是叫停程序。连续第二条才升级成 MONEY BREACH 停轮。
+    """
+    if not watch:
+        return False
+    return not watch.startswith(("EXTERNAL", "WARN_MONEY"))
+
+
+def is_ledger_spend_tap(act: Action, last_cls: str = "") -> bool:
+    """这一发该给台账开付费窗。JIT 丢掉 / tap 返回失败也要用同一套。
+
+    漏记窗会把随后青辉石下降当成 EXTERNAL 放行。
+    """
+    if act is None or not getattr(act, "is_tap", False):
+        return False
+    from routing_v2.act.gate import _SPEND_TRIGGERS
+    from routing_v2.state import vocab as V
+    cls = getattr(act, "target_cls", "") or ""
+    reason = getattr(act, "reason", "") or ""
+    if getattr(act, "money", False) or cls in _SPEND_TRIGGERS:
+        return True
+    if cls == "购买青辉石" or "刷新" in reason:
+        return True
+    if cls == V.CONFIRM and last_cls in _SPEND_TRIGGERS:
+        return True
+    return False
+
+
 class Runner:
     def __init__(self, cfg: Optional[dict] = None, log: Callable = print,
                  approver: Optional[Callable[[Action, Observation], bool]] = None):
@@ -114,6 +147,7 @@ class Runner:
         self.ctx: Optional[Ctx] = None
         self._last_seq = -1
         self._ap_replanned = False       # AP 复盘只做一次（见 run_all）
+        self._daily_replanned = False    # 08-16 remain: 8/8 红点还在补领一次
         self._shot_dir: Optional[Path] = None
         self._flow: Optional[Flow] = None
         self._recover_n = 0
@@ -137,9 +171,9 @@ class Runner:
         self._blank_taps += 1
         return self._blank_taps - 1
 
-    # ══ 启动 ═══════════════════════════════════════════════════════════
+    #  启动
     def boot(self) -> bool:
-        self.log("── routing_v2 启动 ──────────────────────────────────")
+        self.log(" routing_v2 启动 ")
         if self._data_dir is None:
             self.log("[boot] profile.json 缺 account.id（台账分桶键）— 拒绝开跑:"
                      " 大小号共用台账会互相把「今天做过/本期顶过」当成自己的账")
@@ -206,7 +240,7 @@ class Runner:
                        ledger=self.ledger, log=self.log)
         return True
 
-    # ══ 感知 ═══════════════════════════════════════════════════════════
+    #  感知
     def _observe(self, frame, age, seq) -> Observation:
         h, w = frame.shape[:2]
         # 2026-08-12 live 实锤：这里原来**硬写 `("ui",)`**，把 flow 声明的
@@ -229,7 +263,7 @@ class Runner:
             return None
         return self._observe(fr, age, seq)
 
-    # ══ 人审 ═══════════════════════════════════════════════════════════
+    #  人审
     def _money_review(self, act: Action, obs: Observation) -> bool:
         if self.approver is None:
             self.log(f"    金钱步「{act.reason}」没有人审通道  拒绝")
@@ -240,7 +274,30 @@ class Runner:
             self.log(f"       帧证据: {shot}")
         return bool(self.approver(act, obs))
 
-    # ══ 落盘 ═══════════════════════════════════════════════════════════
+    def _note_ledger_spend(self, act: Action, *, uncertain: bool = False) -> None:
+        """付费/刷新/确认付费 tap 给台账开窗。不放松点购买键。
+
+        uncertain=True: JIT 丢掉或 tap 返回失败。币种不确定时开青辉石窗,
+        漏记会把 bot 花石当成 EXTERNAL。
+        """
+        last = self.gate._last[2] if self.gate._last else ""
+        if not is_ledger_spend_tap(act, last):
+            return
+        spend = "青辉石" if uncertain else (act.spend or "")
+        self.ledger.note_bot_spend(act.reason or "", act.target_cls or "", spend)
+
+    #  落盘
+    def _money_warn(self, obs: Observation, watch: Optional[str]) -> None:
+        """台账首条掉钱告警: 大声记 + 存证帧, **不停轮**。
+
+        存证帧是这条改动的代价对冲: 不停轮就更要留下能事后逐帧核的图,
+        否则"只记账不停轮"会退化成"悄悄放过"。
+        """
+        if not watch or not watch.startswith("WARN_MONEY"):
+            return
+        self.log(f"    [ledger] {watch}")
+        self._save(obs, tag="MONEYWARN")
+
     def _save(self, obs: Observation, tag: str = "", target=None) -> Optional[str]:
         if self._shot_dir is None or obs.frame is None:
             return None
@@ -301,7 +358,7 @@ class Runner:
         except Exception:
             pass
 
-    # ══ 兜底恢复（唯一允许发起"退出类"动作的地方）════════════════════
+    #  兜底恢复（唯一允许发起"退出类"动作的地方）
     def _recover(self, obs: Observation, st) -> Optional[Action]:
         from routing_v2.act.action import tap_at, tap_box
         from routing_v2.state import vocab as V
@@ -309,7 +366,7 @@ class Runner:
         if st.flapping:
             return None                     # 判据在打架，别动手
 
-        # ── 空屏：一个框都没有 ─────────────────────────────────────────
+        #  空屏：一个框都没有
         # 大厅点背景会把 UI 收起来（08-08 我一发算错坐标的点击就把它收了，
         # 之后 bot 永远看不见任何 cls = 死循环）。此时点屏幕中央就能唤回；
         # 若是过场则等于推进对话；若是加载则无害。
@@ -363,7 +420,7 @@ class Runner:
         act, self._route_plan = nav.route(obs, st, target, self._route_plan)
         return act
 
-    # ══ 派发 ═══════════════════════════════════════════════════════════
+    #  派发
     def _dispatch(self, act: Action, obs: Observation, st) -> bool:
         """返回 False = 要停整条链。"""
         # **上一发还没兑现，就不许收工/退出**（2026-08-12 通用闸）。
@@ -376,7 +433,7 @@ class Runner:
         #      （cafe 开邀请券 / craft 快速製造 / shop 切大赛 tab /
         #        战术大赛商店「選擇購買」 确认框没人点就跑了）
         #     推进闸里还挂着未兑现的契约时，`done` 一律降级成 `wait`。
-        #      契约超时会自己作废（宽松 retry//6、严格 retry_frames），
+        #      契约超时会自己作废（宽松 max(地板10, retry//6)、严格 retry_frames），
         #      所以不会永远卡住 —— 只是**不许在动作悬空时下"干完了"的结论**。
         if act.kind in ("wait", "note"):
             if act.kind == "note":
@@ -387,7 +444,7 @@ class Runner:
             self.log(f"HALT: {act.reason}")
             self._save(obs, tag="HALT", target=act)
             return False
-        retry = int(self.run.get("retry_frames", 25))
+        retry = int(self.run.get("retry_frames", 38))
         if act.kind == "swipe":
             # 滑动也要过推进闸。原来它排在 `gate.allow()` 之前、一道闸都不过，
             #    于是 arm 里那个 settle 契约**永远没人递减**（`advance` 只在
@@ -455,6 +512,9 @@ class Runner:
             if self._flow.state.pop(f"once:{v.rollback_once}", None) is not None:
                 self.log(f"    [gate] 契约没兑现 — 退回 `{v.rollback_once}` 的 once 标记，允许重试")
         if not v.ok:
+            if v.by == "jit":
+                # JIT 丢掉没发出去, 但漏记窗会把随后石头下降当成 EXTERNAL
+                self._note_ledger_spend(act, uncertain=True)
             self._tr(st, act, {"blocked": v.why[:120] or "(静默)",
                                "by": v.by, "halt": v.halt,
                                "stop_flow": v.stop_flow})
@@ -505,6 +565,9 @@ class Runner:
             #   （interrupt._on_money_popup 的三重合取之一, 数事实不数意图）
             import time as _t
             self.interrupts.money_grace_until = _t.time() + 12.0
+        # 花钱键: tap 成败都记窗. 必须在 note_fired 之前, _last 仍是上一发.
+        # tap 返回失败币种不确定, 开青辉石窗 (漏 EXTERNAL 比误 BREACH 贵).
+        self._note_ledger_spend(act, uncertain=not ok)
         # 推进契约也只在**真发出去之后**才 arm（同一条「数事实」纪律）——
         #   被闸吞掉的决策若 arm 了，闸会为一发从没发出去的点击一直等下去。
         if ok:
@@ -530,7 +593,7 @@ class Runner:
                  + ("" if ok else "   tap 返回失败"))
         return True
 
-    # ══ 主循环 ═════════════════════════════════════════════════════════
+    #  主循环
     def run_all(self) -> RunStats:
         if not self.boot():
             self.stats.halted = "boot 失败"
@@ -554,6 +617,9 @@ class Runner:
                 self.log(f"[run] ⏱总时长上限 {budget_s/60:.0f} 分到了，剩下的不跑了")
                 for f in queue:
                     f.outcome = f.outcome or Outcome.SKIPPED
+                    f.note_lines.append(
+                        "skipped_because=budget_exhausted（总时长上限到点, "
+                        "本 flow 没轮到, 不代表已完成）")
                     self.stats.reports.append(f.report())
                 break
             f = queue.pop(0)
@@ -561,8 +627,15 @@ class Runner:
             self.stats.reports.append(f.report())
             self.ledger.force_sample()          # flow 交接点强制采一次余额
             if self.stats.halted:
+                # 这些 flow 一个 tick 都没跑过, 是被上游 HALT 连坐的。
+                #    不打标的话报告长得和"自己判完了"一模一样
+                #    (08-20 143301: 课表后 feed 冻, bounty/jfd/event/arena/
+                #     mail/daily_mission 全是 0 tick SKIPPED, 被当成做完了)。
                 for rest in queue:
                     rest.outcome = Outcome.SKIPPED
+                    rest.note_lines.append(
+                        "skipped_because=upstream_halt（上游 HALT 连坐, "
+                        "本 flow 0 tick, 不代表已完成）")
                     self.stats.reports.append(rest.report())
                 break
             # 插队**必须先于归位**：归位的目标取自 queue[0]，插队会改 queue[0]。
@@ -589,7 +662,7 @@ class Runner:
             # **AP 复盘**（用户 2026-08-10 提议，当天就有实证）:
             #    order 是 …eventarenamaildaily_mission，而 **mail / 每日领奖
             #    才是当天 AP 的大头**（社团签到、咖啡厅溢出、任务奖励全进信箱）。
-            #    08-10 实测：event 把 AP 花到 **9**  mail 领回 **219** 
+            #    08-10 实测：event 把 AP 花到 **9**  mail 领回 **219**
             #    daily_mission  收工，**那 219 AP 原封不动留到第二天**。
             #     队列跑空后读一次 AP，够一轮就把 event 再挂回去把它花掉。
             #    只做**一次**（`_ap_replanned`）：event 自己有 AP 闸和扫荡上限，
@@ -606,6 +679,19 @@ class Runner:
                     #   daily_mission 的页面上开工。
                     self._handoff(getattr(extra, "entry_page", "lobby"),
                                   nxt=extra.name)
+
+            # 08-16 live: 末流每日任务收工后队列空, 人不归位停在任务页。
+            if not queue and not requested:
+                self._handoff("lobby")
+            # 08-16 remain: 大厅 8/8 每日领奖红点还在, 本轮没再进任务页.
+            #    必须在回大厅之后看入口, 只补一轮.
+            if not queue and not self._daily_replanned:
+                self._daily_replanned = True
+                extra_d = self._daily_replan()
+                if extra_d is not None:
+                    queue.append(extra_d)
+                    self._handoff(getattr(extra_d, "entry_page", "lobby"),
+                                  nxt=extra_d.name)
 
         self._teardown()
         return self.stats
@@ -642,7 +728,13 @@ class Runner:
         #    真按钮只挨了一下就被判死(jfd 残留任務資訊的叉叉, event 接手后
         #    同一坐标点开了)。现在只数 sent=true(_dead_tap), 判死档降到 4 发。
         same_tap = {"key": None, "n": 0}
-        self.log(f"[run] 归位到 `{target}` 再交班")
+        nxt_cls = ALL.get(nxt)
+        self.interrupts.watch_next_chapter = bool(
+            nxt_cls is not None
+            and getattr(nxt_cls, "watch_next_chapter", False))
+        self.log(f"[run] 归位到 `{target}` 再交班"
+                 + (f"（watch_next={self.interrupts.watch_next_chapter}）"
+                    if nxt else ""))
         while time.time() - t0 < budget:
             fr, age, seq = self.feed.wait_new(self._last_seq, timeout=3.0)
             if fr is None or seq == self._last_seq:
@@ -653,12 +745,13 @@ class Runner:
             st = mac.update(obs)
             # 归位期间契约时钟同样要走（归位的 tap 一样会 arm 契约）
             self.gate.heartbeat(obs, page_changed=st.changed,
-                                retry_frames=int(self.run.get("retry_frames", 25)))
+                                retry_frames=int(self.run.get("retry_frames", 38)))
             # 归位期间照样喂台账 —— 少采一段就是一段掉钱盲区
             #    （memory `money_safety`: 30 青辉石就是在没采样的那一段花掉的）。
-            breach = self.ledger.feed(obs, st.page, "handoff")
-            if breach:
-                self.stats.halted = breach
+            watch = self.ledger.feed(obs, st.page, "handoff")
+            self._money_warn(obs, watch)
+            if money_watch_should_halt(watch):
+                self.stats.halted = watch
                 self._save(obs, tag="BREACH")
                 return
             # 到位判据必须**连覆盖层一起**干净：`st.overlay` 不参与页面身份
@@ -759,6 +852,28 @@ class Runner:
                  f" 再挂一轮 {target} 花掉（AP 停在 240 就不回复了）")
         return ALL[target](self.ctx)
 
+    def _daily_replan(self) -> Optional[Flow]:
+        """队列跑空且人在大厅: 每日领奖入口还在就再挂一轮任务页.
+
+        08-16 remain: 其它 job 把 4/8 做成 8/8 后红点还在, daily_mission
+           早已 CLEAN 或不在本轮 --flows. 入口 cls 在 = 还有领的.
+        """
+        from routing_v2.state import vocab as V
+        mods = self.cfg.get("modules", {})
+        on = mods.get("daily_mission")
+        if on is None:
+            on = mods.get(ALL["daily_mission"].module, True)
+        if not on:
+            return None
+        fr, age, seq = self.feed.latest()
+        if fr is None:
+            return None
+        obs = self._observe(fr, age, seq)
+        if obs.find(V.NAV_DAILY_REWARD, 0.35) is None:
+            return None
+        self.log("[run] 每日补领: 大厅每日领奖还在，再挂一轮 daily_mission")
+        return ALL["daily_mission"](self.ctx)
+
     def _apply_ap_split(self, flow: Flow) -> None:
         """按用户配的百分比，给这个 flow 算出它该留多少 AP 给后面的人。
 
@@ -824,11 +939,11 @@ class Runner:
         self.gate.reset()
         self._stop_flow = False
         self._feed_healed = False        # 冻结自愈：每条 flow 给一次机会
-        self.log(f"\n── flow: {flow.name} ─────────────────────────────")
+        self.log(f"\n flow: {flow.name} ")
         t0 = time.time()
         cap = float(self.run.get("max_minutes_per_flow", 15)) * 60
         stuck = int(self.run.get("stuck_frames", 400))
-        retry = int(self.run.get("retry_frames", 25))
+        retry = int(self.run.get("retry_frames", 38))
         idle = 0
 
         while True:
@@ -879,9 +994,10 @@ class Runner:
                 self.log(f"    [gate] 契约没兑现 — 退回 `{rb}` 的 once 标记，"
                          f"允许重试")
 
-            breach = self.ledger.feed(obs, st.page, flow.name)
-            if breach:
-                self.stats.halted = breach
+            watch = self.ledger.feed(obs, st.page, flow.name)
+            self._money_warn(obs, watch)
+            if money_watch_should_halt(watch):
+                self.stats.halted = watch
                 self._save(obs, tag="BREACH")
                 return
 
@@ -1018,7 +1134,7 @@ class Runner:
                          if flow.note_lines else f"   {flow.name} 提前收工")
                 return
 
-    # ══ 收尾 ═══════════════════════════════════════════════════════════
+    #  收尾
     def _teardown(self) -> None:
         try:
             if self._trace:
@@ -1031,7 +1147,7 @@ class Runner:
         except Exception:
             pass
         dur = (time.time() - self.stats.t0) / 60
-        self.log("\n══ 本轮报告 ══════════════════════════════════════")
+        self.log("\n 本轮报告 ")
         for r in self.stats.reports:
             self.log("  " + r)
         sf = getattr(self.stats, "save_fails", 0)

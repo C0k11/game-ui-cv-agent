@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""任務推图（走格子, 集中指挥模式）-- 按答案走一关。
+"""任務推图（走格子, 集中指挥模式）-- 按用户点名的关卡列表连推。
 
 三层分工:
    感知层  v16 的走格子族 cls（小号实测 0.85-0.98）
@@ -7,7 +7,8 @@
    答案层  data/grid_answers/{stage}.json（scripts/convert_baah_grid.py
            从 BAAH 原始转换; normal 150 + Hard 90, 全量含多队/portal/exchange）
 
-**打哪一关是用户的策略**（cfg campaign.stage）, bot 只负责走。
+**打哪几关是用户的策略**（cfg campaign.stages, 空则退回 campaign.stage 单关）,
+   bot 只负责按用户顺序走。可跳号, 可 Normal+Hard 混。
 战斗期靠游戏内 AUTO: 检出 `自动战斗关闭` 才点开（状态钮绝不盲 toggle）。
 BAAH 是盲走, 我们每步都验: 落点取检出的真格心, 到达靠相位循环。
 能力边界（2026-08-13 转换器盘点）: 单队纯 move 33 关（1-3 章 + H1-H3）;
@@ -15,6 +16,8 @@ BAAH 是盲走, 我们每步都验: 落点取检出的真格心, 到达靠相位
    这些在**进关花 AP 之前**由 `_capability_gate` 拦下, 不进关走到一半才死。
 """
 from __future__ import annotations
+
+import re
 
 from routing_v2.act.action import Action, tap_box, wait
 from routing_v2.flow import grid, nav
@@ -27,6 +30,55 @@ from routing_v2.state.machine import StateView
 # 队伍绑格和目标格心的判等距离（相对列步长的比例, 不是绝对值）
 REACH = 0.45
 
+# 配置关号: 可选 H + 章-节。不是 N/H（无前缀=Normal）或读不出章-节 = 非法。
+_STAGE_ID = re.compile(r"^H?(\d{1,2})-(\d)$", re.I)
+
+
+def parse_stage_id(raw):
+    """配置关号 -> 规范 "3-2" / "H2-1"。非法返回 None。"""
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    m = _STAGE_ID.fullmatch(s)
+    if m is None:
+        return None
+    hard = s[0] in "Hh"
+    return ("H" if hard else "") + f"{int(m.group(1))}-{m.group(2)}"
+
+
+def resolve_queue(cfg):
+    """(queue, bad)。bad 非空 = 非法号, 不许开跑。
+
+    stages 空则退回 stage 单关; 两个都空 = ([], []) 自动打得星_0。
+    去空白、去重, **保持用户顺序**（不按关号排序）。
+    """
+    raw = (cfg or {}).get("stages", None)
+    items = []
+    if isinstance(raw, str):
+        items = [p.strip() for p in re.split(r"[,，;；]+", raw) if p.strip()]
+    elif isinstance(raw, (list, tuple)):
+        items = [str(x).strip() for x in raw if str(x).strip()]
+    if not items:
+        one = str((cfg or {}).get("stage", "") or "").strip()
+        if not one:
+            return [], []
+        items = [one]
+    queue = []
+    seen = set()
+    bad = []
+    for s in items:
+        canon = parse_stage_id(s)
+        if canon is None:
+            bad.append(s)
+            continue
+        if canon in seen:
+            continue
+        seen.add(canon)
+        queue.append(canon)
+    if bad:
+        return [], bad
+    return queue, []
+
 
 class CampaignFlow(ExitMixin, Flow):
     name = "campaign"
@@ -38,17 +90,27 @@ class CampaignFlow(ExitMixin, Flow):
 
     def setup(self) -> None:
         self.state.update(round_i=0, target=None, need_end=False,
-                          battles=0)
-        # stage 配置是**可选的**（用户 2026-08-13 拍板:「找关卡还是需要
-        #    digitOCR 读数字, 只是点击是 cls 主导」）。空 = 自动: 得星_0 那行
-        #    的关号从屏上读, 答案按读到的关号查。配置了 = 用户点名, 读出来的
-        #    必须和配置一致才进（防止在错的关上用错的答案走）。
-        stage = str(self.cfg.get("stage", "") or "")
-        self.state["stage"] = stage
-        self.state["answer"] = grid.load_answer(stage) if stage else None
+                          battles=0, done=[], skipped=[],
+                          queue=[], queue_i=0, queue_bad=[])
+        # stages 优先; 空则退回 stage 单关; 两个都空 = 自动打得星_0。
+        #    非法号 setup 记下, 第一帧 decide 就 BLOCKED, 不进关。
+        queue, bad = resolve_queue(self.cfg)
+        self.state["queue_bad"] = bad
+        if bad:
+            self.state["stage"] = ""
+            self.state["answer"] = None
+            self.log("关卡号非法: " + "/".join(bad) + " -- 不进关")
+            return
+        self.state["queue"] = queue
+        self.state["queue_i"] = 0
+        if queue:
+            self._load_current(queue[0])
+        else:
+            self.state["stage"] = ""
+            self.state["answer"] = None
         # 断点续走: 设备上的任务已经走完前 N 步时从第 N+1 步接着走
         #    （中断任务在任务内没有可点的返回键, 拆不掉时用这个接上）。
-        #    一次性参数, 用完就该清回 0。
+        #    一次性参数, 用完就该清回 0。只作用于队列第一关。
         skip = int(self.cfg.get("skip_rounds", 0) or 0)
         if skip:
             self.state["round_i"] = skip
@@ -64,6 +126,149 @@ class CampaignFlow(ExitMixin, Flow):
         if m is None:
             return None
         return ("H" if hard else "") + f"{m.group(1)}-{m.group(2)}"
+
+    def goto(self, phase, why=""):
+        super().goto(phase, why)
+        # step CLI 每发新进程, 只落盘 flow.state, 相位本身不存。
+        #    不写回的话续走会从 enter 起手, 战斗页就干等任务大厅。
+        self.state["phase"] = self.phase
+
+    def pre_page(self, obs, st):
+        # 非法号第一帧就收, 任何相位都不许开始找关/进关。
+        if self.state.get("queue_bad"):
+            bad = self.state["queue_bad"]
+            return self.finish(
+                Outcome.BLOCKED,
+                f"关卡号非法: {'/'.join(bad)} -- 读不出章-节或不是 Normal/Hard, 不进关")
+        saved = self.state.get("phase")
+        if saved and saved in self.phases and not self.phase:
+            self.goto(saved, "续上相位")
+        return None
+
+    def finish(self, outcome: str, why: str = ""):
+        if (outcome == Outcome.UNKNOWN and self.state.get("queue")
+                and "停在" not in (why or "")):
+            extra = self._queue_summary("")
+            if extra:
+                why = f"{why} -- {extra}" if why else extra
+        return super().finish(outcome, why)
+
+    def _load_current(self, stage: str) -> None:
+        self.state["stage"] = stage
+        self.state["answer"] = grid.load_answer(stage) if stage else None
+
+    def _reset_row_cache(self) -> None:
+        self.state["row_anchor"] = None
+        self.state["row_reads"] = {}
+        self.state.pop("stage_vote", None)
+        self.state["opened_popup"] = False
+        self.state["area_hops"] = 0
+        self.state["scrolls"] = 0
+
+    def _reset_for_next_stage(self) -> None:
+        self.state.update(
+            round_i=0, target=None, need_end=False, battles=0,
+            battle_seen=False, issued=False, cycling=False,
+            pe_absent=0, bind_last=None, pre_vec=None,
+            moved_t=None, moved_frames=0, start_box=None,
+            dx_est=None, deploy_round0=0)
+        self.state["cell_acc"] = []
+        self._reset_row_cache()
+        self._wt_clear()
+        for k in [k for k in self.state if k.startswith("hold:")]:
+            self.state.pop(k, None)
+
+    def _queue_summary(self, head=""):
+        q = self.state.get("queue") or []
+        done = self.state.get("done") or []
+        skipped = self.state.get("skipped") or []
+        cur = self.state.get("stage") or "?"
+        i = int(self.state.get("queue_i") or 0)
+        parts = []
+        if head:
+            parts.append(head)
+        if done:
+            parts.append("已完成 " + "/".join(done))
+        if skipped:
+            parts.append("跳过 " + "/".join(skipped))
+        if q:
+            parts.append(f"停在 {cur}（队列 {i + 1}/{len(q)}）")
+        return ", ".join(parts)
+
+    def _fail_or_skip(self, why: str):
+        """当前关没答案/能力不够: 有下一关就跳过继续, 队列全失败才 BLOCKED。"""
+        cur = self.state.get("stage") or "?"
+        q = self.state.get("queue") or []
+        i = int(self.state.get("queue_i") or 0)
+        has_next = bool(q and i + 1 < len(q))
+        if has_next or self.state.get("done"):
+            self.state.setdefault("skipped", []).append(cur)
+            self.log(f"跳过 {cur}: {why}")
+            self.note_lines.append(f"跳过 {cur}: {why}")
+        if has_next:
+            nxt = q[i + 1]
+            self.state["queue_i"] = i + 1
+            self._reset_for_next_stage()
+            self._load_current(nxt)
+            return None
+        if self.state.get("done"):
+            return self.finish(Outcome.CLEAN, self._queue_summary("剩余关都跳过"))
+        return self.finish(Outcome.BLOCKED, why)
+
+    def _ensure_playable(self):
+        """当前关不能打就沿队列跳过。返回收工 Action, 或 None=可以进。"""
+        if self.state.get("queue_bad"):
+            bad = self.state["queue_bad"]
+            return self.finish(
+                Outcome.BLOCKED,
+                f"关卡号非法: {'/'.join(bad)} -- 读不出章-节或不是 Normal/Hard, 不进关")
+        hops = 0
+        while hops < 64:
+            hops += 1
+            stage = self.state.get("stage") or ""
+            if not stage:
+                return None
+            if self.state.get("answer") is None:
+                act = self._fail_or_skip(f"没有 {stage} 的答案文件")
+                if act is not None:
+                    return act
+                continue
+            lack = self._capability_lack()
+            if lack:
+                act = self._fail_or_skip(
+                    lack + " -- 进关前拦下, AP 一分没花")
+                if act is not None:
+                    return act
+                continue
+            ans = self.state.get("answer") or {}
+            if ans.get("needs", {}).get("attrs") and self.once("attr_note"):
+                self.log(f"答案推荐属性队 {'/'.join(ans['needs']['attrs'])}"
+                         f"（blue=神秘 red=爆发 yellow=贯穿 purple=振动）, 打不过按这个配")
+            return None
+        return self.finish(Outcome.BLOCKED, "队列跳过次数异常")
+
+    def _after_stage_clean(self, why_one: str):
+        """一关走完: 有下一关就切关回 stage_list, 不要立刻 finish。"""
+        cur = self.state.get("stage") or "?"
+        self.state.setdefault("done", []).append(cur)
+        self.log(why_one)
+        if why_one and (not self.note_lines or self.note_lines[-1] != why_one):
+            self.note_lines.append(why_one)
+        q = self.state.get("queue") or []
+        i = int(self.state.get("queue_i") or 0)
+        if not q or i + 1 >= len(q):
+            if q and len(q) > 1:
+                return self.finish(Outcome.CLEAN, self._queue_summary(why_one))
+            return self.finish(Outcome.CLEAN, why_one)
+        nxt = q[i + 1]
+        self.state["queue_i"] = i + 1
+        self._reset_for_next_stage()
+        self._load_current(nxt)
+        blocked = self._ensure_playable()
+        if blocked is not None:
+            return blocked
+        self.goto("stage_list", f"下一关 {self.state['stage']}")
+        return wait(f"切下一关 {self.state['stage']}")
 
     # 观测: 格心跨帧累积（绿勾累积同款）。同一张地图上格子是**静态**的,
     #    单帧 conf 抖动(同图实测 0.31-0.97 帧间波动)不该抖掉我们对地图的认知。
@@ -175,11 +380,29 @@ class CampaignFlow(ExitMixin, Flow):
         for k in keys:
             self.state.pop(f"wt:{k}", None)
 
+    def _dump_grid_miss(self, obs) -> str:
+        """无格框停手时落干净帧, 给 v18 补标, 不开训。"""
+        if obs is None or getattr(obs, "frame", None) is None:
+            return ""
+        try:
+            import time as _t
+            from pathlib import Path as _P
+            import cv2
+            d = _P("data") / "raw_images" / f"v18_grid_miss_{_t.strftime('%Y%m%d')}"
+            d.mkdir(parents=True, exist_ok=True)
+            name = f"{_t.strftime('%H%M%S')}_{int(getattr(obs, 'seq', 0)):06d}_grid_quest.jpg"
+            p = d / name
+            cv2.imencode(".jpg", obs.frame,
+                         [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tofile(str(p))
+            return str(p).replace("\\", "/")
+        except Exception:
+            return ""
+
     # 进关前能力预检: 答案要什么能力, 现在的 flow 会不会 -- 不会就 BLOCKED
     #    在花 AP 之前。旧行为是进关走到那一回合才 UNKNOWN: AP 扣了、任务挂在
     #    半路、归位链还要去拆「任务进行中」的残局, 三重浪费。
-    def _capability_gate(self):
-        ans = self.state.get("answer")
+    def _capability_lack(self, ans=None):
+        ans = ans if ans is not None else self.state.get("answer")
         if not ans:
             return None
         needs = ans.get("needs") or {}
@@ -191,44 +414,77 @@ class CampaignFlow(ExitMixin, Flow):
         if needs.get("exchange"):
             lack.append("exchange 换位(交換按钮无 cls)")
         if lack:
-            return self.finish(
-                Outcome.BLOCKED,
-                f"{ans.get('stage', '?')} 的答案需要 " + " + ".join(lack)
-                + " -- 进关前拦下, AP 一分没花")
-        if needs.get("attrs") and self.once("attr_note"):
-            self.log(f"答案推荐属性队 {'/'.join(needs['attrs'])}"
+            return (f"{ans.get('stage', '?')} 的答案需要 " + " + ".join(lack))
+        return None
+
+    def _capability_gate(self):
+        # 列表已锁定某一行之后的预检: 跳过就停手重找, 不许拿旧行入場去打下一关。
+        lack = self._capability_lack()
+        if lack:
+            act = self._fail_or_skip(
+                lack + " -- 进关前拦下, AP 一分没花")
+            if act is not None:
+                return act
+            return wait(f"跳过, 改打 {self.state['stage']}")
+        ans = self.state.get("answer") or {}
+        if ans.get("needs", {}).get("attrs") and self.once("attr_note"):
+            self.log(f"答案推荐属性队 {'/'.join(ans['needs']['attrs'])}"
                      f"（blue=神秘 red=爆发 yellow=贯穿 purple=振动）, 打不过按这个配")
         return None
 
-    # 绑当前队伍的身体框（observe 的位移证据和 do_walk 落子共用一份逻辑）:
-    #    箭头正下方最近的我方框; 箭头缺席时唯一的我方框（多框有歧义就 None）
+    # 绑当前队伍（observe 的位移证据和 do_walk 落子共用一份逻辑）。
+    #
+    # 2026-08-24 改成**只认头顶那个黄色倒三角**（501 走格子_队伍箭头）:
+    #    原来是「箭头正下方最近的我方框; 箭头缺席时唯一的我方框」, 依赖
+    #    509 走格子_我方。可 509 在大池里**约 40% 框的是敌方/BOSS**
+    #    (2,173 框散在 1,640 帧, 带上下文抽 21 张明确敌方 >=8 张, 红底 RANK
+    #     菱形 / BOSS 横幅直接压在框上; 两版自动判据都被骗过 —— 红衣服、
+    #     START 格黄高亮), 手工修不动, 已整类标废案。
+    #    箭头则是**结构上只有我方才有**的标记(同样抽 21 张 21/21 干净),
+    #    敌方永远没有, 不存在敌我混淆。
+    #    箭头比立绘更高一截, 但 grid.below() 的判据是「同 x 带内正下方最近的
+    #    格」, 高一点不影响: 实测同帧 箭头 cy .335 / 脚下格 cy .511, x 差 .001。
     def _bind_unit(self, obs):
-        arrow = obs.find(V.GRID_ARROW, 0.25)
-        allies = obs.all(V.GRID_ALLY, 0.30)
-        if arrow is not None and allies:
-            under = [b for b in allies
-                     if b.cy > arrow.cy and abs(b.cx - arrow.cx) < 0.05]
-            if under:
-                return min(under, key=lambda b: b.cy - arrow.cy)
-        if len(allies) == 1:
-            return allies[0]
-        return None
+        return obs.find(V.GRID_ARROW, 0.25)
 
     # enter
     def do_enter(self, obs, st):
-        if self.state.get("stage") and self.state.get("answer") is None:
-            return self.finish(Outcome.BLOCKED,
-                               f"没有 {self.state['stage']} 的答案文件")
-        g = self._capability_gate()
+        g = self._ensure_playable()
         if g is not None:
             return g
+        if st.page == "battle":
+            self.goto("walk", "已经在战斗中, 接手")
+            return wait("进相位 walk")
+        if st.page == "battle_result":
+            self.goto("walk", "战斗结算, 接手")
+            return wait("进相位 walk")
         if st.page == "lobby":
-            return nav.enter(obs, V.NAV_TASKS, "任务大厅")
-        if st.page == "task_hall":
+            return nav.lobby_enter(self, obs, V.NAV_TASKS, "任务大厅",
+                                   expect=(V.HUB_CAMPAIGN,))
+        # 关卡列表签名掉成 facility 时先自愈进 stage_list, 再看大厅磁贴
+        #    (两条都可能在 facility 上成立, 列表页签优先, 免得在列表上再点磁贴)
+        if (st.page in ("facility", "unknown")
+                and obs.has([V.STAGE_NORMAL_SEL, V.STAGE_HARD_SEL,
+                             V.STAGE_NORMAL, V.STAGE_HARD, V.SWEEP_BATCH],
+                            0.45)):
+            self.goto("stage_list", "关卡列表被判成 facility/unknown, 相位自愈")
+            return wait("进相位 stage_list")
+        # 任务大厅新身份=推图+(返回|回大厅); 旧皮少 tile 仍可能掉成 facility
+        #    (08-15 H2-3: 任務/剧情/特殊任务刚好 3, 转场少一个 -> facility
+        #    -> 本分支不跑, enter 干等 4001 tick)。磁贴在就当大厅。
+        if (st.page in ("task_hall", "facility", "unknown")
+                and obs.has(V.HUB_CAMPAIGN, 0.45)):
             t = obs.find(V.HUB_CAMPAIGN, 0.45)
             if t is not None:
-                return tap_box(t, "进 任務 推图",
-                               expect=(V.STAGE_NORMAL_SEL, V.STAGE_NORMAL))
+                # 游戏会记住 Hard 页签, 进列表不一定出 普通关卡选中
+                act = tap_box(t, "进 任務 推图",
+                              expect=(V.STAGE_NORMAL_SEL, V.STAGE_NORMAL,
+                                      V.STAGE_HARD_SEL, V.STAGE_HARD))
+                # 任务关卡推图 框是磁贴顶上「Area N」标题条
+                #    (08-15 实帧 y 0.215-0.273), 框心偏上, 转场期点标题没进。
+                #    往下收到磁贴本体。
+                act.y = min(0.50, t.y2 + 0.08)
+                return act
             return wait("找 任務 磁贴")
         if st.page == "campaign_stage":
             self.goto("stage_list", "到关卡列表了")
@@ -238,6 +494,12 @@ class CampaignFlow(ExitMixin, Flow):
             self.goto("stage_list", "开局就有关卡弹窗")
             return wait("进相位 stage_list")
         if st.page == "grid_quest":
+            # 已经走过步/绑过格 = 续走, 进 walk 不要再经 grid
+            #    (do_grid 会重写 deploy_round0, 航位从起点重算)。
+            if (self.state.get("issued") or self.state.get("round_i", 0)
+                    or self.state.get("bind_last")):
+                self.goto("walk", "地图上续走")
+                return wait("进相位 walk")
             # 上一轮没退干净, 直接从地图接手
             self.goto("grid", "已经在走格子地图上")
             return wait("进相位 grid")
@@ -262,11 +524,18 @@ class CampaignFlow(ExitMixin, Flow):
         if st.page in ("task_hall", "lobby"):
             self.goto("enter", "画面在任务大厅/大厅, 相位退回 enter 重进")
             return wait("退回 enter")
+        if (st.page in ("facility", "unknown")
+                and obs.has(V.HUB_CAMPAIGN, 0.45)
+                and not obs.has([V.STAGE_NORMAL_SEL, V.STAGE_HARD_SEL,
+                                 V.STAGE_NORMAL, V.STAGE_HARD, V.SWEEP_BATCH],
+                                0.45)):
+            self.goto("enter", "画面其实是任务大厅(判成 facility), 退回 enter")
+            return wait("退回 enter")
         # 弹窗开没开也看**内容证据**(页签 0.99 稳), 不只等页面签名 --
         #    复打版式上 任务开始 只有 0.22, 光靠签名会卡死(2026-08-13 实录 4001 tick)
         if (st.page == "stage_popup"
                 or obs.has([V.TAB_COMMAND_SEL, V.TAB_GUIDE_SEL], 0.45)):
-            # ⛔只认**自己点入場开的**弹窗。残留/用户手开的弹窗可能是别的关
+            # 禁只认**自己点入場开的**弹窗。残留/用户手开的弹窗可能是别的关
             #    (08-13 实录: 设备上留着 2-4 的弹窗, 配置却是 2-2) -- 在别人的
             #    弹窗上点 任務開始 = 进错关烧 AP, 叉掉回列表重选才是对的
             if not self.state.get("opened_popup"):
@@ -434,13 +703,17 @@ class CampaignFlow(ExitMixin, Flow):
                 return wait(f"读到 {got}, 等下一帧复读确认")
             ans = grid.load_answer(got)
             if ans is None:
-                return self.finish(Outcome.BLOCKED,
-                                   f"没有 {got} 的答案文件")
+                act = self._fail_or_skip(f"没有 {got} 的答案文件")
+                if act is not None:
+                    return act
+                return wait(f"跳过 {got}, 改打 {self.state['stage']}")
             self.state.update(stage=got, answer=ans,
                               row_anchor=(sb.cx, sb.cy))
             g = self._capability_gate()
             if g is not None:
                 return g
+            if self.state.get("stage") != got:
+                return wait(f"跳过 {got}, 改打 {self.state['stage']}")
             self.log(f"锁定目标关 = {got}（{len(ans['rounds'])} 回合）")
             anchor = (sb.cx, sb.cy)
         rows = obs.all(V.STAGE_ENTER, 0.45)
@@ -488,7 +761,8 @@ class CampaignFlow(ExitMixin, Flow):
                 and self.hold("start_grey", 20)):
             return self.finish(Outcome.BLOCKED,
                                "弹窗里 任務開始 是灰的（AP 不够？）-- 不硬点")
-        return wait("等弹窗控件")
+        extra = "（任务资讯在）" if obs.has(V.TASK_INFO, 0.40) else ""
+        return wait("等弹窗控件" + extra)
 
     # grid: 部署 -- 点起点上队, 然后 任務開始
     def do_grid(self, obs, st):
@@ -582,7 +856,7 @@ class CampaignFlow(ExitMixin, Flow):
             self.goto("result", "答案回合走完了")
             return wait("等结算")
         # 真多区域地图（H1-2 实测有）: 计划没走完游戏就弹回部署屏 --
-        #    重新部署后**继续同一份 rounds**。⛔数字键不是"区域"（BAAH 官方
+        #    重新部署后**继续同一份 rounds**。禁数字键不是"区域"（BAAH 官方
         #    grid_solution_format.json: 数字键=按目标区分的**备选解法**,
         #    一份 fight_plan 覆盖整关）; 中途部署是游戏自己的节奏, 别换计划。
         # 只有走过至少一步才可能是真重部署 -- 开局 任務開始 刚点完、PHASE
@@ -650,6 +924,12 @@ class CampaignFlow(ExitMixin, Flow):
                 return wait("新回合")
             # 落子发了但相位一直没走 = 那一发没被游戏收下 -> 有界重发
             #    （150 tick 是 live 验过的值: 开局动画期实测第 4 发才被收下）
+            # 08-15 3-2 replay: observe 已记下 moved_t（人走到了目标格）,
+            #    但 PHASE 不闪、6s 超时又输给 150 tick; 重发走 _issued()
+            #    清掉 moved_t, 再点自己站的格没有新位移, 3 次后谎报没走动。
+            #    位移已确认 = 游戏收下了这一步, 禁止重发, 等 observe 置 cycling。
+            if self.state.get("moved_t"):
+                return wait("等相位循环（位移已确认）")
             if self.hold("move_wait", 150):
                 n = self.bump(f"reissue:{self.state['round_i']}")
                 if n > 3:
@@ -710,9 +990,9 @@ class CampaignFlow(ExitMixin, Flow):
             if unit is None:
                 if self._overdue("no_unit", 75):
                     return self.finish(Outcome.UNKNOWN,
-                                       "75s 内起点航位和 箭头+我方 都拿不到 -- "
+                                       "75s 内起点航位和队伍箭头都拿不到 -- "
                                        "感知不足, 已存帧待标注, 不瞎点")
-                return wait("等 起点地标或箭头+我方（绑当前格）")
+                return wait("等 起点地标或队伍箭头（绑当前格）")
             self._wt_clear("no_unit")
             cur = grid.below(unit, cs, dx)
             if cur is None:
@@ -744,6 +1024,7 @@ class CampaignFlow(ExitMixin, Flow):
         d = moves[0]["dir"]
         # **目的格候选排除自己站的格**（05 轮实锤: 绑格偏一格时 resolve 会解析
         #    回自己 -> 点自己=no-op -> 假到位）
+        # 有格用格; 无格 wait/UNKNOWN, 不拿 BOSS/道具当落点（用户否掉硬搞）。
         goal = grid.resolve(cur, d,
                             [c for c in cs
                              if (c[0] - cur[0]) ** 2 + (c[1] - cur[1]) ** 2
@@ -751,9 +1032,13 @@ class CampaignFlow(ExitMixin, Flow):
                             dx, dy)
         if goal is None:
             if self.hold("no_goal", 20):
-                return self.finish(Outcome.UNKNOWN,
-                                   f"方向 {d} 落不到任何检出的格子 -- 不瞎点"
-                                   f"（cur={cur} dx={dx:.3f}）")
+                note = grid.dir_miss_report(obs, cur, d, dx, dy)
+                path = self._dump_grid_miss(obs)
+                return self.finish(
+                    Outcome.UNKNOWN,
+                    f"方向 {d} 落不到任何检出的格子 -- 不瞎点"
+                    f"（cur={cur} dx={dx:.3f}）{note}"
+                    + (f" 干净帧 {path}" if path else ""))
             return wait(f"方向 {d} 暂时解析不到格子, 再看几帧")
         cell_box = min(obs.all(grid.CELL_CLS, 0.35),
                        key=lambda b: (b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2)
@@ -803,8 +1088,7 @@ class CampaignFlow(ExitMixin, Flow):
             return tap_box(cf, "结算確認") if cf is not None else wait("等結算")
         if st.page == "campaign_stage":
             n = self.state["round_i"]
-            return self.finish(
-                Outcome.CLEAN,
+            return self._after_stage_clean(
                 f"{self.state['stage']} 按答案走完 {n} 回合, "
                 f"战斗 {self.state['battles']} 场, 已回到关卡列表")
         cf = obs.find(V.CONFIRM, 0.40)

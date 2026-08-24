@@ -227,7 +227,7 @@ def main() -> int:
         except Exception:                                     # noqa: BLE001
             page, why = "?", "?"
 
-        # ── 落点的 cls 支撑 ──
+        #  落点的 cls 支撑
         near = []
         if act == "click" and isinstance(tgt, (list, tuple)) and len(tgt) == 2:
             tx, ty = float(tgt[0]), float(tgt[1])
@@ -250,7 +250,7 @@ def main() -> int:
         repeats = repeats + 1 if sig == last_sig else 0
         last_sig = sig
 
-        # ── 存帧: 原图 + 标注图(全部检出框 + 落点十字) ──
+        #  存帧: 原图 + 标注图(全部检出框 + 落点十字)
         # 判断"这一步安排得对不对"必须回到画面: cls 名对了不代表点的是对的东西
         # (Bonus 固定位漂那次, jsonl 里一切正常, 是看图才发现槽位错了)。
         # 文件名必须带墙钟: walk 是"停一次改一次 --allow 再起一次"的用法,
@@ -291,7 +291,7 @@ def main() -> int:
                            round(b.x1, 4), round(b.y1, 4),
                            round(b.x2, 4), round(b.y2, 4)] for b in boxes]}
 
-        # ── 守卫 ──
+        #  守卫
         stop = None
         _money = _hits_money(reason)
         _money_ok = any(k in reason for k in a.money_ok) if a.money_ok else False

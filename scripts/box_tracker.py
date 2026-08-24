@@ -320,7 +320,7 @@ class BoxTracker:
         for t in self._tracks:
             t.predict()
 
-        # ── ByteTrack two-stage matching ──
+        #  ByteTrack two-stage matching
         high_dets = [(i, d) for i, d in enumerate(detections) if d[1] >= self.high_conf]
         low_dets = [(i, d) for i, d in enumerate(detections) if d[1] < self.high_conf]
 

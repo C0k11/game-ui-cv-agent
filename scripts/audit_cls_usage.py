@@ -271,14 +271,14 @@ def main() -> int:
             print(f"        {path}:{ln}  {tag}")
 
     if aux_only:
-        print(f"\n🔧 仅旁支引用(scripts/tests/server, **不是**死判据) {len(aux_only)} 条:")
+        print(f"\n 仅旁支引用(scripts/tests/server, **不是**死判据) {len(aux_only)} 条:")
         for i, n, r in aux_only:
             print(f"   idx{i:4d} {n:24} 旁支 {r} 处")
 
     zombie = [(i, n) for i, n in enumerate(master)
               if boxes.get(i, 0) == 0 and referenced(n, "brain") == 0
               and referenced(n, "aux") == 0]
-    print(f"\n💤废案(零标注 + 零引用) {len(zombie)} 条:")
+    print(f"\n废案(零标注 + 零引用) {len(zombie)} 条:")
     for i, n in zombie:
         print(f"   idx{i:4d} {n:24} [{domain(i)}]")
 

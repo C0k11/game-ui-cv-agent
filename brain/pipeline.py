@@ -47,7 +47,7 @@ from brain.skills.story_mining import StoryMiningSkill
 from brain.skills.daily_routine import DailyRoutineSkill
 
 
-# ── OCR Engine (singleton) ──────────────────────────────────────────────
+#  OCR Engine (singleton)
 
 _ocr_engine = None
 _ocr_lock = None
@@ -140,7 +140,7 @@ def _get_ocr():
         return _ocr_engine
 
 
-# ── YOLO Detector (singleton) ───────────────────────────────────────
+#  YOLO Detector (singleton)
 
 _yolo_models = []   # list of (model, conf_threshold, model_tag) tuples
 _yolo_lock = None
@@ -153,7 +153,7 @@ _yolo_lock = None
 import datetime as _dt
 _PIPELINE_SESSION_ID = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# ── Model registry — single source of truth for active model paths ──
+#  Model registry — single source of truth for active model paths
 # data/model_registry.json drives which version is "live".  Hardcoded paths
 # below are fallbacks for back-compat / when registry is unreachable.
 
@@ -171,7 +171,7 @@ def _load_model_registry() -> dict:
 def _resolve_path(model_key: str, fallback: Path) -> Path:
     """Resolve an active model's weights path via registry.
 
-    fail-closed(2026-07-16 审计): registry 存在但该 key 解析不出 
+    fail-closed(2026-07-16 审计): registry 存在但该 key 解析不出
     raise, 绝不静默回落硬编码老路径 — 旧行为是"registry JSON 手编出错
     /active 指错"时带着 5 月 v1(145类, 缺全部商店/confirm 钱防线类)照常
     开跑, 正是"改了 registry 没效果、旧模型还在跑"的复现路径。
@@ -200,7 +200,7 @@ _YOLO_BATTLE_HEADS = Path(r"D:\Project\ml_cache\models\yolo\battle_heads.pt")
 _YOLO_EMOTICON_V26 = Path(r"D:\Project\ml_cache\models\yolo\runs\emoticon_yolo26n\weights\best.pt")
 _YOLO_EMOTICON = _YOLO_EMOTICON_V26
 
-# ── Fused avatar v4 (251-class student head detector) ──
+#  Fused avatar v4 (251-class student head detector)
 # Manual mAP50 = 0.9657 on hand-curated 29-frame val (vs v3 baseline 0.683).
 # best_manual.pt = ep11 weights (true best, vs best.pt = ep15 nominal-best
 # that was synth-fitness-biased). See yolo_migration memory for details.
@@ -208,7 +208,7 @@ _YOLO_FUSED_AVATAR_V4 = _resolve_path("fused_avatar", Path(
     r"D:\Project\ml_cache\models\yolo\runs\fused_avatar_yolo26x_v4\weights\best_manual.pt"
 ))
 
-# ── UI v1 (~145-class static UI detector) ──
+#  UI v1 (~145-class static UI detector)
 # Replaces OCR-driven button finding in most skills. Trained 2026-05-27 from
 # COCO yolo26m + 1220 frames (oversampled minority classes target=12) + 51
 # hand-curated val frames. Target mAP50 ≥ 0.85.
@@ -247,10 +247,10 @@ def get_yolo_context() -> str:
         return _yolo_context
 
 
-# ── Lobby resource snapshot (user 2026-06-09: 大厅顶栏三资源稳读  全局复用) ──
+#  Lobby resource snapshot (user 2026-06-09: 大厅顶栏三资源稳读  全局复用)
 # Refreshed on lobby frames every ~30s. Consumers:
-#   • shop budget fallback (in-shop top-bar credit cls is flaky  use snapshot)
-#   •  PYROXENE KILL-SWITCH: a DROP between two consecutive confirmed reads =
+#   - shop budget fallback (in-shop top-bar credit cls is flaky  use snapshot)
+#   -  PYROXENE KILL-SWITCH: a DROP between two consecutive confirmed reads =
 #     money breach somewhere  abort the whole pipeline (global audit on top of
 #     every per-skill guard).
 _RESOURCES: Dict[str, Any] = {"ap": None, "credits": None, "pyroxene": None, "ts": 0.0}
@@ -262,7 +262,7 @@ def get_resource_snapshot() -> Dict[str, Any]:
     return dict(_RESOURCES)
 
 
-# ── 数字 strip 几何: 一律用「锚点图标自身尺寸」当单位 ──────────────────────
+#  数字 strip 几何: 一律用「锚点图标自身尺寸」当单位
 # 2026-07-27 定死, 起因是 bounty 票数在关卡列表页 **0/211 帧**读得出。
 #
 # 为什么不能用屏幕比例(0.078 这种):
@@ -624,7 +624,7 @@ def _get_yolo():
                 _UI_LOAD_FAILED = True
                 print("[Pipeline]  ui model FAILED to load after retry — pipeline will "
                       "abort immediately (fail-closed: no taps without UI eyes)")
-        # ── emoticon fold-in (ui v6+, 判定提前 2026-07-17) ────────────────
+        #  emoticon fold-in (ui v6+, 判定提前 2026-07-17)
         # ui 类表含 Emoticon_Action  摸头泡泡由 ui forward pass 提供,
         # standalone v26n 不再加载(旧代码先完整加载再 fold-in 丢弃 = 每次
         # 启动白加载一个模型)。ui 缺该类(pre-v6)才补载 v26n 保 cafe headpat。
@@ -655,7 +655,7 @@ def _get_yolo():
 
 _OCR_WORK_W = 1280  # Downscale wide frames for faster OCR
 
-# ── PURE-YOLO MODE (user spec 2026-05-29) ────────────────────────────────
+#  PURE-YOLO MODE (user spec 2026-05-29)
 # OCR is fully disabled to force every skill's navigation + click logic
 # through YOLO cls — NO OCR fallback. This surfaces every place still
 # secretly relying on OCR (they go blind  log+wait  we migrate them).
@@ -663,7 +663,7 @@ _OCR_WORK_W = 1280  # Downscale wide frames for faster OCR
 # scope OCR to DIGIT-ONLY scanning (AP / ticket / mail counts).
 _OCR_ENABLED = False
 
-# ── BRING-UP EXPOSE MODE (user spec 2026-05-29) ──────────────────────────
+#  BRING-UP EXPOSE MODE (user spec 2026-05-29)
 # While bringing up pure-YOLO navigation we want every stuck point to be a
 # VISIBLE hole, not papered over by blind recovery. With this True the
 # stuck-recovery FALLBACKS are disabled:
@@ -765,7 +765,7 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
     return boxes
 
 
-# ── Clean-frame source (money-read defense) ────────────────────────────
+#  Clean-frame source (money-read defense)
 # The Win32 YoloOverlay burns boxes/labels into every DXcam frame, which can
 # KILL detection of small icons (live 2026-06-09: arena 战术大赛票 icon got a
 # tight green box + label burned over it  ui_v7 detected NOTHING  ticket
@@ -775,7 +775,7 @@ def _run_ocr_on_image(img, w: int, h: int) -> List[OcrBox]:
 # capture function here once the pipeline's ADB connection is up.
 _CLEAN_FRAME_SOURCE = None
 
-# ── 同 tick 干净帧复用 (2026-07-25) ────────────────────────────────────
+#  同 tick 干净帧复用 (2026-07-25)
 # 实测: run_digit_ocr 每次调用都重抓一张 ADB 4K 帧 ~770ms, 而 OCR 本体只要
 # 19.6ms(scratchpad/bench_digit.py)。一个 tick 内 skill 不可能改变屏幕 —
 # skill.tick() 只返回 action dict, 点击在 tick 返回之后才由 server 落屏 —
@@ -907,12 +907,12 @@ def run_digit_ocr(frame, region_norm) -> Optional[str]:
         # join DUPLICATES digits when OCR fragments overlap (live 2026-06-12:
         # '25,583,379'  '255833379' = 10x over-read  shop budget chaos).
         # The comma grouping VALIDATES digit structure — when present, trust
-        # only a clean single group; several disjoint groups = fragment mess 
+        # only a clean single group; several disjoint groups = fragment mess
         # fail-closed None (multi-sample voting retries).
         # 千位分隔符归一(2026-07-28 live 实锤, 原始片段为证):
         # 青辉石 15,426 那一条, ocr 返回**两个片段** `'15.'`(score .66) 与
         # `',426'`(score .80) —— **两边各自把分隔符包了进去**, 拼接成 `'15.,426'`。
-        # 后果: 旧正则只认 `,` 不匹配; 落到下面"保留小数点"的通用清洗 
+        # 后果: 旧正则只认 `,` 不匹配; 落到下面"保留小数点"的通用清洗
         # `'15.426'`  `parse_count` 既非纯数字也无 '/'  **None**, 这一帧整个
         # 读不出(fail-closed 安全, 但钱闸拿不到数)。
         # 我第一版只把正则的 `,` 放宽成 `[.,]` —— **不管用**, 因为真正的形态是
@@ -1004,7 +1004,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     # detectors were trained at smaller native frame sizes — 960 is fine.
     _IMGSZ_BY_TAG = {
         # ui_v2 trained at imgsz=960 on 2475×1392 frames. MUST infer at 960:
-        # verified 2026-05-28 that v2 @ imgsz=1920  0 detections, but @ 960 
+        # verified 2026-05-28 that v2 @ imgsz=1920  0 detections, but @ 960
         # 一次领取黄色 conf 0.936 etc. (The earlier 1920 "4K fix" was wrong —
         # production frames are 2475×1392, not 4K; the occasional 4K frame was
         # a capture-path glitch, not the norm.)
@@ -1034,7 +1034,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
                     # ui carries a folded Emoticon_Action (cls451). When the
                     # standalone v26n (tag "cafe", 0.995) is ALSO running it is
                     # the emoticon AUTHORITY — drop the ui copy, else the two
-                    # models double-box every bubble (offset boxes, IoU<0.6 
+                    # models double-box every bubble (offset boxes, IoU<0.6
                     # dedup can't catch) = ghosting + "emoticon 和 ui 抢信用点"
                     # (live 2026-06-09). After fold-in (2026-06-11) v26n is
                     # unloaded  _standalone_emo_active False  ui 451 passes.
@@ -1065,7 +1065,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
         except Exception as e:
             print(f"[Pipeline] YOLO detect error: {type(e).__name__}: {e}")
             import traceback; traceback.print_exc()
-    # ── Cross-class / cross-model region dedup (user rule 2026-06-09:
+    #  Cross-class / cross-model region dedup (user rule 2026-06-09:
     # "一个框的区域不能重复然后检测出另外的东西"). One screen region = ONE
     # detection: when boxes from different classes/models overlap heavily
     # (IoU>0.6), keep only the highest-confidence one. Kills e.g. the
@@ -1120,7 +1120,7 @@ def _run_yolo_on_image(img, w: int, h: int, context: str = "") -> List[YoloBox]:
     return yolo_boxes
 
 
-# ── Top-level detector helpers for skills ──────────────────────────────
+#  Top-level detector helpers for skills
 # Skills should NOT call _run_yolo_on_image directly — use these.  They
 # operate on the current ScreenState's yolo_boxes (already populated each
 # tick by the pipeline observation step) so there's no extra inference cost.
@@ -1223,7 +1223,7 @@ def read_screen_from_frame(frame_bgr, *, screenshot_path: str = "",
     )
 
 
-# ── Pipeline ────────────────────────────────────────────────────────────
+#  Pipeline
 
 @dataclass
 class SkillResult:
@@ -1253,8 +1253,8 @@ class DailyPipeline:
 
     # Fallback skill sequence for direct DailyPipeline() use (no server).
     # canonical 在 server/app.py _DEFAULT_SKILL_ORDER(2026-07-11 用户定死,
-    # 那边是唯一权威, 改序改那边) — 此处仅同步拷贝: 收菜攒AP  纯票扫荡 
-    # 学园交流会(吃AP)  活动(剩余AP全灌)  战术大赛  邮件  每日领奖 
+    # 那边是唯一权威, 改序改那边) — 此处仅同步拷贝: 收菜攒AP  纯票扫荡
+    # 学园交流会(吃AP)  活动(剩余AP全灌)  战术大赛  邮件  每日领奖
     # 活动再跑一轮(消化 mail/任务回灌的新AP, AP<20 自动秒过)。
     DEFAULT_SKILLS = [
         "daily_routine",
@@ -1601,12 +1601,12 @@ class DailyPipeline:
             return
         self._start_current_skill()
 
-    # ── Lobby badge tracking ─────────────────────────────────────────
+    #  Lobby badge tracking
     #
     # The 8 bottom-nav icons each render a small dot when something is
     # actionable:
-    #   • RED dot    unclaimed reward at that location
-    #   • YELLOW dot  unfinished task / new content at that location
+    #   - RED dot    unclaimed reward at that location
+    #   - YELLOW dot  unfinished task / new content at that location
     # We scan the lobby a few times during a run (at start, between
     # skills, at end) and diff to see what got cleared vs. what was
     # missed.  Future: use the initial scan to skip skills whose icon
@@ -1665,7 +1665,7 @@ class DailyPipeline:
         skill — pure cls: 获得奖励 / 羁绊·地区升级 / 启动期强更下载确认 /
         加载中等待。其余弹窗归 skill 语境 + base._handle_common_popups。
         """
-        # ════════════════════════════════════════════════════════════════
+        #
         # PURE-YOLO interceptor (2026-05-29; 2026-07-17 死 OCR 段整删).
         # Only cls-backed popups are auto-handled here; ambiguous
         # confirm/cancel dialogs are left to the owning skill /
@@ -1673,10 +1673,10 @@ class DailyPipeline:
         # blind-confirm a 'visit friend cafe' / 'exit game' prompt.
         # 旧 OCR 分支段(P0 断线/退出框, P0.5 签到/选项/公告/指南任务,
         # P1 通知/promo/课程表弹窗X, P2 level-up/TAP TO CONTINUE/獲得獎勵
-        # /羈絆)已整段删除(2026-07-17) — _OCR_ENABLED=False 恒假 
+        # /羈絆)已整段删除(2026-07-17) — _OCR_ENABLED=False 恒假
         # ocr_boxes 恒空  find_any_text 恒 None, 全部 dead code;
         # 活的同功能保护在 base._handle_common_popups cls 段。
-        # ════════════════════════════════════════════════════════════════
+        #
         # Reward-result popup (获得奖励) — dismiss via 确认键, else tap.
         reward_y = find_yolo_box(screen, ["获得奖励"], min_conf=0.35)
         if reward_y:
@@ -1698,7 +1698,7 @@ class DailyPipeline:
                 return action_click_box(x_y, "interceptor: reward X-close (YOLO)")
             print("[Interceptor] YOLO reward popup  blind tap (no cls)")
             return action_click(0.5, 0.88, "interceptor: dismiss reward (blind, no cls)")
-        # ── 剧情过场逃生 (2026-08-07 live 实锤的阻塞洞) ──────────────────
+        #  剧情过场逃生 (2026-08-07 live 实锤的阻塞洞)
         # 现象: EventQuest 点进活动  撞上活动开场剧情  `back` **完全无效**
         # (BA 剧情过场不吃 ESC), 连按 5 次屏上还是 `剧情menu 0.98`  EventQuest
         # 判 verify-timeout 放弃活动, Arena 接手继续 back 空转。**整个活动被一段
@@ -1742,7 +1742,7 @@ class DailyPipeline:
             print(f"[Interceptor] YOLO level-up ({levelup_y.cls_name})  tap dismiss")
             return action_click(0.5, 0.5, "interceptor: dismiss level-up (YOLO)")
 
-        # ── P-1: 强更下载确认框 (pure YOLO, 启动期专用, 2026-07-16 重构) ──
+        #  P-1: 强更下载确认框 (pure YOLO, 启动期专用, 2026-07-16 重构)
         # patch-day 冷启动在标题屏前后(TOUCH TO START 前后)弹"需要下載遊戲所
         # 需的檔案 X.XX GB"强更框。旧版 OCR 文字匹配(通知标题+下載 body 词表)
         # 已删 — 纯 相位+结构 判定:
@@ -1787,7 +1787,7 @@ class DailyPipeline:
                         _upd_confirm,
                         "interceptor: confirm force-update download (startup YOLO)")
 
-        # ── P-1: Global loading / update / download ──
+        #  P-1: Global loading / update / download
         # During game startup the screen shows "正在更新", "Now Loading",
         # "驗證下載檔案中", "重置遊戲資料中", etc.  No skill should act
         # during these — just wait.  Also reset the current skill's enter
@@ -1948,7 +1948,7 @@ class DailyPipeline:
             self._last_back_sig = None
             return action
 
-        # ── universal loading gate: never tap mid-transition ──
+        #  universal loading gate: never tap mid-transition
         try:
             if screen is not None and screen.is_loading():
                 return action_wait(500, "加载中  暂停, 等加载完成")
@@ -1961,7 +1961,7 @@ class DailyPipeline:
         last_target = getattr(self, "_last_click_target", None)
         last_sig = getattr(self, "_last_click_sig", None)
 
-        # ── "看到目标就点" exemption (user 2026-06-13: 无端等待) ──────────────
+        #  "看到目标就点" exemption (user 2026-06-13: 无端等待)
         # Stacked popups (sweep/battle/event rewards, 領取/確認/continue, X-close)
         # sit at the SAME position and EACH layer must be clicked through. The
         # same-target hold below would HOLD the dismiss  the popup never gets
@@ -2006,7 +2006,7 @@ class DailyPipeline:
             self._click_hold = 0
             return action
 
-        # ── frame-settle gate(2026-07-17 用户"不要强拍"): 导航/进入类点击
+        #  frame-settle gate(2026-07-17 用户"不要强拍"): 导航/进入类点击
         # 只在稳定帧放行 — 连续两帧结构指纹+质心一致(_tick_with_screen 每
         # tick 记录)。转场动画/列表滚动中指纹或质心持续变化  自然等待;
         # 稳定后首帧立即放行 = 零固定延迟。弹窗 dismiss/领取类在上方豁免
@@ -2099,7 +2099,7 @@ class DailyPipeline:
                 print(f"[Pipeline] digit 帧缓存: 真抓 {_cfs['grab']} / 复用 "
                       f"{_cfs['hit']}  省 ≈{_cfs['hit'] * 0.77:.1f}s", flush=True)
 
-        # ── frame-settle 历史(_dedup_click 稳定门用, 2026-07-17 用户"不要
+        #  frame-settle 历史(_dedup_click 稳定门用, 2026-07-17 用户"不要
         # 强拍"): 每 tick 记录 结构指纹+各cls质心, 连续两帧一致=页面稳定。
         # 转场动画/列表滚动期间指纹或质心持续变化  导航类点击自然等待;
         # 稳定后首帧立即放行 = 零人为延迟, 纯事件驱动。
@@ -2160,7 +2160,7 @@ class DailyPipeline:
         except Exception:
             pass
 
-        # ── Lobby resource snapshot + 青辉石 kill-switch ──────────────────
+        #  Lobby resource snapshot + 青辉石 kill-switch
         try:
             _now = time.time()
             if _now - _RESOURCES["ts"] > 30 and screen.yolo_boxes:
@@ -2548,7 +2548,7 @@ class DailyPipeline:
                 # tick can run its first action cleanly.
                 return action_wait(200, f"advanced past {skill.name} (no dot)")
 
-        # ── Global Interceptor (runs before any skill) ──
+        #  Global Interceptor (runs before any skill)
         intercept = self._global_interceptor(screen, skill)
         if intercept:
             intercept = self._dedup_click(intercept)
@@ -2616,7 +2616,7 @@ class DailyPipeline:
                 print(f"[Pipeline] should_run check failed for {skill.name}: {e}")
                 self._dot_gate_done = True
 
-        # ── universal loading gate (user 2026-06-13: 有加载中就暂停process给
+        #  universal loading gate (user 2026-06-13: 有加载中就暂停process给
         # 游戏加载时间). Pause the skill entirely while the 加载中 spinner is up —
         # don't run skill logic on a transient loading frame.
         try:
@@ -2628,7 +2628,7 @@ class DailyPipeline:
         except Exception:
             pass
 
-        # ── L2 页面图 · v1 只观测不接管 (2026-07-25) ────────────────────
+        #  L2 页面图 · v1 只观测不接管 (2026-07-25)
         # 每 tick 认一次"我在哪个画面", **只在页面变化时**打印(否则刷屏)。
         # 现在绝不让它接管导航 —— 全语料实测(scratchpad/pg_eval.py, 92,855
         # 帧): 覆盖率 26.6% / 矛盾率 1.33% / 时序自洽 67.1%。覆盖率低是因为
@@ -2675,7 +2675,7 @@ class DailyPipeline:
                   f"{getattr(skill, 'name', '?')} '{action_reason[:60]}'",
                   flush=True)
 
-        # ── State lockout: detect truly stuck repeated waits ──
+        #  State lockout: detect truly stuck repeated waits
         same_wait = (
             action_type == "wait"
             and skill.sub_state == self._last_sub_state
@@ -2725,7 +2725,7 @@ class DailyPipeline:
         _cancel_btn = find_yolo_box(screen, ["取消键"], min_conf=0.40)
         _x_btn = find_yolo_box(screen, ["弹窗叉叉"], min_conf=0.40)
         _popup_on_screen = bool(_cancel_btn or _x_btn)
-        # ── EARLIER escalation: blind-TAP to dismiss full-screen overlays ──
+        #  EARLIER escalation: blind-TAP to dismiss full-screen overlays
         # A repeated wait often means an undismissed "TOUCH TO CONTINUE" /
         # 獲得獎勵 reward overlay (e.g. arena ranking reward) or an account
         # level-up — full-screen prompts that carry NO reliable YOLO cls, so

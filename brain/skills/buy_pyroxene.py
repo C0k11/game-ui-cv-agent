@@ -5,14 +5,14 @@ All clicks resolved through YOLO cls (ui_classes) — NO OCR, NO hardcoded pixel
 positions. The ONLY purpose is to claim the **每日免費組合包** (gives AP×10 +
 credits×10K, NOT pyroxene).
 
- HARD RULE — NEVER spend pyroxene / real money 
+ HARD RULE — NEVER spend pyroxene / real money
 The shop has CAD$ packs sitting right next to the free one. We ONLY ever click
 a 购买 (SHOP_BUY) button that has a 免费 (FREE) price-label directly above it in
 the same column, and we ONLY confirm a purchase dialog that shows the 免费 cls.
 Any dialog without 免费 (i.e. a CAD price)  cancel immediately.
 
 State machine
--------------
+----
 enter      lobby  click SHOP_BUY_PYROXENE (购买青辉石). Retry on ADB drop
            (re-click while still on lobby). Wait for the shop popup.
 combo_tab  shop opens on 特別販售 tab  click COMBO_PACK (组合包未选择) to switch
@@ -39,7 +39,7 @@ from brain.skills.base import (
 )
 from brain.skills import ui_classes as UC
 
-# ── tuning knobs ─────────────────────────────────────────────────────────
+#  tuning knobs
 _CLS_CONF = 0.30              # default UI cls confidence floor
 # 免费(FREE) is a genuinely weak/flickery cls (14f) — on a settled frame it's
 # 0.9 but it dips to 0.13-0.34 on transition frames. Use a TARGETED low floor
@@ -98,7 +98,7 @@ class BuyPyroxeneSkill(BaseSkill):
         region = (entry.x1 - 0.02, entry.y1 - 0.05, entry.x2 + 0.05, entry.y2 + 0.02)
         return self.dot_in_region(screen, region, dot_classes=(UC.DOT_RED,))
 
-    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    #  竣工判据
     def exit_report(self):
         """竣工判据 = 今天这个免费包到底领没领。
 
@@ -122,7 +122,7 @@ class BuyPyroxeneSkill(BaseSkill):
         self.max_ticks = 80
         self._init_state()
 
-    # ── state init / reset ────────────────────────────────────────────────
+    #  state init / reset
 
     def _init_state(self) -> None:
         self._phase_ticks: int = 0
@@ -143,7 +143,7 @@ class BuyPyroxeneSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    # ── shared cls helpers ────────────────────────────────────────────────
+    #  shared cls helpers
 
     def _shop_open(self, screen: ScreenState) -> bool:
         """Shop popup open = either combo-pack tab present (selected or not)."""
@@ -196,7 +196,7 @@ class BuyPyroxeneSkill(BaseSkill):
         return self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF,
                              region=(0.55, 0.04, 0.95, 0.30))
 
-    # ── tick: global guards + dispatch ─────────────────────────────────────
+    #  tick: global guards + dispatch
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -224,7 +224,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return action_wait(300, "buy_pyroxene unknown state")
         return handler(screen)
 
-    # ── enter ───────────────────────────────────────────────────────────────
+    #  enter
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         if self._shop_open(screen):
@@ -254,7 +254,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return action_wait(600, "no UI detected, likely loading")
         return self.nav_home(screen, "buy_pyroxene recover")
 
-    # ── combo_tab ────────────────────────────────────────────────────────────
+    #  combo_tab
 
     def _combo_tab(self, screen: ScreenState) -> Dict[str, Any]:
         if not self._shop_open(screen):
@@ -284,7 +284,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return action_wait(300, "no combo tab cls  exit")
         return action_wait(350, "waiting for 组合包 tab cls")
 
-    # ── buy ──────────────────────────────────────────────────────────────────
+    #  buy
 
     def _buy(self, screen: ScreenState) -> Dict[str, Any]:
         # A confirm dialog may already be up (e.g. retry race)  handle it.
@@ -353,7 +353,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return action_wait(250, f"no free pack  exit ({why})")
         return action_wait(300, "settling combo tab before concluding")
 
-    # ── confirm ──────────────────────────────────────────────────────────────
+    #  confirm
 
     def _confirm(self, screen: ScreenState) -> Dict[str, Any]:
         # Reward popup already showing (confirm registered)  reward state.
@@ -369,7 +369,7 @@ class BuyPyroxeneSkill(BaseSkill):
         confirm_btn = self._confirm_dialog(screen)
         if confirm_btn is None:
             # 2026-07-29 重构: 进 confirm 的唯一入口是"对话框真在屏"(buy 顶部
-            # 分支), 这里框没了只有两种情况 — 確認已发, 框在关闭动画里 
+            # 分支), 这里框没了只有两种情况 — 確認已发, 框在关闭动画里
             # 停住等 reward 证据(顶部分支接), 超时 fail-closed exit; 误检
             # 闪没/被吞  回 buy 重走(buy 态管重按与节流)。旧版的盲坐标
             # re-press 删除: 它在大厅上就是幽灵点击(今天 step_walk 实拦)。
@@ -428,7 +428,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return action_back("abort non-free purchase (ESC)")
         return action_wait(250, "polling dialog for 免费 cls")
 
-    # ── reward ───────────────────────────────────────────────────────────────
+    #  reward
 
     def _reward(self, screen: ScreenState) -> Dict[str, Any]:
         # Prefer the 点击继续字样 strip; else tap the 获得奖励 header box.
@@ -449,7 +449,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return action_wait(250, "reward done  exit")
         return action_wait(300, "waiting for reward popup to settle")
 
-    # ── exit ─────────────────────────────────────────────────────────────────
+    #  exit
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():

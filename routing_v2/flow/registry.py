@@ -12,13 +12,14 @@ from routing_v2.flow.cafe import CafeFlow
 from routing_v2.flow.event import EventFlow
 from routing_v2.flow.event_shop import EventShopFlow
 from routing_v2.flow.facilities import (ClubFlow, CraftFlow, DailyMissionFlow,
-                                        MailFlow, ShopFlow)
+                                        FreePackFlow, MailFlow, ShopFlow)
 from routing_v2.flow.jfd import JfdFlow
 from routing_v2.flow.mining import StoryMiningFlow
 from routing_v2.flow.momotalk import MomoTalkFlow
 from routing_v2.flow.schedule import ScheduleFlow
 
 ALL: Dict[str, Type[Flow]] = {
+    "free_pack": FreePackFlow,
     "club": ClubFlow,
     "craft": CraftFlow,
     "shop": ShopFlow,
@@ -36,8 +37,8 @@ ALL: Dict[str, Type[Flow]] = {
     "campaign": CampaignFlow,
 }
 
-# `daily_routine` 这个模块开关管着三条小链
-COMPOSITE = {"daily_routine": ["club", "craft", "shop"]}
+# `daily_routine` 展开: 免费包第一枪, 然后社团/制造/商店
+COMPOSITE = {"daily_routine": ["free_pack", "club", "craft", "shop"]}
 
 # **开关有、flow 没有** —— 前端能打开，跑起来什么也不发生。
 #    `modules` 里有 batch_sweep / special_sweep，`_ap_replan` 的默认优先级

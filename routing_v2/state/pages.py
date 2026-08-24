@@ -68,9 +68,9 @@ class Sig:
         return float(len(self.need) + hits)
 
 
-# ══════════════════════════════════════════════════════════════════════
+#
 #  打断型（interrupt）—— 与"在哪一页"无关，见到就得先处理
-# ══════════════════════════════════════════════════════════════════════
+#
 INTERRUPTS: List[Sig] = [
     Sig("money_popup",
         pred=lambda o: _money.purchase_context(o) is not None,
@@ -132,9 +132,9 @@ INTERRUPTS: List[Sig] = [
 ]
 
 
-# ══════════════════════════════════════════════════════════════════════
+#
 #  轮播位**两个活动共用同一个 405** —— 只能用「进去之后的内容」区分
-# ══════════════════════════════════════════════════════════════════════
+#
 # 2026-08-11 live 实锤：任务大厅左上**一个轮播位轮流显示两个活动**，二者都只
 # 检出 `距离结束还剩`(405)，点进去纯看运气 —— 实测**连进两次都进了「夏萊總結算」**。
 # 时序赛跑赢不了（轮播 3.0s，转场帧上的点击还会被稳定门吞，当天试 7 次没进对），
@@ -187,20 +187,21 @@ def _is_event_guide_hub(o: Observation) -> bool:
     return True
 
 
-# ══════════════════════════════════════════════════════════════════════
+#
 #  普通页面
-# ══════════════════════════════════════════════════════════════════════
+#
 PAGES: List[Sig] = [
-    # ── 大厅 / 大厅级 ────────────────────────────────────────────────
+    #  大厅 / 大厅级
     Sig("lobby", any_of=V.LOBBY_NAV, min_any=3,
         forbid=[V.COMBO_PACK, V.COMBO_PACK_SEL, V.SHOP_SELECT_ALL, V.SORTIE],
         priority=10, note="底栏 3 个以上设施入口 = 大厅"),
 
-    Sig("task_hall", any_of=V.HUB_TILES + [V.SPECIAL_DEFENSE, V.SPECIAL_CREDIT],
-        min_any=3, forbid=[V.NAV_CAFE],
-        priority=20, note="各玩法的红点只在这里可见；大厅入口那个红点不是工作信号"),
+    Sig("task_hall", pred=lambda o: _task_hall_now(o),
+        priority=20, note="国际服新皮 hub 四 tile 真类 0, 只剩推图能过 0.45。"
+             "身份=推图+(返回键或回大厅)+底栏NAV簇<3。0.45不动。"
+             "旧皮多 tile 仍通常带着推图, 这条也能认。"),
 
-    # ── 战斗链（优先级最高的普通页，别被别的页遮住）──────────────────
+    #  战斗链（优先级最高的普通页，别被别的页遮住）
     Sig("battle", any_of=V.BATTLE_CHROME, min_any=2,
         priority=70, note="战斗内。单个 chrome cls 会在别处漏出，要 2 个"),
 
@@ -251,7 +252,7 @@ PAGES: List[Sig] = [
             len(obs.all([V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_CELL_FOG],
                         0.45)) >= 3
             and obs.has([V.GRID_START, V.GRID_START_GREY, V.GRID_ARROW,
-                         V.GRID_ALLY, V.TASK_START_GREY], 0.45)),
+                         V.TASK_START_GREY], 0.45)),
         priority=58,
         note="走格子地图（3D 俯视, 同资产不同相机域）。格子>=3 + 任一结构锚"),
 
@@ -268,7 +269,7 @@ PAGES: List[Sig] = [
         any_of=[V.SWEEP_BATCH_START, V.SWEEP_BATCH_START_GREY],
         priority=57, note="批量扫荡对话框"),
 
-    # ── 活动 ─────────────────────────────────────────────────────────
+    #  活动
     Sig("event_quest_list",
         any_of=[V.EVENT_SHOP, V.EVENT_TASK, V.EVENT_QUEST_SEL],
         need=[],
@@ -298,7 +299,7 @@ PAGES: List[Sig] = [
              "轮播位两个活动共用 405  进错了只能在这一页认出来  退出去重进。"
              "bot 绝不自作主张去打 任務/特殊任務 —— 刷什么是用户的策略"),
 
-    # ── 票券扫荡型 ───────────────────────────────────────────────────
+    #  票券扫荡型
     Sig("bounty_branch",
         need=[V.TICKET_BOUNTY],
         any_of=V.BOUNTY_BRANCHES, min_any=1,
@@ -321,7 +322,7 @@ PAGES: List[Sig] = [
         forbid=[V.SWEEP_BATCH_START, V.SWEEP_BATCH_START_GREY],
         priority=35, note="主线关卡列表"),
 
-    # ── 设施 ─────────────────────────────────────────────────────────
+    #  设施
     Sig("cafe",
         any_of=[V.CAFE_EARNINGS, V.CAFE_TICKET, V.CAFE_MOVE_1F, V.CAFE_MOVE_2F],
         priority=30, note="咖啡厅"),
@@ -374,7 +375,7 @@ PAGES: List[Sig] = [
         # region 只排掉**左栏那个 tab 图标**（cx≈0.03），不排顶部余额栏:
         #    这一页有条**只有大赛商店才有**的大赛币余额栏（实测 0.97 @cx≈0.57,
         #    cy≈0.12），它是页面级、常驻、强检出的证据。
-        #    ⛔ 我第一版把 region 收成"货架区 cy 0.20-0.98"，当场把这一页判不出来了
+        #    禁 我第一版把 region 收成"货架区 cy 0.20-0.98"，当场把这一页判不出来了
         #      —— 货架上只有那两瓶饮料的价签会被检出（神名文字那 6 张的价签和
         #      購買一样是系统性漏标），饮料一买完货架区就一个都没有，
         #      页面掉成 unknown、flow 0 tap 空转 36 秒。
@@ -390,12 +391,12 @@ PAGES: List[Sig] = [
         forbid=[V.COMBO_PACK, V.COMBO_PACK_SEL],
         priority=30, note="商店货架"),
     Sig("combo_pack", any_of=[V.COMBO_PACK, V.COMBO_PACK_SEL], priority=54,
-        note="组合包页（免費組合包旁边就是 CAD$16.99 真钱包）—— 逐帧人审"),
+        note="购买青辉石弹层: 组合包/特别贩售。日常第一枪要进, 只领免费。"),
 
     Sig("mail", any_of=[V.CLAIM_ONCE_YELLOW, V.CLAIM_ONCE_GREY, V.CLAIM_BLUE],
         forbid=[V.NAV_CAFE], priority=30,
         note="邮件箱。`领取蓝色` 也算：领完一次后一次領取键消失、只剩逐条的"
-             "蓝色領取键，不带它页面身份会在 mail↔unknown 之间抖（08-08 实测"
+             "蓝色領取键，不带它页面身份会在 mail<->unknown 之间抖（08-08 实测"
              "3s 内抖了 4 次）"),
 
     Sig("daily_mission",
@@ -405,14 +406,14 @@ PAGES: List[Sig] = [
 
     Sig("club", need=[V.CLUB], priority=30, note="社团"),
 
-    # ── MomoTalk ─────────────────────────────────────────────────────
+    #  MomoTalk
     Sig("momo_chat",
         any_of=[V.MOMO_REPLY_OPT, V.MOMO_SENDING, V.MOMO_GOTO_BOND],
         priority=44, note="MomoTalk 对话中"),
     Sig("momo_list", any_of=[V.MOMO_TAB_SEL, V.MOMO_TAB, V.MOMO_UNREAD],
         priority=30, note="MomoTalk 列表"),
 
-    # ── 剧情 / 挖矿 ──────────────────────────────────────────────────
+    #  剧情 / 挖矿
     Sig("story_hub", any_of=[V.STORY_MAIN, V.STORY_SHORT, V.STORY_SIDE],
         min_any=2, priority=33, note="剧情大厅"),
     Sig("story_nodes", any_of=[V.STORY_NODE_DONE, V.STORY_NODE_UNDONE],
@@ -433,10 +434,10 @@ PAGES: List[Sig] = [
         note="剧情大章节图。推进顺序 = `new`/`完成` 按 **cx 从左到右**；"
              "右侧小章节靠 `黄点` 定位（用户 2026-08-11 口述的路由规则）"),
 
-    # ── 覆盖层：盖在某一页之上，**不参与"我在哪一页"的竞争** ──────────
+    #  覆盖层：盖在某一页之上，**不参与"我在哪一页"的竞争**
     # 2026-08-08 live 实锤（为什么必须有 overlay 这个概念）:
     #    邮件页上「一次領取黄色」和结算「確認键」会交替被检出，两者当成两个
-    #    **页面**去竞争，于是页面身份在 mail ↔ ack_dialog 之间来回抖了几十次，
+    #    **页面**去竞争，于是页面身份在 mail <-> ack_dialog 之间来回抖了几十次，
     #    flow 每次都拿到"刚换页"的状态、闸每次都放行  同一个領取键点了 65 下。
     #    真相是：底页一直是 mail，確認框只是盖在上面。分开跟踪，抖动立刻消失。
     Sig("confirm_dialog", need=[V.CONFIRM, V.CANCEL], priority=15, overlay=True,
@@ -476,7 +477,7 @@ PAGES: List[Sig] = [
              "被当通知框抢点確認会把**旧阵容原样提交**（自動还没点）——"
              "有 自動 键在场 = 编辑面板，交回 formation 的子链处理"),
 
-    # ── 「在某个设施里，但不知道是哪个」（优先级极低，任何具体页都盖过它）──
+    #  「在某个设施里，但不知道是哪个」（优先级极低，任何具体页都盖过它）
     # 这是从老 `brain/screens.py` 搬过来的 FACILITY_MARKERS，我第一版漏了。
     # 全语料实证：`回大厅按钮`+`返回键` 同时在场，在**每个设施页 ≈1.0**，
     # 在大厅 / MomoTalk / 剧情播放上 **0.0**。
@@ -486,7 +487,7 @@ PAGES: List[Sig] = [
     Sig("facility", need=[V.HOME, V.BACK], priority=4,
         note="在某个设施内部（具体哪个不知道）。有退出控件，能安全走人"),
 
-    # ── 空屏（优先级最低，任何一个检出都能盖过它）────────────────────
+    #  空屏（优先级最低，任何一个检出都能盖过它）
     Sig("blank", pred=lambda o: len(o.boxes) == 0, priority=1,
         note="**一个框都没有**。三种可能：大厅 UI 被收起（点背景会收，"
              "08-08 我一发飞出屏幕的点击就把它收了）全屏过场 加载。"
@@ -495,6 +496,19 @@ PAGES: List[Sig] = [
              "于是盲点坐标正压在「編輯模式」上。这里要求 **len(boxes)==0**，"
              "屏上什么都没有  也就没有任何按钮可以被误点。"),
 ]
+
+
+def _task_hall_now(obs: Observation) -> bool:
+    """任务大厅(国际服新皮过渡)。推图是唯一稳过 0.45 的 tile。"""
+    if obs.find(V.HUB_CAMPAIGN, CONF) is None:
+        return False
+    if obs.find(V.BACK, CONF) is None and obs.find(V.HOME, CONF) is None:
+        return False
+    if obs.count(V.LOBBY_NAV, CONF) >= 3:
+        return False
+    if obs.find(V.NAV_CAFE, CONF) is not None:
+        return False
+    return True
 
 
 # `event_quest_list` 需要"至少一行关卡"这个额外结构条件，用代码补

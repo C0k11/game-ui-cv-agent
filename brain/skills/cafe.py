@@ -6,14 +6,14 @@ hardcoded button positions (only relative gesture params: the headpat
 cx-offset and the swipe start/end points).
 
 State machine
--------------
+----
 enter     lobby  click NAV_CAFE  wait for Cafe page.
 earnings  click CAFE_EARNINGS  popup  click an active CLAIM cls
-          (CLAIM_REWARD_YELLOW / CLAIM_YELLOW). 0% earnings = no claim cls 
+          (CLAIM_REWARD_YELLOW / CLAIM_YELLOW). 0% earnings = no claim cls
           bail after a few ticks (never dead-wait).
 invite    open CAFE_INVITE_TICKET  MomoTalk list. Each row = an avatar
           (fused_avatar model, model_tag=="avatar", cls_name=中文角色名,
-          cx≈0.35) + a CAFE_INVITE_BTN (cx≈0.60). Pair avatar.cy↔button.cy,
+          cx≈0.35) + a CAFE_INVITE_BTN (cx≈0.60). Pair avatar.cy<->button.cy,
           click the target row's invite button  BTN_CONFIRM in the
           "邀請XXX到咖啡廳" dialog. Up to 2 invites per cafe (1F target, 2F
           target from config). Scroll to find the target; fall back to the
@@ -56,7 +56,7 @@ _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _CAFE_STATE_FILE = _DATA_DIR / "cafe_state.json"
 _APP_CONFIG_FILE = _DATA_DIR / "app_config.json"
 
-# ── tuning knobs ─────────────────────────────────────────────────────────
+#  tuning knobs
 _CLS_CONF = 0.30            # default UI cls confidence floor
 _EMOTICON_CONF = 0.40       # headpat marker. 0.550.40 STOPGAP (user 2026-06-13):
 #   v10 folded the retired emoticon v26n (mAP 0.995) into ui cls 451; measured on
@@ -92,7 +92,7 @@ _MAX_PANS_PER_FLOOR = 6       # safety helmet on camera sweeps
 _INVITES_PER_FLOOR = 1        # invite 1 student per floor (2 total per cafe)
 _INVITE_MAX_SCROLLS = 12      # rows to scroll hunting the target
 _INVITE_SWIPE_SETTLE = 3      # ticks to wait after a list swipe (anim settle)
-_ROW_PAIR_DY = 0.06           # avatar.cy ↔ invite-button.cy max gap = same row
+_ROW_PAIR_DY = 0.06           # avatar.cy <-> invite-button.cy max gap = same row
 
 # Top-left false-positive zone: 指定訪問/隨機訪問 buttons get mis-detected as
 # Emoticon_Action. The buttons hug the LEFT EDGE (cx≈0.04-0.08, cy≈0.25-0.40) —
@@ -145,7 +145,7 @@ def _save_cafe_state(state: dict) -> None:
 def _load_invite_targets() -> List[str]:
     """Read the cafe invite character list from app_config profile.
 
-    Same pattern as BountySkill._load_enabled_branches: app_config.json 
+    Same pattern as BountySkill._load_enabled_branches: app_config.json
     active_profile  profiles[active].cafe_invite_targets. Returns a list of
     中文角色名 matching fused_avatar cls_name (e.g. "莉央(战斗)"). Index 0 is
     the 1F target, index 1 the 2F target; extra entries are accepted as
@@ -216,7 +216,7 @@ class CafeSkill(BaseSkill):
                                # 2 泡泡未拍; invite 空滚修复后仍留 ~80 tick 余量
         self._init_state()
 
-    # ── state init / reset ────────────────────────────────────────────────
+    #  state init / reset
 
     def _init_state(self) -> None:
         self._phase_ticks: int = 0          # ticks spent in current sub_state
@@ -300,7 +300,7 @@ class CafeSkill(BaseSkill):
         except Exception:
             pass
 
-    # ── shared cls helpers ────────────────────────────────────────────────
+    #  shared cls helpers
 
     def _close_x(self, screen: ScreenState,
                  region=(0.56, 0.04, 0.94, 0.30)) -> Optional[YoloBox]:
@@ -355,7 +355,7 @@ class CafeSkill(BaseSkill):
             "invited_names": sorted(self._invited),
         })
 
-    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    #  竣工判据
     def exit_report(self):
         """咖啡厅的竣工判据 = 收益领了没 / 摸头摸了几个 / 邀请卷用了没。
 
@@ -382,7 +382,7 @@ class CafeSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    # ── tick: global popup guards + dispatch ──────────────────────────────
+    #  tick: global popup guards + dispatch
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -392,7 +392,7 @@ class CafeSkill(BaseSkill):
             self.log("timeout, exiting")
             return action_done("cafe timeout")
 
-        # ── popups that can appear in any sub_state (pure YOLO) ──
+        #  popups that can appear in any sub_state (pure YOLO)
 
         # Reward-result popup ("獲得獎勵") after a claim — tap to dismiss.
         got_reward = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
@@ -427,7 +427,7 @@ class CafeSkill(BaseSkill):
         if screen.is_loading():
             return action_wait(700, "cafe loading")
 
-        # ── state machine ──
+        #  state machine
         if self.sub_state == "":
             self._goto("enter")
 
@@ -444,7 +444,7 @@ class CafeSkill(BaseSkill):
             return action_wait(300, "cafe unknown state")
         return handler(screen)
 
-    # ── enter ─────────────────────────────────────────────────────────────
+    #  enter
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_attempts += 1
@@ -565,7 +565,7 @@ class CafeSkill(BaseSkill):
             return self.nav_home(screen, "cafe recover")
         return action_wait(400, "entering cafe")
 
-    # ── earnings ──────────────────────────────────────────────────────────
+    #  earnings
 
     def _earnings(self, screen: ScreenState) -> Dict[str, Any]:
         """Open CAFE_EARNINGS, claim via the active CLAIM cls.
@@ -687,7 +687,7 @@ class CafeSkill(BaseSkill):
                 return action_click_box(close, "close earnings popup (nothing)")
             # X not detected THIS frame (one-frame miss) — ESC closes the popup
             # just as well. NEVER advance with the popup still covering the
-            # students (live 2026-06-09 2nd run: advancing here left it open 
+            # students (live 2026-06-09 2nd run: advancing here left it open
             # 1F headpat saw nothing again). _earnings_done is already True so
             # the next tick moves on to invite with a clean screen.
             return action_back("close earnings popup (ESC, X miss)")
@@ -758,7 +758,7 @@ class CafeSkill(BaseSkill):
             return action_wait(300, "no earnings cls  invite")
         return action_wait(350, "waiting for CAFE_EARNINGS cls")
 
-    # ── invite ────────────────────────────────────────────────────────────
+    #  invite
 
     def _begin_invite(self, *, floor_2: bool) -> None:
         """Enter the invite sub_state for the given floor."""
@@ -1053,7 +1053,7 @@ class CafeSkill(BaseSkill):
             return action_back("close lingering invite list (ESC)")
         return None
 
-    # ── headpat ───────────────────────────────────────────────────────────
+    #  headpat
 
     def _emoticon_mark(self, screen: ScreenState) -> Optional[YoloBox]:
         """Best Emoticon_Action marker that is a real student (not a UI FP).
@@ -1261,7 +1261,7 @@ class CafeSkill(BaseSkill):
             self.log(f"1F re-sweep done ({reason}, {self._pat_count} pats)  exit")
             self._goto("exit")
             return action_wait(300, "1F re-sweep done  exit")
-        # IN-CAFE SIGNAL both ways (user 2026-06-09): NO 黄点 on 移動至2號店 
+        # IN-CAFE SIGNAL both ways (user 2026-06-09): NO 黄点 on 移動至2號店
         # 2F has nothing to do — skip the whole trip. 2-frame confirmation so a
         # single dot-flicker frame can't wrongly cancel the 2F visit; button
         # not detected  can't judge  go as before.
@@ -1279,7 +1279,7 @@ class CafeSkill(BaseSkill):
         self._goto("switch")
         return action_wait(300, "1F headpat done  switch")
 
-    # ── switch floor ──────────────────────────────────────────────────────
+    #  switch floor
 
     def _switch_floor(self, screen: ScreenState) -> Dict[str, Any]:
         """1F  2F. On 2F the button reads CAFE_MOVE_1F (takes us back to 1F)."""
@@ -1332,7 +1332,7 @@ class CafeSkill(BaseSkill):
         self._pat_settle = 0
         self._recent_pats = []
 
-    # ── exit ──────────────────────────────────────────────────────────────
+    #  exit
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":

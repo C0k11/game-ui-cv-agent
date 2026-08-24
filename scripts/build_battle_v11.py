@@ -105,11 +105,11 @@ def collect(dirs):
 
 
 def main() -> None:
-    print("── TRAIN 新增（全部人审）──")
+    print(" TRAIN 新增（全部人审）")
     new = collect(NEW_SRCS)
-    print("── TRAIN 基座（v10 原九池, 含大决战四池）──")
+    print(" TRAIN 基座（v10 原九池, 含大决战四池）")
     base = collect(BASE_SRCS)
-    print("── VAL（纯人工标, 主量尺）──")
+    print(" VAL（纯人工标, 主量尺）")
     val = collect([VAL_POOL])
 
     rng = random.Random(SEED)

@@ -163,7 +163,7 @@ def main():
                             tiles.append(cv2.resize(
                                 vis[cy1:min(H, y2 + 40), cx1:min(W, x2 + 220)],
                                 (300, 340)))
-            # ── 孤儿血条补框: 画面有血条但没有任何身份框盖住 = 漏检人 ──
+            #  孤儿血条补框: 画面有血条但没有任何身份框盖住 = 漏检人
             if orphan_mode:
                 if img is None:
                     img = imread_any(str(lbl.with_suffix(".jpg")))

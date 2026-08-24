@@ -69,7 +69,7 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     #
     # 旧 skill id 保留兼容老 profile, 标 [已并入 daily_routine] + 默认不勾选.
 
-    # ── 推荐 (新 profile 默认勾这 2 个) ──
+    #  推荐 (新 profile 默认勾这 2 个)
     {"id": "daily_routine", "label": "[] 日常收菜 全套 (mail/cafe/schedule/club/daily_tasks/craft/event/pass_reward/momo/story/shop/ap, 内部按 dot 判断)"},
 
     # 注: 旧收菜 12 个 skill id (cafe/schedule/club/daily_tasks/craft/
@@ -122,9 +122,9 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 # claimed by the end-of-run Mail since BA's mailbox accumulates
 # until claimed — no need for an additional start-of-run Mail.
 _DEFAULT_SKILL_ORDER = [
-    # canonical 日常顺序(用户 2026-07-11 定死): 收菜攒AP  纯票扫荡 
-    # 学园交流会(吃AP)  活动(剩余AP全灌+加成台账)  战术大赛  邮件 
-    # 每日领奖(必须最后, 且大额扫荡后立跑防 server 3AM 重置吞箱) 
+    # canonical 日常顺序(用户 2026-07-11 定死): 收菜攒AP  纯票扫荡
+    # 学园交流会(吃AP)  活动(剩余AP全灌+加成台账)  战术大赛  邮件
+    # 每日领奖(必须最后, 且大额扫荡后立跑防 server 3AM 重置吞箱)
     # 活动再跑一轮(消化 mail/任务回灌的新AP, AP<20 自动秒过)。
     "daily_routine",
     "bounty",
@@ -160,7 +160,7 @@ def _box_iou_n(a, b) -> float:
     ua = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter
     return inter / ua if ua > 0 else 0.0
 
-# ── Pipeline state ─────────────────────────────────────────────────────
+#  Pipeline state
 _PIPELINE_LOCK = threading.Lock()
 _PIPELINE = None          # brain.pipeline.DailyPipeline instance
 _PIPELINE_THREAD = None   # background worker thread
@@ -171,7 +171,7 @@ _DISPLAY_SYNC_HZ = 240.0
 _TIMER_RES_ENABLED = False
 _PIPELINE_RUN_META: Dict[str, Any] = {}
 
-# ── Daily scheduler ────────────────────────────────────────────────────
+#  Daily scheduler
 # Background thread that, when enabled in the active profile, auto-starts
 # the pipeline at `reset_time` (HH:MM, local) and again every
 # `interval_hours`. Manual POST /api/v1/start always wins — scheduler
@@ -289,7 +289,7 @@ def _default_profile_settings() -> Dict[str, Any]:
         # max-level) only dispatches a room when one of these students sits in
         # it. Empty list = spend leftover tickets on any room (fallback).
         "schedule_target_students": [],
-        # ── Extended profile config (schema-only; skills consume incrementally) ──
+        #  Extended profile config (schema-only; skills consume incrementally)
         # Daily scheduler (opt-in). When enabled, server auto-fires pipeline
         # at `reset_time` (HH:MM, local) and re-fires every `interval_hours`.
         "scheduler": {
@@ -610,9 +610,9 @@ def _parent_watchdog() -> None:
         pid = int(pid_str)
     except Exception:
         pid = 0
-    
+
     print(f"DEBUG: Watchdog init. Parent PID: {pid}", flush=True)
-    
+
     if pid <= 0:
         return
 
@@ -640,8 +640,11 @@ def _parent_watchdog() -> None:
 
 app = FastAPI()
 
+from routing_v2.app.api import router as v2_router
+app.include_router(v2_router)
 
-# ── Daily scheduler worker ────────────────────────────────────────────
+
+#  Daily scheduler worker
 def _compute_next_fire(now: float, reset_hhmm: str, interval_hours: int) -> float:
     """Next fire time: aligned to today's `reset_hhmm`, rolled by `interval_hours`."""
     import datetime as _dt
@@ -737,7 +740,7 @@ except Exception as e:
     print(f"DEBUG: Watchdog start failed: {e}", flush=True)
 
 
-# ── Pipeline control ──────────────────────────────────────────────────
+#  Pipeline control
 
 def _start_pipeline(*, payload: Dict[str, Any]) -> None:
     """Start the DailyPipeline in a background thread."""
@@ -927,7 +930,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
         _log_pipeline(f"Pipeline worker started. window='{window_title}' hwnd={hwnd} render={render_hwnd} sleep={step_sleep} dry_run={dry_run}")
 
-        # ── Clean-flywheel recorder (user rule 2026-06-09: 每次启动 bot 实跑都
+        #  Clean-flywheel recorder (user rule 2026-06-09: 每次启动 bot 实跑都
         # 录干净帧当迭代素材). ADB screencap runs INSIDE Android — the Win32
         # overlay doesn't exist there, so frames are guaranteed overlay-free
         # (DXcam/trajectory frames burn the boxes in). Each capture is its own
@@ -1046,7 +1049,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _log_pipeline(f"DXcam unavailable ({e}), falling back to ADB/BitBlt")
             _dxcam_camera = None
 
-        # ── scrcpy 视频流 feed (2026-07-15, combat v7 地基迁入日常) ──
+        #  scrcpy 视频流 feed (2026-07-15, combat v7 地基迁入日常)
         # Android 内部 H.264 流: 帧龄 0.02s / 不怕遮挡最小化 / 天然无
         # overlay 烧录。高频线程首选帧源, DXcam 降级为 fallback。
         # 1440p 帧: 只喂 YOLO(检出与 4K 帧一致已实测), digit-OCR 场景
@@ -1067,7 +1070,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _log_pipeline(f"scrcpy feed unavailable ({e})  DXcam fallback")
             _scrcpy_feed = None
 
-        # ── High-FPS YOLO detection thread (battle-grade) ──
+        #  High-FPS YOLO detection thread (battle-grade)
         # Owns DXcam exclusively (not thread-safe for concurrent grab).
         # Runs YOLO at ~30 FPS, feeds overlay with ByteTrack-tracked boxes.
         # Shares latest YOLO results AND latest frame with pipeline tick.
@@ -1468,14 +1471,14 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 globals()["_STEP_PENDING"] = None
                 _PIPELINE_STATUS["step_pending"] = None
 
-            # 3b. JIT 落点复验(2026-07-28 幽灵点击根治, 一处集中修) ──
+            # 3b. JIT 落点复验(2026-07-28 幽灵点击根治, 一处集中修)
             # 决策帧  落 tap 之间隔着 稳定门/hold(≤4s) + step 门人审(1.5~40s)
             # + exec(32-800ms), 三段叠加后"决策时看到的目标"未必还在屏上。
             # 一天里在 4 个 skill 上各修过一次同形(schedule 報告確認/cafe 領取/
             # arena claim/club 簽到)才被用户点破是同一个病: after-ack 只管
             # "同目标别连发", 不管"发出去时目标还在不在"。
             # 规则: 距决策 >0.30s 的 click, 若决策帧上落点有 cls 锚(半径 0.06
-            # 内/含住落点), 就重抓一帧跑 YOLO 确认同名 cls 仍支撑落点; 消失 
+            # 内/含住落点), 就重抓一帧跑 YOLO 确认同名 cls 仍支撑落点; 消失
             # 丢弃这一发 + 置 action_suppressed 让 skill 下一 tick 重算。
             # 盲拍(决策帧上落点本就无 cls, 如"点击继续"空点)无从复验, 放行 —
             #   否则合法空点会被永久丢弃死循环。
@@ -1663,7 +1666,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     _log_pipeline(f"[lat] instrumentation error: {_e}")
 
             # 4. Sleep
-            # ── ZERO-WAIT policy (user 2026-06-14: 不要有wait time — 出现目标就点 /
+            #  ZERO-WAIT policy (user 2026-06-14: 不要有wait time — 出现目标就点 /
             # 没目标pass / 只有"加载中"cls在时才硬wait, wait时长=加载中存在时长). All
             # the per-skill settle/re-scan/render-wait counters are squashed to a
             # fast re-poll; only a 加载中/loading wait keeps its full duration (the
@@ -1856,7 +1859,7 @@ def _log_pipeline(msg: str) -> None:
         pass
 
 
-# ── Utility functions ─────────────────────────────────────────────────
+#  Utility functions
 
 def _tail_text(path: Path, lines: int) -> str:
     if not path.exists():
@@ -1881,7 +1884,7 @@ def _write_state(name: str, state: Dict[str, Any]) -> None:
         pass
 
 
-# ── Core routes ───────────────────────────────────────────────────────
+#  Core routes
 
 @app.post("/api/v1/shutdown")
 def shutdown_server() -> Dict[str, str]:
@@ -1898,7 +1901,7 @@ def shutdown_server() -> Dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
-    return "<html><head><meta http-equiv='refresh' content='0; url=/dashboard.html'></head><body></body></html>"
+    return "<html><head><meta http-equiv='refresh' content='0; url=/v2/'></head><body></body></html>"
 
 
 @app.get("/dashboard.html")
@@ -1944,7 +1947,7 @@ def status() -> Dict[str, Any]:
     }
 
 
-# ── Capture path helpers ──────────────────────────────────────────────
+#  Capture path helpers
 
 def _safe_capture_path(rel: str) -> Path:
     rel = (rel or "").replace("\\", "/").lstrip("/")
@@ -1958,7 +1961,7 @@ def _safe_capture_path(rel: str) -> Path:
     return p
 
 
-# ── Config / Favorites ────────────────────────────────────────────────
+#  Config / Favorites
 
 @app.get("/api/v1/config")
 def get_app_config() -> Dict[str, Any]:
@@ -2024,7 +2027,7 @@ def set_favorites(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"status": "ok", "active_profile": active_profile, "target_favorites": profiles[active_profile].get("target_favorites", [])}
 
 
-# ── Characters ────────────────────────────────────────────────────────
+#  Characters
 
 @app.get("/api/v1/characters/avatars")
 def list_character_avatars() -> Dict[str, Any]:
@@ -2034,7 +2037,7 @@ def list_character_avatars() -> Dict[str, Any]:
     return {"avatars": avatars}
 
 
-# ── Captures ──────────────────────────────────────────────────────────
+#  Captures
 
 @app.get("/api/v1/captures/sessions")
 def list_sessions() -> Dict[str, Any]:
@@ -2073,7 +2076,7 @@ def get_image(path: str = Query(...)) -> FileResponse:
     return FileResponse(str(p))
 
 
-# ── Annotations ───────────────────────────────────────────────────────
+#  Annotations
 
 def _labels_path_for_image(rel: str) -> Path:
     rel = rel.replace("\\", "/").lstrip("/")
@@ -2194,7 +2197,7 @@ def next_unlabeled(
     return {"session": session, "filename": None, "image": None}
 
 
-# ── Schedule Roster Region Tuner ────────────────────────────────────────
+#  Schedule Roster Region Tuner
 # Lets the user visually tune the avatar-cell grid used by ScheduleSkill when
 # scanning the 全體課程表 roster popup for favorite characters. Source config
 # file: data/schedule_avatar_regions.json (loaded by ScheduleSkill).
@@ -2373,7 +2376,7 @@ def roster_image(jpg: str = Query(...)) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=3600"})
 
 
-# ── Dataset & Label Editor APIs ──────────────────────────────────────────
+#  Dataset & Label Editor APIs
 
 def _safe_dataset_path(name: str) -> Path:
     """Resolve dataset name to filesystem dir.
@@ -2400,7 +2403,7 @@ def _safe_dataset_path(name: str) -> Path:
     return p
 
 
-# ── Universal class registry helpers ──────────────────────────────────────
+#  Universal class registry helpers
 
 # master 读-改-写全路径互斥(2026-07-11 审计: merge 分钟级窗口内并发 add_class/
 # 懒迁移的 append 会被回滚 = idx 移位铁律违规)。RLock: 迁移内部会调 append。
@@ -2596,7 +2599,7 @@ def _current_generation() -> Dict[str, Any]:
 @app.get("/api/v1/datasets")
 def list_datasets() -> Dict[str, Any]:
     datasets = []
-    # ── raw_images recordings + val pools ──
+    #  raw_images recordings + val pools
     # Naming convention:
     #   run_<timestamp>/    training data (kind="raw")
     #   _val_<purpose>/     dedicated validation pool (kind="val")
@@ -2640,7 +2643,7 @@ def list_datasets() -> Dict[str, Any]:
             "image_count": jpg_count,
             "kind": kind,
         })
-    # ── trajectory 退役 (2026-06-05) ──────────────────────────────────────
+    #  trajectory 退役 (2026-06-05)
     # pipeline 实战 tick 帧 (data/trajectories/) 有 overlay 烧录风险: 跑 pipeline
     # 时 YoloOverlay 透明置顶, DXcam 抓的是合成画面  检测框烧进像素 = 训练垃圾
     # (2026-05-28 删过 11 个烧录 run)。故不再进 label 队列。飞轮采集改用
@@ -2757,7 +2760,7 @@ def add_dataset_class(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "id": idx}
 
 
-# ── Class registry management: stats / rename / merge ─────────────────────
+#  Class registry management: stats / rename / merge
 # 铁律: master 索引一经分配**绝不移位** — 部署模型 idx、build 脚本 REMAP、头像段
 # 143-394、battle 段 128-136/412/476-479 的路由全按 idx 走。合并 = 全库 label 行
 # srcdst 重写 + src 行墓碑化(_dead 前缀占位); 改名 = 原位改行。绝不删行/挪行
@@ -3066,7 +3069,7 @@ def classes_merge(payload: Dict[str, Any]) -> Dict[str, Any]:
             "failed": failed, "backup": str(backup), "code_refs": refs}
 
 
-# ── 凹轴: 总力战轴视频素材管线 (下载  抽帧  battle 预标  轴表打点) ────────
+#  凹轴: 总力战轴视频素材管线 (下载  抽帧  battle 预标  轴表打点)
 
 AXIS_VIDEO_DIR = REPO_ROOT / "data" / "axis_videos"
 AXIS_SHEET_DIR = REPO_ROOT / "data" / "axis_sheets"
@@ -3586,7 +3589,7 @@ def dataset_florence_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": str(e), "suggestions": [], "count": 0, "labels_used": labels}
 
 
-# ── UI YOLO model-assisted suggestions ─────────────────────────────────
+#  UI YOLO model-assisted suggestions
 # Unlike florence_suggest (open-vocabulary, fuzzy), this runs the ACTIVE ui
 # detector (model_registry ui.active) so suggestions come back already tagged
 # with the exact trained cls_name. Used by the annotation UI to PRE-FILL boxes
@@ -3776,7 +3779,7 @@ def dataset_yolo_models() -> Dict[str, Any]:
     return {"models": out}
 
 
-# ── OCR API ───────────────────────────────────────────────────────────
+#  OCR API
 
 _OCR_ENGINE = None
 _OCR_LOCK = threading.Lock()
@@ -3927,7 +3930,7 @@ def dataset_ocr_batch(payload: Dict[str, Any]):
             "total_texts": total_texts}
 
 
-# ── Screen Capture APIs (DXcam) ──────────────────────────────────────
+#  Screen Capture APIs (DXcam)
 
 def _capture_worker(dataset_name: str, interval: float, window_title: str):
     """Capture game screen via DXcam (Desktop Duplication API).
@@ -4058,7 +4061,7 @@ def capture_status_api() -> Dict[str, Any]:
     return {"status": _CAPTURE_STATUS}
 
 
-# ── Single-step approval ───────────────────────────────────────────────
+#  Single-step approval
 @app.get("/api/v1/step/pending")
 def step_pending_api() -> Dict[str, Any]:
     """Current pending action awaiting approval (None if not paused)."""
@@ -4073,7 +4076,7 @@ def step_go_api() -> Dict[str, Any]:
     return {"ok": True, "approved": approved}
 
 
-# ── Synth Template Editor ────────────────────────────────────────────
+#  Synth Template Editor
 # Lets the user define synthetic data composition templates per UI context.
 # Each context (schedule_popup, momotalk, student_list, battle_squad,
 # tactical_competition, cafe_invite, ...) gets its own JSON template with:
@@ -4113,7 +4116,7 @@ def _synth_default_template(ctx: str) -> Dict[str, Any]:
             "brightness_jitter": [0.92, 1.08],
         },
         "synth_count": 200,
-        # ── UI-model synth (2026-05-29) ──
+        #  UI-model synth (2026-05-29)
         # target: "avatar" (default — slots labelled with student names for the
         # avatar detector) OR "ui" (slots provide BACKGROUND diversity only;
         # the ui_stamps below are the labelled boxes, with ui-cls indices).
@@ -4634,12 +4637,12 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             cropped = ref
         else:
             cropped = ref[ry1:ry2, rx1:rx2]
-        # ── Read aug config (apply AFTER resize for visibility at slot pixel res) ──
+        #  Read aug config (apply AFTER resize for visibility at slot pixel res)
         ui_overlay_prob = float(aug.get("ui_overlay_prob", 0.5))
         ui_comp = aug.get("ui_components") or {}
         border_prob = float(aug.get("border_ablation_prob", 0.4))
         aug_stats["total_slots"] += 1
-        # ── Unified paste logic: ALWAYS preserve ref aspect ratio (no stretch).
+        #  Unified paste logic: ALWAYS preserve ref aspect ratio (no stretch).
         # Compute the slot's pixel AABB (for rect: x1..x2,y1..y2; for quad: poly AABB).
         # Fit ref inside AABB ("contain"), centered. For quad, apply polygon mask after
         # so corners outside the quad show background, not stretched ref pixels.
@@ -4680,8 +4683,8 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             resized = _cv2.resize(cropped, (target_w, target_h), interpolation=_cv2.INTER_AREA)
         except Exception:
             continue
-        # ── Apply aug AFTER resize — effects are now sized for slot pixels,
-        # so Lv text / star / weapon / heart are visible at game resolution ──
+        #  Apply aug AFTER resize — effects are now sized for slot pixels,
+        # so Lv text / star / weapon / heart are visible at game resolution
         aug_pos = (tpl.get("ref_transform") or {}).get("aug_positions") or {}
         if _random.random() < ui_overlay_prob:
             resized = _synth_apply_ui_overlay(resized.copy(), ui_comp, aug_pos)
@@ -4738,9 +4741,9 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             composite[aabb_y1:aabb_y2, aabb_x1:aabb_x2] = patch
         # YOLO label box = visible ref region (clip rect)
         px1, py1, px2, py2 = clip_x1, clip_y1, clip_x2, clip_y2
-        # ── end paste, fall through to label & overlay drawing ─────────
+        #  end paste, fall through to label & overlay drawing
         labels.append({"name": chosen, "xyxy": [px1, py1, px2, py2]})
-        # ── Overlay: yellow = the slot's TRUE shape (quad polygon or rect).
+        #  Overlay: yellow = the slot's TRUE shape (quad polygon or rect).
         # This matches what the user configured in the editor.  We do NOT draw
         # the inner ref AABB rect anymore (was confusing — looked like the slot
         # was axis-aligned even when slot is a parallelogram).
@@ -4776,7 +4779,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# ── Game launch ───────────────────────────────────────────────────────
+#  Game launch
 
 def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
     """Launch game exe if not already running. Returns a short status message."""
@@ -4812,7 +4815,7 @@ def _maybe_launch_game(exe_path: str, wait_seconds: float = 5.0) -> str:
     return "launched"
 
 
-# ── Agent Start / Stop ────────────────────────────────────────────────
+#  Agent Start / Stop
 
 @app.post("/api/v1/start")
 def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -4886,7 +4889,7 @@ def api_stop() -> Dict[str, Any]:
     return status()
 
 
-# ── Logs ──────────────────────────────────────────────────────────────
+#  Logs
 
 @app.get("/api/v1/logs")
 def api_logs(

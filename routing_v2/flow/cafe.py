@@ -60,6 +60,40 @@ class CafeFlow(ExitMixin, Flow):
                           pat_ts=0.0, invite_scrolls=0)
 
     # 观测: 每帧都跑，跟当前相位无关
+    def _unlocked_move(self, obs: Observation):
+        """换厅钮与 `房间区域未解锁` 重叠时丢掉, 不当 to1/to2.
+
+        08-15 锁态「前往第2」被标成 `移动至一号店` 0.69-0.72, 锁框
+        `房间区域未解锁` 0.86 @(0.103, 0.148), 钮心 @(0.126, 0.143).
+        用这对钮校正 floor 会把还锁着的 2F 写成 2.
+        `_in_cafe` 仍可用锁钮当「人在咖啡厅」.
+        """
+        to2 = obs.find(V.CAFE_MOVE_2F, 0.45)
+        to1 = obs.find(V.CAFE_MOVE_1F, 0.45)
+        locks = obs.all(V.ROOM_LOCKED, 0.40)
+
+        def _locked(btn):
+            if btn is None:
+                return False
+            for lk in locks:
+                ix = min(btn.x2, lk.x2) - max(btn.x1, lk.x1)
+                iy = min(btn.y2, lk.y2) - max(btn.y1, lk.y1)
+                overlaps = ix > 0.0 and iy > 0.0
+                center_inside = (btn.contains(lk.cx, lk.cy)
+                                 or lk.contains(btn.cx, btn.cy))
+                centers_share_extent = (
+                    abs(lk.cx - btn.cx) <= (lk.w + btn.w) / 2.0
+                    and abs(lk.cy - btn.cy) <= (lk.h + btn.h) / 2.0)
+                if center_inside or (overlaps and centers_share_extent):
+                    return True
+            return False
+
+        if _locked(to2):
+            to2 = None
+        if _locked(to1):
+            to1 = None
+        return to2, to1
+
     def observe(self, obs: Observation, st: StateView) -> None:
         """从**屏上 cls** 认当前在几号厅，别信自己维护的计数器。
 
@@ -69,8 +103,7 @@ class CafeFlow(ExitMixin, Flow):
            `移动至2號店` 在场 = 我在 **1 号厅**（按钮指向别处）
            `移动至一號店` 在场 = 我在 **2 号厅**
         """
-        to2 = obs.find(V.CAFE_MOVE_2F, 0.45)
-        to1 = obs.find(V.CAFE_MOVE_1F, 0.45)
+        to2, to1 = self._unlocked_move(obs)
         real = 1 if (to2 is not None and to1 is None) else (
             2 if (to1 is not None and to2 is None) else None)
         if real is not None and real != self.state.get("floor"):
@@ -165,9 +198,9 @@ class CafeFlow(ExitMixin, Flow):
         exp = self.state.get("expect_floor")
         if exp is None:
             return None
-        to2 = obs.has(V.CAFE_MOVE_2F, 0.45)
-        to1 = obs.has(V.CAFE_MOVE_1F, 0.45)
-        cur = 1 if (to2 and not to1) else (2 if (to1 and not to2) else None)
+        to2, to1 = self._unlocked_move(obs)
+        cur = 1 if (to2 is not None and to1 is None) else (
+            2 if (to1 is not None and to2 is None) else None)
         if cur == exp:
             self.state.pop("expect_floor", None)
             self.state.pop("switch_bounced", None)   # 重试成了就不算账
@@ -200,7 +233,11 @@ class CafeFlow(ExitMixin, Flow):
         fl = self.state.get("floor", 1)
         if (not self.cfg.get("invite_targets")
                 or self.cfg.get("skip_invite", False)):
-            return self.goto_and_wait(nxt, "没配邀请目标")
+            if not self.state.get("invite_disabled"):
+                self.state["invite_disabled"] = True
+                self.note_lines.append(
+                    "邀请按当前账号配置关闭，未消费邀请券，也不会滑动名单")
+            return self.goto_and_wait(nxt, "当前账号没有可靠邀请目标")
         # **放弃过就别再开卷**（用户 2026-08-13:「找人找两下没找到就直接关了
         #    邀请卷然后又打开继续抽风」）。原来放弃分支只是 tap 叉叉关面板，
         #    没留任何标记 -> 下一帧 `_invite` 从头跑、`panel` 已经 False
@@ -473,11 +510,12 @@ class CafeFlow(ExitMixin, Flow):
         if self.state.get("switch_taps", 0) >= 2:
             return self.goto_and_wait(
                 "exit", f"去 {dst} 号厅点了 2 次都没反应（多半锁着）- 收工")
-        btn = obs.find(V.CAFE_MOVE_2F if dst == 2 else V.CAFE_MOVE_1F, 0.45)
+        to2, to1 = self._unlocked_move(obs)
+        btn = to2 if dst == 2 else to1
         if btn is None:
             if self.phase_ticks > 30:
-                return self.goto_and_wait("exit", f"找不到去 {dst} 号厅的按钮")
-            return wait(f"找去 {dst} 号厅的按钮")
+                return self.goto_and_wait("exit", f"找不到去 {dst} 号厅的未锁按钮")
+            return wait(f"找去 {dst} 号厅的未锁按钮")
 
         def _moved(d=dst):
             self.bump("switch_taps")
@@ -502,7 +540,8 @@ class CafeFlow(ExitMixin, Flow):
         if dots and self.state["backs"] < 4:
             # 黄点**挂在移动按钮上** = 对面厅还有活（气泡会再生），跟着走；
             #    挂在别处（礼物/家具等）= 本 flow 消不掉，别为它来回跑。
-            mv = obs.find([V.CAFE_MOVE_2F, V.CAFE_MOVE_1F], 0.45)
+            to2, to1 = self._unlocked_move(obs)
+            mv = to2 or to1
             on_move = mv is not None and any(
                 abs(d.cx - mv.cx) < 0.10 and abs(d.cy - mv.cy) < 0.08
                 for d in dots)
@@ -524,6 +563,8 @@ class CafeFlow(ExitMixin, Flow):
         # **黄点是竣工的权威判据**（用户 2026-08-13:「判断有没有活没干的
         #    可以靠黄点来判断」）。有黄点 = 还有活，不管我自己以为干完了没有。
         det = f"摸头 {pats} 次，邀请 {inv} 次"
+        if self.state.get("invite_disabled"):
+            det += "，邀请按账号配置关闭"
         det += "，收益已领" if self.state.get("claimed") else \
                f"，**收益没领到**（{self.state.get('earn_why', '原因不明')}）"
         # 切厅弹回过 = 有一个厅整个没做 -- 就算此刻黄点检不出也不许报 CLEAN

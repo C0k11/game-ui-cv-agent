@@ -124,7 +124,7 @@ NEGATIVE_CONTEXTS = [
 ]
 
 
-# ── unicode-safe image IO ───────────────────────────────────────────────
+#  unicode-safe image IO
 
 def imread_u(p: Path) -> Optional[np.ndarray]:
     try:
@@ -149,7 +149,7 @@ def imwrite_u(p: Path, img: np.ndarray) -> bool:
         return False
 
 
-# ── class registry helpers ──────────────────────────────────────────────
+#  class registry helpers
 
 def load_master() -> List[str]:
     if not MASTER_FILE.exists():
@@ -339,7 +339,7 @@ def load_character_names() -> List[str]:
             if not (lo <= i < hi)]
 
 
-# ── manual label extraction ─────────────────────────────────────────────
+#  manual label extraction
 
 def _parse_label_file(
     txt: Path,
@@ -422,7 +422,7 @@ def extract_manual_samples(
     return samples
 
 
-# ── synthetic compositing ───────────────────────────────────────────────
+#  synthetic compositing
 
 def find_negative_frames(limit: int) -> List[Path]:
     """Auto-harvest no-avatar frames from trajectories.
@@ -838,8 +838,8 @@ def build_template_driven_synth(
         if not slots_norm:
             print(f"[tpl-synth] {ctx_name}: no slots configured, skipping")
             continue
-        # ── 底图来源: bg_runs(多张真实帧轮换当背景, 根治单底图背景过拟合)优先;
-        #    否则回落 sample_image(单底图, 兼容其他 context 模板)。──
+        #  底图来源: bg_runs(多张真实帧轮换当背景, 根治单底图背景过拟合)优先;
+        #    否则回落 sample_image(单底图, 兼容其他 context 模板)。
         bg_paths = []
         for rn in (template.get("bg_runs") or []):
             rd = RAW_IMAGES / rn
@@ -881,7 +881,7 @@ def build_template_driven_synth(
         use_for = template.get("use_for", "train")  # train | val | both
         n_emitted = 0
 
-        # ── Round-robin char picker (guarantees every char appears in this
+        #  Round-robin char picker (guarantees every char appears in this
         # context before any char repeats): refill a shuffled pool when empty.
         # This is per-context, so each context sees every char ≈ N times where
         # N = (target_count × slots) / len(chars).  For schedule_popup (17 slots
@@ -944,7 +944,7 @@ def build_template_driven_synth(
                 # below — at slot pixel resolution so effects are visible at
                 # the scale model actually sees during inference.
 
-                # ── Compute slot AABB (rect: x1..x2; quad: polygon AABB) ──
+                #  Compute slot AABB (rect: x1..x2; quad: polygon AABB)
                 quad = slot.get("quad")
                 quad_px = None
                 if quad and len(quad) == 4:
@@ -1017,7 +1017,7 @@ def build_template_driven_synth(
                         desat *= (dark + (bright - dark) * inside)[..., None]
                     resized = np.clip(desat, 0, 255).astype(np.uint8)
 
-                # ── Apply aug AFTER resize at slot pixel resolution ──
+                #  Apply aug AFTER resize at slot pixel resolution
                 aug_positions = rt.get("aug_positions") or {}
                 if random.random() < ui_overlay_prob:
                     resized = _apply_ui_overlay_per_template(resized, ui_comp, aug_positions)
@@ -1285,7 +1285,7 @@ def build_synthetic_samples(
                 else:
                     ref = refs[char_name]
 
-                # ── Gemini Path B: adversarial augmentation ──
+                #  Gemini Path B: adversarial augmentation
                 # Apply UI overlay (Lv text / star / weapon / heart / dim)
                 # + border ablation BEFORE paste, so model sees realistic
                 # noise on top of the ref.
@@ -1326,7 +1326,7 @@ def build_synthetic_samples(
     return out
 
 
-# ── main ────────────────────────────────────────────────────────────────
+#  main
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -1362,7 +1362,7 @@ def main() -> int:
 
     char_set = set(fused_names)
 
-    # ── 1. Manual labels (train) + dedicated val pool ──
+    #  1. Manual labels (train) + dedicated val pool
     manual_samples = extract_manual_samples(master, char_set, fused_idx_map)
     print(f"[manual] {len(manual_samples)} frames with character bboxes ( train)")
     total_manual_boxes = sum(len(b) for _, b in manual_samples)
@@ -1376,7 +1376,7 @@ def main() -> int:
         print(f"[val_pool] none found at _val_fused/frames/ "
               f"— falling back to stratified split from train")
 
-    # ── 2. Synthetic samples ──
+    #  2. Synthetic samples
     synth_samples_data: List[Tuple[np.ndarray, List[str], str]] = []
     if not args.skip_synth and len(fused_names) > 0:
         # Multi-source ref loading: combines CN-named harvested mini-crops,
@@ -1399,7 +1399,7 @@ def main() -> int:
 
         available_chars = [c for c in fused_names if c in ref_bundle]
 
-        # ── Synth path selection ──
+        #  Synth path selection
         # If dashboard templates exist at data/synth_templates/*.json, use the
         # user-configured template-driven pipeline (preferred).  Otherwise fall
         # back to legacy static_ui-detect + cross-context manual-frame swap.
@@ -1454,14 +1454,14 @@ def main() -> int:
             print(f"[cross-ctx] generated {len(cross_ctx_samples)} additional composites")
             synth_samples_data.extend(cross_ctx_samples)
 
-    # ── 2b. Auto-harvested negative frames (no-avatar contexts) ──
+    #  2b. Auto-harvested negative frames (no-avatar contexts)
     negative_frames: List[Path] = []
     if not args.skip_negatives:
         negative_frames = find_negative_frames(args.negative_target)
         print(f"[neg] auto-harvested {len(negative_frames)} negative frames "
               f"from trajectories ({len(NEGATIVE_CONTEXTS)} contexts)")
 
-    # ── 3. Clean output, emit ──
+    #  3. Clean output, emit
     if OUT_ROOT.exists():
         shutil.rmtree(OUT_ROOT)
     for sub in ("images/train", "images/val", "labels/train", "labels/val"):
@@ -1602,7 +1602,7 @@ def main() -> int:
     if n_synth_val:
         print(f"[emit] val + {n_synth_val} synth-val frames ({n_val_boxes_synth} boxes)")
 
-    # ── 4. data.yaml ──
+    #  4. data.yaml
     yaml_lines = [
         f"path: {OUT_ROOT.as_posix()}",
         "train: images/train",

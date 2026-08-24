@@ -10,7 +10,7 @@ This is the FIRST skill driven end-to-end by the screen semantizer
 clicking — UNKNOWN screen  wait/recover, never blind-click (用户铁律:
 识别上了再决定, 不抢跑不乱点; 图稳不图快).
 
-Ordering (user 2026-06-11): hall block = 悬赏通缉  学院交流会  批量掃蕩 
+Ordering (user 2026-06-11): hall block = 悬赏通缉  学院交流会  批量掃蕩
 战术大赛 — ticket activities first (their own AP+ticket spend is bounded),
 batch sweep then eats whatever AP remains, arena (no AP) last.
 
@@ -27,7 +27,7 @@ dialog       sweep_batch_dialog  preset = first tab (user's saved presets)
 confirm      掃蕩內容 dialog (確認+取消):  pyroxene-in-body gate  確認.
 running      skip键 overlay  click skip.
 results      result_page (確認+X, no 取消)  確認 (loops over result pages).
-close        back at sweep_batch_dialog (steppers grey = swept)  X 
+close        back at sweep_batch_dialog (steppers grey = swept)  X
              stage_select  回大厅  lobby  done.
 
 Money: AP only. The confirm gate cancels on any pyroxene in the dialog body.
@@ -108,11 +108,11 @@ class BatchSweepSkill(BaseSkill):
         return (self._phase_ticks > _PHASE_MAX
                 and self.since("phase") > _PHASE_MAX_SEC)
 
-    # ── semantizer shorthand ────────────────────────────────────────────
+    #  semantizer shorthand
     def _screen(self, screen: ScreenState):
         return classify_screen(screen.yolo_boxes)
 
-    # ── tick ────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -146,7 +146,7 @@ class BatchSweepSkill(BaseSkill):
             return action_wait(300, "unknown state")
         return handler(screen)
 
-    # ── states ──────────────────────────────────────────────────────────
+    #  states
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_ticks += 1
         sid, _, _ = self._screen(screen)

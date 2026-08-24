@@ -78,7 +78,7 @@ class Observation:
     # 每 tick 的余额台账（read.py 填；可能为 None = 这帧没读/读不出）
     balances: dict = field(default_factory=dict)
 
-    # ── 查询 ────────────────────────────────────────────────────────────
+    #  查询
     def all(self, names: Names, conf: float = 0.45, *,
             region: Optional[Rect] = None,
             ymin: float = 0.0, ymax: float = 1.0,
@@ -178,7 +178,7 @@ def annotate(obs: Observation, target: Optional[Box] = None,
     """画锁定框的调试图。逐帧门控时**必须看这个**，不是自己截图
     （用户 2026-08-08: 「而且你也不看 yolo 锁定画面」）。
 
-    ⛔ 类名必须用 PIL 画：`cv2.putText` **不支持中文**，画出来全是 `?????`。
+    禁 类名必须用 PIL 画：`cv2.putText` **不支持中文**，画出来全是 `?????`。
        这个函数的 docstring 从写下起就说"必须看这个"，而它画出来的图
        **每一个类名都不可读** —— 等于这份调试图一直是废的。
        memory 里同一个坑踩过一次（atlas 出图中文变问号，用户当场指出

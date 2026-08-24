@@ -89,7 +89,7 @@ def main():
     report = defaultdict(list)
     changed = set()
 
-    # ── 1. 478 残留  480 (在主教位置邻域才改) ──
+    #  1. 478 残留  480 (在主教位置邻域才改)
     for n, bs in frames.items():
         for b in bs:
             if b[0] == SETH:
@@ -100,8 +100,8 @@ def main():
                     report["seth_manual"].append((n, round(b[1], 3), round(b[2], 3)))
                 changed.add(n)
 
-    # ── 2. 主教: 全帧模板搜索 (boss 会动/相机移动, 最近邻传播 p50 仅 0.21
-    #    已证伪  matchTemplate 半分辨率全图搜, 多模板取最大响应) ──
+    #  2. 主教: 全帧模板搜索 (boss 会动/相机移动, 最近邻传播 p50 仅 0.21
+    #    已证伪  matchTemplate 半分辨率全图搜, 多模板取最大响应)
     labeled_b = sorted(n for n in combat if any(b[0] == BISHOP for b in frames[n]))
     tpl_b = [(n, next(b for b in frames[n] if b[0] == BISHOP)) for n in labeled_b]
     SCALE = 0.5
@@ -156,7 +156,7 @@ def main():
             else:
                 report["bishop_skip"].append((n, s))
 
-    # ── 3. HUD 补标 (位置固定, 中位框 + NCC) ──
+    #  3. HUD 补标 (位置固定, 中位框 + NCC)
     for cls, name in ((PAUSE, "暂停"), (AUTO_OFF, "AUTO关")):
         boxes = [b for bs in frames.values() for b in bs if b[0] == cls]
         if not boxes:
@@ -181,8 +181,8 @@ def main():
                     changed.add(n)
                     report[f"hud_{name}_filled"].append(n)
 
-    # ── 3.5 倍速键补标: 缺倍速的战斗帧, 固定位 crop 与 1x/3x 两组模板
-    #    判别写入 (状态类不能盲贴中位框; within 0.93/0.99 cross 0.53 可分) ──
+    #  3.5 倍速键补标: 缺倍速的战斗帧, 固定位 crop 与 1x/3x 两组模板
+    #    判别写入 (状态类不能盲贴中位框; within 0.93/0.99 cross 0.53 可分)
     sp_all = [b for bs in frames.values() for b in bs if b[0] in (X1, X3)]
     if sp_all:
         med_sp = [0] + list(np.median(np.array([b[1:] for b in sp_all]), axis=0))
@@ -212,7 +212,7 @@ def main():
                 else:
                     report["speed_skip"].append((n, s))
 
-    # ── 4. 倍速键 1x/3x 判别: 全部倍速框 crop 与两类模板比 ──
+    #  4. 倍速键 1x/3x 判别: 全部倍速框 crop 与两类模板比
     sp1 = [(n, b) for n, bs in frames.items() for b in bs if b[0] == X1]
     sp3 = [(n, b) for n, bs in frames.items() for b in bs if b[0] == X3]
     all_sp = [b for _, b in sp1 + sp3]
@@ -233,7 +233,7 @@ def main():
                                "within_3x": round(float(within3), 3),
                                "n_1x": len(sp1), "n_3x": len(sp3)}
 
-    # ── 落盘 ──
+    #  落盘
     if APPLY and changed:
         stamp = time.strftime("%Y%m%d_%H%M%S")
         bak = RAW / "_backups" / f"{stamp}_axisfix"
@@ -245,7 +245,7 @@ def main():
             save(imgs[n].with_suffix(".txt"), frames[n])
         print(f"[apply] {len(changed)} 帧已改, 备份  {bak}")
 
-    # ── 报告 ──
+    #  报告
     print(f"pool={POOL.name} 战斗帧={len(combat)}")
     print(f"478残留改480: {report['seth_fixed']} | 位置存疑需手动: {report['seth_manual']}")
     sb = report["bishop_scores"]

@@ -99,7 +99,7 @@ class Machine:
         self._overlay = (_ov_tail[0] if len(_ov_tail) == self.confirm
                          and len(set(_ov_tail)) == 1 else None)
 
-        # ── 打断 ────────────────────────────────────────────────────────
+        #  打断
         if m.interrupt in _INSTANT_INTERRUPTS:
             new_int = m.interrupt
         else:
@@ -117,7 +117,7 @@ class Machine:
             new_int = None
         self._interrupt = new_int
 
-        # ── 页面：连续 confirm 帧一致才换 ────────────────────────────────
+        #  页面：连续 confirm 帧一致才换
         changed = False
         tail = list(self._recent)[-self.confirm:]
         if len(tail) == self.confirm and len(set(tail)) == 1 and tail[0] != self._page:
@@ -133,15 +133,15 @@ class Machine:
         else:
             self._since_frames += 1
 
-        # ── 抖动检测：3s 内换了 ≥4 次页 = 判据打架，别让 flow 继续动手 ──
+        #  抖动检测：3s 内换了 ≥4 次页 = 判据打架，别让 flow 继续动手
         now = time.time()
         recent_changes = [t for t in self._changes if now - t < 3.0]
         flapping = len(recent_changes) >= 4
         if flapping:
             # 只用来**抑制兜底恢复**（退出/回大厅那类），flow 自己的动作照常 ——
             #   flow 知道自己在干什么，兜底不知道。抖动往往说明某个页面签名漏了
-            #   一个态（08-08 实测: mail 领完后只剩 `领取蓝色`，签名里没有它 
-            #   mail↔unknown 来回抖）。看到这条日志就去补签名，别去调阈值。
+            #   一个态（08-08 实测: mail 领完后只剩 `领取蓝色`，签名里没有它
+            #   mail<->unknown 来回抖）。看到这条日志就去补签名，别去调阈值。
             self._log(f"[state] 抖动: 3s 内页面身份变了 {len(recent_changes)} 次"
                       f" — 兜底恢复暂停（多半是某个页面签名漏了一个状态）")
 

@@ -11,7 +11,7 @@ so they ship with the packaged release.
 | `auto_off_gray.png` | AUTO toggle OFF (gray background) | HSV threshold only |
 | `auto_on_yellow.png` | AUTO toggle ON (yellow background) | HSV threshold only |
 | `quest_cleared_book.png` | "story already read" book marker | **unused** — candidate for template match |
-| `quest_cleared_star.png` | "quest cleared" yellow star badge | **unused** — OCR detects `★` / `★★★` on the same row today |
+| `quest_cleared_star.png` | "quest cleared" yellow star badge | **unused** — OCR detects `` / `` on the same row today |
 
 ## Why the speed/auto PNGs exist even though HSV does the work
 
@@ -28,6 +28,6 @@ If the game ever re-skins the HUD, re-crop + re-fit the thresholds here.
 ## Why `quest_cleared_star.png` isn't wired in yet
 
 Trajectory inspection (run_20260424_024445 tick 95) shows OCR already
-reads `★` and `★★★` boxes at `cx≈0.55` next to cleared node numbers,
+reads `` and `` boxes at `cx≈0.55` next to cleared node numbers,
 so text-based detection covers the cleared-stage case. Template match is
 a belt-and-suspenders fallback if OCR starts missing the unicode star.

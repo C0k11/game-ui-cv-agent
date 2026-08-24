@@ -23,6 +23,13 @@ from routing_v2.flow.battle import BattleMixin, FormationMixin
 from routing_v2.percept import read as R
 from routing_v2.state import vocab as V
 
+# 卡片堆叠最多翻几次。主线只有 2 张, 留 4 次余量给以后加部。
+_MAX_STACK_ROT = 4
+# 剧情卡标签在卡底, 立绘/缩略图在卡身中上部。落点仍**挂在检出框上**
+#   (JIT 复验/require 锚点都还在), 只是从标签往上推到卡身。
+#   实测: 标签 cy=0.735, 点 cy=0.450 进得去(v19_046)。
+_STORY_CARD_DY = -0.28
+
 _SOURCE_CLS = {
     "主线剧情": V.STORY_MAIN,
     "短篇剧情": V.STORY_SHORT,
@@ -38,7 +45,8 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     entry_page = "task_hall"
 
     def setup(self) -> None:
-        self.state.update(nodes=0, src_i=0, ap0=None, scrolls=0)
+        self.state.update(nodes=0, src_i=0, ap0=None, scrolls=0, map_scrolls=0,
+                          fac_swipes=0, rot=0)
         self.want_team = 1
         # 「下一章節」框点 觀看 还是 中斷 —— 这条 flow 是来看剧情的，
         #   要连着推。**这个意图属于本 flow，不能写进全局 ctx.bag**:
@@ -46,20 +54,38 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         #   整轮每条 flow 的剧情逃生语义都被反转成「觀看」，而且没有清除路径。
         #   改成类属性，由 runner 按**当前**flow 读（见 runner 主循环）。
 
-    # ── 进场 ────────────────────────────────────────────────────────────
+    #  进场
     def on_lobby(self, obs, st):
-        return nav.enter(obs, V.NAV_TASKS, "任务大厅")
+        return nav.lobby_enter(self, obs, V.NAV_TASKS, "任务大厅",
+                               expect=(V.HUB_CAMPAIGN,))
 
     def on_task_hall(self, obs, st):
         t = obs.find(V.HUB_STORY, 0.40)
         if t is not None:
             return tap_box(t, "进入剧情")
+        # 08-20 live: 剧情 tile 全飞轮 0, 黄点在剧情卡右上。点黄点进卡, 不是盲坐标。
+        dots = [b for b in obs.all(V.DOT_YELLOW, 0.40)
+                if b.cx > 0.70 and 0.18 < b.cy < 0.48]
+        if dots and self.pending("story_tile"):
+            d = min(dots, key=lambda b: b.cy)
+            return tap_box(d, f"剧情 tile 0, 点卡上黄点@{d.cx:.3f},{d.cy:.3f}",
+                           dx=0.04, once="story_tile")
         if self.stalled(st, 120):
             return self.finish(Outcome.UNKNOWN, "任务大厅没检出 剧情 tile")
         return wait("等 剧情 tile")
 
-    # ── 剧情大厅：选来源 ────────────────────────────────────────────────
+    #  剧情大厅：选来源
     def on_story_hub(self, obs, st):
+        """剧情 hub。同类剧情卡是**堆叠**的, 只有最前面那张点了才进得去。
+
+        2026-08-21 用户口述 + CC live 实测(飞轮 v19_045/046/047/048):
+          主线剧情是 第1部 / 第2部 两张卡叠着 —— **点后卡只是把它翻到最前面,
+          不进入; 点前卡才进那部剧情。**
+        08-20 那版注释里写的"点 0.44,0.45 只翻部, 页还是 hub"看到的就是这个现象,
+          但当时读成"落点没对准", 于是堆了三层 dx/dy 去猜立绘在哪。
+          按机制走之后那些偏移全删掉了。
+        前卡/后卡怎么分见 `nav.story_cards`(遮挡决定后卡框必然更窄, 不是写死尺寸)。
+        """
         srcs = [s for s in (self.cfg.get("sources") or []) if s in _SOURCE_CLS]
         if not srcs:
             srcs = list(_SOURCE_CLS)
@@ -67,16 +93,40 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         if i >= len(srcs):
             return self._wrap(f"{len(srcs)} 类剧情都扫过了")
         cls = _SOURCE_CLS[srcs[i]]
-        b = obs.find(cls, 0.40)
-        if b is not None:
-            self.log(f"进 [{i+1}/{len(srcs)}] {srcs[i]}")
-            return tap_box(b, f"进 {srcs[i]}")
-        if self.stalled(st, 90):
-            self.state["src_i"] += 1
-            return wait(f"{srcs[i]} 的 cls 没检出  换下一类")
-        return wait(f"等 {srcs[i]} 的 cls")
+        front, backs = nav.story_cards(obs, cls)
+        if front is None:
+            if self.stalled(st, 90):
+                self.state["src_i"] += 1
+                self.state["rot"] = 0
+                return wait(f"{srcs[i]} 的 cls 没检出  换下一类")
+            return wait(f"等 {srcs[i]} 的 cls")
 
-    # ── 大章节图  小章节（用户 2026-08-11 口述的路由规则）──────────────
+        # 带黄点(=还有没看的)那一部要是压在后面, 先把它翻到最前面。
+        #    点后卡不进页, 所以这一步不会误入别的部。
+        dot = nav.story_stack_dot(obs, front)
+        if backs and dot is not None and not nav.story_dot_on_front(front, dot):
+            n = int(self.state.get("rot", 0) or 0)
+            if n >= _MAX_STACK_ROT:
+                self.state["src_i"] += 1
+                self.state["rot"] = 0
+                return wait(f"{srcs[i]} 翻了 {n} 次仍没把带黄点那部转到最前"
+                            f"  换下一类")
+            key = f"rot{i}_{n}"
+            if self.pending(key):
+                def _rotated():
+                    self.state["rot"] = n + 1
+
+                return tap_box(backs[0],
+                               f"{srcs[i]}: 带黄点那部在后面, 点后卡把它翻到最前"
+                               f"(黄点@{dot.cx:.3f} 在前卡右缘 {front.x2:.3f} 之外)",
+                               once=key, post=_rotated)
+            return wait("等卡片翻面")
+
+        self.state["rot"] = 0
+        self.log(f"进 [{i+1}/{len(srcs)}] {srcs[i]}")
+        return tap_box(front, f"进 {srcs[i]}(前卡)", dy=_STORY_CARD_DY)
+
+    #  大章节图  小章节（用户 2026-08-11 口述的路由规则）
     def on_story_chapter_map(self, obs, st):
         """「主线剧情」点进来是**大章节图**，不是节点图。
 
@@ -94,6 +144,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         dots = [b for b in obs.all(V.DOT_YELLOW, 0.40)
                 if b.cx > 0.55 and 0.15 < b.cy < 0.90]
         if dots:
+            self.state["map_scrolls"] = 0
             d = min(dots, key=lambda b: b.cy)       # 最上面那个 = 进度最靠前
             if self.pending("subchap"):
                 # 用 `dx` 而不是 tap_at：落点仍然**挂在检出框上**（JIT 复验、
@@ -112,12 +163,17 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         marks = [b for b in obs.all([V.NEW_MARK, V.NODE_DONE], 0.40) if b.cy < 0.85]
         news = [b for b in marks if b.cls == V.NEW_MARK]
         if not news:
-            if self.stalled(st, 90):
-                self.state["src_i"] += 1
-                self.once_reset("subchap", "bigchap")
-                done = sum(1 for b in marks if b.cls == V.NODE_DONE)
-                return wait(f"章节图上没有 new（{done} 个已完成） 这一类挖完了，换下一类")
-            return wait("等章节图上的 new 角标")
+            # 本屏都是完成：滑一次，下一帧再扫 new。不要干等 90s，也不许整条收工。
+            # 08-20 live 159：new 在已完成 banner 右侧；看不见就沿 banner 轴向右翻。
+            sw = self._map_swipe_for_new(marks)
+            if sw is not None:
+                return sw
+            self.state["src_i"] += 1
+            self.state["map_scrolls"] = 0
+            self.once_reset("subchap", "bigchap")
+            done = sum(1 for b in marks if b.cls == V.NODE_DONE)
+            return wait(f"章节图滑完仍无 new（{done} 个已完成） 换下一类")
+        self.state["map_scrolls"] = 0
         lead = min(news, key=lambda b: b.cx)          # 最左的 new = 最早没做的
         if self.pending("bigchap"):
             self.log("大章节: 角标 %s  取最左的 **new** cx=%.3f"
@@ -127,7 +183,31 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
                            once="bigchap")
         return wait("大章节已点，等右侧小章节面板出黄点")
 
-    # ── 节点图：挖未完成的 ──────────────────────────────────────────────
+    def _map_swipe_for_new(self, marks):
+        """章节图：本帧没有 new，沿已检出的完成/new 轴向右翻一屏。
+
+        几何从角标推，不写死坐标。滑一次就返回，下一 tick 再扫。
+        推不出距离或已经连滑 4 次仍无 new，返回 None 让调用方换源。
+        """
+        n = int(self.state.get("map_scrolls") or 0)
+        if n >= 4:
+            return None
+        bs = [b for b in marks if 0.12 < b.cy < 0.85]
+        if len(bs) < 1:
+            return None
+        right = max(bs, key=lambda b: b.cx)
+        left = min(bs, key=lambda b: b.cx)
+        span = max(0.20, right.cx - left.cx)
+        x0 = min(0.88, right.cx + 0.05)
+        x1 = max(0.14, x0 - span)
+        if x0 - x1 < 0.12:
+            return None
+        ys = sorted(b.cy for b in bs)
+        cy = ys[len(ys) // 2]
+        return swipe(x0, cy, x1, cy, "章节图滑一次找 new",
+                     post=lambda: self.state.update(map_scrolls=n + 1))
+
+    #  节点图：挖未完成的
     def on_story_nodes(self, obs, st):
         self.once_reset("bigchap", "subchap")   # 进到节点图就重置上一层的一次性闸
         # AP 记账（**不是闸**）
@@ -168,31 +248,62 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
                                counter="nodes")
             if any(abs(l.cy - ic.cy) < 0.04 for l in locked):
                 self.log(f"节点 @cy={ic.cy:.3f} 未完成但**入场键没解锁**  跳过这一行")
+        # 08-20 live 156：本章 COMPLETE，剩 ??? 未完成且入场键 0。
+        #    旧逻辑 _wrap 整条挖矿，章节图上已看见的 new 永远走不到。
+        #    这里回章节图，让 map 扫/滑 new。不是这一源挖完了。
         if undone and not enters:
-            return self._wrap(f"{len(undone)} 个未完成节点全是锁着的 — 推不动了")
+            self.state["scrolls"] = 0
+            self.once_reset("bigchap", "subchap")
+            return (self.exit_step(obs, prefer_close=False)
+                    or wait("本章无入场键，回章节图找 new"))
 
-        # 本屏没有未完成的  往下找一屏。滑到没变化就是到底了。
+        # 本屏没有能进的未完成：滑一次再扫。滑尽了回章节图，不 src_i++。
         if self.state["scrolls"] < 6:
             n = self.state["scrolls"] + 1             # 计数挂 post，见 sweep.py
-            # 几何从检出推：节点/入场键就是这一列的行（nav.list_swipe）。
             sw = nav.list_swipe(
                 obs, [V.STORY_NODE_DONE, V.STORY_NODE_UNDONE, V.STAGE_ENTER],
                 f"节点图下滑找未完成（第 {n} 次）",
                 post=lambda: self.state.update(scrolls=n))
             if sw is not None:
                 return sw
-            return wait("节点图上没检出行锚点 — 推不出滑动几何，不瞎滑")
-        self.state["src_i"] += 1
         self.state["scrolls"] = 0
-        self.log("这一类挖完了  换下一类")
+        self.once_reset("bigchap", "subchap")
+        self.log("本节点图推不动  回章节图找 new")
         return self.exit_step(obs, prefer_close=False) or wait("等返回控件")
 
-    # ── 弹窗 / 战斗 ─────────────────────────────────────────────────────
+    def on_facility(self, obs, st):
+        """支线社团墙会被判成 facility(无 new/完成)。有黄点就进, 有右切换就翻页.
+
+        08-20 live 145551: 第3章节点图(??? + 入场键没解锁) page=facility,
+           旧逻辑 src_i++ 回 hub, 短篇没进. 有节点图锚就改走 on_story_nodes.
+           真支线墙 = 右切换且无节点图标, 才翻页/回 hub 换源.
+        """
+        if obs.find([V.STAGE_ENTER_LOCKED, V.STORY_NODE_UNDONE,
+                     V.STORY_NODE_DONE], 0.40) is not None:
+            self.log("facility 上有节点图锚  改走 on_story_nodes, 不换源")
+            return self.on_story_nodes(obs, st)
+        dots = [b for b in obs.all(V.DOT_YELLOW, 0.40)
+                if 0.12 < b.cx < 0.90 and 0.15 < b.cy < 0.90]
+        if dots:
+            d = min(dots, key=lambda b: (b.cy, b.cx))
+            return tap_box(d, f"支线墙黄点@{d.cx:.3f},{d.cy:.3f}", dx=0.04)
+        arr = obs.find(V.ARROW_RIGHT, 0.45)
+        n = int(self.state.get("fac_swipes") or 0)
+        if arr is not None and n < 4:
+            return tap_box(arr, f"支线墙翻页（第 {n+1} 次）",
+                           post=lambda: self.state.update(fac_swipes=n + 1))
+        self.state["src_i"] = int(self.state.get("src_i") or 0) + 1
+        self.state["fac_swipes"] = 0
+        self.log("支线墙没有黄点  回 hub 换下一类")
+        return (self.exit_step(obs, prefer_close=False)
+                or wait("支线墙回 hub"))
+
+    #  弹窗 / 战斗
     def on_stage_popup(self, obs, st):
         # 同 momotalk：只认「進入章節」，**绝不碰 `任务开始`**。
         #    argmax 会让 0.99 的 `任务开始` 压过 `进入章节`，而剧情节点上出现
         #    那个键就说明我们站错了页面 —— 点下去打战斗吃 AP，AP 不够就弹
-        #    「購買AP 單價💎30」（2026-08-10 arena 上实锤过一次）。
+        #    「購買AP 單價30」（2026-08-10 arena 上实锤过一次）。
         b = obs.find(V.STORY_ENTER_CHAPTER, 0.35)
         return tap_box(b, "进入章节") if b is not None else wait("等进入章节键")
 

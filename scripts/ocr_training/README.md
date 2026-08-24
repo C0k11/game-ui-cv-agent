@@ -6,11 +6,11 @@ Traditional/Simplified Chinese recognition with stylized game fonts.
 ## Pipeline Steps
 
 ```
-01_extract_crops.py   → Extract text crops from trajectory screenshots
-02_generate_synthetic.py → Generate synthetic training data with CJK fonts
-03_train.py           → Fine-tune PP-OCRv4 rec model with PaddlePaddle
-04_export_onnx.py     → Export trained model to ONNX format
-05_evaluate.py        → Evaluate model accuracy on trajectory data
+01_extract_crops.py   -> Extract text crops from trajectory screenshots
+02_generate_synthetic.py -> Generate synthetic training data with CJK fonts
+03_train.py           -> Fine-tune PP-OCRv4 rec model with PaddlePaddle
+04_export_onnx.py     -> Export trained model to ONNX format
+05_evaluate.py        -> Evaluate model accuracy on trajectory data
 ```
 
 ## Quick Start

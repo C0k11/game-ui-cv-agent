@@ -62,13 +62,16 @@ def cfg():
                    "jfd": {"academies": ["千年", "三一", "格黑娜"]}})
 
 
-# ══ 1. 页面身份 ════════════════════════════════════════════════════════
+#  1. 页面身份
 def t_pages():
-    print("\n── 页面身份 ─────────────────────────────────")
+    print("\n 页面身份 ")
     check("大厅", classify(O(B(V.NAV_CAFE), B(V.NAV_SHOP), B(V.NAV_CRAFT))).page
           == "lobby")
-    check("任务大厅", classify(O(B(V.HUB_BOUNTY), B(V.HUB_ARENA),
-                                B(V.HUB_JFD))).page == "task_hall")
+    check("任务大厅", classify(O(B(V.HUB_CAMPAIGN), B(V.BACK))).page
+          == "task_hall")
+    check("三旧tile无推图不当task_hall",
+          classify(O(B(V.HUB_BOUNTY), B(V.HUB_ARENA),
+                     B(V.HUB_JFD))).page != "task_hall")
     check("战斗内(2个chrome)", classify(O(B(V.BATTLE_PAUSE), B(V.BATTLE_3X))).page
           == "battle")
     check("单个chrome不算战斗", classify(O(B(V.BATTLE_PAUSE))).page != "battle")
@@ -238,11 +241,18 @@ def t_pages():
     _combo = O(B(V.COMBO_PACK, conf=0.98, cx=0.701, cy=0.251),
                B(V.SHOP_BUY, conf=0.98, cx=0.299, cy=0.695),
                B(V.FREE, conf=0.97, cx=0.301, cy=0.651))
-    check("組合包页  money_popup 不 halt（否则免費包永远拿不到）",
+    check("组合包页  money_popup 不 halt（否则免费包永远拿不到）",
           _Iq(log=lambda m: None).handle("money_popup", _combo) is None)
+    check("组合包货架不是 purchase_context（08-17 页不是成交框）",
+          money_rules.purchase_context(_combo) is None,
+          str(money_rules.purchase_context(_combo)))
+    check("组合包页不打 money_popup 打断（交给 free_pack）",
+          classify(_combo).interrupt is None,
+          f"实际 {classify(_combo).interrupt}")
     _gc = Gate(cfg(), log=lambda m: None)
-    check("但組合包页上点 `购买` 仍被拦成人审",
-          not _gc.money(_tbq(B(V.SHOP_BUY, cx=0.299, cy=0.695), "买"), _combo).ok)
+    _vbuy = _gc.money(_tbq(B(V.SHOP_BUY, cx=0.299, cy=0.695), "买"), _combo)
+    check("但组合包页上点 购买 仍被拦（拒这一发, 不停轮）",
+          (not _vbuy.ok) and (not _vbuy.halt) and _vbuy.needs_human, _vbuy.why)
 
     # 真正不可绕过的那道：**闸**。八个 flow 都覆写了 on_confirm_dialog，
     #    护栏放基类会被整体绕过（08-08 craft 就这么在退出框上点了確認）。
@@ -270,9 +280,9 @@ def t_pages():
           classify(O(B(V.EVENT_AFTERSTORY), B(V.EVENT_SHOP))).page == "event_ended")
 
 
-# ══ 2. 连续 N 帧确认 ═══════════════════════════════════════
+#  2. 连续 N 帧确认
 def t_machine():
-    print("\n── §A3 连续帧确认 ───────────────────────────")
+    print("\n §A3 连续帧确认 ")
     m = Machine(confirm_frames=3)
     lobby = O(B(V.NAV_CAFE), B(V.NAV_SHOP), B(V.NAV_CRAFT))
     for _ in range(3):
@@ -319,9 +329,9 @@ def t_machine():
           nav.blank_escape(stb, 45) is not None, f"last_solid={stb.last_solid}")
 
 
-# ══ 3. 三道闸 ══════════════════════════════════════════════════════
+#  3. 三道闸
 def t_gate():
-    print("\n── 三道闸 ───────────────────────────────────")
+    print("\n 三道闸 ")
     g = Gate(cfg(), log=lambda m: None)
 
     #  金钱
@@ -340,6 +350,28 @@ def t_gate():
     _vb = g.money(Action(kind="tap", x=0.3, y=0.7, reason="点購買",
                          target_cls=V.SHOP_BUY), body)
     check("购买页上点 `购买`  仍拦成人审", not _vb.ok, _vb.why)
+    _vdk = g.money(Action(kind="tap", x=0.91, y=0.92, reason="买饮料",
+                          target_cls=V.SHOP_BUY_SELECTED,
+                          spend="战术大赛货币"),
+                   O(B(V.SHOP_BUY_SELECTED, cx=0.91, cy=0.92)))
+    check("大赛币选择购买不声明 money 仍放行", _vdk.ok, _vdk.why)
+    _vcr = g.money(Action(kind="tap", x=0.91, y=0.92, reason="信用点批量买",
+                          target_cls=V.SHOP_BUY_SELECTED, spend="信用点"),
+                   O(B(V.SHOP_BUY_SELECTED, cx=0.91, cy=0.92)))
+    check("信用点选择购买不声明 money 仍放行", _vcr.ok, _vcr.why)
+    _vns = g.money(Action(kind="tap", x=0.91, y=0.92, reason="没写 spend",
+                          target_cls=V.SHOP_BUY_SELECTED),
+                   O(B(V.SHOP_BUY_SELECTED, cx=0.91, cy=0.92)))
+    check("选择购买未写 spend 仍拦", not _vns.ok, _vns.why)
+    g_cf = Gate(cfg(), log=lambda m: None)
+    g_cf.note_fired(Action(kind="tap", x=0.91, y=0.92, reason="上一发",
+                           target_cls=V.SHOP_BUY_SELECTED), 0)
+    _vcf = g_cf.money(Action(kind="tap", x=0.60, y=0.83, reason="确认",
+                             target_cls=V.CONFIRM, spend="战术大赛货币"),
+                      O(B(V.CONFIRM, cx=0.60, cy=0.83),
+                        B(V.CANCEL, cx=0.40, cy=0.83),
+                        B(V.CREDIT, cx=0.51, cy=0.05)))
+    check("大赛币确认不声明 money 仍放行", _vcf.ok, _vcf.why)
 
     v = g.money(Action(kind="tap", x=0.5, y=0.5, reason="买", money=True,
                        spend="青辉石"), O(B(V.NAV_CAFE)))
@@ -425,11 +457,110 @@ def t_gate():
     check("重发按边沿算: 间隔恒为 retry_frames，不是每帧连发",
           all(b - a == 70 for a, b in zip(_fired, _fired[1:])) and len(_fired) >= 5,
           f"放行帧 {_fired}")
+    # 2026-08-15: retry 70->38 后仍必须是边沿, 不是电平连发
+    g8 = Gate(cfg(), log=lambda m: None)
+    a5 = Action(kind="tap", x=0.4, y=0.4, reason="r", target_cls="btn3")
+    _fired38 = []
+    for _f in range(0, 250):
+        _v = g8.dedup(a5, False, _f, 38)
+        if _v.stop_flow:
+            break
+        if _v.ok:
+            _fired38.append(_f)
+            g8.note_fired(a5, _f)
+    check("retry=38 仍按边沿: 间隔恒为 38, 不是每帧连发",
+          all(b - a == 38 for a, b in zip(_fired38, _fired38[1:]))
+          and len(_fired38) >= 5,
+          f"放行帧 {_fired38}")
 
 
-# ══ 4. flow 跨 tick 状态（真实例，不是 stateless 回放）════════════════
+#  3b. 购买青辉石页只领免费包
+def t_free_pack():
+    print("\n 免费包只领不买 ")
+    from routing_v2.act.action import tap_box as _tbf
+    _g = Gate(cfg(), log=lambda m: None)
+    _combo = O(B(V.COMBO_PACK_SEL, cx=0.70, cy=0.25),
+               B(V.FREE, cx=0.301, cy=0.651),
+               B(V.SHOP_BUY, cx=0.299, cy=0.695),
+               B(V.SHOP_BUY, cx=0.500, cy=0.695),
+               B(V.SHOP_BUY, cx=0.701, cy=0.695))
+    _vf = _g.money(_tbf(B(V.FREE, cx=0.301, cy=0.651), "领免费包",
+                        money=False, spend=""), _combo)
+    check("闸: 组合包页点免费 spend空 放行", _vf.ok, _vf.why)
+    _vb = _g.money(_tbf(B(V.SHOP_BUY, cx=0.299, cy=0.695), "买"), _combo)
+    check("闸: 组合包页点购买仍拦但不停轮",
+          (not _vb.ok) and (not _vb.halt) and _vb.needs_human, _vb.why)
+    _g2 = Gate(cfg(), log=lambda m: None)
+    _g2.note_fired(Action(kind="tap", x=0.301, y=0.651, reason="领免费",
+                          target_cls=V.FREE), 0)
+    _dlg_free = O(B(V.CONFIRM, cx=0.60, cy=0.83), B(V.CANCEL, cx=0.40, cy=0.83),
+                  B(V.CREDIT, cx=0.51, cy=0.05), B(V.FREE, cx=0.66, cy=0.62))
+    _vd = _g2.money(_tbf(B(V.CONFIRM, cx=0.60, cy=0.83), "确认领取免费包",
+                         money=False, spend=""), _dlg_free)
+    check("闸: 确认框有免费且 spend空 放行", _vd.ok, _vd.why)
+
+    from routing_v2.config.schema import DAILY_CHAIN as _DC
+    from routing_v2.flow.registry import COMPOSITE as _COMP, build as _bld
+    check("COMPOSITE 第一项是 free_pack",
+          _COMP["daily_routine"][0] == "free_pack",
+          str(_COMP["daily_routine"]))
+    check("DAILY_CHAIN 第一项是免费包", _DC[0] == "免费包", str(_DC))
+    _built = _bld(cfg(), Ctx(cfg=cfg(), log=lambda m: None))
+    _names = [f.name for f in _built]
+    check("build 日常第一枪是 free_pack",
+          _names[:4] == ["free_pack", "club", "craft", "shop"],
+          str(_names[:6]))
+
+    _sctx = Ctx(cfg=cfg(), log=lambda m: None)
+    _sf = ALL["free_pack"](_sctx)
+    _sf.state["pack_done"] = False
+    _lob = O(B(V.NAV_SHOP, conf=0.97, cx=0.621, cy=0.953),
+             B(V.SHOP_BUY_PYROXENE, conf=0.97, cx=0.116, cy=0.360))
+    _al = _sf.on_lobby(_lob, Machine(1).update(_lob))
+    check("大厅看见购买青辉石(无红点)也进页",
+          _al is not None and getattr(_al, "target_cls", "") == V.SHOP_BUY_PYROXENE,
+          str(_al))
+
+    _sf3 = ALL["free_pack"](_sctx)
+    _sf3.state["pack_done"] = False
+    _ac = _sf3.on_combo_pack(_combo, Machine(1).update(_combo))
+    check("免费+购买双亮只点免费, 不点购买",
+          _ac is not None and _ac.target_cls == V.FREE
+          and (not _ac.money) and _ac.spend == "",
+          str(_ac))
+
+    _sf4 = ALL["free_pack"](_sctx)
+    _sf4.state["pack_done"] = False
+    _paid = O(B(V.COMBO_PACK_SEL, cx=0.70, cy=0.25),
+              B(V.SHOP_BUY, cx=0.299, cy=0.695),
+              B(V.SHOP_BUY, cx=0.500, cy=0.695),
+              B(V.SHOP_BUY, cx=0.701, cy=0.695))
+    _ap = _sf4.on_combo_pack(_paid, Machine(1).update(_paid))
+    check("没有免费标绝不点购买",
+          _ap is None or getattr(_ap, "target_cls", "") != V.SHOP_BUY,
+          str(_ap))
+
+    _sf5 = ALL["free_pack"](_sctx)
+    _sf5.state["pack_done"] = False
+    _ad = _sf5.on_confirm_dialog(_dlg_free, Machine(1).update(_dlg_free))
+    check("确认框有免费: 点确认且 spend 空 money 否",
+          _ad is not None and _ad.target_cls == V.CONFIRM
+          and (not _ad.money) and _ad.spend == "",
+          str(_ad))
+
+    _sf6 = ALL["free_pack"](_sctx)
+    _sf6.state["pack_done"] = False
+    _dlg_paid = O(B(V.CONFIRM, cx=0.60, cy=0.83), B(V.CANCEL, cx=0.40, cy=0.83),
+                  B(V.COMBO_PACK_SEL, cx=0.70, cy=0.25))
+    _ax = _sf6.on_confirm_dialog(_dlg_paid, Machine(1).update(_dlg_paid))
+    check("组合包确认框没免费: 不点确认",
+          _ax is None or getattr(_ax, "target_cls", "") != V.CONFIRM,
+          str(_ax))
+
+
+#  4. flow 跨 tick 状态（真实例，不是 stateless 回放）
 def t_flows():
-    print("\n── flow 跨 tick 行为 ────────────────────────")
+    print("\n flow 跨 tick 行为 ")
     c = cfg()
     ctx = Ctx(cfg=c, log=lambda m: None)
 
@@ -450,13 +581,34 @@ def t_flows():
     act2 = craft2.decide(bright, st2)
     check("亮态「开始制造」 点它", act2 is not None and act2.is_tap, str(act2))
 
+    # 08-16 live after_craft: once:quick 没清, 200 帧谎报 UNKNOWN
+    from routing_v2.state.machine import StateView as _CSt
+    craft3 = ALL["craft"](ctx)
+    craft3.state.update({"once:quick": True, "started": 1, "claimed": 2})
+    after_c = O(B(V.CLAIM_ONCE_GREY, conf=0.99, cx=0.878, cy=0.858),
+                B(V.CRAFT_QUICK, conf=0.99, cx=0.696, cy=0.857))
+    a3 = craft3.on_craft(after_c, _CSt(page="craft", frames_in_page=40))
+    check("after_craft 已开已领  CLEAN 且清 once:quick, 不 UNKNOWN",
+          a3 is not None and a3.kind == "done"
+          and craft3.outcome == "CLEAN"
+          and not craft3.state.get("once:quick"), str(a3))
+    craft4 = ALL["craft"](ctx)
+    craft4.state["once:quick"] = True
+    a4 = craft4.on_craft(after_c, _CSt(page="craft", frames_in_page=10))
+    check("once:quick 未开未领  等面板, 不收工",
+          a4 is not None and a4.kind == "wait", str(a4))
+
     # event: 轮播闸 —— 405 一直在场时**不点**，只在跃迁那帧点
     ev = ALL["event"](ctx)
     m3 = Machine(1)
-    hall_cur = O(B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
+    hall_cur = O(B(V.HUB_CAMPAIGN, cx=0.4, cy=0.4),
+                 B(V.BACK, cx=0.05, cy=0.05),
+                 B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
                  B(V.HUB_JFD, cx=0.7, cy=0.4),
                  B(V.EVENT_LIVE, conf=0.88, cx=0.5, cy=0.15))
-    hall_other = O(B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
+    hall_other = O(B(V.HUB_CAMPAIGN, cx=0.4, cy=0.4),
+                   B(V.BACK, cx=0.05, cy=0.05),
+                   B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
                    B(V.HUB_JFD, cx=0.7, cy=0.4),
                    B(V.EVENT_ENDED, conf=0.88, cx=0.5, cy=0.15))
     a = ev.decide(hall_cur, m3.update(hall_cur))
@@ -492,8 +644,9 @@ def t_flows():
           a is not None and a.kind == "wait", str(a))
     form_t1 = O(B(V.SORTIE, cx=0.92, cy=0.92), B(V.SQUAD_1_HI, cx=0.06, cy=0.26))
     a = ev3.decide(form_t1, m5.update(form_t1))
-    check("部队1 已高亮  出击", a is not None and a.is_tap
-          and abs(a.x - 0.92) < 0.01, str(a))
+    check("部队1 已高亮但没有槽位帧  仍不出击",
+          a is not None and a.kind == "wait"
+          and not (a.is_tap and a.target_cls == V.SORTIE), str(a))
 
     # 加成阶段，**没赢过就不许扫荡**（08-08 live 事故：把"点了入场键"
     #    当成"打完一场顶好纪录"，加成队一次没上场，780 AP 按旧纪录刷掉）
@@ -556,7 +709,7 @@ def t_flows():
     check("连续停在关卡列表页时，入场键**只点一次**（once 保护不是死码）",
           _taps == 1, f"实际点了 {_taps} 次")
 
-    # ── 08-15 日常 live 复发：once 解锁不能挂在 st.changed 上 ──────────
+    #  08-15 日常 live 复发：once 解锁不能挂在 st.changed 上
     #    活动页身份抖（event_quest_list/facility/unknown 来回翻），每次翻回
     #    列表 changed 边沿都全清 once  16 tick 内重发两处不同入场键，
     #    第二发离「掃蕩開始」只差 2% 屏高。现在解锁只按事实：
@@ -578,8 +731,8 @@ def t_flows():
     check("40 个列表帧等不到弹窗  重武装恰好补一发(不死等也不机关枪)",
           _taps2 == 1, f"补了 {_taps2} 发")
 
-    # ── 08-15 日常 live：快速编辑面板收起窗口不许交 None ────────────────
-    #    確認提交后面板自收有动画、页面身份还滞后, None 会落到 nav 归位 
+    #  08-15 日常 live：快速编辑面板收起窗口不许交 None
+    #    確認提交后面板自收有动画、页面身份还滞后, None 会落到 nav 归位
     #    点返回键, 和自收赛跑输了就把编队页整层退掉（当天连环三圈白工）。
     _qe = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
     for _k in ("af_edit", "af_auto", "af_ins", "af_confirm"):
@@ -592,11 +745,11 @@ def t_flows():
     check("收起窗口有界(60 tick 后放回兜底, 防真卡死)",
           _qe.on_squad_quick_edit(O(), _stq) is None)
 
-    # ── 08-15 大赛冷却闸: 读「等待時間」, 不再编队页盲等 ────────────────
+    #  08-15 大赛冷却闸: 读「等待時間」, 不再编队页盲等
     #    老 brain/skills/arena.py 本来就 OCR 这个倒计时(06-13 用户拍板
     #    "倒计时早没了别傻等"), 新架构重写时丢了  盲等 20s < 真冷却 ~25s,
     #    每场第一发出击都打早撞提示框, 确认吃掉后墙钟重置再蹲 ~36s。
-    #    cls 526 只框标签四个字, READY 态「--:--」标签仍在屏上 
+    #    cls 526 只框标签四个字, READY 态「--:--」标签仍在屏上
     #    判据 = 读标签右侧数字; 无读数连续 2 帧才放行。
     from routing_v2.percept.read import _mmss_secs as _mm
     check("mm:ss 解析", _mm("01:25") == 85 and _mm("0025") == 25
@@ -630,7 +783,7 @@ def t_flows():
 
     _RD.read_topbar = _orig_topbar          # 还原读数打桩
 
-    # ── 08-15 活动奖励同层抢拍（trace t13901t13953 三连换目标）──────────
+    #  08-15 活动奖励同层抢拍（trace t13901t13953 三连换目标）
     #    规矩: 横幅「获得奖励」永不点; 「前往大厅」在奖励层禁点(点了回 lobby
     #    拆断活动链); 同层锁一个出口; 没真按钮就 wait 不落底页。
     _rw = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
@@ -669,9 +822,30 @@ def t_flows():
     _rw2.decide(_lob_o, _mlob.update(_lob_o))
     check("奖励层掉了  出口锁复位（下一层重新选）",
           "reward_exit" not in _rw2.state)
+    # 08-16 live freepack4: 点击继续常 <0.40, 叉叉 0.94 却不点
+    _fp_rw = ALL["free_pack"](Ctx(cfg=cfg(), log=lambda m: None))
+    _ox = O(B(V.GOT_REWARD, conf=0.99, cx=0.501, cy=0.224),
+            B(V.CLOSE_X, conf=0.94, cx=0.788, cy=0.157))
+    _ax = _fp_rw.on_reward(_ox, _st_rw)
+    check("奖励层无继续有叉叉0.94  点叉叉",
+          _ax is not None and _ax.is_tap and _ax.target_cls == V.CLOSE_X, str(_ax))
+    _olow = O(B(V.GOT_REWARD, conf=0.99, cx=0.501, cy=0.224),
+              B(V.STORY_TAP_CONTINUE, conf=0.25, cx=0.502, cy=0.878),
+              B(V.CLOSE_X, conf=0.94, cx=0.788, cy=0.157))
+    _al = _fp_rw.on_reward(_olow, _st_rw)
+    check("点击继续 0.25 低于 0.40 仍点继续(认字样)",
+          _al is not None and _al.is_tap
+          and _al.target_cls == V.STORY_TAP_CONTINUE, str(_al))
+    _obuy = O(B(V.GOT_REWARD, conf=0.99, cx=0.501, cy=0.224),
+              B(V.SHOP_BUY, conf=0.96, cx=0.299, cy=0.695),
+              B(V.CLOSE_X, conf=0.94, cx=0.788, cy=0.157))
+    _ab = _fp_rw.on_reward(_obuy, _st_rw)
+    check("奖励层有购买键  绝不点购买, 点叉叉",
+          _ab is not None and _ab.is_tap and _ab.target_cls == V.CLOSE_X
+          and _ab.target_cls != V.SHOP_BUY, str(_ab))
 
     # 金钱，**双键框内有数量步进器 = 购买/兑换框**（08-09 差点花 30 青辉石：
-    #    AP 耗尽后又点扫荡，游戏弹「購買AP 單價💎30」，而弹窗体内的青辉石图标
+    #    AP 耗尽后又点扫荡，游戏弹「購買AP 單價30」，而弹窗体内的青辉石图标
     #    一个都没检出  非「看见青辉石」的判据全瞎）
     _buyap = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
                B(V.CANCEL, conf=0.98, cx=0.402, cy=0.699),
@@ -799,7 +973,7 @@ def t_flows():
     check("§A8 JFD 用 cls 选学院（配置首选 千年）", a is not None and a.is_tap
           and a.target_cls == V.ACADEMY_MILLENNIUM, str(a))
 
-    # ── 票配额（用户点名「票用在哪个地区，还是一个地区用几张」）────────
+    #  票配额（用户点名「票用在哪个地区，还是一个地区用几张」）
     # 关键实现约束：用**票数差**算已用几张，不用计数器（数事实不数意图）。
     def _bounty_with(plan, tix, branch, tix0):
         f = ALL["bounty"](ctx)
@@ -883,22 +1057,56 @@ def t_flows():
           and "读不出" in str(r7), str(r7))
 
 
-# ══ 5. 配置锁死 ════════════════════════════════════════════════════════
+#  5. 配置锁死
 def t_config():
-    print("\n── 配置 ─────────────────────────────────────")
+    print("\n 配置 ")
     from routing_v2.config import merged
-    evil = {"safety": {"forbid_premium_currency": False, "ap_purchase_limit": 99},
+    evil = {"safety": {"forbid_premium_currency": False,
+                       "ap_purchase_limit": 99,
+                       "money_step_needs_human": False},
             "shop": {"refresh_times": 5},
             "run": {"frame_source": "adb"}}
     c = merged(evil)
     check("改不动 forbid_premium_currency",
           c["safety"]["forbid_premium_currency"] is True)
     check("改不动 ap_purchase_limit", c["safety"]["ap_purchase_limit"] == 0)
+    check("改不动 money_step_needs_human",
+          c["safety"]["money_step_needs_human"] is True)
     check("改不动 shop.refresh_times", c["shop"]["refresh_times"] == 0)
+    check("shop.credit_buy 默认关", c["shop"]["credit_buy"] is False)
+    check("shop.arena_shop 默认开", c["shop"]["arena_shop"] is True)
     check("frame_source 强制 scrcpy", c["run"]["frame_source"] == "scrcpy")
     check("挖矿默认关", c["modules"]["story_mining"] is False)
+    from routing_v2.config.schema import DEFAULTS as _DEF
+    check("schema 默认 retry_frames=38", _DEF["run"]["retry_frames"] == 38)
 
-    # ── AP 百分比分配（用户点名）────────────────────────────────────
+    try:
+        merged({"account": {"id": "typo"},
+                "accounts": {"main": {"cafe": {"skip_invite": False}}}})
+        _typo_refused = False
+    except ValueError:
+        _typo_refused = True
+    check("非空 accounts 不含 account.id 时拒绝开跑", _typo_refused)
+    _single = merged({"account": {"id": "_single"}, "accounts": {}})
+    check("accounts 为空时保留单账号兼容",
+          _single["account"]["id"] == "_single")
+    _covered = merged({
+        "account": {"id": "main"},
+        "accounts": {
+            "main": {
+                "account": {"id": "other"},
+                "accounts": {},
+                "safety": {"money_step_needs_human": False},
+            }
+        },
+    })
+    check("账号覆盖不能改 account/accounts",
+          _covered["account"]["id"] == "main"
+          and "main" in _covered["accounts"])
+    check("账号覆盖也掀不开 money_step_needs_human",
+          _covered["safety"]["money_step_needs_human"] is True)
+
+    #  AP 百分比分配（用户点名）
     # 只测**算术**：给定 AP / 百分比 / 谁还没跑  reserve 该是多少。
     # 抓帧和 OCR 不在这一层测（那是 read.py 的活）。
     # 调**真函数**，不在测试里复制一份算法 —— 复制的话真代码改了测试照样绿。
@@ -924,8 +1132,8 @@ def t_config():
     check("AP 分配: 没配百分比的 flow 不参与（返回 None 表示不注入）",
           _reserve(1000, {}, "event", od) is None)
 
-    # ── 死开关不许再静默（08-10：modules 有 batch_sweep/special_sweep，
-    #    ALL 里从来没有  前端打开后 build() 一声不吭地跳过）────────────
+    #  死开关不许再静默（08-10：modules 有 batch_sweep/special_sweep，
+    #    ALL 里从来没有  前端打开后 build() 一声不吭地跳过）
     from routing_v2.flow.registry import ALL as _ALL, PLANNED, build as _build
     said = []
     _build({"modules": {"batch_sweep": True, "special_sweep": True,
@@ -945,7 +1153,7 @@ def t_config():
           not (set(_sp.get("options", [])) & set(PLANNED)),
           str(set(_sp.get("options", [])) & set(PLANNED)))
 
-    # ── 红点归属半径必须随框尺寸放大（08-11：奖励躺着没领的根因）────
+    #  红点归属半径必须随框尺寸放大（08-11：奖励躺着没领的根因）
     #    红点画在按钮**右上角**，框越宽红点离框心越远。实测同一页：
     #      活动任务 w=0.029  dx≈+0.02   ；奖励资讯 w=0.076  **dx=+0.056**
     #    固定 0.05 对宽按钮永远判不到  红点驱动的领取整条失效。
@@ -963,8 +1171,35 @@ def t_config():
     check("窄按钮自己的红点照样判得到（别把下限也放宽了）",
           _EF._dot_on(O(_narrow, B(V.DOT_RED, conf=0.93,
                                    cx=0.413, cy=0.913)), _narrow))
+    # 08-16 live taskhall1: 黄点在 tile 右上角, 名字框中心对不上
+    from routing_v2.flow import nav as _navdot
+    _jfd = B(V.HUB_JFD, conf=0.98, cx=0.5456, cy=0.8039, w=0.0967, h=0.0328)
+    _yel_jfd = B(V.DOT_YELLOW, conf=0.93, cx=0.6087, cy=0.7669)
+    _bounty = B(V.HUB_BOUNTY, conf=0.98, cx=0.5607, cy=0.5494, w=0.0770, h=0.0362)
+    _yel_bounty = B(V.DOT_YELLOW, conf=0.92, cx=0.6339, cy=0.5117)
+    _arena = B(V.HUB_ARENA, conf=0.99, cx=0.6669, cy=0.8041, w=0.0815, h=0.0377)
+    _red_arena = B(V.DOT_RED, conf=0.91, cx=0.7648, cy=0.7679)
+    _story = B(V.HUB_STORY, conf=0.99, cx=0.8137, cy=0.2439, w=0.0700, h=0.0625)
+    _far = B(V.DOT_YELLOW, conf=0.91, cx=0.9713, cy=0.1912)
+    _th = O(_jfd, _bounty, _arena, _yel_jfd, _yel_bounty, _red_arena, _far)
+    check("taskhall1 学院交流会黄点在名框右上  判得到",
+          _navdot.dot_on(_th, _jfd))
+    check("taskhall1 悬赏黄点在名框右上  判得到",
+          _navdot.dot_on(_th, _bounty))
+    check("taskhall1 战术大赛红点在名框右上  判得到",
+          _navdot.dot_on(_th, _arena))
+    check("taskhall1 右侧无关黄点不算剧情的",
+          not _navdot.dot_on(O(_story, _far), _story))
+    _mail = B(V.NAV_MAIL, conf=0.96, cx=0.892, cy=0.054, w=0.04, h=0.04)
+    _rd = B(V.DOT_RED, conf=0.93, cx=0.922, cy=0.034)
+    check("大厅入口红点离框心 0.05 内仍算",
+          _navdot.dot_on(O(_mail, _rd), _mail))
+    import inspect as _ins
+    from routing_v2.app.runner import Runner as _Rn
+    check("末流后归位大厅",
+          '_handoff("lobby")' in _ins.getsource(_Rn.run_all))
 
-    # ── 买入分支必须有页面身份前提（08-11 审计抓到的 fail-OPEN）─────
+    #  买入分支必须有页面身份前提（08-11 审计抓到的 fail-OPEN）
     #    原代码依赖 `信用点商店`(train=0, live 990 帧 0 检出) 做前置检查，
     #    而那个 if 既没 else 也没 return  买入分支零前提。
     #    危险面：战术大赛货架上 `全部选择` conf 0.98(30/31 帧)，
@@ -981,18 +1216,25 @@ def t_config():
     check("认不出站在信用点货架上  绝不点「全部选择/选择购买」",
           _aa is None or getattr(_aa, "target_cls", "") not in
           (V.SHOP_SELECT_ALL, V.SHOP_BUY_SELECTED), str(_aa))
-    # 正例：信用点货架（有 信用点商店_已选中）照常买
+    # 正例：信用点货架走全部选择, 不滑货架单卡买
     _cs = ALL["shop"](_sctx)
     _cs.setup()
+    _cs.cfg = dict(_cs.cfg or {})
+    _cs.cfg["credit_buy"] = True
     _credit_shelf = O(B(V.SHOP_TAB_CREDIT_SEL, conf=0.98, cx=0.050, cy=0.195),
-                      B(V.SHOP_SELECT_ALL, conf=0.97, cx=0.931, cy=0.122))
+                      B(V.SHOP_SELECT_ALL, conf=0.97, cx=0.931, cy=0.122),
+                      B(V.SHOP_BUY, cx=0.55, cy=0.48),
+                      B(V.SHOP_BUY, cx=0.78, cy=0.48),
+                      B(V.SHOP_BUY, cx=0.55, cy=0.83),
+                      B(V.SHOP_BUY, cx=0.78, cy=0.83),
+                      B(V.CREDIT, cx=0.55, cy=0.40))
     _cc = _cs.on_shop(_credit_shelf, Machine(1).update(_credit_shelf))
-    check("在信用点货架上照常「全部选择」（别误伤正常流程）",
+    check("信用点货架点全部选择, 不探底单卡",
           _cc is not None and getattr(_cc, "target_cls", "") == V.SHOP_SELECT_ALL,
           str(_cc))
 
-    # ── shop 三段做完必须收工（08-11 live：全 True 了还再进一次商店，
-    #    自主跑会死循环到 max_minutes_per_flow 超时）────────────────────
+    #  shop 三段做完必须收工（08-11 live：全 True 了还再进一次商店，
+    #    自主跑会死循环到 max_minutes_per_flow 超时）
     _sf = ALL["shop"](_sctx)
     _sf.setup()
     _lob = O(B(V.NAV_SHOP, conf=0.97, cx=0.621, cy=0.953),
@@ -1016,7 +1258,7 @@ def t_config():
     check("关掉的那段不算没做完（否则永远收不了工）",
           _a3 is not None and not getattr(_a3, "is_tap", False), str(_a3))
 
-    # ── 战术大赛商店不许只靠弱 cls 认页（08-11 live：tab 已高亮但
+    #  战术大赛商店不许只靠弱 cls 认页（08-11 live：tab 已高亮但
     #    `战术大赛商店已选择` conf 仅 0.116  页面判不成 arena_shop，整条支线静默失效）
     _shelf = O(B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.749, cy=0.794),
                B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.866, cy=0.793),
@@ -1039,7 +1281,7 @@ def t_config():
     check("信用点商店不许被误判成战术大赛商店",
           classify(_credit).page == "shop", classify(_credit).page)
 
-    # ── 配置乱码必须拒绝写盘（08-10 实伤：我把 profile.json 写乱了）──
+    #  配置乱码必须拒绝写盘（08-10 实伤：我把 profile.json 写乱了）
     #    乱码的 branches 永远匹配不上屏上 cls  那条 flow **静默**选不中分支。
     import os
     import tempfile
@@ -1048,7 +1290,7 @@ def t_config():
     try:
         # 这串是**故意的乱码样本**（"教室"被当 latin-1 解出来的样子），
         #   写成转义形式免得源码里再混进一个不可见控制字符。
-        _save({"bounty": {"branches": ["æ\x95▙å®¤"]}}, _tmp)
+        _save({"bounty": {"branches": ["æ\x95å®¤"]}}, _tmp)
         check("乱码配置必须拒绝写盘", False, "居然写进去了")
     except ValueError as e:
         check("乱码配置必须拒绝写盘", "乱码" in str(e), str(e)[:60])
@@ -1065,10 +1307,10 @@ def t_config():
     check("回大厅兜底默认关", c["run"]["allow_home_escape"] is False)
 
 
-# ══ 6. 死判据 ══════════════════════════════════════════════════════
+#  6. 死判据
 def t_invariants():
     """架构不变量 —— 扫源码，防"修一处没 grep 全仓同形"。"""
-    print("\n── 架构不变量 ───────────────────────────────")
+    print("\n 架构不变量 ")
     import re
     root = _ROOT / "routing_v2"
     # 返回键**只能有一个发起处**（nav.back_key）。它是唯一挡住"大厅按返回
@@ -1152,7 +1394,7 @@ def t_invariants():
     #    实锤：`ArenaFlow.on_stage_popup` 写着
     #      `find([TASK_START, SWEEP_START])  tap("开始")`，
     #    而战术大赛压根没有关卡弹窗  event 收工停在活动关卡弹窗上、arena 接手，
-    #    一上来就点了「任务开始」，当时 AP=9  游戏弹「購買AP 單價💎30」，
+    #    一上来就点了「任务开始」，当时 AP=9  游戏弹「購買AP 單價30」，
     #    全靠 money 闸 halt 才没成交。momotalk / mining 里也混着同一个键（已清）。
     #     白名单：只有 sweep（悬赏/JFD）和 event（活动）会真的开关卡。
     # campaign 是合法例外: 它的本职就是花 AP 打关, 且 stage 由用户配置、
@@ -1199,7 +1441,7 @@ def t_invariants():
 
 
 def t_vocab():
-    print("\n── cls 健康度 ───────────────────────────────")
+    print("\n cls 健康度 ")
     from routing_v2.state.vocab import DEAD, HEALTH, WEAK, require
     # 断言**机制**，别断言某个具体类的等级 —— 等级每次重建数据集都会变。
     #    原来这里写死「战斗失败 是死类」，v16 重建后它有 6 框了，测试当场红。
@@ -1227,7 +1469,7 @@ def t_route():
     用户 2026-08-12:「返回和大厅按钮要结合位置语义来判断是返回还是回大厅，
        要根据板块来的，比方说我们打完学园交流会，这个时候就是返回任务大厅就行。」
     """
-    print("\n-- 交班归位 --------------------------------")
+    print("\n-- 交班归位 ----")
     from routing_v2.flow import nav as _nv
     from routing_v2.state.machine import StateView as _SV
 
@@ -1352,10 +1594,9 @@ def t_route():
     check("没有'写了但从来没人读'的实例字段（死字段=注释漂移的温床）",
           not _dead, str([f"{a} @{_writes[a]}" for a in _dead]))
 
-    # 組合包页的"不停机"豁免必须认**选中态**，不能认页签按钮（2026-08-13 审计）:
-    #   `组合包未选择` 是另一个页签的标签，站在「特別販售」页（整页 CAD 真钱货架）
-    #   上它照样在场 —— 拿它当豁免 = 在一整页真钱商品上关掉金钱 HALT。
-    check("只有页签按钮(未选中) 不算組合包页  金钱打断照常生效",
+    # 组合包页豁免必须认选中态或免费标, 不能认未选中页签。
+    # 特别贩售上组合包未选择也在, 那一页交给 FreePackFlow 切 tab, 不是成交框。
+    check("只有页签按钮(未选中) 不算组合包已选中",
           not money_rules.is_combo_pack_page(O(B(V.COMBO_PACK, conf=0.97),
                                                B(V.SHOP_BUY, conf=0.98))))
     check("选中态 = 真的在組合包页  豁免",
@@ -1366,7 +1607,7 @@ def t_route():
     # 台账基线自愈（2026-08-13 live，**我先判反了一次**）: 抓到
     #   `信用点 59,653 -> 59,653,863`，我按"读大"处理加了量级闸；用户把那一帧
     #   贴出来才发现**屏上真值就是 59,653,863**，错的是第一次读数（截断）。
-    #   ledger 自己的原理是「OCR 只会截断，不会凭空多出位数」⇒ 旧基线是新读数的
+    #   ledger 自己的原理是「OCR 只会截断，不会凭空多出位数」=> 旧基线是新读数的
     #   **前缀**时，可疑的是旧基线，应该修正基线而不是拒收新值。
     def _is_trunc(a, b):
         return len(str(b)) > len(str(a)) and str(b).startswith(str(a))
@@ -1430,14 +1671,15 @@ def t_route():
         _raised = True
     check("goto 到没声明的相位要当场报错（别默默走错路）", _raised)
 
-    # 真钱货架页: 关掉走人, **不停整轮**（2026-08-13 小号: 購買青輝石默认开在
-    #   「特別販售」, 整页 CAD 25.99/16.99, 而 414 只是没选中的页签标签）。
-    #   但双键确认框仍然要 halt —— 那才是成交前一刻。
+    # 特别贩售: 切到组合包, 不停整轮。货架页不是成交框。
     from routing_v2.flow.interrupt import Interrupts as _IC
     _ic = _IC(log=lambda m: None)
     _cad = O(B(V.COMBO_PACK, cx=0.70, cy=0.36), B(V.CLOSE_X, cx=0.79, cy=0.28))
+    check("特别贩售不是 purchase_context",
+          money_rules.purchase_context(_cad) is None,
+          str(money_rules.purchase_context(_cad)))
     _a_c = _ic._on_money_popup(_cad)
-    check("停在真钱页签上要切到組合包，不是关掉走人也不是停整轮",
+    check("停在特别贩售要切到组合包，不是关掉走人也不是停整轮",
           _a_c is not None and _a_c.kind == "tap"
           and _a_c.target_cls == V.COMBO_PACK,
           f"{_a_c and (_a_c.kind, _a_c.target_cls)}")
@@ -1524,11 +1766,51 @@ def t_route():
     check("敌方绑到正下方的格子, 不是欧氏最近的起点",
           _c1 is not None and abs(_c1[0] - 0.429) < 0.01
           and abs(_c1[1] - 0.603) < 0.01, str(_c1))
+    # 3-2 开局原分辨率帧 (v2_20260815_105347/0000567): 我方框心和右上
+    #    邻格几乎同高, 欧氏最近会绑到邻格; 正下方必须是脚下那格。
+    # below() 是**不看 cls 的纯几何**, 这里换成 队伍箭头(509 已废案) 坐标不动
+    _n32_ally = B(V.GRID_ARROW, conf=0.95, cx=0.4036, cy=0.5020,
+                  w=0.084, h=0.232)
+    _n32_cs = [(0.4591, 0.4972), (0.6900, 0.6131),
+               (0.5018, 0.6159), (0.4085, 0.6121)]
+    _n32_dx, _n32_dy = 0.0933, 0.1188
+    _n32_cur = _grid.below(_n32_ally, _n32_cs, _n32_dx)
+    check("3-2 我方绑脚下格, 不绑同排右上邻格",
+          _n32_cur is not None and abs(_n32_cur[0] - 0.4085) < 0.01
+          and abs(_n32_cur[1] - 0.6121) < 0.01, str(_n32_cur))
+    _n32_ru = None
+    if _n32_cur is not None:
+        _n32_ru = _grid.resolve(
+            _n32_cur, "right-up",
+            [c for c in _n32_cs
+             if (c[0] - _n32_cur[0]) ** 2 + (c[1] - _n32_cur[1]) ** 2
+             > (0.4 * _n32_dx) ** 2],
+            _n32_dx, _n32_dy)
+    check("3-2 脚下格 right-up 解析到邻格",
+          _n32_ru is not None and abs(_n32_ru[0] - 0.4591) < 0.01
+          and abs(_n32_ru[1] - 0.4972) < 0.01, str(_n32_ru))
     _rd = _grid.resolve((0.385, 0.482), "right-down", _cs, _dx, _dy)
     check("right-down 解析到真格心（不是推算点）",
           _rd is not None and abs(_rd[0] - 0.429) < 0.01, str(_rd))
     check("没有格子的方向要 fail-closed 返回 None",
           _grid.resolve((0.385, 0.482), "left", _cs, _dx, _dy) is None)
+    # 3-2 r3: 右邻无格框。用户否掉拿 BOSS 当落点, resolve 必须 None。
+    _n32r3_at = (0.593, 0.549)
+    _n32r3_cs = [(0.454, 0.662), (0.547, 0.665), (0.735, 0.668),
+                 (0.501, 0.548), (0.593, 0.548)]
+    _n32r3_dx, _n32r3_dy = 0.0932, 0.1166
+    _n32r3_oth = [c for c in _n32r3_cs
+                  if (c[0] - _n32r3_at[0]) ** 2 + (c[1] - _n32r3_at[1]) ** 2
+                  > (0.4 * _n32r3_dx) ** 2]
+    check("3-2 r3 右邻无格框 resolve(right) 是 None（有BOSS也不点）",
+          _grid.resolve(_n32r3_at, "right", _n32r3_oth,
+                        _n32r3_dx, _n32r3_dy) is None)
+    _n32r3_cell = _grid.resolve(
+        _n32r3_at, "right", _n32r3_oth + [(0.686, 0.549)],
+        _n32r3_dx, _n32r3_dy)
+    check("3-2 r3 有真格子框才出点",
+          _n32r3_cell is not None and abs(_n32r3_cell[0] - 0.686) < 0.01,
+          str(_n32r3_cell))
     _a12 = _grid.load_answer("1-2")
     check("答案 1-2（我们的格式）: 单队 2 回合",
           _a12 is not None and len(_a12["rounds"]) == 2
@@ -1536,7 +1818,7 @@ def t_route():
     check("答案 1-1 没有 rounds（不用走位, 不是文件缺失）",
           _grid.load_answer("1-1") is not None
           and _grid.load_answer("1-1")["rounds"] == [])
-    # ⛔BAAH 数字键是**备选解法**不是多区域（官方 grid_solution_format.json）:
+    # 禁BAAH 数字键是**备选解法**不是多区域（官方 grid_solution_format.json）:
     #    多解法文件必须只取一个主解法, 其余进 alts -- 旧版当"区域"顺序打,
     #    打完第一个解法会干等第二次部署
     _a21h = _grid.load_answer("H2-1")
@@ -1572,8 +1854,9 @@ def t_route():
     _cp2.goto("walk")
     # 走格子帧(fixture 同前): 我方箭头在起点上方, 回合0 = right-up... 1-2 的
     #   plan 是 right-up/right, 但 fixture 地图没有 right-up 格 -> fail-closed
-    # 绑格锚是 我方 身体框(在自己格心上方约0.9行), 箭头已被禁止当锚
-    _wb = list(_gb) + [B(V.GRID_ALLY, conf=0.90, cx=0.385, cy=0.377),
+    # 2026-08-24: 绑格锚**只认队伍箭头**(509 我方框池子里 40% 是敌方, 已废案)。
+    #    箭头比立绘更高, 但 below() 的判据是同 x 带内正下方最近的格, 不受影响。
+    _wb = list(_gb) + [B(V.GRID_ARROW, conf=0.90, cx=0.385, cy=0.377),
                        B(V.PHASE_END, conf=0.90, cx=0.92, cy=0.88)]
     _wo = Observation(boxes=_wb, seq=2, w=3840, h=2160)
     _act_w = None
@@ -1646,11 +1929,11 @@ def t_route():
     _cpt.state["answer"] = _cp3.state["answer"]
     # 起点也拿掉: 起点在场时航位推算本来就该走下去(见下一条正向用例)
     _wb_nou = [b for b in _wb
-               if b.cls not in (V.GRID_ALLY, V.GRID_START, V.GRID_START_GREY)]
+               if b.cls not in (V.GRID_ARROW, V.GRID_START, V.GRID_START_GREY)]
     _cpt.state["wt:no_unit"] = _tm.time() - 80
     _a_t = _cpt.decide(Observation(boxes=_wb_nou, seq=3, w=3840, h=2160),
                        _SV(page="grid_quest", frames_in_page=10))
-    check("起点航位和 箭头+我方 都拿不到 75s -> UNKNOWN 收工不空转",
+    check("起点航位和队伍箭头都拿不到 75s -> UNKNOWN 收工不空转",
           _cpt.outcome == "UNKNOWN"
           and any("感知不足" in l for l in _cpt.note_lines),
           f"{_cpt.outcome} {_cpt.note_lines}")
@@ -1660,7 +1943,7 @@ def t_route():
     _cpe = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
     _cpe.goto("walk")
     _cpe.state["answer"] = _cp3.state["answer"]
-    _wb_noally = [b for b in _wb if b.cls != V.GRID_ALLY]
+    _wb_noally = [b for b in _wb if b.cls != V.GRID_ARROW]
     _a_dr = None
     for _ in range(3):
         _a_dr = _cpe.decide(
@@ -1672,6 +1955,32 @@ def t_route():
           _a_dr is not None and _a_dr.kind == "tap"
           and abs(_a_dr.x - 0.429) < 0.03,
           f"{_a_dr and (_a_dr.kind, round(_a_dr.x, 3), round(_a_dr.y, 3))}")
+    # step CLI 不存相位: 战斗页从 enter 起手必须接手 walk, 不能干等大厅
+    _cpbt = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpbt.state.update(issued=True, bind_last=(0.46, 0.50),
+                       answer=_cp3.state["answer"])
+    _o_bt = O(B(V.BATTLE_AUTO_ON, cx=0.95, cy=0.94),
+              B(V.BATTLE_PAUSE, cx=0.96, cy=0.06))
+    _a_bt = _cpbt.decide(_o_bt, _SV(page="battle", frames_in_page=5))
+    check("enter 遇战斗页接手 walk, 不干等大厅",
+          _cpbt.phase == "walk"
+          and _a_bt is not None and _a_bt.kind == "wait"
+          and "任务大厅" not in (_a_bt.reason or ""),
+          f"phase={_cpbt.phase} act={_a_bt}")
+    _a_bt2 = _cpbt.decide(_o_bt, _SV(page="battle", frames_in_page=6))
+    check("接手后战斗页走 AUTO 等待",
+          _a_bt2 is not None and _a_bt2.kind == "wait"
+          and "战斗" in (_a_bt2.reason or ""),
+          f"{_a_bt2}")
+    # 相位写进 state 后, 新实例续上 walk 不再经 enter
+    _cprp = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cprp.state.update(phase="walk", issued=True,
+                       answer=_cp3.state["answer"])
+    _a_rp = _cprp.decide(_o_bt, _SV(page="battle", frames_in_page=3))
+    check("state.phase=walk 续上相位, 直接战斗等待",
+          _cprp.phase == "walk"
+          and _a_rp is not None and "战斗" in (_a_rp.reason or ""),
+          f"phase={_cprp.phase} act={_a_rp}")
     # 区域对齐先于列表滚动: 配 H2-1 而列表在 Area3(读到 H3-x) -> 点 左切换
     #    换区, 不是在区域内滚 6 次然后 UNKNOWN（2026-08-13 live 用户抓到）
     import routing_v2.flow.campaign as _cpm_mod
@@ -1739,7 +2048,6 @@ def t_route():
     _o_mv = O(B(V.PHASE_END, cx=0.92, cy=0.88),
               B(V.GRID_START_GREY, cx=0.40, cy=0.55),
               B(V.GRID_ARROW, cx=0.49, cy=0.35),
-              B(V.GRID_ALLY, cx=0.49, cy=0.40),
               B(V.GRID_CELL, cx=0.49, cy=0.52))
     for _ in range(2):
         _cpd.decide(_o_mv, _SV(page="grid_quest", frames_in_page=8))
@@ -1751,6 +2059,116 @@ def t_route():
     check("PHASE 没闪但位移超时 -> 按位移判循环并推进回合",
           _cpd.state["round_i"] == 1,
           f"round_i={_cpd.state['round_i']} cycling={_cpd.state.get('cycling')}")
+    # 08-15 3-2 replay: 位移已记下但 PHASE 不闪, 150 tick 重发清掉 moved_t,
+    #    人已在目标格再点 = 谎报没走动。位移确认后禁止重发。
+    _cpmv = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
+    _cpmv.goto("walk")
+    _cpmv.state["answer"] = _cpc2.state["answer"]
+    _cpmv.state.update(issued=True, cycling=False, moved_t=_tm.time(),
+                       round_i=1, dx_est=0.093, pre_vec=(0.04, -0.22))
+    _a_mv = None
+    for _ in range(155):
+        _a_mv = _cpmv.decide(_wo, _SV(page="grid_quest", frames_in_page=8))
+        if _cpmv.outcome:
+            break
+    check("位移已确认后 150 tick 不重发、不报没走动",
+          _cpmv.outcome is None and _cpmv.state["round_i"] == 1
+          and _cpmv.state.get("issued") is True
+          and _cpmv.state.get("moved_t") is not None,
+          f"out={_cpmv.outcome} ri={_cpmv.state['round_i']} "
+          f"issued={_cpmv.state.get('issued')} act={_a_mv}")
+
+    # 连续推关: stages 列表可跳号、可 Normal+Hard 混; 空则退回 stage 单关
+    from routing_v2.flow.campaign import parse_stage_id as _psid
+    from routing_v2.flow.campaign import resolve_queue as _rq
+    _qm, _badm = _rq({"stages": ["3-2", "H2-1", "3-4"]})
+    check("解析混排保序（不按关号排序）",
+          _qm == ["3-2", "H2-1", "3-4"] and not _badm, str(_qm))
+    _qd, _ = _rq({"stages": ["3-2", "3-2", "H2-1"]})
+    check("去重保持用户先写的顺序", _qd == ["3-2", "H2-1"], str(_qd))
+    _qs, _bads = _rq({"stage": "3-2", "stages": []})
+    check("单关 stage 兼容（stages 空退回 stage）",
+          _qs == ["3-2"] and not _bads, str(_qs))
+    _qstr, _ = _rq({"stages": "3-2, H2-1, 3-4"})
+    check("逗号串也按用户顺序拆",
+          _qstr == ["3-2", "H2-1", "3-4"], str(_qstr))
+    check("关号规范: h2-1 -> H2-1 / 非法拒收",
+          _psid("h2-1") == "H2-1" and _psid("TR-5") is None
+          and _psid("foo") is None and _psid("3-2") == "3-2",
+          f"{_psid('h2-1')},{_psid('TR-5')},{_psid('foo')}")
+    from routing_v2.config.schema import SCHEMA as _SC_ST
+    _sc_st = _SC_ST.get("campaign.stages") or {}
+    check("FORM 对外文案是要推的关卡, 不暴露 JSON 术语",
+          _sc_st.get("label") == "要推的关卡"
+          and "stages" not in (_sc_st.get("note") or "")
+          and "3-1, 3-3, H2-1" in ((_sc_st.get("placeholder") or "")
+                                   + (_sc_st.get("note") or "")),
+          str(_sc_st))
+
+    _cfgq = cfg()
+    _cfgq["campaign"] = {"stages": ["1-2", "1-3"]}
+    _cpq = ALL["campaign"](Ctx(cfg=_cfgq, log=lambda m: None))
+    check("setup 队列第一关是当前关并已 load_answer",
+          _cpq.state["queue"] == ["1-2", "1-3"]
+          and _cpq.state["stage"] == "1-2"
+          and _cpq.state.get("answer") is not None
+          and _cpq.state["queue_i"] == 0,
+          f"q={_cpq.state.get('queue')} st={_cpq.state.get('stage')}")
+    _cpq.goto("result")
+    _cpq.state["round_i"] = 2
+    _cpq.state["battles"] = 1
+    _a_qn = _cpq.decide(O(), _SV(page="campaign_stage", frames_in_page=5))
+    check("一关 CLEAN 后相位回 stage_list 且 stage 变成下一关",
+          _cpq.outcome is None
+          and _cpq.phase == "stage_list"
+          and _cpq.state["stage"] == "1-3"
+          and _cpq.state.get("done") == ["1-2"]
+          and _cpq.state.get("row_anchor") is None
+          and _a_qn is not None and _a_qn.kind == "wait",
+          f"out={_cpq.outcome} ph={_cpq.phase} st={_cpq.state.get('stage')}"
+          f" done={_cpq.state.get('done')} act={_a_qn and _a_qn.kind}")
+
+    _cfgu = cfg()
+    _cfgu["campaign"] = {"stages": ["1-2", "1-3"]}
+    _cpuq = ALL["campaign"](Ctx(cfg=_cfgu, log=lambda m: None))
+    _cpuq.goto("walk")
+    _act_uq = None
+    for _ in range(25):
+        _act_uq = _cpuq.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
+        if _cpuq.outcome:
+            break
+    check("UNKNOWN 不推进队列（停在这一关, 不偷打下一关）",
+          _cpuq.outcome == "UNKNOWN"
+          and _cpuq.state["queue_i"] == 0
+          and _cpuq.state["stage"] == "1-2"
+          and not _cpuq.state.get("done")
+          and any("停在 1-2" in l for l in _cpuq.note_lines),
+          f"{_cpuq.outcome} i={_cpuq.state.get('queue_i')} "
+          f"st={_cpuq.state.get('stage')} notes={_cpuq.note_lines}")
+
+    _cfgs = cfg()
+    _cfgs["campaign"] = {"stages": ["99-1", "1-2"]}
+    _cpsk = ALL["campaign"](Ctx(cfg=_cfgs, log=lambda m: None))
+    _a_sk = _cpsk.decide(O(B(V.HUB_CAMPAIGN, cx=0.30, cy=0.40)),
+                         _SV(page="task_hall", frames_in_page=5))
+    check("无答案的关跳过, 改打下一关, 不卡死整条",
+          _cpsk.outcome is None
+          and _cpsk.state["stage"] == "1-2"
+          and "99-1" in (_cpsk.state.get("skipped") or [])
+          and _a_sk is not None and _a_sk.kind != "done",
+          f"out={_cpsk.outcome} st={_cpsk.state.get('stage')} "
+          f"skip={_cpsk.state.get('skipped')} act={_a_sk and _a_sk.kind}")
+
+    _cfgi = cfg()
+    _cfgi["campaign"] = {"stages": ["TR-5", "foo"]}
+    _cpi = ALL["campaign"](Ctx(cfg=_cfgi, log=lambda m: None))
+    _a_i = _cpi.decide(O(B(V.HUB_CAMPAIGN, cx=0.30, cy=0.40)),
+                       _SV(page="task_hall", frames_in_page=5))
+    check("非法号 setup/decide 不进关",
+          _cpi.outcome == "BLOCKED"
+          and _a_i is not None and _a_i.kind == "done"
+          and any("关卡号非法" in l for l in _cpi.note_lines),
+          f"{_cpi.outcome} act={_a_i and _a_i.kind} notes={_cpi.note_lines}")
 
     # 大赛商店: 余额读数不许一票否决, 必须**勾选探针**（用户 2026-08-13:
     #   「也没选饮料然后辨别是否买得起啊？」）。余额 0 也要点饮料, 然后
@@ -1767,12 +2185,25 @@ def t_route():
           _a_p is not None and _a_p.kind == "tap"
           and _a_p.target_cls in (V.ENERGY_DRINK_LOW, V.ENERGY_DRINK_MID),
           f"{_a_p and (_a_p.kind, _a_p.target_cls)}")
+    _asx = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    _cross = O(B(V.ARENA_SHOP_TAB_SEL, cx=0.06, cy=0.51),
+               B(V.ARENA_SHOP_CURRENCY, cx=0.56, cy=0.08),
+               B(V.ARENA_SHOP_CURRENCY, cx=0.74, cy=0.55),
+               B(V.ENERGY_DRINK_LOW, cx=0.90, cy=0.49),
+               B(V.ENERGY_DRINK_MID, cx=0.76, cy=0.49))
+    for _ in range(4):
+        _asx.on_arena_shop(_cross, _SV(page="arena_shop", frames_in_page=10))
+    check("472/473 左右反了拒勾",
+          _asx.state.get("drink_side_dirty") is True
+          and _asx.state.get(f"picked:{V.ENERGY_DRINK_LOW}")
+          and _asx.state.get(f"picked:{V.ENERGY_DRINK_MID}"))
     # 勾上了、右下角出灰（本页实测 0.33, 判据带 region 降到 0.25）-> 买不起收工
     _as.state.update({f"picked:{V.ENERGY_DRINK_LOW}": True,
                       f"picked:{V.ENERGY_DRINK_MID}": True})
     _grey_shelf = O(B(V.ARENA_SHOP_TAB_SEL, cx=0.06, cy=0.51),
                     B(V.ARENA_SHOP_CURRENCY, cx=0.74, cy=0.55),
                     B(V.ARENA_SHOP_CURRENCY, cx=0.86, cy=0.55),
+                    B(V.GREEN_CHECK, cx=0.76, cy=0.49),
                     B(V.SHOP_BUY_SELECTED_GREY, conf=0.30, cx=0.91, cy=0.92))
     for _ in range(10):
         _a_g2 = _as.decide(_grey_shelf, _SV(page="arena_shop", frames_in_page=20))
@@ -1783,8 +2214,14 @@ def t_route():
     # 买不起 != 买过了（2026-08-13 小号实帧: 信用点 35,544 / 货最贵 500,000,
     #   屏上只出 `选择购买灰色` 0.78, 亮态零检出）。灰按钮点了也不动。
     _sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    # 08-20 起 shop.credit_buy 默认关(schema.py:148), 信用点买路整段被开关罩住。
+    #    本用例考的就是"开着时买不起怎么收敛", 所以按 cfg() 的规矩自己声明输入,
+    #    不去改产品默认(同 t_shelf_walk 里 sh3.cfg["credit_buy"]=True 的写法)。
+    _sh.cfg = dict(_sh.cfg or {})
+    _sh.cfg["credit_buy"] = True
     _sh.state["pack_done"] = True
     _short = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.12),
+               B(V.GREEN_CHECK, cx=0.88, cy=0.20),
                B(V.SHOP_BUY_SELECTED_GREY, cx=0.91, cy=0.92))
     for _ in range(10):
         # 走 decide 而不是直调 on_shop —— `hold()` 数的是 self.ticks，
@@ -2041,6 +2478,43 @@ def t_route():
             break
     check("宽松契约超时不退标记（那是常态，不是没生效）", not _rb2)
 
+    # 2026-08-15: 补发/严格 与 宽松地板拆开, 宽松不随 retry 等比塌缩
+    from routing_v2.act.gate import (
+        _LOOSE_RETRY_FLOOR as _LRF, _contract_lim as _clim)
+    check("retry=38 时宽松不低于地板(不会塌成 38//6=6)",
+          _clim(True, 38) >= _LRF and _clim(True, 38) == max(_LRF, 38 // 6))
+    check("retry=25 时宽松也不塌到 3-4 帧",
+          _clim(True, 25) >= _LRF and _clim(True, 25) >= 8)
+    check("严格档仍等于 retry_frames",
+          _clim(False, 38) == 38 and _clim(False, 25) == 25)
+    _g_loose = _G(cfg())
+    _act_l = _A(kind="tap", x=0.5, y=0.5, target_cls="某键", reason="r")
+    _g_loose.arm(_act_l, O(B("某键")))
+    _g_loose._pending["t0"] -= 9.0
+    _n_to = 0
+    for _i in range(1, 80):
+        _g_loose.heartbeat(O(B("某键")), page_changed=False, retry_frames=25)
+        if _g_loose._pending is None:
+            _n_to = _i
+            break
+    check("retry=25 宽松超时仍 >= 8 帧(地板兜住, 不是 4 帧连发)",
+          _n_to >= 8, f"n={_n_to}")
+    # 未完成契约时不许对第二个目标开火(防同时点多个东西)
+    _g_two = _G(cfg())
+    _first = _A(kind="tap", x=0.3, y=0.4, target_cls="键A", reason="点A")
+    _second = _A(kind="tap", x=0.6, y=0.4, target_cls="键B", reason="点B")
+    _obs_ab = O(B("键A"), B("键B"))
+    _g_two.arm(_first, _obs_ab)
+    _g_two._pending["t0"] -= 9.0
+    for _ in range(6):
+        _g_two.heartbeat(_obs_ab, page_changed=False, retry_frames=38)
+    _v_two = _g_two.allow(_second, _obs_ab, fresh=lambda: None,
+                          page_changed=False, frames_in_page=1,
+                          retry_frames=38)
+    check("契约未兑现时第二目标不许开火",
+          (not _v_two.ok) and _v_two.by == "advance",
+          f"ok={_v_two.ok} by={_v_two.by}")
+
     # Gate 的逐次上下文必须能清(跨 flow 泄漏会误拦/误放)
     from routing_v2.act.gate import Gate as _G
     g = _G(cfg())
@@ -2056,7 +2530,7 @@ def t_route():
 
 def t_ledger():
     """余额台账的 OCR 结构闸（08-15 日常 live: 信用点收尾报 +5.99 亿假账）。"""
-    print("\n── 余额台账读数闸 ───────────────────────────")
+    print("\n 余额台账读数闸 ")
     import routing_v2.percept.read as _RD
     from routing_v2.act.ledger import Ledger, _one_insert
 
@@ -2097,13 +2571,163 @@ def t_ledger():
         check("千位逗号0形态(20,176->200176)被同一道闸覆盖",
               _one_insert("20176", "200176"))
         check("真实等长变动不误伤", not _one_insert("59227991", "59252667"))
+
+        import time as _t
+        from routing_v2.app.runner import (
+            is_ledger_spend_tap, money_watch_should_halt)
+
+        def push_pyx(ledx, v, page="lobby"):
+            _VS.vals = {_RD.PYROXENE: v}
+            return ledx._commit(page, "test")
+
+        led_ext = Ledger(log=lambda m: None)
+        led_ext.path = _ROOT / "data" / "routing_v2" / "_test_ledger_ext.jsonl"
+        led_ext._vote = _VS()
+        try:
+            push_pyx(led_ext, 220)
+            push_pyx(led_ext, 220)
+            check("青辉石两次一致立基线",
+                  led_ext.confirmed.get(_RD.PYROXENE) == 220)
+            ext_msg = push_pyx(led_ext, 190)
+            check("外部青辉石下降且无付费 tap 不 HALT",
+                  ext_msg is not None and ext_msg.startswith("EXTERNAL")
+                  and not money_watch_should_halt(ext_msg)
+                  and led_ext.confirmed.get(_RD.PYROXENE) == 190
+                  and led_ext.breach is None, str(ext_msg))
+            check("外部下降写入 external 标签",
+                  any(e.tag == "external" and e.cls == _RD.PYROXENE
+                      for e in led_ext.entries))
+        finally:
+            led_ext.path.unlink(missing_ok=True)
+
+        led_bot = Ledger(log=lambda m: None)
+        led_bot.path = _ROOT / "data" / "routing_v2" / "_test_ledger_bot.jsonl"
+        led_bot._vote = _VS()
+        try:
+            push_pyx(led_bot, 250)
+            push_pyx(led_bot, 250)
+            led_bot.note_bot_spend("确认购买", "确认键", "青辉石")
+            sus = push_pyx(led_bot, 220, "lobby")
+            check("bot 付费后首读下降只挂起不 HALT",
+                  sus is None and led_bot.confirmed.get(_RD.PYROXENE) == 250)
+            br = push_pyx(led_bot, 220, "cafe")
+            # 08-21 契约改: 台账是**事后账**, 首条掉钱只记账告警不停轮
+            #    (真防线是 gate.py tap 前那两条)。第二条才升级停轮。
+            check("bot 付费 tap 后青辉石下降落 WARN_MONEY 且不停轮",
+                  br is not None and br.startswith("WARN_MONEY")
+                  and not money_watch_should_halt(br)
+                  and led_bot.breach is None, str(br))
+            check("首条掉钱仍写 breach 标签 + 进 _breaches 明细",
+                  len(led_bot._breaches) == 1
+                  and any(e.tag == "breach" and e.cls == _RD.PYROXENE
+                          for e in led_bot.entries))
+            check("首条掉钱进收工报告", "掉钱告警 1 条" in led_bot.report())
+            # 第二次: 连续掉钱 -> 停轮
+            led_bot.note_bot_spend("确认购买", "确认键", "青辉石")
+            push_pyx(led_bot, 190, "lobby")
+            br2 = push_pyx(led_bot, 190, "cafe")
+            check("第二条掉钱升级成 MONEY BREACH 停轮",
+                  br2 is not None and br2.startswith("MONEY BREACH")
+                  and money_watch_should_halt(br2)
+                  and led_bot.breach is not None, str(br2))
+        finally:
+            led_bot.path.unlink(missing_ok=True)
+
+        check("购买键要记窗",
+              is_ledger_spend_tap(Action(kind="tap", target_cls=V.SHOP_BUY,
+                                         reason="买")))
+        check("确认付费要记窗",
+              is_ledger_spend_tap(Action(kind="tap", target_cls=V.CONFIRM,
+                                         reason="确认"), V.SHOP_BUY))
+        check("无上一发的确认键不记窗",
+              not is_ledger_spend_tap(Action(kind="tap", target_cls=V.CONFIRM,
+                                             reason="确认")))
+        check("出击不记窗",
+              not is_ledger_spend_tap(Action(kind="tap", target_cls=V.SORTIE,
+                                             reason="出击")))
+
+        led_jit = Ledger(log=lambda m: None)
+        led_jit.path = _ROOT / "data" / "routing_v2" / "_test_ledger_jit.jsonl"
+        led_jit._vote = _VS()
+        try:
+            push_pyx(led_jit, 250)
+            push_pyx(led_jit, 250)
+            # JIT 丢掉: runner 以 uncertain 开青辉石窗
+            led_jit.note_bot_spend("购买", V.SHOP_BUY, "青辉石")
+            sus_j = push_pyx(led_jit, 220, "lobby")
+            br_j = push_pyx(led_jit, 220, "cafe")
+            check("JIT 丢掉仍记窗: 石头下降仍被抓成掉钱告警",
+                  sus_j is None
+                  and br_j is not None and br_j.startswith("WARN_MONEY")
+                  and len(led_jit._breaches) == 1, str(br_j))
+        finally:
+            led_jit.path.unlink(missing_ok=True)
+
+        led_exp = Ledger(log=lambda m: None)
+        led_exp.path = _ROOT / "data" / "routing_v2" / "_test_ledger_exp.jsonl"
+        led_exp._vote = _VS()
+        try:
+            push_pyx(led_exp, 250)
+            push_pyx(led_exp, 250)
+            led_exp.note_bot_spend("确认购买", "确认键", "青辉石")
+            sus_e = push_pyx(led_exp, 220, "lobby")
+            check("窗内首读下降挂起", sus_e is None)
+            led_exp._bot_spend_ts[_RD.PYROXENE] = _t.time() - 30
+            br_e = push_pyx(led_exp, 220, "cafe")
+            check("换页复读时窗已过仍抓成掉钱告警",
+                  br_e is not None and br_e.startswith("WARN_MONEY")
+                  and len(led_exp._breaches) == 1, str(br_e))
+        finally:
+            led_exp.path.unlink(missing_ok=True)
+
+        led_ocr = Ledger(log=lambda m: None)
+        led_ocr.path = _ROOT / "data" / "routing_v2" / "_test_ledger_ocr.jsonl"
+        led_ocr._vote = _VS()
+        try:
+            _VS.vals = {_RD.CREDIT: 1097169}
+            led_ocr._commit("lobby", "test")
+            led_ocr._commit("lobby", "test")
+            check("信用点 1097169 立基线",
+                  led_ocr.confirmed.get(_RD.CREDIT) == 1097169)
+            _VS.vals = {_RD.CREDIT: 97169}
+            ocr_msg = led_ocr._commit("lobby", "test")
+            check("信用点 1097169 截成 97169 不改基线也不 HALT",
+                  led_ocr.confirmed.get(_RD.CREDIT) == 1097169
+                  and not money_watch_should_halt(ocr_msg),
+                  str(led_ocr.confirmed.get(_RD.CREDIT)))
+        finally:
+            led_ocr.path.unlink(missing_ok=True)
+
+        led_up = Ledger(log=lambda m: None)
+        led_up.path = _ROOT / "data" / "routing_v2" / "_test_ledger_up.jsonl"
+        led_up._vote = _VS()
+        try:
+            _VS.vals = {_RD.CREDIT: 1097169}
+            led_up._commit("lobby", "test")
+            led_up._commit("lobby", "test")
+            _VS.vals = {_RD.CREDIT: 1050000}
+            up_msg = led_up._commit("lobby", "test")
+            check("用户升级花信用点不 HALT, 记外部变动",
+                  up_msg is not None and up_msg.startswith("EXTERNAL")
+                  and not money_watch_should_halt(up_msg)
+                  and led_up.confirmed.get(_RD.CREDIT) == 1050000,
+                  str(up_msg))
+        finally:
+            led_up.path.unlink(missing_ok=True)
+
+        check("runner: EXTERNAL 不停轮",
+              not money_watch_should_halt("EXTERNAL: 青辉石 220 降到 190"))
+        check("runner: BREACH 停轮",
+              money_watch_should_halt("MONEY BREACH: 青辉石 220 降到 190"))
+        check("runner: 空 watch 不停轮",
+              not money_watch_should_halt(None))
     finally:
         led.path.unlink(missing_ok=True)
 
 
 def t_event_bonus_shop():
     """08-15 复盘三修: 兜底过台账 / 台账写入口防测试污染 / 商店拒买不拒推算。"""
-    print("\n── 活动加成台账与商店扫买 ───────────────────")
+    print("\n 活动加成台账与商店扫买 ")
     import routing_v2.percept.read as _RD
     _orig_topbar = _RD.read_topbar
     _RD.read_topbar = lambda o, c: (500 if c == _RD.AP else _orig_topbar(o, c))
@@ -2111,7 +2735,7 @@ def t_event_bonus_shop():
              B(V.STAGE_ENTER, cx=0.9, cy=0.70), B(V.STAR_3, cx=0.6, cy=0.70),
              B(V.AP, conf=0.9, cx=0.40, cy=0.033))
     try:
-        # ── 修1: plan 空(推算被金钱闸拦掉/文件过期)时, 兜底关也要过台账 ──
+        #  修1: plan 空(推算被金钱闸拦掉/文件过期)时, 兜底关也要过台账
         #    08-15 实锤: 台账里 02:24 刚顶过倒数第 1 关, 第三通道 plan 空,
         #    跳过循环被 `plan and ...` 短路 -> 又打了一场(20AP 白花)。
         _ev = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
@@ -2129,7 +2753,7 @@ def t_event_bonus_shop():
               a is not None and a.kind != "done" and getattr(a, "is_tap", False)
               and "扫荡" in (a.reason or ""), str(a))
 
-        # ── 修2: _topped_mark 对 bag fixture 只写内存, 真实台账文件不许碰 ──
+        #  修2: _topped_mark 对 bag fixture 只写内存, 真实台账文件不许碰
         #    08-12/08-15(x2) 三次实锤: 离线套件驱动"赢一场"路径把
         #    data/routing_v2/event_topped.json 真写了。
         _ev2 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
@@ -2142,7 +2766,7 @@ def t_event_bonus_shop():
         _after = _tp.read_bytes() if _tp.exists() else None
         check("真实台账文件未被测试写过", _before == _after)
 
-        # ── 修3: event_shop 金钱被拒后不再试买, 但扫描推算照做 ──────────
+        #  修3: event_shop 金钱被拒后不再试买, 但扫描推算照做
         #    附带回归: 滑动后停稳闸(假到底) + 自底向上单遍 + 双向滑幅同尺。
         _orig_coin = _RD.read_event_coin
         _RD.read_event_coin = lambda o: 189
@@ -2173,30 +2797,30 @@ def t_event_bonus_shop():
             check("下行第一滑是向下(起点在下终点在上)",
                   a1 is not None and a1.kind == "swipe" and a1.y > a1.y2,
                   str(a1))
-            a2 = step(v1)
-            check("滑动后 10 tick 内不下结论(停稳闸, 根治一滑就假到底)",
-                  a2 is not None and a2.kind == "wait" and "停稳" in a2.reason,
+            a2 = step(v2)
+            check("滑动后画面未停稳不下结论(不固定 sleep)",
+                  a2 is not None and a2.kind == "wait" and "停稳" in (a2.reason or ""),
                   str(a2))
-            es.ticks += 10
-            step(v2)                              # 指纹变了 -> 继续下滑
-            es.ticks += 10
-            step(v2)                              # 指纹停变 -> 到底, 转上行
-            check("到底后转入自底向上购买", es.state.get("shelf_phase") == "up",
-                  str(es.state.get("shelf_phase")))
-            a5 = None
-            for _ in range(4):                    # 拒买状态下: 不出 money 步
-                a5 = step(v2)
-                if a5 is not None and a5.kind == "swipe":
+            a_down = None
+            for _ in range(6):
+                a_down = step(v2)
+                if a_down is not None and a_down.kind == "swipe" and a_down.y > a_down.y2:
                     break
-            check("上行滑动方向相反(起点在上终点在下)",
+            check("新货出现后继续下滑, 不提前向上",
+                  a_down is not None and a_down.kind == "swipe" and a_down.y > a_down.y2,
+                  str(a_down))
+            a5 = None
+            for _ in range(12):
+                a5 = step(v2)
+                if a5 is not None and a5.kind == "swipe" and a5.y < a5.y2:
+                    break
+            check("拒买扫描下行停变后才上翻(不是买路探底回滑)",
                   a5 is not None and a5.kind == "swipe" and a5.y < a5.y2,
                   str(a5))
-            es.ticks += 10
-            step(v1)                              # 指纹变 -> 还在上行
-            es.ticks += 10
-            step(v1)                              # 指纹停变 -> 到顶, tab 扫完
+            for _ in range(6):
+                step(v1)
             fin = None
-            for _ in range(3):
+            for _ in range(8):
                 fin = step(v1)
                 if fin is not None and fin.kind == "done":
                     break
@@ -2219,7 +2843,7 @@ def t_event_bonus_shop():
 def t_deadbtn():
     """死按钮复盘（08-15）: 假超时 = 契约把不弹框的键锁进死等确认/取消;
     归位假死 = 把被闸按住的提案数成连发。两刀分别在 gate.arm 和 _dead_tap。"""
-    print("\n── 死按钮: 契约拆档 + 归位只数真发 ─────────────")
+    print("\n 死按钮: 契约拆档 + 归位只数真发 ")
     from routing_v2.act.action import tap_box as _tb
     from routing_v2.act.gate import _EXPECT_DIALOG_AFTER as _DLG_EVIDENCE
 
@@ -2281,7 +2905,7 @@ def t_ocr_geom():
     UI 等比缩放; 写成绝对像素后 4K 顶栏被夹瘦切首位(47,143,185->433185 /
     7,555->555), 而 1440p 全对 —— 单位错, 不是标定错。地板仍是真绝对像素
     (DB 检测器物性)。"""
-    print("\n── OCR 裁片几何 ─────────────────────────────")
+    print("\n OCR 裁片几何 ")
     from routing_v2.percept.read import CREDIT, PYROXENE, STRIP, icon_strip
     xf, xt, yp, pmin, pmax = STRIP[CREDIT]
     b = Box(cls=CREDIT, conf=0.9, x1=0.500, y1=(720 - 24.7) / 1440,
@@ -2309,7 +2933,7 @@ def t_bucket():
     """台账账号分桶（08-15）: 落盘键过去只有游戏日/倒数第几关, 大小号换着跑
     互相把「今天做过/本期顶过」当成自己的账（ledger_20260813 同一份文件里
     05:48 大号 59M / 08:49 小号 35,544）。现在一切按 account.id 分桶。"""
-    print("\n── 台账账号分桶 ─────────────────────────────")
+    print("\n 台账账号分桶 ")
     from routing_v2.act.ledger import Ledger
     from routing_v2.config import data_dir, merged
     d = data_dir(cfg())
@@ -2339,10 +2963,1371 @@ def t_bucket():
     shutil.rmtree(d2, ignore_errors=True)
 
 
+def t_alt_gates():
+    """08-15 小号离线闸：锁入口、编队、归位、咖啡厅和账号分层。"""
+    print("\n-- 小号五项离线闸 ----")
+    import copy
+    import json
+    import cv2 as _cv
+    import numpy as _np
+    from routing_v2.flow import nav as _nv
+    from routing_v2.flow.battle import formation_ready, formation_slot_saturation
+    from routing_v2.state.machine import StateView as _SV
+
+    tiles = {"bounty": V.HUB_BOUNTY, "jfd": V.HUB_JFD,
+             "arena": V.HUB_ARENA}
+
+    def _hall_obs(*extra, special=False):
+        boxes = [
+            B(V.HUB_STORY, cx=0.20, cy=0.45),
+            B(V.HUB_CAMPAIGN, cx=0.40, cy=0.45),
+            B(V.BACK, cx=0.05, cy=0.05),
+        ]
+        if special:
+            boxes.append(B(V.HUB_SPECIAL, cx=0.60, cy=0.45))
+        boxes.extend(extra)
+        return O(*boxes)
+
+    def _hall_state(page, overlay=None):
+        return _SV(page=page, raw=page, overlay=overlay,
+                   frames_in_page=10, last_solid="task_hall")
+
+    one_anchor = O(B(V.HUB_STORY, cx=0.20, cy=0.45))
+    check("任务大厅单锚只计数，不满足普通大厅证据",
+          _nv.task_hall_anchor_count(one_anchor) == 1
+          and not _nv.task_hall_evidence(one_anchor))
+
+    for name, tile in tiles.items():
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        actions = []
+        for i in range(80):
+            page = "task_hall" if i % 2 == 0 else "facility"
+            actions.append(flow.decide(
+                _hall_obs(special=i % 3 == 0),
+                _hall_state(page)))
+        tile_taps = [a for a in actions
+                     if a is not None and a.is_tap and a.target_cls == tile]
+        confirm_taps = [a for a in actions
+                        if a is not None and a.is_tap
+                        and a.target_cls == V.CONFIRM]
+        check(f"{name} 真实零 tile 形态跨 task_hall/facility 80 帧后 SKIPPED",
+              flow.outcome == "SKIPPED"
+              and not tile_taps and not confirm_taps,
+              f"outcome={flow.outcome} tile={len(tile_taps)} "
+              f"confirm={len(confirm_taps)}")
+
+    for name in tiles:
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        no_evidence_actions = []
+        for i in range(24):
+            page = "facility" if i % 2 == 0 else "unknown"
+            no_evidence_actions.append(flow.decide(
+                O(B(V.BACK, cx=0.05, cy=0.05)),
+                _hall_state(page)))
+        check(f"{name} facility/unknown 无大厅证据不计 miss 也不按返回",
+              flow.state.get("hub_tile_misses") == 0
+              and flow.outcome is None
+              and not any(a is not None and a.is_tap
+                          for a in no_evidence_actions),
+              f"miss={flow.state.get('hub_tile_misses')}")
+
+    for name, tile in tiles.items():
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        for i in range(40):
+            page = "task_hall" if i % 2 == 0 else "facility"
+            flow.decide(_hall_obs(special=i % 2 == 0), _hall_state(page))
+        appeared = flow.decide(
+            _hall_obs(B(tile, cx=0.72, cy=0.62), special=True),
+            _hall_state("facility"))
+        check(f"{name} 漏 40 帧后 tile 出现立即清 miss 并正常 tap",
+              appeared is not None and appeared.is_tap
+              and appeared.target_cls == tile
+              and flow.state.get("hub_tile_misses") == 0,
+              f"{appeared} miss={flow.state.get('hub_tile_misses')}")
+
+    st_lock = _hall_state("facility", overlay="ack_dialog")
+    for name, tile in tiles.items():
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        first = flow.on_task_hall(
+            _hall_obs(B(tile, cx=0.72, cy=0.62), special=True),
+            _hall_state("task_hall"))
+        check(f"{name} 第一次探测入口",
+              first is not None and first.is_tap and first.target_cls == tile,
+              str(first))
+        if first is not None and first.post:
+            first.post()
+        rejected = flow.decide(
+            _hall_obs(B(V.CONFIRM, cx=0.50, cy=0.70), special=True),
+            st_lock)
+        check(f"{name} 当前大厅证据下单键锁通知快速 SKIPPED",
+              rejected is not None and rejected.kind == "done"
+              and flow.outcome == "SKIPPED"
+              and not (rejected.is_tap
+                       and rejected.target_cls == V.CONFIRM),
+              f"{rejected} outcome={flow.outcome}")
+
+    for name in tiles:
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        flow.state["entry_probe"] = True
+        rejected = flow.decide(
+            O(B(V.HUB_STORY, cx=0.20, cy=0.45),
+              B(V.CONFIRM, cx=0.50, cy=0.70)),
+            st_lock)
+        check(f"{name} 单剧情锚锁通知快速 SKIPPED 且不点确认",
+              rejected is not None and rejected.kind == "done"
+              and flow.outcome == "SKIPPED"
+              and not (rejected.is_tap
+                       and rejected.target_cls == V.CONFIRM),
+              f"{rejected} outcome={flow.outcome}")
+
+    for name in tiles:
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        flow.state["entry_probe"] = True
+        notified = flow.decide(
+            O(B(V.CONFIRM, cx=0.50, cy=0.70)),
+            st_lock)
+        check(f"{name} 无大厅锚内页通知绝不误 SKIP",
+              flow.outcome != "SKIPPED"
+              and notified is not None and notified.is_tap
+              and notified.target_cls == V.CONFIRM,
+              f"{notified} outcome={flow.outcome}")
+
+    hard_evidence = (
+        ("sweep ticket", "bounty", B(V.TICKET_BOUNTY, cx=0.08, cy=0.20)),
+        ("sweep branch", "jfd", B(V.JFD_ACADEMIES[0], cx=0.70, cy=0.40)),
+        ("sweep stage", "bounty", B(V.STAGE_ENTER, cx=0.82, cy=0.55)),
+        ("arena ticket", "arena", B(V.TICKET_ARENA, cx=0.08, cy=0.20)),
+        ("arena row", "arena", B(V.ARENA_ROW, cx=0.70, cy=0.40)),
+        ("arena attack form", "arena",
+         B(V.ARENA_ATTACK_FORM, cx=0.72, cy=0.70)),
+    )
+    for case, name, inside_box in hard_evidence:
+        tile = tiles[name]
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        first = flow.on_task_hall(
+            _hall_obs(B(tile, cx=0.72, cy=0.62), special=True),
+            _hall_state("task_hall"))
+        if first is not None and first.post:
+            first.post()
+        raced = flow.decide(
+            _hall_obs(inside_box,
+                      B(V.CONFIRM, cx=0.50, cy=0.70),
+                      special=True),
+            st_lock)
+        check(f"{case} 进内页通知竞态绝不误 SKIP",
+              flow.outcome != "SKIPPED"
+              and raced is not None and raced.is_tap
+              and raced.target_cls == V.CONFIRM,
+              f"{raced} outcome={flow.outcome}")
+
+    for case, name, inside_box in hard_evidence:
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        flow.state["entry_probe"] = True
+        raced = flow.decide(
+            O(B(V.HUB_STORY, cx=0.20, cy=0.45),
+              inside_box,
+              B(V.CONFIRM, cx=0.50, cy=0.70)),
+            st_lock)
+        check(f"{case} 单锚内页硬证据绝不误 SKIP",
+              flow.outcome != "SKIPPED"
+              and raced is not None and raced.is_tap
+              and raced.target_cls == V.CONFIRM,
+              f"{raced} outcome={flow.outcome}")
+
+    for case, name, inside_box in hard_evidence:
+        flow = ALL[name](Ctx(cfg=cfg(), log=lambda m: None))
+        flow.state["entry_probe"] = True
+        raced = flow.decide(
+            O(inside_box, B(V.CONFIRM, cx=0.50, cy=0.70)),
+            st_lock)
+        check(f"{case} 无大厅锚内页硬证据绝不误 SKIP",
+              flow.outcome != "SKIPPED"
+              and raced is not None and raced.is_tap
+              and raced.target_cls == V.CONFIRM,
+              f"{raced} outcome={flow.outcome}")
+
+    event = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    event.state["saw_other"] = True
+    event_enter = event.decide(
+        _hall_obs(B(V.EVENT_LIVE, cx=0.30, cy=0.18), special=True),
+        _hall_state("facility"))
+    check("event facility 有大厅证据时转发 on_task_hall 进场",
+          event_enter is not None and event_enter.is_tap
+          and event_enter.target_cls == V.EVENT_LIVE,
+          str(event_enter))
+    event_no_hall = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    no_hall_action = event_no_hall.decide(
+        O(B(V.EVENT_LIVE, cx=0.30, cy=0.18),
+          B(V.BACK, cx=0.05, cy=0.05)),
+        _hall_state("facility"))
+    check("event facility 无大厅证据保持 no-op，不按返回制造乒乓",
+          no_hall_action is None, str(no_hall_action))
+    event_reward = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    event_reward.state["in_reward"] = True
+    reward_action = event_reward.decide(
+        _hall_obs(B(V.CLAIM_REWARD_YELLOW, cx=0.50, cy=0.70),
+                  special=True),
+        _hall_state("facility"))
+    check("event facility 保留 in_reward 奖励分支",
+          reward_action is not None and reward_action.is_tap
+          and reward_action.target_cls == V.CLAIM_REWARD_YELLOW,
+          str(reward_action))
+
+    schedule = ALL["schedule"](Ctx(cfg=cfg(), log=lambda m: None))
+    schedule_banner = schedule.on_reward(
+        O(B(V.GOT_REWARD, conf=0.99, cx=0.50, cy=0.22)),
+        _SV(page="schedule_region", overlay="reward"))
+    check("课程表奖励层只有横幅时继承基类并 wait",
+          schedule_banner is not None and schedule_banner.kind == "wait",
+          str(schedule_banner))
+    schedule_continue = schedule.on_reward(
+        O(B(V.GOT_REWARD, conf=0.99, cx=0.50, cy=0.22),
+          B(V.STORY_TAP_CONTINUE, conf=0.90, cx=0.50, cy=0.88)),
+        _SV(page="schedule_region", overlay="reward"))
+    check("课程表横幅和点击继续同屏时只点继续",
+          schedule_continue is not None and schedule_continue.is_tap
+          and schedule_continue.target_cls == V.STORY_TAP_CONTINUE,
+          str(schedule_continue))
+
+    a_rw, _ = _nv.route(
+        O(B(V.GOT_REWARD, cx=0.50, cy=0.22), B(V.BACK, cx=0.05, cy=0.06)),
+        _SV(page="mail", overlay="reward", frames_in_page=10), "lobby", None)
+    check("归位不点获得奖励横幅(等)",
+          a_rw is not None and a_rw.kind == "wait"
+          and a_rw.target_cls != V.GOT_REWARD, str(a_rw))
+    a_ct, _ = _nv.route(
+        O(B(V.GOT_REWARD, cx=0.50, cy=0.22),
+          B(V.STORY_TAP_CONTINUE, cx=0.50, cy=0.88)),
+        _SV(page="mail", overlay="reward", frames_in_page=10), "lobby", None)
+    check("归位奖励层点点击继续",
+          a_ct is not None and a_ct.target_cls == V.STORY_TAP_CONTINUE, str(a_ct))
+
+    def _cafe():
+        return ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
+
+    cf = _cafe()
+    cf.state["floor"] = 1
+    cf.observe(
+        O(B(V.CAFE_MOVE_1F, cx=0.126, cy=0.143, w=0.08, h=0.05),
+          B(V.ROOM_LOCKED, cx=0.103, cy=0.148, w=0.02, h=0.02)),
+        _SV(page="cafe"))
+    check("咖啡锁框与换厅钮重叠时不改 floor",
+          cf.state.get("floor") == 1, str(cf.state.get("floor")))
+    cf2 = _cafe()
+    cf2.state["floor"] = 1
+    cf2.observe(
+        O(B(V.CAFE_MOVE_1F, cx=0.126, cy=0.143, w=0.08, h=0.05),
+          B(V.ROOM_LOCKED, cx=0.190, cy=0.143, w=0.02, h=0.02)),
+        _SV(page="cafe"))
+    check("不重叠的锁框不屏蔽单一 to1",
+          cf2.state.get("floor") == 2, str(cf2.state.get("floor")))
+    cf3 = _cafe()
+    cf3.state["floor"] = 2
+    cf3.observe(O(B(V.CAFE_MOVE_2F, cx=0.126, cy=0.143, w=0.08, h=0.05)),
+                _SV(page="cafe"))
+    check("无锁的单一 to2 仍校正到 1F",
+          cf3.state.get("floor") == 1, str(cf3.state.get("floor")))
+
+    sample_paths = {
+        "full_event_7994": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_021657"
+            / "0007994_new_formation.jpg"),
+        "full_event_8736": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_021657"
+            / "0008736_new_formation.jpg"),
+        "full_arena_11024": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_021657"
+            / "0011024_new_formation.jpg"),
+        "full_alt_0641": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_084829"
+            / "0000641_formation.jpg"),
+        "full_alt_0835": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_084829"
+            / "0000835_formation.jpg"),
+        "empty_40323": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_050854"
+            / "0040323_formation.jpg"),
+        "empty_7781": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_021657"
+            / "0007781_new_formation.jpg"),
+        "partial_0582": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_084829"
+            / "0000582_formation.jpg"),
+        "fade_8523": (
+            _ROOT / "data" / "raw_images" / "v2_20260815_021657"
+            / "0008523_new_formation.jpg"),
+    }
+    check("九张真实编队帧都在盘上",
+          len(sample_paths) > 0 and all(p.is_file() for p in sample_paths.values()),
+          ", ".join(str(p) for p in sample_paths.values() if not p.is_file()))
+    images = {
+        name: (_cv.imdecode(_np.fromfile(str(path), dtype=_np.uint8),
+                            _cv.IMREAD_COLOR)
+               if path.is_file() else None)
+        for name, path in sample_paths.items()
+    }
+    check("九张真实编队帧都能解码",
+          len(images) > 0 and all(frame is not None for frame in images.values()))
+
+    must_pass = (
+        "full_event_7994", "full_event_8736", "full_arena_11024",
+        "full_alt_0641", "full_alt_0835",
+    )
+    must_block = ("empty_40323", "empty_7781", "partial_0582", "fade_8523")
+
+    def _form_obs(frame, *, arena=False):
+        boxes = [
+            B(V.SORTIE, cx=0.92, cy=0.92),
+            B(V.SQUAD_1_HI, cx=0.06, cy=0.26),
+        ]
+        if arena:
+            boxes.append(B(V.SKIP_BATTLE, cx=0.91, cy=0.84))
+        return Observation(
+            boxes=boxes, frame=frame, seq=1,
+            w=frame.shape[1], h=frame.shape[0])
+
+    if all(frame is not None for frame in images.values()):
+        for name in must_pass:
+            metric = formation_slot_saturation(Observation(frame=images[name]))
+            check(f"{name} 六人满编必须放行",
+                  formation_ready(Observation(frame=images[name])),
+                  str(metric))
+            ready_flow = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+            ready_act = ready_flow.decide(
+                _form_obs(images[name]),
+                _SV(page="formation", raw="formation", frames_in_page=10))
+            check(f"{name} event 路径可生成出击 Action",
+                  ready_act is not None and ready_act.is_tap
+                  and ready_act.target_cls == V.SORTIE,
+                  str(ready_act))
+        for name in must_block:
+            metric = formation_slot_saturation(Observation(frame=images[name]))
+            check(f"{name} 有空槽或未就绪必须拦",
+                  not formation_ready(Observation(frame=images[name])),
+                  str(metric))
+
+        import time as _time
+
+        def _run_unready(frame, elapsed, ticks=40):
+            flow = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+            flow.state["formation_unready_since"] = _time.monotonic() - elapsed
+            acts = []
+            for _ in range(ticks):
+                acts.append(flow.decide(
+                    _form_obs(frame),
+                    _SV(page="formation", raw="formation", frames_in_page=10)))
+            sorties = [a for a in acts if a is not None
+                       and a.is_tap and a.target_cls == V.SORTIE]
+            return flow, acts[-1], sorties
+
+        for name in ("empty_40323", "empty_7781", "partial_0582"):
+            blocked_flow, blocked_last, blocked_sorties = _run_unready(
+                images[name], 6.0)
+            check(f"{name} 满 40 tick 且 5s 后 BLOCKED，出击 Action 为 0",
+                  not blocked_sorties and blocked_flow.outcome == "BLOCKED"
+                  and blocked_last.kind == "done",
+                  f"{blocked_last} sorties={len(blocked_sorties)}")
+
+        fade_flow, fade_last, fade_sorties = _run_unready(
+            images["fade_8523"], 0.5)
+        check("淡入帧即使满 40 tick，墙钟仅 0.5s 也只 wait 不终结",
+              not fade_sorties and fade_flow.outcome is None
+              and fade_last.kind == "wait",
+              f"{fade_last} outcome={fade_flow.outcome}")
+
+        reset_flow = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+        reset_flow.state["formation_unready_since"] = _time.monotonic() - 6.0
+        for _ in range(12):
+            reset_flow.decide(
+                _form_obs(images["empty_40323"]),
+                _SV(page="formation", raw="formation", frames_in_page=10))
+        reset_flow.decide(
+            O(), _SV(page="lobby", raw="lobby",
+                     frames_in_page=1, changed=True))
+        check("编队页面变化会清空未就绪 hold 和墙钟",
+              "formation_unready_since" not in reset_flow.state
+              and "hold:formation_unready" not in reset_flow.state)
+
+        recovered_flow = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+        recovered_flow.state["formation_unready_since"] = _time.monotonic() - 6.0
+        for _ in range(12):
+            recovered_flow.decide(
+                _form_obs(images["empty_40323"]),
+                _SV(page="formation", raw="formation", frames_in_page=10))
+        recovered_act = recovered_flow.decide(
+            _form_obs(images["full_alt_0641"]),
+            _SV(page="formation", raw="formation", frames_in_page=10))
+        check("编队准备成功会清状态并立即允许出击",
+              recovered_act is not None and recovered_act.is_tap
+              and recovered_act.target_cls == V.SORTIE
+              and "formation_unready_since" not in recovered_flow.state,
+              str(recovered_act))
+
+        arena_flow = ALL["arena"](Ctx(cfg=cfg(), log=lambda m: None))
+        arena_actions = [
+            arena_flow.decide(
+                _form_obs(images["full_arena_11024"], arena=True),
+                _SV(page="formation", raw="formation", frames_in_page=10))
+            for _ in range(8)
+        ]
+        check("arena 0011024 满编通过像素闸并可出击",
+              any(a is not None and a.is_tap and a.target_cls == V.SORTIE
+                  for a in arena_actions)
+              and arena_flow.outcome != "BLOCKED",
+              str(arena_actions[-1]))
+
+    unknown_flow = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    unknown_obs = O(B(V.SORTIE, cx=0.92, cy=0.92),
+                    B(V.SQUAD_1_HI, cx=0.06, cy=0.26))
+    import time as _time
+    unknown_flow.state["formation_unready_since"] = _time.monotonic() - 6.0
+    unknown_acts = [
+        unknown_flow.decide(
+            unknown_obs,
+            _SV(page="formation", raw="formation", frames_in_page=10))
+        for _ in range(40)
+    ]
+    check("无帧无法证明编队，满 40 tick 且 5s 后 BLOCKED 且不出击",
+          not any(a is not None and a.is_tap and a.target_cls == V.SORTIE
+                  for a in unknown_acts)
+          and unknown_flow.outcome == "BLOCKED")
+
+    from routing_v2.act.ledger import Ledger
+    from routing_v2.config import data_dir, merged
+    from routing_v2.config.schema import PROFILE
+    from routing_v2.flow import daybook as _daybook
+    user = json.loads(PROFILE.read_text(encoding="utf-8"))
+    alt_cfg = merged(user)
+    profile_unlocked = copy.deepcopy(user)
+    profile_unlocked.setdefault("safety", {})["money_step_needs_human"] = False
+    check("profile 直接写 false 也掀不开 money_step_needs_human",
+          merged(profile_unlocked)["safety"]["money_step_needs_human"] is True)
+    main_user = copy.deepcopy(user)
+    main_user.setdefault("account", {})["id"] = "main"
+    main_cfg = merged(main_user)
+    main_targets = ["凯伊", "爱丽丝(战斗)", "爱丽丝"]
+    check("当前运行账号明确为 alt",
+          alt_cfg["account"]["id"] == "alt")
+    check("alt 邀请目标为空且明确禁用",
+          alt_cfg["cafe"]["invite_targets"] == []
+          and alt_cfg["cafe"]["skip_invite"] is True)
+    check("main 邀请目标未被 alt 覆盖",
+          main_cfg["cafe"]["invite_targets"] == main_targets
+          and main_cfg["cafe"]["skip_invite"] is False)
+    alt_dir = data_dir(alt_cfg)
+    alt_ledger = Ledger(log=lambda m: None, out_dir=alt_dir)
+    alt_sched = ALL["schedule"](Ctx(cfg=alt_cfg, log=lambda m: None))
+    check("alt 的 ledger/daybook/schedule_rooms 都落 alt 桶",
+          alt_dir.name == "alt"
+          and alt_ledger.path.parent == alt_dir
+          and _daybook._file(alt_cfg).parent == alt_dir
+          and alt_sched._rooms_file().parent == alt_dir)
+    alt_cafe = ALL["cafe"](Ctx(cfg=alt_cfg, log=lambda m: None))
+    alt_cafe.goto("invite", "测试账号邀请配置")
+    no_invite = alt_cafe.decide(O(), _SV(page="cafe", frames_in_page=10))
+    check("alt 不开邀请名单也不盲滑",
+          no_invite is not None and no_invite.kind == "wait"
+          and alt_cafe.state.get("invite_disabled")
+          and alt_cafe.state.get("invite_scrolls", 0) == 0)
+
+    def _alt_exit(with_dot):
+        flow = ALL["cafe"](Ctx(cfg=alt_cfg, log=lambda m: None))
+        flow.state.update(claimed=True, invite_disabled=True)
+        flow.goto("exit", "测试收尾语义")
+        obs = O(B(V.DOT_YELLOW, cx=0.50, cy=0.50)) if with_dot else O()
+        act = None
+        for _ in range(20):
+            act = flow.decide(obs, _SV(page="cafe", frames_in_page=10))
+        return flow, act
+
+    left_flow, left_act = _alt_exit(True)
+    clean_flow, clean_act = _alt_exit(False)
+    check("alt 禁邀但仍有黄点时诚实报 LEFTOVER",
+          left_flow.outcome == "LEFTOVER" and left_act.kind == "done")
+    check("alt 禁邀且无黄点时可报 CLEAN",
+          clean_flow.outcome == "CLEAN" and clean_act.kind == "done")
+    caps = alt_cfg["safety"]["purchase_caps"]
+    check("钱相关默认仍为 0",
+          alt_cfg["safety"]["ap_purchase_limit"] == 0
+          and alt_cfg["shop"]["refresh_times"] == 0
+          and alt_cfg["safety"]["money_step_needs_human"] is True
+          and all(caps[k] == 0 for k in ("arena", "bounty",
+                                         "scrimmage", "lesson")))
+
+
+def t_shelf_walk():
+    """大厅店走全部选择/选择购买; 活动店可见有 103 时不向上."""
+    print("\n 大厅选择流 / 活动店有103不向上 ")
+    import inspect as _insp
+    from routing_v2.flow import facilities as _fac
+    from routing_v2.percept.read import CREDIT as _CR
+
+    check("大厅店源码不 import shelf_walk",
+          "shelf_walk" not in _insp.getsource(_fac))
+
+    def drive(flow, obs, fn):
+        flow.ticks += 1
+        a = fn(obs, Machine(1).update(obs))
+        if a is not None and getattr(a, "post", None):
+            a.post()
+        return a
+
+    # 大厅: 全部选择 -> 选择购买, 不滑货架, 不点 103 / 购买青辉石
+    sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    sh.cfg = dict(sh.cfg or {})
+    sh.cfg["credit_buy"] = True
+    grid = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19),
+             B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
+             B(V.SHOP_BUY_SELECTED, cx=0.91, cy=0.92),
+             B(V.SHOP_BUY, cx=0.55, cy=0.48),
+             B(V.SHOP_BUY, cx=0.90, cy=0.48),
+             B(V.SHOP_BUY, cx=0.55, cy=0.83),
+             B(V.SHOP_BUY, cx=0.90, cy=0.83),
+             B(V.CREDIT, cx=0.55, cy=0.40))
+    grid.balances[_CR] = 50000000
+    a_s = drive(sh, grid, sh.on_shop)
+    check("大厅店点全部选择",
+          a_s is not None and getattr(a_s, "target_cls", "") == V.SHOP_SELECT_ALL,
+          str(a_s))
+    check("大厅店不走 shelf_walk/不点购买青辉石",
+          a_s.kind != "swipe"
+          and getattr(a_s, "target_cls", "") not in
+          (V.SHOP_BUY, V.SHOP_BUY_PYROXENE),
+          str(a_s))
+    sh.state["once:selectall"] = True
+    grid_checked = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19),
+                     B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
+                     B(V.GREEN_CHECK, cx=0.88, cy=0.20),
+                     B(V.SHOP_BUY_SELECTED, cx=0.91, cy=0.92),
+                     B(V.CREDIT, cx=0.55, cy=0.40))
+    grid_checked.balances[_CR] = 50000000
+    a_buy = drive(sh, grid_checked, sh.on_shop)
+    check("绿勾在场不再点全部选择",
+          a_buy is None or getattr(a_buy, "target_cls", "") != V.SHOP_SELECT_ALL,
+          str(a_buy))
+    check("大厅店全部选择后点选择购买",
+          a_buy is not None and getattr(a_buy, "target_cls", "") == V.SHOP_BUY_SELECTED,
+          str(a_buy))
+    check("信用点选择购买不走人审",
+          a_buy is not None and (not getattr(a_buy, "money", False)),
+          str(a_buy))
+
+    from routing_v2.state.machine import StateView as _SV
+    sh_off = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    a_off = drive(sh_off, grid, sh_off.on_shop)
+    check("credit_buy 默认关不点全部选择",
+          a_off is None or getattr(a_off, "target_cls", "") != V.SHOP_SELECT_ALL,
+          str(a_off))
+    check("credit_buy 默认关不点选择购买",
+          a_off is None or getattr(a_off, "target_cls", "") != V.SHOP_BUY_SELECTED,
+          str(a_off))
+    check("credit_buy 关记 credit_off",
+          sh_off.state.get("credit_off") is True
+          and sh_off.state.get("bought") is True)
+    sh_left = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    sh_left.state.update(bought=True, credit_off=True, arena_done=True)
+    a_left = sh_left.on_shop(
+        grid_checked, _SV(page="shop", frames_in_page=50))
+    check("credit_buy 关时货架选择购买不报 LEFTOVER",
+          a_left is not None and a_left.kind == "done"
+          and sh_left.outcome == "CLEAN"
+          and "没买成" not in (a_left.reason or "")
+          and "已关" in (a_left.reason or ""),
+          str(a_left))
+
+    idle = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19),
+             B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
+             B(V.SHOP_BUY_SELECTED, cx=0.91, cy=0.92),
+             B(V.CREDIT, cx=0.55, cy=0.40))
+    idle.balances[_CR] = 50000000
+    sh_idle = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    sh_idle.cfg = dict(sh_idle.cfg or {})
+    sh_idle.cfg["credit_buy"] = True
+    sh_idle.state["once:selectall"] = True
+    a_idle = drive(sh_idle, idle, sh_idle.on_shop)
+    check("空闲底栏 450 无勾选证据不当选择购买",
+          a_idle is None or getattr(a_idle, "target_cls", "") != V.SHOP_BUY_SELECTED,
+          str(a_idle))
+    from routing_v2.flow.base import qty_max_ok as _qmax
+    check("灰 MAX 在场不点 111",
+          _qmax(O(B(V.QTY_MAX, conf=0.40, cx=0.80, cy=0.50),
+                  B(V.QTY_MAX_GREY, conf=0.50, cx=0.80, cy=0.50))) is None)
+    check("只有亮 MAX 放行",
+          _qmax(O(B(V.QTY_MAX, conf=0.40, cx=0.80, cy=0.50))) is not None)
+    check("TASK_INFO 在词表", V.TASK_INFO == "任务资讯")
+    check("529/530 不建常量",
+          not hasattr(V, "STAR_1") and not hasattr(V, "STAR_2"))
+
+    lob = O(B(V.NAV_SHOP, cx=0.621, cy=0.953),
+            B(V.SHOP_BUY_PYROXENE, cx=0.116, cy=0.360))
+    a_ent = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None)).on_lobby(
+        lob, Machine(1).update(lob))
+    check("大厅入口点底栏商店不是购买青辉石",
+          a_ent is not None and a_ent.target_cls == V.NAV_SHOP
+          and a_ent.y > 0.88, str(a_ent))
+    pyx = O(B(V.SHOP_TAB_PYROXENE_SEL, cx=0.05, cy=0.30, w=0.06, h=0.04),
+            B(V.SHOP_BUY, cx=0.70, cy=0.50))
+    a_tab = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None)).on_shop_pyroxene_tab(
+        pyx, Machine(1).update(pyx))
+    check("青辉石 tab 切回信用点, 不点购买/不退出",
+          a_tab is not None and a_tab.kind == "tap"
+          and a_tab.target_cls != V.SHOP_BUY
+          and a_tab.y < 0.30, str(a_tab))
+    grey_buy = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19),
+                 B(V.GREEN_CHECK, cx=0.88, cy=0.20),
+                 B(V.SHOP_BUY_SELECTED_GREY, cx=0.91, cy=0.92),
+                 B(V.CREDIT, cx=0.70, cy=0.55))
+    sh3 = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    sh3.cfg = dict(sh3.cfg or {})
+    sh3.cfg["credit_buy"] = True
+    sh3.state["once:selectall"] = True
+    a_nb = None
+    for _ in range(10):
+        a_nb = drive(sh3, grey_buy, sh3.on_shop)
+    check("大厅店选择购买灰色不当成交",
+          sh3.state.get("credit_short") is True
+          and getattr(a_nb, "target_cls", "") != V.SHOP_BUY_SELECTED,
+          str((sh3.state.get("credit_short"), a_nb)))
+
+    # 活动店: 可见有 103 时不向上. 即使刚滑完/同画面也不回滑.
+    ev = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    ev.state["plan"] = {}
+    top = O(B(V.CURRENCY_SEL, cx=0.08, cy=0.30, w=0.06, h=0.04),
+            B(V.SHOP_BUY, cx=0.40, cy=0.36),
+            B(V.SHOP_BUY, cx=0.80, cy=0.36),
+            B(V.SHOP_BUY, cx=0.40, cy=0.72),
+            B(V.SHOP_BUY, cx=0.80, cy=0.72))
+    ups = []
+    last = None
+    for _ in range(8):
+        last = drive(ev, top, ev.on_event_shop)
+        if last is not None and last.kind == "swipe" and last.y < last.y2:
+            ups.append(last)
+    check("活动店可见有 103 时不向上",
+          not ups, str(ups[0] if ups else last))
+    check("活动店有 103 不因同画面回滑",
+          last is None or last.kind != "swipe" or last.y > last.y2,
+          str(last))
+    ev_fake = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    ev_fake.state.update(plan={}, shelf_went_down=True, shelf_moved=False)
+    a_fake = drive(ev_fake, top, ev_fake.on_event_shop)
+    check("活动店有 103 即使标记已探底也不向上",
+          a_fake is None or a_fake.kind != "swipe" or a_fake.y > a_fake.y2,
+          str(a_fake))
+
+    sold = O(B(V.CURRENCY_SEL, cx=0.08, cy=0.30, w=0.06, h=0.04),
+             B(V.SHOP_BUY_GREY, cx=0.40, cy=0.36),
+             B(V.SHOP_BUY_GREY, cx=0.80, cy=0.36),
+             B(V.SHOP_BUY_GREY, cx=0.40, cy=0.72),
+             B(V.SHOP_BUY_GREY, cx=0.80, cy=0.72))
+    ev2 = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    ev2.state["plan"] = {}
+    a_down = drive(ev2, sold, ev2.on_event_shop)
+    check("活动店本屏无 103 才下滑",
+          a_down is not None and a_down.kind == "swipe" and a_down.y > a_down.y2,
+          str(a_down))
+
+    _yolo_shop_fixture()
+
+
+def _yolo_shop_fixture():
+    """YOLO 标注帧: 大厅走选择流, 活动店有 103 不向上. 分母先印且不为 0."""
+    root = Path(__file__).resolve().parents[2]
+    cls_path = root / "data" / "raw_images" / "_classes.txt"
+    names = cls_path.read_text(encoding="utf-8").splitlines()
+    frames = [
+        ("credit", root / "data" / "raw_images" / "walk_20260813_083604" / "007_shop.txt"),
+        ("event", root / "data" / "raw_images" / "v2_20260813_134818" / "0006580_MONEY.txt"),
+    ]
+    exist = [(tag, p) for tag, p in frames if p.exists()]
+    print(f"YOLO货架夹具分母 {len(exist)}/{len(frames)}")
+    check("YOLO货架夹具分母不为 0", len(exist) > 0, str(len(exist)))
+    for tag, p in exist:
+        boxes = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            cid = int(float(parts[0]))
+            if cid < 0 or cid >= len(names):
+                continue
+            name = names[cid].strip()
+            cx, cy, w, h = map(float, parts[1:5])
+            boxes.append(B(name, conf=0.9, cx=cx, cy=cy, w=w, h=h))
+        obs = O(*boxes)
+        n103 = sum(1 for b in boxes if b.cls == V.SHOP_BUY)
+        n489 = sum(1 for b in boxes if b.cls == V.SHOP_BUY_GREY)
+        print(f"  {tag} {p.name}: n103={n103} n489={n489}")
+        if tag == "credit":
+            sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+            sh.cfg = dict(sh.cfg or {})
+            sh.cfg["credit_buy"] = True
+            sh.cfg["arena_shop"] = False
+            shelf_sw = []
+            taps103 = []
+            last = None
+            for i in range(12):
+                sh.ticks += 1
+                last = sh.on_shop(obs, Machine(1).update(obs))
+                if last is not None and getattr(last, "post", None):
+                    last.post()
+                if last is not None and last.kind == "swipe":
+                    why = last.reason or ""
+                    if "货架" in why or "探底" in why:
+                        shelf_sw.append(last)
+                if last is not None and getattr(last, "target_cls", "") == V.SHOP_BUY:
+                    taps103.append(last)
+            print(f"    大厅007 last={last}")
+            check("大厅007不走 shelf_walk(不滑货架)",
+                  not shelf_sw, str(shelf_sw[0] if shelf_sw else last))
+            check("大厅007不点单卡购买103",
+                  not taps103, str(taps103[0] if taps103 else last))
+            sel_ok = (sh.state.get("credit_short")
+                      or sh.state.get("bought")
+                      or (last is not None and last.kind == "wait")
+                      or getattr(last, "target_cls", "") in (
+                          V.SHOP_SELECT_ALL, V.SHOP_BUY_SELECTED,
+                          V.SHOP_BUY_SELECTED_GREY, V.SHOP_SELECT_ALL_GREY))
+            check("大厅007走全部选择/选择购买系列",
+                  bool(sel_ok) and last is not None and last.kind != "swipe",
+                  str((sh.state.get("credit_short"), last)))
+        if tag == "event":
+            es = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
+            es.setup()
+            ups = []
+            last = None
+            for _ in range(8):
+                es.ticks += 1
+                last = es._scan_shelf(obs, Machine(1).update(obs),
+                                      "tab1/1", 0, 0, 1)
+                if last is not None and getattr(last, "post", None):
+                    last.post()
+                if last is not None and last.kind == "swipe" and last.y < last.y2:
+                    ups.append(last)
+            print(f"    活动6580 n103={n103} last={last}")
+            check("活动店6580可见有103时不向上",
+                  n103 == 0 or not ups, str(ups[0] if ups else last))
+
+
+def t_remain_gates_0816():
+    """08-16 remain: 社团浮层不秒收 / AP 909->9 / 大赛续打 / 活动店确认不滑走."""
+    print("\n-- remain 五条门控 ----")
+    from routing_v2.flow import nav as _nv
+    from routing_v2.state.machine import StateView as _SV
+
+    club = ALL["club"](Ctx(cfg=cfg(), log=lambda m: None))
+    overlay = O(B(V.CLUB, cx=0.22, cy=0.46))
+    st_c = Machine(1).update(overlay)
+    a = club.on_club(overlay, st_c)
+    check("社团浮层点卡不置 entered",
+          a is not None and a.target_cls == V.CLUB
+          and not club.state.get("inside"))
+    club.state["once:enter_card"] = True
+    for _ in range(15):
+        club.ticks += 1
+        a3 = club.on_club(overlay, st_c)
+    check("浮层 15 帧不秒收 CLEAN",
+          getattr(club, "outcome", None) in (None, ""),
+          str(getattr(club, "outcome", None)))
+    check("点卡后浮层仍在是 wait",
+          a3 is not None and a3.kind == "wait")
+
+    ev = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    ev.state["ap_seen"] = 909
+    import routing_v2.percept.read as _RD
+    _orig = _RD.read_topbar
+    try:
+        _RD.read_topbar = lambda o, c: 9
+        check("AP 909 截成 9 不采信", ev._ap_read(O(B(V.AP))) is None)
+        ev.state["ap_seen"] = 29
+        check("AP 29 花到 9 采信", ev._ap_read(O(B(V.AP))) == 9)
+    finally:
+        _RD.read_topbar = _orig
+
+    ar = ALL["arena"](Ctx(cfg=cfg(), log=lambda m: None))
+    ar.state.update(tickets0=5, tickets=2, fights=4, inside=True,
+                    entry_claims=3)
+    row = O(B(V.ARENA_ROW, cx=0.70, cy=0.30, w=0.30, h=0.08))
+    st_a = Machine(1).update(row)
+    st_a.page = "arena"
+    st_a.frames_in_page = 60
+    aa = ar.on_arena(row, st_a)
+    check("大赛进门 5 打了 4 票读不出仍出战",
+          aa is not None and aa.kind != "done", str(aa))
+
+    a, _ = _nv.route(
+        O(B(V.HOME, cx=0.12, cy=0.06), B(V.BACK, cx=0.05, cy=0.06),
+          B(V.CANCEL, cx=0.40, cy=0.70)),
+        _SV(page="formation", frames_in_page=10), "lobby", None)
+    check("编队归位大厅优先回大厅键",
+          a is not None and a.target_cls == V.HOME,
+          str(getattr(a, "target_cls", None)))
+
+    es = ALL["event_shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    es.setup()
+    o = O(B(V.SHOP_BUY, cx=0.50, cy=0.50),
+          B(V.SHOP_BUY_SELECTED, cx=0.80, cy=0.90),
+          B(V.CURRENCY_SEL, cx=0.08, cy=0.30))
+    asel = es._scan_shelf(o, Machine(1).update(o), "tab1/2", 0, 0, 2)
+    check("活动店选择购买在场先点不滑走",
+          asel is not None and asel.target_cls == V.SHOP_BUY_SELECTED,
+          str(asel))
+
+    lobby = O(B(V.NAV_DAILY_REWARD, cx=0.90, cy=0.06, w=0.04, h=0.04),
+              B(V.NAV_CAFE, cx=0.20, cy=0.95), B(V.NAV_SHOP, cx=0.40, cy=0.95))
+    dm = ALL["daily_mission"](Ctx(cfg=cfg(), log=lambda m: None))
+    ad = dm.on_lobby(lobby, Machine(1).update(lobby))
+    check("大厅每日领奖还在就进任务页",
+          ad is not None and ad.target_cls == V.NAV_DAILY_REWARD, str(ad))
+
+
+def t_v18_gates_0820():
+    """08-20 国际服新皮门控: 任务厅身份 / 信用点0.70 / 双扫荡开始 / 藏UI。"""
+    print("\n-- v18 0820 门控 ----")
+    from routing_v2.flow import nav as _nv
+    from routing_v2.state.machine import StateView as _SV
+
+    camp_back = O(B(V.HUB_CAMPAIGN, cx=0.40, cy=0.45),
+                  B(V.BACK, cx=0.05, cy=0.05))
+    check("evidence 推图+返回", _nv.task_hall_evidence(camp_back))
+    check("evidence 只有推图不够",
+          not _nv.task_hall_evidence(O(B(V.HUB_CAMPAIGN, cx=0.40, cy=0.45))))
+    check("evidence 剧情+特殊无推图不够",
+          not _nv.task_hall_evidence(
+              O(B(V.HUB_STORY, cx=0.20, cy=0.45),
+                B(V.HUB_SPECIAL, cx=0.60, cy=0.45),
+                B(V.BACK, cx=0.05, cy=0.05))))
+    lobby_plus = O(B(V.NAV_CAFE, cx=0.07, cy=0.95),
+                   B(V.NAV_SHOP, cx=0.62, cy=0.95),
+                   B(V.NAV_CRAFT, cx=0.53, cy=0.95),
+                   B(V.HUB_CAMPAIGN, cx=0.40, cy=0.45),
+                   B(V.BACK, cx=0.05, cy=0.05))
+    check("底栏NAV>=3 不当 task_hall", classify(lobby_plus).page == "lobby")
+
+    sh = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
+    gem = O(B(V.ARENA_SHOP_TAB_SEL, conf=0.98, cx=0.06, cy=0.30),
+            B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.03, cy=0.30),
+            B(V.SHOP_TAB_CREDIT_SEL, conf=0.47, cx=0.05, cy=0.19))
+    check("青辉石左栏大赛已选 + 信用点0.47 不当信用点货架",
+          not sh._on_credit_shelf(gem))
+    cred = O(B(V.SHOP_TAB_CREDIT_SEL, conf=0.975, cx=0.05, cy=0.19),
+             B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
+             B(V.CREDIT, cx=0.55, cy=0.40))
+    check("信用点已选 0.975 认货架", sh._on_credit_shelf(cred))
+    cred_noise = O(B(V.ARENA_SHOP_TAB_SEL, conf=0.98, cx=0.06, cy=0.30),
+                   B(V.SHOP_TAB_CREDIT_SEL, conf=0.975, cx=0.05, cy=0.19),
+                   B(V.SHOP_SELECT_ALL, cx=0.93, cy=0.12),
+                   B(V.CREDIT, cx=0.55, cy=0.40))
+    check("左栏大赛已选不挡真信用点货架", sh._on_credit_shelf(cred_noise))
+    sh.state["bought"] = True
+    a_tab = sh._goto_arena_tab(
+        O(B(V.ARENA_SHOP_CURRENCY, conf=0.97, cx=0.03, cy=0.30),
+          B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19)))
+    check("左栏大赛币 cy0.30 不当大赛tab",
+          a_tab is None or not (getattr(a_tab, "is_tap", False)
+                                and abs(getattr(a_tab, "y", 0) - 0.30) < 0.05),
+          str(a_tab))
+
+    dual = O(B(V.SWEEP_START, conf=0.99, cx=0.73, cy=0.60),
+             B(V.SWEEP_START, conf=0.96, cx=0.73, cy=0.79))
+    go = _nv.real_sweep_start(dual, 0.35)
+    check("双扫荡开始只取 cy 小的",
+          go is not None and abs(go.cy - 0.60) < 0.02)
+    check("cy>0.72 扫荡开始当任务开始禁点",
+          _nv.real_sweep_start(
+              O(B(V.SWEEP_START, conf=0.96, cx=0.73, cy=0.79)), 0.35) is None)
+
+    flow = ALL["mail"](Ctx(cfg=cfg(), log=lambda m: None))
+    st_blank = _SV(page="blank", raw="blank", overlay=None,
+                   frames_in_page=2, last_solid="lobby")
+    w = _nv.wake_hidden_lobby(O(), st_blank, flow)
+    check("大厅藏UI 唤醒",
+          w is not None and w.kind == "tap"
+          and abs(w.x - 0.40) < 0.01 and abs(w.y - 0.55) < 0.01)
+    st_bat = _SV(page="blank", raw="blank", overlay=None,
+                 frames_in_page=2, last_solid="battle")
+    check("战斗后 blank 不唤醒",
+          _nv.wake_hidden_lobby(O(), st_bat, flow) is None)
+    # `nav.task_hall_blind` 08-21 起是**死开关**(盲点已删, 无人读),
+    #   留着只为不动 profile.json。默认仍是关。
+    check("盲点默认关", cfg().get("nav", {}).get("task_hall_blind") is False)
+
+    sm_door = ALL["story_mining"](Ctx(cfg=cfg(), log=lambda m: None))
+    sm_door.setup()
+    o_door = O(B(V.NAV_CAFE, cx=0.07, cy=0.95),
+               B(V.NAV_SHOP, cx=0.62, cy=0.95),
+               B(V.NAV_CRAFT, cx=0.53, cy=0.95))
+    a_door = _nv.lobby_enter(sm_door, o_door, V.NAV_TASKS, "任务大厅",
+                             expect=(V.HUB_CAMPAIGN,))
+    # 08-21 契约改: 猜控件位置的盲坐标已删。没帧(离线 fixture)= 低阈通道
+    #   开不了 -> **如实返回 None**(fail-closed), 而不是往右下角盲点一发。
+    check("大厅 NAV>=3 但入口检不出 -> 不动(不再盲点)",
+          a_door is None, str(a_door))
+    sm_few = ALL["story_mining"](Ctx(cfg=cfg(), log=lambda m: None))
+    sm_few.setup()
+    a_few = _nv.lobby_enter(
+        sm_few, O(B(V.NAV_CAFE, cx=0.07, cy=0.95)), V.NAV_TASKS, "任务大厅")
+    check("大厅 NAV<3 更不动", a_few is None, str(a_few))
+    a_rt, _pl = _nv.route(o_door, _SV(page="lobby", frames_in_page=3),
+                          "task_hall")
+    check("归位大厅进厅同样不盲点",
+          a_rt is None or a_rt.kind != "tap", str(a_rt))
+    # 入口过 0.45 时照常点**检出框**(落点来自 cls, 不是坐标)
+    sm_ok = ALL["story_mining"](Ctx(cfg=cfg(), log=lambda m: None))
+    sm_ok.setup()
+    o_ok = O(B(V.NAV_CAFE, cx=0.07, cy=0.95),
+             B(V.NAV_SHOP, cx=0.62, cy=0.95),
+             B(V.NAV_CRAFT, cx=0.53, cy=0.95),
+             B(V.NAV_TASKS, conf=0.88, cx=0.9393, cy=0.9428, w=0.1017, h=0.0553))
+    a_ok = _nv.lobby_enter(sm_ok, o_ok, V.NAV_TASKS, "任务大厅",
+                           expect=(V.HUB_CAMPAIGN,))
+    check("入口检得出 -> 点检出框",
+          a_ok is not None and a_ok.kind == "tap"
+          and a_ok.target_cls == V.NAV_TASKS
+          and abs(a_ok.x - 0.9393) < 0.01, str(a_ok))
+    # 低阈通道的门: 没确认在大厅就不许开
+    check("低阈通道要先确认在大厅",
+          _nv.weak_task_entry(O(B(V.NAV_CAFE, cx=0.07, cy=0.95))) is None)
+
+    from routing_v2.flow.interrupt import Interrupts
+    o_nx = O(B(V.STORY_QUIT, cx=0.39, cy=0.72),
+             B(V.STORY_WATCH, cx=0.61, cy=0.72))
+    it = Interrupts(log=lambda m: None)
+    it.watch_next_chapter = True
+    a_w = it.handle("story_cutscene", o_nx)
+    check("watch_next 点观看",
+          a_w is not None and a_w.target_cls == V.STORY_WATCH, str(a_w))
+    it2 = Interrupts(log=lambda m: None)
+    a_q = it2.handle("story_cutscene", o_nx)
+    check("默认过场点中断",
+          a_q is not None and a_q.target_cls == V.STORY_QUIT, str(a_q))
+    check("story_mining 声明 watch_next",
+          bool(getattr(ALL["story_mining"], "watch_next_chapter", False)))
+
+
+def t_story_mining_0820():
+    """08-20 剧情：章节图有 new 就点；全完成滑一次再扫；节点无入场键回图不收工。"""
+    print("\n-- story_mining 0820 滑一次扫一次 ----")
+    from routing_v2.state.machine import StateView as _SV
+
+    ctx = Ctx(cfg=cfg(), log=lambda m: None)
+    st_map = _SV(page="story_chapter_map", frames_in_page=3)
+    st_nodes = _SV(page="story_nodes", frames_in_page=3)
+
+    sm = ALL["story_mining"](ctx)
+    sm.setup()
+    o_new = O(B(V.NEW_MARK, conf=0.96, cx=0.588, cy=0.547),
+              B(V.NODE_DONE, conf=0.97, cx=0.139, cy=0.546),
+              B(V.NODE_DONE, conf=0.96, cx=0.418, cy=0.250),
+              B(V.BACK, conf=0.98, cx=0.045, cy=0.051))
+    a = sm.on_story_chapter_map(o_new, st_map)
+    check("159 有 new 就点 new",
+          a is not None and a.kind == "tap" and a.target_cls == V.NEW_MARK,
+          str(a))
+
+    sm2 = ALL["story_mining"](ctx)
+    sm2.setup()
+    o_done = O(B(V.NODE_DONE, conf=0.97, cx=0.139, cy=0.546),
+               B(V.NODE_DONE, conf=0.96, cx=0.418, cy=0.250),
+               B(V.BACK, conf=0.98, cx=0.045, cy=0.051))
+    a2 = sm2.on_story_chapter_map(o_done, st_map)
+    check("章节图全完成滑一次找 new",
+          a2 is not None and a2.kind == "swipe" and a2.x > a2.x2, str(a2))
+    check("滑一次不换源", sm2.state.get("src_i") == 0)
+
+    sm3 = ALL["story_mining"](ctx)
+    sm3.setup()
+    o156 = O(B(V.STORY_NODE_UNDONE, conf=0.97, cx=0.57, cy=0.35),
+             B(V.STORY_NODE_DONE, conf=0.98, cx=0.52, cy=0.50),
+             B(V.BACK, conf=0.98, cx=0.045, cy=0.051))
+    a3 = sm3.on_story_nodes(o156, st_nodes)
+    check("156 无入场键回章节图不整条收工",
+          a3 is not None and a3.kind != "done" and a3.target_cls == V.BACK,
+          str(a3))
+    check("156 不 src_i++", sm3.state.get("src_i") == 0)
+
+    smt = ALL["story_mining"](ctx)
+    smt.setup()
+    o_yd = O(B(V.HUB_CAMPAIGN, cx=0.40, cy=0.45),
+             B(V.BACK, cx=0.05, cy=0.05),
+             B(V.DOT_YELLOW, cx=0.831, cy=0.303))
+    a_yd = smt.on_task_hall(o_yd, _SV(page="task_hall", frames_in_page=3))
+    check("剧情 tile 0 点卡上黄点",
+          a_yd is not None and a_yd.target_cls == V.DOT_YELLOW
+          and abs(a_yd.x - 0.871) < 0.02, str(a_yd))
+
+    # 08-21 契约改: 旧的"主线四字点立绘 / 优先点卡上黄点往左下"是在不知道
+    #   卡片是**堆叠**的前提下拟合出来的落点, 已被用户口述 + live 实测推翻
+    #   (点后卡只翻面不进入)。完整机制断言见 t_story_stack_0821, 这里只留
+    #   单卡形态最小检查: 落点必须挂在剧情卡框上, 且推到卡身而不是标签行。
+    smm = ALL["story_mining"](ctx)
+    smm.setup()
+    a_m = smm.on_story_hub(
+        O(B(V.STORY_MAIN, cx=0.441, cy=0.721, w=0.124, h=0.050)),
+        _SV(page="story_hub", frames_in_page=3))
+    check("主线单卡: 落点挂在剧情卡框上并推到卡身",
+          a_m is not None and a_m.target_cls == V.STORY_MAIN
+          and abs(a_m.x - 0.441) < 0.02 and a_m.y < 0.60,
+          str(a_m))
+    # 卡顶有黄点但只有一张卡 -> 没有后卡可翻, 照样直接进
+    smy = ALL["story_mining"](ctx)
+    smy.setup()
+    a_ydot = smy.on_story_hub(
+        O(B(V.STORY_MAIN, cx=0.441, cy=0.721, w=0.124, h=0.050),
+          B(V.DOT_YELLOW, cx=0.410, cy=0.165, w=0.010, h=0.018)),
+        _SV(page="story_hub", frames_in_page=3))
+    check("主线单卡带黄点: 没后卡可翻, 直接进(不再往左下推)",
+          a_ydot is not None and a_ydot.target_cls == V.STORY_MAIN
+          and abs(a_ydot.x - 0.441) < 0.02 and a_ydot.y < 0.60,
+          str(a_ydot))
+    smf = ALL["story_mining"](ctx)
+    smf.setup()
+    a_fac = smf.on_facility(
+        O(B(V.ARROW_RIGHT, cx=0.92, cy=0.50),
+          B(V.BACK, cx=0.045, cy=0.05)),
+        _SV(page="facility", frames_in_page=3))
+    check("支线墙无黄点先翻页",
+          a_fac is not None and a_fac.target_cls == V.ARROW_RIGHT, str(a_fac))
+
+
+
+def t_schedule_locked_card_0821():
+    """08-21: 全體課程表面板上锁着的房间卡, 卡上的灰头像不许挑。
+
+    fixture 全部来自小号 Lv30 真采帧 `v19_117_alt_roster2`:
+      面板是 3 列 x 3 行房间卡; 锁 `房间区域未解锁` conf 0.977-0.981, 落在
+      cx .2339/.5028/.7718 三列, cy .3310/.5411/.7512 三行。
+      視聽室(列1行1)/體育館(列2行1) 开着; 其余五张锁着(需要RANK 3/5/6/8/9)。
+    """
+    print("\n-- schedule locked card 0821 ----")
+    from routing_v2.state.machine import StateView as _SV
+
+    ctx = Ctx(cfg=cfg(), log=lambda m: None)
+    st = _SV(page="schedule_region", frames_in_page=5)
+
+    def lock(cx, cy):
+        return B(V.ROOM_LOCKED, conf=0.98, cx=cx, cy=cy, w=0.0217, h=0.0327)
+
+    def stud(name, cx, cy):
+        # Box 是 frozen dataclass, model 只能在构造时给
+        return Box(cls=name, conf=0.90, x1=cx - 0.0225, y1=cy - 0.040,
+                   x2=cx + 0.0225, y2=cy + 0.040, model="avatar")
+
+    panel = [B(V.SCHED_TICKET, conf=0.97, cx=0.4521, cy=0.2086),
+             B(V.CLOSE_X, conf=0.97, cx=0.8886, cy=0.1401)]
+    locks = [lock(0.7718, 0.3310),            # 圖書館 需要RANK 3
+             lock(0.2339, 0.5411), lock(0.5028, 0.5412), lock(0.7717, 0.5411),
+             lock(0.2339, 0.7512)]
+    free = stud("白子", 0.1400, 0.3980)        # 視聽室(没锁)
+    locked = stud("小春", 0.6800, 0.3960)      # 圖書館(锁着), 在锁下方同一列
+
+    sc = ALL["schedule"](ctx)
+    sc.setup()
+    sc.goto("roster", "test")
+    check("锁在头像上方同一张卡 -> 判成锁卡",
+          sc._on_locked_card(O(*panel, *locks), locked))
+    check("没锁的那张卡不判成锁卡",
+          not sc._on_locked_card(O(*panel, *locks), free))
+    # 锁**下方**才算同卡: 头像跑到锁上面去就不算(防跨行误伤)
+    above = stud("小春", 0.6800, 0.3000)
+    check("头像在锁上方不算同卡",
+          not sc._on_locked_card(O(*panel, *locks), above))
+    # 横向差超过卡宽也不算(防蹭隔壁列)
+    far = stud("小春", 0.4000, 0.3960)
+    check("横向超出卡宽不算同卡",
+          not sc._on_locked_card(O(*panel, *locks), far))
+
+    a = sc.do_roster(O(*panel, *locks, free, locked), st)
+    check("roster 只挑没锁那张卡上的人",
+          a is not None and a.kind == "tap" and abs(a.x - 0.1400) < 0.02,
+          detail=str(a))
+    # 只剩锁卡上的人 -> 不许点, 该换区域
+    sc2 = ALL["schedule"](ctx)
+    sc2.setup()
+    sc2.goto("roster", "test")
+    a2 = sc2.do_roster(O(*panel, *locks, locked), st)
+    check("面板上只剩锁卡的人 -> 不点, 去关面板/换区域",
+          a2 is None or a2.target_cls != "小春", detail=str(a2))
+
+
+def t_story_stack_0821():
+    """08-21: 剧情卡堆叠 —— 点后卡只翻面, 点前卡才进。
+
+    fixture 数字全部来自当天真采的四件套 `flywheel_v19_ui_20260821`:
+      v19_048 (第2部在前): 前卡 cx .3274 w .1241 / 后卡 cx .4400 w .0620 / 黄点 cx .4102
+      v19_047 (第1部在前): 前卡 cx .3211 w .1354 / 后卡 cx .4398 w .0625 / 黄点 cx .4899
+    """
+    print("\n-- story stack 0821 ----")
+    from routing_v2.state.machine import StateView as _SV
+    from routing_v2.flow import nav as _nav
+
+    ctx = Ctx(cfg=cfg(), log=lambda m: None)
+    st_hub = _SV(page="story_hub", frames_in_page=3)
+
+    def card(cx, w, conf):
+        return B(V.STORY_MAIN, conf=conf, cx=cx, cy=0.7240, w=w, h=0.0500)
+
+    # 隔壁短篇/支线卡上的黄点(cx .7103) 每帧都在, 不许被算进主线那一摞
+    other = [B(V.STORY_SHORT, conf=0.996, cx=0.6566, cy=0.5352, w=0.0786, h=0.0367),
+             B(V.DOT_YELLOW, conf=0.941, cx=0.7103, cy=0.1666, w=0.0100, h=0.0175)]
+
+    # A 带黄点那部在**前** (v19_048) -> 直接进, 不许翻面
+    o_front = O(*other, card(0.3274, 0.1241, 0.407), card(0.4400, 0.0620, 0.924),
+                B(V.DOT_YELLOW, conf=0.941, cx=0.4102, cy=0.1654, w=0.0100, h=0.0175))
+    f, backs = _nav.story_cards(o_front, V.STORY_MAIN)
+    check("前卡=最宽那个(不是 conf 最高那个)",
+          f is not None and abs(f.cx - 0.3274) < 0.01 and len(backs) == 1,
+          detail=str((f and round(f.cx, 4), len(backs))))
+    d = _nav.story_stack_dot(o_front, f)
+    check("卡顶黄点只取主线那一摞的(隔壁 .7103 不算)",
+          d is not None and abs(d.cx - 0.4102) < 0.01, detail=str(d and round(d.cx, 4)))
+    check("黄点在前卡上 -> story_dot_on_front True",
+          _nav.story_dot_on_front(f, d))
+
+    m = ALL["story_mining"](ctx)
+    m.setup()
+    a = m.on_story_hub(o_front, st_hub)
+    check("带黄点那部在前 -> 点前卡进入",
+          a is not None and a.kind == "tap" and abs(a.x - 0.3274) < 0.04
+          and a.y < 0.60, detail=str(a))
+
+    # B 带黄点那部在**后** (v19_047) -> 先点后卡翻面, 不许直接进
+    o_back = O(*other, card(0.3211, 0.1354, 0.344), card(0.4398, 0.0625, 0.964),
+               B(V.DOT_YELLOW, conf=0.942, cx=0.4899, cy=0.1911, w=0.0093, h=0.0175))
+    f2, backs2 = _nav.story_cards(o_back, V.STORY_MAIN)
+    d2 = _nav.story_stack_dot(o_back, f2)
+    check("黄点在后卡 -> story_dot_on_front False",
+          not _nav.story_dot_on_front(f2, d2),
+          detail=str((f2 and round(f2.x2, 4), d2 and round(d2.cx, 4))))
+
+    m2 = ALL["story_mining"](ctx)
+    m2.setup()
+    b1 = m2.on_story_hub(o_back, st_hub)
+    check("带黄点那部在后 -> 点后卡翻面(不是点前卡进入)",
+          b1 is not None and b1.kind == "tap" and abs(b1.x - 0.4398) < 0.04,
+          detail=str(b1))
+    m2.state["once:rot0_0"] = True          # 模拟 runner 在 tap 落地后写 once
+    b2 = m2.on_story_hub(o_back, st_hub)
+    check("翻面那一发不重复点", b2 is None or b2.kind != "tap", detail=str(b2))
+    # 翻完之后画面变成 A 形态 -> 该进了
+    m2.state["rot"] = 1
+    b3 = m2.on_story_hub(o_front, st_hub)
+    check("翻面后黄点到前卡 -> 改成点前卡进入",
+          b3 is not None and b3.kind == "tap" and abs(b3.x - 0.3274) < 0.04,
+          detail=str(b3))
+
+    # C 单卡(短篇/支线): 没有后卡, 直接进, 不许被隔壁黄点带跑
+    o_single = O(B(V.STORY_SHORT, conf=0.996, cx=0.6566, cy=0.5352, w=0.0786, h=0.0367),
+                 B(V.DOT_YELLOW, conf=0.941, cx=0.7103, cy=0.1666, w=0.0100, h=0.0175))
+    f3, backs3 = _nav.story_cards(o_single, V.STORY_SHORT)
+    check("单卡没有后卡", f3 is not None and backs3 == [], detail=str(backs3))
+    # 单独一个 ctx: cfg 是 ctx 上的共享 dict, 在这儿改 sources 会漏给下面的用例
+    ctx_single = Ctx(cfg=cfg(), log=lambda m: None)
+    m3 = ALL["story_mining"](ctx_single)
+    m3.setup()
+    m3.cfg["sources"] = ["短篇剧情"]
+    c1 = m3.on_story_hub(o_single, st_hub)
+    check("单卡直接进(不翻面)",
+          c1 is not None and c1.kind == "tap" and abs(c1.x - 0.6566) < 0.04,
+          detail=str(c1))
+
+    # D 死循环闸: 一直翻不到 -> 换下一类, 不许无限点
+    m4 = ALL["story_mining"](ctx)
+    m4.setup()
+    m4.state["rot"] = 9
+    d1 = m4.on_story_hub(o_back, st_hub)
+    check("翻够次数仍不对 -> 换下一类而不是接着点",
+          (d1 is None or d1.kind != "tap") and m4.state["src_i"] == 1,
+          detail=str((d1, m4.state["src_i"])))
+
+
+def t_daily_fix_0820():
+    """08-20 档B: tile 0 点卡上点 / HALT 连坐打标 / event AP OCR 文案."""
+    print("\n-- daily fix 0820 ----")
+    from routing_v2.state.machine import StateView as _SV
+    from routing_v2.flow import nav as _nav
+
+    ctx = Ctx(cfg=cfg(), log=lambda m: None)
+    st_hall = _SV(page="task_hall", frames_in_page=3)
+
+    # 任务大厅证据(推图 + 返回, 底栏 NAV 簇不在) —— 与 nav.task_hall_evidence 一致
+    hall = [B(V.HUB_CAMPAIGN, conf=0.92, cx=0.62, cy=0.31),
+            B(V.BACK, cx=0.045, cy=0.052)]
+
+    # 1) 悬赏: tile cls 0 + 卡上黄点 -> 点黄点(检出框), 不是盲坐标
+    bo = ALL["bounty"](ctx)
+    bo.setup()
+    o_dot = O(*hall, B(V.DOT_YELLOW, conf=0.88, cx=0.61, cy=0.545))
+    a = bo.on_task_hall(o_dot, st_hall)
+    check("bounty tile0 + 卡上黄点 -> tap 黄点",
+          a is not None and a.kind == "tap"
+          and abs(a.x - 0.61) < 0.05 and abs(a.y - 0.545) < 0.05,
+          detail=str(a))
+    check("bounty 点黄点后不再计 tile_dead miss",
+          bo.state.get("hub_tile_misses", 0) == 0)
+    # once 标记由 runner 在 tap 真落地后才写(base.pending 的契约, 08-08 craft
+    #    JIT 丢发那次定的规矩), 离线这里手动模拟 ack 再验不重复点。
+    bo.state["once:hub_tile_dot"] = True
+    a2 = bo.on_task_hall(o_dot, st_hall)
+    check("bounty 卡上点落地后不再重复点",
+          a2 is None or a2.kind != "tap", detail=str(a2))
+
+    # 2) 悬赏: 卡外的点不许当退路(防点到隔壁卡)
+    bo2 = ALL["bounty"](ctx)
+    bo2.setup()
+    o_far = O(*hall, B(V.DOT_YELLOW, conf=0.88, cx=0.20, cy=0.90))
+    a3 = bo2.on_task_hall(o_far, st_hall)
+    check("bounty 卡区外的黄点不当入口",
+          a3 is None or a3.kind != "tap", detail=str(a3))
+
+    # 3) 大赛: 卡上红点 -> 点红点
+    ar = ALL["arena"](ctx)
+    ar.setup()
+    o_red = O(*hall, B(V.DOT_RED, conf=0.91, cx=0.71, cy=0.82))
+    a4 = ar.on_task_hall(o_red, st_hall)
+    check("arena tile0 + 卡上红点 -> tap 红点",
+          a4 is not None and a4.kind == "tap"
+          and abs(a4.x - 0.71) < 0.05 and abs(a4.y - 0.82) < 0.05,
+          detail=str(a4))
+
+    # 4) jfd: 明确没有 hub_dot_region, 不许硬套(同帧那张卡上没点)
+    jf = ALL["jfd"](ctx)
+    jf.setup()
+    a5 = jf.on_task_hall(O(*hall, B(V.DOT_YELLOW, conf=0.88, cx=0.61, cy=0.545)),
+                         st_hall)
+    check("jfd 无 hub_dot_region 不点隔壁卡的点",
+          a5 is None or a5.kind != "tap", detail=str(a5))
+
+    # 5) nav.hub_tile_dot 区域过滤本身
+    inside = _nav.hub_tile_dot(O(B(V.DOT_RED, conf=0.9, cx=0.71, cy=0.82)),
+                               (0.62, 0.74, 0.79, 0.92))
+    outside = _nav.hub_tile_dot(O(B(V.DOT_RED, conf=0.9, cx=0.20, cy=0.20)),
+                                (0.62, 0.74, 0.79, 0.92))
+    check("hub_tile_dot 区内命中", inside is not None)
+    check("hub_tile_dot 区外不命中", outside is None)
+
+    # 6) HALT 连坐的 SKIPPED 必须带 skipped_because
+    src_runner = (Path(__file__).resolve().parents[1] / "app" / "runner.py").read_text(
+        encoding="utf-8")
+    check("runner HALT 连坐打 upstream_halt 标",
+          "skipped_because=upstream_halt" in src_runner)
+    check("runner 超时未跑打 budget_exhausted 标",
+          "skipped_because=budget_exhausted" in src_runner)
+
+    # 7) event AP 读不出的收工文案点明是 OCR 失败, 且不写成没 AP
+    src_event = (Path(__file__).resolve().parents[1] / "flow" / "event.py").read_text(
+        encoding="utf-8")
+    check("event AP 文案写明 OCR 失败", src_event.count("OCR 失败") >= 2)
+    check("event AP 文案写明不等于没 AP", "这不等于没 AP" in src_event)
+
+    src_shop = (Path(__file__).resolve().parents[1] / "flow" / "facilities.py").read_text(
+        encoding="utf-8")
+    buy_credit = src_shop.split("批量购买（花信用点）", 1)[1][:180]
+    check("信用点批量买源码不带 money=True", "money=True" not in buy_credit)
+    src_gate = (Path(__file__).resolve().parents[1] / "act" / "gate.py").read_text(
+        encoding="utf-8")
+    check("闸承认信用点/大赛币为非付费成交",
+          '_SOFT_SPEND' in src_gate
+          and "战术大赛货币" in src_gate)
+
+
+def t_prod_three_0820():
+    """08-20 生产三洞: 节点图误判 facility / 签到簿误 HALT / event tab_tries."""
+    print("\n-- prod three 0820 ----")
+    from routing_v2.state.machine import StateView as _SV
+
+    ctx = Ctx(cfg=cfg(), log=lambda m: None)
+    st_fac = _SV(page="facility", frames_in_page=3)
+
+    sm = ALL["story_mining"](ctx)
+    sm.setup()
+    o_nodes = O(B(V.HOME, cx=0.965, cy=0.033),
+                B(V.BACK, cx=0.045, cy=0.052),
+                B(V.STORY_NODE_UNDONE, conf=0.97, cx=0.70, cy=0.25),
+                B(V.STAGE_ENTER_LOCKED, conf=0.98, cx=0.85, cy=0.25),
+                B(V.ARROW_RIGHT, cx=0.92, cy=0.50))
+    a_n = sm.on_facility(o_nodes, st_fac)
+    check("节点图误判 facility 不 src_i++", sm.state.get("src_i") == 0)
+    check("节点图误判 facility 改走节点图(回图不换源)",
+          a_n is not None and a_n.kind != "done"
+          and a_n.target_cls == V.BACK, str(a_n))
+
+    smw = ALL["story_mining"](ctx)
+    smw.setup()
+    a_w = smw.on_facility(
+        O(B(V.ARROW_RIGHT, cx=0.92, cy=0.50),
+          B(V.BACK, cx=0.045, cy=0.05)),
+        st_fac)
+    check("真支线墙(右切换无节点图标)仍翻页",
+          a_w is not None and a_w.target_cls == V.ARROW_RIGHT, str(a_w))
+    check("真支线墙翻页不 src_i++", smw.state.get("src_i") == 0)
+
+    smo = ALL["story_mining"](ctx)
+    smo.setup()
+    smo.state["fac_swipes"] = 4
+    a_o = smo.on_facility(
+        O(B(V.BACK, cx=0.045, cy=0.05), B(V.HOME, cx=0.965, cy=0.033)),
+        st_fac)
+    check("真支线墙翻尽才换源", smo.state.get("src_i") == 1, str(a_o))
+
+    book = O(B(V.PYROXENE, conf=0.87, cx=0.971, cy=0.385),
+             B(V.CREDIT, conf=0.40, cx=0.72, cy=0.38),
+             B(V.AP, conf=0.91, cx=0.80, cy=0.62))
+    check("签到簿 BODY 青辉石不是 purchase_context",
+          money_rules.purchase_context(book) is None,
+          str(money_rules.purchase_context(book)))
+    check("签到簿不打 money_popup",
+          classify(book).interrupt is None,
+          f"实际 {classify(book).interrupt}")
+
+    booklet = O(B(V.NAV_DAILY_REWARD, conf=0.96, cx=0.22, cy=0.28),
+                B(V.PYROXENE, conf=0.87, cx=0.80, cy=0.40),
+                B(V.CLOSE_X, conf=0.95, cx=0.90, cy=0.10))
+    check("每日领奖 booklet + BODY 石不当购买框",
+          money_rules.purchase_context(booklet) is None,
+          str(money_rules.purchase_context(booklet)))
+
+    real = O(B(V.PYROXENE, conf=0.94, cx=0.50, cy=0.45),
+             B(V.CONFIRM, cx=0.60, cy=0.75), B(V.CANCEL, cx=0.40, cy=0.75))
+    check("真购买框仍是 purchase_context",
+          money_rules.purchase_context(real) is not None,
+          str(money_rules.purchase_context(real)))
+    buyap = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
+              B(V.CANCEL, conf=0.98, cx=0.402, cy=0.699),
+              B(V.QTY_MAX, conf=0.98, cx=0.687, cy=0.480),
+              B(V.PLUS, conf=0.97, cx=0.630, cy=0.480))
+    check("購買AP 双键+步进器仍是购买框",
+          money_rules.purchase_context(buyap) is not None,
+          str(money_rules.purchase_context(buyap)))
+    near = O(B(V.SHOP_BUY_PYROXENE, cx=0.470, cy=0.520),
+             B(V.CONFIRM, cx=0.60, cy=0.80), B(V.CANCEL, cx=0.40, cy=0.80))
+    check("购买青辉石+对话框仍是购买流程",
+          money_rules.purchase_context(near) is not None,
+          str(money_rules.purchase_context(near)))
+
+    ev = ALL["event"](ctx)
+    ev.setup()
+    ev.state.pop("tab_tries", None)
+    st_ev = _SV(page="event_page", frames_in_page=3)
+    try:
+        a_tab = ev.on_event_page(
+            O(B(V.EVENT_QUEST, cx=0.635, cy=0.151)), st_ev)
+        tab_err = None
+    except KeyError as e:
+        a_tab = None
+        tab_err = e
+    check("event tab_tries 缺键不崩", tab_err is None, str(tab_err))
+    check("event 缺键仍切 Quest",
+          a_tab is not None and a_tab.target_cls == V.EVENT_QUEST, str(a_tab))
+    check("event setup 有 tab_tries",
+          "tab_tries" in ALL["event"](ctx).state)
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
     t_gate()
+    t_free_pack()
     t_flows()
     t_route()
     t_config()
@@ -2353,7 +4338,16 @@ if __name__ == "__main__":
     t_ocr_geom()
     t_bucket()
     t_event_bonus_shop()
-    print("\n" + "═" * 52)
+    t_alt_gates()
+    t_shelf_walk()
+    t_remain_gates_0816()
+    t_v18_gates_0820()
+    t_story_mining_0820()
+    t_prod_three_0820()
+    t_daily_fix_0820()
+    t_story_stack_0821()
+    t_schedule_locked_card_0821()
+    print("\n" + "" * 52)
     if FAILS:
         print(f" {len(FAILS)} 项没过:")
         for f in FAILS:

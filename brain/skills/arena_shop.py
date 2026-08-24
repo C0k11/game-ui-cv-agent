@@ -19,7 +19,7 @@ ONE live calibration pass before this skill joins the unattended chain.
      skipping a non-premium drink costs nothing).
 
 State machine
--------------
+----
 enter    lobby  商店入口  shop_grid.
 locate   shop_grid  swipe the left tab column down to reveal 战术大赛商店 (469)
           tap  verify 战术大赛商店已选择 (470). Capped swipes.
@@ -127,7 +127,7 @@ class ArenaShopSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _in_arena_tab(self, screen: ScreenState) -> bool:
         return self.find_cls(screen, UC.ARENA_SHOP_TAB_SEL, conf=_CLS_CONF) is not None
 
@@ -172,7 +172,7 @@ class ArenaShopSkill(BaseSkill):
             return None
         return val
 
-    # ── tick ─────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -208,7 +208,7 @@ class ArenaShopSkill(BaseSkill):
             return action_wait(600, "no UI — likely loading")
         # Not lobby, not shop, but UI present = the shop-opening transition. If we
         # already clicked the entry, WAIT for it to load — do NOT back-bounce
-        # (user 2026-06-14: 转场期别瞎退; the back-press cancelled the transition 
+        # (user 2026-06-14: 转场期别瞎退; the back-press cancelled the transition
         # bounced to lobby  re-click). Only recover-back if we never clicked entry.
         if self._entry_clicked:
             return action_wait(500, "等商店加载(已点入口, 不瞎退)")
@@ -313,7 +313,7 @@ class ArenaShopSkill(BaseSkill):
             self.log(f"buying {list(want)} total={total} 货币, balance={bal} — ok")
 
         # 被吞对账 (mutate-before-ack 残留, 逐帧审 2026-07-21 实锤): tap 计数在
-        # return click 前突变, select-click 被稳定门吞时点击没发出去却已计账 
+        # return click 前突变, select-click 被稳定门吞时点击没发出去却已计账
         # 虚耗 _MAX_TAP  提前"放弃"漏买 (一般能量饮料 2 次被吞后被 skip)。
         # action_suppressed 只在被吞后的第一个 tick 为 True  在此回滚该 tap。
         if self.action_suppressed and self._last_select_name:
@@ -453,9 +453,9 @@ class ArenaShopSkill(BaseSkill):
         # confirm button is present, but only click it if this is POSITIVELY the
         # energy-drink dialog — require an energy drink (472/473) in the dialog
         # body. v11 detects 472 @0.96 in-body on the real confirm frame (471货币
-        # sits at the bg tab edge cx0.03, NOT a reliable in-body anchor). Absent 
+        # sits at the bg tab edge cx0.03, NOT a reliable in-body anchor). Absent
         # this is NOT our drink purchase (could be a mis-routed premium/other
-        # dialog)  CANCEL. The old code was blacklist-only ("no pyroxene 
+        # dialog)  CANCEL. The old code was blacklist-only ("no pyroxene
         # confirm") = fail-OPEN: a mis-detected premium dialog would get confirmed.
         drink = self.find_cls(screen, [UC.ENERGY_DRINK_LOW, UC.ENERGY_DRINK_MID],
                               conf=_CLS_CONF, region=_DIALOG_BODY)

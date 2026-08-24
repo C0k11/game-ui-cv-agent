@@ -75,7 +75,7 @@ def main():
         for t in frames.values():
             shutil.copy2(t, bak / t.name)
 
-    # ── A. HUD 重写 ──
+    #  A. HUD 重写
     from ultralytics import YOLO
     ui = YOLO(UI_WEIGHTS)
     n_del = n_add = 0
@@ -111,7 +111,7 @@ def main():
             n_add += 1
     print(f"A. HUD: 删 {n_del}  v13 重写 {n_add} (暂停菜单键零写入)")
 
-    # ── B. 其他 axis 池清日文暂停键 ──
+    #  B. 其他 axis 池清日文暂停键
     n_purge = 0
     for other in glob.glob(str(RAW / "axis_*")):
         op = Path(other)
@@ -129,7 +129,7 @@ def main():
                     save(t, kept)
     print(f"B. 其他池日文暂停键清除: {n_purge}")
 
-    # ── C. 黑白全帧模板传播 ──
+    #  C. 黑白全帧模板传播
     labeled = sorted(n for n in frames if any(b[0] == BW for b in data[n]))
     combat = sorted(n for n in frames
                     if any(b[0] in (476, 477, BW) for b in data[n]))

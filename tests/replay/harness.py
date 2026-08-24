@@ -7,7 +7,7 @@
   tick 的全量决策录像(每 tick 落 yolo_boxes + ocr_boxes + 干净帧)。用它做离线
   回归, 改一行代码 5 分钟就能知道"这一改动会改变历史上哪些 tick 的决策"。
 
-⛔**做 diff replay, 不做 golden replay**(用户 2026-07-24 定):
+禁**做 diff replay, 不做 golden replay**(用户 2026-07-24 定):
   录像里的 `action` 字段是**当时的 bot 实际干的事**, 里面含 bot 自己犯的错
   (Challenge 假阳性 / 假账 / 误入活动)。拿它当期望值 = 把 bug 固化成测试。
   正确用法: 同一批 tick 在 **改动前的代码** 和 **改动后的代码** 上各跑一遍,
@@ -18,14 +18,14 @@
   两边代码在同一张垃圾帧上都返回同样的 wait, diff 为空, 不产生噪声。
 
 重建保真度(逐字段核对 brain/skills/base.py 的 ScreenState):
-  ocr_boxes / yolo_boxes / image_w / image_h  ✓ 原样落盘
-  timestamp                                    ✓ 由 ts 字符串解析
-  screenshot_path / frame                      ✓ 同名 tick_NNNN.jpg 在盘上(懒加载)
+  ocr_boxes / yolo_boxes / image_w / image_h  OK 原样落盘
+  timestamp                                    OK 由 ts 字符串解析
+  screenshot_path / frame                      OK 同名 tick_NNNN.jpg 在盘上(懒加载)
   YoloBox.model_tag                            ~ 未落盘, 按 cls id 分段还原
                                                  (0-142/395-475=ui, 143-394=avatar,
                                                   476-484=battle) —— 与 pipeline
                                                  的真实来源一致
-  fresh_boxes/fresh_frame/fresh_ts             ✗ 未落盘 → None/0.0。用到它们的
+  fresh_boxes/fresh_frame/fresh_ts             X 未落盘 -> None/0.0。用到它们的
                                                  skill(event_quest 原子 banner)
                                                  在 replay 下会走 null-check 分支,
                                                  这类判定不能靠 replay 验证。
@@ -44,7 +44,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 TRAJ_DIR = os.path.join(ROOT, "data", "trajectories")
 _MASTER_YAML = r"D:/Project/ml_cache/models/yolo/dataset/ui_v2/data.yaml"
 
-# master 类表分段 → 产出该 cls 的模型(见 memory val_set_crisis: 485 是三模型共用表)
+# master 类表分段 -> 产出该 cls 的模型(见 memory val_set_crisis: 485 是三模型共用表)
 _SEG = ((0, 142, "ui"), (143, 394, "avatar"), (395, 475, "ui"), (476, 484, "battle"))
 
 _NAME2TAG: Optional[Dict[str, str]] = None
@@ -52,7 +52,7 @@ _NAME2ID: Dict[str, int] = {}
 
 
 def _name_to_tag() -> Dict[str, str]:
-    """cls_name → model_tag, 从 master 类表按 id 分段推。顺带建 cls_name → cls_id
+    """cls_name -> model_tag, 从 master 类表按 id 分段推。顺带建 cls_name -> cls_id
     (tick json 只落了类名, YoloBox 要 id)。表读不到就返回空 dict —— model_tag
     全空只影响 cafe/schedule 的头像过滤, cls_id 退化成 -1 只影响按 id 取类的
     代码(全仓用的是 cls_name)。"""
@@ -108,7 +108,7 @@ class ReplayTick:
 
 def screen_from_tick(raw: Dict[str, Any], *, jpg_path: str = "",
                      load_frame: bool = False):
-    """tick json → ScreenState。load_frame=True 时把同名 jpg 读成 BGR 挂上去
+    """tick json -> ScreenState。load_frame=True 时把同名 jpg 读成 BGR 挂上去
     (数字 OCR 类逻辑需要; 纯 cls 判定不需要, 省掉解码开销)。"""
     from brain.skills.base import OcrBox, ScreenState, YoloBox
 
@@ -197,7 +197,7 @@ def find_runs(*, since: str = "", skill: Optional[str] = None,
     return runs
 
 
-# ── 决策 trace ────────────────────────────────────────────────────────────
+#  决策 trace
 
 _ACTION_KEYS = ("action", "x", "y", "x2", "y2", "duration_ms", "key")
 
@@ -229,7 +229,7 @@ def replay_skill(skill_factory, ticks: List[ReplayTick], *,
           初值, 与真实历史不同 —— 所以**不能**拿它跟录制 action 对齐, 只能
           A/B 互比(这正是 diff replay 的用法)。
       'sequential' — 单个实例顺序吃完整段, 状态自然演化。更接近真实, 但一旦
-          决策与历史分叉, 后面的帧就不再对应了 → 只看"第一处分叉在哪"。
+          决策与历史分叉, 后面的帧就不再对应了 -> 只看"第一处分叉在哪"。
     """
     out: List[Dict[str, Any]] = []
     seq_skill = skill_factory() if mode == "sequential" else None

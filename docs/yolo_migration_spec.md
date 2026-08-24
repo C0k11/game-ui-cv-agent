@@ -1,4 +1,4 @@
-# 纯 YOLO 迁移规范 (sub-skill OCR → YOLO cls)
+# 纯 YOLO 迁移规范 (sub-skill OCR -> YOLO cls)
 
 ## 背景
 BA 自动化 bot。YOLO `ui` 模型能识别 156 个 UI cls（见 `brain/skills/ui_classes.py`）。
@@ -31,7 +31,7 @@ self.detect_screen_yolo(screen) -> "Lobby"|"Mail"|"Schedule"|"Cafe"|"Craft"|"Mom
 - `_on_mail_page()` 用 cls 判页面，不用 OCR header
 - enter: `find_cls(NAV_MAIL)` 点入口；带 `_enter_click_cooldown` 防重复点
 - claim: `find_cls(CLAIM_*)` 多候选 + region 约束；OCR 只读 X/200 计数验证真实进展
-- 关键：找不到 claim cls 且 count>0 → `log("YOLO gap") + wait`，不盲点
+- 关键：找不到 claim cls 且 count>0 -> `log("YOLO gap") + wait`，不盲点
 - exit: `detect_screen_yolo()=="Lobby"` 判完成；退出优先 `find_cls(BTN_HOME/BTN_BACK)` 再 ESC
 
 ## 迁移后自检
@@ -40,6 +40,6 @@ py -3 -c "import ast; ast.parse(open('brain/skills/<X>.py',encoding='utf-8').rea
 ```
 
 ## 报告格式（迁移完返回给我）
-1. 改了哪些 OCR→cls（列表）
+1. 改了哪些 OCR->cls（列表）
 2. **遇到的 cls gap**：需要但 ui_classes 没有 / 该 cls frame 数太低（<20）可能识别不稳的 — 这些是后续补训练数据的清单
 3. 哪些 OCR 保留了（数字/守卫）+ 原因

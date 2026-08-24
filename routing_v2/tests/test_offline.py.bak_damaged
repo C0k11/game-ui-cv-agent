@@ -76,7 +76,7 @@ def t_pages():
           f"瀹為檯 {classify(day1).page}")
 
     # 猸惵1 杞満甯э細鍙湁 鍥炲ぇ鍘?杩斿洖閿殑甯?*涓嶈**褰撳満瑙﹀彂"鐐瑰洖澶у巺"銆?    #    锛堝畠鐜板湪浼氳璁ゆ垚娉涘寲鐨?`facility`锛屼絾娉涘寲椤甸潰瑕佸緟澶?90 甯ф墠鍑嗚蛋浜?鈥斺€?    #      浠讳綍杞満閮芥椿涓嶈繃 90 甯э紝鎵€浠ョ敤鎴风幇鍦虹湅鍒扮殑"鍒氳杩涙垬鏂楀氨琚脊鍥炲ぇ鍘?
-    #      涓嶄細澶嶇幇銆傝涓烘柇瑷€姣旈〉闈㈠悕鏂█鏇存湁鎰忎箟銆傦級
+    #      涓嶄細澶嶇幇銆傝涓烘柇瑷€姣旈〉闈㈠悕鏂鏇存湁鎰忎箟銆傦級
     stray = O(B(V.HOME, cx=0.05, cy=0.05), B(V.BACK, cx=0.02, cy=0.05))
     from routing_v2.flow import nav as _nav
     from routing_v2.state.machine import Machine as _MM
@@ -111,7 +111,7 @@ def t_pages():
     check("椤舵爮闈掕緣鐭充笉璇姤", classify(top).interrupt is None,
           f"瀹為檯 {classify(top).interrupt}")
 
-    # 鉀?026-08-08 live 瀹為敜锛氬ぇ鍘呭乏渚у父椹汇€岃喘涔伴潚杈夌煶銆嶅箍鍛婁綅 conf 0.95銆?    #    鎸夎瘝鍒や細璁╂瘡涓€杞殑绗竴甯у氨 HALT銆傚繀椤婚厤涓婂璇濇鎺т欢鎵嶇畻璐拱娴佺▼銆?    banner = O(B(V.SHOP_BUY_PYROXENE, conf=0.95, cx=0.117, cy=0.360),
+    # 鉀?026-08-08 live 瀹為敜锛氬ぇ鍘呭乏渚у父椹汇€岃喘涔伴潚杈夌煶銆嶅箍鍛婁綅 conf 0.95銆?    #    鎸夎瘝鍒や細璁瘡涓€杞殑绗竴甯у氨 HALT銆傚繀椤婚厤涓婂璇濇鎺т欢鎵嶇畻璐拱娴佺銆?    banner = O(B(V.SHOP_BUY_PYROXENE, conf=0.95, cx=0.117, cy=0.360),
                B(V.PYROXENE, cx=0.670, cy=0.053),
                B(V.NAV_CAFE, cx=0.073, cy=0.953), B(V.NAV_SHOP, cx=0.531, cy=0.953),
                B(V.NAV_CRAFT, cx=0.437, cy=0.953))
@@ -133,14 +133,14 @@ def t_pages():
     check("鐪熻喘涔版锛堜綋鍐呴潚杈夌煶+纭/鍙栨秷锛屾棤鏀跺叆鏍囪锛夆啋 鍋?,
           classify(real_dialog).interrupt == "money_popup")
 
-    # 鉀斺洈2026-08-08 杩為攣浜嬫晠锛氬ぇ鍘呮寜杩斿洖閿?鈫?寮广€岄洟闁嬮亰鎴层€嶇‘璁ゆ锛?    #    瀹冪殑 `纭閿甡 + 澶у巺甯搁┗鐨?`璩艰卜闈掕紳鐭砢 骞垮憡浣?= 璇姤璐拱娴佺▼鍋滄暣杞€?    quit_dlg = O(B(V.SHOP_BUY_PYROXENE, conf=0.96, cx=0.117, cy=0.360),
+    # 鉀斺洈2026-08-08 杩為攣浜嬫晠锛氬ぇ鍘呮寜杩斿洖閿?鈫?寮广€岄洟闁嬮亰鎴层€嶇‘璁ゆ锛?    #    瀹冪殑 `纭閿甡 + 澶у巺甯搁鐨?`璩艰卜闈掕紳鐭砢 骞垮憡浣?= 璇姤璐拱娴佺鍋滄暣杞€?    quit_dlg = O(B(V.SHOP_BUY_PYROXENE, conf=0.96, cx=0.117, cy=0.360),
                  B(V.CONFIRM, cx=0.60, cy=0.70), B(V.CANCEL, cx=0.40, cy=0.70),
                  B(V.NAV_CAFE, cx=0.073, cy=0.953), B(V.NAV_SHOP, cx=0.621, cy=0.953),
                  B(V.NAV_CRAFT, cx=0.531, cy=0.953))
-    check("鉀斿ぇ鍘呫€岄洟闁嬮亰鎴层€嶇‘璁ゆ涓嶈鎶ユ垚璐拱娴佺▼锛堣鍒?quit_dialog锛?,
+    check("鉀斿ぇ鍘呫€岄洟闁嬮亰鎴层€嶇‘璁ゆ涓嶈鎶ユ垚璐拱娴佺锛堣鍒?quit_dialog锛?,
           classify(quit_dlg).interrupt == "quit_dialog",
           f"瀹為檯 {classify(quit_dlg).interrupt}")
-    # 涓?*澶у巺涓婄粷涓嶅彂杩斿洖閿?*锛堥偅涓⒑瑾嶆槸閫€鍑烘父鎴忥級
+    # 涓?*澶у巺涓婄粷涓嶅彂杩斿洖閿?*锛堥偅涓瑾嶆槸閫€鍑烘父鎴忥級
     from routing_v2.flow import nav as _nv2
     from routing_v2.state.machine import Machine as _M2
     _m2 = _M2(1)
@@ -152,7 +152,7 @@ def t_pages():
     check("鉀斿ぇ鍘?澶у巺娴眰涓婁笉鍙?KEYCODE_BACK锛堜細寮归€€鍑烘父鎴忥級",
           _a2 is None or _a2.kind != "key", str(_a2))
 
-    # 鉀斺洈绯荤粺銆屾槸鍚︾祼鏉燂紵銆嶆锛氱⒑瑾?= 閫€鍑烘父鎴忥紝鍙鐐瑰彇娑?    sysq = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
+    # 鉀斺洈绯荤粺銆屾槸鍚︾祼鏉燂紵銆嶆锛氱瑾?= 閫€鍑烘父鎴忥紝鍙鐐瑰彇娑?    sysq = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
              B(V.CANCEL, conf=0.99, cx=0.401, cy=0.701),
              B(V.CLOSE_X, conf=0.96, cx=0.692, cy=0.230))
     check("鉀斻€屾槸鍚︾祼鏉燂紵銆嶏紙鏃犻《鏍忚揣甯侊級鈫?quit_dialog 鎵撴柇",
@@ -172,21 +172,21 @@ def t_pages():
     _ml.update(_pure_lobby)
     _sv = _ml.update(sysq)
     _a3 = _mf.on_confirm_dialog(sysq, _sv)
-    check("鉀旈€€鍑烘锛堜粠澶у巺寮癸級鈫?on_confirm_dialog 缁濅笉鐐圭⒑瑾?,
+    check("鉀旈€€鍑烘锛堜粠澶у巺寮癸級鈫?on_confirm_dialog 缁濅笉鐐圭瑾?,
           _a3 is None or _a3.target_cls == V.CANCEL, str(_a3))
     # 猸愬弽鍚戯細**娓告垙鍐?*鐨勫弻閿锛堝簳椤垫槸鍏冲崱寮圭獥锛変笉璇ヨ褰撻€€鍑烘鎷?    #   鈥斺€?銆岃浣跨敤340AP鎺冭暕17娆″棊銆嶈璇嫤杩囷紝鎵崱鐩存帴琚彇娑堬紙08-09 瀹為敜锛夈€?    _mg = Machine(1)
     _stage = O(B(V.SWEEP_START, cx=0.73, cy=0.56), B(V.TASK_START, cx=0.73, cy=0.75))
     _mg.update(_stage)
     _sv2 = _mg.update(sysq)
     _a4 = _mf.on_confirm_dialog(sysq, _sv2)
-    check("鉀旀父鎴忓唴鍙岄敭妗嗭紙搴曢〉=鍏冲崱寮圭獥锛変笉褰撻€€鍑烘 鈫?鐐圭⒑瑾?,
+    check("鉀旀父鎴忓唴鍙岄敭妗嗭紙搴曢〉=鍏冲崱寮圭獥锛変笉褰撻€€鍑烘 鈫?鐐圭瑾?,
           _a4 is not None and _a4.target_cls == V.CONFIRM, str(_a4))
     # 鉀斺洈鉀斻€岄€€鍑烘銆嶅垽鎹殑鍥涘悜閿侊紙08-09 澶?agent 瀹℃煡 + 瀹炴祴澶嶇幇鍚庨噸鍐欙級:
     #    鍘嗗彶涓婇敊杩囦袱鐗?鈥斺€?鈶犮€岄《鏍忔病璐у竵銆嶈鎷?340AP 鎵崱妗嗭紱
     #    鈶°€宭ast_solid 涓嶅湪澶у巺绯汇€嶅湪 **Machine 鏂板缓鏃?last_solid 鎭掍负
     #      'unknown'** 鐨勭獥鍙ｉ噷 fail-OPEN锛屽疄娴?gate.ok=True 鈬?**浼氱偣纰鸿獚
     #      鍏虫帀娓告垙**锛涜€屽綋鏃剁殑娴嬭瘯**娌′紶 last_solid**锛岀粰浜嗗亣淇濊瘉銆?    #    鈬?鐜板湪鐨勫垽鎹槸銆岃繖涓鏄笉鏄垜鑷繁鐐瑰嚭鏉ョ殑銆嶏紝鍥涗釜鏂瑰悜閮借閿佹銆?    from routing_v2.act.action import tap_box as _tbq
-    _cfm = _tbq(B(V.CONFIRM, cx=0.598, cy=0.699), "鐐圭⒑瑾?)
+    _cfm = _tbq(B(V.CONFIRM, cx=0.598, cy=0.699), "鐐圭瑾?)
     _gq = Gate(cfg(), log=lambda m: None)
     check("鉀斺洈A 閫€鍑烘 + 娌＄偣杩囦换浣曚細寮规鐨勯敭 + last_solid=unknown 鈫?蹇呴』鎷?,
           not _gq.money(_cfm, sysq, "unknown").ok,
@@ -216,10 +216,10 @@ def t_pages():
     check("鉀斾絾绲勫悎鍖呴〉涓婄偣 `璐拱` 浠嶈鎷︽垚浜哄",
           not _gc.money(_tbq(B(V.SHOP_BUY, cx=0.299, cy=0.695), "涔?), _combo).ok)
 
-    # 鉀斺洈鐪熸涓嶅彲缁曡繃鐨勯偅閬擄細**闂?*銆傚叓涓?flow 閮借鍐欎簡 on_confirm_dialog锛?    #    鎶ゆ爮鏀惧熀绫讳細琚暣浣撶粫杩囷紙08-08 craft 灏辫繖涔堝湪閫€鍑烘涓婄偣浜嗙⒑瑾嶏級銆?    from routing_v2.act.action import tap_box as _tb2
+    # 鉀斺洈鐪熸涓嶅彲缁曡繃鐨勯偅閬擄細**闂?*銆傚叓涓?flow 閮借鍐欎簡 on_confirm_dialog锛?    #    鎶ゆ爮鏀惧熀绫讳細琚暣浣撶粫杩囷紙08-08 craft 灏辫繖涔堝湪閫€鍑烘涓婄偣浜嗙瑾嶏級銆?    from routing_v2.act.action import tap_box as _tb2
     _g = Gate(cfg(), log=lambda m: None)
     _bad = _tb2(B(V.CONFIRM, cx=0.598, cy=0.699), "flow 鑷繁瑕佺偣纰鸿獚")
-    check("鉀斺洈闂告嫤涓嬨€岄《鏍忓叏鏃犵殑鍙岄敭妗嗕笂鐐圭⒑瑾嶃€嶏紙璋侀兘缁曚笉杩囷級",
+    check("鉀斺洈闂告嫤涓嬨€岄《鏍忓叏鏃犵殑鍙岄敭妗嗕笂鐐圭瑾嶃€嶏紙璋侀兘缁曚笉杩囷級",
           not _g.money(_bad, sysq).ok, _g.money(_bad, sysq).why)
     _ingame = O(B(V.CONFIRM, cx=0.6, cy=0.7), B(V.CANCEL, cx=0.4, cy=0.7),
                 B(V.AP, cx=0.40, cy=0.033), B(V.CREDIT, cx=0.51, cy=0.033),
@@ -309,7 +309,7 @@ def t_gate():
                        spend="闈掕緣鐭?), O(B(V.NAV_CAFE)))
     check("鉀斿０鏄庤姳闈掕緣鐭?鈫?鐩存帴鎷?, not v.ok)
 
-    # 鉀斺洈璐拱纭妗嗙洸鍖猴紙08-10 live 鎶撳埌锛屽洓鍚戦攣锛?    #   銆屾槸鍚﹁臣璨疯┎鍟嗗搧锛熴€嶈繖涓€甯? 椤舵爮浠ヤ笅娌℃湁闈掕緣鐭筹紙浠风鏄?CAD/鍏嶈不锛夈€?    #   tab 琚鐩栦綇銆佷篃娌℃湁姝ヨ繘鍣?鈬?money.purchase_context() **鍥涙潯鍒ゆ嵁鍏?None**锛?    #   闂稿杩欎竴甯у師鏈畬鍏ㄦ槸鐬庣殑銆傜湡閽卞寘鐨勭‘璁ゆ鍜屽厤璨诲寘**闀垮緱涓€妯′竴鏍?*銆?    _dlg = O(B(V.CONFIRM, cx=0.60, cy=0.83), B(V.CANCEL, cx=0.40, cy=0.83),
+    # 鉀斺洈璐拱纭妗嗙洸鍖猴紙08-10 live 鎶撳埌锛屽洓鍚戦攣锛?    #   銆屾槸鍚﹁臣璨疯鍟嗗搧锛熴€嶈繖涓€甯? 椤舵爮浠ヤ笅娌℃湁闈掕緣鐭筹紙浠风鏄?CAD/鍏嶈不锛夈€?    #   tab 琚鐩栦綇銆佷篃娌℃湁姝ヨ繘鍣?鈬?money.purchase_context() **鍥涙潯鍒ゆ嵁鍏?None**锛?    #   闂稿杩欎竴甯у師鏈畬鍏ㄦ槸鐬庣殑銆傜湡閽卞寘鐨勭‘璁ゆ鍜屽厤璨诲寘**闀垮緱涓€妯′竴鏍?*銆?    _dlg = O(B(V.CONFIRM, cx=0.60, cy=0.83), B(V.CANCEL, cx=0.40, cy=0.83),
              B(V.CREDIT, cx=0.51, cy=0.05))          # 椤舵爮璐у竵鍦紝寮圭獥浣撳唴娌￠潚杈夌煶
     check("鈶?杩欎竴甯?purchase_context 纭疄鏄?None锛堢洸鍖烘垚绔嬶級",
           money_rules.purchase_context(_dlg) is None)
@@ -334,7 +334,7 @@ def t_gate():
     _prev(g6, V.SWEEP_START)
     _ve = g6.money(Action(kind="tap", x=0.60, y=0.83, reason="纭",
                           target_cls=V.CONFIRM), _dlg)
-    check("鈶?涓婁竴鍙戞槸銆屾巸钑╅枊濮嬨€?涓嶈姳閽辩殑閿? 鈫?涓嶈鎷?,
+    check("鈶?涓婁竴鍙戞槸銆屾巸钑枊濮嬨€?涓嶈姳閽辩殑閿? 鈫?涓嶈鎷?,
           _ve.ok, _ve.why)
 
     # 鈶?JIT 钀藉湴澶嶉獙
@@ -431,14 +431,14 @@ def t_gate():
 
     # 鉀斺洈鍔犳垚闃舵锛?*娌¤耽杩囧氨涓嶈鎵崱**锛?8-08 live 浜嬫晠锛氭妸"鐐逛簡鍏ュ満閿?
     #    褰撴垚"鎵撳畬涓€鍦洪《濂界邯褰?锛屽姞鎴愰槦涓€娆℃病涓婂満锛?80 AP 鎸夋棫绾綍鍒锋帀锛?    # 鉀旂绾?fixture 娌℃湁鐪熷抚锛孫CR 璇讳笉鍑?AP锛涜€?08-09 璧?AP 闂告槸 **fail-closed**
-    #    锛堣涓嶅嚭灏卞仠鎵嬶紝闃?AP鑰楀敖杩樺幓鐐规壂鑽♀啋娓告垙寮硅臣璨稟P妗?锛夈€?    #    鈬?娴嬭瘯蹇呴』鎶婅鏁版墦妗╋紝鍚﹀垯娴嬬殑鏄?璇讳笉鍑?鑰屼笉鏄姞鎴愰€昏緫銆?    import routing_v2.percept.read as _RD
+    #    锛堣涓嶅嚭灏卞仠鎵嬶紝闃?AP鑰楀敖杩樺幓鐐规壂鑽啋娓告垙寮硅臣璨稟P妗?锛夈€?    #    鈬?娴嬭瘯蹇呴』鎶婅鏁版墦妗紝鍚﹀垯娴嬬殑鏄?璇讳笉鍑?鑰屼笉鏄姞鎴愰€昏緫銆?    import routing_v2.percept.read as _RD
     _orig_topbar = _RD.read_topbar
     _RD.read_topbar = lambda o, c: (500 if c == _RD.AP else _orig_topbar(o, c))
 
     evb = ALL["event"](ctx)
     evb.state["phase"] = "bonus_clear"
     # 鉀攆ixture锛氫笉璁歌 data/routing_v2/event_topped.json 閭ｄ唤鐪熷疄鍙拌处
-    #    锛堢嚎涓婇《杩囧叧涔嬪悗杩欐潯娴嬭瘯浼氱孩 鈥斺€?08-09 宸茬粡涓繃涓€娆★級
+    #    锛堢嚎涓婇《杩囧叧涔嬪悗杩欐潯娴嬭瘯浼氱孩 鈥斺€?08-09 宸茬粡涓繃涓€娆級
     evb.ctx.bag["event_topped"] = {}
     m8 = Machine(1)
     lst2 = O(B(V.EVENT_SHOP, cx=0.1, cy=0.5), B(V.EVENT_QUEST_SEL, cx=0.6, cy=0.15),
@@ -480,7 +480,7 @@ def t_gate():
     _RD.read_topbar = _orig_topbar          # 杩樺師璇绘暟鎵撴々
 
     # 鉀斺洈閲戦挶锛?*鍙岄敭妗嗗唴鏈夋暟閲忔杩涘櫒 = 璐拱/鍏戞崲妗?*锛?8-09 宸偣鑺?30 闈掕緣鐭筹細
-    #    AP 鑰楀敖鍚庡張鐐规壂鑽★紝娓告垙寮广€岃臣璨稟P 鍠児馃拵30銆嶏紝鑰屽脊绐椾綋鍐呯殑闈掕緣鐭冲浘鏍?    #    涓€涓兘娌℃鍑?鈬?闈?鐪嬭闈掕緣鐭?鐨勫垽鎹叏鐬庯級
+    #    AP 鑰楀敖鍚庡張鐐规壂鑽紝娓告垙寮广€岃臣璨稟P 鍠児馃拵30銆嶏紝鑰屽脊绐椾綋鍐呯殑闈掕緣鐭冲浘鏍?    #    涓€涓兘娌℃鍑?鈬?闈?鐪嬭闈掕緣鐭?鐨勫垽鎹叏鐬庯級
     _buyap = O(B(V.CONFIRM, conf=0.98, cx=0.598, cy=0.699),
                B(V.CANCEL, conf=0.98, cx=0.402, cy=0.699),
                B(V.QTY_MAX, conf=0.98, cx=0.687, cy=0.480),
@@ -492,7 +492,7 @@ def t_gate():
     from routing_v2.act.action import tap_box as _tbx
     _g2 = Gate(cfg(), log=lambda m: None)
     _tapc = _tbx(B(V.CONFIRM, cx=0.598, cy=0.699), "flow 瑕佺偣纰鸿獚")
-    check("鉀斺洈闂告嫤涓嬨€岃臣璨稟P 妗嗕笂鐐圭⒑瑾嶃€?,
+    check("鉀斺洈闂告嫤涓嬨€岃臣璨稟P 妗嗕笂鐐圭瑾嶃€?,
           not _g2.money(_tapc, _buyap, "stage_popup").ok,
           _g2.money(_tapc, _buyap, "stage_popup").why)
     # 鍙嶅悜锛氭壂鑽＄‘璁ゆ鏄?*绾枃瀛?*锛堟棤姝ヨ繘鍣級鈫?涓嶈璇嫤
@@ -516,10 +516,10 @@ def t_gate():
           _nv.to_lobby(fac, _fs) is not None, f"f={_fs.frames_in_page}")
     # 鍏蜂綋椤甸潰蹇呴』鐩栬繃 facility
     fac2 = O(*fac.boxes, B(V.CRAFT_QUICK, cx=0.7, cy=0.86))
-    check("鏈夊叿浣撻〉闈㈢鍚嶆椂 facility 璁╀綅", classify(fac2).page == "craft",
+    check("鏈夊叿浣撻〉闈㈢鍚嶆椂 facility 璁綅", classify(fac2).page == "craft",
           f"瀹為檯 {classify(fac2).page}")
 
-    # 鉀旈€€鍑洪『搴忥細鍙栨秷 > 绲愭灉妗嗙⒑瑾?> 鍙夊弶 > 杩斿洖锛?026-07-27 鎮祻寮?6 绁ㄦ牴鍥犫憿锛?    from routing_v2.act.action import tap_box as _tb
+    # 鉀旈€€鍑洪『搴忥細鍙栨秷 > 绲愭灉妗嗙瑾?> 鍙夊弶 > 杩斿洖锛?026-07-27 鎮祻寮?6 绁ㄦ牴鍥犫憿锛?    from routing_v2.act.action import tap_box as _tb
     ml = ALL["mail"](ctx)
     modal = O(B(V.CANCEL, cx=0.40, cy=0.75), B(V.CONFIRM, cx=0.60, cy=0.75),
               B(V.CLOSE_X, conf=0.96, cx=0.85, cy=0.20), B(V.BACK, cx=0.04, cy=0.05))
@@ -528,7 +528,7 @@ def t_gate():
           a is not None and a.target_cls == V.CANCEL, str(a))
     result = O(B(V.CONFIRM, cx=0.5, cy=0.8), B(V.CLOSE_X, cx=0.85, cy=0.20))
     a = ml.exit_step(result)
-    check("缁撴灉妗嗭紙鏃犲彇娑堬級閫€鍑?鈫?鐐圭⒑瑾?,
+    check("缁撴灉妗嗭紙鏃犲彇娑堬級閫€鍑?鈫?鐐圭瑾?,
           a is not None and a.target_cls == V.CONFIRM, str(a))
 
     # 鉀旂エ鏁拌秺鐣屾牎楠岋細'0/6' 琚鎴?'9/0' 閭ｇ蹇呴』姣欐帀
@@ -619,7 +619,7 @@ def t_gate():
           f4.state["branch_i"] == 1 and not getattr(r, "is_finish", False),
           f"branch_i={f4.state['branch_i']} r={r}")
 
-    # 猸愨瓙鏍稿績璺緞锛氱エ 6鈫? 鐢ㄦ帀 3 寮?= 閰嶉婊?鈫?鎹㈠垎鏀€?    #   绁ㄦ暟璧?OCR锛岀绾挎祴涓嶄簡 鈬?鎵撴々 `_tickets`銆傛墦妗╃殑鏄?*璇绘暟**锛?    #   琚祴鐨勬槸**閰嶉鍒ゅ畾閫昏緫**锛屼笉鏄嚜宸辨祴鑷繁銆?    def _quota_hit(plan, tix_now, tix0, branch="鏁欏", bi=0):
+    # 猸愨瓙鏍稿績璺緞锛氱エ 6鈫? 鐢ㄦ帀 3 寮?= 閰嶉婊?鈫?鎹㈠垎鏀€?    #   绁ㄦ暟璧?OCR锛岀绾挎祴涓嶄簡 鈬?鎵撴々 `_tickets`銆傛墦妗殑鏄?*璇绘暟**锛?    #   琚祴鐨勬槸**閰嶉鍒ゅ畾閫昏緫**锛屼笉鏄嚜宸辨祴鑷繁銆?    def _quota_hit(plan, tix_now, tix0, branch="鏁欏", bi=0):
         f = ALL["bounty"](ctx)
         f.cfg = dict(f.cfg or {})
         f.cfg.update(ticket_plan=plan, branches=["鏁欏", "楂樻灦鍏矾"])
@@ -648,7 +648,7 @@ def t_gate():
     f7._tickets = lambda _obs: None
     _ob7 = O(B(V.TICKET_BOUNTY, cx=0.2, cy=0.05))
     # 鈿爃old() 闈?`self.ticks` 鍒?杩炵画" 鈥斺€?涓嶆帹 ticks 鐨勮瘽 cnt 姘歌繙鏄?1锛?    #   寰幆 70 娆′篃鍙細涓€鐩磋繑鍥?杩炵画纭涓?銆傜涓€鐗堝氨鏄繖涔?*鍋囬€氳繃**鐨勶細
-    #   鏂█锛堜笉鏄?tap锛夌宸ф垚绔嬶紝鍗存牴鏈病璧板埌琚祴鐨勯偅鏉″垎鏀€?    for _ in range(70):
+    #   鏂锛堜笉鏄?tap锛夌宸ф垚绔嬶紝鍗存牴鏈病璧板埌琚祴鐨勯偅鏉″垎鏀€?    for _ in range(70):
         f7.ticks += 1
         r7 = f7._on_stage_list(_ob7, Machine(1).update(_ob7))
     check("鉀旂エ鏁拌涓嶅嚭 鈫?fail-closed 涓嶅嚭鍑伙紙涓旂‘瀹炶蛋鍒颁簡杩欐潯鍒嗘敮锛?,
@@ -688,7 +688,7 @@ def t_config():
     check("AP 鍒嗛厤: 銆岄兘鍒峰弻涓夊€嶃€? special+batch 鍚?50 鈫?绗竴涓暀涓€鍗?,
           _reserve(600, {"special_sweep": 50, "batch_sweep": 50},
                    "special_sweep", od) == 300)
-    check("AP 鍒嗛厤: 鐣欏簳 100 鏃讹紝60% 鍙垎鍓╀笅鐨?900",
+    check("AP 鍒嗛厤: 鐣欏簳 100 鏃讹紝60% 鍙垎鍓笅鐨?900",
           _reserve(1000, {"event": 60, "special_sweep": 40}, "event", od,
                    floor=100) == 460)   # 900*0.4 + 100
     check("鉀擜P 鍒嗛厤: 娌￠厤鐧惧垎姣旂殑 flow 涓嶅弬涓庯紙杩斿洖 None 琛ㄧず涓嶆敞鍏ワ級",
@@ -786,7 +786,7 @@ def t_invariants():
     print("\n鈹€鈹€ 鏋舵瀯涓嶅彉閲?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€")
     import re
     root = _ROOT / "routing_v2"
-    # 鉀旇繑鍥為敭**鍙兘鏈変竴涓彂璧峰**锛坣av.back_key锛夈€傚畠鏄敮涓€鎸′綇"澶у巺鎸夎繑鍥?    #    寮归€€鍑烘父鎴忔"鐨勫湴鏂癸紱2026-08-08 鎴戞妸闂稿啓浜嗕袱浠姐€佹紡浜嗙涓夊锛?    #    缁撴灉 runner 缁曡繃闂稿湪澶у巺杩炴寜 6 娆★紝鎶婃父鎴忓叧鎺変簡銆?    origins = []
+    # 鉀旇繑鍥為敭**鍙兘鏈変竴涓彂璧峰**锛坣av.back_key锛夈€傚畠鏄敮涓€鎸′綇"澶у巺鎸夎繑鍥?    #    寮归€€鍑烘父鎴忔"鐨勫湴鏂癸紱2026-08-08 鎴戞妸闂稿啓浜嗕袱浠姐€佹紡浜嗙涓夊锛?    #    缁撴灉 runner 缁曡繃闂稿湪澶у巺杩炴寜 6 娆紝鎶婃父鎴忓叧鎺変簡銆?    origins = []
     for p in root.rglob("*.py"):
         if p.name in ("device.py", "action.py") or "tests" in p.parts:
             continue
@@ -819,7 +819,7 @@ def t_invariants():
     # 鉀斺洈**婊戝姩鍓嶄笉璁告敼鐘舵€?*锛?8-10 鍏ㄤ粨鎶撳埌 5 澶勶紝鍚垜褰撳ぉ鑷繁鍐欑殑涓€澶勶級銆?    #    `swipes += 1` / `sig = 鏂版寚绾筦 / `done_rows = []` 鍐欏湪 `return swipe(...)`
     #    涔嬪墠 = mutate-before-ack + 鏁版剰鍥句笉鏁颁簨瀹烇細鍔ㄤ綔琚椄鍚炴帀銆佹垨 step 鍙槸
     #    鐪嬩簡涓€鐪煎喅绛栵紝璁℃暟鐓ф定銆侀槻绌鸿浆鐨勫熀鍑嗕篃琚薄鏌?鈬?鎻愬墠鍒ゃ€屾粦鍒板簳浜嗐€嶏紝
-    #    momotalk 閭ｅ鏇翠細鎶婂凡鑱婅繃鐨勮鍙拌处娓呯┖ 鈬?閲嶅鐐广€?    #    鈬?涓€寰嬫寕 `post=`锛坮unner/cli 鐨?swipe 鍒嗘敮閮戒細鍦ㄧ湡婊戝嚭鍘诲悗鎵ц瀹冿級銆?    bad = []
+    #    momotalk 閭ｅ鏇翠細鎶婂凡鑱婅繃鐨勮鍙拌处娓呯 鈬?閲嶅鐐广€?    #    鈬?涓€寰嬫寕 `post=`锛坮unner/cli 鐨?swipe 鍒嗘敮閮戒細鍦ㄧ湡婊戝嚭鍘诲悗鎵ц瀹冿級銆?    bad = []
     for p in (root / "flow").glob("*.py"):
         lines = p.read_text(encoding="utf-8").splitlines()
         for i, line in enumerate(lines):

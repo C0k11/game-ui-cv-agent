@@ -79,7 +79,7 @@ _SURVEY_MAX_SEC = 90.0
 # "看到目标就点"要成立, **"看到"必须是现在**: 观测年龄必须远小于窗口, 否则
 # 你点的是"过去那一帧里的东西", 落到现在的屏幕上就是另一张卡。
 # 窗口实测(2026-07-25, ADB 8 连拍 1.55s 间隔, scratchpad/slotstrip.py):
-#   紫(上期)/橙(当期)交替, 切换点落在 +3.4~4.9 / +6.4~8.0 / +9.6~11.2 
+#   紫(上期)/橙(当期)交替, 切换点落在 +3.4~4.9 / +6.4~8.0 / +9.6~11.2
 #   **每张停留 ~3.2s**(旧注释写的 2-2.5s 偏小, 按小的定更安全但会白等)。
 # 全链实测(server [lat] 埋点): 帧龄 14ms + 推理 35ms + 决策 3ms = 看到决定
 #   **52ms**; ADB tap 下发 564ms; captap **616ms** ≈ 窗口的 19%。
@@ -305,7 +305,7 @@ class EventQuestSkill(BaseSkill):
         super().reset()
         self._init_state()
 
-    # ── helpers ────────────────────────────────────────────────────
+    #  helpers
 
     def _set(self, state: str) -> None:
         if state != self.sub_state:
@@ -368,7 +368,7 @@ class EventQuestSkill(BaseSkill):
         has_bottom = self.find_cls(
             screen, [UC.EVENT_SHOP, UC.EVENT_TASK], conf=_WEAK_CONF) is not None
         # Challenge tab 假阳性(2026-07-23 实锤): Challenge 列表同样有 ≥2
-        # 入场键+活动底栏 — 切 Quest tab 点击被稳定门吞后 verify 假 OK 
+        # 入场键+活动底栏 — 切 Quest tab 点击被稳定门吞后 verify 假 OK
         # survey 在 Challenge 3 关上死等 4 keys 超时, 全天 swept=0 两连。
         # 正锚: 活动quest_已选择 在屏(Quest tab 真选中); 兜底: 未选中态
         # 活动quest 不在屏 且 检出 关卡得星_3(Challenge 全 0 星/Story 无星)。
@@ -416,8 +416,8 @@ class EventQuestSkill(BaseSkill):
                 return int(a), int(b)
         return None
 
-    # ── banner 实例记账 (感知铁律 2026-07-11: 判断主导=cls, pHash 只做
-    # "同一实例防复点"记账辅助) ────────────────────────────────────────
+    #  banner 实例记账 (感知铁律 2026-07-11: 判断主导=cls, pHash 只做
+    # "同一实例防复点"记账辅助)
     # hub 轮播实测(v13): 遊戲開發部=405@0.97 / 情人節=405@0.97(复刻, 无关卡,
     # 落成就页) / 鋼鐵大陸=474@0.88(领奖余韵)。405 有两个实例  点错落成就页
     # 由 verify 用 cls 证据识别, 该实例 pHash 拉黑, 下次 405 检出先比对。
@@ -450,7 +450,7 @@ class EventQuestSkill(BaseSkill):
             self.log(f"banner instance blacklisted ({why}), "
                      f"total={len(self._banner_bad_hashes)}")
 
-    # ── L1- 列表结构化解析 (2026-07-25) ──────────────────────────────
+    #  L1- 列表结构化解析 (2026-07-25)
     # 为什么必须做: 台账主键一直是 **cy**(归一化屏幕纵坐标)。列表一滚动 cy
     # 全变, 台账整个失效 —— data/event_bonus_state.json 落盘的就是
     # {"0.397": true, "0.871": true, ...} 这种东西。"坐标不是身份"。
@@ -465,7 +465,7 @@ class EventQuestSkill(BaseSkill):
     # 必须是连续递增整数, 满足才算这一帧全对。参数扫了 5 组, 2.4h 最稳
     # (2.0h 那组会把 08 切成 30 —— 切太紧比切太松危险得多)。
     _QNUM_STRIP_UP = 2.4        # 关号条上边界 = 得星 y1 - 2.4 * 得星高
-    _ROW_PAIR_DY = 0.05         # 入场键 ↔ 得星 同行的最大 cy 差(实测 ~0.024)
+    _ROW_PAIR_DY = 0.05         # 入场键 <-> 得星 同行的最大 cy 差(实测 ~0.024)
 
     def parse_quest_rows(self, screen: ScreenState) -> List[Dict[str, Any]]:
         """把 quest 列表帧解析成**结构化行**, 自上而下。
@@ -497,7 +497,7 @@ class EventQuestSkill(BaseSkill):
                          "cy": ecy, "enter": enter, "star": star})
         rows.sort(key=lambda r: r["cy"])
         # max_stage 落账(用户 2026-07-30: 币-关映射不 hardcode): 看到的最大
-        # 关号=活动 Quest 总关数, planner 用「尾 K 关↔K 币按序」推关。只在
+        # 关号=活动 Quest 总关数, planner 用「尾 K 关<->K 币按序」推关。只在
         # 数值增长时写盘(一个活动期最多几次)。
         _nums = [r["num"] for r in rows if r["num"] is not None]
         if _nums:
@@ -579,7 +579,7 @@ class EventQuestSkill(BaseSkill):
         n = int(d)
         return n if 1 <= n <= 30 else None
 
-    # ── 加成台账 (persistent, data/event_bonus_state.json) ────────────
+    #  加成台账 (persistent, data/event_bonus_state.json)
     _BONUS_STATE_PATH = "data/event_bonus_state.json"
 
     # 2026-07-25 主键迁移 cy  关号(L1-)。旧盘上的 {"0.397": true} 这种
@@ -697,7 +697,7 @@ class EventQuestSkill(BaseSkill):
                 return True
         return False
 
-    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    #  竣工判据
     def exit_report(self):
         """活动的竣工判据 = AP 灌完了没(单关 20AP, 所以 <20 才叫干净)。
 
@@ -755,7 +755,7 @@ class EventQuestSkill(BaseSkill):
         # 而 find_cls 取的是**全屏 conf 最高**那个框。掃蕩弹窗一开, 对话框体内
         # 的两个体力图标(cy 0.506/0.681)就跟顶栏那个抢锚点 —— 实测体内 0.94 >
         # 顶栏 0.93, 于是选中体内的, 紧接着撞上下面 cy>0.12 的门直接 return None。
-        # 表现: 弹窗没开时读得出(t041-43), 弹窗一开就"AP 连续 7.7s 读不出 
+        # 表现: 弹窗没开时读得出(t041-43), 弹窗一开就"AP 连续 7.7s 读不出
         # fail-closed 收工", 840 AP 原地报废。
         # 修: 锚点直接约束在 topbar 带内, 不再让体内图标参与竞争。
         icon = self.find_cls(screen, UC.TOPBAR_AP, conf=0.5,
@@ -779,7 +779,7 @@ class EventQuestSkill(BaseSkill):
         self._ap_spend_after_read = False   # 新读数  陈旧标记清零
         return self._last_ap_read
 
-    # ── tick ───────────────────────────────────────────────────────
+    #  tick
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -789,7 +789,7 @@ class EventQuestSkill(BaseSkill):
             return action_done(f"event_quest unknown state {self.sub_state}")
         return handler(screen)
 
-    # ── enter / verify ─────────────────────────────────────────────
+    #  enter / verify
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         """感知铁律(2026-07-11): cls 主导 + 极端事件驱动 —
@@ -1085,7 +1085,7 @@ class EventQuestSkill(BaseSkill):
             return action_back("verify timeout (no evidence)  back, rescan")
         return action_wait(500, "verify: no cls evidence yet — wait")
 
-    # ── survey ─────────────────────────────────────────────────────
+    #  survey
 
     def _survey(self, screen: ScreenState) -> Dict[str, Any]:
         """列表滑到底, 自底向上开尾部 N 关 popup 记录 Bonus 状态."""
@@ -1093,7 +1093,7 @@ class EventQuestSkill(BaseSkill):
         # 旧码 `_phase_ticks > _PHASE_MAX*2` = 36 tick。survey 要开/关 4 关 popup
         # = 8 次点击, 而**每次点击都被帧稳定门拦到 4s 超时才放行**(活动页背景有
         # 角色待机动画+对话气泡, 帧几乎永不"稳定"; 日志实锤 `action suppressed:
-        # survey open quest popup Q10/Q11`)。等待期间 _phase_ticks 照涨 
+        # survey open quest popup Q10/Q11`)。等待期间 _phase_ticks 照涨
         # 36 tick 全耗在等稳定上  `survey timeout  close`  **skill 根本没进
         # sweep 阶段**  _read_ap 一次都没调用  竣工判据报 "AP 从未成功读出",
         # 而 AP 909 一点没灌(840AP 失败模式复发)。
@@ -1274,7 +1274,7 @@ class EventQuestSkill(BaseSkill):
             return True
         return any(abs(row["cy"] - c) <= 0.03 for c in self._surveyed_cys)
 
-    # ── unlock (加成解锁: 自动编队 + 真打一次) ────────────────────────
+    #  unlock (加成解锁: 自动编队 + 真打一次)
 
     def _unlock(self, screen: ScreenState) -> Dict[str, Any]:
         # 每关墙钟(2026-07-28): 旧 tick 总和闸在第一场解锁战打到一半就开枪 —
@@ -1535,7 +1535,7 @@ class EventQuestSkill(BaseSkill):
             return action_click(*_POS_TOUCH_CONTINUE, "settle: TOUCH continue")
         return action_wait(500, f"unlock: step {step}")
 
-    # ── points / currency sweep ────────────────────────────────────
+    #  points / currency sweep
 
     def _points(self, screen: ScreenState) -> Dict[str, Any]:
         """尾关(点数关) MAX 扫直到 目标 / AP尽."""
@@ -1701,9 +1701,9 @@ class EventQuestSkill(BaseSkill):
                 if close is not None:
                     _a = action_click_box(
                         close, f"{label}: {_why} — 先关掉当前弹窗")
-                    # 2026-08-01 AP744 剩着收工的根因: 换关 X 被稳定门连吞 
+                    # 2026-08-01 AP744 剩着收工的根因: 换关 X 被稳定门连吞
                     # phase 预算(confirm 没落地不重置)烧光  提前收口。X 是
-                    # 幂等键(弹窗一关 X 即消失, 重发被 JIT bbox 复验丢弃) 
+                    # 幂等键(弹窗一关 X 即消失, 重发被 JIT bbox 复验丢弃)
                     # 与配额加号同用显式豁免, 不给稳定门吞的机会。
                     _a["_hold_exempt"] = True
                     return _a
@@ -1867,11 +1867,11 @@ class EventQuestSkill(BaseSkill):
                 return action_back("PURCHASE DIALOG suspected — back!")
             # 弹入动画中途位不许点(2026-08-02 用户抓包 + 日志铁证):
             # 掃蕩完成框的確認键**稳定位 cy≈0.809**, 但弹入过程中它从 ~0.705
-            # 一路滑下来。`_DIALOG_BTN_BAND` 下沿 0.55 把中途位也圈了进去 
+            # 一路滑下来。`_DIALOG_BTN_BAND` 下沿 0.55 把中途位也圈了进去
             # skill 在动画帧上就派发 0.705, 等 tap 落地按钮早已滑走, 落点砸在
             # 「最終獲得獎勵」行的道具图标上  弹出物品 tooltip(task#32 那个
             # 压暗遮罩的来源之一)。
-            # 帧证(logs/agent.out.log 06:22:10~13): tick67 点 0.7053 
+            # 帧证(logs/agent.out.log 06:22:10~13): tick67 点 0.7053
             # [jit] 丢弃(锚在新帧已消失)  tick68 重算 0.8092  复验通过。
             # **JIT 只在决策龄 >0.30s 才复验**(_JIT_STALE_S): step_mode 有人审
             # 停顿必然触发, 所以这个病在门控下被完全掩盖; **自主跑决策龄常 <0.3s,
@@ -1906,9 +1906,9 @@ class EventQuestSkill(BaseSkill):
             return action_wait(600, f"{label}: target quest not in view")
         return action_wait(600, f"{label}: waiting")
 
-    # ── milestone (獎勵資訊里程碑领奖, 2026-07-11 落码; 0710 手动probe验证
+    #  milestone (獎勵資訊里程碑领奖, 2026-07-11 落码; 0710 手动probe验证
     # 过链路: 奖励资讯475@0.96红点popup領取獎勵_黄89(一键领所有到达档,
-    # +9M信用点实录)獲得獎勵toast灰90翻转叉退回) ────────────────────
+    # +9M信用点实录)獲得獎勵toast灰90翻转叉退回)
 
     def _milestone(self, screen: ScreenState) -> Dict[str, Any]:
         if self._phase_ticks > _PHASE_MAX and self.since("phase_wall") > _PHASE_MAX_SEC:
@@ -1922,7 +1922,7 @@ class EventQuestSkill(BaseSkill):
             return action_click(*_POS_TOUCH_CONTINUE, "milestone: dismiss reward")
         claim_y = self.find_cls(screen, UC.CLAIM_REWARD_YELLOW, conf=0.5)
         if claim_y is not None:
-            # after-ack(2026-07-28): 旧 reason 含「領取獎勵」命中关键词豁免 
+            # after-ack(2026-07-28): 旧 reason 含「領取獎勵」命中关键词豁免
             # 稳定门+hold 全跳  每 tick 真发一发(0.2s 节奏), 后续发落在
             # 獲得獎勵 toast/弹窗动画中途的坐标上。发一发等帧证据, 且
             # _force_settle 走稳定门(别再拿措辞当控制 API)。
@@ -1973,7 +1973,7 @@ class EventQuestSkill(BaseSkill):
             return action_wait(200, "milestone: 无獎勵資訊入口  tasks")
         return action_wait(300, f"milestone: 等獎勵資訊入口 ({_el:.1f}s)")
 
-    # ── tasks (活动任務领奖) / close ──────────────────────────────────
+    #  tasks (活动任務领奖) / close
 
     def _tasks(self, screen: ScreenState) -> Dict[str, Any]:
         if self._phase_ticks > _PHASE_MAX and self.since("phase_wall") > _PHASE_MAX_SEC:

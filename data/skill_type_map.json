@@ -298,7 +298,7 @@
  },
  "光": {
   "idx": 174,
-  "ex_name": "验票☆时间",
+  "ex_name": "验票时间",
   "cost": 2,
   "target": "ally",
   "aim": "auto",
@@ -804,7 +804,7 @@
  },
  "明日奈": {
   "idx": 227,
-  "ex_name": "上啰──！",
+  "ex_name": "上啰！",
   "cost": 2,
   "target": "self",
   "aim": "tap_target",
@@ -1178,7 +1178,7 @@
  },
  "泉": {
   "idx": 261,
-  "ex_name": "起司巧克力汉堡──！",
+  "ex_name": "起司巧克力汉堡！",
   "cost": 3,
   "target": "self",
   "aim": "auto",
@@ -1332,7 +1332,7 @@
  },
  "玛丽娜旗袍": {
   "idx": 280,
-  "ex_name": "呃，呃啊啊啊──！",
+  "ex_name": "呃，呃啊啊啊！",
   "cost": 6,
   "target": "enemy",
   "aim": "tap_target",
@@ -1695,7 +1695,7 @@
  },
  "花子泳装": {
   "idx": 315,
-  "ex_name": "我会多洒一点的♡",
+  "ex_name": "我会多洒一点的",
   "cost": 2,
   "target": "enemy",
   "aim": "tap_target",
@@ -2003,7 +2003,7 @@
  },
  "野乃美": {
   "idx": 344,
-  "ex_name": "惩罚时间到啰～♣",
+  "ex_name": "惩罚时间到啰～",
   "cost": 5,
   "target": "enemy",
   "aim": "tap_target",
@@ -2014,7 +2014,7 @@
  },
  "野乃美泳装": {
   "idx": 345,
-  "ex_name": "变凉快吧～♧",
+  "ex_name": "变凉快吧～",
   "cost": 6,
   "target": "enemy",
   "aim": "tap_target",

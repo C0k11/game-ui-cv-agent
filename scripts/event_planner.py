@@ -44,7 +44,7 @@ def plan():
     stages = []
 
     def stage_of(ti):
-        """尾 K 关规律: tab i ↔ 关(max_stage - (n_tabs - i))。缺账时 None。"""
+        """尾 K 关规律: tab i <-> 关(max_stage - (n_tabs - i))。缺账时 None。"""
         if max_stage and n_tabs:
             return max_stage - (n_tabs - ti)
         return None

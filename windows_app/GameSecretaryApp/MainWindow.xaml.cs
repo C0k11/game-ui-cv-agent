@@ -20,7 +20,7 @@ public partial class MainWindow : Window
     private HwndSource? _source;
     private bool _isRestarting;
 
-    // ── System tray ──
+    //  System tray
     private WinForms.NotifyIcon? _trayIcon;
     private bool _reallyClosing; // true only when user picks "Exit" from tray
 
@@ -57,7 +57,7 @@ public partial class MainWindow : Window
         if (_trayIcon != null)
         {
             _trayIcon.Visible = true;
-            _trayIcon.ShowBalloonTip(2500, "私人碧蓝档案助手", "程序已最小化到系统托盘 (右下角↘)，双击托盘图标恢复窗口。右键可退出。", WinForms.ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(2500, "私人碧蓝档案助手", "程序已最小化到系统托盘 (右下角)，双击托盘图标恢复窗口。右键可退出。", WinForms.ToolTipIcon.Info);
         }
     }
 
@@ -287,7 +287,7 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // Close button → minimize to tray (keep pipeline running)
+        // Close button -> minimize to tray (keep pipeline running)
         // Only truly exit when user clicks "退出" from tray menu
         if (!_reallyClosing)
         {

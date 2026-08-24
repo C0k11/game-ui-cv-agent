@@ -42,6 +42,7 @@ _EXPECT_DIALOG_AFTER = frozenset({
     V.STORY_SKIP, V.STORY_MENU,            # 剧情「跳過」的确认
     V.CAFE_INVITE, V.SORTIE, V.QTY_MAX,
     V.CLAIM_ALL_YELLOW, V.CLAIM_ONCE_YELLOW, V.CLAIM_YELLOW,
+    V.FREE,                               # 免费包键会弹确认框
 })
 
 # arm 的严格档只认「点了**必然**弹确认框」的键（08-15 复盘: 昨晚 29 次契约
@@ -87,6 +88,22 @@ _NAV_SAFE = frozenset({
 _SPEND_TRIGGERS = frozenset({
     V.SHOP_BUY, V.SHOP_BUY_SELECTED, V.SHOP_BUY_PYROXENE,
     V.COMBO_PACK, V.COMBO_PACK_SEL,
+    V.FREE,                               # 点免费后确认框必须仍写着免费
+})
+
+# 信用点/大赛币成交不是买AP/买票/CAD, 不走人审, 不需 --money-ok.
+#    08-20 live: 去掉 money=True 之后, 下面「未声明金钱的购买键」仍把
+#    大赛店选择购买拦成 BLOCKED, 饮料勾了买不成.
+_SOFT_SPEND = frozenset({"信用点", "战术大赛货币"})
+_SOFT_SPEND_CLS = frozenset({V.SHOP_BUY_SELECTED, V.CONFIRM})
+
+# 免费领取白名单: 目标是这些 cls 且 spend 不是青辉石, 购买语境也放行。
+#    不改 money.py。组合包页 purchase_context 成立时, 旧逻辑会把
+#    非 _NAV_SAFE 的 tap 全拦成人审; 02:16 点购买+money=True 就是这么死的。
+_FREE_CLAIM_CLS = frozenset({
+    V.FREE,
+    V.CLAIM_YELLOW, V.CLAIM_ALL_YELLOW, V.CLAIM_ONCE_YELLOW,
+    V.CLAIM_BLUE, V.CLAIM_REWARD_YELLOW,
 })
 
 
@@ -109,12 +126,24 @@ _MIN_HOLD = 4
 #    tick 不是时间单位, 零等待上线后纯帧数判据全部缩水）。
 #    不是 sleep: 帧照抓、决策照做, 只是派发按住 -- 零等待铁律不破。
 _MIN_HOLD_S = 0.5
+# 宽松契约超时地板。补发/严格档走 retry_frames; 宽松档是
+#   max(本地板, retry_frames//6)。二者必须拆开: 70 收到 38 时
+#   若宽松仍按比例 //6, 会塌成 6 帧; 若收到旧值 25 更会塌成 4 帧,
+#   同屏同族按钮必连发(advance_gate C1 / routing_v2 审计连发闸)。
+#   10 帧在 campaign 实测约 0.41-0.50s, 仍在 0.4s 以上。
+_LOOSE_RETRY_FLOOR = 10
+
+
+def _contract_lim(loose: bool, retry_frames: int) -> int:
+    if not loose:
+        return max(1, int(retry_frames))
+    return max(_LOOSE_RETRY_FLOOR, int(retry_frames) // 6)
 
 
 def _sig(obs) -> Optional[frozenset]:
     """点下去**之前**屏上有哪些 cls。契约判"生效"时要拿它当基线。
 
-    ⛔ 这一步原来是**懒设**的（`advance` 里第一次检查之后才填）—— 而第一次
+    禁 这一步原来是**懒设**的（`advance` 里第一次检查之后才填）—— 而第一次
        检查恰恰是"刚点完、面板刚盖上来"那一帧，此时 `sig0 is None`，
        那条「消失还不够，必须伴随新 cls」的补丁直接被 `base is None` 短路，
        **等于从写下起就没生效过**。
@@ -173,7 +202,7 @@ class Gate:
         self._last_fire_frame = 0
         self._fires = 0
 
-    # ══  金钱闸 ═══════════════════════════════════════════════════════
+    #   金钱闸
     def money(self, act: Action, obs: Observation,
               last_solid: Optional[str] = None) -> Verdict:
         """判据全部在 `act/money.py`（唯一一份）。这里只负责怎么处置。"""
@@ -205,6 +234,13 @@ class Gate:
                         f"拦下：{sysd}；且上一发点的是 `{prev or '(无)'}`"
                         f" — **没有任何动作会弹出这个框**  只允许点取消")
 
+        # 信用点批量买 / 大赛币买饮料: 声明了 spend 就放行, 不走 --money-ok.
+        #    必须放在「未声明金钱的购买键」和「上一发花钱键+确认」之前,
+        #    否则 spend 写了仍被拦 (08-20 174556 勾了饮料买不成).
+        if (act.is_tap and act.spend in _SOFT_SPEND
+                and act.target_cls in _SOFT_SPEND_CLS):
+            return Verdict(True, f"非付费成交: 花 {act.spend}")
+
         # 购买确认框盲区（见 _SPEND_TRIGGERS 那段）：上一发点的是花钱键
         #     眼前这个双键框就是「是否購買該商品？」，没声明 money 不许点。
         if (act.is_tap and act.target_cls == V.CONFIRM and not act.money
@@ -216,6 +252,23 @@ class Gate:
                            f"确认框且**没写着「免費」** — 这一下確認就是成交，"
                            f"而动作没声明 money  拦下交人审",
                            halt=True, needs_human=True)
+
+        # 免费领取: 目标是免费/领取, 或确认框写着免费且没声明 money。
+        #    spend=青辉石 仍拒。
+        if (act.is_tap and act.spend not in ("青辉石", "青辉石(premium)")):
+            if act.target_cls in _FREE_CLAIM_CLS:
+                return Verdict(True, "免费领取: 目标是免费/领取 cls")
+            if (act.target_cls == V.CONFIRM and obs.has(V.FREE, 0.30)
+                    and not act.money):
+                return Verdict(True, "确认免费领取: 框上有免费且未声明花钱")
+
+        # 未授权的购买键: 拒这一发, 不停整轮。货架页不是成交框。
+        #    信用点/大赛店选择购买走 spend=信用点/战术大赛货币, 上面已放行.
+        #    这里拦的是没写 spend 也没 money=True 的 购买/选择购买 (CAD/误点).
+        if (act.is_tap and act.target_cls in (V.SHOP_BUY, V.SHOP_BUY_SELECTED)
+                and not act.money):
+            return Verdict(False, "未声明金钱的购买键不点（免费包只点免费/领取）",
+                           halt=False, needs_human=True)
 
         ctxt = money_rules.purchase_context(obs)
         if ctxt is not None and act.is_tap and not act.money:
@@ -262,7 +315,7 @@ class Gate:
         self.stats["money"] += 1
         return Verdict(True, f"金钱步已放行: {act.reason} (花 {act.spend or '?'})")
 
-    # ══  落地复验（JIT）═══════════════════════════════════════════════
+    #   落地复验（JIT）
     def jit(self, act: Action, obs: Observation,
             fresh: Callable[[], Optional[Observation]]) -> Verdict:
         """派发前用**最新帧**确认目标还在。
@@ -297,7 +350,7 @@ class Gate:
                 self.stats["jit_drop"] += 1
                 # 2026-08-12 最隐蔽的一次"选项打架"：**一发被丢弃后，
                 #    flow 转头点了相反的按钮**。战术大赛商店实录:
-                #      ↗ 等到了 `确认键`（确认框弹出来了）
+                #       等到了 `确认键`（确认框弹出来了）
                 #      丢弃 '确认键' 锚点 y 0.9850.842 位移 0.144 > 容差 0.029
                 #      丢弃 '取消键' 锚点 y 0.8450.803 位移 0.042 > 容差 0.028
                 #       tap **取消键**「模态框唯一有效出口」    购买被取消
@@ -336,7 +389,7 @@ class Gate:
                                      f"{nx:.3f},{ny:.3f}）")
         return Verdict(True, "JIT 复验通过")
 
-    # ══  连发闸 ═══════════════════════════════════════════════════════
+    #   连发闸
     def dedup(self, act: Action, page_changed: bool,
               frames_in_page: int, retry_frames: int) -> Verdict:
         """同一落点不重复点；重发只认"状态连续 N 帧没变"。
@@ -357,8 +410,8 @@ class Gate:
         if not act.is_tap:
             return Verdict(True)
         # "同一个落点"必须按**距离**判，不能按坐标相等判。
-        #    2026-08-08 live 实锤：`邮件箱` 的框每帧抖 ±0.001（0.892↔0.893、
-        #    0.045↔0.054），用 `round(x,3)` 当 key  每一帧都被当成**新目标**
+        #    2026-08-08 live 实锤：`邮件箱` 的框每帧抖 ±0.001（0.892<->0.893、
+        #    0.045<->0.054），用 `round(x,3)` 当 key  每一帧都被当成**新目标**
         #     闸形同虚设，一个大厅入口连点 12 次。
         #    这是"连发族"的第 4 种形态：前三种是 after-ack 挂错地方 / 判定带宽
         #    不一致 / 没有 after-ack 的重发，这一种是**同一性判据太严**。
@@ -423,7 +476,7 @@ class Gate:
         self._last = (x, y, key)
         self._last_fire_frame = frames_in_page
 
-    # ══  推进闸（1 step ahead）═════════════════════════════════════════
+    #   推进闸（1 step ahead）
     def arm(self, act: Action, obs: Optional[Observation] = None) -> None:
         """一发 tap **真的发出去之后**调 —— 记下推进契约。
 
@@ -561,7 +614,7 @@ class Gate:
         hit = next((c for c in p["expect"] if obs.has(c, 0.40)), None)
         if hit is not None:
             self._pending = None
-            return Verdict(True, f"↗ 等到了 `{hit}` — `{p['cls']}` 这一发生效，推进")
+            return Verdict(True, f" 等到了 `{hit}` — `{p['cls']}` 这一发生效，推进")
         if p["expect_gone"] and not any(obs.has(c, 0.40) for c in p["expect_gone"]):
             # **"消失"还不够，必须伴随新东西出现**（2026-08-12 全链审计后加）。
             #    默认契约 `expect_gone=(自己,)` 的误判源就在这里：点"打开面板"
@@ -577,7 +630,7 @@ class Gate:
             base = p.get("sig0")
             if not p["loose"] or base is None or (cur - base):
                 self._pending = None
-                return Verdict(True, f"↗ `{'/'.join(p['expect_gone'])}` 已消失"
+                return Verdict(True, f" `{'/'.join(p['expect_gone'])}` 已消失"
                                      f" — `{p['cls']}` 这一发生效，推进")
         # 滑动契约：没有 cls 可等，只能等画面停稳。按住 8 帧（≈0.4s）——
         #   够模型把停稳后的列表扫一遍，也就实现了「滑一次  扫一次」。
@@ -595,10 +648,11 @@ class Gate:
         #    正好放走了同族按钮之间的连点——而那是这道闸存在的理由。
         #     出口删掉。宽松档和严格档的**满足条件现在完全一致**
         #      （目标消失 / 期待出现 / 页面变），只在**超时长度**上有区别：
-        #      宽松 retry//6（约 11 帧、半秒），严格走完整 retry_frames。
-        #      「点完自己还在」的控件（加号、翻页箭头）靠那半秒超时兜底，
+        #      严格走完整 retry_frames; 宽松 max(地板, retry//6)。
+        #      地板不跟 retry 等比缩小, 避免补发加快时宽松塌成 3-4 帧连发。
+        #      「点完自己还在」的控件（加号、翻页箭头）靠宽松超时兜底，
         #      代价可以接受，换来的是同屏同族按钮不会被连着点掉。
-        lim = max(1, retry_frames if not p["loose"] else max(3, retry_frames // 6))
+        lim = _contract_lim(p["loose"], retry_frames)
         if p["n"] >= lim:
             self._pending = None
             self.stats["expect_timeout"] += 1
@@ -624,9 +678,9 @@ class Gate:
         self.stats["expect_hold"] += 1
         return Verdict(False, "")      # 静默按住，不刷屏
 
-    # ══ 汇总 ═══════════════════════════════════════════════════════════
+    #  汇总
     def heartbeat(self, obs: Observation, *, page_changed: bool,
-                  retry_frames: int = 25) -> str:
+                  retry_frames: int = 38) -> str:
         """契约时钟 -- **runner 主循环每帧调一次**（在 flow.decide 之前）。
 
         为什么单独存在: 契约的兑现/超时判断原来全在 `advance()` 里，而那只在
@@ -664,8 +718,7 @@ class Gate:
             if p["n"] >= 8 and time.time() - p.get("t0", 0.0) >= _MIN_HOLD_S:
                 self._pending = None
             return ""
-        lim = max(1, retry_frames if not p["loose"]
-                  else max(3, retry_frames // 6))
+        lim = _contract_lim(p["loose"], retry_frames)
         if p["n"] >= lim:
             self._pending = None
             self.stats["expect_timeout"] += 1
@@ -678,7 +731,7 @@ class Gate:
     def allow(self, act: Action, obs: Observation, *,
               fresh: Callable[[], Optional[Observation]],
               page_changed: bool, frames_in_page: int,
-              retry_frames: int = 25,
+              retry_frames: int = 38,
               last_solid: Optional[str] = None) -> Verdict:
         # **必须短路求值**（2026-08-12 修）：原来写的是 `for v in (a(), b(), c())`
         #    —— 元组在进循环前就把三道闸**全部执行**了，于是 money 闸拦下的那一发

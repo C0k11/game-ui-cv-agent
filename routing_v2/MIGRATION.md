@@ -20,7 +20,7 @@
 | `brain/skills/ui_classes.py` | `state/vocab.py` | 加了**训练量健康度**和 `require()` 死判据闸 |
 | `brain/screens.py` 页面签名 | `state/pages.py` | 结构判据重写，去掉全部"内容多才算数"的前提 |
 | `brain/pipeline.py` 的 JIT 复验 / 金钱 kill-switch | `act/gate.py` + `act/money.py` + `act/ledger.py` | 判据集中一份 |
-| `scratchpad/loop.py` 的状态机 | `state/pages.py` + `flow/battle.py` | ⭐`STRAY` 兜底**已按约定删掉** |
+| `scratchpad/loop.py` 的状态机 | `state/pages.py` + `flow/battle.py` | *`STRAY` 兜底**已按约定删掉** |
 | `scratchpad/step1.py` 的真到达验证 | `app/cli.py::cmd_step` | 只认页面身份变化 |
 | 13 个 skill 的流程知识 | `flow/*.py` | 见下表 |
 
@@ -31,12 +31,12 @@
 | `daily_routine.py` `club.py` | `flow/facilities.py::ClubFlow` | 写完，**未 live** |
 | `craft.py` | `facilities.py::CraftFlow` | 写完，**未 live**（灰态优先已修） |
 | `shop.py` `buy_pyroxene.py` | `facilities.py::ShopFlow` | 写完，**未 live** |
-| `mail.py` | `facilities.py::MailFlow` | ✅ **live 跑通 CLEAN** |
+| `mail.py` | `facilities.py::MailFlow` | OK **live 跑通 CLEAN** |
 | `daily_mission.py` | `facilities.py::DailyMissionFlow` | 写完，**未 live** |
 | `cafe.py` | `flow/cafe.py` | 写完，**未 live** |
 | `schedule.py` | `flow/schedule.py` | 写完，**未 live** |
 | `ticket_sweep.py` `bounty.py` | `flow/sweep.py` + `bounty.py` | 写完，**未 live** |
-| `jfd.py` | `flow/jfd.py` | 写完，**未 live**；⭐已改用 cls 选学院 |
+| `jfd.py` | `flow/jfd.py` | 写完，**未 live**；*已改用 cls 选学院 |
 | `event_quest.py` | `flow/event.py` | 写完，**未 live** |
 | `scripts/buy_event_shop.py` | `flow/event_shop.py` | 写完，**未 live** |
 | `arena.py` `arena_shop.py` | `flow/arena.py` | 写完（大赛商店买体力未做） |
@@ -47,7 +47,7 @@
 
 ---
 
-## 二、⛔绝对不能删
+## 二、禁绝对不能删
 
 - `data/raw_images/` `data/**/*.jsonl` `dataset/` `runs/` —— 训练素材与权重
 - `data/raw_images/_classes.txt` —— **按行号索引，连改都要小心**
@@ -63,7 +63,7 @@
 `tests/replay/`，以及仓库根目录那一堆 `_probe_*.py` / `_shopdbg*.py` / `_cal_*.py`
 （都是一次性探针，功能已被 `py -m routing_v2 probe/step` 取代）。
 
-⚠ `scripts/audit_cls_usage.py` 要**改**不要删 —— 它的扫描目标要从 `brain/` 换成
+注意 `scripts/audit_cls_usage.py` 要**改**不要删 —— 它的扫描目标要从 `brain/` 换成
 `routing_v2/`，那道 `--fail-on-dead` 闸仍然有用。
 
 ## 四、`server/app.py`（4898 行）
@@ -91,8 +91,8 @@
 ```bash
 git checkout -b pre-delete-snapshot && git checkout main   # 先留个还原点
 ```
-① 删根目录一次性探针 → ② 删 `scripts/` 里依赖老 skill 的 → ③ 拆 `server/app.py`
-的 pipeline 半边 → ④ 删 `brain/skills/` → ⑤ 删 `brain/pipeline.py`（**最后**，
+1) 删根目录一次性探针 -> 2) 删 `scripts/` 里依赖老 skill 的 -> 3) 拆 `server/app.py`
+的 pipeline 半边 -> 4) 删 `brain/skills/` -> 5) 删 `brain/pipeline.py`（**最后**，
 它还带着 `combat_brain` 用得上的东西）。
 
 每一步之后跑 `py -m routing_v2.tests.test_offline` + 一次 `run --flows mail`。

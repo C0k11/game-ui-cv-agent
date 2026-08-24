@@ -315,9 +315,9 @@ TRAIN_CONFIGS = {
         "mixup": 0.0,
         "copy_paste": 0.0,
         "fliplr": 0.0,            #  UI has direction (X always top-right)
-        "flipud": 0.0,            # 
+        "flipud": 0.0,            #
         "degrees": 0.0,           #  UI orthogonal only
-        "perspective": 0.0,       # 
+        "perspective": 0.0,       #
         "hsv_h": 0.015,
         "hsv_s": 0.3,
         "hsv_v": 0.3,
@@ -397,7 +397,7 @@ TRAIN_CONFIGS = {
         #   开空间 aug 治"过度依赖位置/邻居"过拟合(侧栏图标随布局偏移就崩):
         #     translate/scale=位置+尺度不变性, mosaic=换邻居/上下文,
         #     copy_paste=治稀有 cls, close_mosaic 最后10ep关mosaic干净微调(保清晰)
-        #   flip/rotate 保持 0 —— UI 有左右/朝向语义(左切换↔右切换), 翻转会搞反标签
+        #   flip/rotate 保持 0 —— UI 有左右/朝向语义(左切换<->右切换), 翻转会搞反标签
         # from COCO (非 warm-start)。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v1" / "data.yaml",
@@ -412,11 +412,11 @@ TRAIN_CONFIGS = {
         "lr0": 0.01,
         "weight_decay": 0.0005,
         "dropout": 0.0,
-        # ── 空间增强 ON (治过拟合 / 位置依赖, v3 的核心病) ──
+        #  空间增强 ON (治过拟合 / 位置依赖, v3 的核心病)
         "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
         "scale": 0.3, "translate": 0.1,
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,   # hsv_v: 立绘背景明暗多样
-        # ── 几何翻转/旋转保持 0 (UI 左右/朝向语义不可翻) ──
+        #  几何翻转/旋转保持 0 (UI 左右/朝向语义不可翻)
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
     "ui_yolo26m_v5": {
@@ -850,7 +850,7 @@ TRAIN_CONFIGS = {
         # v14 (2026-07-17) = v13 warm + 0711 大合并池(1624) + 0717 大合并池(442,
         #  16源池: 午夜派对活动商店 evshop 77帧[103 OCR辅助165亮态/101已选择30/
         #  102x150/104x19] + idx77当期活动入口用户手标 + 451摸头span修复补标53)。
-        #  误标四类批量清零: Challenge语义框/405↔474混淆/灰购买/灰确认2023。
+        #  误标四类批量清零: Challenge语义框/405<->474混淆/灰购买/灰确认2023。
         #  配方 = v13 args.yaml 复刻(cache=False, v13 爆盘教训后 disk 永不再用)。
         #  验收闸: by-cls 对比 v13, momo 四类+剧情类群任何一类退步不上 registry。
         "kind": "detect",
@@ -975,7 +975,7 @@ TRAIN_CONFIGS = {
         "cache": False,
         "workers": 4,
         # **不写 optimizer**: trainer.py:983 的 `warmup_bias_lr = 0.0` 只在
-        #  `if name == "auto":` 分支里执行。显式锁死 optimizer 会跳过该分支 
+        #  `if name == "auto":` 分支里执行。显式锁死 optimizer 会跳过该分支
         #  warmup 前 3 轮 bias 按 **0.1** 跑而 body 是 ~0.0004(差 250 倍),
         #  正好打在稀有类(战斗胜利19/失败28/暂停菜单各27框)最怕的地方。
         #  而 warmup_bias_lr 不在下面 :1142 的白名单里, 写了也会被静默丢掉。
@@ -1109,6 +1109,74 @@ TRAIN_CONFIGS = {
         "mosaic": 0.0, "close_mosaic": 0, "mixup": 0.0, "copy_paste": 0.0,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
+    },
+    "ui_yolo26m_v18": {
+        # v18 (2026-08-18) = v17 warm + 08-16/18 raw 标修复第一次进集。
+        # 超参照抄 v16/v17 (只变数据)。nc 528->531 (528任务资讯 / 529得星_1 / 530得星_2)。
+        # 529 全库 0 框 (wash 空星已改 83), 头在表里占位。
+        # 验收: 购买/灰购买对账帧 (0001500 等) / 走格子 / 任务资讯 528。
+        # 金钱类仍无诚实 val, 只能 live 对账。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v17" / "weights" / "last.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v18",
+        "cache": False,
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
+    "ui_yolo26m_v17": {
+        # v17 (2026-08-14) = v16 warm + 数据修复。**超参一个不动, 照抄 v16**
+        # (batch/imgsz/epochs/patience/cache/workers 全同) -- 这轮只变数据,
+        # 变两个变量就说不清是哪个起的作用。
+        #
+        # 数据: train 30,060 帧 / 445,089 实例, val **1,530 帧 / 17,313 实例**。
+        #
+        # 这轮修掉的(每条都有实测数字, 详见 data/routing_v2/v17_dataset_repair.md):
+        #   1. **val 泄漏 86.3%** -- 旧 val 11,129 帧里 9,599 帧与某张 train 帧
+        #      dHash(8x8, INTER_AREA) 距离 <14, 4,587 帧逐像素同图。
+        #      病根: build 的 dedup 拿**字节 md5** 做 key, 挡不住重编码副本。
+        #      这解释了 v16 报 mAP50 0.967 却在 2-4 走格子上零检出 -- 它在背题。
+        #      清洗后 val 最小距离 14, 中位 16。泄漏帧隔离在
+        #      `_val_quarantine_leak14_*`(可还原), 另出 data_ref.yaml 参考集
+        #      (与 v16 同口径, 只看趋势, 绝对值不可信)。
+        #   2. 购买态: 212 个同坐标同时挂 购买+购买灰色 的框全解;
+        #      1,047 个售罄按钮从"可买"翻成"灰"。裁决用游戏自己印的
+        #      `可購買N次`(0次必灰 / >0必亮), 不是像素启发式。
+        #   3. 预填域过滤 `_ui_span` 硬编码 i<476, 把 484-527 共 44 个新 UI 类
+        #      (走格子全族/PHASE族/任务页签族)整个静默丢了, 41% 检出被吞。
+        #      修后走格子族的框才第一次进得来。
+        #   4. 重复框: 单实例类双标 906 帧 + 同类近重复 611 对, 源池删 1,508 框。
+        #
+        # 验收口径变了, 别照搬 v16 的看法:
+        #   - val 只剩 1,530 帧, **221 个 ui 活类里 157 个 val=0**(含
+        #     购买灰色/选择购买/选择购买灰色)。整体 mAP 不再有可比性,
+        #     只看那 53 个有真 val 的类的逐类 P/R。
+        #   - 与 v16 比趋势用 data_ref.yaml(泄漏参考集), **那个数字不代表泛化**。
+        #   - **金钱类没有 val, 只能做行为验收** -- live 逐帧看购买流程 +
+        #     青辉石余额对账, 不许拿指标当通过条件。
+        #   - 重点看: 走格子族 497-510(v16 时全族 val=0, 现在 12/13 有量尺) /
+        #     购买 vs 购买灰色 的混淆矩阵 / cls 7 每日领奖去重后是否回归。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v16" / "weights" / "last.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v17",
+        "cache": False,
     },
     "ui_yolo26m_v16": {
         # v16 (2026-08-12) = v15 warm + 新素材 + 标注修正。

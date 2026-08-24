@@ -36,6 +36,9 @@ _AF_DEAD_ROUNDS = 3      # 关掉重挑最多来这么多轮，再多就是清�
 #    但代价是 arena 判成"票数读不出"干等 60 帧收工。
 #    这就是 840AP 事故那条通用铁律的又一处落点：**读数锚点必须带 region**。
 _TICKET_RAIL = (0.0, 0.10, 0.30, 1.0)
+_HUB_TILE_MISS_LIMIT = 80
+# 戰術大賽 卡区域(归一化): 08-20 `0000322_new_task_hall` 红点 0.91 @(0.71,0.82)
+_ARENA_DOT_REGION = (0.62, 0.74, 0.79, 0.92)
 
 
 class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
@@ -45,18 +48,29 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
 
     def setup(self) -> None:
         self.state.update(fights=0, tickets0=None, tickets=None,
-                          af_taps=0, af_dead=0)
+                          af_taps=0, af_dead=0, enter_taps=0, inside=False,
+                          hub_tile_misses=0)
 
-    # **别在这里覆写 `on_ack_dialog`**（08-11 审计结论，写下来免得再来一次）:
-    #    单键通知框在 arena 页**本来就能被优先处理** —— `pages.classify()` 把
-    #    overlay 和底页分成两个桶各自打分（overlay 不参与"我在哪一页"的竞争），
-    #    `Flow.decide()` 是 **overlay  pre_page  底页** 的顺序，而 arena 没有
-    #    自己的 `on_ack_dialog`  落到 `Flow.on_ack_dialog` 点掉確認。
-    #    离线复验（08-11 那帧「通知: 已超過清單更新時間」）: classify 给
-    #    `<arena +ack_dialog>`，`ArenaFlow.decide` 给 `tap(确认键@0.499,0.699)`；
-    #    当晚 live 日志里 arena 页上"确认（单键通知框）"也确实点成功过两次。
-    #   卡住的真因**不是**通知框挡住按钮（那 10 帧里 conf 0.02 都检不出确认键），
-    #    是上面那个**死面板**。覆写只会把好用的一层弄坏。
+    def _hub_lock_popup(self, obs, st, why: str):
+        """单次入口探测后仍以任务大厅为底的单键框，按锁态收工。"""
+        if self.state.get("inside") or not self.state.get("entry_probe"):
+            return None
+        if nav.task_hall_anchor_count(obs) < 1:
+            return None
+        if obs.has(
+                [V.TICKET_ARENA, V.ARENA_ROW, V.ARENA_ATTACK_FORM],
+                0.30):
+            return None
+        return self.finish(
+            Outcome.SKIPPED,
+            f"战术大赛入口探测后当前帧仍有任务大厅专属锚并弹出{why}，"
+            "按未解锁收工")
+
+    def on_ack_dialog(self, obs, st):
+        locked = self._hub_lock_popup(obs, st, "单键通知框")
+        if locked is not None:
+            return locked
+        return super().on_ack_dialog(obs, st)
 
     def observe(self, obs, st) -> None:
         # **第一行必须是 super()**：`BattleMixin.observe` 也挂在这个名字上，
@@ -70,17 +84,57 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             self.state["af_taps"] = 0
 
     def on_lobby(self, obs, st):
-        return nav.enter(obs, V.NAV_TASKS, "任务大厅")
+        return nav.lobby_enter(self, obs, V.NAV_TASKS, "任务大厅",
+                               expect=(V.HUB_CAMPAIGN,))
 
     def on_task_hall(self, obs, st):
         t = obs.find(V.HUB_ARENA, 0.40)
         if t is not None:
-            return tap_box(t, "进入战术大赛")
-        if self.stalled(st, 120):
-            return self.finish(Outcome.UNKNOWN, "任务大厅没检出 战术大赛 tile")
-        return wait("等 战术大赛 tile")
+            self.state["hub_tile_misses"] = 0
+        if not nav.task_hall_evidence(obs):
+            return wait("当前帧缺少两个任务大厅专属锚，不计战术大赛入口漏检")
+        if self.state.get("entry_probe"):
+            if self.hold("entry_probe_no_result", 120):
+                return self.finish(
+                    Outcome.UNKNOWN,
+                    "战术大赛入口只探测一次，但既没进页也没出现可识别通知")
+            return wait("战术大赛入口已探测一次，等进页或锁通知，不重复点")
+        if t is not None:
+            def _probe():
+                self.state["entry_probe"] = True
+                self.bump("enter_taps")
+            return tap_box(t, "进入战术大赛",
+                           post=_probe)
+        # tile 真名换皮 cls=0 时, 退回点卡上的红点(检出框, 非盲坐标)。
+        #    08-20 `0000322_new_task_hall`: 戰術大賽 卡上 红点 0.91。
+        dot = nav.hub_tile_dot(obs, _ARENA_DOT_REGION)
+        if dot is not None and self.pending("hub_tile_dot"):
+            def _probe_dot():
+                self.state["entry_probe"] = True
+                self.bump("enter_taps")
+            return tap_box(
+                dot,
+                f"战术大赛 cls 0 - 点该卡上的点"
+                f"@{dot.cx:.3f},{dot.cy:.3f}(检出框, 不是盲坐标)",
+                once="hub_tile_dot", post=_probe_dot)
+        misses = self.bump("hub_tile_misses")
+        if misses >= _HUB_TILE_MISS_LIMIT:
+            return self.finish(
+                Outcome.SKIPPED,
+                f"有任务大厅证据的连续 {misses} 个观测帧都没检出 "
+                "战术大赛，tile_dead（模型认不出入口，不是未解锁）")
+        return wait(
+            f"任务大厅证据成立但没检出 战术大赛 "
+            f"({misses}/{_HUB_TILE_MISS_LIMIT})")
+
+    def on_facility(self, obs, st):
+        if not nav.task_hall_evidence(obs):
+            return None
+        return self.on_task_hall(obs, st)
 
     def on_arena(self, obs, st):
+        self.state["inside"] = True
+        self.state.pop("entry_probe", None)
         t = obs.find(V.TICKET_ARENA, 0.30, region=_TICKET_RAIL)
         # **领奖励不能排在打大赛前面**（2026-08-10 live 实锤，票 5/5 一场没打）:
         #    左栏「時間獎勵 **+90/分**」是**持续累积、永远领不完**的 —— 每打完一场
@@ -194,8 +248,19 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             #    用户原话：「arena 不要改配对，不要自动配队」。已改回。
             #    同理不要给大赛加自动编队（那次改动也当场回滚了，见 on_formation）。
             return tap_box(rows[0], "挑战最上面那个对手", counter="fights")
-        if tix is None and self.stalled(st, 60):
-            return self._wrap("票数读不出  fail-closed，不出战")
+        if tix is None:
+            # 08-16 remain: 进门票 5, 打 4 场后详情面板压暗左栏, 60 帧
+            #    leftover, 第 5 场没打. 从未读过才 fail-closed; 进门有剩余
+            #    按已点场次接着等对手行.
+            t0 = self.state.get("tickets0")
+            used = int(self.state.get("fights", 0))
+            if t0 is not None and used < int(t0):
+                if self.stalled(st, 180):
+                    return self._wrap(
+                        f"进门票 {t0} 已点 {used} 场, 对手行一直没有")
+                return wait(f"票本帧读不出，进门 {t0} 已点 {used} 场，继续等对手行")
+            if self.stalled(st, 60):
+                return self._wrap("票数读不出  fail-closed，不出战")
         if self.stalled(st, 120):
             return self._wrap("大赛页没有对手行 cls")
         return wait("等对手列表")
@@ -207,7 +272,7 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         #    但大赛这一页是**「攻擊編制」页**，`快速編輯` 只是右侧竖排四个入口
         #    之一（快速編輯/起始技能/部隊資訊/預設），点开后的面板结构和活动
         #    加成那条链**不一样**；`_auto_form_chain` 一上来就按活动的版面找
-        #    「自動」键，找不到就 wait，而它的 `af_edit` once 已经落下 
+        #    「自動」键，找不到就 wait，而它的 `af_edit` once 已经落下
         #    再也不会去开面板  **死等**。实测当场卡住，只能回滚。
         #     想给大赛做自动编队，得**单独适配这一页**并用票之外的方式验证，
         #      不能拿每日限量的票去试错。（待办，别再顺手复用。）
@@ -230,6 +295,7 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         off = obs.find(V.SKIP_BATTLE_OFF, 0.40)
         on = obs.find(V.SKIP_BATTLE, 0.40)
         if off is not None and on is None:
+            self._reset_formation_guard()
             return tap_box(off, "勾上「跳過戰鬥」（每场都会被游戏重置，逐场认状态）",
                            expect=(V.SKIP_BATTLE,))
         # 2026-08-12 用户实测：**出击后有 ~25 秒冷却**，冷却没走完再点
@@ -243,11 +309,16 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         import time as _t
         last = self.state.get("sortie_ts")
         if last is not None and _t.time() - last < 20.0:
+            self._reset_formation_guard()
             return wait(f"大赛出击冷却中（还剩 {20.0 - (_t.time() - last):.0f}s）"
                         f" — 现在点只会弹提示框（保险层, 主闸在对手页读等待時間）")
         go = obs.find(V.SORTIE, 0.45)
         if go is None:
+            self._reset_formation_guard()
             return wait("等出击键")
+        blocked = self._formation_guard(obs, "大赛")
+        if blocked is not None:
+            return blocked
         # 勾选本来就是勾好的时（上面那支没机会当"页面活了"的探针），
         #    出击也不许抢在淡入死区里发 —— 连续 8 帧都在配队页再点。
         if not self.hold("form_ready", 8):
@@ -271,7 +342,7 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     #        一上来就点了「任务开始」。
     #      `find([TASK_START, SWEEP_START])` 是 **conf argmax**，而
     #        `任务开始`(0.99) 常压过 `扫荡开始`(0.98)  专挑真打战斗那个键。
-    #      **没有任何 AP 闸**：当时 AP=9，点下去游戏直接弹「購買AP 單價💎30」，
+    #      **没有任何 AP 闸**：当时 AP=9，点下去游戏直接弹「購買AP 單價30」，
     #        全靠 money 闸 halt 才没成交（青辉石 20,916 一分没动）。
     #     不认识的页面就**什么都不做**，交给 nav 逐层退出。这才是 §A1。
     def on_confirm_dialog(self, obs, st):

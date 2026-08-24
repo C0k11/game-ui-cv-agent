@@ -8,7 +8,7 @@ combat AI 2.0 tracker Phase 1 的地基: 拿人审过的凹轴池当 GT, 量化
   1. --cache   v8 对池逐帧检测(conf0.05, 身份类), 存 _detcache/*.npz — GPU 只跑这一次
   2. (默认)    用缓存喂手动 BYTETracker/BOTSORT 实例扫参数网格 — 纯 CPU, 秒级/配置
   3. GT 链     人审 label 的身份类框按 IoU 匈牙利串成链(gap≤2 保活) = "真实的人"
-  4. 指标      每帧 GT↔track 框匈牙利(IoU≥0.45):
+  4. 指标      每帧 GT<->track 框匈牙利(IoU≥0.45):
                purity   链上主 tid 占比(=锁定不换人的程度, 关键指标)
                idsw     链上相邻匹配帧 tid 变化次数
                cover    GT 框被 track 框覆盖比例(检测+轨迹召回)
@@ -42,7 +42,7 @@ IDENTITY_MASTER = {476, 477, 478, 479, 480, 481, 482, 483}
 GT_MIN_CHAIN = 5          # 短于此的 GT 链不评(开场淡入/结算残帧)
 GT_LINK_IOU = 0.30        # GT 帧间串链阈值(3fps 位移大, 放宽)
 GT_LINK_GAP = 2           # GT 链断档保活帧数(遮挡/漏标容忍)
-MATCH_IOU = 0.45          # GT↔track 评测匹配阈值
+MATCH_IOU = 0.45          # GT<->track 评测匹配阈值
 
 
 def find_pool(pat: str) -> Path:
@@ -54,7 +54,7 @@ def frames_of(pool: Path):
                   key=lambda p: int(re.search(r"(\d+)", p.stem).group(1)))
 
 
-# ────────────────────────── 检测缓存 ──────────────────────────
+#  检测缓存
 
 def build_cache(pool: Path) -> Path:
     from track_prefill import _latest_battle_weights  # 权重同源 registry 最新 vN
@@ -103,7 +103,7 @@ def load_cache(pool: Path):
     return per_frame, int(z["n_frames"]), float(z["w"]), float(z["h"])
 
 
-# ────────────────────────── GT 链 ──────────────────────────
+#  GT 链
 
 def iou_mat(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """a:(N,4) b:(M,4) xyxy  (N,M) IoU。"""
@@ -171,7 +171,7 @@ def build_gt_chains(pool: Path, n_frames: int, W: float, H: float):
     return chains
 
 
-# ────────────────────────── tracker 离线跑 ──────────────────────────
+#  tracker 离线跑
 
 class _Dets:
     """BYTETracker.update 的输入 shim(.conf/.cls/.xywh/.xyxy + mask 索引)。"""
@@ -231,7 +231,7 @@ def run_tracker(per_frame, n_frames, cfg: dict, botsort=False, pool=None):
     return out
 
 
-# ────────────────────────── 评测 ──────────────────────────
+#  评测
 
 def evaluate(track_frames, chains):
     tot_gt = tot_match = tot_cls_ok = tot_idsw = 0
@@ -271,7 +271,7 @@ def evaluate(track_frames, chains):
     }
 
 
-# ────────────────────────── 站位绑定 demo ──────────────────────────
+#  站位绑定 demo
 
 def slots_demo(track_frames, chains, n_frames):
     """开场站位=编成序(左右)。GT 我方链按首现帧+cx 排序发 slot,
@@ -302,7 +302,7 @@ def slots_demo(track_frames, chains, n_frames):
               f"switch={sw} 匹配{len(tids)}/{len(ch)}")
 
 
-# ────────────────────────── main ──────────────────────────
+#  main
 
 GRID = [  # (名字, botsort?, 覆写)
     ("byte默认(30fps假设)", False, {}),

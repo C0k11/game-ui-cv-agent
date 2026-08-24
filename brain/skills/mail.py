@@ -12,7 +12,7 @@ the root cause was re-tapping the envelope icon (which becomes a  gear inside
 the mailbox). We avoid it by only clicking NAV_MAIL while on the lobby.
 
 State machine
--------------
+----
 enter   lobby  click NAV_MAIL (邮件箱). Envelope cls is weak (19f) so fall
         back to the red dot in the top-right mail zone. Wait for the Mail page.
 claim   CLAIM_ONCE_YELLOW (一次领取黄色)  click (claims all). GOT_REWARD popup
@@ -88,7 +88,7 @@ class MailSkill(BaseSkill):
             return action_click_box(got, "dismiss reward via header")
         return None
 
-    # ── state machine ──────────────────────────────────────────────────────
+    #  state machine
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1

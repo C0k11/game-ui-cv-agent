@@ -7,7 +7,7 @@ screen id to the cls constellation that proves we are on it, and
 `classify_screen(yolo_boxes)` returning the best match.
 
 Design rules
-------------
+----
 - Signatures use ANCHOR classes only — stable structural UI (tabs, headers,
   fixed buttons). NEVER badges (红点/黄点/绿勾): they come and go with game
   state, not with the screen.
@@ -46,7 +46,7 @@ MIN_CONF = 0.45
 # screen_id  signature. Order matters only for documentation; matching is
 # score-based across all entries.
 SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
-    # ── hub ────────────────────────────────────────────────────────────
+    #  hub
     "lobby": {
         # bottom nav bar — require 3 of the entries via any_of pairs is too
         # loose; lobby is proven by ANY 3+ of these (handled specially below).
@@ -58,7 +58,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     },
     "loading": {"need": [UC.LOADING], "any_of": [], "forbid": []},
 
-    # ── shops ──────────────────────────────────────────────────────────
+    #  shops
     "shop_grid": {
         "need": [],
         "any_of": [UC.SHOP_SELECT_ALL, UC.SHOP_SELECT_ALL_GREY, UC.SHOP_ALL_SELECTED],
@@ -70,14 +70,14 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [],
     },
 
-    # ── mail ───────────────────────────────────────────────────────────
+    #  mail
     "mailbox": {
         "need": [],
         "any_of": [UC.CLAIM_ONCE_YELLOW, UC.CLAIM_ONCE_GREY],
         "forbid": [UC.NAV_CAFE],   # lobby shows neither claim-once variant
     },
 
-    # ── schedule (課程表) ────────────────────────────────────────────────
+    #  schedule (課程表)
     "schedule_location_select": {
         "need": [UC.SCHOOL_OFFICE],
         "any_of": [],
@@ -89,7 +89,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [],
     },
 
-    # ── cafe ───────────────────────────────────────────────────────────
+    #  cafe
     "cafe_main": {
         "need": [],
         "any_of": [UC.CAFE_EARNINGS, UC.CAFE_INVITE_TICKET,
@@ -97,7 +97,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [],
     },
 
-    # ── story ──────────────────────────────────────────────────────────
+    #  story
     "story_hub": {
         "need": [],
         "any_of": [UC.STORY_MAIN, UC.STORY_SHORT, UC.STORY_SIDE],
@@ -105,7 +105,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [],
     },
 
-    # ── battle ─────────────────────────────────────────────────────────
+    #  battle
     "battle": {
         "need": [],
         "any_of": [UC.BATTLE_PAUSE, UC.BATTLE_AUTO_ON, UC.BATTLE_AUTO_OFF,
@@ -119,7 +119,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [UC.BATTLE_PAUSE],
     },
 
-    # ── batch sweep (批量掃蕩, v8 classes; spec via live walk 2026-06-11) ──
+    #  batch sweep (批量掃蕩, v8 classes; spec via live walk 2026-06-11)
     "sweep_batch_dialog": {
         "need": [],
         "any_of": [SWEEP_BATCH_START, SWEEP_BATCH_START_GREY,
@@ -135,7 +135,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [SWEEP_BATCH_START, SWEEP_BATCH_START_GREY],
     },
 
-    # ── task hall (任務大廳; live walk step 1, 2026-06-11) ──────────────
+    #  task hall (任務大廳; live walk step 1, 2026-06-11)
     #  per-activity dots are visible ONLY here — the lobby entry dot is NOT
     #   a work signal (user iron rule: enter and scan, never gate at entry).
     "task_hall": {
@@ -152,7 +152,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [SWEEP_BATCH_START, SWEEP_BATCH_START_GREY],
     },
 
-    # ── mined from trajectories (workflow 2026-06-11, presence-rate based) ─
+    #  mined from trajectories (workflow 2026-06-11, presence-rate based)
     "craft_main": {
         "need": ["快速制造"],     # unique anchor 0.875, nowhere else
         "any_of": [],
@@ -183,7 +183,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [UC.CAFE_EARNINGS, UC.CLAIM_ONCE_YELLOW],
     },
 
-    # ── sweep progress / result pages (live walk steps 6-8) ────────────
+    #  sweep progress / result pages (live walk steps 6-8)
     "sweep_running": {
         "need": [UC.BATTLE_SKIP],          # skip键 fast-forward overlay
         "any_of": [],
@@ -198,7 +198,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [UC.BTN_CANCEL, SWEEP_PLAN1, SWEEP_PLAN2, UC.SHOP_SELECT_ALL],
     },
 
-    # ── dialogs (generic, lowest priority — see _DIALOG_IDS) ───────────
+    #  dialogs (generic, lowest priority — see _DIALOG_IDS)
     "confirm_dialog": {
         "need": [UC.BTN_CONFIRM, UC.BTN_CANCEL],
         "any_of": [],

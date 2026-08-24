@@ -21,20 +21,20 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-# ══ 顶栏资源 ═══════════════════════════════════════════════════════════
+#  顶栏资源
 AP = "体力"
 CREDIT = "信用点"
 PYROXENE = "青辉石"
 PLUS = "加号"
 PLUS_GREY = "加号灰色"
 
-# ══ 徽章 ═══════════════════════════════════════════════════════════════
+#  徽章
 DOT_RED = "红点"
 DOT_YELLOW = "黄点"
 NEW_MARK = "new"
 STORY_NEW = "剧情new"
 
-# ══ 大厅底栏 ═══════════════════════════════════════════════════════════
+#  大厅底栏
 NAV_MAIL = "邮件箱"
 NAV_DAILY_REWARD = "每日领奖"
 NAV_MOMOTALK = "MomoTalk"
@@ -50,7 +50,7 @@ NAV_TASKS = "任务大厅入口"
 LOBBY_NAV = [NAV_CAFE, NAV_SCHEDULE, NAV_STUDENT, NAV_EDIT, NAV_SOCIAL,
              NAV_CRAFT, NAV_SHOP, NAV_RECRUIT, NAV_RECRUIT]
 
-# ══ 通用控件 ═══════════════════════════════════════════════════════════
+#  通用控件
 CONFIRM = "确认键"
 CONFIRM_GREY = "灰色确认"
 CANCEL = "取消键"
@@ -61,7 +61,7 @@ LOADING = "加载中"
 ARROW_LEFT = "左切换"
 ARROW_RIGHT = "右切换"
 
-# ══ 领取族 ═════════════════════════════════════════════════════════════
+#  领取族
 CLAIM_ALL_YELLOW = "全部领取_黄"
 CLAIM_ALL_GREY = "全部领取_灰色"
 CLAIM_ONEKEY_GREY = "一键领取灰色"          # DEAD train=0
@@ -78,7 +78,7 @@ CLAIM_ACTIVE = [CLAIM_ALL_YELLOW, CLAIM_ONCE_YELLOW, CLAIM_YELLOW,
                 CLAIM_REWARD_YELLOW, CLAIM_BLUE]
 CLAIM_DONE = [CLAIM_ALL_GREY, CLAIM_ONCE_GREY, CLAIM_GREY, CLAIM_REWARD_GREY]
 
-# ══ 咖啡厅 ═════════════════════════════════════════════════════════════
+#  咖啡厅
 CAFE_EARNINGS = "咖啡厅收益"
 CAFE_TICKET = "咖啡厅邀请卷"
 CAFE_INVITE = "邀请键"
@@ -86,7 +86,7 @@ CAFE_MOVE_1F = "移动至一号店"
 CAFE_MOVE_2F = "移动至2号点"
 EMOTICON = "Emoticon_Action"
 
-# ══ 课程表 ═════════════════════════════════════════════════════════════
+#  课程表
 SCHED_TICKET = "课程表票"
 SCHED_ALL = "全体课程表"
 SCHED_START = "课程表开始"
@@ -99,10 +99,10 @@ SCHOOL_MILLENNIUM = "千年研究所"
 SCHOOL_AREAS = [SCHOOL_OFFICE, SCHOOL_DORM, SCHOOL_GEHENNA,
                 SCHOOL_ABYDOS, SCHOOL_MILLENNIUM]
 
-# ══ 社团 ═══════════════════════════════════════════════════════════════
+#  社团
 CLUB = "社团"
 
-# ══ 任务大厅入口 tile ═══════════════════════════════════════════════════
+#  任务大厅入口 tile
 HUB_CAMPAIGN = "任务关卡推图"
 HUB_STORY = "剧情"
 HUB_BOUNTY = "悬赏通缉"
@@ -111,13 +111,13 @@ HUB_JFD = "学院交流会"
 HUB_ARENA = "战术大赛"
 HUB_TILES = [HUB_CAMPAIGN, HUB_STORY, HUB_BOUNTY, HUB_SPECIAL, HUB_JFD, HUB_ARENA]
 
-# ══ 悬赏分支（有 cls，动态识别）═════════════════════════════════════════
+#  悬赏分支（有 cls，动态识别）
 BRANCH_HIGHWAY = "高架公路"
 BRANCH_DESERT = "沙漠铁道"
 BRANCH_CLASSROOM = "教室"
 BOUNTY_BRANCHES = [BRANCH_CLASSROOM, BRANCH_HIGHWAY, BRANCH_DESERT]
 
-# ══ 学院交流会学院 有 cls（各 84 train / 5 val，2026-08-08 实测）═══════
+#  学院交流会学院 有 cls（各 84 train / 5 val，2026-08-08 实测）
 # 老 jfd.py 写着"三个学院 tile 没有 YOLO cls（v6 gap）"并用写死坐标选择 ——
 #    那是 v6 时代的事实，v15 早就训了。**这就是 §A8 的标准案例：写死坐标一旦
 #    落下去，就没人回头看它补上了没。**
@@ -126,12 +126,12 @@ ACADEMY_MILLENNIUM = "千年"
 ACADEMY_GEHENNA = "格黑娜"
 JFD_ACADEMIES = [ACADEMY_MILLENNIUM, ACADEMY_TRINITY, ACADEMY_GEHENNA]
 
-# ══ 票券 ═══════════════════════════════════════════════════════════════
+#  票券
 TICKET_BOUNTY = "悬赏通缉票"
 TICKET_ARENA = "战术大赛票"
 TICKET_JFD = "学院交流会票"
 
-# ══ 关卡 / 出击 ════════════════════════════════════════════════════════
+#  关卡 / 出击
 STAGE_ENTER = "入场键"
 STAGE_ENTER_LOCKED = "入场键没解锁"
 STAGE_NORMAL = "普通关卡"
@@ -140,14 +140,17 @@ STAGE_HARD = "困难关卡"
 STAGE_HARD_SEL = "困难关卡选中"
 STAR_0 = "关卡得星_0"
 STAR_3 = "关卡得星_3"
+# 529 关卡得星_1: v18 train=0, 模型物理检不出. 禁止建常量、禁止引用.
+# 530 关卡得星_2: train=42, 未接线. 禁止当唯一门. 星数只认 STAR_0 / STAR_3.
 SWEEP_START = "扫荡开始"
 TASK_START = "任务开始"
+TASK_INFO = "任务资讯"              # 528, train=46. 关卡弹层附加证据, 不当唯一门
 SORTIE = "出击"
 SWEEP_BATCH = "批量扫荡"
 SWEEP_BATCH_START = "批量扫荡开始"
 SWEEP_BATCH_START_GREY = "批量扫荡开始灰色"
 
-# ══ 编队 ═══════════════════════════════════════════════════════════════
+#  编队
 SQUAD_1 = "1部队"
 SQUAD_1_HI = "1部队高亮"
 SQUAD_2 = "2部队"
@@ -163,13 +166,19 @@ SKIP_BATTLE_OFF = "跳过战斗未选"
 
 # -- 走格子（集中指挥, v16 新增族; 2026-08-13 小号实测 conf 0.85-0.98）--
 GRID_CELL = "走格子_格子"
+# 498/499 训练料已改成 497, master 标 _废弃*。常量留给 v17 权重名和
+# offline 夹具; 走子按答案只点格子本体。
 GRID_CELL_FOG = "走格子_格子_迷雾"
-GRID_CELL_OPEN = "走格子_格子_可走"       # 叠在格子上的标记, 数格子要去重
+GRID_CELL_OPEN = "走格子_格子_可走"
 GRID_START = "走格子_起点_黄"
 GRID_START_GREY = "走格子_起点_灰"
 GRID_ARROW = "走格子_队伍箭头"
+# 502/510/507 已在 _classes.txt 标 _废弃*; detect 出口丢弃。常量留给
+# offline below() 夹具, 不是走子依据。走子只认格子本体族。
 GRID_BOSS = "走格子_BOSS标记"
 GRID_ITEM = "走格子_道具"
+# 2026-08-24 废案: 池子里约 40% 框的是敌方/BOSS, 我方定位改用 GRID_ARROW。
+#    常量留着不删(照 502/510/507 的先例), detect 出口已经不吐这个类了。
 GRID_ALLY = "走格子_我方"
 GRID_ENEMY = "走格子_敌方"
 PHASE_END = "PHASE结束"
@@ -184,7 +193,7 @@ TAB_COMMAND_SEL = "集中指挥已选中"
 TAB_GUIDE = "简易攻略"
 TAB_GUIDE_SEL = "简易攻略_已选中"
 
-# ══ 战斗内 ═════════════════════════════════════════════════════════════
+#  战斗内
 BATTLE_PAUSE = "战斗暂停"
 BATTLE_1X = "战斗1倍速"
 BATTLE_2X = "战斗2倍速"
@@ -204,7 +213,7 @@ GOTO_LOBBY_TEXT = "前往大厅文字按钮"
 BATTLE_CHROME = [BATTLE_PAUSE, BATTLE_AUTO_ON, BATTLE_AUTO_OFF,
                  BATTLE_1X, BATTLE_2X, BATTLE_3X]
 
-# ══ 数量步进 ═══════════════════════════════════════════════════════════
+#  数量步进
 QTY_MAX = "MAX_可点击"
 QTY_MAX_GREY = "MAX_灰色"
 QTY_MIN = "MIN_可点击"
@@ -212,7 +221,7 @@ QTY_MIN_GREY = "MIN_灰色"
 QTY_MINUS = "减号"
 QTY_MINUS_GREY = "减号灰色"
 
-# ══ 商店 ═══════════════════════════════════════════════════════════════
+#  商店
 SHOP_SELECT_ALL = "全部选择"
 SHOP_SELECT_ALL_GREY = "全部选择灰"
 SHOP_ALL_SELECTED = "已全部选择"
@@ -226,7 +235,7 @@ SHOP_BUY_SELECTED = "选择购买"
 #      原来契约只写 `expect=(选择购买,)`，在买不起的号上永远不兑现、整段反复重试。
 #    同时是**硬停**: 灰的按钮点了也不动，点就是空转。
 SHOP_BUY_SELECTED_GREY = "选择购买灰色"
-SHOP_BUY_PYROXENE = "购买青辉石"      # 金钱红线锚点
+SHOP_BUY_PYROXENE = "购买青辉石"      # 日常第一枪免费包入口, 不是停机红线
 CURRENCY = "货币"
 CURRENCY_SEL = "货币_已选择"
 CURRENCY_QTY_AREA = "货币数量显示区域"
@@ -236,20 +245,20 @@ FREE = "免费"
 SHOP_TAB_CREDIT = "信用点商店"
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"
 SHOP_TAB_PYROXENE = "青辉石商店"
-SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"     # 进了这个 tab 就是在花青辉石
+SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"     # 落到这 tab 只切回信用点, 页本身不停轮
 ARENA_SHOP_TAB = "战术大赛商店"
 ARENA_SHOP_TAB_SEL = "战术大赛商店已选择"
 ARENA_SHOP_CURRENCY = "战术大赛商店货币"
 ENERGY_DRINK_LOW = "下级能量饮料"
 ENERGY_DRINK_MID = "一般能量饮料"
 
-# ══ 制造 ═══════════════════════════════════════════════════════════════
+#  制造
 CRAFT_QUICK = "快速制造"
 CRAFT_START = "开始制造"
 CRAFT_START_GREY = "开始制造灰色"      # v15 起模型真会吐（train=289）
 CRAFT_NO_MATERIAL = "材料不足"
 
-# ══ 活动 ═══════════════════════════════════════════════════════════════
+#  活动
 EVENT_STORY = "活动剧情"
 EVENT_STORY_SEL = "活动剧情_已选择"
 EVENT_QUEST = "活动quest"
@@ -268,11 +277,11 @@ EVENT_MULTIPLIER = "双倍或三倍活动进行中"
 SPECIAL_DEFENSE = "据点防御"
 SPECIAL_CREDIT = "信用货币回收"
 # 这两个本该用来判"这关打过没"，但 **train=0 / val=0**，一框都没有。
-#     关卡完成度只能靠 关卡得星_0 / _3（1263 / 3765 框）间接判。
+#     关卡完成度只能靠 关卡得星_0 / _3 间接判. 529/530 禁止引用 (见 STAR_*).
 EVENT_STAGE_STORY_SEEN = "活动剧情关卡_已看"     # DEAD
 EVENT_STAGE_BATTLE_DONE = "活动站斗关卡_已打"    # DEAD
 
-# ══ 剧情 / 挖矿 ════════════════════════════════════════════════════════
+#  剧情 / 挖矿
 STORY_MAIN = "主线剧情"
 STORY_SHORT = "短篇剧情"
 STORY_SIDE = "支线剧情"
@@ -293,7 +302,7 @@ SCENE_DONE = "战斗图标已完成"
 BOND_LEVELUP = "羁绊升级"
 REGION_LEVELUP = "地区升级"
 
-# ══ MomoTalk ═══════════════════════════════════════════════════════════
+#  MomoTalk
 MOMO_TAB = "momotalk学生聊天区域按钮"
 MOMO_TAB_SEL = "momotalk学生聊天区域已进入"
 MOMO_UNREAD = "学生momotalk信息未读"   # train=6462，非常强
@@ -302,20 +311,20 @@ MOMO_REPLY_OPT = "学生信息回复选项"
 MOMO_GOTO_BOND = "前往羁绊剧情"
 MOMO_ENTER_BOND = "进入羁绊剧情"
 
-# ══ 大赛 ═══════════════════════════════════════════════════════════════
+#  大赛
 ARENA_ROW = "战术大赛对战选择区域"
 ARENA_ATTACK_FORM = "攻击编制"     # 对手详情面板上的"进攻编队"入口（435）
 ARENA_WAIT = "等待时间"            # 左栏出击冷却「等待時間 mm:ss」的标签（526）
 #    只框标签四个字不含数字（08-15 帧证）; READY 态显示 --:-- 标签仍在,
 #    所以冷却判据 = read_wait_secs 读它右侧的数字, 不是 cls 存在性。
 
-# ══ 剧情过场逃生（interceptor 用）══════════════════════════════════════
+#  剧情过场逃生（interceptor 用）
 # BA 的过场**不吃 KEYCODE_BACK**（2026-08-07 连按 5 次实测全无响应）。
 #    唯一有效链：剧情menu(右上)  跳过故事键  确认键。
 STORY_ESCAPE_CHAIN = [STORY_MENU, STORY_SKIP]
 
 
-# ══ 健康度表（ui_v2 数据集实测 2026-08-08）════════════════════════════
+#  健康度表（ui_v2 数据集实测 2026-08-08）
 # cls  (train, val)。只登记**代码里真的会引用**的类；没登记的默认按 UNKNOWN
 # 处理（require() 会放行但打日志），不是"没登记就是死类"。
 HEALTH: Dict[str, Tuple[int, int]] = {

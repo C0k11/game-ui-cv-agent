@@ -164,7 +164,7 @@ def main():
                 return True
         return False
 
-    # ── A. 加成重打 ──
+    #  A. 加成重打
     for safety in range(40):
         todo = [q for q in range(1, TOTAL_Q + 1)
                 if not led["bonus_cleared"].get(str(q))]
@@ -206,7 +206,7 @@ def main():
 
     print("[A] 12关加成全记录 ", flush=True)
 
-    # ── B. Q12 扫荡吃剩余 AP ──
+    #  B. Q12 扫荡吃剩余 AP
     # B0. 金钱铁律: 扫前正向读 AP(体力cls锚定+右侧0.06 strip),
     # None 或 <20(单次成本)  收工, 绝不试探点扫荡开始(fail-closed)
     fr = ensure_quest_tab()

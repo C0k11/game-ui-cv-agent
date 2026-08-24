@@ -5,14 +5,14 @@ rate even when the window is occluded or in the background, using the
 ``windows-capture`` library (Windows.Graphics.Capture API).
 
 Why this exists
----------------
+----
 ``scripts/win_capture.py`` offers PrintWindow / BitBlt / desktop BitBlt modes.
 Their ceiling is ~32 fps (PrintWindow) and BitBlt returns black for GPU-rendered
 windows on a secondary monitor. WGC hardware-composites the window and delivers
 50+ fps regardless of occlusion.
 
 API notes (windows_capture 2.0.0)
----------------------------------
+----
 * ``WindowsCapture(window_hwnd=..., window_name=..., monitor_index=...)`` selects
   the target. ``window_hwnd`` is the most reliable (no CJK-title issues) and the
   captured surface auto-follows the window. WGC captures the *whole window*
@@ -60,7 +60,7 @@ def wgc_available() -> bool:
     return _WGC_AVAILABLE
 
 
-# ── monitor enumeration (for monitor-index fallback crop) ─────────────────
+#  monitor enumeration (for monitor-index fallback crop)
 
 _MONITORENUMPROC = ctypes.WINFUNCTYPE(
     wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
@@ -128,7 +128,7 @@ def monitor_index_for_window(hwnd: int) -> Optional[int]:
     return None
 
 
-# ── the capture backend ───────────────────────────────────────────────────
+#  the capture backend
 
 
 class WgcCapture:
@@ -139,7 +139,7 @@ class WgcCapture:
     frame cropped to the MuMu client area as a BGR ``numpy.ndarray``.
 
     Parameters
-    ----------
+    ----
     render_hwnd:
         The MuMu render child window. Used to compute the client-area crop
         (its client rect on screen). When ``capture_hwnd`` is not given, this
@@ -208,7 +208,7 @@ class WgcCapture:
         self._resolve_target(capture_hwnd, monitor_index)
         self._start_thread()
 
-    # ── geometry helpers ──────────────────────────────────────────────────
+    #  geometry helpers
 
     def _read_client_size(self) -> Tuple[int, int]:
         try:
@@ -318,7 +318,7 @@ class WgcCapture:
         mox, moy = self._monitor_origin
         return rc.left - mox, rc.top - moy
 
-    # ── capture thread ────────────────────────────────────────────────────
+    #  capture thread
 
     def _build_capture(self):
         if self._mode == "window":
@@ -371,7 +371,7 @@ class WgcCapture:
         )
         self._thread.start()
 
-    # ── public API ────────────────────────────────────────────────────────
+    #  public API
 
     @property
     def mode(self) -> str:

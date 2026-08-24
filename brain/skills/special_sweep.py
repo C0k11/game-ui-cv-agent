@@ -89,7 +89,7 @@ class SpecialSweepSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _on_hub(self, screen: ScreenState) -> bool:
         return self.detect_screen_yolo(screen) == "Mission"
 
@@ -103,7 +103,7 @@ class SpecialSweepSkill(BaseSkill):
                 return tile
         return None
 
-    # ── tick ─────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -125,7 +125,7 @@ class SpecialSweepSkill(BaseSkill):
             return action_wait(300, "unknown state")
         return handler(screen)
 
-    # ── states ───────────────────────────────────────────────────────────
+    #  states
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_ticks += 1
         if self._on_hub(screen):

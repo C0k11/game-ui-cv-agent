@@ -7,7 +7,7 @@ room coordinates. OCR is used for the ONE thing it's good at: reading the
 held-ticket digits 「持有票券 X/7」.
 
 High-level flow
----------------
+----
 1. lobby  click NAV_SCHEDULE  region-select screen.
 2. Click 夏莱办公室 (list row 0 — region tiles are under-trained, GAP)  enter
    its region-internal 選擇課程表 screen  ARROW_LEFT once = jump to the LAST
@@ -16,9 +16,9 @@ High-level flow
 3. Per region: click SCHED_ALL (全體課程表)  popout. fused_avatar reads the
    heads, clustered into rooms (≤3 heads/room, x-gap ~0.057, room-gap ~0.15;
    rows at y≈0.39 / 0.60 / 0.81). Detect ROOM_LOCKED:
-     • Case A (locks present, region not max level): goal = level this region.
+     - Case A (locks present, region not max level): goal = level this region.
        Dispatch EVERY un-clicked room to spend tickets here.
-     • Case B (no locks, max level): goal = only the dashboard target students.
+     - Case B (no locks, max level): goal = only the dashboard target students.
        Dispatch a room iff a target head sits in it; else skip.
    When no room is left to click  close popout (BTN_CLOSE_X)  ARROW_LEFT next.
 4. Per-room dispatch (one room): click a head  課程表資訊 (SCHED_START)  click
@@ -111,7 +111,7 @@ def _save_sched_state(state: dict) -> None:
     except Exception:
         pass
 
-# ── tuning knobs ──────────────────────────────────────────────────────────
+#  tuning knobs
 _CLS_CONF = 0.30            # default UI cls confidence floor
 _AVATAR_CONF = 0.30         # fused_avatar head confidence (probe used 0.30)
 
@@ -139,7 +139,7 @@ _QTY_STEPPER_CLS = (UC.QTY_MIN, UC.QTY_MIN_GREY, UC.QTY_MAX, UC.QTY_MAX_GREY,
                     UC.QTY_MINUS, UC.QTY_MINUS_GREY, UC.TOPBAR_PLUS)
 _QTY_STEPPER_REGION = (0.22, 0.30, 0.80, 0.62)
 
-# ── GAP fallbacks (under-trained cls — documented in probe log) ───────────
+#  GAP fallbacks (under-trained cls — documented in probe log)
 # Region tiles (SCHOOL_*) are ~3-12 frames each and routinely missed (v6 gap
 # #29). We click 夏莱办公室 by its list-row position when the cls isn't seen.
 _OFFICE_ROW_POS = (0.64, 0.22)        # region-select list row 1 (夏莱办公室)
@@ -198,7 +198,7 @@ _MAX_REGIONS = 14
 def _load_schedule_targets() -> List[str]:
     """Read the schedule target-student list from the active app_config profile.
 
-    Same pattern as CafeSkill._load_invite_targets: app_config.json 
+    Same pattern as CafeSkill._load_invite_targets: app_config.json
     active_profile  profiles[active].schedule_target_students. Returns a list
     of 中文角色名 matching fused_avatar cls_name (e.g. "莉央(战斗)"). Empty list
      Case B has no targets, so the fallback (spend remaining tickets on any
@@ -246,7 +246,7 @@ class ScheduleSkill(BaseSkill):
         self.max_ticks = 900
         self._init_state()
 
-    # ── state init / reset ────────────────────────────────────────────────
+    #  state init / reset
 
     def _init_state(self) -> None:
         self._phase_ticks: int = 0          # ticks spent in current sub_state
@@ -331,7 +331,7 @@ class ScheduleSkill(BaseSkill):
         self._head_settle = _HEAD_RENDER_SETTLE  # let heads render before 1st pick
         self._open_room_t0 = 0.0     # 開房等待墙钟起点(0=未开始计时)
 
-    # ── ticket digit-OCR ──────────────────────────────────────────────────
+    #  ticket digit-OCR
 
     # 「持有票券 X/7」 sits BELOW the popout title at cy≈0.215 — the probe's
     # initial guess (cy≈0.10-0.17) was ~0.1 too HIGH, so digit-OCR read EMPTY
@@ -355,7 +355,7 @@ class ScheduleSkill(BaseSkill):
     _TICKET_SPANS = (4.5, 6.5)     # 两个窗口互为交叉复核
     _TICKET_YPAD = 1.20
 
-    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    #  竣工判据
     def exit_report(self):
         """课程表的竣工判据 = 票用干净了没。
 
@@ -426,7 +426,7 @@ class ScheduleSkill(BaseSkill):
                         c = f
             return c if (c is not None and 0 <= c <= _MAX_TICKETS) else None
 
-        # ──  cls 锚定(主路径) ────────────────────────────────────────────
+        #   cls 锚定(主路径)
         _lo, _hi = self._TICKET_ANCHOR_CY
         anchors = [b for b in (getattr(screen, "yolo_boxes", None) or [])
                    if b.cls_name == UC.SCHED_TICKET and b.confidence >= 0.30
@@ -456,7 +456,7 @@ class ScheduleSkill(BaseSkill):
             # 有锚点但读不出(弹窗遮住数字) = 正常的 fail-closed, 不噪声刷屏
             return None
 
-        # ──  写死矩形(兜底, 仅在**一个锚点都没有**时) ────────────────────
+        #   写死矩形(兜底, 仅在**一个锚点都没有**时)
         # 保留它是为了"不劣于改动前"; 且加一道: 必须带 "/上限" 才认, 光秃秃一个
         # 数字可能是任何东西。
         raw = run_digit_ocr(screen.frame, self._TICKET_REGION)
@@ -494,20 +494,20 @@ class ScheduleSkill(BaseSkill):
         self._reconcile_ledger(cur)
         return cur
 
-    # ── screen-state helpers (pure YOLO) ──────────────────────────────────
+    #  screen-state helpers (pure YOLO)
 
     def _buy_dialog(self, screen: ScreenState) -> bool:
         """购买/数量选择对话框判据。 HARD money stop。
 
         2026-07-25 实锤事故(30 青辉石被花掉): 旧版**单点**依赖"对话框体内检出
         青辉石 cls"。那一帧(run_20260724_201229 tick_0101)屏上明明是
-        「購買課程表票券 單價💎30 總購買價格💎30」, 但 YOLO **一个 body 青辉石
+        「購買課程表票券 單價30 總購買價格30」, 但 YOLO **一个 body 青辉石
         都没检出**(小图标压在深色价格条上), 只检出顶栏余额那个 —— 判据返回
         False, 防线整条哑火, PRIORITY 1 把购买框的「確認」当成報告框的「確認」
         点了下去 = 亲手买票。**单点防线 = 没有防线。**
 
         改成正交多信号, 任一命中即判购买框(全部取自那一帧的实测检出, conf
-        0.94-0.98, 远比那个检不出的 💎 可靠):
+        0.94-0.98, 远比那个检不出的  可靠):
           A 数量步进器: MIN/MAX/减号/加号 出现在对话框体内(cy 0.30-0.62)
             —— 只有"选数量再买"的框才有, 課程表報告 绝无。
           B 取消键与确认键同屏 —— 報告框只有孤零零一个 確認, 没有取消。
@@ -566,7 +566,7 @@ class ScheduleSkill(BaseSkill):
         # The close-X flickers (live 2026-06-09: popout clearly open, X cls
         # missed one frame  "popout closed" re-click loop). Backup signature
         # that exists ONLY on the popout:
-        #   • 课程表票 in the TOP-CENTER header band — the region screen's ticket
+        #   - 课程表票 in the TOP-CENTER header band — the region screen's ticket
         #     counter sits top-LEFT (cx≈0.06), the popout's at cx≈0.45,cy≈0.21.
         #  REMOVED (2026-06-13, user-caught bug): ROOM_LOCKED  open. The map's
         #    locked BUILDING (需要RANKx, e.g. 需要RANK9) ALSO fires 房间区域未解锁
@@ -594,7 +594,7 @@ class ScheduleSkill(BaseSkill):
             screen, UC.ARROW_LEFT, conf=_CLS_CONF, region=(0.0, 0.30, 0.12, 0.70)
         )
 
-    # ── 区域身份(到达态判据) ────────────────────────────────────────────────
+    #  区域身份(到达态判据)
 
     def _region_sig(self, screen: ScreenState):
         """区域内屏「RANK N 区域名」横幅的 96x24 灰度缩略图; 拿不到返回 None。
@@ -635,7 +635,7 @@ class ScheduleSkill(BaseSkill):
         except Exception:
             return True
 
-    # ── roster head clustering ────────────────────────────────────────────
+    #  roster head clustering
 
     def _roster_heads(self, screen: ScreenState) -> List[YoloBox]:
         """All fused_avatar head boxes in the popout (model_tag=='avatar')."""
@@ -777,8 +777,8 @@ class ScheduleSkill(BaseSkill):
     def _pick_room(self, screen: ScreenState, rooms: List[List[YoloBox]]) -> Tuple[
             Optional[List[YoloBox]], str]:
         """Choose the next room to dispatch. A room is OFF the table when:
-          • clicked this session (proximity memory), OR
-          • it visually shows a 绿勾 (user mechanic 2026-06-09: dispatched
+          - clicked this session (proximity memory), OR
+          - it visually shows a 绿勾 (user mechanic 2026-06-09: dispatched
             rooms mark owned heads with a green check — cross-session signal).
         Case A (locks) = fill every remaining room to upgrade the region;
         Case B (no locks) = only rooms with a configured target student."""
@@ -825,7 +825,7 @@ class ScheduleSkill(BaseSkill):
 
         return None, "case-B no target in region"
 
-    # ── tick: global popup guards + state dispatch ────────────────────────
+    #  tick: global popup guards + state dispatch
 
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
@@ -848,7 +848,7 @@ class ScheduleSkill(BaseSkill):
                 return action_click_box(cancel, "cancel 买票 dialog (青辉石)")
             return action_back("ESC 买票 dialog (青辉石)")
 
-        # ── popups that can appear in any sub_state (pure YOLO) ──
+        #  popups that can appear in any sub_state (pure YOLO)
 
         # Reward-result popup ("獲得獎勵") — tap to dismiss.
         got_reward = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
@@ -864,7 +864,7 @@ class ScheduleSkill(BaseSkill):
             self.log(f"level-up splash ({splash.cls_name}), tap to dismiss")
             return action_click(0.5, 0.5, f"dismiss splash ({splash.cls_name})")
 
-        # ── DISPATCH POPUP PRIORITY (strict single-step, runs above states) ──
+        #  DISPATCH POPUP PRIORITY (strict single-step, runs above states)
         # These two are the per-room dispatch sequence and must be handled
         # FIRST so they win regardless of sub_state (probe教训: state-machine
         # mis-judgement here = mis-clicks that drained tickets).
@@ -885,7 +885,7 @@ class ScheduleSkill(BaseSkill):
         if _report_up:
             #  Defense  (hard cap): each confirmed report = one ticket spent. A
             # day caps at _MAX_TICKETS; exceeding it means tickets ran out and the
-            # game is charging 青辉石 to continue — STOP (backstop if defense 
+            # game is charging 青辉石 to continue — STOP (backstop if defense
             # somehow misses the buy dialog).
             # Cap check BEFORE increment and WITHOUT clicking (deep-dive C1,
             # 2026-06-09): the old `+=1 then > cap` let the 8th dispatch through
@@ -899,7 +899,7 @@ class ScheduleSkill(BaseSkill):
             # 票数读不出时台账保持原值 = 跨 session 兜底原样(fail-closed)。
             if max(self._dispatch_count, self._day_dispatched) >= _MAX_TICKETS:
                 # 2026-07-28 live 观察(**看到了但故意不改**): 触顶时屏上那份
-                # 課程表報告(第 7 张票的收据)也不会被关  转 exit  stuck 20 
+                # 課程表報告(第 7 张票的收据)也不会被关  转 exit  stuck 20
                 # 去点**背景 popout 的叉叉**(0.889,0.140, 跟报告不在一层)。出口
                 # 是脏的, 但**没有损失**: 票在「課程表開始」时就已扣、奖励已落袋,
                 # 报告只是收据, 挂着或被别的路径关掉都不掉东西。
@@ -917,7 +917,7 @@ class ScheduleSkill(BaseSkill):
                 return action_wait(300, "at ticket cap  EXIT, do NOT confirm")
             # dispatch 计数不再在此提前 +1(2026-07-22 实锤): 旧码
             # `if not action_suppressed: +=1` 信号语义错位 — suppressed 反映
-            # **上一 tick** 的吞, 预知不了本次点击; 上一 tick 吞标志挂着 
+            # **上一 tick** 的吞, 预知不了本次点击; 上一 tick 吞标志挂着
             # 派了1票计数=0  圈末误判"本圈零派出"退出剩6票。计数移到
             # _roster 的票数重读处(票实际减少=报告确认真落地, after-ack)。
             # after-ack(2026-07-28 live 实锤): 旧码**没有任何节流** —— 只要
@@ -967,7 +967,7 @@ class ScheduleSkill(BaseSkill):
         if start is not None:
             #  源头闸(2026-07-25 事故后新增): 票 == 0 时**绝不点課程表開始**。
             # 事故链证据(run_20260724_201229): 票已 0  仍点開始  游戏弹
-            # 「購買課程表票券 單價💎30」 那个框的「確認」被 PRIORITY 1 当成
+            # 「購買課程表票券 單價30」 那个框的「確認」被 PRIORITY 1 当成
             # 報告框的確認点掉 = 花了 30 青辉石。**不点開始, 购买框根本不会出现**
             # —— 这是比"识别购买框"更靠前、更便宜的一道闸。
             # 读不出(-1/None)时不拦(fail-open)会重蹈覆辙, 但读不出就全停也会让
@@ -983,7 +983,7 @@ class ScheduleSkill(BaseSkill):
             # 连发两发, 第二发落在**下一屏**上。实测第二发撞过「購買課程表票券」
             # (青辉石 30/张)的确認键旁 Δx=0.097 —— 只差一点就是真掏钱。
             # 现在改成显式 `_settle_exempt`: 稳定门照旧豁免(不被吞), same-target
-            # hold 恢复生效(第二发被 hold 成 wait, 等指纹变化后 skill 重新看帧 
+            # hold 恢复生效(第二发被 hold 成 wait, 等指纹变化后 skill 重新看帧
             # 那时若是购买框, _buy_dialog 三路防线接管取消)。
             # reason 也改回**如实描述点的是什么** —— 措辞不该再兼任控制信号。
             self.log("schedule info  start (YOLO 课程表开始)")
@@ -1004,7 +1004,7 @@ class ScheduleSkill(BaseSkill):
         if screen.is_loading():
             return action_wait(700, "schedule loading")
 
-        # ── state machine ──
+        #  state machine
         if self.sub_state == "":
             self._goto("enter")
 
@@ -1020,7 +1020,7 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "schedule unknown state")
         return handler(screen)
 
-    # ── enter ─────────────────────────────────────────────────────────────
+    #  enter
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
         self._enter_attempts += 1
@@ -1050,7 +1050,7 @@ class ScheduleSkill(BaseSkill):
             return action_wait(700, "no UI detected, likely loading")
         return action_wait(400, "entering schedule")
 
-    # ── navigate (region-select / region-internal) ────────────────────────
+    #  navigate (region-select / region-internal)
 
     def _navigate(self, screen: ScreenState) -> Dict[str, Any]:
         """Drive from the region-select list to a region's popout.
@@ -1059,7 +1059,7 @@ class ScheduleSkill(BaseSkill):
         Then per region:  click SCHED_ALL  open popout  roster.
         """
         # popout 检查必须先于 _is_schedule(2026-07-31 live 帧实锤): 全屏
-        # popout 把底图 SCHOOL 瓦片/页面签名全盖住  _is_schedule False 
+        # popout 把底图 SCHOOL 瓦片/页面签名全盖住  _is_schedule False
         # 旧顺序走不到这里, 空等 _NAVIGATE_MAX 后 back 把**开得好好的 popout**
         # 关掉(守卫拦下才没白干)。popout 在屏本身就是"在 schedule 里"的最强
         # 证据 — 判定从强到弱排。
@@ -1084,7 +1084,7 @@ class ScheduleSkill(BaseSkill):
 
         # Step 1: first click 夏莱办公室 (region-select list row 0).
         if not self._office_clicked:
-            # 动态区域数(2026-07-21 逐帧审修): 区域列表帧数区域名 cls (36-40) 
+            # 动态区域数(2026-07-21 逐帧审修): 区域列表帧数区域名 cls (36-40)
             # 一圈判定用真实区数, 不再用 _MAX_REGIONS=14 兜底 — 5 区账号旧码要
             # 绕近 3 圈才触发 full-circle/exit, live 抓到 200+ tick 开关 popout
             # 空转。检出 <2 (列表帧没抓全)  保守回落 _MAX_REGIONS。
@@ -1154,7 +1154,7 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "no SCHED_ALL, switching region")
         return action_wait(400, "waiting for 全体课程表 button cls")
 
-    # ── roster (popout open) ──────────────────────────────────────────────
+    #  roster (popout open)
 
     def _roster(self, screen: ScreenState) -> Dict[str, Any]:
         """Popout open: read tickets, detect case A/B, pick + click a room."""
@@ -1287,7 +1287,7 @@ class ScheduleSkill(BaseSkill):
             return action_back("close popout (no X cls)")
         return action_wait(400, "waiting for popout close-X cls")
 
-    # ── open_room (info  start  report  confirm handled in tick) ────────
+    #  open_room (info  start  report  confirm handled in tick)
 
     def _open_room(self, screen: ScreenState) -> Dict[str, Any]:
         """After clicking a head, wait for the dispatch popups. The info/report
@@ -1336,7 +1336,7 @@ class ScheduleSkill(BaseSkill):
             return action_wait(300, "dispatch timeout  roster")
         return action_wait(400, "waiting for SCHED_START / report cls")
 
-    # ── switch (ARROW_LEFT to next region) ────────────────────────────────
+    #  switch (ARROW_LEFT to next region)
 
     def _switch(self, screen: ScreenState) -> Dict[str, Any]:
         """Close any lingering popout, then ARROW_LEFT to the next region."""
@@ -1377,7 +1377,7 @@ class ScheduleSkill(BaseSkill):
         if self._circle_closed:
             # 防空转真闸(2026-07-25, 取代原来那个数圈数的 `not _full_circle`):
             # 一圈 N 个区必须伴随 N-1 次**帧证据确认的换区**。对不上 = 我们其实
-            # 在原地反复开关同一个区的 popout(2026-07-25 那 200 tick 的形状) 
+            # 在原地反复开关同一个区的 popout(2026-07-25 那 200 tick 的形状)
             # 立刻大声收工, 绝不靠"日志说我切过"续命。
             # 需要的换区次数按**本圈实际扫过的 popout 数**算(_regions_seen-1),
             # 不再按 cls 猜的 _circle_size —— 一圈现在可能是 9 个区而不是 5 个。
@@ -1536,7 +1536,7 @@ class ScheduleSkill(BaseSkill):
             if (self._circle_first_sig is not None
                     and self._sig_same(_sig, self._circle_first_sig)):
                 self._circle_closed = True
-                self.log(f"↩标题指纹转回起点 = 一圈走完(共 {self._regions_seen} 个区)")
+                self.log(f"标题指纹转回起点 = 一圈走完(共 {self._regions_seen} 个区)")
             self._switch_from_sig = None
             self._reset_region()
             self._goto("navigate")
@@ -1573,7 +1573,7 @@ class ScheduleSkill(BaseSkill):
 
         return action_wait(400, "waiting for ARROW_LEFT cls")
 
-    # ── exit ──────────────────────────────────────────────────────────────
+    #  exit
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from routing_v2.act.action import Action, swipe, tap_box, wait
+from routing_v2.act.action import Action, swipe, tap_at, tap_box, wait
 from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
 from routing_v2.state.machine import StateView
@@ -72,6 +72,161 @@ _PARENT = {
 # 从大厅进某一层的入口 cls。只登记**大厅直达**的那些；再深的一层靠逐层进。
 _ENTRY = {"task_hall": V.NAV_TASKS}
 
+# 任务大厅的正向身份只认专属磁贴，且至少两个同时在场。
+# 目标玩法磁贴不参与身份判断，因为未解锁账号上它可能完全不存在。
+_TASK_HALL_ANCHORS = (V.HUB_STORY, V.HUB_CAMPAIGN, V.HUB_SPECIAL)
+
+
+def task_hall_anchor_count(obs: Observation, conf: float = 0.45) -> int:
+    """当前帧检出的任务大厅专属磁贴数。"""
+    return sum(obs.find(cls, conf) is not None for cls in _TASK_HALL_ANCHORS)
+
+
+def task_hall_evidence(obs: Observation, conf: float = 0.45) -> bool:
+    """任务大厅在场。国际服新皮只剩推图能过 0.45, 不再要两个专属磁贴。"""
+    if obs.find(V.HUB_CAMPAIGN, conf) is None:
+        return False
+    if obs.find(V.BACK, conf) is None and obs.find(V.HOME, conf) is None:
+        return False
+    if obs.count(V.LOBBY_NAV, conf) >= 3:
+        return False
+    return True
+
+
+def hub_tile_dot(obs: Observation, region, conf: float = 0.40):
+    """tile 真名 cls=0 时, 退回点该卡上的红/黄点。
+
+    08-20 live (`v2_20260820_155347/_ann/0000322_new_task_hall_ann.jpg`):
+      国际服任务大厅九张卡换皮, 只有 `任务关卡推图` 过 0.45; 懸賞通緝 卡上
+      黄点 0.88、戰術大賽 卡上红点 0.91 仍在。story_mining 早就用这条退路
+      (`mining.py` 剧情 tile 0 点卡上黄点), 悬赏/大赛没有, 于是 80 帧后
+      SKIPPED tile_dead。
+
+    落点是**检出框**, 不是新硬坐标 —— 认不出卡但认得出卡上的点。
+    region = (x1, y1, x2, y2) 归一化, 圈住该卡, 防止点到别的卡。
+    學園交流會 那张卡同帧无红黄点, 所以这条退路对它不成立(不要硬套)。
+    """
+    x1, y1, x2, y2 = region
+    hits = [b for b in (obs.all(V.DOT_RED, conf) + obs.all(V.DOT_YELLOW, conf))
+            if x1 <= b.cx <= x2 and y1 <= b.cy <= y2]
+    if not hits:
+        return None
+    return max(hits, key=lambda b: b.conf)
+
+
+# 同窗黄「任務開始」会被预标成扫荡开始(同页签预标不一致, 不是页签反转)。
+# cy>0.72 的扫荡开始当任务开始, 禁点。多个扫荡开始只取 cy 最小的。
+_SWEEP_START_MAX_CY = 0.72
+
+
+def real_sweep_start(obs: Observation, conf: float = 0.35):
+    hits = [b for b in obs.all(V.SWEEP_START, conf) if b.cy <= _SWEEP_START_MAX_CY]
+    if not hits:
+        return None
+    return min(hits, key=lambda b: b.cy)
+
+
+def wake_hidden_lobby(obs: Observation, st: StateView, flow) -> Optional[Action]:
+    """大厅闲置约 6 秒会收起全部 UI。只在刚从大厅掉到 blank/unknown 时唤醒。"""
+    if st.last_solid != "lobby":
+        return None
+    if st.page not in ("unknown", "blank"):
+        return None
+    if st.overlay:
+        return None
+    navn = obs.count(V.LOBBY_NAV, 0.30)
+    if len(obs.boxes) > 0 and navn >= 2:
+        return None
+    if not flow.pending("lobby_wake"):
+        return None
+    return tap_at(
+        0.40, 0.55, "大厅藏UI 唤醒",
+        justify="国际服大厅闲置约6秒收起全部UI, 成 blank/unknown。"
+                "只在 last_solid=lobby 且(零框或底栏NAV<2)时点背景(0.40,0.55),"
+                "不点正中以免压到立绘。战斗/剧情 last_solid 不是 lobby, 不进这条。",
+        once="lobby_wake")
+
+
+# 换皮期专用: 只对 `任务大厅入口` 这一个 cls 做二次低阈重推。
+#   **不动全局 0.20**(那会让每帧涌进一堆垃圾框), 也**不写坐标**。
+# 08-21 全量实测(飞轮 v19 67 帧, 推理底压到 0.01):
+#   - 12 张已确认大厅的帧上, 这个 cls **恰好各只有 1 个候选**,
+#     conf 0.0464-0.1402, 位置 (0.944, 0.9416), 帧间抖动 <0.001 —— 定位是准的,
+#     崩的只是类分(新皮)。
+#   - 55 张非大厅帧里只有 1 张有候选(组合包浮层压暗那张, conf 0.718),
+#     而那本来就是同一个真入口。**零误报**。
+#   所以低阈通道的安全边界是: 已确认在大厅 + 低阈候选唯一。
+# v19 把新皮训回去之后, 把 _NAV_TASKS_FLOOR 调回 0.45 即可, 结构不用改。
+_NAV_TASKS_FLOOR = 0.03
+_task_entry_cache = {"seq": None, "box": None}
+
+
+def weak_task_entry(obs: Observation):
+    """大厅里那个任务大厅入口的**检出框**(换皮期低阈通道)。拿不准返回 None。
+
+    落点仍然来自 cls 检出框, 不是坐标 —— JIT 复验、契约锚点都照常成立。
+    """
+    if obs.count(V.LOBBY_NAV, 0.35) < 3:
+        return None                       # 没确认在大厅, 不开低阈通道
+    if obs.frame is None:
+        return None
+    seq = getattr(obs, "seq", None)
+    if seq is not None and _task_entry_cache["seq"] == seq:
+        return _task_entry_cache["box"]
+    from routing_v2.percept import detect
+    cands = [b for b in detect.infer(obs.frame, ("ui",),
+                                     conf_override=_NAV_TASKS_FLOOR)
+             if b.cls == V.NAV_TASKS]
+    box = cands[0] if len(cands) == 1 else None   # 多于一个 = 噪声, 宁可不动
+    if seq is not None:
+        _task_entry_cache["seq"] = seq
+        _task_entry_cache["box"] = box
+    return box
+
+
+def hall_door_from_lobby(obs: Observation, *, reason: str,
+                         expect=(), post=None, once: str = ""):
+    """大厅进任务厅。入口 cls 过 0.45 就点框; 否则走**同一个 cls** 的低阈通道。
+
+    08-21 用户定: 不要任何硬编码, 落点一律来自 cls。原来那发写死右下角坐标的
+    盲点是在**猜控件位置**, 已删 —— 版面再改一次就会点错,
+    而低阈通道会**如实检不出**并让上层去处理, 这才是 fail-closed 的形态。
+    """
+    if isinstance(expect, str):
+        expect = (expect,)
+    box = obs.find(V.NAV_TASKS, 0.45)
+    why = reason
+    if box is None:
+        box = weak_task_entry(obs)
+        if box is not None:
+            why = (f"{reason}(新皮低阈通道: `{V.NAV_TASKS}` conf {box.conf:.3f}"
+                   f" 唯一候选, 落点仍是检出框)")
+    if box is None:
+        return None
+    return tap_box(box, why, expect=expect, post=post, once=once)
+
+
+def hall_door_followup(obs: Observation, flow) -> Optional[Action]:
+    """点过任务夹之后: 见推图就等确认; FruLink(无底栏无推图) BACK 一次。"""
+    if flow.pending("lobby_enter"):
+        return None
+    if obs.find(V.HUB_CAMPAIGN, 0.45) is not None:
+        return wait("已见推图，等任务大厅确认")
+    if obs.count(V.LOBBY_NAV, 0.30) >= 3:
+        return None
+    n = flow.bump("hall_door_wait")
+    if n > 8:
+        return None
+    if (obs.count(V.LOBBY_NAV, 0.30) < 2
+            and obs.find(V.HUB_CAMPAIGN, 0.30) is None
+            and flow.pending("frulink_back")):
+        act = back_key(obs, "FruLink 挡门，系统返回一次")
+        if act is not None:
+            act.once_key = "frulink_back"
+        return act
+    return wait("点任务夹后等大厅或任务厅")
+
+
 # 模态/弹窗类**底页** —— 它们没有"层级"，只能关掉，关掉后回到它盖着的那一页。
 #   归位时必须先把它们关干净，否则下一条 flow 会在**别人的弹窗**上动手
 #   （2026-08-12 体外复现: bounty 从 `on_stage_popup` 收工时弹窗还开着，
@@ -102,8 +257,7 @@ def close_overlay(obs: Observation, overlay: str) -> Optional[Action]:
         if sk is not None:
             return tap_box(sk, "归位: SKIP 掉结算奖励动画")
     b = (obs.find(V.CONFIRM, 0.45)
-         or obs.find(V.STORY_TAP_CONTINUE, 0.40)
-         or obs.find(V.GOT_REWARD, 0.40))
+         or obs.find(V.STORY_TAP_CONTINUE, 0.40))
     if b is not None:
         return tap_box(b, f"归位: 关掉 {overlay}（结果框没有取消键）")
     x = obs.find(V.CLOSE_X, 0.55)
@@ -231,15 +385,22 @@ def route(obs: Observation, st: StateView, target: str = "lobby",
         a = close_overlay(obs, st.overlay)
         if a is not None:
             return a, plan
-        if st.page == target:
-            # 已经在目标层，只是这一帧关不掉那个覆盖层（控件还没渲染出来）。
-            #    绝不能因此掉头往别的层走 —— 等它。
-            return wait(f"归位({target}): 已到位，等 {st.overlay} 上的控件"), plan
+        # 覆盖层还在但这一帧没有真按钮(確認/点击继续). 「获得奖励」是横幅
+        #    不是按钮, 08-15 归位点了 @(0.500, 0.224) 就是把它当出口.
+        #    只要 overlay 没关就等, 别在奖励层下点返回/回大厅.
+        return wait(f"归位({target}): 等 {st.overlay} 上的真按钮"
+                    f"（获得奖励是横幅, 不点）"), plan
     if st.page == target:
         return None, {}                    # 到位，策略作废
     # 模态框没有层级，只能关掉。**必须先关干净**：不关就交班，下一条 flow
     #   会在别人的弹窗上动手（体外复现: jfd 在悬赏关卡上点了扫荡开始）。
     if st.page in _MODAL:
+        # 08-16 remain arena: 编队页 BACK 弹出确认+取消, close_overlay 点取消,
+        #    再 BACK, 乒乓烧完 45s. 去大厅优先回大厅键.
+        if target == "lobby":
+            h = obs.find(V.HOME, 0.55)
+            if h is not None:
+                return tap_box(h, "归位(大厅): 模态页回大厅键，避免返回+取消乒乓"), plan
         c = obs.find(V.CANCEL, 0.45)
         if c is not None:
             return tap_box(c, f"归位({target}): 取消（模态框唯一有效出口）"), plan
@@ -254,9 +415,20 @@ def route(obs: Observation, st: StateView, target: str = "lobby",
         e = _ENTRY.get(target)
         if e is None:
             return None, plan              # 大厅到不了的目标，交给 flow 自己进
+        if plan.get("entry_sent"):
+            return wait(f"归位({target}): 已点入口，等进页（不 38 帧连点）"), plan
+        if e == V.NAV_TASKS:
+            a = hall_door_from_lobby(
+                obs, reason=f"归位({target}): 从大厅进入",
+                expect=(V.HUB_CAMPAIGN,),
+                post=lambda p=plan: p.__setitem__("entry_sent", True))
+            return a, plan
         box = obs.find(e, 0.45)
-        return (tap_box(box, f"归位({target}): 从大厅进入") if box is not None
-                else None), plan
+        if box is None:
+            return None, plan
+        return tap_box(box, f"归位({target}): 从大厅进入",
+                       expect=(V.HUB_CAMPAIGN,),
+                       post=lambda p=plan: p.__setitem__("entry_sent", True)), plan
     chain = ancestors(st.page)
     if not chain:
         # 未登记的页面（facility / unknown / blank）—— 沿用老的保守行为。
@@ -390,11 +562,32 @@ def enter(obs: Observation, cls: str, why: str = "") -> Optional[Action]:
     return tap_box(box, f"nav: 进入 {why or cls}") if box is not None else None
 
 
+def lobby_enter(flow, obs: Observation, cls: str, why: str = "",
+                expect=(), conf: float = 0.45, post=None):
+    """大厅只点当前 job 入口. 08-16: 同帧多入口不抢; once+expect 挡 38 帧连点."""
+    if cls == V.NAV_TASKS:
+        follow = hall_door_followup(obs, flow)
+        if follow is not None:
+            return follow
+    if not flow.pending("lobby_enter"):
+        return wait(f"已点 {why or cls} 入口，等进页（不 38 帧连点）")
+    if cls == V.NAV_TASKS:
+        return hall_door_from_lobby(
+            obs, reason=f"nav: 进入 {why or cls}",
+            expect=expect, post=post, once="lobby_enter")
+    box = obs.find(cls, conf)
+    if box is not None:
+        return tap_box(box, f"nav: 进入 {why or cls}",
+                       once="lobby_enter", expect=expect, post=post)
+    return None
+
+
 def to_task_hall(obs: Observation, st: StateView) -> Optional[Action]:
     if st.page == "task_hall":
         return None
     if st.page == "lobby":
-        return enter(obs, V.NAV_TASKS, "任务大厅")
+        return hall_door_from_lobby(obs, reason="nav: 进入 任务大厅",
+                                    expect=(V.HUB_CAMPAIGN,))
     return to_lobby(obs, st)
 
 
@@ -413,7 +606,75 @@ def dot_on(obs: Observation, box, radius: float = 0.05) -> bool:
     """
     if box is None:
         return False
-    d = obs.nearest([V.DOT_RED, V.DOT_YELLOW], to=(box.cx, box.cy), conf=0.40)
-    if d is None:
+    # 08-16 live taskhall1: 黄点在 tile 右上角, 名字框中心对不上 radius 0.05。
+    #    命中=点在框内, 或离框心 <=radius, 或离框右上角邻近(大厅入口仍走框心)。
+    tr_r = max(radius, 0.08)
+    for d in obs.all([V.DOT_RED, V.DOT_YELLOW], 0.40):
+        if box.contains(d.cx, d.cy):
+            return True
+        if ((d.cx - box.cx) ** 2 + (d.cy - box.cy) ** 2) ** 0.5 <= radius:
+            return True
+        if ((d.cx - box.x2) ** 2 + (d.cy - box.y1) ** 2) ** 0.5 <= tr_r:
+            return True
+    return False
+
+
+# 剧情 hub 的同类剧情卡是**堆叠**的(2026-08-21 用户口述 + CC live 实测)。
+#   实测四件套: flywheel_v19_ui_20260821 的 v19_024 / 045 / 047 / 048。
+#   主线剧情有 第1部 / 第2部 两张叠在一起:
+#     前卡完整可见, 标签框宽 0.124-0.135(框住"第N部主線劇情"整串);
+#     后卡被前卡压住只露一条, 标签框宽 0.062(只剩"線劇情"之类的残字)。
+#   **点前卡 = 进那部剧情; 点后卡 = 把它翻到最前面, 不进入。**
+#   短篇 / 支线各只有一张卡(框宽 0.077-0.079), 没有后卡。
+#   同一张卡会吐几个重叠框(NMS 残留, conf 0.09-0.21), 要先按 IoU 去重。
+_STORY_CARD_CONF = 0.25
+# 黄点贴在它那张卡的右上角; 卡每往后退一层, 点就往右下退一档。
+#   实测两档: 前卡 cx=0.410 / 后卡 cx=0.490(差 0.080), 而前卡标签右缘 ~0.389
+#    前卡 delta=+0.021, 后卡 delta=+0.101。阈值取中间的 0.06。
+_STORY_DOT_FRONT_DX = 0.06
+
+
+def _iou(a, b) -> float:
+    ix = max(0.0, min(a.x2, b.x2) - max(a.x1, b.x1))
+    iy = max(0.0, min(a.y2, b.y2) - max(a.y1, b.y1))
+    inter = ix * iy
+    ua = a.w * a.h + b.w * b.h - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+def story_cards(obs: Observation, cls: str, conf: float = _STORY_CARD_CONF):
+    """把同一类剧情卡的检出拆成 `(前卡, [后卡...])`。没检出返回 `(None, [])`。
+
+    前卡 = 去重后**最宽**那个框(后卡被压住必然更窄, 这是遮挡的必然结果,
+      不是写死的尺寸阈值)。后卡按 cx 从小到大排, 第一个就是紧挨着前卡那张。
+    """
+    raw = sorted(obs.all(cls, conf), key=lambda b: -b.conf)
+    keep = []
+    for b in raw:
+        if all(_iou(b, k) < 0.5 for k in keep):
+            keep.append(b)
+    if not keep:
+        return None, []
+    front = max(keep, key=lambda b: b.w)
+    backs = sorted((b for b in keep if b is not front), key=lambda b: b.cx)
+    return front, backs
+
+
+def story_dot_on_front(front, dot) -> bool:
+    """这个黄点挂的是不是**前卡**。front/dot 任一为 None 时当"不是"。"""
+    if front is None or dot is None:
         return False
-    return ((d.cx - box.cx) ** 2 + (d.cy - box.cy) ** 2) ** 0.5 <= radius
+    return (dot.cx - front.x2) < _STORY_DOT_FRONT_DX
+
+
+def story_stack_dot(obs: Observation, front, conf: float = 0.40):
+    """取剧情卡顶那一行的黄点(卡顶 y 远在标签之上, 用 front 的上缘定带)。
+
+    只认落在前卡上缘**之上**、且横向不比前卡左缘更左的那些 —— 隔壁短篇/支线
+    卡上的黄点(cx 0.71)不能算进来。
+    """
+    if front is None:
+        return None
+    hits = [d for d in obs.all(V.DOT_YELLOW, conf)
+            if d.cy < front.y1 and front.x1 - 0.05 <= d.cx <= front.x2 + 0.30]
+    return min(hits, key=lambda d: d.cx) if hits else None

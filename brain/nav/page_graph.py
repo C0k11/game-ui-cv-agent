@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-# ── 页面定义 ────────────────────────────────────────────────────────────
+#  页面定义
 # core     : 核心指纹 cls(组内 ≥80% 帧出现)
 # min_core : 至少命中几个 core 才算这一页(单 cls 判据的坑见文件头 )
 # require  : **必须全部出现**, 少一个直接否决。
@@ -61,7 +61,7 @@ PAGES: Dict[str, P] = {
                  "战术大赛", "特殊任务"],
         "min_core": 3, "parent": "Lobby",
     },
-    # ── Schedule 族 (坑: 一律 ≥2 core + 取消键负条件) ──
+    #  Schedule 族 (坑: 一律 ≥2 core + 取消键负条件)
     "Schedule_RegionSelect": {
         "core": ["课程表票", "夏莱办公室", "夏莱居住区", "格黑娜学院中央区",
                  "阿拜多斯高中", "千年研究所"],
@@ -71,7 +71,7 @@ PAGES: Dict[str, P] = {
         "core": ["全体课程表", "左切换", "右切换", "课程表票"],
         # 2026-07-27 live 实锤: 只有 min_core=2 时, **社交页**(社團/好友/幫手
         # 三卡)靠通用的 左切换+右切换 就凑够 2  被判成课程表轮播, 而它同帧的
-        # 「社团」0.99 让 Club(core 1/1) 只拿到 1 分, 打分按**绝对命中数**排序 
+        # 「社团」0.99 让 Club(core 1/1) 只拿到 1 分, 打分按**绝对命中数**排序
         # 通用 chrome 打赢专属物件。这正是 memory 经验 "靠专属物件区分的同构
         # 页面, 那个物件必须进 require" 的第二次复发。
         # 两帧验证: 真轮播帧 全体课程表=0.98 在; 社交页帧无此 cls。
@@ -90,12 +90,12 @@ PAGES: Dict[str, P] = {
         "core": ["确认键", "弹窗叉叉", "课程表票"],
         "min_core": 3, "neg": ["扫荡开始", "任务开始", "悬赏通缉票", "学院交流会票", "取消键"], "parent": "Schedule_RosterPopout",
     },
-    # ── 编队 ──
+    #  编队
     "Formation_Attack": {
         "core": ["1部队高亮", "快速编辑", "跳过战斗", "出击"],
         "min_core": 2, "parent": None,
     },
-    # ── Arena ──
+    #  Arena
     "Arena_Opponents": {
         "core": ["战术大赛对战选择区域", "战术大赛票"],
         "min_core": 2, "parent": "MissionHub",
@@ -109,13 +109,13 @@ PAGES: Dict[str, P] = {
                  "全部选择", "购买"],
         "min_core": 2, "parent": "Arena_Opponents",
     },
-    # ── 活动 Quest 列表(2026-07-25 补: 草稿 §6 当时无帧, 现有 479 帧) ──
+    #  活动 Quest 列表(2026-07-25 补: 草稿 §6 当时无帧, 现有 479 帧)
     "EventQuestList": {
         "core": ["活动quest_已选择", "入场键", "关卡得星_3",
                  "活动商店", "活动任务"],
         "min_core": 3, "neg": ["取消键"], "parent": "MissionHub",
     },
-    # ── Cafe (1号厅 ⇔ 2号厅 靠"移动至X"互斥) ──
+    #  Cafe (1号厅  2号厅 靠"移动至X"互斥)
     "Cafe_Hall1": {
         "core": ["咖啡厅收益", "咖啡厅邀请卷", "移动至2号点"],
         "min_core": 2, "parent": "Lobby",
@@ -128,7 +128,7 @@ PAGES: Dict[str, P] = {
         "core": ["邀请键", "收藏图标", "弹窗叉叉"],
         "min_core": 2, "parent": "Cafe_Hall1",
     },
-    # ── Bounty ──
+    #  Bounty
     "Bounty_SceneSelect": {
         "core": ["悬赏通缉票", "高架公路", "沙漠铁道", "教室"],
         "min_core": 2, "parent": "MissionHub",
@@ -142,7 +142,7 @@ PAGES: Dict[str, P] = {
         "require": ["悬赏通缉票", "扫荡开始"], "core": ["任务开始", "弹窗叉叉"],
         "min_core": 1, "neg": ["取消键"], "parent": "Bounty_StageList",
     },
-    # ── Exchange(学院交流会) ──
+    #  Exchange(学院交流会)
     "Exchange_SchoolSelect": {
         "core": ["三一", "千年", "格黑娜"],
         "min_core": 2, "parent": "MissionHub",
@@ -163,7 +163,7 @@ PAGES: Dict[str, P] = {
         "min_core": 1, "neg": ["取消键", "悬赏通缉票", "学院交流会票"],
         "parent": "EventQuestList",
     },
-    # ── 商店族 ──
+    #  商店族
     "CreditShop": {
         "core": ["信用点商店_已选中", "全部选择", "购买"],
         "min_core": 2, "parent": "Lobby",
@@ -179,7 +179,7 @@ PAGES: Dict[str, P] = {
         "neg": ["全部选择", "战术大赛商店已选择", "信用点商店_已选中", "免费"],
         "parent": None,
     },
-    # ── 全域通用 ──
+    #  全域通用
     "RewardObtained": {
         "core": ["获得奖励", "点击继续字样"], "min_core": 1, "parent": None,
     },
@@ -195,7 +195,7 @@ PAGES: Dict[str, P] = {
 # 命中这个形状就报 ambiguous, 让调用方用上下文闸(结构/位置)去分。
 CONFIRM_SHAPE = ("确认键", "取消键")
 
-# ── 转移边: (from_page, 点这个 cls, to_page) ─────────────────────────────
+#  转移边: (from_page, 点这个 cls, to_page)
 # 全部来自 screen_flow_draft 的"点击去向(观测)"。返回键parent /
 # 回大厅按钮Lobby 是全局默认边, 不在这里重复。
 EDGES: List[Tuple[str, str, str]] = [

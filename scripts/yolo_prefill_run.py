@@ -144,7 +144,30 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 # fold-in 正是靠它, emoticon 独立模型已退役), 旧表把 451 划给 emoticon
 # teacher 导致 ui 预标漏摸头框(用户抓)。451 同时在 emoticon teacher 域
 # (dashboard 补标仍可用): 两域重叠, overwrite 模式二者都会重写 451 框。
-def _ui_span(i: int) -> bool:       return not (143 <= i <= 394) and i < 476  # UI=非头像非战斗身份段(476+), 含451摸头
+# 2026-08-13 实锤: 旧写法 `i < 476` 把 **484-527 全部 44 个新 UI 类**静默丢了。
+#   476 这个上限是当年 476-483 还是 master 尾巴时定的; 之后往尾部追加的都是
+#   UI 类(制造族/购买灰色/批量扫荡/集中指挥/走格子全族/任务页签族/中断任务...),
+#   没人回来改这条 -> ui 预填对它们**一框不出**。
+#   在 _TRAIN_v17_0813(387帧) 上量: 写入 2,049 框, **被这条丢掉 1,436 框(41%)**
+#   -- 走格子_格子_迷雾377/格子287/可走122/PHASE自动结束113/起点灰94/PHASE结束87...
+#   现象 = "预标很失败"(grid_quest 帧框中位 2), 而 live 的 detect.infer 不过
+#   这层 span, 同样的帧同样的权重能出 9-12 框。两条路差在这儿, 不在模型。
+#   这跟 _battle_span 2026-07-14 那次「枚举 476-479, 主教/球/黑白 加类后静默漏」
+#   是**同一个病**: 硬编码边界 + 往尾部加类。battle 当时改成了词表动态 span,
+#   ui 不能照抄(ui 现役权重 nc 随 master, v18 起 531; 动态 span 等于不过滤), 所以改成
+#   **排除别的域**而不是圈定自己的域 -- 尾部新增默认归 ui, 不会再静默漏。
+# 2026-08-13 二次修正: 第一版在这儿又本地写了一份战斗身份段的上下界常量
+#   -- 那正是本条注释在骂的病(同一个边界写在 N 处)。而且值还错了: 写成上界
+#   483, 但 `build_battle_v11.py:62` 的 REMAP 有 `484: 18`(战斗失败),
+#   484 是 **battle 在训的类**, 划给 ui 会变成两条写路径同时认领。
+#   域边界的唯一权威是 `scripts/cls_domains.py`, 这里只引用不重写。
+#   (注释里也别再写出形如 名字=(数,数) 的字面量 -- audit_domain_ownership
+#    是正则扫源码文本的, 会把注释当成真的赋值。)
+from scripts.cls_domains import domain as _domain     # noqa: E402
+
+
+def _ui_span(i: int) -> bool:       # UI = 排除法兜底; 451 摸头与 emoticon 有意重叠
+    return _domain(i) == "ui" or i == 451
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
 # battle 静态 span — 只供 UI datalist 展示/校验; **写路径一律用
@@ -315,9 +338,52 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
         imgsz = _IMGSZ_BY_TAG.get(tag, 960)
     imgs = sorted(glob.glob(str(img_dir / "*.jpg")))
     written = skipped = 0
-    CHUNK = 64
-    for ci in range(0, len(imgs), CHUNK):
-        chunk = imgs[ci:ci + CHUNK]
+    # 2026-08-13 事故定标: 混分辨率的目录会把峰值显存顶到 20GB 把整个后端拖死。
+    # **CHUNK 就是 batch size, 不只是循环分块** -- 传 list 给 predict() 时
+    #   data/build.py check_source 走 `isinstance(source,(list,tuple))` -> from_img
+    #   -> LoadPilAndNumpy, 它 `self.bs = len(self.im0)` 且 __next__ 只迭代一次
+    #   ("loop only once as it's batch inference")。stream=True 不会再切分。
+    #   => CHUNK=64 等于一次 64 张前向。
+    # **混批把网络输入面积放大 1.76 倍**(这才是"混分辨率"的代价所在):
+    #   engine/model.py:523 predict() 的方法默认是 `rect: True`(覆盖 default.yaml
+    #   的 rect:False), 于是 engine/predictor.py:193 的
+    #     same_shapes = len({x.shape for x in im}) == 1
+    #     letterbox = LetterBox(imgsz, auto=same_shapes and args.rect and model.pt)
+    #   均一批 auto=True  -> augment.py 走 `np.mod(dw,stride)` 最小矩形 -> 960x544
+    #   混合批 auto=False -> 整个补满                                 -> 960x960
+    #   960*960 / (960*544) = 1.7647x 激活量。
+    # 实测(387 帧 = 343x2560x1440 + 44x3840x2160):
+    #     不分组 CHUNK=64  19,656MB   <- 4090 开着模拟器只剩 ~20.3GB, 踩线
+    #     仅分组 CHUNK=64  11,206MB   (19,656/11,206 = 1.754, 对上 1.7647)
+    #     仅缩块 CHUNK=16   5,602MB
+    #     分组+CHUNK=16     2,896MB   <- 现方案, 且耗时最短(16.0s vs 16.5s)
+    #   拟合 = 173.1MB/张(矩形态) + 126MB 固定; 反推混批 64 张 19,677MB, 差 0.1%。
+    # 超了**不报 OOM** -- Windows WDDM 静默溢出到共享内存, 慢约百倍; 而本函数被
+    #   同步端点 dataset_yolo_prefill_run 直接调用 -> 整个后端连 /api/v1/status
+    #   都不回, 表现成"前端卡死"。以前不犯是因为每个目录都单一 1440p(峰值 11GB)。
+    # 别把下面的按分辨率分组去掉 -- 混批不是免费的, 见上面 1.76x。
+    # empty_cache() 试过, 只省 2MB 还多花 0.9s, 不加。
+    CHUNK = 16
+    _by_size: "dict[tuple, list]" = {}
+    for _p in imgs:
+        try:
+            from PIL import Image as _PILImage  # noqa: PLC0415
+            with _PILImage.open(_p) as _im:
+                _k = _im.size
+        except Exception:
+            _k = (0, 0)          # 读不出尺寸的单独成组, 不混进正常批
+        _by_size.setdefault(_k, []).append(_p)
+    if len(_by_size) > 1:
+        print(f"源目录含 {len(_by_size)} 种分辨率 "
+              f"{ {f'{w}x{h}': len(v) for (w, h), v in sorted(_by_size.items())} }"
+              f" — 按分辨率分组推理(混批会让峰值显存翻数倍)")
+    batches = [(k, g[i:i + CHUNK])
+               for k, g in sorted(_by_size.items())
+               for i in range(0, len(g), CHUNK)]
+    # 尺寸 -> [该尺寸看过的帧, 其中空标的]。**skip 掉的帧也要进分母** —— skip
+    #   模式只重跑"原来就是空"的帧, 只数写入的话分母全是空标, 必报 100% 假阳。
+    _yield: "dict[tuple, list]" = {k: [0, 0] for k in _by_size}
+    for _size, chunk in batches:
         todo = []
         for p in chunk:
             lp = Path(p).with_suffix(".txt")
@@ -325,6 +391,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 try:
                     if lp.read_text(encoding="utf-8").strip():
                         skipped += 1
+                        _yield[_size][0] += 1   # 有内容的跳过帧也算分母
                         continue
                 except Exception:
                     pass
@@ -371,8 +438,22 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 lines.append(f"{mid} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
             lp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
             written += 1
+            _yield[(w, h)][0] += 1
+            if not lines:
+                _yield[(w, h)][1] += 1
             if progress and written % 50 == 0:
                 progress(written, len(imgs))
+    # 2026-08-13: 空标不是"这帧没东西", 常常是"这个分辨率模型看不见"。
+    #   实锤: walk_20260813_083604 里 1280x720 那 140 帧写出来 89 个空标(64%),
+    #   同目录 2560x1440 的 141 帧只有 13 个(9%) —— 720p 要上采样进 960 letterbox,
+    #   细节没了。而空标文件进 train = **真内容配空标 = 负监督毒**(未标注反而
+    #   会被 build 跳过, 无害)。所以这里必须出声, 不能默默写完就算完。
+    for (w0, h0), (n0, z0) in sorted(_yield.items()):
+        if n0 >= 5 and z0 / n0 > 0.40:
+            print(f"[!] {w0}x{h0}: {n0} 帧里 {z0} 个空标({z0/n0:.0%}) — "
+                  f"该分辨率很可能出模型分布(训练域是 2560x1440/3840x2160)。"
+                  f"空标进 train 是负监督毒, **先删掉这批 txt 回到未标注**, "
+                  f"别直接拿去训。")
     if _cx_on:
         print(f"cx 规则(>={CX_RULE_THRESHOLD}) 把 {n_flip} 个「我方」改判敌方 "
               f"— 人审时优先复查这些框(阈值边界 0.50-0.55 有真学生误伤)")

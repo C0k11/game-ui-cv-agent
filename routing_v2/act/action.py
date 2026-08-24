@@ -33,7 +33,7 @@ class Action:
     ms: int = 350
     keycode: str = "KEYCODE_BACK"
 
-    # ── 落地前复验契约（Gate 执行）────────────────────────────────────
+    #  落地前复验契约（Gate 执行）
     # 复验的是**锚点框有没有移动**，不是"落点在不在框内"。
     #    因为有的落点是**故意**打到框外的（HUB 活动入口 +0.075 打卡片本体，
     #    框标的是倒计时气泡）。第一版写成"落点必须在框内"，离线测试当场把
@@ -44,7 +44,7 @@ class Action:
     anchor_tol: float = 0.0             # 允许它漂多少（默认取框的半宽/半高）
     require_conf: float = 0.45
 
-    # ── 落地**后**的推进契约（Gate 第道闸执行）─────────────────────────
+    #  落地**后**的推进契约（Gate 第道闸执行）
     # 2026-08-12 用户点名：「点了一次就去识别下一个要点的 cls，而不是看到
     #    什么点什么，思考逻辑得 **1 step ahead**」。
     #
@@ -67,11 +67,11 @@ class Action:
     #    两个都填 = 「或」（谁先满足算谁），不是「与」——弹窗切换时两边
     #      往往不同帧到位，要求同时满足会把正常的一发判成丢了。
 
-    # ── 金钱 ──────────────────────────────────────────────────────────
+    #  金钱
     money: bool = False                 # 声明是金钱步  需人审
     spend: str = ""                     # 花什么（"信用点" / "战术大赛币" / …）
 
-    # ── 元 ────────────────────────────────────────────────────────────
+    #  元
     target_cls: str = ""                # 打的是哪个 cls（日志/连发闸用）
     outcome: str = ""                   # kind == done 时的竣工判据
     justify: str = ""                   # tap_at 必填
@@ -99,7 +99,7 @@ class Action:
         return f"{self.kind}({self.reason})"
 
 
-# ══ 构造器 ═════════════════════════════════════════════════════════════
+#  构造器
 
 def tap_box(box: Box, reason: str, *, dy: float = 0.0, dx: float = 0.0,
             money: bool = False, spend: str = "", counter: str = "",
@@ -138,7 +138,8 @@ def tap_box(box: Box, reason: str, *, dy: float = 0.0, dx: float = 0.0,
 
 
 def tap_at(x: float, y: float, reason: str, *, justify: str,
-           require: Optional[str] = None, money: bool = False) -> Action:
+           require: Optional[str] = None, money: bool = False,
+           once: str = "") -> Action:
     """点一个**没有 cls 支撑**的坐标。
 
     `justify` 是必填的，而且要具体：写清楚为什么这里没有 cls 可用、这个坐标
@@ -149,7 +150,8 @@ def tap_at(x: float, y: float, reason: str, *, justify: str,
     if not justify:
         raise ValueError("tap_at 必须给 justify —— 没有 cls 支撑的坐标要说明理由")
     return Action(kind="tap", reason=reason, x=x, y=y, justify=justify,
-                  require=require, money=money, target_cls="(no-cls)")
+                  require=require, money=money, target_cls="(no-cls)",
+                  once_key=once)
 
 
 def swipe(x1: float, y1: float, x2: float, y2: float, reason: str,

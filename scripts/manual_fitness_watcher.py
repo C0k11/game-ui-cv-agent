@@ -172,7 +172,7 @@ def main() -> int:
                 if is_best:
                     best_manual = m50
                     shutil.copyfile(tmp_pt, best_manual_pt)
-                    print(f"[watcher] ep{ep}: 🏆 NEW BEST manual mAP50 = {m50:.4f} (vs prior {best_manual - m50 + m50:.4f})  saved best_manual.pt")
+                    print(f"[watcher] ep{ep}:  NEW BEST manual mAP50 = {m50:.4f} (vs prior {best_manual - m50 + m50:.4f})  saved best_manual.pt")
                 else:
                     print(f"[watcher] ep{ep}: manual mAP50 = {m50:.4f} (best = {best_manual:.4f})")
 

@@ -4,7 +4,7 @@ Verified flow (interactive probe 2026-06-01, data/_missions_probe_log.md).
 bounty & JFD are isomorphic ("票券扫荡型"); this base captures the common flow
 and subclasses fill in the ticket cls / hub tile / branch picker / AP cost.
 
- THREE-LAYER pyroxene protection (the buy-ticket money bug) 
+ THREE-LAYER pyroxene protection (the buy-ticket money bug)
    digit-OCR the ticket count at entry  0 (or unreadable-and-confirm-greyed)
       NEVER sortie/sweep (a 0-ticket sweep pops a 購買票券 青辉石 dialog).
    never click 立即完成 / buy buttons.
@@ -14,7 +14,7 @@ Tickets are SHARED across branches (probe: 1/6 total), so one MAX sweep on a
 single branch drains them all — we pick ONE configured branch, no iteration.
 
 State machine
--------------
+----
 enter        lobby  NAV_TASKS  hub  _HUB_TILE  on-page (ticket cls).
 ticket_check digit-OCR ticket X/Y. 0  exit. >0  branch.
 branch       subclass _click_branch() navigates to the configured branch's
@@ -99,7 +99,7 @@ def _load_profile_list(key: str) -> List[str]:
 
 
 class TicketSweepSkill(BaseSkill):
-    # ── subclass config (override) ──
+    #  subclass config (override)
     _TICKET_CLS: str = UC.TICKET_BOUNTY        # ticket icon (digit-OCR anchor)
     _HUB_TILE: str = UC.HUB_BOUNTY             # hub entry tile cls
     _PAGE_NAME: str = "Bounty"                 # detect_screen_yolo page (or "")
@@ -144,7 +144,7 @@ class TicketSweepSkill(BaseSkill):
         self.mark("phase")                 # _phase_ticks 的墙钟版
         self.clear_timer("post_sweep")     # 重读票数窗随阶段重置
 
-    # ── 竣工判据 ─────────────────────────────────────────────────────────
+    #  竣工判据
     def exit_report(self):
         """票券型 skill 的竣工判据 = 票扫光了没。
 
@@ -169,13 +169,13 @@ class TicketSweepSkill(BaseSkill):
                     f"扫了 {self._sweep_cycles} 轮, 仍剩 {self._tickets} 张票")
         return ("CLEAN", f"{self._sweep_cycles} 轮扫光, 票 0")
 
-    # ── subclass hooks ───────────────────────────────────────────────────
+    #  subclass hooks
     def _click_branch(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
         """Navigate to the configured branch's stage list. Return an action to
         click the branch, or None to wait. Default: no branch select needed."""
         return None
 
-    # ── shared helpers ────────────────────────────────────────────────────
+    #  shared helpers
     def _on_page(self, screen: ScreenState) -> bool:
         if self.find_cls(screen, self._TICKET_CLS, conf=_CLS_CONF) is not None:
             return True
@@ -225,7 +225,7 @@ class TicketSweepSkill(BaseSkill):
         if icon is None:
             # Ticket cls anchor FLICKERS (live 2026-06-09: bounty 票 cls
             # zero-detected on the branch page while the counter rendered
-            # plainly top-left). The counter is a stable page fixture 
+            # plainly top-left). The counter is a stable page fixture
             # fixed-region OCR fallback on the DIGITS zone only (0708 新皮肤
             # 「持有票券 6/6」布局, 两页帧离线验证 '6/6' )。
             # 这条没有 YOLO 锚, 所以要求 raw 里必须有 '/' —— 不带斜杠的裸数字
@@ -333,7 +333,7 @@ class TicketSweepSkill(BaseSkill):
     def _stage_enters(self, screen: ScreenState) -> List[YoloBox]:
         return self.find_all_cls(screen, UC.STAGE_ENTER, conf=_CLS_CONF, region=_STAGE_PANEL)
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -498,7 +498,7 @@ class TicketSweepSkill(BaseSkill):
 
         if not self.find_cls(screen, [UC.SWEEP_START, UC.QTY_MAX, UC.QTY_MAX_GREY], conf=_CLS_CONF):
             # 任務資訊 not open yet. The 入場 tap intermittently DROPS under adbd
-            # contention (live 2026-06-15: skill tap lost  popup never showed 
+            # contention (live 2026-06-15: skill tap lost  popup never showed
             # 0 tickets swept; manual same-pos tap opened it). Root-fixed by the
             # AdbInput I/O lock; self-healing backstop here — re-click the 入場键
             # (bounded) instead of giving up with tickets unspent.
@@ -531,7 +531,7 @@ class TicketSweepSkill(BaseSkill):
         # — the GAME caps it, never overspends (you can't go negative on AP).
         # So MAX is safe whenever AP ≥ one sweep; the old `ap ≥ tix×AP_PER_SWEEP`
         # gate wrongly fell back to a SINGLE sweep whenever full tickets couldn't
-        # all be afforded (live 2026-06-09: 24 tickets needed 360 AP > 240 cap 
+        # all be afforded (live 2026-06-09: 24 tickets needed 360 AP > 240 cap
         # safe_to_max False  swept only 1, leaving AP+tickets unspent).
         if self._COSTS_AP and not self._maxed:
             ap = self._read_ap(screen)
@@ -638,7 +638,7 @@ class TicketSweepSkill(BaseSkill):
         # 2026-07-27 live 实锤(bounty 6 张票 + 2 倍奖励差点又白丢): 这条分支在
         # **掃蕩前的确认框**上误触发 —— 「要使用6懸賞通緝票券掃蕩6次嗎?」弹出时,
         # 確認键从下往上**弹入动画**, 途中扫过 _DONE_CONFIRM_BAND(y 0.74-0.90),
-        # 而它的终值在 cy 0.699(带外)。于是: 假计一次 cycle  goto result 
+        # 而它的终值在 cy 0.699(带外)。于是: 假计一次 cycle  goto result
         # **真正的確認从没点过**  result 里票数被弹窗挡住读不出  exit  点叉叉
         # = 取消 = 6 张票一张没花。与今早 cafe「領取」在弹入动画帧上锚点是**同一
         # 个机制**(0.8250.733), 只是这里错的是判定不是落点。
@@ -838,7 +838,7 @@ class TicketSweepSkill(BaseSkill):
         # 取消键优先(money_safety 2026-06-10 定的"exit 阶段见取消键永远先点取消",
         # 一直没传导到这里)。2026-07-27 live 实锤为什么必须这样:
         # 停在「要使用6票掃蕩6次嗎? 取消/確認」这种**模态**上时, 旧顺序先找
-        # BTN_CLOSE_X, 而屏上那个被检成 弹窗叉叉(0.96) 的小 ✕ **根本不吃点击**
+        # BTN_CLOSE_X, 而屏上那个被检成 弹窗叉叉(0.96) 的小  **根本不吃点击**
         # —— 连点 6 次画面纹丝不动(帧证据 data/walk_20260727_e7_frames/)。
         # 模态框的唯一正解是它自己的「取消」。
         # 顺序: 取消 > 完成弹窗的確認 > X > 返回键。

@@ -22,7 +22,7 @@ from typing import Optional
 
 from routing_v2.act.action import Action, swipe, tap_box, wait
 from routing_v2.flow import nav
-from routing_v2.flow.base import ExitMixin, Flow, Outcome
+from routing_v2.flow.base import ExitMixin, Flow, Outcome, qty_max_ok
 from routing_v2.flow.battle import BattleMixin
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Observation
@@ -31,12 +31,15 @@ from routing_v2.state.machine import StateView
 
 STAGE_PANEL = (0.50, 0.10, 1.0, 0.95)
 CONFIRM_BAND = (0.20, 0.55, 0.95, 0.92)
+HUB_TILE_MISS_LIMIT = 80
 
 
 class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
     entry_page = "task_hall"
     ticket_cls: str = ""
     hub_tile: str = ""
+    # tile cls=0 时允许点的卡区域(归一化 x1,y1,x2,y2)。空 = 没有退路。
+    hub_dot_region: tuple = ()
     branch_cls: tuple = ()
     branch_page: str = ""
     stage_page: str = ""
@@ -48,10 +51,11 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         #   最高那一关归位到可见处），那两个字段随滑动逻辑一起删了。
         self.state.update(sweeps=0, tickets0=None, tickets=None,
                           branch_i=0, branch_name="", branch_tix0=None,
-                          planned=0)
+                          planned=0, enter_taps=0, inside=False,
+                          hub_tile_misses=0)
         self._register_pages()
 
-    # ── 票配额（用户点名：「票用在哪个地区，还是一个地区用几张」）──────
+    #  票配额（用户点名：「票用在哪个地区，还是一个地区用几张」）
     def _plan(self) -> dict:
         """{分支名: 分配几张}。空 = 老行为（按顺序打到票光）。"""
         p = self.cfg.get("ticket_plan") or {}
@@ -62,24 +66,85 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         q = self._plan().get(branch)
         return q if (q is not None and q > 0) else None
 
-    # ── 进场 ────────────────────────────────────────────────────────────
+    #  进场
     def on_lobby(self, obs, st):
-        return nav.enter(obs, V.NAV_TASKS, "任务大厅")
+        return nav.lobby_enter(self, obs, V.NAV_TASKS, "任务大厅",
+                               expect=(V.HUB_CAMPAIGN,))
 
     def on_task_hall(self, obs, st):
         tile = obs.find(self.hub_tile, 0.40)
+        if tile is not None:
+            self.state["hub_tile_misses"] = 0
+        if not nav.task_hall_evidence(obs):
+            return wait("当前帧缺少两个任务大厅专属锚，不计入口漏检")
+        if self.state.get("entry_probe"):
+            if self.hold("entry_probe_no_result", 120):
+                return self.finish(
+                    Outcome.UNKNOWN,
+                    f"`{self.hub_tile}` 入口只探测一次，但既没进页也没出现可识别通知")
+            return wait(f"`{self.hub_tile}` 入口已探测一次，等进页或锁通知，不重复点")
         if tile is None:
-            if self.stalled(st, 120):
-                return self.finish(Outcome.UNKNOWN,
-                                   f"任务大厅里没检出 `{self.hub_tile}` tile")
-            return wait("任务大厅: 等 tile")
+            # tile 真名换皮 cls=0 时, 退回点卡上的红/黄点(检出框, 非盲坐标)。
+            #    只试一次: 进错页由 exit_step 逐层退, entry_probe 挡重复点。
+            dot = (nav.hub_tile_dot(obs, self.hub_dot_region)
+                   if self.hub_dot_region else None)
+            if dot is not None and self.pending("hub_tile_dot"):
+                def _probe_dot():
+                    self.state["entry_probe"] = True
+                    self.bump("enter_taps")
+                return tap_box(
+                    dot,
+                    f"`{self.hub_tile}` cls 0 - 点该卡上的点"
+                    f"@{dot.cx:.3f},{dot.cy:.3f}(检出框, 不是盲坐标)",
+                    once="hub_tile_dot", post=_probe_dot)
+            misses = self.bump("hub_tile_misses")
+            if misses >= HUB_TILE_MISS_LIMIT:
+                return self.finish(
+                    Outcome.SKIPPED,
+                    f"有任务大厅证据的连续 {misses} 个观测帧都没检出 "
+                    f"`{self.hub_tile}`，tile_dead（模型认不出入口，不是未解锁）")
+            return wait(
+                f"任务大厅证据成立但没检出 `{self.hub_tile}` "
+                f"({misses}/{HUB_TILE_MISS_LIMIT})")
         # 各玩法的红点**只在任务大厅可见**（大厅那个入口红点不是工作信号）。
         #   但红点缺失 ≠ 没活干（红点自己也会漏检），所以只当提示，不当闸。
         if not nav.dot_on(obs, tile):
             self.note_lines.append(f"{self.hub_tile} tile 上没红点（仅提示，仍进去看）")
-        return tap_box(tile, f"进入 {self.hub_tile}")
+        def _probe():
+            self.state["entry_probe"] = True
+            self.bump("enter_taps")
+        return tap_box(tile, f"进入 {self.hub_tile}",
+                       post=_probe)
 
-    # ── 分支选择（动态：屏上有哪些就是哪些）─────────────────────────
+    def on_facility(self, obs, st):
+        if not nav.task_hall_evidence(obs):
+            return None
+        return self.on_task_hall(obs, st)
+
+    def _hub_inside_evidence(self, obs: Observation) -> bool:
+        return (
+            obs.has(self.ticket_cls, 0.30)
+            or obs.has(self.branch_cls, 0.40)
+            or obs.has(
+                [V.STAGE_ENTER, V.STAGE_ENTER_LOCKED,
+                 V.SWEEP_START, V.TASK_START],
+                0.35)
+        )
+
+    def _hub_lock_popup(self, obs: Observation, st, why: str):
+        """单次入口探测后仍以任务大厅为底的单键框，按锁态收工。"""
+        if self.state.get("inside") or not self.state.get("entry_probe"):
+            return None
+        if nav.task_hall_anchor_count(obs) < 1:
+            return None
+        if self._hub_inside_evidence(obs):
+            return None
+        return self.finish(
+            Outcome.SKIPPED,
+            f"{self.hub_tile} 入口探测后当前帧仍有任务大厅专属锚并弹出{why}，"
+            "按未解锁收工")
+
+    #  分支选择（动态：屏上有哪些就是哪些）
     def _branch_order(self, obs: Observation):
         """配置里点的顺序 ∩ 屏上真的看得到的。**不写死清单。**"""
         # 只配了 ticket_plan 没配 branches 时，plan 的 key 就是想打的分支
@@ -96,6 +161,8 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         return ordered + (rest if not want else [])
 
     def _on_branch(self, obs, st):
+        self.state["inside"] = True
+        self.state.pop("entry_probe", None)
         # 真回到分支页了，换分支这件事才算做成（数事实不数意图）
         self.state["switching"] = False
         if obs.has([V.STAGE_ENTER, V.STAGE_ENTER_LOCKED], 0.45, region=STAGE_PANEL):
@@ -135,15 +202,17 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                        post=lambda n=pick.cls: self.state.update(
                            branch_name=n, branch_tix0=None))
 
-    # ── 票数 ────────────────────────────────────────────────────────────
+    #  票数
     def _tickets(self, obs: Observation) -> Optional[int]:
         t = obs.find(self.ticket_cls, 0.30)
         if t is None:
             return None
         return R.read_ticket(obs, t)          # 带越界校验，挡"读大"
 
-    # ── 关卡列表 ────────────────────────────────────────────────────────
+    #  关卡列表
     def _on_stage_list(self, obs, st):
+        self.state["inside"] = True
+        self.state.pop("entry_probe", None)
         # 换分支**必须真的走回去**，不能只把索引加一（2026-08-12 体外复现）:
         #    原来 `_next_branch_or_done` 只 `branch_i += 1` 然后 return wait，
         #    而 wait 不产生任何动作、页面身份不变，于是**同一个判据下一 tick
@@ -240,7 +309,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                                f"{'最低' if self.cfg.get('difficulty','highest')=='highest' else '最高'}"
                                f"那个，不滑列表）")
 
-    # ── 任務資訊  MAX  扫荡 ───────────────────────────────────────────
+    #  任務資訊  MAX  扫荡
     def on_stage_popup(self, obs, st):
         if self.state.get("switching"):
             return (self.exit_step(obs, prefer_close=False)
@@ -276,7 +345,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 return self._next_branch_or_done(
                     "数量步进全灰 — 没票可扫了", terminal=True)
 
-        mx = obs.find(V.QTY_MAX, 0.20)      # 弱类，蓝 MAX 上只到 conf≈0.26
+        mx = qty_max_ok(obs, 0.20)
         if mx is not None and self.pending("maxed"):
             return tap_box(mx, "数量拉 MAX（游戏会自己钳到付得起的次数）",
                            once="maxed")
@@ -284,11 +353,11 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         # 语义优先，不是 conf argmax：08-08 实测 `任务开始` 0.99 > `扫荡开始`
         #    0.98，放一个列表里 argmax 会选中**真打进战斗**的那个键。
         #    扫荡流**永远不许**点 任務開始。
-        go = obs.find(V.SWEEP_START, 0.35)
+        go = nav.real_sweep_start(obs, 0.35)
         if go is not None:
             # 数量闸（2026-08-11 特殊任務实帧逼出来的）：数量 **0** 时
             #    「掃蕩開始」**照样是亮的**（conf 0.986，不是灰态），点下去游戏
-            #    弹「購買AP 💎30」—— 正是 30 青辉石那次近失的入口。
+            #    弹「購買AP 30」—— 正是 30 青辉石那次近失的入口。
             #    上面那道「步进器整行全灰」在 AP 流上**分不开 0 和 1**
             #    （数量到上限 1 时 MIN/−/+/MAX 同样全灰） 必须读那个数。
             #    **只做加法**：读出 0 才拦；读不出(None)退回原有行为，
@@ -319,10 +388,16 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
             return wait("确认框: 等確認键")
         return tap_box(cf, "確認扫荡", counter="sweeps")
 
+    def on_ack_dialog(self, obs, st):
+        locked = self._hub_lock_popup(obs, st, "单键通知框")
+        if locked is not None:
+            return locked
+        return super().on_ack_dialog(obs, st)
+
     def on_sweep_dialog(self, obs, st):
         return self.on_stage_popup(obs, st)
 
-    # ── 收尾 ────────────────────────────────────────────────────────────
+    #  收尾
     def _next_branch_or_done(self, why: str, terminal: bool = False) -> Action:
         """换下一个分支；`terminal=True` 表示这条理由对**所有分支**都成立。
 
@@ -385,7 +460,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 f"票基线多半是读大的假数，这个分支到底打没打**不确定**")
         return self.finish(Outcome.CLEAN, f"{why}；{det}")
 
-    # ── 页面路由（子类把自己的页面名接到通用处理上）──────────────────
+    #  页面路由（子类把自己的页面名接到通用处理上）
     # 不许覆写 decide()！第一版在这里自己写了按页派发，把基类的
     #    **overlay页面** 顺序整个跳过  扫荡确认框开着时照样跑
     #    `_on_stage_list`，把对话框里的**费用行票图标**当成票数锚，读出 0

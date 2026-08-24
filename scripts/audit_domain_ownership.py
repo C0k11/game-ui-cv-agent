@@ -98,19 +98,25 @@ def check_battle_remap(master: list) -> None:
 
 
 def check_prefill_span() -> None:
-    p = ROOT / "scripts" / "yolo_prefill_run.py"
-    m = re.search(r"_BATTLE_ID\s*=\s*\((\d+),\s*(\d+)\)",
-                  p.read_text(encoding="utf-8"))
-    if not m:
-        fail("解析不到 yolo_prefill_run._BATTLE_ID")
+    # 2026-08-13 改判据: 原来是正则扫 yolo_prefill_run 里的本地边界常量再对账。
+    #   但"对账两份副本"本身就是这轮要根治的病 -- 正解是那边**根本不该有副本**。
+    #   prefill 现已直接 `from scripts.cls_domains import domain`, 所以这里改成
+    #   验行为: 逐 idx 比对 _ui_span 与 cls_domains.domain, 不一致就 fail。
+    #   (顺带治了旧写法的假阳: 正则会匹配到注释里描述性的赋值字面量。)
+    try:
+        sys.path.insert(0, str(ROOT))
+        from scripts.yolo_prefill_run import _ui_span   # noqa: PLC0415
+    except Exception as e:                              # noqa: BLE001
+        fail(f"导入 yolo_prefill_run._ui_span 失败: {type(e).__name__}: {e}")
         return
-    got = (int(m.group(1)), int(m.group(2)))
-    if got != D.BATTLE_ID:
-        fail(f"yolo_prefill_run._BATTLE_ID={got} != cls_domains.BATTLE_ID="
-             f"{D.BATTLE_ID} -- 差集里的 idx 被 ui 和 battle 两条写路径同时"
-             f"认领(overwrite 模式互相冲框)")
+    names = D.load_master()
+    bad = [i for i in range(len(names))
+           if _ui_span(i) != (D.domain(i) == "ui" or i == D.EMOTICON)]
+    if bad:
+        fail(f"prefill _ui_span 与域表不一致 {len(bad)} 个 idx: {bad[:12]} "
+             f"-- 这些 idx 会被 ui 和别的域两条写路径同时认领")
     else:
-        ok(f"prefill _BATTLE_ID 与域表一致 {got}")
+        ok(f"prefill _ui_span 与域表逐 idx 一致 ({len(names)} 个)")
 
 
 # 域边界比较只许出现在这些文件里

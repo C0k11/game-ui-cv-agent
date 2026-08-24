@@ -4,19 +4,19 @@ Verified flow (interactive probe 2026-06-01, data/_craft_probe_log.md). The old
 skill had a "进制造就退" bug (it never started crafts) AND a SAFETY hole: it
 looked for the wrong claim cls and could trigger the 立即完成 rush dialog.
 
- HARD RULES (probe-derived) 
+ HARD RULES (probe-derived)
 - The craft-main 一次領取 (CLAIM_ONCE_YELLOW) is AMBIGUOUS:
-    • crafts FINISHED  tapping it collects them FREE (direct GOT_REWARD).
-    • crafts RUNNING   tapping it pops 「是否立即完成?」 which spends 製造券
+    - crafts FINISHED  tapping it collects them FREE (direct GOT_REWARD).
+    - crafts RUNNING   tapping it pops 「是否立即完成?」 which spends 製造券
       (a consumable). We NEVER spend券  if a confirm dialog appears after the
       tap, CANCEL it. (製造券 isn't pyroxene, but user spec: 让制造自然跑完.)
 - per-slot 立即完成 (blue, no cls) is NEVER clicked (we have no cls  never
   blind-click there).
-- START is safe: 快速制造 costs 信用点 only (probe: 19,000/unit). 快速制造 
+- START is safe: 快速制造 costs 信用点 only (probe: 19,000/unit). 快速制造
   MAX  开始制造  确认键(確定製造N次) spends credits (abundant) — fine.
 
 State machine
--------------
+----
 enter    lobby  NAV_CRAFT  Craft page (CRAFT_QUICK/CRAFT_START signature).
 collect  一次领取黄色  tap. If a confirm dialog (确认键+取消键) appears = the
          券-rush 立即完成  CANCEL (never spend券). GOT_REWARD = free collect
@@ -96,7 +96,7 @@ class CraftSkill(BaseSkill):
            有红点 = 造好了可领  进
            无红点 = 还在造  skip
         实际存在**第三态: 三个槽位全空、根本没在造**, 它同样**没有红点**
-        (当天帧: 材料清單三行全是「＋ 開始製造」, 一次領取灰)  永远走 
+        (当天帧: 材料清單三行全是「＋ 開始製造」, 一次領取灰)  永远走
          **一次都不会开新的制造**。制造是纯免费产素材的, 槽位空着 = 纯损失,
         而且一旦空了就再也不会有红点 —— 这个洞会**自锁**, 越久越亏。
 
@@ -200,7 +200,7 @@ class CraftSkill(BaseSkill):
         return ("LEFTOVER",
                 "进了制造页但**既没领也没造** — 查 一次領取黄/快速制造 是否漏检")
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _is_craft(self, screen: ScreenState) -> bool:
         page = self.detect_screen_yolo(screen)
         if page == "Lobby":
@@ -231,7 +231,7 @@ class CraftSkill(BaseSkill):
             return confirm
         return None
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -492,7 +492,7 @@ class CraftSkill(BaseSkill):
             return _a
         # 兜底: 开始制造(idx444) 是 v6b 漏检的 missing cls (probe 旧模型 0.93,
         # v6b 退步漏检  craft 卡死, live 2026-06-06)。已点过 MAX (= 在 dialog 里)
-        # 且 MAX/MAX灰 检出  用它外推开始制造位置 (probe: MAX(0.926,0.713) 
+        # 且 MAX/MAX灰 检出  用它外推开始制造位置 (probe: MAX(0.926,0.713)
         # 开始制造(0.870,0.812), 偏移 cx-0.056/cy+0.10; dialog 布局固定, 归一化
         # 跨分辨率)。点中  弹「確定製造N次」确认框  _confirm_dialog 收口(信用点,
         # 安全)。根治靠飞轮补 开始制造 样本  v6c。

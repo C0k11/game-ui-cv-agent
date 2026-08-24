@@ -41,7 +41,7 @@ class MomoTalkFlow(ExitMixin, Flow):
             return self.finish(Outcome.UNKNOWN, "大厅没检出 MomoTalk 入口 cls")
         return wait("等 MomoTalk 入口")
 
-    # ── 列表 ────────────────────────────────────────────────────────────
+    #  列表
     def on_momo_list(self, obs, st):
         cap = int(self.cfg.get("max_students_per_run", 0) or 0)
         if cap and self.state["students"] >= cap:
@@ -90,7 +90,7 @@ class MomoTalkFlow(ExitMixin, Flow):
             #    台账**，在 decide 期就清空 —— 滑动一旦没发出去（被闸吞/被 step
             #    只看一眼），台账没了而屏幕没动  本屏已聊过的行会被**重新点一遍**。
             n = self.state["scrolls"] + 1
-            # ⛔ SWIPE_HARDCODED_OK: 这里的几何还是写死的，理由如下 ——
+            # 禁 SWIPE_HARDCODED_OK: 这里的几何还是写死的，理由如下 ——
             #    别处的滑动都改成了 `nav.list_swipe`（几何从检出推，见那里的
             #    说明），但 MomoTalk 左侧学生列表**没有可靠的行锚点**:
             #    唯一的行内 cls 是 `未读`，而走到这一支恰恰是"本屏未读都清完了"，
@@ -104,7 +104,7 @@ class MomoTalkFlow(ExitMixin, Flow):
                          post=lambda: self.state.update(scrolls=n, done_rows=[]))
         return self._wrap("没有未读消息了")
 
-    # ── 对话中 ──────────────────────────────────────────────────────────
+    #  对话中
     def on_momo_chat(self, obs, st):
         # 学生正在打字  见即等。**不能用 sleep 猜时长。**
         if obs.has(V.MOMO_SENDING, 0.35):
@@ -174,7 +174,7 @@ class MomoTalkFlow(ExitMixin, Flow):
         #    `find([A, B])` 是 conf argmax，而 `任务开始`(常 0.99) 会压过
         #    `进入章节`；更要命的是**羁绊剧情根本不该出现「任務開始」**——
         #    真出现了说明我们站在**别的 flow 的关卡弹窗**上，点下去就是打战斗、
-        #    吃 AP，AP 不够时游戏直接弹「購買AP 單價💎30」。
+        #    吃 AP，AP 不够时游戏直接弹「購買AP 單價30」。
         #     只认「進入章節」，认不出就不动，交给 nav 退出去。
         b = obs.find(V.STORY_ENTER_CHAPTER, 0.35)
         return tap_box(b, "进入羁绊章节") if b is not None else wait("等进入章节键")

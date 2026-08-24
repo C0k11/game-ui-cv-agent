@@ -4,7 +4,7 @@
 许可: MIT (Copyright (c) Sanmusen Wu)，全文见 `LICENSE.BAAH`。
 取得: 2026-08-13，共 240 份（normal 150 / hard 90）。
 
-⛔本目录是**只读原始件**，运行时不再直接读这里 --
+禁本目录是**只读原始件**，运行时不再直接读这里 --
 `scripts/convert_baah_grid.py` 转换成 `data/grid_answers/`（我们的格式），
 `grid.load_answer` 只认那边。数字键的真实语义是**按目标区分的备选解法**
 （官方 grid_solution_format.json），不是多区域，详见 grid_answers/README.md。

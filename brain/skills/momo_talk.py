@@ -17,7 +17,7 @@ Probe refinements over the old skill:
   more reply options to clear.
 
 State machine
--------------
+----
 enter     lobby  NAV_MOMOTALK  MomoTalk  click MOMO_CHAT_TAB  unread list.
 scan      tap the top 学生momotalk信息未读 row (via avatar-x). None  done.
 dialogue  metronome: 发送信息中wait; 回复选项tap; 前往羁绊剧情story. STABLE_N
@@ -44,7 +44,7 @@ _CLS_CONF = 0.30
 _UNREAD_LIST_REGION = (0.0, 0.15, 0.55, 0.95)   # left conversation-list panel
 _AVATAR_DX = 0.28          # 头像漏检时的兜底外推量(badge.cx 左移这么多)
 _AVATAR_CONF = 0.30        # fused_avatar 头像框置信度下限(实测该页 0.99-1.00)
-_ROW_DY = 0.035            # badge ↔ 同行头像的 cy 容差(实测行距 0.107, 取 1/3)
+_ROW_DY = 0.035            # badge <-> 同行头像的 cy 容差(实测行距 0.107, 取 1/3)
 # Switch students ONLY when the screen has NO 学生信息回复选项 (reply) AND NO 学生发
 # 送信息中 (sending) AND NO bond CTA — driven purely by cls detection, NOT a timer.
 # This tiny window only bridges a 1-2 frame render gap (sending vanishes before
@@ -201,7 +201,7 @@ class MomoTalkSkill(BaseSkill):
                 return
         self._row_opens.append([cy, 1])
 
-    # ── page predicates ──────────────────────────────────────────────────
+    #  page predicates
     def _on_momotalk(self, screen: ScreenState) -> bool:
         return self.find_cls(
             screen, [UC.MOMO_CHAT_TAB, UC.MOMO_CHAT_TAB_SEL, UC.MOMO_UNREAD,
@@ -268,7 +268,7 @@ class MomoTalkSkill(BaseSkill):
                      UC.STORY_TAP_CONTINUE, UC.ENTER_BOND_STORY], conf=0.30,
         ) is not None
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -287,7 +287,7 @@ class MomoTalkSkill(BaseSkill):
         #   「警告 / 本內容包含 Ex.十字神名篇結局的強烈劇透 / …
         #    **點擊確認時將前往活動頁面。** / 取消 · 確認」
         # 两个要害:
-        #   按钮在 **cy≈0.913**, 而 _story 的略過框判定带是 y 0.55-0.85 
+        #   按钮在 **cy≈0.913**, 而 _story 的略過框判定带是 y 0.55-0.85
         #     **没有任何代码路径处理它**, 它会一直糊在屏上; 当时 bot 在 scan 里
         #     照常要去 swipe 滑列表(列表在框后面仍被检出 0.86) = 对着遮罩瞎滑。
         #   点確認 = **跳去活动页面**, 直接把 bot 带出 MomoTalk, 而这个状态机

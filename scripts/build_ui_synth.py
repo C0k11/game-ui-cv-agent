@@ -6,10 +6,10 @@ duplicating those few frames just makes the model MEMORIZE them (overfit) —
 it never learns the element independent of its background. This composites the
 element onto MANY different backgrounds instead:
 
-  • SLOTS: paste random character avatars (data/captures/角色头像/) into the
+  - SLOTS: paste random character avatars (data/captures/角色头像/) into the
     template's slot rects  infinite BACKGROUND diversity (different students
     behind the same UI).
-  • UI STAMPS: the FIXED UI elements (the unread badge, the bond-story button)
+  - UI STAMPS: the FIXED UI elements (the unread badge, the bond-story button)
     stay at their template-defined rects and are LABELLED in every frame with
     their cls.  the model learns "this element = this cls, on any background".
 

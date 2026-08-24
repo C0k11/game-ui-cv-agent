@@ -1,21 +1,21 @@
 """Build the ui_v2 dataset for ui_yolo26m_v5 (warm-start fine-tune).
 
 v5 plan (vs ui_v1 which v4 trained on):
-  • Schema = MASTER _classes.txt (451 cls, incl 450 选择购买). ui_v1 was 450.
-  • REAL sources are DEDUPED by content md5 — run_20260521_103956_distinct was
+  - Schema = MASTER _classes.txt (451 cls, incl 450 选择购买). ui_v1 was 450.
+  - REAL sources are DEDUPED by content md5 — run_20260521_103956_distinct was
     628 unique frames blown to 12003 via 200x oversample copies (95% dup). We
     keep the 628 uniques. Heavy dup was the v1/v2/v3 overfit driver; v4 only
     survived it via aug+synth. Cut it.
-  • NEW real data merged: run_20260531_110516 (1052) + run_20260531_143201 (37
+  - NEW real data merged: run_20260531_110516 (1052) + run_20260531_143201 (37
     shop frames — fills 选择购买/已选中/绿勾).
-  • cls92 战术大赛对战选择区域 KEPT (no DROP_CLASSES).
-  • MODERATE re-oversample: classes with 8..TARGET unique frames  duplicate to
+  - cls92 战术大赛对战选择区域 KEPT (no DROP_CLASSES).
+  - MODERATE re-oversample: classes with 8..TARGET unique frames  duplicate to
     TARGET (~30) so dedup doesn't starve the old-only event/battle classes that
     aren't in the new captures. Classes with <8 unique are NOT duped (that's the
     overfit trap — they rely on synth / future real captures instead).
-  • 450 选择购买: explicit higher target (50 ≈ ×3 of its 17 real frames) per user.
-  • SYNTH kept (441/442/449 bond): _synth_bond{,_goto,_enter} — proven in v4.
-  • Val = _ui_val_pool (blind to weak cls; only for early-stop mechanics — real
+  - 450 选择购买: explicit higher target (50 ≈ ×3 of its 17 real frames) per user.
+  - SYNTH kept (441/442/449 bond): _synth_bond{,_goto,_enter} — proven in v4.
+  - Val = _ui_val_pool (blind to weak cls; only for early-stop mechanics — real
     judgement is dashboard visual on the shipped model).
 
 Output: D:/Project/ml_cache/models/yolo/dataset/ui_v2/
@@ -122,7 +122,7 @@ REAL_SOURCES = [
     # 头像归fused域) / _synth_*(用户06-06砍的毒) / expanded·full·static(古schema不兼容)。
     "run_20260603_171121",
     "_ui_val_pool",
-    # ── v10 素材 (2026-06-13, 用户授权开训) ────────────────────────────────
+    #  v10 素材 (2026-06-13, 用户授权开训)
     # 用户手标全审: 313帧(星修110+455补128, commit fd40b59)。
     "run_20260612_191319",
     # bot飞轮 _clean 池(6/12-13 整链/商店/schedule/arena_shop live): v9预标 +
@@ -157,7 +157,7 @@ REAL_SOURCES = [
     "run_20260613_190244_clean",
     "run_20260613_190646_clean",
     "run_20260613_203352_clean",
-    # ── v12 素材 (2026-06-14, 用户 dashboard 人审"标注无问题") ──────────────
+    #  v12 素材 (2026-06-14, 用户 dashboard 人审"标注无问题")
     # 任务大厅 skill live (arena/mail/daily/batch_sweep) + arena_shop step_mode walk
     # 的干净帧, v11 预标. 关键: run_20260614_205540 = 用户手录战术大赛商店素材(245帧,
     # 469战术大赛商店未选中tab的解药 — 之前仅27实例饿着; 含470已选择/471货币/472下级/473一般
@@ -171,24 +171,24 @@ REAL_SOURCES = [
     "run_20260614_213324_clean",
     "run_20260614_213728_clean",
     "run_20260614_213959_clean",
-    # ── v13 素材 (2026-07-08, 用户 dashboard 人审) ──────────────────────────
+    #  v13 素材 (2026-07-08, 用户 dashboard 人审)
     # 0616全skill/0626/0706-0708 大合并池(原9源池已删, 唯一副本): 活动(遊戲開發部
     # 大作戰)全链 quest/编队/加成/商店/里程碑 + reset日 daily + shop/arena_shop。
-    # 管线清洗过: 红黄点HSV闸(-1659假点) / WIN误标397(-18) / 405↔474语义分家(51)
+    # 管线清洗过: 红黄点HSV闸(-1659假点) / WIN误标397(-18) / 405<->474语义分家(51)
     # / 96活动任务锚定补标(+485) / 475奖励资讯改名清洗 / 战斗帧已分离(battle池,
     # 另训战斗模型) / 147空帧已删。新类: 474距离奖励获得结束 / 475奖励资讯。
     "run_20260617_merged_clean",
-    # ── v14 素材 (2026-07-17, 用户 dashboard 人审 + 误标四类批量清零) ────────
+    #  v14 素材 (2026-07-17, 用户 dashboard 人审 + 误标四类批量清零)
     # 0711 大合并池: 7/11 daily 全链(战术大赛/悬赏/信用商店/青辉石商店/momo)。
     # 103 灰态清理过(5 灰暗删, 亮蓝 124 保留)。
     "run_20260711_merged_clean",
     # 0717 大合并池(16 源池, 帧名前缀溯源 evshop/0709m/0717a…): 午夜派对活动商店
     # (evshop 77帧: 103 OCR辅助标注165亮态/101_已选择30/102x150/104x19, 灰态遮罩全剔)
     # + 7/09-7/17 daily 走线 dHash 稀疏后 distinct 帧 + idx77 当期活动入口(用户手标)
-    # + cls451 摸头(prefill span 修复后补标53框)。误标清零: Challenge 语义框/405↔474
+    # + cls451 摸头(prefill span 修复后补标53框)。误标清零: Challenge 语义框/405<->474
     # 混淆(2框)/灰确认 2023(41框)。
     "run_20260717_merged_ui_clean",
-    # ── v15 教学循环产出 (2026-08-01/02 与用户逐帧协作人审, 非预标) ──
+    #  v15 教学循环产出 (2026-08-01/02 与用户逐帧协作人审, 非预标)
     # 新 cls 485 开始制造灰色 / 486 材料不足 / 487 蓝矿 / 489 购买灰色 的
     # **唯一**训练来源; 另含 404 全部选择灰 与 110 Bonus 的漂移修正。
     # 只收这两个**人审过**的队列 —— 155 个 run_*_clean 里那 7,057 帧是
@@ -228,9 +228,9 @@ VAL_SOURCES = [
     "_val_v15_gap",
 ]
 
-# ══════════════════════════════════════════════════════════════════════
+#
 #  v16 飞轮并入（2026-08-11）—— 历代 live session 的 *_clean 目录
-# ══════════════════════════════════════════════════════════════════════
+#
 # 盘点结果: raw_images 里 **142,078 个 UI 框已标好但从没接进 build**（162 目录），
 # 相当于当时训练集的 36%。典型缺口 `购买灰色`(489): 已入训 213 / 未入训 1,206，
 # v15 对它召回仅 21%。
@@ -269,7 +269,7 @@ def _clean_dirs(days) -> list:
 #    代价 = train −22,316 框（−5%）。挑这两天是因为「每搬千框补几个类」
 #      的性价比最高，且搬完没有任何类掉到保护线以下。
 MOVED_TO_VAL = [
-    # ── 第二批（补剧情/攻略族的 val）──────────────────────────────────
+    #  第二批（补剧情/攻略族的 val）
     # 挑天的判据从「val 从 0 变成 >0」改成「**该天至少贡献 8 框**」：
     #    val=1~3 等于也测不出（仓库已经有 15 个这种类），把 0 变成 1 是自欺。
     #    换判据后 0529+0607 胜出，给出的是能用的量：
@@ -277,7 +277,7 @@ MOVED_TO_VAL = [
     # 代价：跳过故事键不可用 train 20970。可接受。
     "run_20260529_000756", "run_20260529_123209",
     "run_20260607_193003", "run_20260607_140123",
-    # ── 第一批 ────────────────────────────────────────────────────────
+    #  第一批
     "run_20260717_merged_ui_clean",
     "run_20260612_191319", "run_20260612_205142_clean", "run_20260612_205201_clean",
     "run_20260612_211227_clean", "run_20260612_211617_clean",
@@ -356,6 +356,22 @@ REAL_SOURCES += _clean_dirs(FLYWHEEL_TRAIN_DAYS) + [
     "v2_20260813_123753", "v2_20260813_131458", "v2_20260813_133201",
     "v2_20260813_133816", "v2_20260813_134041", "v2_20260813_134818",
     "v2alt_tour_20260811", "walk_20260813_082858", "walk_20260813_083604",
+    # --- v17 本轮待标暂存区（2026-08-13 深夜建）----
+    #    老前端下拉不支持搜索, 所以把本轮要标的帧硬链接归并成两个显眼目录,
+    #    源 run 目录(带 _trace.jsonl)原样留档、**永不加进任何源列表**,
+    #    否则同一帧两条路进 build = 重复计数。
+    #    _TRAIN_v17_0813  387帧: 主线 normal 走格子(2-4/2-5, 浅底小图 = 模型
+    #      2-4 盲区同域) + H2-1 全程 + 关卡列表/翻区/入场导航 + manualwalk 44
+    #      (其中 14 帧已带 txt) + 金钱闸 HALT 2 帧。
+    #    切法按**关卡**不按 run: 今天全是 08-13, 天粒度切不动, 关卡是拿得到的
+    #      最强隔离边界 -- val 那批(H2-2)是 Hard 新地图/新敌人/带迷雾, 与这边
+    #      任何一关都不重叠。仍属同一天同账号, 有残余乐观偏差, 记在案。
+    "_TRAIN_v17_0813",
+    # v18: 08-16/18 标修复后的格子/任务大厅包。md5 与已有源撞上的进不了第二份。
+    # 不加 _TRAIN_v18_yt / _TRAIN_v18_yt_ace (已并进本目录, 再加会双计)。
+    "_TRAIN_v18",
+    # 08-12 飞轮已人审过的帧, 含 0000427 活动店 8x103。无 txt 的帧 build 会跳过。
+    "flywheel_v16_20260812",
 ]
 REAL_SOURCES = [s for s in REAL_SOURCES if s not in set(MOVED_TO_VAL)]
 VAL_SOURCES += _clean_dirs(FLYWHEEL_VAL_DAYS) + [
@@ -416,6 +432,19 @@ VAL_SOURCES += _clean_dirs(FLYWHEEL_VAL_DAYS) + [
     "v2grid_20260811_val",     # 91帧: 走格子 497-510 的 val
     "v2alt2_20260812_val",     # 49帧: 任务页签 511-520 / 521·522·524·525·527 的 val
     "v2alt3_20260812_val",     # 9帧: 同上第二批（页签帧内容高度重复，能拆的就这么多）
+    # --- v17 本轮 val 暂存区（2026-08-13 深夜建, 与 _TRAIN_v17_0813 配对）---
+    #    325帧 = H2-2 的三个 run 全部（19:17 / 19:29 / 19:38）。
+    #    为什么整关进 val: 走格子全族 14 个 cls 现在 **val=0**, train 又只来自
+    #      `v2gridmap_20260811` 一个目录 -- 没量尺是 v14 那场事故的复发形态。
+    #      H2-2 是 Hard 新地图/新敌人/带迷雾, 与 train 侧的 2-4/2-5/H2-1 无同关
+    #      重叠, 是今天这批里拿得到的最强隔离边界。
+    #    仍是同一天同账号, 顶栏/队伍卡这类通用件必然共享, 指标偏乐观, 记在案;
+    #      下次换号/换天再采一批独立的走格子 val 顶掉它。
+    #    铁律: 源 run（191728 / 192934 / 193846）永不加进 REAL_SOURCES。
+    "_val_v17_0813",
+    # v18 格子 holdout 208。与 _TRAIN_v18 同图的会被 md5 踢出, 不要删 train 救 val。
+    # 量尺仍不测 489/450/527/528; 类号未逐框, 不当干净。
+    "_val_v18",
 ] + MOVED_TO_VAL
 
 TARGET = 30            # moderate oversample floor (was 200 — the overfit driver)
@@ -571,7 +600,7 @@ def main() -> int:
     for d in (img_tr, lbl_tr, img_va, lbl_va):
         d.mkdir(parents=True, exist_ok=True)
 
-    # ── gather REAL frames, dedup by content md5 ──
+    #  gather REAL frames, dedup by content md5
     seen_md5 = {}
     uniques = []   # (src, stem, jpg, cleaned_txt, classes)
     dropped_overflow = 0
@@ -599,7 +628,7 @@ def main() -> int:
     print(f"[real] {n_raw} raw frames  {len(uniques)} unique (dedup removed "
           f"{n_raw - len(uniques)} dup copies); dropped {dropped_overflow} out-of-range boxes")
 
-    # ── synth frames (no dedup) ──
+    #  synth frames (no dedup)
     synth = []
     for s in SYNTH_SOURCES:
         sd = RAW / s
@@ -617,7 +646,7 @@ def main() -> int:
 
     base = uniques + synth   # one entry each (the de-duped real + synth)
 
-    # ── moderate oversample: bring 8..TARGET classes up to TARGET ──
+    #  moderate oversample: bring 8..TARGET classes up to TARGET
     cls_to_frames = defaultdict(list)
     for i, (_, _, _, _, cs) in enumerate(base):
         for c in cs:
@@ -634,7 +663,7 @@ def main() -> int:
     print(f"[oversample] +{len(dup_entries)} dup entries (target {TARGET}, "
           f"450{TARGET_OVERRIDE[450]}, min_unique {MIN_UNIQUE})")
 
-    # ── write train (uniques + synth once, then dups with __dN suffix) ──
+    #  write train (uniques + synth once, then dups with __dN suffix)
     written_tr = set()   # dst stems this build produced — stray purge below
     def write_entry(entry, dst_stem):
         s, stem, jpg, cleaned, _ = entry
@@ -674,7 +703,7 @@ def main() -> int:
     print(f"[train] {n_train} frames ({len(base) - neg} unique+synth, "
           f"{len(dup_entries)} dups, 跳过空标签 {neg})")
 
-    # ── val from VAL_SOURCES (held-out 多域: ui+头像+摸头, 跨多个 run) ──
+    #  val from VAL_SOURCES (held-out 多域: ui+头像+摸头, 跨多个 run)
     # 2026-08-03 补 dedup: 这里**一直没有去重**, 而 REAL 侧有 —— 后果实测:
     #    val 2642 帧里只有 2200 张唯一图, **442 帧(16.7%)是字节完全相同的重复**,
     #      最大一组 **96 张一模一样**(_val_v12flywheel_0616 同一 run 连拍)  mAP 被
@@ -715,7 +744,7 @@ def main() -> int:
           f"  (dedup 去掉 val 内重复 {n_val_dup} + 与 train 同图 {n_val_leak}"
           f" + 空标签 {n_val_empty})")
 
-    # ── hygiene: purge strays + caches (2026-06-11 实锤双病根) ──────────────
+    #  hygiene: purge strays + caches (2026-06-11 实锤双病根)
     # Build is incremental (no rmtree without --clean), so entries dropped from
     # sources (deleted frames / removed pools / renamed stems) linger as orphan
     # jpg+txt — ultralytics globs the dir, so STRAYS GET TRAINED with stale
@@ -733,7 +762,7 @@ def main() -> int:
         c.unlink()
     print(f"[hygiene] purged {n_stray} stray files + {n_npy} npy caches")
 
-    # ── data.yaml ──
+    #  data.yaml
     yaml = [f"path: {OUT_ROOT.as_posix()}", "train: images/train", "val: images/val",
             f"nc: {nc}", "names:"]
     for i, n in enumerate(master):
@@ -744,7 +773,7 @@ def main() -> int:
     print(f"[link] {_ls}" + ("   有真拷贝, 检查是否跨卷" if _ls.get("copy") else ""))
     print(f"[done] {OUT_ROOT}  (nc={nc}, train={n_train}, val={n_val})")
 
-    # ── report key class counts (instances in train) ──
+    #  report key class counts (instances in train)
     inst = defaultdict(int)
     for entry in base:
         for ln in entry[3].splitlines():

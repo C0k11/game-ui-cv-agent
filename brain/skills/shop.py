@@ -4,7 +4,7 @@ Verified flow (interactive probe 2026-06-01, data/_shop_probe_log.md). The old
 skill blindly confirmed ANY purchase. The user requires DYNAMIC budget planning:
 read the credit balance and only buy when we stay above a configured reserve.
 
- HARD RULES 
+ HARD RULES
 - NEVER touch the 青辉石商店 tab — that spends pyroxene. We stay on the default
   一般(信用点) tab, which is 100% credits, so this skill cannot spend
   pyroxene/real money by construction.
@@ -19,7 +19,7 @@ read the credit balance and only buy when we stay above a configured reserve.
   Reserve is configurable (app_config profile `shop_credit_reserve`).
 
 State machine
--------------
+----
 enter    lobby  NAV_SHOP  shop page (默认 一般 tab). Pyroxene-tab guard.
 select   全部选择 (SHOP_SELECT_ALL)  all items green-checked. 全部选择灰 = nothing
          to buy / already bought today  exit.
@@ -119,7 +119,7 @@ class ShopSkill(BaseSkill):
         self.sub_state = sub_state
         self._phase_ticks = 0
 
-    # ── helpers ──────────────────────────────────────────────────────────
+    #  helpers
     def _on_shop(self, screen: ScreenState) -> bool:
         return self.find_cls(screen, self._SHOP_PAGE_CLS, conf=0.25) is not None
 
@@ -150,7 +150,7 @@ class ShopSkill(BaseSkill):
             return True
         # 身份闩锁(2026-07-25 live 实锤后加 —— 我当天的"3 帧容错"仍误杀了采购):
         # 日志 `inside shop (一般 tab)  select` 正锚**确认过**, 但全选后网格变忙
-        # (5 个绿勾+价格条), 左栏 tab 正锚掉到 conf 阈下  连续 3 帧看不到 
+        # (5 个绿勾+价格条), 左栏 tab 正锚掉到 conf 阈下  连续 3 帧看不到
         # fail-closed 退出  **当天信用点采购一件没买**。
         # 加帧数是治标。正解: **tab 身份不会自己变** —— 只有显式点左栏/滑动才换 tab,
         # 而那是本 skill 自己的动作。所以一旦正向确认过, 本次店内访问期间就成立;
@@ -316,7 +316,7 @@ class ShopSkill(BaseSkill):
             return False
         return self._balance >= (self._reserve + _ASSUMED_MAX_TOTAL)
 
-    # ── tick ────────────────────────────────────────────────────────────────
+    #  tick
     def tick(self, screen: ScreenState) -> Dict[str, Any]:
         self.ticks += 1
         self._phase_ticks += 1
@@ -401,7 +401,7 @@ class ShopSkill(BaseSkill):
         # 恰恰是正锚最不可靠的帧。 闩锁从写下那天起就没有任何机会被置上,
         # 「进店时确认过」这个前提从未发生。今天 live 复现: tick70 正锚 conf
         # **0.968**(未选中网格)  全选后 tick71-75 **连续 5 帧零检出**(不是掉
-        # 阈下, 是 0.05 门槛都不出框, 已用该帧重跑 YOLO 复核)  3 帧容错用尽 
+        # 阈下, 是 0.05 门槛都不出框, 已用该帧重跑 YOLO 复核)  3 帧容错用尽
         # 「credit-tab anchor missing at buy  exit」 **24 件商品一件没买**。
         # 感知侧真因: 该 cls 没在"全选绿框"样式的帧上标注过(v14 补标清单已记)。
         # 这里调用一次: 语义仍是 fail-closed —— 只有**正向检到**才上锁, 检不到
@@ -415,7 +415,7 @@ class ShopSkill(BaseSkill):
             return action_wait(300, "shop nothing to select")
 
         # Already selected  go buy. v8 reality (probed 2026-06-11):
-        #  · SHOP_ALL_SELECTED (cls402 已全部选择) has ZERO training samples 
+        #  · SHOP_ALL_SELECTED (cls402 已全部选择) has ZERO training samples
         #    never fires.
         #  · SHOP_BUY_SELECTED (cls450 选择购买) flickers out live.
         #  · BUT the checked select-all box renders a GREEN_CHECK (绿勾) right
@@ -563,7 +563,7 @@ class ShopSkill(BaseSkill):
         #  PRIMARY budget source (2026-06-12): the confirm dialog itself shows
         # 持有數量 (balance) and 總購買價格 (total) in large clear text — read
         # BOTH from fixed dialog regions and do the exact check. This replaces
-        # the topbar read (vote-flaky: '25,583,379' OCR'd unstably  None 
+        # the topbar read (vote-flaky: '25,583,379' OCR'd unstably  None
         # false cancel, live t0163) and the over-conservative 20M ceiling
         # (balance 25.58M vs reserve5M+20M gate = razor margin).
         # The dialog's 持有數量 is white-on-light, clear, and IMMUNE to the
@@ -607,7 +607,7 @@ class ShopSkill(BaseSkill):
             # 2026-07-21 live 实锤: confirm 点击可能被 pipeline 帧稳定门吞成
             # wait / ADB 丢 tap — 先 _goto("exit") 会让 confirm 永远不落地。
             # 停在 confirm, 以"对话框消失"为点击落地的唯一确认(上方 dialog-gone
-            # 分支  exit)。dedup 同目标 hold 限频不会连射; >4 次仍在 
+            # 分支  exit)。dedup 同目标 hold 限频不会连射; >4 次仍在
             # fail-closed 退(绝不无限重试购买点击)。
             self._confirm_clicks += 1
             if self._confirm_clicks > 4:
@@ -620,8 +620,8 @@ class ShopSkill(BaseSkill):
         return self._cancel_dialog(screen, "budget")
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
-        # ── shop统一 (用户 2026-06-16: 信用点商店 + 战术大赛商店是同一个商店, 左栏
-        # 下滑切 tab 即可, 没必要退大厅再进) ──────────────────────────────────
+        #  shop统一 (用户 2026-06-16: 信用点商店 + 战术大赛商店是同一个商店, 左栏
+        # 下滑切 tab 即可, 没必要退大厅再进)
         # 信用点(一般 tab)买完后, 若仍在商店网格内, 就 done-IN-SHOP(不 nav_home),
         # 让紧随的 arena_shop 在同一次访问里继续(arena_shop._enter 已支持 _on_shop
         #  直接 swipe 到战术大赛 tab, 无需从大厅重进)。复用 arena_shop 全部钱防线。

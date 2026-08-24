@@ -19,18 +19,18 @@ reliable vs which still need oversampling:
 """
 from __future__ import annotations
 
-# ── 顶栏资源 widget (YOLO 定位 icon, OCR 读旁边数字) ──────────────────
+#  顶栏资源 widget (YOLO 定位 icon, OCR 读旁边数字)
 TOPBAR_AP = "体力"            # 18  (677f) AP/stamina
 TOPBAR_CREDIT = "信用点"       # 3   (637f) credits
 TOPBAR_PYROXENE = "青辉石"     # 30  (724f) pyroxene
 TOPBAR_PLUS = "加号"           # 26  (518f) "+" buy button next to currency
 TOPBAR_PLUS_GREY = "加号灰色"   # 116 (24f)
 
-# ── 红黄点 (dot-driven skill dispatch) ───────────────────────────────
+#  红黄点 (dot-driven skill dispatch)
 DOT_RED = "红点"               # 5   (559f) unclaimed reward badge
 DOT_YELLOW = "黄点"            # 6   (223f) unfinished / new-content badge
 
-# ── lobby 底栏导航入口 (16-19f each — weak in v1, v2 fixes) ───────────
+#  lobby 底栏导航入口 (16-19f each — weak in v1, v2 fixes)
 NAV_MAIL = "邮件箱"            # 4   (19f)  top-right envelope
 NAV_DAILY_REWARD = "每日领奖"   # 7   (16f)
 NAV_MOMOTALK = "MomoTalk"     # 8   (16f)
@@ -49,7 +49,7 @@ LOBBY_NAV_ICONS = [
     NAV_CRAFT, NAV_SHOP, NAV_RECRUIT,
 ]  # seeing >=2 of these => we're on the lobby
 
-# ── 通用按钮 / 弹窗 ──────────────────────────────────────────────────
+#  通用按钮 / 弹窗
 BTN_CONFIRM = "确认键"          # 20  (82f)  blue confirm
 BTN_CONFIRM_GREY = "灰色确认"   # 23  (12f)  disabled confirm (insufficient)
 BTN_CANCEL = "取消键"           # 118 (47f)
@@ -59,7 +59,7 @@ BTN_HOME = "回大厅按钮"         # 28  (689f) home button  lobby
 BTN_COLLAPSE = "收起键"         # 29  (0f — NOT trained)
 LOADING = "加载中"             # 22  (45f)
 
-# ── 领取按钮 (多状态: 黄=可领, 灰=已领/不可) ─────────────────────────
+#  领取按钮 (多状态: 黄=可领, 灰=已领/不可)
 CLAIM_ALL_YELLOW = "全部领取_黄"     # 107 (12f)  claim-all active
 CLAIM_ALL_GREY = "全部领取_灰色"     # 413 (12f)  claim-all done
 CLAIM_ONEKEY_GREY = "一键领取灰色"   # 415  一键领取 done (daily-mission)
@@ -80,7 +80,7 @@ CLAIM_ACTIVE = [
 ]
 CLAIM_DONE = [CLAIM_ALL_GREY, CLAIM_ONCE_GREY, CLAIM_GREY, CLAIM_REWARD_GREY]
 
-# ── cafe ─────────────────────────────────────────────────────────────
+#  cafe
 CAFE_INVITE_TICKET = "咖啡厅邀请卷"   # 24  (18f)
 CAFE_EARNINGS = "咖啡厅收益"          # 25  (20f)
 CAFE_INVITE_BTN = "邀请键"            # 32  (12f, 60b)
@@ -91,7 +91,7 @@ EMOTICON_ACTION = "Emoticon_Action"  # 451 cafe headpat bubble — folded in fro
 #   "emoticon" substring so it works whether the box comes from ui or the legacy
 #   standalone model; this constant is the canonical name for find_cls callers.
 
-# ── schedule / 课程表 ────────────────────────────────────────────────
+#  schedule / 课程表
 SCHED_TICKET = "课程表票"             # 35  (96f)
 SCHED_ALL = "全体课程表"              # 41  (31f)  the roster overlay header
 SCHED_START = "课程表开始"            # 400 (14f)
@@ -103,15 +103,15 @@ SCHOOL_GEHENNA = "格黑娜学院中央区"    # 38  (12f)
 SCHOOL_ABYDOS = "阿拜多斯高中"        # 39  (12f)
 SCHOOL_MILLENNIUM = "千年研究所"      # 40  (12f)
 
-# ── 区域选择 (campaign / story chapter nav) ─────────────────────────
+#  区域选择 (campaign / story chapter nav)
 STAGE_HIGHWAY = "高架公路"           # 86  (12f)
 STAGE_DESERT_RAIL = "沙漠铁道"        # 87  (12f)
 STAGE_CLASSROOM = "教室"             # 88  (12f)
 
-# ── club / social ───────────────────────────────────────────────────
+#  club / social
 CLUB = "社团"                       # 51  (12f)
 
-# ── 战斗模式入口 (任务 hub tiles) ───────────────────────────────────
+#  战斗模式入口 (任务 hub tiles)
 HUB_CAMPAIGN = "任务关卡推图"         # 67  (18f)
 HUB_STORY = "剧情"                   # 68  (18f)
 HUB_BOUNTY = "悬赏通缉"              # 69  (18f)
@@ -119,7 +119,7 @@ HUB_SPECIAL = "特殊任务"             # 70  (18f)
 HUB_SCHOOL_EXCHANGE = "学院交流会"    # 71  (18f)
 HUB_ARENA = "战术大赛"               # 75  (18f)
 
-# ── 关卡 / 战斗准备 ─────────────────────────────────────────────────
+#  关卡 / 战斗准备
 STAGE_ENTER = "入场键"               # 79  (94f)  enter stage
 STAGE_ENTER_LOCKED = "入场键没解锁"   # 82  (48f)
 STAGE_NORMAL_SEL = "普通关卡选中"     # 80  (12f)
@@ -132,7 +132,7 @@ SWEEP_START = "扫荡开始"             # 108 (39f)
 TASK_START = "任务开始"              # 109 (27f)
 SORTIE = "出击"                     # 124 (44f)
 
-# ── 批量扫荡 dialog (master 455-468; 453/454 见 特殊任务 section) ────
+#  批量扫荡 dialog (master 455-468; 453/454 见 特殊任务 section)
 SWEEP_BATCH = "批量扫荡"             # 455  button on the 任務 stage screen
 SWEEP_BATCH_START = "批量扫荡开始"    # 456  dialog confirm (active)
 SWEEP_BATCH_START_GREY = "批量扫荡开始灰色"  # 457  dialog confirm (disabled)
@@ -148,7 +148,7 @@ SWEEP_PLAN2_SEL = "困难关卡刷取方案二已选中"   # 466
 BATTLE_COMPLETE = "战斗完成"          # 467  sweep/battle result header
 GOTO_NOW = "立即前往"                # 468
 
-# ── 票券 ─────────────────────────────────────────────────────────────
+#  票券
 TICKET_BOUNTY = "悬赏通缉票"          # 85  (20f)
 TICKET_ARENA = "战术大赛票"           # 91  (41f)
 ARENA_OPPONENT_ROW = "战术大赛对战选择区域"  # 92 (v5): bounds each opponent row; cy~0.34/0.57/0.79 right panel.
@@ -156,7 +156,7 @@ ARENA_OPPONENT_ROW = "战术大赛对战选择区域"  # 92 (v5): bounds each op
 #   no avatar model, no hardcoded position.
 TICKET_SCHOOL_EXCHANGE = "学院交流会票"  # 406 (22f)
 
-# ── 编队 / 部队 ─────────────────────────────────────────────────────
+#  编队 / 部队
 SQUAD_QUICK_EDIT = "快速编辑"         # 121 (51f)
 SQUAD_AUTO_EDIT = "自动编辑按钮"      # 127 (12f)
 SQUAD_1 = "1部队"                    # 119 (15f)
@@ -166,7 +166,7 @@ SQUAD_2_HI = "2部队高亮"             # 120 (15f)
 SQUAD_3 = "3部队"                    # 123 (27f)
 SQUAD_4 = "4部队"                    # 122 (27f)
 
-# ── 战斗控制 (in-battle) ────────────────────────────────────────────
+#  战斗控制 (in-battle)
 BATTLE_PAUSE = "战斗暂停"            # 128 (108f)
 BATTLE_1X = "战斗1倍速"              # 412 (22f)
 BATTLE_2X = "战斗2倍速"              # 135 (20f)
@@ -183,7 +183,7 @@ BATTLE_SKIP_TOGGLE = "跳过战斗未选"   # formation 跳過戰鬥 checkbox (a
 GOTO_LOBBY_TEXT = "前往大厅文字按钮"  # 138 (12f)
 ATTACK_FORMATION = "攻击编制"        # 435 (15f)
 
-# ── 数量增减 (purchase / count steppers) ────────────────────────────
+#  数量增减 (purchase / count steppers)
 QTY_MAX = "MAX_可点击"              # 111 (39f)
 QTY_MAX_GREY = "MAX_灰色"           # 117 (24f)
 QTY_MIN = "MIN_可点击"              # 114 (14f)
@@ -191,7 +191,7 @@ QTY_MIN_GREY = "MIN_灰色"           # 112 (49f)
 QTY_MINUS = "减号"                  # 115 (14f)
 QTY_MINUS_GREY = "减号灰色"          # 113 (49f)
 
-# ── 商店 ─────────────────────────────────────────────────────────────
+#  商店
 SHOP_SELECT_ALL = "全部选择"         # 55  (18f)
 SHOP_SELECT_ALL_GREY = "全部选择灰"   # 404 (12f)
 SHOP_ALL_SELECTED = "已全部选择"      # 402  全选完成态（区别于 全部选择/灰）
@@ -213,7 +213,7 @@ SHOP_TAB_CREDIT = "信用点商店"        # 62   一般(信用点)tab
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"  # 54  一般 tab 选中 = 安全
 SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"  # 61   花青辉石 tab 选中
 
-# ── 战术大赛商店 (买体力 — 花战术大赛货币, NOT 青辉石/信用点) ──────────
+#  战术大赛商店 (买体力 — 花战术大赛货币, NOT 青辉石/信用点)
 # 商店左栏下滑可见. 新类 469-473 (v9 起训, 2026-06-11 用户手标+模板补).
 ARENA_SHOP_TAB = "战术大赛商店"           # 469  左栏 tab (未选中)
 ARENA_SHOP_TAB_SEL = "战术大赛商店已选择"   # 470  tab 选中 = 在战术大赛商店内
@@ -221,7 +221,7 @@ ARENA_SHOP_CURRENCY = "战术大赛商店货币"    # 471  货币图标 (顶栏�
 ENERGY_DRINK_LOW = "下级能量饮料"          # 472  30AP, 售15货币
 ENERGY_DRINK_MID = "一般能量饮料"          # 473  60AP, 售30货币
 
-# ── 制造 / craft ────────────────────────────────────────────────────
+#  制造 / craft
 CRAFT_QUICK = "快速制造"             # 443 (28f)
 CRAFT_START = "开始制造"             # 444 (19f)
 # 485 = 灰(禁用)态「開始製造」。2026-08-02 从 444 里拆出来(219 个灰键当年被
@@ -230,7 +230,7 @@ CRAFT_START = "开始制造"             # 444 (19f)
 # (挂在 `find_cls(CRAFT_START)` 非空这个前提上)整条被跳过  落到 MAX 外推盲点。
 CRAFT_START_GREY = "开始制造灰色"     # 485
 
-# ── 活动 (event — 周年庆暂跳过, 但 cls 已训) ────────────────────────
+#  活动 (event — 周年庆暂跳过, 但 cls 已训)
 EVENT_STORY = "活动剧情"             # 93  (24f)
 EVENT_STORY_SEL = "活动剧情_已选择"   # 97  (12f)
 EVENT_QUEST = "活动quest"           # 94  (12f)
@@ -251,7 +251,7 @@ EVENT_DOUBLE_TRIPLE = "双倍或三倍活动进行中"   # 452
 SPECIAL_DEFENSE = "据点防御"          # 453
 SPECIAL_CREDIT = "信用货币回收"        # 454
 
-# ── 剧情 / story mining ─────────────────────────────────────────────
+#  剧情 / story mining
 STORY_MAIN = "主线剧情"              # 423 (15f)
 STORY_SHORT = "短篇剧情"             # 424 (15f)
 STORY_SIDE = "支线剧情"              # 425 (12f)
@@ -271,7 +271,7 @@ NODE_DONE = "完成"                  # 426 (18f)
 NODE_DONE_GREY = "完成_灰色"         # 490  2026-08-02 从 426 拆出(84框), v15 起可用
 SCENE_DONE = "战斗图标已完成"         # 447 (12f)
 
-# ── momotalk ─────────────────────────────────────────────────────────
+#  momotalk
 MOMO_CHAT_TAB = "momotalk学生聊天区域按钮"     # 448  对话区域 tab (未读列表入口)
 MOMO_CHAT_TAB_SEL = "momotalk学生聊天区域已进入"  # 449  对话区域 tab 选中态
 MOMO_UNREAD = "学生momotalk信息未读"  # 439 (121f) unread conversation badge
@@ -280,17 +280,17 @@ MOMO_REPLY_OPT = "学生信息回复选项"    # 440 (32f)  reply choice
 GOTO_BOND_STORY = "前往羁绊剧情"      # 441 (12f)
 ENTER_BOND_STORY = "进入羁绊剧情"     # 442 (12f)
 
-# ── 升级 / 全屏过场 (tap to dismiss) ────────────────────────────────
+#  升级 / 全屏过场 (tap to dismiss)
 BOND_LEVELUP = "羁绊升级"            # 398 (15f)
 REGION_LEVELUP = "地区升级"          # 399 (12f)
 
-# ── 左右翻页 ─────────────────────────────────────────────────────────
+#  左右翻页
 ARROW_LEFT = "左切换"               # 0   (117f)
 ARROW_RIGHT = "右切换"              # 1   (86f)
 FAVORITE_ICON = "收藏图标"           # 33  (14f)
 
 
-# ── 语义组 helpers ──────────────────────────────────────────────────
+#  语义组 helpers
 # Page-detection cls signatures: seeing these YOLO cls => we're on that page.
 # Used by detect_current_screen_yolo() to replace OCR header matching.
 PAGE_SIGNATURES = {
@@ -305,7 +305,7 @@ PAGE_SIGNATURES = {
     "Craft": ([CRAFT_QUICK, CRAFT_START], 1),
     "MomoTalk": ([MOMO_UNREAD, MOMO_REPLY_OPT, MOMO_SENDING], 1),
     "Story": ([STORY_ENTER_CHAPTER, STORY_MENU, STORY_ICON_DONE, STORY_ICON_UNDONE], 1),
-    # ── battle/sweep hub + sub-screens (legacy detect_current_screen names) ──
+    #  battle/sweep hub + sub-screens (legacy detect_current_screen names)
     "PVP": ([TICKET_ARENA], 1),          # arena main screen (持有票券 X/5)
     "Bounty": ([TICKET_BOUNTY], 1),      # bounty screen
     # campaign hub grid: needs >=2 distinct mode tiles so a single tile

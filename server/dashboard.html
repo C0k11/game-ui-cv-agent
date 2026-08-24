@@ -6,7 +6,7 @@
 <title>BA Agent 控制台</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-/* ── Industrial dark theme (2026-06-10 rework) ──
+/*  Industrial dark theme (2026-06-10 rework)
  * Dense, flat, tool-grade: neutral graphite surfaces, one restrained
  * steel-blue accent + muted amber for "active/claim" semantics. No
  * gradients, no glows, no hover lifts — state changes are border/bg
@@ -40,7 +40,7 @@ html,body{height:100%;overflow:hidden}
 body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex;font-size:13px}
 :focus-visible{outline:1px solid var(--accent);outline-offset:1px}
 
-/* ── Sidebar ── */
+/*  Sidebar  */
 .sidebar{width:56px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px;flex-shrink:0}
 .sidebar .logo{font-size:15px;margin-bottom:6px;padding:6px 0;color:var(--muted);font-weight:700;letter-spacing:0;font-family:var(--mono)}
 .nav-btn{width:40px;height:40px;border:none;background:transparent;color:var(--muted);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;transition:background .1s,color .1s;position:relative;font-family:var(--mono)}
@@ -50,17 +50,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .nav-btn .label{display:none}
 .sidebar-bottom{margin-top:auto}
 
-/* ── Main ── */
+/*  Main  */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .page{display:none;flex:1;overflow:auto;padding:14px 18px}
 .page.active{display:flex;flex-direction:column}
 .page-title{font-size:15px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px;color:var(--text);letter-spacing:.2px;border-left:3px solid var(--accent);padding-left:8px}
 
-/* ── Cards ── */
+/*  Cards  */
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:10px}
 .card h3{font-size:11px;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:600;display:flex;align-items:center;gap:6px}
 
-/* ── Form elements ── */
+/*  Form elements  */
 .form-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:flex-end}
 .form-group{display:flex;flex-direction:column;gap:5px}
 .form-group label{font-size:11px;color:var(--muted);letter-spacing:.3px;font-weight:500}
@@ -72,7 +72,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .check-row label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)}
 .check-row input[type=checkbox]{accent-color:var(--accent)}
 
-/* ── Buttons ── */
+/*  Buttons  */
 .btn{padding:6px 13px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12.5px;font-family:var(--font);font-weight:500;transition:background .1s,border-color .1s;white-space:nowrap}
 .btn:hover{background:#2b3037;border-color:#3e454e}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:#0d1116;font-weight:600}
@@ -85,25 +85,25 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .btn-gold:hover{background:#e3ad4e}
 .btn-sm{padding:4px 9px;font-size:12px;border-radius:3px}
 
-/* ── Status pill ── */
+/*  Status pill  */
 .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:3px;font-size:11.5px;font-weight:600;letter-spacing:.2px;font-family:var(--mono)}
 .pill.ok{background:rgba(83,176,109,.12);color:var(--green);border:1px solid rgba(83,176,109,.35)}
 .pill.bad{background:rgba(217,100,89,.12);color:var(--red);border:1px solid rgba(217,100,89,.35)}
 .pill.idle{background:var(--bg3);color:var(--muted);border:1px solid var(--border)}
 .pill.gold{background:var(--gold-soft);color:var(--gold);border:1px solid rgba(217,161,61,.35)}
 
-/* ── Logs ── */
+/*  Logs  */
 .logs-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
 .log-box{display:flex;flex-direction:column;min-height:0}
 .log-box textarea{flex:1;width:100%;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);resize:none}
 
-/* ── Routine HUD ── */
+/*  Routine HUD  */
 .routine-hud{padding:10px 12px;border-radius:var(--radius);background:var(--bg-soft);border:1px solid var(--border);border-left:3px solid var(--accent);margin-top:8px}
 .routine-hud.recovery{background:#241a18;border-left-color:var(--red)}
 .progress-bar{width:100%;background:rgba(0,0,0,.35);height:5px;border-radius:2px;margin:7px 0;overflow:hidden}
 .progress-fill{height:100%;background:var(--accent);transition:width .3s}
 
-/* ── Toast (currently used by annotation save errors) ── */
+/*  Toast (currently used by annotation save errors)  */
 .toast-stack{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:9999;pointer-events:none;max-width:480px}
 .toast{padding:8px 13px;border-radius:var(--radius);font-size:12.5px;font-family:var(--font);box-shadow:0 2px 8px rgba(0,0,0,.45);pointer-events:auto;border-left:3px solid var(--border);background:var(--bg2);color:var(--text);animation:toastIn .15s ease-out;word-break:break-word}
 .toast.error{border-left-color:var(--red);background:#241a18}
@@ -112,13 +112,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .toast.fade-out{opacity:0;transition:opacity .3s}
 @keyframes toastIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
 
-/* ── Capture page ── */
+/*  Capture page  */
 .capture-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
 .stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;text-align:center}
 .stat-card .num{font-size:24px;font-weight:600;color:var(--text);font-family:var(--mono)}
 .stat-card .lbl{font-size:10.5px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.8px}
 
-/* ── Annotate page ── */
+/*  Annotate page  */
 .annotate-layout{display:flex;flex:1;gap:0;min-height:0;overflow:hidden}
 /* Sidebar uses INNER scrolling per section so the class search + add box
    stay visible no matter how many boxes the current image has.  Without
@@ -170,7 +170,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .skill-row .skill-actions{display:flex;gap:4px}
 .profile-hint{font-size:11px;color:var(--muted);margin-top:8px;font-style:italic}
 
-/* ── Char picker ── */
+/*  Char picker  */
 .fav-tray{display:flex;flex-wrap:wrap;gap:8px;min-height:72px;padding:8px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:8px}
 .fav-tray.empty::before{content:"未选择角色 · 从下方列表点击添加，在此拖动调整顺序";color:var(--muted);font-size:11px;width:100%;text-align:center;align-self:center;padding:12px 0}
 .fav-tray-item{position:relative;display:flex;flex-direction:column;align-items:center;padding:4px;border-radius:var(--radius);border:1px solid var(--accent);background:var(--bg-soft);cursor:grab;user-select:none}
@@ -191,7 +191,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 .fav-search{width:100%;padding:6px 9px;margin-bottom:8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:12px;box-sizing:border-box;outline:none;transition:border-color .1s}
 .fav-search:focus{border-color:var(--accent)}
 
-/* ── Scrollbar ── */
+/*  Scrollbar  */
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:#343a42;border-radius:2px;border:2px solid var(--bg)}
@@ -207,7 +207,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   <button class="nav-btn" onclick="showPage('capture')" title="采集中心">C</button>
   <button class="nav-btn" onclick="showPage('annotate')" title="标注中心">L</button>
   <button class="nav-btn" onclick="showPage('synth')" title="合成数据模板编辑（生成训练用 composite 头像）">S</button>
-  <button class="nav-btn" onclick="showPage('axis')" title="凹轴 · 总力战轴视频素材管线（下载→抽帧→预标→轴表）">轴</button>
+  <button class="nav-btn" onclick="showPage('axis')" title="凹轴 · 总力战轴视频素材管线（下载->抽帧->预标->轴表）">轴</button>
   <div class="sidebar-bottom">
     <button class="nav-btn" onclick="window.open('/docs','_blank')" title="API 文档">?</button>
   </div>
@@ -215,12 +215,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
 <div class="main">
 
-<!-- ════════════ AGENT PAGE ════════════ -->
+<!--  AGENT PAGE  -->
 <div class="page active" id="page-agent">
   <div class="page-title">助手控制台</div>
   <div class="assistant-sub">本地日常自动化 · 档案 / Skill 编排 · YOLO 状态机驱动</div>
   <div class="card">
-    <!-- ── PRIMARY: Profile + Run controls (everything you actually press) ── -->
+    <!--  PRIMARY: Profile + Run controls (everything you actually press)  -->
     <div class="form-row">
       <div class="form-group" style="min-width:260px">
         <label>配置档案</label>
@@ -243,17 +243,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <span class="pill idle" id="status_pill" style="align-self:flex-end;margin-bottom:11px">Unknown</span>
     </div>
     <div class="form-row" style="margin-top:4px;gap:8px;align-items:center">
-      <button class="btn-primary btn" id="btn_start">▶ Start 日常</button>
-      <button class="btn-danger btn" id="btn_stop">■ Stop</button>
+      <button class="btn-primary btn" id="btn_start">> Start 日常</button>
+      <button class="btn-danger btn" id="btn_stop">- Stop</button>
       <button class="btn" id="btn_profile_save">保存档案</button>
       <div style="flex:1"></div>
-      <button class="btn btn-sm" onclick="document.getElementById('advancedSettings').open=!document.getElementById('advancedSettings').open;return false">⚙ 高级设置</button>
+      <button class="btn btn-sm" onclick="document.getElementById('advancedSettings').open=!document.getElementById('advancedSettings').open;return false"> 高级设置</button>
     </div>
     <div id="status_text" style="font-size:11px;color:var(--muted);margin-top:8px;font-family:var(--mono);word-break:break-all;max-height:40px;overflow:hidden">Status: ...</div>
 
-    <!-- ── SECONDARY: collapsed advanced settings ── -->
+    <!--  SECONDARY: collapsed advanced settings  -->
     <details id="advancedSettings" style="margin-top:14px;border-top:1px solid var(--border-soft);padding-top:12px">
-      <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none;letter-spacing:.5px">▾ 高级设置（运行参数 / 活动 / 悬赏 / 定时 / 通知 / 目标指令）</summary>
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none;letter-spacing:.5px"> 高级设置（运行参数 / 活动 / 悬赏 / 定时 / 通知 / 目标指令）</summary>
       <div style="margin-top:12px">
         <div class="form-row">
           <div class="form-group" style="min-width:260px;flex:1">
@@ -275,14 +275,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <div class="form-row">
           <div class="form-group"><label>Steps (0=loop)</label><input id="steps" type="number" value="0" style="width:90px"/></div>
           <div class="form-group" title="每 tick 之间 sleep 秒数（非 wait 动作）。0.3 = 默认"><label>Step Sleep</label><input id="step_sleep_s" type="number" step="0.1" min="0.1" value="0.3" style="width:80px"/></div>
-          <div class="form-group"><label>AP Purchase Limit</label><input id="ap_purchase_limit" type="number" value="0" style="width:90px"/></div>
+          <div class="form-group" title="锁死: 买体力上限必须是 0"><label>AP Purchase Limit</label><input id="ap_purchase_limit" type="number" value="0" style="width:90px" readonly disabled/></div>
           <div class="form-group" title="Event 刷取每次技能运行的扫荡轮数"><label>Event Rounds</label><input id="event_max_rounds" type="number" min="1" max="20" value="1" style="width:80px"/></div>
           <div class="form-group" title="AP 保留下限：当前 AP ≤ 此值时停止循环"><label>AP Reserve</label><input id="event_ap_reserve" type="number" min="0" value="0" style="width:80px"/></div>
         </div>
         <div class="form-row" style="gap:18px">
           <div class="check-row">
             <label><input id="dry_run" type="checkbox" checked/> Dry Run</label>
-            <label><input id="forbid_premium_currency" type="checkbox" checked/> 禁止高级货币 / 抽卡点击</label>
+            <label title="锁死: 不能从界面关掉。改了也不生效"><input id="forbid_premium_currency" type="checkbox" checked disabled/> 禁止花青辉石（锁死，不可关）</label>
             <label><input id="exploration_click" type="checkbox"/> 探索性点击</label>
             <label><input id="notify_on_finish" type="checkbox"/> 完成后通知</label>
           </div>
@@ -360,7 +360,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <summary style="cursor:pointer;color:var(--muted);font-size:13px;user-select:none">日常流程编排</summary>
     <div class="card" style="margin-top:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <div style="font-size:12px;color:var(--muted);flex:1;min-width:240px">按顺序执行你启用的收菜模块 · 拖动整行排序，✓ 切换启用 · 无 dot 的 skill 会被红黄点检测自动跳过</div>
+        <div style="font-size:12px;color:var(--muted);flex:1;min-width:240px">按顺序执行你启用的收菜模块 · 拖动整行排序，OK 切换启用 · 无 dot 的 skill 会被红黄点检测自动跳过</div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm" id="btn_skills_all_on" title="勾选所有 skill">全选</button>
           <button class="btn btn-sm" id="btn_skills_all_off" title="取消所有勾选 — 不跑日常，只把档案 / 设置加载">全不选</button>
@@ -379,7 +379,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div id="fav_tray" class="fav-tray empty"></div>
       <input type="text" id="fav_search" class="fav-search" placeholder="搜索角色名（中文/英文/拼音）..." />
       <div id="char_grid" class="char-grid"></div>
-      <div style="margin-top:6px;font-size:10px;color:var(--muted)">顺序 = 优先级: #1 → 咖啡厅1F邀请, #2 → 咖啡厅2F邀请, 全部 → 课程表匹配</div>
+      <div style="margin-top:6px;font-size:10px;color:var(--muted)">顺序 = 优先级: #1 -> 咖啡厅1F邀请, #2 -> 咖啡厅2F邀请, 全部 -> 课程表匹配</div>
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
         <button class="btn btn-primary btn-sm" id="btn_save_favorites">保存收藏角色</button>
         <button class="btn btn-sm" id="btn_clear_favorites">清空</button>
@@ -394,7 +394,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   </div>
 </div>
 
-<!-- ════════════ CAPTURE PAGE ════════════ -->
+<!--  CAPTURE PAGE  -->
 <div class="page" id="page-capture">
   <div class="page-title">Screen Capture</div>
   <div class="capture-stats">
@@ -426,7 +426,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <button class="btn btn-danger" id="btn_cap_stop" style="align-self:flex-end">Stop</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px" id="cap_error"></div>
-    <div style="font-size:11px;color:var(--muted);margin-top:4px" id="cap_dest_hint">→ run_&lt;timestamp&gt; (train data)</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px" id="cap_dest_hint">-> run_&lt;timestamp&gt; (train data)</div>
   </div>
   <div class="card">
     <h3>Existing Datasets</h3>
@@ -434,7 +434,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   </div>
 </div>
 
-<!-- ════════════ ANNOTATE PAGE ════════════ -->
+<!--  ANNOTATE PAGE  -->
 <div class="page" id="page-annotate" style="padding:0;overflow:hidden">
   <div class="ann-toolbar">
     <div class="tb-row">
@@ -442,11 +442,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <div class="form-group" style="margin:0">
       <select id="ann_dataset" style="padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px"><option value="">Select dataset...</option></select>
     </div>
+    <input id="ann_dataset_find" type="text" spellcheck="false" autocomplete="off"
+      placeholder="粘贴目录名, 如 _REVIEW_v18_yt"
+      title="粘贴或输入目录名后回车跳转. 支持完整路径(只取最后一段). 全角/空格会归一. _REVIEW_v18_yt 在下拉最后一组「其他未纳入」."
+      style="width:240px;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;font-family:var(--mono)">
     <span id="ann_generation" class="info" title="当前各域 live 模型代数 (各域最强: UI / 头像 / 摸头)" style="font-family:var(--mono);font-size:11px;color:var(--accent);white-space:nowrap;padding:0 6px">代数 -</span>
     <span class="tb-sep"></span>
-    <button class="btn btn-sm" onclick="annPrev()" title="上一帧 (A)">◀ Prev</button>
+    <button class="btn btn-sm" onclick="annPrev()" title="上一帧 (A)"> Prev</button>
     <span class="info" id="ann_counter" style="font-family:var(--mono)">-</span>
-    <button class="btn btn-sm" onclick="annNext()" title="下一帧 (D)">Next ▶</button>
+    <button class="btn btn-sm" onclick="annNext()" title="下一帧 (D)">Next ></button>
     <button class="btn btn-sm" onclick="annJumpEmpty()">Skip empty</button>
     <button class="btn btn-sm" onclick="annJumpLabeled()">Skip labeled</button>
     <span class="tb-sep"></span>
@@ -475,10 +479,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
     <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前选择的 teacher 模型预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
     <select id="ann_prefill_model" onchange="annFillVersions()" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option><option value="battle_heads">战斗</option></select>
-    <select id="ann_prefill_ver" title="模型版本: ★=prefill推荐teacher(=active), ·live=pipeline在用。UI 默认 v7(2026-06-08 上线, by-cls 0.92 全面最强: 制造入口0→0.97/emoticon/cafe/红黄点都到位, 超 v6c+v5)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"></select>
+    <select id="ann_prefill_ver" title="模型版本: =prefill推荐teacher(=active), ·live=pipeline在用。UI 默认 v7(2026-06-08 上线, by-cls 0.92 全面最强: 制造入口0->0.97/emoticon/cafe/红黄点都到位, 超 v6c+v5)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"></select>
     <select id="ann_prefill_mode" title="累加=追加到其他模型已标的框上不覆盖(首次叠标用) / 覆盖=只替换本模型自己段的框、删旧写新、其他模型框(ui/头像)保留(重跑某模型修错用,如调高摸头conf去课程表乱标) / 跳过已标=不碰已标帧" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="merge">累加</option><option value="overwrite">覆盖(仅本模型)</option><option value="skip">跳过已标</option></select>
     <input id="ann_prefill_conf" type="number" min="0.05" max="0.95" step="0.05" value="0.25" title="预填 conf 阈值。摸头/头像在非主场景(如课程表)易假阳性,调高到 0.4-0.6 滤掉乱标" style="width:56px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
-    <input id="ann_prefill_targets" type="text" list="ann_cls_datalist" oninput="annValidateTargets()" placeholder="只标cls(选/逗号,空=全)" title="只预填这些 cls。聚焦弹下拉自动补全(只列当前模型能标的 cls, 选了必合法), 输入即校验。逗号分隔多个; 空=标该模型全 span。补单弱类(如 咖啡厅收益)填它 → 不用标全部, 大幅提效。" style="width:150px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
+    <input id="ann_prefill_targets" type="text" list="ann_cls_datalist" oninput="annValidateTargets()" placeholder="只标cls(选/逗号,空=全)" title="只预填这些 cls。聚焦弹下拉自动补全(只列当前模型能标的 cls, 选了必合法), 输入即校验。逗号分隔多个; 空=标该模型全 span。补单弱类(如 咖啡厅收益)填它 -> 不用标全部, 大幅提效。" style="width:150px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px">
     <datalist id="ann_cls_datalist"></datalist>
     <span id="ann_targets_hint" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
     <button class="btn btn-sm" id="btn_yolo_run" onclick="annPrefillRun()" title="按上面选的模型+模式批量预填整个 run。累加模式可让 ui/头像/摸头 逐次预填同一批帧而不互相覆盖 (~1min/600帧)">YOLO预填(整run)</button>
@@ -498,10 +502,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <button class="btn btn-sm" onclick="annAlignCenterV()" title="垂直居中">≡V</button>
       <button class="btn btn-sm" onclick="annAlignBottom()" title="底对齐">⫶B</button>
       <span style="width:6px"></span>
-      <button class="btn btn-sm" onclick="annDistributeH()" title="水平均匀分布 (≥3)">↔</button>
-      <button class="btn btn-sm" onclick="annDistributeV()" title="垂直均匀分布 (≥3)">↕</button>
+      <button class="btn btn-sm" onclick="annDistributeH()" title="水平均匀分布 (≥3)"><-></button>
+      <button class="btn btn-sm" onclick="annDistributeV()" title="垂直均匀分布 (≥3)"></button>
       <span style="width:6px"></span>
-      <button class="btn btn-sm" onclick="annMatchSize()" title="尺寸跟随 anchor">⛶=</button>
+      <button class="btn btn-sm" onclick="annMatchSize()" title="尺寸跟随 anchor">=</button>
       <button class="btn btn-sm" onclick="annArrayGenerate()" title="阵列生成 (Shift+G, 选 2 个时用)">⋯N</button>
       <button class="btn btn-sm" onclick="annStampAction()" title="保存/粘贴 stamp (Shift+T)">⎘</button>
     </span>
@@ -512,14 +516,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <h4>Classes <span id="ann_classcount" style="color:var(--muted);font-weight:normal"></span></h4>
       <div class="add-class-row">
         <input type="text" id="ann_class_filter" placeholder="search classes..." oninput="annFilterClasses()" style="flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none"/>
-        <button class="btn btn-sm" onclick="$('ann_class_filter').value='';annFilterClasses()" style="padding:3px 6px" title="Clear filter">✕</button>
+        <button class="btn btn-sm" onclick="$('ann_class_filter').value='';annFilterClasses()" style="padding:3px 6px" title="Clear filter"></button>
       </div>
       <div class="add-class-row">
         <input type="text" id="ann_new_class" placeholder="new class..." onkeydown="if(event.key==='Enter')annAddClass()"/>
         <button class="btn btn-sm btn-success" onclick="annAddClass()" style="padding:3px 6px">+</button>
       </div>
       <div class="add-class-row">
-        <button class="btn btn-sm" onclick="clsMgrOpen()" style="flex:1" title="全库类管理: 两类合并 / 改名 / 用量统计 (自动备份, idx 永不移位)">🛠 类管理</button>
+        <button class="btn btn-sm" onclick="clsMgrOpen()" style="flex:1" title="全库类管理: 两类合并 / 改名 / 用量统计 (自动备份, idx 永不移位)"> 类管理</button>
       </div>
       <div id="ann_classlist"></div>
       <h4>Boxes <span id="ann_boxcount"></span></h4>
@@ -528,7 +532,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div class="add-class-row">
         <input type="text" id="ann_findclass" placeholder="class idx or name, e.g. 361 or 昴" onkeydown="if(event.key==='Enter')annFindFrames()" style="flex:1;padding:4px 6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:11px;outline:none"/>
         <button class="btn btn-sm btn-success" onclick="annFindFrames()" style="padding:3px 6px" title="搜索包含该 class 的 frame">查</button>
-        <button class="btn btn-sm" onclick="$('ann_findclass').value='';$('ann_findlist').innerHTML='';$('ann_findcount').textContent='';" style="padding:3px 6px" title="清空">✕</button>
+        <button class="btn btn-sm" onclick="$('ann_findclass').value='';$('ann_findlist').innerHTML='';$('ann_findcount').textContent='';" style="padding:3px 6px" title="清空"></button>
       </div>
       <div id="ann_findlist" style="flex-shrink:0;max-height:240px;min-height:0;overflow-y:auto;background:#0d0d10;border:1px solid var(--border);border-radius:3px;font-size:11px;font-family:var(--mono)"></div>
       <h4 id="ann_ocr_header" style="display:none">OCR <span id="ann_ocrcount"></span></h4>
@@ -562,10 +566,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   </div>
 </div>
 
-<!-- ════════════ SYNTH TEMPLATE EDITOR PAGE ════════════ -->
+<!--  SYNTH TEMPLATE EDITOR PAGE  -->
 <div class="page" id="page-synth">
   <div class="page-title">合成数据模板编辑器 <span class="pill gold" style="font-size:10px;margin-left:6px">Synth</span></div>
-  <div class="assistant-sub">为每个 UI context (课程表 / 学生清单 / MomoTalk / 战斗编队 / 战术大赛 / 咖啡邀请) 配置合成模板。<b>调好的样板</b> + <b>slot 位置</b> + <b>ref 裁剪</b> + <b>aug 频率</b> → build script 据此批量产合成训练数据。</div>
+  <div class="assistant-sub">为每个 UI context (课程表 / 学生清单 / MomoTalk / 战斗编队 / 战术大赛 / 咖啡邀请) 配置合成模板。<b>调好的样板</b> + <b>slot 位置</b> + <b>ref 裁剪</b> + <b>aug 频率</b> -> build script 据此批量产合成训练数据。</div>
 
   <div class="card" style="display:flex;gap:12px;align-items:stretch;height:calc(100vh - 180px);min-height:500px">
     <!-- Canvas area -->
@@ -579,7 +583,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           <option value="ui">ui 图章</option>
         </select>
         <button onclick="synthToggleStampMode()" id="synth_stamp_btn" class="btn btn-sm" title="开启后: 在画布上拖出一个 UI 图章框, 松手选 class. 关闭时画布行为=画 slot (不变)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">UI 图章: 关</button>
-        <button onclick="synthBuildUI()" id="synth_build_ui_btn" class="btn btn-sm" title="按当前模板的 ui_stamps 生成 UI 合成帧 (POST build_ui)" style="padding:5px 10px;background:#0e7490;border:1px solid #155e75;border-radius:4px;color:#fff;cursor:pointer;font-size:12px;font-weight:600">⚙ 生成UI合成</button>
+        <button onclick="synthBuildUI()" id="synth_build_ui_btn" class="btn btn-sm" title="按当前模板的 ui_stamps 生成 UI 合成帧 (POST build_ui)" style="padding:5px 10px;background:#0e7490;border:1px solid #155e75;border-radius:4px;color:#fff;cursor:pointer;font-size:12px;font-weight:600"> 生成UI合成</button>
         <button onclick="synthNewTemplate()" class="btn btn-sm" title="新建自定义模板 (任意命名, e.g. tactical_tight)" style="padding:5px 10px;background:var(--accent);color:#0d1116;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600">+ 新建</button>
         <button onclick="synthPickSample()" class="btn btn-sm" title="选本地图片文件 (也可以直接拖到画布上)" style="padding:5px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:12px">选样板图</button>
         <button onclick="synthPickSampleByPath()" class="btn btn-sm" title="输入文件路径 (相对 repo 根 / 绝对路径)" style="padding:5px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);cursor:pointer;font-size:11px">路径...</button>
@@ -591,7 +595,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <button onclick="synthPreview()" style="padding:5px 10px;background:var(--accent);color:#0b1a30;border:1px solid var(--accent);border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">Preview 合成</button>
         <div style="display:flex;gap:2px;margin-left:8px">
           <button onclick="synthZoomBy(1/1.25)" title="缩小 (-)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px 0 0 3px;color:var(--text);cursor:pointer;font-size:11px;font-family:var(--mono)">−</button>
-          <button onclick="synthZoomBy(1.25)" title="放大 (滚轮↑)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-right:0;color:var(--text);cursor:pointer;font-size:11px">+</button><button onclick="synthZoomBy(0.8)" title="缩小 (滚轮↓)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-right:0;color:var(--text);cursor:pointer;font-size:11px">−</button><button onclick="SYNTH.zoom=1;SYNTH.panX=0;SYNTH.panY=0;synthDraw();$('synth_status').textContent='Zoom 100%';" title="复位 (F / 0)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-left:0;border-right:0;color:var(--text);cursor:pointer;font-size:11px">⟲</button>
+          <button onclick="synthZoomBy(1.25)" title="放大 (滚轮^)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-right:0;color:var(--text);cursor:pointer;font-size:11px">+</button><button onclick="synthZoomBy(0.8)" title="缩小 (滚轮v)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-right:0;color:var(--text);cursor:pointer;font-size:11px">−</button><button onclick="SYNTH.zoom=1;SYNTH.panX=0;SYNTH.panY=0;synthDraw();$('synth_status').textContent='Zoom 100%';" title="复位 (F / 0)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-left:0;border-right:0;color:var(--text);cursor:pointer;font-size:11px">⟲</button>
           <button onclick="synthZoomBy(1.25)" title="放大 (+)" style="padding:4px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:0 3px 3px 0;color:var(--text);cursor:pointer;font-size:11px;font-family:var(--mono)">+</button>
         </div>
         <span id="synth_status" style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto"></span>
@@ -599,10 +603,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div id="synth_canvas_wrap" style="position:relative;flex:1;background:#0d0d10;border:1px solid var(--border);border-radius:6px;overflow:hidden;min-height:0">
         <canvas id="synth_canvas" style="display:block;width:100%;height:100%;cursor:grab"></canvas>
         <div id="synth_info" style="position:absolute;top:8px;left:8px;background:#0008;color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none"></div>
-        <div id="synth_drop_hint" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#facc1530;border:3px dashed #facc15;border-radius:6px;color:#facc15;font-size:18px;font-weight:700;pointer-events:none;z-index:5">📥 松开放下样板图</div>
+        <div id="synth_drop_hint" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#facc1530;border:3px dashed #facc15;border-radius:6px;color:#facc15;font-size:18px;font-weight:700;pointer-events:none;z-index:5"> 松开放下样板图</div>
       </div>
       <div style="font-size:11px;color:var(--muted);line-height:1.7">
-        <b>操作</b>: 拖框移动 · 拖边/角 resize · <kbd>右键</kbd>空白处新增 · <kbd>Q</kbd> 切换矩形⇄自由四边形 · <kbd>Del</kbd> 删除 · <kbd>Ctrl+C/V/D</kbd> 复制/粘贴/复制原位 · <kbd>方向键</kbd> 微调(Shift=10px) · <kbd>Ctrl+Z/Y</kbd> 撤销/重做 · <kbd>Ctrl+S</kbd> 保存<br>
+        <b>操作</b>: 拖框移动 · 拖边/角 resize · <kbd>右键</kbd>空白处新增 · <kbd>Q</kbd> 切换矩形自由四边形 · <kbd>Del</kbd> 删除 · <kbd>Ctrl+C/V/D</kbd> 复制/粘贴/复制原位 · <kbd>方向键</kbd> 微调(Shift=10px) · <kbd>Ctrl+Z/Y</kbd> 撤销/重做 · <kbd>Ctrl+S</kbd> 保存<br>
         <b>多选</b>: <kbd>Shift/Ctrl+空白拖</kbd> 框选/反选 · <kbd>Shift+点击</kbd> 加选 · <kbd>Ctrl+点击</kbd> 减选 · <kbd>双击 box</kbd> 选同类 · <kbd>Ctrl+A</kbd> 全选 · <kbd>Esc</kbd> 清空选中 · 拖动时 <kbd>Shift</kbd>=锁水平 / <kbd>Ctrl</kbd>=锁垂直<br>
         <b>批量</b>: <kbd>Shift+V</kbd> 复制上一帧 · <kbd>Shift+P</kbd> 任意帧 picker · <kbd>Shift+G</kbd> 阵列生成 · <kbd>Shift+T</kbd> Stamp 保存/粘贴<br>
         <b>视图</b>: 滚轮 缩放 (锚定鼠标) · <kbd>+/-</kbd> 缩放 · <kbd>F</kbd> / <kbd>0</kbd> 复位 · <kbd>左键</kbd>拖空白 / <kbd>中键</kbd>拖 平移<br>
@@ -614,7 +618,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <div style="width:320px;display:flex;flex-direction:column;gap:10px;font-size:12px;overflow-y:auto">
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:11px;color:var(--muted);text-transform:uppercase">Slots (<span id="synth_slot_count">0</span>)</span>
-        <button onclick="synthToggleQuad()" id="synth_toggle_quad_btn" title="选中 slot 后, 切换矩形 ⇄ 自由四边形 (拖 4 角变成平行四边形/梯形/任意四边形). 也可按 Q 键" style="margin-left:auto;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">◆ 矩形 ⇄ 四边形 (Q)</button>
+        <button onclick="synthToggleQuad()" id="synth_toggle_quad_btn" title="选中 slot 后, 切换矩形  自由四边形 (拖 4 角变成平行四边形/梯形/任意四边形). 也可按 Q 键" style="margin-left:auto;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px"> 矩形  四边形 (Q)</button>
       </div>
       <div id="synth_slot_list" style="max-height:140px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px"></div>
 
@@ -641,8 +645,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
             <div id="synth_crop_info" style="position:absolute;bottom:4px;left:4px;background:#0009;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;font-family:var(--mono);pointer-events:none"></div>
           </div>
           <div style="font-size:10px;color:var(--muted);line-height:1.4">
-            🟡框 = slot · 拖证件照 = <b>平移</b> · 滚轮 = <b>放大缩小</b> (锚定鼠标)<br>
-            🔴Lv ⚪Star 🟠Weapon 💗Heart 4 个彩球 = aug 位置, <b>拖球设位置</b> (合成时会 ±5% 随机抖动)
+            框 = slot · 拖证件照 = <b>平移</b> · 滚轮 = <b>放大缩小</b> (锚定鼠标)<br>
+            Lv Star Weapon Heart 4 个彩球 = aug 位置, <b>拖球设位置</b> (合成时会 ±5% 随机抖动)
           </div>
           <div style="display:grid;grid-template-columns:60px 1fr 50px;gap:6px;align-items:center">
             <label style="font-size:11px;color:var(--muted)">crop x1</label>
@@ -684,13 +688,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
             <label style="font-size:11px;color:var(--muted)">  Lv 文字</label>
             <input type="range" id="synth_aug_lv" min="0" max="1" step="0.05" value="0.5"/>
             <span id="synth_aug_lv_v" style="font-family:var(--mono);font-size:11px">0.50</span>
-            <label style="font-size:11px;color:var(--muted)">  ⭐ Star</label>
+            <label style="font-size:11px;color:var(--muted)">  * Star</label>
             <input type="range" id="synth_aug_star" min="0" max="1" step="0.05" value="0.3"/>
             <span id="synth_aug_star_v" style="font-family:var(--mono);font-size:11px">0.30</span>
             <label style="font-size:11px;color:var(--muted)">  Weapon</label>
             <input type="range" id="synth_aug_weapon" min="0" max="1" step="0.05" value="0.4"/>
             <span id="synth_aug_weapon_v" style="font-family:var(--mono);font-size:11px">0.40</span>
-            <label style="font-size:11px;color:var(--muted)">  ❤️ Heart</label>
+            <label style="font-size:11px;color:var(--muted)">  ️ Heart</label>
             <input type="range" id="synth_aug_heart" min="0" max="1" step="0.05" value="0.2"/>
             <span id="synth_aug_heart_v" style="font-family:var(--mono);font-size:11px">0.20</span>
             <label style="font-size:11px;color:var(--muted)">  Alpha dim</label>
@@ -702,9 +706,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           </div>
           <div style="margin-top:6px;font-size:10px;color:var(--muted);line-height:1.5;padding:6px;background:#0d0d10;border-radius:3px;border-left:2px solid var(--accent)">
             <b>UI 干扰说明</b> (训练 augmentation, 不是吸附框):<br>
-            • <b>Lv/Star/Weapon/Heart</b> = 随机位置随机大小贴在 slot 内, 让 model 学会"忽略 UI 装饰看头像本体"<br>
-            • 这些位置<b>不能手动微调</b>, 概率越高越多张合成图会带上对应干扰<br>
-            • <b>Border ablation</b> = 随机遮掉头像 4 边一小条, 学头像中心不学边框
+            - <b>Lv/Star/Weapon/Heart</b> = 随机位置随机大小贴在 slot 内, 让 model 学会"忽略 UI 装饰看头像本体"<br>
+            - 这些位置<b>不能手动微调</b>, 概率越高越多张合成图会带上对应干扰<br>
+            - <b>Border ablation</b> = 随机遮掉头像 4 边一小条, 学头像中心不学边框
           </div>
         </div>
       </details>
@@ -732,7 +736,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted)">
         <label>目标每角色出现</label>
         <input type="number" id="synth_target_per_char" min="5" max="100" step="1" value="20" style="width:60px;padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:12px"/>
-        <button onclick="synthAutoCount()" title="按当前 slot 数 + 252 角色 + 目标值, 反推 synth_count" style="padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px">⚙ 自动算</button>
+        <button onclick="synthAutoCount()" title="按当前 slot 数 + 252 角色 + 目标值, 反推 synth_count" style="padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);cursor:pointer;font-size:11px"> 自动算</button>
         <span id="synth_target_hint" style="font-family:var(--mono);font-size:10px"></span>
       </div>
 
@@ -779,13 +783,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
   </div>
 </div>
 
-<!-- ════════════ AXIS PAGE (凹轴素材) ════════════ -->
+<!--  AXIS PAGE (凹轴素材)  -->
 <div class="page" id="page-axis">
   <div class="page-title">凹轴素材</div>
-  <div class="assistant-sub">总力战轴视频 · bilibili 下载 → ffmpeg 抽帧 → battle v4 预标 → 轴表打点</div>
+  <div class="assistant-sub">总力战轴视频 · bilibili 下载 -> ffmpeg 抽帧 -> battle v4 预标 -> 轴表打点</div>
 
   <div class="card">
-    <h3 style="margin:0 0 8px;font-size:13px">📥 视频下载 (bilibili / YouTube)</h3>
+    <h3 style="margin:0 0 8px;font-size:13px"> 视频下载 (bilibili / YouTube)</h3>
     <div class="form-row" style="align-items:flex-end">
       <div class="form-group" style="flex:1;min-width:320px">
         <label>视频 URL (BV 号页面链接)</label>
@@ -798,7 +802,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           <option value="firefox">Firefox 提取</option>
         </select>
       </div>
-      <button class="btn btn-primary" onclick="axisDownload()" style="margin-bottom:11px">⬇ 下载</button>
+      <button class="btn btn-primary" onclick="axisDownload()" style="margin-bottom:11px"> 下载</button>
     </div>
     <div id="axis_cookie_hint" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
     <div id="axis_jobs" style="font-size:11px;font-family:var(--mono);color:var(--muted);max-height:170px;overflow-y:auto;background:#0d0d10;border:1px solid var(--border);border-radius:3px;padding:6px;margin-top:6px;display:none"></div>
@@ -806,15 +810,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
   <div class="card">
     <div style="display:flex;align-items:center;margin-bottom:8px">
-      <h3 style="margin:0;font-size:13px">🎞 视频库 <span style="color:var(--muted);font-weight:normal;font-size:11px">(data/axis_videos/ — 手动放文件也会出现在这)</span></h3>
+      <h3 style="margin:0;font-size:13px"> 视频库 <span style="color:var(--muted);font-weight:normal;font-size:11px">(data/axis_videos/ — 手动放文件也会出现在这)</span></h3>
       <div style="flex:1"></div>
-      <button class="btn btn-sm" onclick="axisRefresh()">↻ 刷新</button>
+      <button class="btn btn-sm" onclick="axisRefresh()"> 刷新</button>
     </div>
     <div id="axis_video_list" style="font-size:12px;color:var(--muted)">Loading…</div>
   </div>
 
   <div class="card" id="axis_sheet_card" style="display:none">
-    <h3 style="margin:0 0 8px;font-size:13px">📝 轴表 · <span id="axis_sheet_title" style="color:var(--accent)"></span></h3>
+    <h3 style="margin:0 0 8px;font-size:13px"> 轴表 · <span id="axis_sheet_title" style="color:var(--accent)"></span></h3>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div style="flex:1.2;min-width:380px">
         <video id="axis_player" controls style="width:100%;max-height:420px;background:#000;border-radius:4px"></video>
@@ -840,22 +844,22 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           <button class="btn btn-sm" onclick="axisSheetAddRow()">+ 行</button>
           <div style="flex:1"></div>
           <span id="axis_sheet_status" style="font-size:11px;color:var(--muted);align-self:center"></span>
-          <button class="btn btn-sm btn-success" onclick="axisSheetSave()">💾 保存轴表</button>
+          <button class="btn btn-sm btn-success" onclick="axisSheetSave()"> 保存轴表</button>
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ── 类管理 modal (合并 / 改名 / 用量统计) ── -->
+<!--  类管理 modal (合并 / 改名 / 用量统计)  -->
 <div id="cls_mgr_modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)clsMgrClose()">
   <div style="background:var(--bg2);border:1px solid var(--accent);border-radius:8px;width:780px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;padding:14px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <b style="font-size:14px">🛠 类管理</b>
+      <b style="font-size:14px"> 类管理</b>
       <span id="cls_mgr_meta" style="font-size:11px;color:var(--muted)"></span>
       <div style="flex:1"></div>
-      <button class="btn btn-sm" onclick="clsMgrLoad(true)" title="重扫全库统计">↻ 重扫</button>
-      <button class="btn btn-sm" onclick="clsMgrClose()">✕</button>
+      <button class="btn btn-sm" onclick="clsMgrLoad(true)" title="重扫全库统计"> 重扫</button>
+      <button class="btn btn-sm" onclick="clsMgrClose()"></button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
       <input id="cls_mgr_filter" type="text" placeholder="过滤: 名称或 idx…" oninput="clsMgrRender()" style="flex:1;padding:4px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;font-size:12px;outline:none"/>
@@ -864,17 +868,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <div id="cls_mgr_merge_bar" style="display:none;background:#1b1f27;border:1px solid #facc15;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px"></div>
     <div id="cls_mgr_list" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--mono)"></div>
     <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.55">
-      合并 = 全库(raw_images + trajectories) label 行 src→dst 重写, src 变 <code>_dead</code> 墓碑占位 — <b>idx 永不移位</b>, 不破 build REMAP / 头像段 143-394 / battle 段路由; 执行前自动备份到 data/raw_images/_backups/。改名 = 原位改 master 行 + 全池 classes.txt 同步。⚠ 标 <span style="color:#f87171">CODE</span> 的类名被 brain/ 源码引用 — 动之前想清楚: 下代模型训完后 skill 里旧名会失配。
+      合并 = 全库(raw_images + trajectories) label 行 src->dst 重写, src 变 <code>_dead</code> 墓碑占位 — <b>idx 永不移位</b>, 不破 build REMAP / 头像段 143-394 / battle 段路由; 执行前自动备份到 data/raw_images/_backups/。改名 = 原位改 master 行 + 全池 classes.txt 同步。注意 标 <span style="color:#f87171">CODE</span> 的类名被 brain/ 源码引用 — 动之前想清楚: 下代模型训完后 skill 里旧名会失配。
     </div>
   </div>
 </div>
 
-<!-- ── Paste-from-frame picker modal (Shift+P) ── -->
+<!--  Paste-from-frame picker modal (Shift+P)  -->
 <div id="ann_paste_picker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)annClosePastePicker()">
   <div style="background:#0d0d10;border:1px solid var(--border);border-radius:6px;padding:14px;width:560px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;gap:10px;font-family:var(--mono)">
     <div style="display:flex;align-items:center;gap:8px;justify-content:space-between">
       <div><b style="color:var(--text)">复制全部标注 from frame</b></div>
-      <span style="color:var(--muted);font-size:11px">↑↓ 选择 · Enter 复制 · Esc 取消</span>
+      <span style="color:var(--muted);font-size:11px">^v 选择 · Enter 复制 · Esc 取消</span>
     </div>
     <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
       <span>Dataset:</span>
@@ -901,7 +905,7 @@ async function api(path, opts) {
   return ct.includes('application/json') ? r.json() : r.text();
 }
 
-/* ── Toast helper (minimal; used by annotation save errors today) ──
+/*  Toast helper (minimal; used by annotation save errors today)
    showToast(msg, type='info'|'error'|'success', durMs=4000) */
 function showToast(msg, type='info', durMs=4000){
   let stack = document.getElementById('toast_stack');
@@ -922,7 +926,7 @@ function showToast(msg, type='info', durMs=4000){
   return t;
 }
 
-/* ── beforeunload guard: warn on unsaved annotations ──
+/*  beforeunload guard: warn on unsaved annotations
    Triggers modern browsers' native "Leave site?" confirmation. */
 window.addEventListener('beforeunload', e => {
   const annDirty = typeof ANN !== 'undefined' && ANN && ANN.dirty;
@@ -934,7 +938,7 @@ window.addEventListener('beforeunload', e => {
   }
 });
 
-/* ── Page Navigation ── */
+/*  Page Navigation  */
 let currentPage = 'agent';
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -948,9 +952,9 @@ function showPage(name) {
   if (name === 'axis') axisInit();
 }
 
-/* ════════════════════════════════════════════════════
+/*
    AGENT PAGE
-   ════════════════════════════════════════════════════ */
+    */
 const STORAGE_KEY = 'private_ba_assistant.dashboard.v3';
 let APP_CFG={active_profile:'default',profile:{},profiles:{},skill_options:[]};
 const DAILY_ROUTINE_TEMPLATE = `[Routine]\n【目标】蔚蓝档案：日常收菜（排除总力战/大决战/制约解除决战）\n\n【总原则】\n- 先判断当前界面，优先关闭公告/签到等阻挡弹窗。\n- 优先处理红点/可领取/确认/开始/进入/跳过/一键领取等安全按钮。\n- 绝对不要点击：总力战/大决战/制约解除决战。\n- 绝对不要点击：充值/购买/招募/抽卡/青辉石/清輝石/Pyroxene。\n\n【流程】\n1) 大厅：处理弹窗 -> 观察红点\n2) 咖啡厅：领取收益 -> 依次点击黄色感叹号 -> 返回\n3) 日程：选最优区域 -> 确认 -> 返回\n4) 社团：领取AP -> 返回\n5) 悬赏通缉：选最高难度 -> 扫荡Max -> 确认 -> 返回\n6) 战术对抗赛：仅领奖 -> 返回\n7) 清体力：活动优先扫荡；否则主线Hard扫荡到体力不足\n8) 制造：领取完成品 -> 制造 -> 返回\n9) 邮箱&任务：一键领取 -> 返回\n\n【异常处理】\n- 不确定时：wait -> 点返回/关闭尝试回大厅。`;
@@ -967,7 +971,7 @@ function getSelectedSkillOrder(){
 }
 function updateSkillPlanStatus(){
   const order=getSelectedSkillOrder();
-  $('skill_plan_status').textContent=order.length?`当前会执行 ${order.length} 个日常模块：${order.join(' → ')}`:'当前未启用任何日常模块';
+  $('skill_plan_status').textContent=order.length?`当前会执行 ${order.length} 个日常模块：${order.join(' -> ')}`:'当前未启用任何日常模块';
 }
 function renderSkillList(order, selectedIds){
   const options=APP_CFG.skill_options||[];
@@ -994,8 +998,8 @@ function renderSkillList(order, selectedIds){
       </div>
     </div>
     <div class="skill-actions">
-      <button class="btn btn-sm">↑</button>
-      <button class="btn btn-sm">↓</button>
+      <button class="btn btn-sm">^</button>
+      <button class="btn btn-sm">v</button>
     </div>`;
     const cb=row.querySelector('input[type="checkbox"]');
     cb.onchange=(e)=>{e.stopPropagation();row.classList.toggle('off',!cb.checked);saveAgent();updateSkillPlanStatus();};
@@ -1044,7 +1048,7 @@ function fillAgentFromProfile(profile){
   if($('goal'))$('goal').value=p.goal||$('goal').value;
   if($('steps'))$('steps').value=typeof p.steps==='number'?p.steps:0;
   if($('step_sleep_s'))$('step_sleep_s').value=typeof p.step_sleep_s==='number'?p.step_sleep_s:0.3;
-  if($('ap_purchase_limit'))$('ap_purchase_limit').value=typeof p.ap_purchase_limit==='number'?p.ap_purchase_limit:0;
+  if($('ap_purchase_limit'))$('ap_purchase_limit').value=0;
   if($('event_max_rounds'))$('event_max_rounds').value=typeof p.event_max_rounds==='number'?p.event_max_rounds:1;
   if($('event_ap_reserve'))$('event_ap_reserve').value=typeof p.event_ap_reserve==='number'?p.event_ap_reserve:0;
   if($('event_farming_stage'))$('event_farming_stage').value=typeof p.event_farming_stage==='number'?p.event_farming_stage:12;
@@ -1054,7 +1058,7 @@ function fillAgentFromProfile(profile){
   if($('event_shop_auto_buy'))$('event_shop_auto_buy').checked=p.event_shop_auto_buy!==false;
   if($('event_shop_furniture_first'))$('event_shop_furniture_first').checked=Boolean(p.event_shop_furniture_first);
   if($('dry_run'))$('dry_run').checked=Boolean(p.dry_run);
-  if($('forbid_premium_currency'))$('forbid_premium_currency').checked=p.forbid_premium_currency!==false;
+  if($('forbid_premium_currency'))$('forbid_premium_currency').checked=true;
   if($('exploration_click'))$('exploration_click').checked=Boolean(p.exploration_click);
   if($('notify_on_finish'))$('notify_on_finish').checked=Boolean(p.notify_on_finish);
   if($('notify_webhook_url'))$('notify_webhook_url').value=p.notify_webhook_url||'';
@@ -1098,7 +1102,7 @@ let _SCHED_ALL=[]; let _schedSel=[];
 async function loadSchedChars(){
   try{ const r=await api('/api/v1/avatar_classes'); _SCHED_ALL=Array.isArray(r&&r.characters)?r.characters:[]; }
   catch(e){ _SCHED_ALL=[]; }
-  // 填 cafe 1F/2F 角色 datalist (复用 fused 角色列表 → 输入时自动补全正确格式名,
+  // 填 cafe 1F/2F 角色 datalist (复用 fused 角色列表 -> 输入时自动补全正确格式名,
   // 避免手打错 cls 格式如 "季(战斗)")。
   const dl=document.getElementById('cafe_char_list');
   if(dl) dl.innerHTML=_SCHED_ALL.map(n=>`<option value="${String(n).replace(/"/g,'&quot;')}">`).join('');
@@ -1168,7 +1172,7 @@ async function saveProfileConfig(showText='已保存档案'){
       goal:$('goal').value.trim(),
       steps:parseInt($('steps').value,10)||0,
       step_sleep_s:parseFloat($('step_sleep_s').value)||0.3,
-      ap_purchase_limit:parseInt($('ap_purchase_limit').value,10)||0,
+      ap_purchase_limit:0,
       event_max_rounds:Math.max(1,parseInt($('event_max_rounds').value,10)||1),
       event_ap_reserve:Math.max(0,parseInt($('event_ap_reserve').value,10)||0),
       event_farming_stage:Math.max(1,parseInt($('event_farming_stage')?.value,10)||12),
@@ -1178,7 +1182,7 @@ async function saveProfileConfig(showText='已保存档案'){
       event_shop_auto_buy:$('event_shop_auto_buy')?.checked!==false,
       event_shop_furniture_first:Boolean($('event_shop_furniture_first')?.checked),
       dry_run:$('dry_run').checked,
-      forbid_premium_currency:$('forbid_premium_currency').checked,
+      forbid_premium_currency:true,
       exploration_click:$('exploration_click').checked,
       notify_on_finish:$('notify_on_finish').checked,
       notify_webhook_url:$('notify_webhook_url').value.trim(),
@@ -1212,7 +1216,7 @@ function agentPayload() {
     goal:$('goal').value.trim(),
     steps:parseInt($('steps').value,10)||0,
     step_sleep_s:parseFloat($('step_sleep_s').value)||0.3,
-    ap_purchase_limit:parseInt($('ap_purchase_limit').value,10)||0,
+    ap_purchase_limit:0,
     event_max_rounds:Math.max(1,parseInt($('event_max_rounds').value,10)||1),
     event_ap_reserve:Math.max(0,parseInt($('event_ap_reserve').value,10)||0),
     event_farming_stage:Math.max(1,parseInt($('event_farming_stage')?.value,10)||12),
@@ -1222,7 +1226,7 @@ function agentPayload() {
     event_shop_auto_buy:$('event_shop_auto_buy')?.checked!==false,
     event_shop_furniture_first:Boolean($('event_shop_furniture_first')?.checked),
     dry_run:$('dry_run').checked,
-    forbid_premium_currency:$('forbid_premium_currency').checked,
+    forbid_premium_currency:true,
     exploration_click:$('exploration_click').checked,
     notify_on_finish:$('notify_on_finish').checked,
     notify_webhook_url:$('notify_webhook_url').value.trim(),
@@ -1247,12 +1251,12 @@ function loadAgent(){
     if(s.goal)$('goal').value=s.goal;
     if(typeof s.steps==='number')$('steps').value=s.steps;
     if(typeof s.step_sleep_s==='number')$('step_sleep_s').value=s.step_sleep_s;
-    if(typeof s.ap_purchase_limit==='number')$('ap_purchase_limit').value=s.ap_purchase_limit;
+    if($('ap_purchase_limit'))$('ap_purchase_limit').value=0;
     if(typeof s.event_max_rounds==='number')$('event_max_rounds').value=s.event_max_rounds;
     if(typeof s.event_ap_reserve==='number')$('event_ap_reserve').value=s.event_ap_reserve;
     if(s.account_label)$('account_label').value=s.account_label;
     if(typeof s.dry_run==='boolean')$('dry_run').checked=s.dry_run;
-    if(typeof s.forbid_premium_currency==='boolean')$('forbid_premium_currency').checked=s.forbid_premium_currency;
+    if($('forbid_premium_currency'))$('forbid_premium_currency').checked=true;
     if(typeof s.exploration_click==='boolean')$('exploration_click').checked=s.exploration_click;
     if(typeof s.notify_on_finish==='boolean')$('notify_on_finish').checked=s.notify_on_finish;
     if(s.notify_webhook_url)$('notify_webhook_url').value=s.notify_webhook_url;
@@ -1425,7 +1429,7 @@ function applyGridFilter(){
   });
 }
 
-/* ── 学院分组 (按头像基础名映射; 不在表内的归"其他", 映射可手改) ── */
+/*  学院分组 (按头像基础名映射; 不在表内的归"其他", 映射可手改)  */
 const CHAR_ACADEMY={
   Shiroko:'阿拜多斯',['Shiroko＊Terror']:'阿拜多斯',Hoshino:'阿拜多斯',Serika:'阿拜多斯',Nonomi:'阿拜多斯',Ayane:'阿拜多斯',
   Aru:'格黑娜',Mutsuki:'格黑娜',Kayoko:'格黑娜',Haruka:'格黑娜',Hina:'格黑娜',Ako:'格黑娜',Iori:'格黑娜',Chinatsu:'格黑娜',
@@ -1512,9 +1516,9 @@ loadAgent();
   agentRefresh();
 })();
 
-/* ════════════════════════════════════════════════════
+/*
    CAPTURE PAGE
-   ════════════════════════════════════════════════════ */
+    */
 let capTimer=null;
 async function refreshCapture(){
   try{
@@ -1546,11 +1550,11 @@ function updateCapDestHint(){
   if(split==='val'){
     purposeWrap.style.display='';
     const purpose=$('cap_purpose').value;
-    hint.textContent=`→ _val_${purpose}/frames/ (append to val pool — never used for training)`;
+    hint.textContent=`-> _val_${purpose}/frames/ (append to val pool — never used for training)`;
     hint.style.color='#f97316';
   }else{
     purposeWrap.style.display='none';
-    hint.textContent=`→ run_<timestamp> (new training data)`;
+    hint.textContent=`-> run_<timestamp> (new training data)`;
     hint.style.color='var(--muted)';
   }
 }
@@ -1577,9 +1581,9 @@ $('btn_cap_stop').onclick=async()=>{
   setTimeout(refreshCapture,300);
 };
 
-/* ════════════════════════════════════════════════════
+/*
    ANNOTATE PAGE — Zoom/Pan Canvas + OCR
-   ════════════════════════════════════════════════════ */
+    */
 const COLORS=["#ef4444","#22c55e","#3b82f6","#eab308","#a855f7","#06b6d4","#f97316","#8b5cf6","#10b981","#ec4899","#84cc16","#0ea5e9","#f43f5e","#4ade80","#818cf8","#facc15","#c084fc","#2dd4bf","#fb923c","#a3e635"];
 let ANN={
   data:[],classes:[],idx:0,selIdx:-1,drawClass:0,dirty:false,
@@ -1591,7 +1595,7 @@ let ANN={
   rotateKey:false,  // true while R is held down
   polyPoints:null,  // freehand polygon points during drawing [{x,y}...]
   clipboard:null,   // copied SINGLE label for Ctrl+C/V (kept for back-compat)
-  // ── Multi-selection (Phase 1) ──
+  //  Multi-selection (Phase 1)
   selSet:new Set(), // additional box idx beyond selIdx; selIdx is the "anchor" / primary
   lassoStart:null,  // image-space {x,y} when Shift+left-drag starts on empty
   lassoEnd:null,    // current lasso rect endpoint
@@ -1601,7 +1605,7 @@ let ANN={
   stamp:null         // {labels: [...], anchor: {x,y}} saved stamp for cross-frame paste
 };
 
-// ── Selection helpers ──
+//  Selection helpers
 // Treat selSet ∪ {selIdx} as the effective selection. selIdx is preserved as
 // the "anchor" (last-clicked) so existing single-select code paths keep working.
 function _annSelected(){
@@ -1633,7 +1637,7 @@ function _annSelRemove(i){
 function _annSelHas(i){ return i === ANN.selIdx || ANN.selSet.has(i); }
 function _annSelSize(){ return _annSelected().length; }
 
-/* ── U3: Image preload cache (LRU, max 5 entries) ───────────────
+/*  U3: Image preload cache (LRU, max 5 entries)
    Why: each annLoadImage previously created a fresh Image() and waited
    on decode+layout (0.5-1.5s per frame). With cache + neighbor prefetch
    翻 page is ~instant once the cache warms up. */
@@ -1686,7 +1690,7 @@ function _annPrefetchNeighbors(){
   }, 50);
 }
 
-/* ── U1: Undo/Redo history (per-image, snapshot on atomic ops) ──
+/*  U1: Undo/Redo history (per-image, snapshot on atomic ops)
    Snapshots are JSON strings of the labels array. Pushed only on
    "atomic operation complete" (pointerup after drag, Delete, paste,
    class change, Florence add, Shift+V copy-all), NOT on every
@@ -1708,7 +1712,7 @@ function _annPushHistory(){
   _annInitHistoryIfEmpty();
   const h = _annHistory.get(ANN.idx);
   const cur = _annHistorySnapshot();
-  if(h.stack[h.cursor] === cur) return;  // no change → no-op
+  if(h.stack[h.cursor] === cur) return;  // no change -> no-op
   // Truncate forward history (any redo branch is invalidated by new edit)
   h.stack.length = h.cursor + 1;
   h.stack.push(cur);
@@ -1744,7 +1748,7 @@ const annCanvas=$('ann_canvas');
 const annCtx=annCanvas.getContext('2d');
 const annArea=document.querySelector('.ann-canvas-area');
 
-// ── coordinate helpers ──
+//  coordinate helpers
 function img2scr(ix,iy){return{x:ix*ANN.zoom+ANN.offX,y:iy*ANN.zoom+ANN.offY};}
 function scr2img(sx,sy){return{x:(sx-ANN.offX)/ANN.zoom,y:(sy-ANN.offY)/ANN.zoom};}
 function annGetMouse(e){
@@ -1758,7 +1762,7 @@ function annGetScreen(e){
   return{x:(e.clientX-r.left)*(annCanvas.width/r.width),y:(e.clientY-r.top)*(annCanvas.height/r.height)};
 }
 
-// ── zoom/pan controls ──
+//  zoom/pan controls
 function annResizeCanvas(){
   const cw=annArea.clientWidth, ch=annArea.clientHeight;
   if(annCanvas.width!==cw||annCanvas.height!==ch){annCanvas.width=cw;annCanvas.height=ch;}
@@ -1785,7 +1789,7 @@ function annZoomIn(){const c=annCanvas;annZoomTo(ANN.zoom*1.3,c.width/2,c.height
 function annZoomOut(){const c=annCanvas;annZoomTo(ANN.zoom/1.3,c.width/2,c.height/2);}
 function annUpdateZoomLabel(){$('ann_zoom').textContent=Math.round(ANN.zoom/ANN.fitZoom*100)+'%';}
 
-// ── minimap ──
+//  minimap
 const annMinimap=$('ann_minimap');
 const annMinimapCtx=annMinimap.getContext('2d');
 let _minimapDragging=false;
@@ -1854,8 +1858,8 @@ annMinimap.addEventListener('pointerup',e=>{
 });
 
 // double-click on main canvas:
-//   on a box   → L8: select all boxes with same class (replaces selection)
-//   on empty   → zoom in 2.5x at point
+//   on a box   -> L8: select all boxes with same class (replaces selection)
+//   on empty   -> zoom in 2.5x at point
 annCanvas.addEventListener('dblclick',e=>{
   if(!ANN.bgImg)return;
   e.preventDefault();
@@ -1877,7 +1881,7 @@ annCanvas.addEventListener('dblclick',e=>{
   annZoomTo(ANN.zoom*2.5,scr.x,scr.y);
 });
 
-// ── data loading ──
+//  data loading
 // prefill teacher 模型 + 版本下拉 (各域最强标注: UI=v6c teacher / cafe弱类=v5 / 头像v4 / 摸头v26n)
 let ANN_MODELS=[];
 async function annLoadModels(){
@@ -1894,7 +1898,7 @@ function annFillVersions(){
   const sel=$('ann_prefill_ver');if(!sel)return;
   sel.innerHTML='';
   if(!m||!(m.versions||[]).length){const o=document.createElement('option');o.value='';o.textContent='active';sel.appendChild(o);return;}
-  m.versions.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+(v===m.active?'·live':'')+(v===m.teacher?' ★':'');sel.appendChild(o);});
+  m.versions.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+(v===m.active?'·live':'')+(v===m.teacher?' ':'');sel.appendChild(o);});
   sel.value=m.teacher||m.active||m.versions[0]||'';  // 默认选推荐 teacher
 }
 // "只标cls" 下拉 = 当前模型 owns-span 内的 master 类名 (选 ui 只列 UI 域 cls)。
@@ -1914,8 +1918,93 @@ function annValidateTargets(){
   const raw=($('ann_prefill_targets')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
   if(!raw.length){hint.textContent='= 标全部';hint.style.color='var(--muted)';return;}
   const bad=raw.filter(t=>!valid.has(t)&&!/^\d+$/.test(t));
-  if(bad.length){hint.textContent='⚠ 不在「'+mk+'」可标范围: '+bad.join(',');hint.style.color='#f59e0b';}
-  else{hint.textContent='✓ '+raw.length+' 类已识别';hint.style.color='#10b981';}
+  if(bad.length){hint.textContent='注意 不在「'+mk+'」可标范围: '+bad.join(',');hint.style.color='#f59e0b';}
+  else{hint.textContent='OK '+raw.length+' 类已识别';hint.style.color='#10b981';}
+}
+
+let _annDsCache={items:[], lbl:'下代'};
+
+function annNormalizeDsQuery(raw){
+  let q=String(raw||'');
+  q=q.replace(/[\u200B-\u200D\uFEFF]/g,'');
+  if(typeof q.normalize==='function') q=q.normalize('NFKC');
+  q=q.replace(/[\u00A0\u3000]/g,' ');
+  q=q.trim().replace(/^["'`]+|["'`]+$/g,'');
+  q=q.replace(/\\/g,'/');
+  const parts=q.split('/').filter(Boolean);
+  if(parts.length) q=parts[parts.length-1];
+  return q.trim();
+}
+
+function annFindDatasetByQuery(q){
+  const items=_annDsCache.items||[];
+  if(!q) return {pick:null, hits:[]};
+  const ql=q.toLowerCase();
+  const exact=items.find(d=>d.name===q)||items.find(d=>d.name.toLowerCase()===ql);
+  const hits=items.filter(d=>d.name.toLowerCase().includes(ql));
+  return {pick:exact||(hits.length===1?hits[0]:null), hits};
+}
+
+function annFillDatasetSelect(filter){
+  const sel=$('ann_dataset');
+  if(!sel) return;
+  const cur=sel.value;
+  const q=annNormalizeDsQuery(filter||'').toLowerCase();
+  const items=_annDsCache.items||[];
+  const hit=q?items.filter(d=>d.name.toLowerCase().includes(q)):items;
+  const val=hit.filter(d=>d.kind==='val');
+  const raw=hit.filter(d=>d.kind==='raw');
+  const flywheel=hit.filter(d=>d.kind==='flywheel');
+  const unused=hit.filter(d=>d.kind==='unused');
+  const lbl=_annDsCache.lbl||'下代';
+  sel.innerHTML='<option value="">Select dataset...</option>';
+  const addGroup=(title, rows, sortFn)=>{
+    if(!rows.length) return;
+    const og=document.createElement('optgroup');
+    og.label=title;
+    (sortFn?rows.slice().sort(sortFn):rows).forEach(d=>{
+      const o=document.createElement('option');
+      o.value=d.name;
+      o.textContent=d.name+' ('+d.image_count+')';
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  };
+  addGroup('Val (held-out, 进 '+lbl+' val)', val);
+  addGroup('Train (进 '+lbl+' build)', raw);
+  addGroup('飞轮待标注 (capture 新录, 标完加 sources 训下代)', flywheel, (a,b)=>b.name.localeCompare(a.name));
+  addGroup('其他未纳入 (合成/废弃, 标了也不进 build)', unused);
+  if(cur && [...sel.options].some(o=>o.value===cur)) sel.value=cur;
+}
+
+async function annJumpDatasetByQuery(raw, load){
+  const find=$('ann_dataset_find');
+  const q=annNormalizeDsQuery(raw);
+  if(find && q && find.value!==q) find.value=q;
+  if(!q){
+    if(load) showToast('目录名为空','error',2000);
+    return false;
+  }
+  if(load || !(_annDsCache.items||[]).length){
+    if(load) showToast('正在刷新数据集列表...','info',1500);
+    await annLoadDatasets();
+  }
+  annFillDatasetSelect(q);
+  const sel=$('ann_dataset');
+  const found=annFindDatasetByQuery(q);
+  const pick=found.pick;
+  const hits=found.hits;
+  if(!pick){
+    if(load) showToast(hits.length?'匹配 '+hits.length+' 个, 再补全目录名':'没找到 '+q+' (看下拉最后一组: 其他未纳入)', hits.length?'info':'error', 3500);
+    return false;
+  }
+  sel.value=pick.name;
+  const kindLbl={val:'Val',raw:'Train',flywheel:'飞轮待标注',unused:'其他未纳入'};
+  if(load){
+    showToast(pick.name+' ('+pick.image_count+') · '+(kindLbl[pick.kind]||pick.kind),'success',2500);
+    annLoadDataset();
+  }
+  return true;
 }
 
 async function annLoadDatasets(){
@@ -1926,52 +2015,38 @@ async function annLoadDatasets(){
     // 代数 badge: 当前各域 live 模型 (各域最强策略)
     const genEl=$('ann_generation');
     if(genEl){
-      genEl.textContent=`代号 ${gen.label||'?'} ┃ live分域: UI ${gen.ui_live||'?'} · 头像 ${gen.avatar||'?'} · 摸头 ${gen.emoticon||'?'} ┃ unified ${gen.unified||'—'}`;
+      genEl.textContent=`代号 ${gen.label||'?'}  live分域: UI ${gen.ui_live||'?'} · 头像 ${gen.avatar||'?'} · 摸头 ${gen.emoticon||'?'}  unified ${gen.unified||'—'}`;
     }
-    const sel=$('ann_dataset');const cur=sel.value;
-    sel.innerHTML='<option value="">Select dataset...</option>';
-    // label 队列分组 (trajectory 已退役 — overlay 烧录风险; 飞轮改用 capture 干净帧):
-    //   1. Val (held-out)        — ML 质量
-    //   2. Train (进 build)       — 已纳入下代训练
-    //   3. 🆕 飞轮待标注 (run_*)   — capture 新录干净帧, 标完加进 build_sources 训下代
-    //   4. 🗃️ 其他未纳入          — 合成/废弃目录 (_synth_* 等)
-    const items=(ds.datasets||[]);
-    const val=items.filter(d=>d.kind==='val');
-    const raw=items.filter(d=>d.kind==='raw');
-    const flywheel=items.filter(d=>d.kind==='flywheel');
-    const unused=items.filter(d=>d.kind==='unused');
-    const lbl=gen.label||'下代';
-    if(val.length){
-      const og=document.createElement('optgroup');og.label=`⚖️ Val (held-out, 进 ${lbl} val)`;
-      val.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
-      sel.appendChild(og);
-    }
-    if(raw.length){
-      const og=document.createElement('optgroup');og.label=`📦 Train (进 ${lbl} build)`;
-      raw.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
-      sel.appendChild(og);
-    }
-    if(flywheel.length){
-      // capture/start 录的干净 run_* (无 pipeline overlay), 未纳入 build = 飞轮待标注
-      const og=document.createElement('optgroup');og.label='🆕 飞轮待标注 (capture 新录, 标完加 sources 训下代)';
-      // 时间倒序: run_<timestamp> 名字逆排, 新采集置顶
-      flywheel.slice().sort((a,b)=>b.name.localeCompare(a.name)).forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
-      sel.appendChild(og);
-    }
-    if(unused.length){
-      const og=document.createElement('optgroup');og.label='其他未纳入 (合成/废弃, 标了也不进 build)';
-      unused.forEach(d=>{const o=document.createElement('option');o.value=d.name;o.textContent=`${d.name} (${d.image_count})`;og.appendChild(o);});
-      sel.appendChild(og);
-    }
-    if(cur)sel.value=cur;
-  }catch(e){}
+    _annDsCache.items=ds.datasets||[];
+    _annDsCache.lbl=gen.label||'下代';
+    const find=$('ann_dataset_find');
+    annFillDatasetSelect(find?annNormalizeDsQuery(find.value):'');
+  }catch(e){
+    console.error(e);
+    showToast('数据集列表加载失败','error',3000);
+  }
 }
 $('ann_dataset').onchange=()=>annLoadDataset();
+(function(){
+  const find=$('ann_dataset_find');
+  if(!find) return;
+  find.addEventListener('input', ()=>annFillDatasetSelect(annNormalizeDsQuery(find.value)));
+  find.addEventListener('focus', ()=>{
+    if(!(_annDsCache.items||[]).length) annLoadDatasets();
+  });
+  find.addEventListener('paste', ()=>setTimeout(()=>{annJumpDatasetByQuery(find.value, true);}, 0));
+  find.addEventListener('keydown', ev=>{
+    if(ev.key==='Enter'){
+      ev.preventDefault();
+      annJumpDatasetByQuery(find.value, true);
+    }
+  });
+})();
 
 async function annLoadDataset(){
   const ds=$('ann_dataset').value;if(!ds)return;
   ANN.dataset=ds;
-  // U3 + U1 + Phase 1/2: cross-dataset reset. New dataset → new images cache,
+  // U3 + U1 + Phase 1/2: cross-dataset reset. New dataset -> new images cache,
   // new history. Selection cleared (idx no longer makes sense).
   // BUT keep clipboard / groupClipboard / stamp ACROSS dataset switches —
   // the whole point of those is to let you copy in train and paste in val
@@ -2006,17 +2081,17 @@ function annBuildClassList(){
     const d=document.createElement('div');d.className='class-item'+(i===ANN.drawClass?' sel':'');
     d.innerHTML=`<div class="class-dot" style="background:${COLORS[i%COLORS.length]}"></div>${i}: ${name}`;
     // Click behaviour:
-    //  • boxes selected → REASSIGN their class to this one (the "select a
-    //    box → change its bbox class, e.g. X→邮件箱" workflow, works for ALL
+    //  - boxes selected -> REASSIGN their class to this one (the "select a
+    //    box -> change its bbox class, e.g. X->邮件箱" workflow, works for ALL
     //    157+ classes via the search filter — number keys only reach 0-9).
-    //  • nothing selected → set the draw-class for new boxes (old behaviour).
+    //  - nothing selected -> set the draw-class for new boxes (old behaviour).
     d.onclick=()=>{
       const sel=_annSelected();
       if(sel.length>0){
         for(const bi of sel){ if(ANN.data[ANN.idx].labels[bi]) ANN.data[ANN.idx].labels[bi].cls=i; }
         ANN.drawClass=i;
         ANN.dirty=true;_annPushHistory();annDraw();
-        try{showToast(`改类 ${sel.length} 框 → ${i}:${name}`,'ok',1400);}catch(_){}
+        try{showToast(`改类 ${sel.length} 框 -> ${i}:${name}`,'ok',1400);}catch(_){}
       } else {
         ANN.drawClass=i;
       }
@@ -2047,7 +2122,7 @@ function annFindFrames(){
     return;
   }
   // Resolve query to list of class indices.
-  // Priority: 1) integer idx → exact, 2) exact class name → that one only,
+  // Priority: 1) integer idx -> exact, 2) exact class name -> that one only,
   // 3) fallback to substring match (multiple classes).
   let targetIdx = new Set();
   const asInt = parseInt(q, 10);
@@ -2090,14 +2165,14 @@ function annFindFrames(){
   const tag = Array.from(targetIdx).map(i => `${i}:${ANN.classes[i]||'?'}`).join(', ');
   countEl.textContent = `${matches.length} 张 frame 含 [${tag}]`;
   if (!matches.length) {
-    listEl.innerHTML = `<div style="padding:6px;color:#22c55e">✓ "${q}" 在当前 dataset 里 0 frames — 干净的</div>`;
+    listEl.innerHTML = `<div style="padding:6px;color:#22c55e">OK "${q}" 在当前 dataset 里 0 frames — 干净的</div>`;
     return;
   }
   listEl.innerHTML = '';
   // Add "Jump to first" header
   const head = document.createElement('div');
   head.style.cssText = 'padding:4px 6px;background:#1e293b;color:#facc15;cursor:pointer;font-weight:700;border-bottom:1px solid var(--border)';
-  head.innerHTML = `▶ 跳到第 1 张匹配 (frame ${matches[0].img.replace('.jpg','').replace('.png','').split('_').pop()})`;
+  head.innerHTML = `> 跳到第 1 张匹配 (frame ${matches[0].img.replace('.jpg','').replace('.png','').split('_').pop()})`;
   head.onclick = () => annAutoSave(() => { ANN.idx = matches[0].imgIdx; });
   listEl.appendChild(head);
   matches.forEach((m, k) => {
@@ -2157,7 +2232,7 @@ async function annLoadImage(){
 }
 function annCurImg(){return ANN.data[ANN.idx]||{};}
 
-// ── main draw (everything in screen space via zoom/pan transform) ──
+//  main draw (everything in screen space via zoom/pan transform)
 function annDraw(){
   if(!ANN.bgImg||!ANN.data.length)return;
   annResizeCanvas();
@@ -2177,7 +2252,7 @@ function annDraw(){
     const isSel=isAnchor||ANN.selSet.has(i);
     const shape=lb.shape||'rect';
 
-    // ── Polygon shape ──
+    //  Polygon shape
     if(shape==='polygon'&&lb.points&&lb.points.length>=3){
       ctx.save();
       ctx.beginPath();
@@ -2222,7 +2297,7 @@ function annDraw(){
       return; // skip rect/ellipse path
     }
 
-    // ── Rect / Ellipse shape ──
+    //  Rect / Ellipse shape
     const cx_scr=lb.xc*ANN.imgW*Z+ox, cy_scr=lb.yc*ANN.imgH*Z+oy;
     const bw=lb.w*ANN.imgW*Z, bh=lb.h*ANN.imgH*Z;
     const angle=lb.angle||0;
@@ -2330,7 +2405,7 @@ function annDraw(){
   annDrawMinimap();
 }
 
-// ── rotation-aware coordinate helpers ──
+//  rotation-aware coordinate helpers
 function _rotatePoint(px,py,cx,cy,angle){
   const cos=Math.cos(-angle),sin=Math.sin(-angle);
   const dx=px-cx,dy=py-cy;
@@ -2344,7 +2419,7 @@ function _toLocalBox(ix,iy,lb){
   return{x:r.x-cx, y:r.y-cy};
 }
 
-// ── hit testing (in image space, rotation-aware) ──
+//  hit testing (in image space, rotation-aware)
 function annHitHandle(ix,iy){
   if(ANN.selIdx<0)return null;
   const lb=ANN.data[ANN.idx].labels[ANN.selIdx];
@@ -2438,7 +2513,7 @@ function _pointLineDist(p,a,b){
   return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
 }
 
-// ── mouse events ──
+//  mouse events
 annCanvas.addEventListener('pointerdown',e=>{
   if(!ANN.data.length)return;
   // middle button = pan
@@ -2453,17 +2528,17 @@ annCanvas.addEventListener('pointerdown',e=>{
     if(shape==='polygon'){ANN.dragMode='draw_poly';ANN.polyPoints=[pos];return;}
     ANN.dragMode='draw';ANN.dragStart=pos;ANN.dragOrig=pos;return;
   }
-  // left-click: hit handle → resize/rotate; hit box → select+move; hit OCR → select; empty → pan or lasso
+  // left-click: hit handle -> resize/rotate; hit box -> select+move; hit OCR -> select; empty -> pan or lasso
   const h=annHitHandle(pos.x,pos.y);
   if(h){ANN.dragMode=h;ANN.dragStart=pos;const lb=ANN.data[ANN.idx].labels[ANN.selIdx];ANN.dragOrig={xc:lb.xc,yc:lb.yc,w:lb.w,h:lb.h,angle:lb.angle||0,points:lb.points?lb.points.map(p=>({x:p.x,y:p.y})):null};annCanvas.setPointerCapture(e.pointerId);return;}
   const hit=annHitBox(pos.x,pos.y);
   if(hit>=0){
     ocrSelIdx=-1;
     // Multi-select modifiers:
-    //   Shift+click box     → add to selection (or remove if already in)
-    //   Ctrl+click box      → remove from selection
-    //   plain click on UNSELECTED box → single-select (clears multi)
-    //   plain click on ALREADY-SELECTED box → KEEP selection, promote to anchor
+    //   Shift+click box     -> add to selection (or remove if already in)
+    //   Ctrl+click box      -> remove from selection
+    //   plain click on UNSELECTED box -> single-select (clears multi)
+    //   plain click on ALREADY-SELECTED box -> KEEP selection, promote to anchor
     //     (so user can immediately drag the whole group; clicking an in-group
     //      box must not collapse the multi-selection — that's the bug fix.)
     if(e.shiftKey){
@@ -2505,8 +2580,8 @@ annCanvas.addEventListener('pointerdown',e=>{
   const ocrHit=annHitOCR(pos.x,pos.y);
   if(ocrHit>=0){ocrSelIdx=ocrHit;_annSelClear();annUpdateOCRUI();annDraw();return;}
   // Empty space:
-  //   Shift+left-drag → lasso rect (multi-select)
-  //   plain left-drag → pan (legacy)
+  //   Shift+left-drag -> lasso rect (multi-select)
+  //   plain left-drag -> pan (legacy)
   if(e.shiftKey || e.ctrlKey){
     ANN.dragMode='lasso';
     ANN.lassoStart=pos;ANN.lassoEnd=pos;
@@ -2657,7 +2732,7 @@ annCanvas.addEventListener('pointerup',e=>{
       ANN.selIdx=ANN.data[ANN.idx].labels.length-1;ANN.dirty=true;
     }
   }
-  // L1: finalize lasso → collect boxes whose center lies in the rect
+  // L1: finalize lasso -> collect boxes whose center lies in the rect
   if(ANN.dragMode==='lasso' && ANN.lassoStart && ANN.lassoEnd){
     const x1=Math.min(ANN.lassoStart.x,ANN.lassoEnd.x), x2=Math.max(ANN.lassoStart.x,ANN.lassoEnd.x);
     const y1=Math.min(ANN.lassoStart.y,ANN.lassoEnd.y), y2=Math.max(ANN.lassoStart.y,ANN.lassoEnd.y);
@@ -2759,13 +2834,13 @@ document.addEventListener('keydown',e=>{
   }
   if(e.ctrlKey&&!e.shiftKey&&(k==='v'||k==='V')){
     e.preventDefault();
-    // Build class-name → current-id lookup once
+    // Build class-name -> current-id lookup once
     const nameToId = new Map();
     ANN.classes.forEach((n,i)=>nameToId.set(n,i));
     const _remap = (cp) => {
       if(cp._srcClassName !== undefined){
         const newId = nameToId.get(cp._srcClassName);
-        if(newId === undefined) return null;  // unmappable → drop
+        if(newId === undefined) return null;  // unmappable -> drop
         cp.cls = newId;
         delete cp._srcClassName;
       }
@@ -2980,7 +3055,7 @@ async function annRunFlorence(){
 // Pre-fill boxes from the ACTIVE ui detector (v3). Suggestions come back
 // already tagged with the trained cls_name (+ master cls index). Low conf
 // (0.10) so weak detections (邮件箱-grade) still surface for review. Dedup
-// is ANY-cls IoU>0.6 → never stack a 2nd box where one already sits
+// is ANY-cls IoU>0.6 -> never stack a 2nd box where one already sits
 // (the "不能让 bbox 挤一个东西" rule). Correct mis-labels by selecting the
 // box then clicking the right class in the left list.
 async function annRunYolo(){
@@ -3102,7 +3177,7 @@ async function annSave(){
   return _annSavingPromise;
 }
 
-// ── X1: Array generation (Shift+G) ──
+//  X1: Array generation (Shift+G)
 // Take exactly 2 selected boxes as anchors, generate N-2 intermediate ones
 // at uniform spacing. Useful for grid-like UI (rows of dots, item slots, etc).
 function annArrayGenerate(){
@@ -3145,8 +3220,8 @@ function annArrayGenerate(){
   showToast(`已生成 ${N - 2} 个等距 box (共 ${N} 个，Ctrl+Z 可撤销)`,'success',2500);
 }
 
-// ── X3: Stamp (Shift+T) ──
-// First call with selection → save as stamp. Subsequent calls → paste stamp
+//  X3: Stamp (Shift+T)
+// First call with selection -> save as stamp. Subsequent calls -> paste stamp
 // at current frame (center anchored at the stamp's saved centroid + offset).
 // Persists across frame navigation but cleared on dataset switch.
 function annStampAction(){
@@ -3169,7 +3244,7 @@ function annStampAction(){
     showToast('未保存 stamp。先选中几个 box 再按 Shift+T','info',2000);
     return;
   }
-  // Paste stamp at center + 2% offset, remap class names → current dataset ids
+  // Paste stamp at center + 2% offset, remap class names -> current dataset ids
   const {labels, anchor} = ANN.stamp;
   const nameToId = new Map();
   ANN.classes.forEach((n,i)=>nameToId.set(n,i));
@@ -3204,7 +3279,7 @@ function annStampAction(){
 }
 function annStampClear(){ ANN.stamp = null; showToast('Stamp 已清除','info',1500); }
 
-// ── X2: Group alignment / distribution ──
+//  X2: Group alignment / distribution
 // All operate on _annSelected() (>= 2 needed for most ops).
 function _annAlignBounds(){
   const sel = _annSelected();
@@ -3277,9 +3352,9 @@ function annMatchSize(){
   showToast(`${sel.length-1} 个 box 已匹配 anchor 尺寸`,'info',1500);
 }
 
-// ── Paste-from-frame picker ── (Shift+P)
+//  Paste-from-frame picker  (Shift+P)
 // Lets the user copy all labels from an arbitrary already-labeled frame into
-// the current frame. Supports cross-dataset paste (e.g. train → val) — when
+// the current frame. Supports cross-dataset paste (e.g. train -> val) — when
 // source dataset is different, class IDs are remapped by class NAME so that
 // schema differences don't corrupt labels (unmapped classes are dropped).
 // Destructive but Ctrl+Z restorable (snapshots history).
@@ -3407,7 +3482,7 @@ function annPastePickerConfirm(){
   const src = srcData[r.idx];
   if(!src || !src.labels || !src.labels.length){ annClosePastePicker(); return; }
 
-  // Class id remap (only needed cross-dataset): source cls id → name → current ds cls id.
+  // Class id remap (only needed cross-dataset): source cls id -> name -> current ds cls id.
   // Unmappable classes are dropped + counted for toast.
   const nameToCurId = new Map();
   ANN.classes.forEach((n, i) => nameToCurId.set(n, i));
@@ -3464,7 +3539,7 @@ async function annAddClass(){
     body:JSON.stringify({dataset:ANN.dataset,name})});}catch(e){}
 }
 
-/* ── OCR overlay + editable + save ── */
+/*  OCR overlay + editable + save  */
 let ocrSelIdx=-1;
 
 // Run OCR on current image (always fresh from backend)
@@ -3578,13 +3653,13 @@ async function annOpenOCRFolder(){
 // resize handler
 window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)annDraw();});
 
-/* ════════════════════════════════════════════════════
+/*
    SYNTH TEMPLATE EDITOR — canvas-based slot editor for
    synthetic-data composition. Each context (schedule_popup
    / student_list / momotalk / battle_squad / tactical_competition
    / cafe_invite / arena_squad) gets its own template JSON
    with slot rects + ref crop + aug config.
-   ════════════════════════════════════════════════════ */
+    */
 const SYNTH = {
   context: null,
   template: null,        // current loaded template object
@@ -3602,8 +3677,8 @@ const SYNTH = {
   panX: 0, panY: 0,      // viewport pan offset in canvas px
   panning: false,
   panStart: null,
-  spaceHeld: false,      // Space key → drag-to-pan
-  // ── UI-stamp mode (additive; independent of slot editing) ──
+  spaceHeld: false,      // Space key -> drag-to-pan
+  //  UI-stamp mode (additive; independent of slot editing)
   target: 'avatar',      // 'avatar' (default) | 'ui'
   uiStamps: [],          // [{cls,cls_name,x1,y1,x2,y2}] normalized to SAMPLE image (same space as slots)
   stampMode: false,      // when true, dragging draws UI stamps instead of editing slots
@@ -3614,7 +3689,7 @@ const SYNTH = {
   _uiClasses: null,      // cached class-name list from /ui_classes (index = cls id)
 };
 
-/* ─── Quad helpers ────────────────────────────────────────────
+/*  Quad helpers
  * A slot can be axis-aligned rect (no quad) or a free 4-point quad.
  * Quad points order: TL, TR, BR, BL.  When quad exists, x1/y1/x2/y2
  * are kept as the AABB of the quad (so legacy code still works as
@@ -3672,14 +3747,14 @@ function synthToggleQuad(){
     // Reset to axis-aligned rect (snap to current AABB)
     synthSyncBBox(s);
     delete s.quad;
-    $('synth_status').textContent = `#${SYNTH.selIdx+1} → 矩形模式`;
+    $('synth_status').textContent = `#${SYNTH.selIdx+1} -> 矩形模式`;
   } else {
-    // Convert rect → quad with 4 corner control points
+    // Convert rect -> quad with 4 corner control points
     s.quad = [
       {x: s.x1, y: s.y1}, {x: s.x2, y: s.y1},
       {x: s.x2, y: s.y2}, {x: s.x1, y: s.y2},
     ];
-    $('synth_status').textContent = `#${SYNTH.selIdx+1} → 自由四边形 (拖 4 个角随意变形)`;
+    $('synth_status').textContent = `#${SYNTH.selIdx+1} -> 自由四边形 (拖 4 个角随意变形)`;
   }
   synthDraw(); synthUpdateSlotList();
 }
@@ -3692,7 +3767,7 @@ async function synthInit(){
     (r.templates || []).forEach(t => {
       const o = document.createElement('option');
       o.value = t.context;
-      o.textContent = `${t.context}${t.configured?' ✓':' (新)'}  · ${t.n_slots} slots`;
+      o.textContent = `${t.context}${t.configured?' OK':' (新)'}  · ${t.n_slots} slots`;
       sel.appendChild(o);
     });
   } catch(e){ console.error(e); }
@@ -3764,7 +3839,7 @@ async function synthLoadContext(ctx){
       }
       return c;
     });
-    // ── UI-stamp fields (additive) ──
+    //  UI-stamp fields (additive)
     SYNTH.target = (t.target === 'ui') ? 'ui' : 'avatar';
     SYNTH.uiStamps = (t.ui_stamps || []).map(s => ({
       cls: +s.cls, cls_name: s.cls_name || '',
@@ -3890,7 +3965,7 @@ function synthDraw(){
       ctx.fillStyle = '#fff';
       ctx.font = '11px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(`#${i+1}◆`, pts[0].x+3, pts[0].y-5);
+      ctx.fillText(`#${i+1}`, pts[0].x+3, pts[0].y-5);
     } else {
       const x1 = ox + s.x1*w, y1 = oy + s.y1*h;
       const x2 = ox + s.x2*w, y2 = oy + s.y2*h;
@@ -3903,7 +3978,7 @@ function synthDraw(){
       ctx.fillText(`#${i+1}`, x1+3, y1-5);
     }
   });
-  // ── Draw UI stamps (magenta, visually distinct from slots) ──
+  //  Draw UI stamps (magenta, visually distinct from slots)
   (SYNTH.uiStamps || []).forEach((s, i) => {
     const sel = i === SYNTH.selStampIdx;
     const x1 = ox + s.x1*w, y1 = oy + s.y1*h;
@@ -3926,7 +4001,7 @@ function synthDraw(){
       ctx.fillRect(x1-3, y1-3, 6, 6); ctx.fillRect(x2-3, y2-3, 6, 6);
     }
   });
-  // ── In-progress stamp drag rubber-band ──
+  //  In-progress stamp drag rubber-band
   if (SYNTH.stampMode && SYNTH.stampDrawing && SYNTH.stampDrawStart && SYNTH.stampDrawCur) {
     const a = SYNTH.stampDrawStart, b = SYNTH.stampDrawCur;
     const rx1 = ox + Math.min(a.x,b.x)*w, ry1 = oy + Math.min(a.y,b.y)*h;
@@ -3946,8 +4021,8 @@ function synthUpdateSlotList(){
   SYNTH.slots.forEach((s, i) => {
     const d = document.createElement('div');
     d.style.cssText = 'padding:3px 6px;margin:1px 0;background:'+(i===SYNTH.selIdx?'#3a3a4a':'transparent')+';border-radius:3px;cursor:pointer;font-family:monospace;font-size:10px';
-    const tag = s.quad ? ' ◆' : '';
-    d.textContent = `#${i+1}${tag}  ${s.x1.toFixed(3)},${s.y1.toFixed(3)} → ${s.x2.toFixed(3)},${s.y2.toFixed(3)}`;
+    const tag = s.quad ? ' ' : '';
+    d.textContent = `#${i+1}${tag}  ${s.x1.toFixed(3)},${s.y1.toFixed(3)} -> ${s.x2.toFixed(3)},${s.y2.toFixed(3)}`;
     d.onclick = () => { SYNTH.selIdx = i; synthDraw(); synthUpdateSlotList(); };
     el.appendChild(d);
   });
@@ -3993,7 +4068,7 @@ function synthHitTest(mx, my){
 
 function synthAttachCanvasEvents(){
   const c = $('synth_canvas'); if (!c) return;
-  // ── Drag-drop image file onto canvas to set as sample ──────
+  //  Drag-drop image file onto canvas to set as sample
   const wrap = $('synth_canvas_wrap') || c.parentElement;
   const hint = $('synth_drop_hint');
   const showHint = (show) => { if (hint) hint.style.display = show ? 'flex' : 'none'; };
@@ -4015,7 +4090,7 @@ function synthAttachCanvasEvents(){
     });
   }
   c.onmousedown = (e) => {
-    // Middle-button OR Space+left-button → start panning
+    // Middle-button OR Space+left-button -> start panning
     if (e.button === 1 || (e.button === 0 && SYNTH.spaceHeld)) {
       e.preventDefault();
       SYNTH.panning = true;
@@ -4024,7 +4099,7 @@ function synthAttachCanvasEvents(){
       return;
     }
     if (e.button !== 0) return;  // only left-button for slot interaction
-    // ── UI-stamp mode: left-drag draws a stamp box (additive) ──
+    //  UI-stamp mode: left-drag draws a stamp box (additive)
     if (SYNTH.stampMode) {
       const r = c.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
@@ -4079,7 +4154,7 @@ function synthAttachCanvasEvents(){
       return;
     }
     if (!SYNTH.panning) { c.style.cursor = SYNTH.stampMode ? 'crosshair' : 'grab'; }
-    // ── UI-stamp drawing: update rubber-band ──
+    //  UI-stamp drawing: update rubber-band
     if (SYNTH.stampMode && SYNTH.stampDrawing) {
       const nn = synthCanvasToNorm(mx, my);
       if (nn) { SYNTH.stampDrawCur = {x: nn.x, y: nn.y}; }
@@ -4094,7 +4169,7 @@ function synthAttachCanvasEvents(){
     const s = SYNTH.slots[SYNTH.selIdx];
     const o = SYNTH.dragOrig;
     const lockSquare = e.shiftKey && SYNTH.dragMode && SYNTH.dragMode !== 'move' && !SYNTH.dragMode.startsWith('quad-');
-    // ── Quad corner drag: move single point only ─────────────
+    //  Quad corner drag: move single point only
     if (SYNTH.dragMode && SYNTH.dragMode.startsWith('quad-') && o.quad) {
       const ki = {'quad-tl':0, 'quad-tr':1, 'quad-br':2, 'quad-bl':3}[SYNTH.dragMode];
       s.quad = o.quad.map(p => ({...p}));
@@ -4106,7 +4181,7 @@ function synthAttachCanvasEvents(){
       synthDraw(); synthUpdateSlotList();
       return;
     }
-    // ── Quad whole-shape move: translate all 4 points ────────
+    //  Quad whole-shape move: translate all 4 points
     if (SYNTH.dragMode === 'move' && o.quad) {
       // Clamp so the entire quad stays in [0,1]
       const minX = Math.min(...o.quad.map(p=>p.x)), maxX = Math.max(...o.quad.map(p=>p.x));
@@ -4163,7 +4238,7 @@ function synthAttachCanvasEvents(){
     synthDraw(); synthUpdateSlotList();
   };
   c.onmouseup = () => {
-    // ── Finalize a UI-stamp drag → open class picker (additive) ──
+    //  Finalize a UI-stamp drag -> open class picker (additive)
     if (SYNTH.stampMode && SYNTH.stampDrawing) {
       SYNTH.stampDrawing = false;
       const a = SYNTH.stampDrawStart, b = SYNTH.stampDrawCur;
@@ -4231,7 +4306,7 @@ function synthAttachCanvasEvents(){
   window.addEventListener('keydown', (e) => {
     if ($('page-synth') && !$('page-synth').classList.contains('active')) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-    // ── UI-stamp delete takes priority when a stamp is selected (additive) ──
+    //  UI-stamp delete takes priority when a stamp is selected (additive)
     if ((e.key === 'Delete' || e.key === 'Backspace') && SYNTH.selStampIdx >= 0) {
       synthDeleteStamp();
       e.preventDefault();
@@ -4251,7 +4326,7 @@ function synthAttachCanvasEvents(){
       const cl = SYNTH.clipboard;
       const wpx = ((cl.x2-cl.x1)*SYNTH.imgW).toFixed(0);
       const hpx = ((cl.y2-cl.y1)*SYNTH.imgH).toFixed(0);
-      const tag = cl.quad ? '◆四边形' : '矩形';
+      const tag = cl.quad ? '四边形' : '矩形';
       $('synth_status').textContent = `已复制 ${tag} #${SYNTH.selIdx+1} (${wpx}×${hpx}px AABB) — 移到目标位置按 Ctrl+V`;
       e.preventDefault();
     }
@@ -4318,7 +4393,7 @@ function synthAttachCanvasEvents(){
       $('synth_status').textContent = 'Zoom 重置 (100% · 居中)';
       e.preventDefault();
     }
-    // Space → pan mode (cursor: grab)
+    // Space -> pan mode (cursor: grab)
     if (e.key === ' ' && !SYNTH.spaceHeld) {
       SYNTH.spaceHeld = true;
       const cv = $('synth_canvas'); if (cv) cv.style.cursor = 'grab';
@@ -4332,7 +4407,7 @@ function synthAttachCanvasEvents(){
       synthZoomBy(1/1.25); e.preventDefault();
     }
   });
-  // Space key release → exit pan mode
+  // Space key release -> exit pan mode
   window.addEventListener('keyup', (e) => {
     if ($('page-synth') && !$('page-synth').classList.contains('active')) return;
     if (e.key === ' ') {
@@ -4381,7 +4456,7 @@ function synthBuildPayload(){
     synth_count: parseInt($('synth_count').value, 10) || 200,
     bbox_mode: $('synth_bbox_mode').value || 'full',
     use_for: $('synth_use_for').value || 'train',
-    // ── UI-stamp fields (additive) ──
+    //  UI-stamp fields (additive)
     target: SYNTH.target || 'avatar',
     ui_stamps: (SYNTH.uiStamps || []).map(s => ({
       cls: s.cls, cls_name: s.cls_name || '',
@@ -4390,10 +4465,10 @@ function synthBuildPayload(){
   };
 }
 
-/* ════════════════════════════════════════════════════════════════
+/*
  * UI-STAMP MODE (additive — does not touch slot / ref-crop / aug)
  * Stamps are normalized to the SAMPLE image, same coord space as slots.
- * ════════════════════════════════════════════════════════════════ */
+ *  */
 
 // Hit-test an existing stamp by canvas px (returns index or -1)
 function synthStampHitTest(mx, my){
@@ -4414,7 +4489,7 @@ function synthUpdateStampList(){
   (SYNTH.uiStamps||[]).forEach((s, i) => {
     const d = document.createElement('div');
     d.style.cssText = 'padding:3px 6px;margin:1px 0;background:'+(i===SYNTH.selStampIdx?'#6b21a8':'transparent')+';border-radius:3px;cursor:pointer;font-family:monospace;font-size:10px;color:#f5d0fe';
-    d.textContent = `${s.cls}:${s.cls_name||''}  ${s.x1.toFixed(3)},${s.y1.toFixed(3)} → ${s.x2.toFixed(3)},${s.y2.toFixed(3)}`;
+    d.textContent = `${s.cls}:${s.cls_name||''}  ${s.x1.toFixed(3)},${s.y1.toFixed(3)} -> ${s.x2.toFixed(3)},${s.y2.toFixed(3)}`;
     d.onclick = () => { SYNTH.selStampIdx = i; synthDraw(); synthUpdateStampList(); };
     el.appendChild(d);
   });
@@ -4441,7 +4516,7 @@ function synthToggleStampMode(){
     if ($('synth_target')) $('synth_target').value = 'ui';
   }
   if ($('synth_status')) $('synth_status').textContent = SYNTH.stampMode
-    ? 'UI 图章模式: 在画布拖框 → 选 class (画布不再编辑 slot)'
+    ? 'UI 图章模式: 在画布拖框 -> 选 class (画布不再编辑 slot)'
     : 'UI 图章模式 关 (画布恢复 slot 编辑)';
   synthDraw();
 }
@@ -4564,13 +4639,13 @@ async function synthBuildUI(){
       body: JSON.stringify({count})
     });
     const frames = (r && (r.frames ?? r.out)) ?? '?';
-    showToast(`✓ UI 合成完成: 写入 ${frames} 帧${r && r.out ? ' → ' + r.out : ''}`, 'success', 5000);
-    if ($('synth_status')) $('synth_status').textContent = `✓ UI 合成: ${frames} 帧`;
+    showToast(`OK UI 合成完成: 写入 ${frames} 帧${r && r.out ? ' -> ' + r.out : ''}`, 'success', 5000);
+    if ($('synth_status')) $('synth_status').textContent = `OK UI 合成: ${frames} 帧`;
   } catch(e){
     showToast('UI 合成失败: ' + e.message, 'error', 6000);
     if ($('synth_status')) $('synth_status').textContent = 'UI 合成失败: ' + e.message;
   } finally {
-    if (btn){ btn.textContent = prevTxt || '⚙ 生成UI合成'; btn.disabled = false; btn.style.opacity = '1'; }
+    if (btn){ btn.textContent = prevTxt || ' 生成UI合成'; btn.disabled = false; btn.style.opacity = '1'; }
   }
 }
 
@@ -4582,7 +4657,7 @@ async function synthSave(){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(p)
     });
-    $('synth_status').textContent = '✓ 已保存 ' + new Date().toLocaleTimeString();
+    $('synth_status').textContent = 'OK 已保存 ' + new Date().toLocaleTimeString();
     // Refresh dropdown info
     synthInit();
   } catch(e){
@@ -4608,7 +4683,7 @@ async function synthUploadSampleFile(f){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({file_b64: b64, filename: f.name})
     });
-    $('synth_status').textContent = `✓ ${f.name} → ${r.image_size.join('×')}`;
+    $('synth_status').textContent = `OK ${f.name} -> ${r.image_size.join('×')}`;
     await synthLoadContext(SYNTH.context);
   } catch(e){
     $('synth_status').textContent = '上传失败: ' + e.message;
@@ -4635,12 +4710,12 @@ function synthPickSampleByPath(){
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({source_path: src.trim()})
   }).then(r => {
-    $('synth_status').textContent = `✓ 路径加载: ${r.image_size.join('×')}`;
+    $('synth_status').textContent = `OK 路径加载: ${r.image_size.join('×')}`;
     synthLoadContext(SYNTH.context);
   }).catch(e => { $('synth_status').textContent = '失败: ' + e.message; });
 }
 
-/* ─── Visual ref-crop tool ──────────────────────────────────
+/*  Visual ref-crop tool
  * Loads a character's wiki portrait into a side-panel canvas, draws
  * the crop rectangle (driven by synth_crop_x1/y1/x2/y2 sliders), and
  * lets the user drag the rect with mouse.  Crop applies to ALL chars
@@ -4655,9 +4730,9 @@ const SYNTH_CROP = {
   // Aug positions (normalized inside slot 0-1). Defaults match BA UI common spots.
   augPositions: {
     lv:     {x: 0.05, y: 0.15, color: '#ffffff', label: 'Lv'},
-    star:   {x: 0.10, y: 0.10, color: '#ffd700', label: '★'},
-    weapon: {x: 0.85, y: 0.85, color: '#ff8c00', label: '⚔'},
-    heart:  {x: 0.85, y: 0.85, color: '#ff1493', label: '♥'},
+    star:   {x: 0.10, y: 0.10, color: '#ffd700', label: ''},
+    weapon: {x: 0.85, y: 0.85, color: '#ff8c00', label: ''},
+    heart:  {x: 0.85, y: 0.85, color: '#ff1493', label: ''},
   },
 };
 
@@ -4699,7 +4774,7 @@ function synthCropDraw(){
   const im = SYNTH_CROP.refImg;
   const refW = im.naturalWidth, refH = im.naturalHeight;
 
-  // ── Get the first slot's actual shape (rect or quad), in template pixel coords ──
+  //  Get the first slot's actual shape (rect or quad), in template pixel coords
   // slotPts_px is always a 4-corner polygon; for rect mode it's TL/TR/BR/BL of the rect.
   let slotPts_px;
   if (SYNTH.slots && SYNTH.slots.length > 0 && SYNTH.imgW > 1 && SYNTH.imgH > 1) {
@@ -4752,10 +4827,10 @@ function synthCropDraw(){
   const canvasSlotAspect = sw / Math.max(sh, 1);
   let cropCanvasW, cropCanvasH;
   if (cropAspect > canvasSlotAspect) {
-    // Crop wider than slot → fit height, overflow width
+    // Crop wider than slot -> fit height, overflow width
     cropCanvasH = sh; cropCanvasW = sh * cropAspect;
   } else {
-    // Crop taller than slot → fit width, overflow height
+    // Crop taller than slot -> fit width, overflow height
     cropCanvasW = sw; cropCanvasH = sw / cropAspect;
   }
   const refScale = cropCanvasW / cropNatW;
@@ -4864,10 +4939,10 @@ function synthCropDraw(){
 
   const info = $('synth_crop_info');
   if (info) {
-    const slotTag = isQuad ? '◆四边形' : '矩形';
-    const shapeTag = shape === 'circle' ? '⚪circle'
-                    : shape === 'rounded_rect' ? `▢rounded(r=${radiusPx})`
-                    : '⬛square';
+    const slotTag = isQuad ? '四边形' : '矩形';
+    const shapeTag = shape === 'circle' ? 'circle'
+                    : shape === 'rounded_rect' ? `rounded(r=${radiusPx})`
+                    : 'square';
     info.textContent = `${SYNTH_CROP.charCn} · slot ${slotTag} ${aabbW.toFixed(0)}×${aabbH.toFixed(0)} · shape ${shapeTag} · zoom ${(1/cw*100).toFixed(0)}%`;
   }
 }
@@ -4978,7 +5053,7 @@ function synthCropAttach(){
   }, {passive: false});
 }
 
-/* ─── Preview modal state + helpers ────────────────────────── */
+/*  Preview modal state + helpers  */
 const SYNTH_PV = {
   imgSrc: null, imgW: 0, imgH: 0,
   zoom: 1, panX: 0, panY: 0,
@@ -4998,7 +5073,7 @@ function synthAutoCount(){
   const cnt = Math.ceil(target * nChars / nSlots);
   $('synth_count').value = cnt;
   $('synth_target_hint').textContent = `= ⌈${target}×${nChars}/${nSlots}⌉ = ${cnt} 张`;
-  $('synth_status').textContent = `✓ ${SYNTH.context}: 每角色至少 ${target} 次 → synth_count=${cnt}`;
+  $('synth_status').textContent = `OK ${SYNTH.context}: 每角色至少 ${target} 次 -> synth_count=${cnt}`;
 }
 
 async function synthNewTemplate(){
@@ -5032,7 +5107,7 @@ async function synthNewTemplate(){
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
     });
-    $('synth_status').textContent = `✓ 新建 ${safe}`;
+    $('synth_status').textContent = `OK 新建 ${safe}`;
     await synthInit();
     // Select the new one
     const sel = $('synth_context');
@@ -5048,7 +5123,7 @@ async function synthDeleteContext(){
   if (!confirm(`删除 context "${SYNTH.context}" 的模板和样板图? (不可恢复)`)) return;
   try {
     await api(`/api/v1/synth/template/${SYNTH.context}`, {method: 'DELETE'});
-    $('synth_status').textContent = `✓ 已删除 ${SYNTH.context}`;
+    $('synth_status').textContent = `OK 已删除 ${SYNTH.context}`;
     SYNTH.context = null;
     SYNTH.slots = []; SYNTH.bgImg = null; SYNTH.selIdx = -1;
     synthDraw(); synthUpdateSlotList();
@@ -5063,7 +5138,7 @@ function synthZeroAug(){
     const el = $('synth_' + id);
     if (el) { el.value = '0'; $('synth_' + id + '_v').textContent = '0.00'; }
   });
-  $('synth_status').textContent = '✓ 所有 augmentation 关掉了 (Save 后生效)';
+  $('synth_status').textContent = 'OK 所有 augmentation 关掉了 (Save 后生效)';
 }
 
 function synthDefaultAug(){
@@ -5076,7 +5151,7 @@ function synthDefaultAug(){
     const el = $('synth_' + id);
     if (el) { el.value = String(v); $('synth_' + id + '_v').textContent = v.toFixed(2); }
   });
-  $('synth_status').textContent = '✓ 推荐 augmentation 已填 (Save 后生效)';
+  $('synth_status').textContent = 'OK 推荐 augmentation 已填 (Save 后生效)';
 }
 
 function synthRandomAug(){
@@ -5095,7 +5170,7 @@ function synthRandomAug(){
     const v = lo + Math.random() * (hi - lo);
     el.value = v.toFixed(3); $('synth_' + id + '_v').textContent = v.toFixed(2);
   });
-  $('synth_status').textContent = '✓ Augmentation 随机化了 (Save 后生效)';
+  $('synth_status').textContent = 'OK Augmentation 随机化了 (Save 后生效)';
 }
 
 async function synthRandomPreview(){
@@ -5133,7 +5208,7 @@ async function synthPreview(){
     cap.style.cssText = 'font-size:10px;color:var(--muted);margin-top:4px;text-align:center;pointer-events:none';
     cap.textContent = info + ' · 点击放大';
     holder.appendChild(cap);
-    $('synth_status').textContent = '✓ Preview ready';
+    $('synth_status').textContent = 'OK Preview ready';
     // Auto-open modal (first time, can also be reopened by clicking thumbnail)
     synthOpenPreviewModal();
   } catch(e){
@@ -5233,9 +5308,9 @@ function synthPvRender(){
     setTimeout(attach, 0);
   }
 })();
-/* ════════════════════════════════════════════════════
+/*
    类管理 (merge / rename / stats)
-   ════════════════════════════════════════════════════ */
+    */
 function clsEsc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 async function clsApi(path, body){
   const r = await fetch(path, body!==undefined?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:undefined);
@@ -5268,7 +5343,7 @@ function clsMgrRender(){
   if(CLSM.mergeSrc!=null){
     const s = CLSM.stats.find(c=>c.idx===CLSM.mergeSrc);
     bar.style.display='block';
-    bar.innerHTML = `合并模式: src = <b>${s.idx}: ${clsEsc(s.name)}</b> (${s.boxes}框) — 在列表里点目标类的 <b>⇐并入</b> <button class="btn btn-sm" style="margin-left:10px" onclick="CLSM.mergeSrc=null;clsMgrRender()">取消</button>`;
+    bar.innerHTML = `合并模式: src = <b>${s.idx}: ${clsEsc(s.name)}</b> (${s.boxes}框) — 在列表里点目标类的 <b>并入</b> <button class="btn btn-sm" style="margin-left:10px" onclick="CLSM.mergeSrc=null;clsMgrRender()">取消</button>`;
   } else bar.style.display='none';
   const el = $('cls_mgr_list');
   el.innerHTML='';
@@ -5289,7 +5364,7 @@ function clsMgrRender(){
       const bM=document.createElement('button');bM.className='btn btn-sm';
       if(CLSM.mergeSrc==null){ bM.textContent='合并…'; bM.title='把这个类当 src(被并掉的那个)'; bM.onclick=()=>{CLSM.mergeSrc=c.idx;clsMgrRender();}; }
       else if(isSrc){ bM.textContent='取消'; bM.onclick=()=>{CLSM.mergeSrc=null;clsMgrRender();}; }
-      else { bM.textContent='⇐并入'; bM.className='btn btn-sm btn-success'; bM.title=`把 ${CLSM.mergeSrc} 并入 ${c.idx}`; bM.onclick=()=>clsMgrMergeInto(c.idx); }
+      else { bM.textContent='并入'; bM.className='btn btn-sm btn-success'; bM.title=`把 ${CLSM.mergeSrc} 并入 ${c.idx}`; bM.onclick=()=>clsMgrMergeInto(c.idx); }
       act.appendChild(bM);
     }
     d.appendChild(act);
@@ -5298,17 +5373,17 @@ function clsMgrRender(){
 }
 async function clsMgrRename(idx){
   const c = CLSM.stats.find(x=>x.idx===idx);
-  const nn = prompt(`改名 idx ${idx} (${c.boxes}框):\n${c.name}\n\n→ 新名字:`, c.name);
+  const nn = prompt(`改名 idx ${idx} (${c.boxes}框):\n${c.name}\n\n-> 新名字:`, c.name);
   if(!nn || nn.trim()===c.name) return;
   const send = async force=>clsApi('/api/v1/classes/rename',{idx, new_name:nn.trim(), force});
   try{ await send(false); }
   catch(e){
     if(e.status===409 && e.detail && e.detail.code_refs){
-      if(!confirm(`⚠ '${c.name}' 被代码引用:\n${e.detail.code_refs.join('\n')}\n\n${e.detail.hint}\n\n仍要改名?`)) return;
+      if(!confirm(`注意 '${c.name}' 被代码引用:\n${e.detail.code_refs.join('\n')}\n\n${e.detail.hint}\n\n仍要改名?`)) return;
       try{ await send(true); }catch(e2){ alert('改名失败: '+e2.message); return; }
     } else { alert('改名失败: '+e.message); return; }
   }
-  showToast(`已改名 ${idx}: ${c.name} → ${nn.trim()}`,'ok');
+  showToast(`已改名 ${idx}: ${c.name} -> ${nn.trim()}`,'ok');
   await clsMgrLoad(true);
   try{ if(ANN.dataset) annLoadDataset(); }catch(_){}
 }
@@ -5318,8 +5393,8 @@ async function clsMgrMergeInto(dstIdx){
   let pv;
   try{ pv = await clsApi('/api/v1/classes/merge',{src:src.idx,dst:dst.idx,dry_run:true}); }
   catch(e){ alert('预检失败: '+e.message); return; }
-  let msg = `合并确认:\n\nsrc ${src.idx}: ${src.name} (${src.boxes}框)\n → dst ${dst.idx}: ${dst.name} (${dst.boxes}框)\n\n将改写 ${pv.files} 个 label 文件, src 变墓碑(idx 不移位)。\n自动备份后执行, 不可从 UI 撤销。`;
-  if(pv.code_refs && pv.code_refs.length) msg += `\n\n⚠ '${src.name}' 被代码引用:\n${pv.code_refs.join('\n')}`;
+  let msg = `合并确认:\n\nsrc ${src.idx}: ${src.name} (${src.boxes}框)\n -> dst ${dst.idx}: ${dst.name} (${dst.boxes}框)\n\n将改写 ${pv.files} 个 label 文件, src 变墓碑(idx 不移位)。\n自动备份后执行, 不可从 UI 撤销。`;
+  if(pv.code_refs && pv.code_refs.length) msg += `\n\n注意 '${src.name}' 被代码引用:\n${pv.code_refs.join('\n')}`;
   if(!confirm(msg)) return;
   try{
     const r = await clsApi('/api/v1/classes/merge',{src:src.idx,dst:dst.idx,force:true});
@@ -5330,9 +5405,9 @@ async function clsMgrMergeInto(dstIdx){
   }catch(e){ alert('合并失败: '+e.message); }
 }
 
-/* ════════════════════════════════════════════════════
-   凹轴素材 (axis): 下载 → 抽帧 → battle v4 预标 → 轴表
-   ════════════════════════════════════════════════════ */
+/*
+   凹轴素材 (axis): 下载 -> 抽帧 -> battle v4 预标 -> 轴表
+    */
 let AXIS = {videos:[], cur:null, rows:[], dirty:false, jobTimer:null, wasRunning:false};
 function axisInit(){ axisRefresh(); axisPollJobs(); }
 async function axisRefresh(){
@@ -5340,8 +5415,8 @@ async function axisRefresh(){
     const r = await clsApi('/api/v1/axis/videos'); AXIS.videos=r.videos||[]; axisRenderVideos();
     const h=$('axis_cookie_hint');
     if(h) h.innerHTML = r.cookies_file
-      ? '🍪 <span style="color:#4ade80">data/axis_cookies.txt 已配置 — 下载 1080p 全长流</span>'
-      : 'ℹ <span style="color:#facc15">未配置 data/axis_cookies.txt → 自动降 480p(实锤完整流, 抄轴/训练够用)。要 1080p: B站页面 F12 → Application → Cookies → 复制 SESSDATA 值建此文件(720p+ 未登录只给15-80s试看, Chrome/Edge cookie 提取在 Win 已被加密堵死)</span>';
+      ? ' <span style="color:#4ade80">data/axis_cookies.txt 已配置 — 下载 1080p 全长流</span>'
+      : 'ℹ <span style="color:#facc15">未配置 data/axis_cookies.txt -> 自动降 480p(实锤完整流, 抄轴/训练够用)。要 1080p: B站页面 F12 -> Application -> Cookies -> 复制 SESSDATA 值建此文件(720p+ 未登录只给15-80s试看, Chrome/Edge cookie 提取在 Win 已被加密堵死)</span>';
   }
   catch(e){ $('axis_video_list').textContent='加载失败: '+e.message; }
 }
@@ -5361,10 +5436,10 @@ function axisRenderVideos(){
       `<td style="font-family:var(--mono)">${v.sheet_rows||0}行</td><td></td>`;
     const td=tr.lastElementChild;
     const mk=(label,title,fn,cls='btn btn-sm')=>{const b=document.createElement('button');b.className=cls;b.textContent=label;b.title=title;b.style.margin='1px';b.onclick=fn;td.appendChild(b);};
-    mk('🎬 轴表','打点标轴(播放器+行表)',()=>axisOpenSheet(v));
+    mk(' 轴表','打点标轴(播放器+行表)',()=>axisOpenSheet(v));
     mk('抽帧','ffmpeg 抽帧进 raw_images/'+v.pool,()=>axisExtract(v));
     if(v.frames){
-      mk('⚡track预标','ByteTrack 预标(闪烁捞回+遮挡插值+轨迹类别投票), 权重=battle 最新版, 后台job ~3分钟',()=>axisTrackPrefill(v));
+      mk('track预标','ByteTrack 预标(闪烁捞回+遮挡插值+轨迹类别投票), 权重=battle 最新版, 后台job ~3分钟',()=>axisTrackPrefill(v));
       mk('单帧预标','普通逐帧预标(battle 最新版, 同步)',()=>axisPrefill(v));
       mk('标注页','跳到标注中心该池人审',()=>{showPage('annotate');setTimeout(()=>{const s=$('ann_dataset');if(s){s.value=v.pool;if(s.value===v.pool)annLoadDataset();else showToast('列表里选 '+v.pool,'info');}},700);});
     }
@@ -5383,17 +5458,17 @@ async function axisDownload(){
 }
 async function axisExtract(v){
   const est = f=>v.duration?`≈${Math.round(v.duration*f)}帧`:'';
-  const fps = prompt(`抽帧 fps (建议 2-5)\n视频 ${v.duration}s → 3fps ${est(3)} / 5fps ${est(5)}:`, '3');
+  const fps = prompt(`抽帧 fps (建议 2-5)\n视频 ${v.duration}s -> 3fps ${est(3)} / 5fps ${est(5)}:`, '3');
   if(!fps) return;
   const send = async force=>clsApi('/api/v1/axis/extract',{video:v.name, fps:parseFloat(fps), force});
   try{
     const r = await send(false);
-    showToast('抽帧任务已启动 → '+r.pool,'ok'); axisPollJobs();
+    showToast('抽帧任务已启动 -> '+r.pool,'ok'); axisPollJobs();
   }catch(e){
     if(e.status===409){
       // 池已有帧/标注: 服务端拒绝, 需确认清池重抽(标注先自动备份)
-      if(!confirm('⚠ '+e.message+'\n\n确认清池重抽?')) return;
-      try{ const r = await send(true); showToast('已清池重抽 → '+r.pool,'ok'); axisPollJobs(); }
+      if(!confirm('注意 '+e.message+'\n\n确认清池重抽?')) return;
+      try{ const r = await send(true); showToast('已清池重抽 -> '+r.pool,'ok'); axisPollJobs(); }
       catch(e2){ alert('抽帧失败: '+e2.message); }
     } else alert('抽帧失败: '+e.message);
   }
@@ -5403,14 +5478,14 @@ async function axisJobCancel(jid){
   catch(e){ alert('取消失败: '+e.message); }
 }
 async function axisTrackPrefill(v){
-  if(!confirm(`⚡ track 预标 ${v.pool} (${v.frames}帧)?\nByteTrack 时序预标(闪烁捞回/遮挡插值/类别投票), 权重=battle 最新版。\n⚠ 会覆盖该池现有 battle 域标注(自动备份) — 已人审过的池别跑!`)) return;
+  if(!confirm(` track 预标 ${v.pool} (${v.frames}帧)?\nByteTrack 时序预标(闪烁捞回/遮挡插值/类别投票), 权重=battle 最新版。\n注意 会覆盖该池现有 battle 域标注(自动备份) — 已人审过的池别跑!`)) return;
   try{
     await clsApi('/api/v1/axis/track_prefill',{pool:v.pool});
     showToast('track 预标已启动(后台 job, 约2-4分钟)','ok'); axisPollJobs();
   }catch(e){ alert('启动失败: '+e.message); }
 }
 async function axisPrefill(v){
-  // battle teacher 版本由 server 动态解析(registry 最新 vN); version 不传 →
+  // battle teacher 版本由 server 动态解析(registry 最新 vN); version 不传 ->
   // 端点默认 active=legacy 会被空 remap 守卫拒绝, 故这里显式拉 teacher。
   let ver = '';
   try{ const m=(await clsApi('/api/v1/datasets/yolo_models')).models.find(x=>x.key==='battle_heads'); ver=m&&m.teacher||''; }catch(_){}
@@ -5441,7 +5516,7 @@ async function axisPollJobs(){
       el.innerHTML = r.jobs.map(j=>{
         const dur=Math.round((j.ended||Date.now()/1000)-j.started);
         const col=j.status==='running'?'#facc15':(j.status==='done'?'#4ade80':'#f87171');
-        const cancel=j.status==='running'?` <button class="btn btn-sm btn-danger" style="padding:0 5px;font-size:10px" onclick="axisJobCancel('${clsEsc(j.id)}')">✕取消</button>`:'';
+        const cancel=j.status==='running'?` <button class="btn btn-sm btn-danger" style="padding:0 5px;font-size:10px" onclick="axisJobCancel('${clsEsc(j.id)}')">取消</button>`:'';
         return `<div style="margin-bottom:5px"><span style="color:${col}">[${j.status}]</span> ${clsEsc(j.kind)} · ${clsEsc(j.label)} · ${dur}s${cancel}<br><span style="opacity:.65">${(j.log||[]).slice(-3).map(clsEsc).join('<br>')}</span></div>`;
       }).join('');
       running = r.jobs.some(j=>j.status==='running');
@@ -5453,7 +5528,7 @@ async function axisPollJobs(){
     // 瞬时请求失败不能断轮询链(server 重启/网络抖动) — 重试到 10 次再放弃
     AXIS.pollFails=(AXIS.pollFails||0)+1;
     if(AXIS.pollFails<=10) AXIS.jobTimer=setTimeout(axisPollJobs,3000);
-    else{ AXIS.wasRunning=false; const el=$('axis_jobs'); if(el){el.style.display='block'; el.innerHTML='<span style="color:#f87171">job 轮询失败(server 离线?) — 点上方 ↻ 刷新重试</span>';} }
+    else{ AXIS.wasRunning=false; const el=$('axis_jobs'); if(el){el.style.display='block'; el.innerHTML='<span style="color:#f87171">job 轮询失败(server 离线?) — 点上方  刷新重试</span>';} }
   }
   else if(AXIS.wasRunning){ AXIS.wasRunning=false; axisRefresh(); }
 }
@@ -5469,7 +5544,7 @@ function axisOpenSheet(v){
     .then(r=>{ if(AXIS.cur!==v) return;  /* 竞态守卫: 慢响应不得灌错视频(审计2026-07-15) */
       AXIS.rows=r.rows||[]; axisSheetRender(); })
     .catch(e=>{ AXIS.loadFailed=true; axisSheetRender();
-      $('axis_sheet_status').textContent='⚠ 轴表加载失败, 已禁止保存(防空表覆盖): '+e.message; });
+      $('axis_sheet_status').textContent='注意 轴表加载失败, 已禁止保存(防空表覆盖): '+e.message; });
   $('axis_sheet_card').scrollIntoView({behavior:'smooth'});
 }
 function axisPlayerStep(d){ const p=$('axis_player'); p.currentTime=Math.max(0,p.currentTime+d); }
@@ -5497,8 +5572,8 @@ function axisSheetRender(){
     tr.appendChild(cell('action','116px'));
     tr.appendChild(cell('note','126px'));
     const td=document.createElement('td'); td.style.whiteSpace='nowrap';
-    const j=document.createElement('button'); j.className='btn btn-sm'; j.textContent='▶'; j.title='跳到该时刻'; j.onclick=()=>{ $('axis_player').currentTime=r.t; }; td.appendChild(j);
-    const del=document.createElement('button'); del.className='btn btn-sm btn-danger'; del.textContent='✕'; del.style.marginLeft='2px'; del.onclick=()=>{ AXIS.rows.splice(i,1); AXIS.dirty=true; axisSheetRender(); }; td.appendChild(del);
+    const j=document.createElement('button'); j.className='btn btn-sm'; j.textContent='>'; j.title='跳到该时刻'; j.onclick=()=>{ $('axis_player').currentTime=r.t; }; td.appendChild(j);
+    const del=document.createElement('button'); del.className='btn btn-sm btn-danger'; del.textContent=''; del.style.marginLeft='2px'; del.onclick=()=>{ AXIS.rows.splice(i,1); AXIS.dirty=true; axisSheetRender(); }; td.appendChild(del);
     tr.appendChild(td); tb.appendChild(tr);
   });
   axisSheetStatus();
@@ -5510,7 +5585,7 @@ async function axisSheetSave(){
   try{
     const r = await clsApi('/api/v1/axis/sheet',{video:AXIS.cur.name, rows:AXIS.rows});
     AXIS.dirty=false; axisSheetStatus();
-    showToast(`轴表已存 (${r.rows} 行) → data/axis_sheets/`,'ok');
+    showToast(`轴表已存 (${r.rows} 行) -> data/axis_sheets/`,'ok');
     axisRefresh();
   }catch(e){ alert('保存失败: '+e.message); }
 }
