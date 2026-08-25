@@ -3565,6 +3565,9 @@ def t_shelf_walk():
     check("大厅入口点底栏商店不是购买青辉石",
           a_ent is not None and a_ent.target_cls == V.NAV_SHOP
           and a_ent.y > 0.88, str(a_ent))
+    # 2026-08-24 起 56/61 已是废案, detect 出口不吐 -> 这条路线现实中永不触发。
+    #    用例留着当**安全网的回归**: 哪天有人把类翻回来, 逻辑还得是"切回信用点"
+    #    而不是点购买或退出。
     pyx = O(B(V.SHOP_TAB_PYROXENE_SEL, cx=0.05, cy=0.30, w=0.06, h=0.04),
             B(V.SHOP_BUY, cx=0.70, cy=0.50))
     a_tab = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None)).on_shop_pyroxene_tab(

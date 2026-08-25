@@ -244,8 +244,13 @@ COMBO_PACK_SEL = "组合包已选择"
 FREE = "免费"
 SHOP_TAB_CREDIT = "信用点商店"
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"
+# 2026-08-24 废案(用户拍板): 青辉石商店那一页**没东西可买**, bot 从来不导航过去,
+#    这两个类只用在"万一落到这个 tab 就切回信用点"的防守码上, 而且 train=0/val=0、
+#    990 帧 0 检出, 那段防守从没跑过。常量留着不删(照 509/502/510/507 的先例),
+#    detect 出口已经不吐这个类了。
+#    别连坐: SHOP_BUY_PYROXENE(购买青辉石) 是**免费包入口**, 日常第一枪要用, 留着。
 SHOP_TAB_PYROXENE = "青辉石商店"
-SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"     # 落到这 tab 只切回信用点, 页本身不停轮
+SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"
 ARENA_SHOP_TAB = "战术大赛商店"
 ARENA_SHOP_TAB_SEL = "战术大赛商店已选择"
 ARENA_SHOP_CURRENCY = "战术大赛商店货币"
