@@ -1110,6 +1110,42 @@ TRAIN_CONFIGS = {
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
     },
+    "ui_yolo26m_v19": {
+        # v19 (2026-08-24) = v18 warm + 大厅换皮补采第一次进集。
+        # **超参一个不动, 照抄 v18** -- 这轮只变数据。变两个变量就说不清是哪个
+        #   起的作用(v17 那条规矩)。
+        # nc 531 -> 535: 新增 531 预设标题 / 532 预设_读取 / 533 预设_组成 /
+        #   534 预设_组成_灰色。cls 头继承旧 531 行、新增 4 行重学(同 v4->v5 的
+        #   450->451、v5->v6 的 451->452, registry 已验证可行)。
+        # 数据: train 38,746 帧 / 567,925 框, val 11,036 帧 / 156,210 框。
+        #   新进 flywheel_v19_ui_20260821 592帧/8,203框(五轮人审)。
+        # 这轮最该验的三件:
+        #   1 大厅换皮 tile: 68 剧情 / 69 悬赏通缉 / 71 学院交流会 / 75 战术大赛
+        #     -- 老皮 val 各有 404-422 框, 但**新皮那部分没有 val**, 只能 live 验;
+        #   2 **被单位压住的走格子格子**(497 +156 / 506 +67): 旧模型只给 0.08-0.15,
+        #     低于 grid.cells() 的 0.30 门槛。验收看这类格子能不能过 0.30;
+        #   3 531-534 预设族 train 只有 2-8 框、val=0, 大概率学不动, 记在案,
+        #     下一轮补采再说。
+        # 金钱类仍无诚实 val, 只能 live 对账。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v18" / "weights" / "best_real.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v19",
+        "cache": False,
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "ui_yolo26m_v18": {
         # v18 (2026-08-18) = v17 warm + 08-16/18 raw 标修复第一次进集。
         # 超参照抄 v16/v17 (只变数据)。nc 528->531 (528任务资讯 / 529得星_1 / 530得星_2)。
