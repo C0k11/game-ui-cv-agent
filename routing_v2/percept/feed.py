@@ -75,9 +75,20 @@ def find_app_display(serial: str, pkg: str = _PKG) -> Optional[int]:
 def _make_client(device, max_fps: int, display_id: int):
     """工厂: 子类覆盖 name-mangled 私有方法（display_id 参数化 + 解码韧性）。"""
     import scrcpy
+    try:
+        # libav 把解码告警直接刷 stderr(non-existing PPS / no frame!), 坏流时
+        #    一秒几十行, 淹掉全部业务日志(08-26 的 event 日志 3052 行里 ~2600
+        #    行是它, 还把断流统计污染成 1696)。解码健康度由 watchdog 用
+        #    结构化日志报, libav 闭嘴。
+        import av
+        av.logging.set_level(av.logging.PANIC)
+    except Exception:
+        pass
 
     class _DisplayClient(scrcpy.Client):
         _target_display = display_id
+        # InvalidDataError 重建 codec 且未再解出帧的时刻(0=健康)
+        codec_reset_ts = 0.0
 
         def _Client__stream_loop(self):
             import av
@@ -91,6 +102,7 @@ def _make_client(device, max_fps: int, display_id: int):
                             fr = frame.to_ndarray(format="bgr24")
                             self.last_frame = fr
                             self.resolution = (fr.shape[1], fr.shape[0])
+                            self.codec_reset_ts = 0.0
                             self._Client__send_to_listeners(scrcpy.EVENT_FRAME, fr)
                 except BlockingIOError:
                     time.sleep(0.01)
@@ -100,6 +112,13 @@ def _make_client(device, max_fps: int, display_id: int):
                     # 出击进战斗时 MuMu 重置 encoder  frame_num 跳变 + PPS 丢失。
                     # 丢帧不丢线程；SPS/PPS 彻底丢失由 watchdog 重启整个 client。
                     codec = CodecContext.create("h264", "r")
+                    # 重建的 codec **没有 SPS/PPS** -- scrcpy 裸流只在开流时
+                    #    发一次参数集, 静止页连 IDR 都不来 -> 重建后若再无一帧
+                    #    解出, 这条流就是废的(08-26 实锤: 有效帧率掉到每 4s
+                    #    一两帧, event flow 全程无帧可用)。记下时刻, watchdog
+                    #    1.5s 内看不到新帧就立刻换流, 不等 3s 断流线。
+                    if not self.codec_reset_ts:
+                        self.codec_reset_ts = time.time()
                 except OSError as e:
                     if self.alive:
                         raise e
@@ -158,6 +177,8 @@ class Feed:
         self.restarts = 0
         self.rotations = 0
         self._fail_streak = 0
+        # 连续"重启成功但 3s 零首帧"次数 -- purge 升级判据
+        self._dead_streak = 0
 
     #  生命周期
     def _start_client(self):
@@ -369,13 +390,19 @@ class Feed:
                     and time.time() - self._client_born >= self._ROTATE_AT):
                 self._rotate()
                 continue
+            # codec 孤儿: 数据在流、解码全废。_is_static 会把它当"画面静止"
+            #    无限续命(比对用的是最后一张**解出的**帧, 静止页恰好一致),
+            #    所以必须在静止判据**之前**拦。
+            _c = self._client
+            _reset = float(getattr(_c, "codec_reset_ts", 0.0) or 0.0) if _c else 0.0
+            dead_decode = _reset > 0 and time.time() - _reset > 1.5
             with self._lock:
                 age = time.time() - self._ts if self._ts else 0.0
                 seq_now = self._seq
             if seq_now != seen_seq:
                 seen_seq = seq_now
                 revive = 0         # **只有真帧到达才算活** -- 数事实
-            if age <= self._stale_restart_s or self._stopping:
+            if not dead_decode and (age <= self._stale_restart_s or self._stopping):
                 static_streak = 0
                 # 2026-08-13 尸体复活实锤: 部署屏(静止画面)上流死 ->
                 #    _is_static 每秒刷新 _ts -> age 永远小 -> 这里把
@@ -391,7 +418,7 @@ class Feed:
             # 逐帧门控时画面静止几十秒是常态（人在审帧）。静止判据每轮都用独立
             # ADB 链跟真屏比过，所以"无限续命"的窗口只存在于屏幕也没变的时候，
             # 那时重不重启对决策毫无影响。上限 120 轮（~2min）后强制验一次活性。
-            elif static_streak < 120 and self._is_static():
+            elif (not dead_decode and static_streak < 120 and self._is_static()):
                 static_streak += 1
                 revive += 1
                 with self._lock:
@@ -399,7 +426,11 @@ class Feed:
                 continue
             static_streak = 0
             revive = 0
-            self._log(f"    [feed] 断流{age:.1f}s  重启 scrcpy client")
+            if dead_decode:
+                self._log(f"    [feed] codec 孤儿(重建后 {time.time()-_reset:.1f}s"
+                          f" 零解码) -- 重启 scrcpy client 拿新参数集")
+            else:
+                self._log(f"    [feed] 断流{age:.1f}s -- 重启 scrcpy client")
             with self._restart_lock:
                 if self._stopping:
                     break
@@ -415,12 +446,29 @@ class Feed:
                     # 冻结，相位永不变  重定位永不触发（老代码审计实锤）。
                     if self._fail_streak >= 2:
                         self._display_id = None
-                    self._client, _ = self._start_client()
+                    # 连续两次重启拿不到首帧 = 设备上多半挂着一个吃连接的死
+                    #    server(08-10 结案那族: 连得上、永远等不到 SPS/PPS)。
+                    #    start() 里的 purge 自愈这里永远轮不到 -- 零星帧会把
+                    #    runner 的 40 口饥饿计数一直清零 -- 只能在这里清。
+                    if self._dead_streak >= 2:
+                        self._log(f"    [feed] 连续 {self._dead_streak} 次重启"
+                                  f"零首帧 -- 清理设备上挂死的 scrcpy server")
+                        self._purge_dead_server()
+                    self._client, holder = self._start_client()
                     self._client_born = time.time()
-                    self.restarts += 1
                     self._fail_streak = 0
-                    with self._lock:
-                        self._ts = time.time()
+                    # 首帧验活。原来这里无条件把 _ts 刷成 now -- 一帧都没有的
+                    #    重启也被当成活了 3s, 死流按 3-4s 一轮无限空转。
+                    _t0 = time.time()
+                    while time.time() - _t0 < 3.0 and not holder["got"]:
+                        time.sleep(0.05)
+                    if holder["got"]:
+                        self.restarts += 1
+                        self._dead_streak = 0
+                    else:
+                        self._dead_streak += 1
+                        self._log(f"    [feed] 重启后 3s 无首帧"
+                                  f" x{self._dead_streak}")
                 except Exception as e:
                     self._fail_streak += 1
                     self._log(f"    [feed] 重启失败x{self._fail_streak}({e})")

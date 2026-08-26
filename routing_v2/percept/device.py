@@ -23,8 +23,33 @@ import threading
 import time
 from typing import Optional, Tuple
 
-_ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
-_MANAGER = r"C:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe"
+def _find_exe(env_key: str, cands) -> str:
+    """MuMu 可执行文件定位: 环境变量 > 逐候选探测 > 第一候选保底。
+
+    保底不 raise: 让"文件不存在"的报错发生在用它的那一步, 错误信息里自带
+    路径, 比 import 时炸好定位。路径别写死一处 -- 用户 08-26: MuMu 数据已
+    搬 D 盘, 本体哪天跟着搬, 这里不用改码。
+    """
+    import os as _os
+    env = str(_os.environ.get(env_key) or "").strip()
+    if env and _os.path.isfile(env):
+        return env
+    for c in cands:
+        if _os.path.isfile(c):
+            return c
+    return cands[0]
+
+
+_ADB = _find_exe("MUMU_ADB", (
+    r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe",
+    r"D:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe",
+    r"D:\MuMu\nx_device\12.0\shell\adb.exe",
+))
+_MANAGER = _find_exe("MUMU_MANAGER", (
+    r"C:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe",
+    r"D:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe",
+    r"D:\MuMu\nx_main\MuMuManager.exe",
+))
 _FALLBACK_SERIAL = "127.0.0.1:7555"
 _PKG = "com.nexon.bluearchive"
 
