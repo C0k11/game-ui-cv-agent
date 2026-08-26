@@ -616,6 +616,8 @@ def main() -> int:
     seen_md5 = {}
     uniques = []   # (src, stem, jpg, cleaned_txt, classes)
     dropped_overflow = 0
+    dropped_valdup = 0
+    _VAL_SET = set(VAL_SOURCES)
     n_raw = 0
     for s in REAL_SOURCES:
         sd = RAW / s
@@ -625,6 +627,16 @@ def main() -> int:
         for jpg in frames_in(sd):
             txt = sd / (jpg.stem + ".txt")
             if not txt.exists():
+                continue
+            # 2026-08-25 硬泄漏闸: `_arrow_boost` 装的是**别的 run 的重编码副本**
+            #    (见该源注释, 文件名就是 `<源run>__frame_xxx_ab.jpg`)。
+            #    `MOVED_TO_VAL` 把 run_20260607_140123 / 193003 挪进 val 补剧情类,
+            #    但副本还留在 train -> 实测 `val ...frame_000894` 和
+            #    `train _arrow_boost__...` **MAE = 0.00**, 289 帧真泄漏。
+            #    md5 去重挡不住, 因为副本是重编码的(v17 那条"md5 挡不住重编码副本")。
+            #    所以按**文件名前缀**认源: 源 run 在 val 名单里就不许进 train。
+            if "__" in jpg.stem and jpg.stem.split("__")[0] in _VAL_SET:
+                dropped_valdup += 1
                 continue
             n_raw += 1
             h = md5(jpg)
@@ -638,7 +650,8 @@ def main() -> int:
             cleaned = ("\n".join(keep) + "\n") if keep else ""
             uniques.append((s, jpg.stem, jpg, cleaned, label_classes(cleaned)))
     print(f"[real] {n_raw} raw frames  {len(uniques)} unique (dedup removed "
-          f"{n_raw - len(uniques)} dup copies); dropped {dropped_overflow} out-of-range boxes")
+          f"{n_raw - len(uniques)} dup copies); dropped {dropped_overflow} out-of-range boxes"
+          f"; dropped {dropped_valdup} frames whose origin run is in VAL_SOURCES")
 
     #  synth frames (no dedup)
     synth = []

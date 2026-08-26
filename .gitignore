@@ -181,3 +181,5 @@ routing_v2/_*.txt
 routing_v2/_*.json
 routing_v2/_*.jpg
 routing_v2/_*.png
+
+# dHash 对账缓存与切出来的干净 val, 都在 ml_cache 下, 不入库
