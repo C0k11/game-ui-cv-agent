@@ -81,6 +81,7 @@ class Machine:
         self._recent: Deque[str] = deque(maxlen=max(8, self.confirm * 3))
         self._recent_int: Deque[Optional[str]] = deque(maxlen=max(8, self.confirm * 3))
         self._recent_ov: Deque[Optional[str]] = deque(maxlen=max(8, self.confirm * 3))
+        self._recent_ts: Deque[float] = deque(maxlen=max(8, self.confirm * 3))
         self._page = "unknown"
         self._last_solid = "unknown"
         self._interrupt: Optional[str] = None
@@ -92,6 +93,7 @@ class Machine:
     def update(self, obs: Observation) -> StateView:
         m: Match = classify(obs)
         self._recent.append(m.page)
+        self._recent_ts.append(time.time())
         self._recent_int.append(m.interrupt)
         self._recent_ov.append(m.overlay)
         # 覆盖层同样要连续 N 帧确认（弹入/弹出都有动画帧）
@@ -120,7 +122,16 @@ class Machine:
         #  页面：连续 confirm 帧一致才换
         changed = False
         tail = list(self._recent)[-self.confirm:]
-        if len(tail) == self.confirm and len(set(tail)) == 1 and tail[0] != self._page:
+        # "连续 N 帧"的隐含前提是**帧在时间上连续**。feed 断流时几分钟里只漏
+        #    过来三五张帧, 它们在 deque 里照样排成"连续"3 张 -- 08-26 实锤:
+        #    三次流重启各漏 1 张认不出的帧, 攒出 unknown x3, 能把好好的底页
+        #    身份洗掉。具名页不受此限: 签名连中 3 次是**正面证据**, 稀疏也
+        #    作数; unknown/blank 是**缺证据**, 缺证据凑不出"页面变了"。
+        _tt = list(self._recent_ts)[-self.confirm:]
+        _contig = all(b - a < 1.5 for a, b in zip(_tt, _tt[1:]))
+        if (len(tail) == self.confirm and len(set(tail)) == 1
+                and tail[0] != self._page
+                and (_contig or tail[0] not in ("unknown", "blank"))):
             old = self._page
             self._page = tail[0]
             self._since_frames = 0
@@ -142,8 +153,10 @@ class Machine:
             #   flow 知道自己在干什么，兜底不知道。抖动往往说明某个页面签名漏了
             #   一个态（08-08 实测: mail 领完后只剩 `领取蓝色`，签名里没有它
             #   mail<->unknown 来回抖）。看到这条日志就去补签名，别去调阈值。
-            self._log(f"[state] 抖动: 3s 内页面身份变了 {len(recent_changes)} 次"
-                      f" — 兜底恢复暂停（多半是某个页面签名漏了一个状态）")
+            if now - getattr(self, "_flap_logged", 0.0) > 5.0:
+                self._flap_logged = now
+                self._log(f"[state] 抖动: 3s 内页面身份变了 {len(recent_changes)} 次"
+                          f" — 兜底恢复暂停（多半是某个页面签名漏了一个状态）")
 
         return StateView(
             page=self._page, raw=m.page, interrupt=self._interrupt,
@@ -158,5 +171,6 @@ class Machine:
         """外部强制置位（只给测试/单步工具用，主循环不许调）。"""
         self._page = page
         self._recent.extend([page] * self.confirm)
+        self._recent_ts.extend([time.time()] * self.confirm)
         self._since_frames = 0
         self._since_ts = time.time()

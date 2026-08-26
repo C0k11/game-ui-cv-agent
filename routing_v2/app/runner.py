@@ -716,7 +716,12 @@ class Runner:
         self._flow = None
         self._route_plan = None
         self.gate.reset()
-        mac = Machine(int(self.run.get("confirm_frames", 3)), log=self.log)
+        # 归位和 flow 盯的是**同一块屏**, 页面身份必须共用同一台状态机。
+        #    原来这里 new 一台局部 Machine -- 它确认"已到 task_hall"之后整个
+        #    状态被丢掉, self.machine 进 flow 循环时还是 unknown, 要靠 feed
+        #    重新攒 3 连帧才开工。08-26 event 专跑实锤: feed 正好病着(每 4s
+        #    漏一两帧), 全局机 3 分钟才第一次 commit, flow 全程一个动作没发。
+        mac = self.machine
         t0 = time.time()
         # 同一目标连点保险（2026-08-13 实录: 任务进行中归位链认不出路,
         #    back 键弹任務資訊框 -> 框被判 ack_dialog 点確認关掉 -> back 又弹
@@ -929,7 +934,12 @@ class Runner:
             self.log(f"[run] 预热 {flow.name} 需要的模型 {_m}…")
             detect.warm(_m)
         self._apply_ap_split(flow)
-        self.machine = Machine(int(self.run.get("confirm_frames", 3)), log=self.log)
+        # 这里原来每条 flow 都 new 一台 Machine -- 页面身份属于**屏幕**不属于
+        #    flow, 交班归位刚用 3 连帧验完'已到 task_hall', 一进 _run_flow 就
+        #    整机清零, flow 第一批 tick 全在 page=unknown 上空转(08-26 event
+        #    专跑实锤: feed 再病一点就是全程饿死)。last_solid 也被清 --
+        #    quit_dialog 的大厅系白名单靠它, 清完到下次换页前那道闸全失明。
+        #    _recover_n/_blank_taps/_route_plan 才是真的每 flow 状态, 分开算。
         self._recover_n = 0
         self._blank_taps = 0
         self._route_plan = None
