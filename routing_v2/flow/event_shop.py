@@ -277,6 +277,18 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
 
             return self._shelf_swipe(obs, up, why, post=_post)
 
+        # 拒买/不自动买 = 纯扫描口径: 只下行一趟数存货, 触底即收 tab,
+        #    不上翻(切 tab 自己回顶)。08-26 用户实看: 扫描模式跑着买路的
+        #    "找该买的"寻路, 每 tab 下探到底再上翻回顶, 纯瞎滑。
+        if denied or (not auto):
+            if (went_down and moved is False) or n_down >= 12:
+                return self._tab_done(cur_name, rec, bal)
+            sw = _arm(False, f"{cur_name}: 扫描存货 下行(第 {n_down + 1} 次)",
+                      n_down + 1)
+            if sw is not None:
+                return sw
+            return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
+
         if want_up:
             if n_up >= 12 or (last_up and moved is False):
                 return self._tab_done(cur_name, rec, bal)

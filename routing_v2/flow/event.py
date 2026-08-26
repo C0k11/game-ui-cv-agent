@@ -31,6 +31,8 @@
 """
 from __future__ import annotations
 
+import time
+
 from typing import List, Optional
 
 from routing_v2.act.action import Action, swipe, tap_box, wait
@@ -42,9 +44,20 @@ from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
 from routing_v2.state.machine import StateView
 
-# HUB 活动入口的落点下移量。405/474 的框标的是倒计时气泡，点气泡完全不响应。
-#   由 08-07 手动实测反推（点 cy=0.222 生效，框心 cy=0.149）。
-HUB_TILE_DY = 0.075
+# HUB 活动入口的落点下移量。
+# 语义: 405/474 这两个类的**含义**就是"当期/上期活动入口"(77/78 当初就是并进来的,
+#   见 _classes.txt 那两行的名字), 但**框只圈了横幅顶上那行倒计时文字**, 点文字不响应。
+#   横幅本体在文字下面: 立绘 -> 活动标题牌 -> 轮播三点(实测 08-26 逐帧量: 文字 cy 0.149,
+#   立绘 0.20-0.26, 标题牌 0.26-0.30, 轮播点 0.317)。
+# 2026-08-26 改成**按 405 自身框高的倍数**, 不再写死 0.075:
+#   老值 0.075 是 08-07 手动点一次反推的**绝对常量** -- 大厅一换皮/换分辨率就失效,
+#   而且它到底对不对没有任何帧内依据。405 的框高随 UI 字号一起缩放(实测 26 帧 h
+#   在 0.020-0.023, cy 恒为 0.149), 所以"文字高度的几倍"是**尺度无关**的写法:
+#   0.075 / 0.0220(中位) = 3.4。UI 再缩放, 文字和版式一起缩, 这个倍数不变。
+# 真正的根治是**把 405 的框改成圈整块横幅**(那才是它的语义), 属于下一轮标注的事。
+HUB_TILE_RATIO = 3.4
+# 兜底带: 推出来的 dy 落在这个区间外说明框量得离谱(比如只圈到半个字), 不许发。
+HUB_TILE_DY_BAND = (0.045, 0.115)
 STAGE_PANEL = (0.42, 0.10, 1.0, 0.95)
 ROW_TOL = 0.055          # 入场键 与 得星 认为"同一行"的 cy 容差
 
@@ -74,14 +87,32 @@ class EventEntryMixin:
         if cur is None:
             # 现在显示的是上期入口 / 页间空白  记下"看见过别的了"
             self.state["saw_other"] = True
+            # 405 断了 -- 轮播真在转, 常驻计时作废
+            self.state.pop("ev_seen_since", None)
             if self.stalled(st, 300):
                 return self.finish(
                     Outcome.SKIPPED,
                     "任务大厅盯了很久都没等到「距离结束还剩」— 当前没有进行中的活动")
             return wait("等轮播翻到「距离结束还剩」")
         if not self.state.get("saw_other"):
-            # 405 已经显示一会儿了，可能正处在窗口尾巴上 -- 等下一轮跃迁
-            return wait("405 在场但不是刚翻过来的 — 等下一次跃迁（避开轮播尾巴）")
+            # 405 一直在场有两种世界: 轮播正转、撞在窗口尾巴上(点下去正好
+            #    翻页 -- 大厅横幅照坐标点进招募页那次就是这么误触的); 或者
+            #    **本期只有一张横幅、根本不轮播**(08-26 live 实锤: 怪谈复刻
+            #    期横幅常驻, "等跃迁"永远等不到, 这个分支又没有 stalled
+            #    出口, flow 对着 0.96 的 405 干等到 15 分钟上限)。
+            #    两者用**连续观测时长**区分: 轮播周期 2-3s, 连续 >=8s 帧帧
+            #    都是 405 -> 物理上排除轮播, 落点稳定, 直接进。
+            #    观测断档 >1s 清零重数 -- 盲窗里横幅可能转过一整圈,
+            #    "连续在场"必须是连续观测出来的, 不许跨盲窗外推。
+            now = time.monotonic()
+            t0 = self.state.get("ev_seen_since")
+            if t0 is None or now - self.state.get("ev_last_seen", 0.0) > 1.0:
+                self.state["ev_seen_since"] = t0 = now
+            self.state["ev_last_seen"] = now
+            if now - t0 < 8.0:
+                return wait("405 在场但不是刚翻过来的 — 等跃迁或坐实常驻"
+                            "(%.0fs/8s)" % (now - t0))
+            # 连续 8s 全是 405: 横幅常驻坐实, 不存在翻页风险, 按可点处理
         # `saw_other=False` **必须挂 post**（08-10 live 实锤，同族第 7 处）：
         #    写在这里 = 「决策了要点」就把跃迁标记清掉，而这一发未必真发得出去
         #    -- gate 可能吞掉它，`--ticks N` 循环里前 N-1 个 tick 的 decide
@@ -90,9 +121,27 @@ class EventEntryMixin:
         #    注意上面那句 `saw_other=True` 留在 decide 期是**对的**：那是
         #      「我这一帧看见了别的入口」这个**观测事实**，不是动作副作用。
         #      观测可以在 decide 期记，动作后果只能挂 post -- 这条界线要分清。
-        return tap_box(cur, "进当期活动（捕到 405 跃迁）",
-                       dy=HUB_TILE_DY, counter="entered",
-                       post=lambda: self.state.update(saw_other=False))
+        dy = cur.h * HUB_TILE_RATIO
+        lo, hi = HUB_TILE_DY_BAND
+        if not (lo <= dy <= hi):
+            # 框高离谱(只圈到半个字 / 糊成一片) -> 落点也就不可信, 宁可等下一轮跃迁
+            return wait("405 框高 %.4f 推出的落点偏移 %.4f 超出兜底带 %s — 等下一次跃迁"
+                        % (cur.h, dy, HUB_TILE_DY_BAND))
+        # 落点体检: 推出来的点**不许落在别的检出框里**。
+        #   横幅本体上没有任何独立控件, 真落到别的框上 = 版式变了或者框量歪了,
+        #   那一发点下去就是误触(大厅左下 EVENT 横幅照坐标点进招募页那次就是这么来的)。
+        ty = cur.cy + dy
+        clash = [b for b in obs.boxes
+                 if b is not cur and b.conf >= 0.35
+                 and b.x1 <= cur.cx <= b.x2 and b.y1 <= ty <= b.y2]
+        if clash:
+            return wait("405 推出的落点(%.3f,%.3f)压在 %s 上 — 不发, 等下一次跃迁"
+                        % (cur.cx, ty, clash[0].cls))
+        return tap_box(cur, "进当期活动（捕到 405 跃迁, dy=%.4f=框高x%.1f）"
+                            % (dy, HUB_TILE_RATIO),
+                       dy=dy, counter="entered",
+                       post=lambda: (self.state.update(saw_other=False),
+                                     self.state.pop("ev_seen_since", None)))
 
     # -- 进错活动: 上期余韵 ----
     def on_event_ended(self, obs, st):
@@ -216,6 +265,82 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                     best, s = d, k
             out.append((e, s.cls if s is not None else None))
         return out, locked
+
+    # -- 按关号选关（用户口径：直接说"扫荡 Q11"，不用换算"倒数第几关"）----
+    #
+    # 为什么要有这条: 原来的目标只有 `from_bottom`(屏上从下往上数第几行)。
+    #   那是**位置**不是**关号** —— 列表一滚动同一个 fb 就指到别的关上去了,
+    #   而且用户根本不是按"倒数第几"想问题的。
+    # 关号本身没有 cls, 但它**就印在得星星星的正上方**, 所以
+    #   `read.stage_numbers()` 从得星框往上推 ROI 去读(见那边的注释),
+    #   再拿"关号连续递增"这个列表结构上必然成立的事实补洞纠错。
+    #
+    # ⚠ 关号读数是 OCR, 一行一次、还跑在 CPU 上(本机 onnxruntime 的 CUDA
+    #   provider 加载失败, 缺 cublasLt64_12.dll)。**绝不能每帧都读** ——
+    #   一屏 4-7 行就是 4-7 次 OCR, tick 会被拖垮。列表在同一页时行版式不变,
+    #   所以按**行的 cy 指纹**缓存, 版式一变(滚动/换页)才重读。
+    def _stage_map(self, obs, rows) -> dict:
+        """{关号: 屏上行索引}。读不出关号的行不进表。"""
+        if not rows:
+            return {}
+        fp = tuple(round(e.cy, 3) for e, _ in rows)
+        cache = self.state.get("stageno_cache")
+        if cache and cache.get("fp") == fp:
+            return cache["map"]
+        pairs = R.stage_numbers(obs, region=STAGE_PANEL)
+        # 排他配对: 星标和入场行各只许用一次, 全局按距离贪心。
+        #    原来每个入场行独立取最近星标 -- 入场行 3 个/星标 4 个时中间那颗
+        #    星会被跳过(08-26 实锤: 屏上明明是 9,10,11,12, 配对出 9,10,12,
+        #    Q11 被判"不在屏上"回退推算)。
+        cands = []
+        for i, (e, _s) in enumerate(rows):
+            for jj, (sb, no) in enumerate(pairs):
+                if no is None:
+                    continue
+                d = abs(sb.cy - e.cy)
+                if d < ROW_TOL:
+                    cands.append((d, jj, i, int(no)))
+        cands.sort()
+        used_j, used_i, out = set(), set(), {}
+        for d, jj, i, no in cands:
+            if jj in used_j or i in used_i or no in out:
+                continue
+            used_j.add(jj)
+            used_i.add(i)
+            out[no] = i
+        self.state["stageno_cache"] = {"fp": fp, "map": out}
+        if out:
+            self.log("屏上关号 -> 行: %s"
+                     % ", ".join(f"Q{k}=第{v+1}行" for k, v in sorted(out.items())))
+        return out
+
+    def _row_for_stage(self, obs, rows, want: int):
+        """想打 Q<want>。在屏 -> 返回行索引; 不在屏 -> 返回滑动 Action 去找它;
+        屏上一个关号都读不出 -> 返回 None(调用方回退到老的 from_bottom 口径)。"""
+        m = self._stage_map(obs, rows)
+        if not m:
+            return None
+        if want in m:
+            return m[want]
+        lo, hi = min(m), max(m)
+        if want < lo:
+            why = f"要 Q{want}，屏上最小是 Q{lo} — 往上找"
+            rows_n = -1.5
+        elif want > hi:
+            why = f"要 Q{want}，屏上最大是 Q{hi} — 往下找"
+            rows_n = 1.5
+        else:
+            # 夹在中间却没读到 = 那一行的关号没读出来, 别硬猜, 交回老口径
+            self.log(f"要 Q{want}，屏上关号 {sorted(m)} 夹着它却没读到那一行 —"
+                     f" 不硬猜, 回退到推算口径")
+            return None
+        if self.bump("stage_seek") > 12:
+            self.log(f"找 Q{want} 滑了 12 次还没找到 — 放弃, 回退到推算口径")
+            return None
+        anchors = [e for e, _ in rows]
+        act = nav.list_swipe(obs, anchors, why, rows=rows_n,
+                             post=lambda: self.state.pop("stageno_cache", None))
+        return act if act is not None else None
 
     def on_event_quest_list(self, obs, st):
         self.state["in_event"] = True      # 到过活动页（stage_popup 上下文守卫用）
@@ -385,6 +510,33 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         except Exception:
             return {}
 
+    def _topped_ok(self, v) -> bool:
+        """台账条目有效性: 只认 v2 dict 且 5 个游戏日内。
+
+        老字符串条目(位置键、无期概念)一律无效 -- 08-26 实锤: 08-12/15/20
+        三天留下的 10 条把本期(08-21 开的复刻)6 个目标全跳光, phase 直接翻成
+        扫荡, 820 AP 全按未加成纪录刷掉。位置键在换活动/换关卡数后指向完全
+        不同的关, 没有期界的"永久台账"比没有台账更危险。
+        5 天窗口的取舍: 活动期约两周, 窗口内误跳的代价是低倍率扫荡(大),
+        窗口外误重打的代价是每关 20 AP(小) -- 宁可偏短。
+        """
+        if not isinstance(v, dict):
+            return False
+        try:
+            from datetime import datetime as _dt
+
+            from routing_v2.flow.daybook import game_day
+            d0 = _dt.strptime(str(v.get("day", "")), "%Y%m%d")
+            d1 = _dt.strptime(game_day(), "%Y%m%d")
+            return 0 <= (d1 - d0).days <= 5
+        except Exception:
+            return False
+
+    def _topped_has(self, topped: dict, stage_no: int) -> bool:
+        """这个**关号**本期是否已有有效顶纪录条目(只认 v2 语义键)。"""
+        return any(self._topped_ok(v) and v.get("stage") == stage_no
+                   for v in topped.values())
+
     def _topped_mark(self, from_bottom: int, detail: str) -> None:
         """**读不出来就绝不写**（2026-08-12 数据丢失实录）。
 
@@ -400,6 +552,15 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         """
         import json as _json
         import time as _t
+        # v2 条目: 语义关号 + 游戏日。关号在进关时记进 state(cur_stage_no),
+        #    读不出关号才退回位置键 fb:N(这种条目 _topped_has 不认, 只有
+        #    老口径的 from_bottom 跳过路会用它)。
+        from routing_v2.flow.daybook import game_day as _gday
+        entry = {"stage": self.state.get("cur_stage_no"),
+                 "fb": int(from_bottom), "day": _gday(),
+                 "note": f"{_t.strftime('%m-%d %H:%M')} {detail}"}
+        key = (str(entry["stage"]) if entry["stage"] is not None
+               else "fb:%d" % from_bottom)
         # bag 注入的 fixture 台账: **只写内存, 绝不碰真实文件**。
         #    08-12 与 08-15 两次实锤同一事故: 离线套件驱动"赢一场"路径时,
         #    读走的是 bag fixture, 写却落进真 data/routing_v2/event_topped.json
@@ -407,7 +568,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #    读写必须同源, 从写入口根治, 测试永远污染不到生产台账。
         b = self.ctx.bag.get("event_topped")
         if b is not None:
-            b[str(from_bottom)] = f"{_t.strftime('%m-%d %H:%M')} {detail}"
+            b[key] = entry
             return
         p = self._topped_path()
         d = None
@@ -422,12 +583,12 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                 self.log("顶纪录台账内容不是 dict — 放弃本次落账，不覆盖")
                 return
         d = dict(d or {})
-        d[str(from_bottom)] = f"{_t.strftime('%m-%d %H:%M')} {detail}"
+        d[key] = entry
         try:
             p.write_text(_json.dumps(d, ensure_ascii=False, indent=1),
                          encoding="utf-8")
-            self.log(f"顶纪录台账已记：倒数第 {from_bottom+1} 关"
-                     f"（本期共 {len(d)} 条）")
+            self.log(f"顶纪录台账已记: {key} (倒数第 {from_bottom+1} 关, "
+                     f"day={entry['day']}, 共 {len(d)} 条)")
         except Exception as e:
             self.log(f"顶纪录台账落盘失败: {e}")
 
@@ -449,8 +610,24 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             if prev is not None:
                 sa, sp = str(ap), str(prev)
                 if ap > 0 and len(sa) + 2 <= len(sp) and sp.endswith(sa):
-                    self.log(f"AP {ap} 疑似 {prev} 截断（remain 909->9），不采信")
-                    return None
+                    # 疑似截断不能一票否决到永远: 08-26 实锤 821->1 是 MAX
+                    #    扫荡真花掉的读数, 被这里连拒 5 次, 台账记成体力+0。
+                    #    同一个可疑值连续 4 帧一致 -> 按真值采信并调低基线
+                    #    (真截断多为帧间闪变; 且基线只升不降会让此后一切
+                    #    小额真余额永远进不了账)。
+                    n = (self.state.get("ap_susp_n", 0) + 1
+                         if self.state.get("ap_susp") == ap else 1)
+                    self.state.update(ap_susp=ap, ap_susp_n=n)
+                    if n < 4:
+                        if n == 1:
+                            self.log(f"AP {ap} 疑似 {prev} 截断（remain 909->9）"
+                                     f"— 暂不采信, 连续 4 帧一致才认")
+                        return None
+                    self.log(f"AP {ap} 连续 {n} 帧一致 — 判定不是截断而是"
+                             f"真花掉了({prev}->{ap}), 采信并调低基线")
+                    self.state.update(ap_seen=ap, ap_susp=None, ap_susp_n=0)
+                    return ap
+            self.state.update(ap_susp=None, ap_susp_n=0)
             self.state["ap_seen"] = ap if prev is None else max(int(prev), ap)
         return ap
 
@@ -503,29 +680,89 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         # **Best Record 是本期永久的**  顶过的关不用再顶（每次 20AP）。
         #    台账落盘（跨进程/跨重启），key = 倒数第几关。
         topped = self._topped_load()
-        while (ph == "bonus_clear" and plan and ti < len(plan)
-               and str(plan[ti]["from_bottom"]) in topped):
-            self.log(f" 倒数第 {plan[ti]['from_bottom']+1} 关的纪录本期已顶过"
-                     f"（{topped[str(plan[ti]['from_bottom'])]}）— 跳过")
-            ti += 1
-            self.state["target_i"] = ti
-        if ph == "bonus_clear" and plan and ti >= len(plan):
-            self.state["phase"] = "bonus_sweep"
-            self.log("所有推算目标的纪录都顶好了  转入扫荡")
-            return wait("转入加成阶段（扫荡）")
+        want_list = [int(x) for x in (self.cfg.get("bonus_stages") or [])]
+        if ph == "bonus_clear" and want_list:
+            # 用户显式点名加成关 -> 台账只认**同关号**的有效条目(v2+5天)。
+            #    08-26 实锤: 这段原来只有老的位置键 while, 它跑在 want_list
+            #    分支**之前**, 上一期台账把 6 个目标跳光 -> phase 直接翻成
+            #    扫荡, 用户配置根本没轮到被读("修复没落实"的根子)。
+            if self.once("bonus_analysis"):
+                _valid = {k: v.get("note", "") for k, v in topped.items()
+                          if self._topped_ok(v)}
+                _todo = [n for n in want_list
+                         if not self._topped_has(topped, n)]
+                self.log("加成分析: 指定关 %s; 台账有效条目 %s; 本轮要打 %s"
+                         % (want_list, _valid if _valid else "无",
+                            ["Q%d" % n for n in _todo] if _todo
+                            else "无(全部已顶过)"))
+            while ti < len(want_list) and self._topped_has(topped, want_list[ti]):
+                self.log("Q%d 的纪录本期已顶过(台账有效条目) -- 跳过"
+                         % want_list[ti])
+                ti += 1
+                self.state["target_i"] = ti
+            if ti >= len(want_list):
+                self.state["phase"] = "bonus_sweep"
+                self.log("指定的加成关全部顶过  转入扫荡")
+                return wait("转入加成阶段（扫荡）")
+        else:
+            while (ph == "bonus_clear" and plan and ti < len(plan)
+                   and self._topped_ok(topped.get(str(plan[ti]["from_bottom"])))):
+                self.log("倒数第 %d 关的纪录本期已顶过 -- 跳过"
+                         % (plan[ti]["from_bottom"] + 1))
+                ti += 1
+                self.state["target_i"] = ti
+            if ph == "bonus_clear" and plan and ti >= len(plan):
+                self.state["phase"] = "bonus_sweep"
+                self.log("所有推算目标的纪录都顶好了  转入扫荡")
+                return wait("转入加成阶段（扫荡）")
         if ph == "bonus_clear" and plan and ti < len(plan):
             fb = int(plan[ti]["from_bottom"])
         else:
             fb = int(plan[0]["from_bottom"]) if plan else 0
-        idx = len(rows) - 1 - fb
-        if idx < 0:
-            self.log(f"推算要倒数第 {fb+1} 关，但屏上只有 {len(rows)} 关  打最后一关")
-            idx = len(rows) - 1
+        # 用户显式点名要打哪几关(关号)时优先按关号定位。
+        idx = None
+        why_hit = None
+        want_list = [int(x) for x in (self.cfg.get("bonus_stages") or [])]
+        if ph == "bonus_clear" and want_list:
+            if ti >= len(want_list):
+                self.state["phase"] = "bonus_sweep"
+                self.log(f"指定的加成关 {want_list} 都打过了  转入扫荡")
+                return wait("转入加成阶段（扫荡）")
+            got = self._row_for_stage(obs, rows, want_list[ti])
+            if isinstance(got, Action):
+                return got                       # 正在滑去找那一关
+            if got is not None:
+                idx = got
+                why_hit = f"用户指定 Q{want_list[ti]}"
+                self.state[f"locate_miss{ti}"] = 0
+                # 进关时记语义关号, 打赢后 _topped_mark 落 v2 条目用它
+                self.state["cur_stage_no"] = want_list[ti]
+            else:
+                # 单帧定位不到不等于不在屏上(入场键检出会闪) -- 等 12 帧;
+                #    还不行就跳过这一关, **不代打别的关**(用户点名的是关号,
+                #    静默换成推算目标 = 违背指令)。
+                if self.bump(f"locate_miss{ti}") < 12:
+                    return wait(f"指定的 Q{want_list[ti]} 这一帧定位不到 — 等下一帧")
+                self.state[f"locate_miss{ti}"] = 0
+                self.log(f"指定的 Q{want_list[ti]} 连续 12 帧定位不到 — "
+                         f"跳过这一关(不代打别的关)")
+                self.state["target_i"] = ti + 1
+                return wait("换下一个指定加成关")
+        if idx is None:
+            idx = len(rows) - 1 - fb
+            if idx < 0:
+                self.log(f"推算要倒数第 {fb+1} 关，但屏上只有 {len(rows)} 关  打最后一关")
+                idx = len(rows) - 1
         target = rows[idx][0]
         if self.once(f"target{ti}"):
-            why = plan[ti]["why"] if plan and ti < len(plan) else "无推算结果，兜底打最后一关"
-            self.log(f"加成目标[{ti+1}/{max(1,len(plan))}] = 倒数第 {len(rows)-idx} 关"
-                     f"（屏上第 {idx+1}/{len(rows)} 行）  {why}")
+            if why_hit:
+                self.log(f"加成目标[{ti+1}/{len(want_list)}] = **{why_hit}**"
+                         f"（屏上第 {idx+1}/{len(rows)} 行）")
+            else:
+                why = (plan[ti]["why"] if plan and ti < len(plan)
+                       else "无推算结果，兜底打最后一关")
+                self.log(f"加成目标[{ti+1}/{max(1,len(plan))}] = 倒数第 {len(rows)-idx} 关"
+                         f"（屏上第 {idx+1}/{len(rows)} 行）  {why}")
 
         if ph == "bonus_clear":
             # "纪录顶好了"的判据 = **真的赢了一场**，不是"我点了入场键"。
@@ -536,7 +773,8 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             #    这次数的是"点击"，本质一样：**都不是"这件事完成了"**。
             # 赢一场 = 这个目标的纪录顶好了  **换下一个推算目标**，
             #    全部顶完才转扫荡（用户 08-09：提前把要打的加成都打好）。
-            need = max(1, len(plan))
+            need = (len(want_list) if want_list
+                    else max(1, len(plan)))
             # 判据不能是 `win >= ti + 1`（2026-08-10 用户发现，昨天 Q11 的
             #    顶纪录台账就是这么丢的）：那是拿**全局累加的胜场数**去比目标序号，
             #    默认「win 从 0 开始单调涨到 need」。可 `win` 存在 flow 实例状态里，
@@ -623,7 +861,21 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #    对应的关，点数照拿还能补上缺口。plan 里 why 带「商店」的就是它。
         order = sorted(range(len(plan)),
                        key=lambda k: 0 if "商店" in str(plan[k].get("why", "")) else 1)
-        if plan and si < len(order):
+        # 用户指定扫哪一关(关号)优先 -- "这次我们扫荡 Q11" 这种。
+        want_sweep = self.cfg.get("sweep_stage")
+        if want_sweep not in (None, "", 0):
+            got = self._row_for_stage(obs, rows, int(want_sweep))
+            if isinstance(got, Action):
+                return got
+            if got is not None:
+                sidx, target = got, rows[got][0]
+                if self.once("sweep_target_log"):
+                    self.log(f"扫荡目标 = **Q{int(want_sweep)}**"
+                             f"（屏上第 {sidx+1}/{len(rows)} 行, 用户指定）")
+            else:
+                self.log(f"指定扫荡的 Q{want_sweep} 定位不到  回退到推算口径")
+                want_sweep = None
+        if want_sweep in (None, "", 0) and plan and si < len(order):
             sfb = int(plan[order[si]]["from_bottom"])
             _i = len(rows) - 1 - sfb
             if 0 <= _i < len(rows):
@@ -703,9 +955,27 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                         "步进器数量读出来是 0 — 一次也扫不了，掃蕩鍵亮着"
                         "也不点（点下去就是買 AP 的框）；"
                         f"扫荡 {self.state['swept']} 次")
+                # 数量必须**读出来且连续两帧一致**才许按。08-26 实锤: 点完
+                #    MAX 的下一帧就读, 读到渲染前的旧值 1, 日志记"数量 1",
+                #    游戏实际按 MAX=41 发把 821 AP 扫光 -- 假账。
+                #    读不出(None)也绝不盲按: 那一发的规模完全未知。
+                if n is None:
+                    if self.bump("qty_unread") >= 20:
+                        return self.finish(
+                            Outcome.LEFTOVER,
+                            "步进器数量连续 20 帧读不出 — 规模未知, "
+                            f"不盲按掃蕩開始; 扫荡 {self.state['swept']} 次")
+                    return wait("扫荡数量读不出 — 等渲染稳定")
+                self.state["qty_unread"] = 0
+                if self.state.get("qty_prev") != n:
+                    self.state["qty_prev"] = n
+                    return wait(f"扫荡数量读到 {n} — 等下一帧复核")
                 self.once_reset("sweepmax")
-                return tap_box(sw, f"扫荡开始（数量 {n if n is not None else chr(63)}）",
-                               counter="swept")
+                _tot = int(self.state.get("swept_qty", 0))
+                return tap_box(sw, f"扫荡开始（数量 {n}, 连续两帧一致）",
+                               counter="swept",
+                               post=lambda q=n, t=_tot: self.state.update(
+                                   swept_qty=t + q, qty_prev=None))
             if obs.has(V.CONFIRM_GREY, 0.45):
                 return self.finish(
                     Outcome.LEFTOVER,

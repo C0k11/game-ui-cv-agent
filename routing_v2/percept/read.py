@@ -503,6 +503,73 @@ def read_event_coin(obs: Observation) -> Optional[int]:
     return r[0] if r and r[0] is not None else None
 
 
+# 关卡列表每一行左侧的那个**两位关号**。
+#   它没有自己的 cls, 但它**正下方就是三颗星**, 而得星有 cls -> 位置从得星框推,
+#   一个坐标都不用写, UI 缩放时两者一起缩。
+STAGE_STAR = ("关卡得星_0", "关卡得星_1", "关卡得星_2", "关卡得星_3")
+# ROI 高度 = 得星框高的几倍。**要试一串**: "11" 这种窄字形在矮 ROI 下
+#   RapidOCR 的检测阶段抓不住(实测 UP<=1.7 全 None, UP=2.0 才读出 11),
+#   而 "09"/"10" 在 1.35 就读得出。从窄到宽逐个试, 谁先给出结果算谁的。
+_STAGE_UP_LADDER = (1.35, 1.6, 2.0, 2.4)
+_STAGE_SIDE = 0.12          # 左右各外扩多少倍星宽
+
+
+def stage_numbers(obs: Observation, *, region: Optional[Rect] = None):
+    """读关卡列表的关号, 返回 `[(得星框, 关号 or None), ...]`(按 cy 从上到下)。
+
+    两层保险, 缺一不可:
+      1 **每一行单独 OCR**: `small_number` 自带 5 票共识(横向平铺 5 份必须读出
+        同一个数), 读不出就是 None, 绝不瞎猜。
+      2 **关号连续递增**这个 UI 不变量补洞 + 纠错: 关卡列表从上到下就是
+        n, n+1, n+2 ...。所以拿"已读出的行"去拟合一个起始号 base:
+        每个已读行 i 给出候选 base = 值 - i, 取众数。
+        **至少要两行读出同一个 base 才敢补**(只有一行 = 没有第二个证人,
+        OCR 读错就会把整列关号整体带偏, 那比读不出更危险) -- fail-closed。
+        和 base 对不上的行判为 OCR 读错, 一律按 base 修正。
+
+    为什么不直接信单行 OCR: 单行错一位(11 读成 1)会让"扫荡 Q11"点到 Q1,
+      那是真金白银的 AP。列表连续性是这一页**结构上必然成立**的事实,
+      拿它当第二证人比调 OCR 参数靠谱得多。
+    """
+    rows = [b for b in obs.boxes
+            if b.cls in STAGE_STAR and b.conf >= 0.35
+            and (region is None
+                 or (region[0] <= b.cx <= region[2]
+                     and region[1] <= b.cy <= region[3]))]
+    rows.sort(key=lambda b: b.cy)
+    if not rows:
+        return []
+    frame = obs.frame
+    read: List[Optional[int]] = []
+    for b in rows:
+        got = None
+        for up in _STAGE_UP_LADDER:
+            rect = (max(0.0, b.x1 - b.w * _STAGE_SIDE),
+                    max(0.0, b.y1 - b.h * up),
+                    min(1.0, b.x2 + b.w * _STAGE_SIDE),
+                    b.y1)
+            got = small_number(frame, rect, inset=0.02)
+            if got is not None:
+                break
+        read.append(got)
+    # 连续性拟合
+    from collections import Counter as _C
+    votes = _C(v - i for i, v in enumerate(read) if v is not None)
+    if not votes:
+        return list(zip(rows, read))
+    base, n = votes.most_common(1)[0]
+    if n < 2:
+        # 只有一行读出来 -> 没有第二个证人, 不补洞也不纠错, 原样返回
+        return list(zip(rows, read))
+    fixed = [base + i for i in range(len(rows))]
+    bad = [(i, read[i], fixed[i]) for i in range(len(rows))
+           if read[i] is not None and read[i] != fixed[i]]
+    if bad:
+        print("[read] 关号与连续性冲突, 按连续性修正: %s"
+              % ", ".join("行%d 读成%s->%d" % t for t in bad), flush=True)
+    return list(zip(rows, fixed))
+
+
 def read_topbar(obs: Observation, cls: str) -> Optional[int]:
     """顶栏某货币的**单帧**读数。单帧不可用于金钱决策，用 vote()。"""
     anchor = obs.find(cls, conf=0.25, region=TOPBAR)
