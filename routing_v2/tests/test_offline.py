@@ -605,7 +605,11 @@ def t_flows():
                  B(V.BACK, cx=0.05, cy=0.05),
                  B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
                  B(V.HUB_JFD, cx=0.7, cy=0.4),
-                 B(V.EVENT_LIVE, conf=0.88, cx=0.5, cy=0.15))
+                 # h 用**实测值**: 26 个真大厅帧里 405 的框高是 0.020-0.023,
+                 #   B() 的默认 0.04 是工厂缺省值, 不是观测到的东西。
+                 #   落点偏移现在按框高的倍数推(见 event.HUB_TILE_RATIO),
+                 #   夹具高度不真实就会把兜底带判红。
+                 B(V.EVENT_LIVE, conf=0.88, cx=0.5, cy=0.15, h=0.022))
     hall_other = O(B(V.HUB_CAMPAIGN, cx=0.4, cy=0.4),
                    B(V.BACK, cx=0.05, cy=0.05),
                    B(V.HUB_BOUNTY, cx=0.3, cy=0.4), B(V.HUB_ARENA, cx=0.5, cy=0.4),
@@ -618,8 +622,11 @@ def t_flows():
     a = ev.decide(hall_cur, m3.update(hall_cur))
     check("§轮播 捕到 (非405405) 跃迁  点", a is not None and a.is_tap, str(a))
     if a is not None and a.is_tap:
-        check("§HUB 落点 +0.075 打到卡片本体", abs(a.y - (0.15 + 0.075)) < 1e-6,
-              f"y={a.y:.3f}")
+        # 不再断言写死的 0.075: 那是 08-07 手点一次反推的绝对常量。
+        #   现在是"框高 x HUB_TILE_RATIO", 尺度无关 -- 断言按同一个式子算。
+        from routing_v2.flow.event import HUB_TILE_RATIO as _HR
+        check("§HUB 落点按框高推, 打到卡片本体",
+              abs(a.y - (0.15 + 0.022 * _HR)) < 1e-6, f"y={a.y:.3f}")
         check("§落地复验锚点 = 距离结束还剩", a.require == V.EVENT_LIVE)
 
     # event: 通关阶段从上往下打**未通关**的关（得星_0）
@@ -2740,7 +2747,11 @@ def t_event_bonus_shop():
         #    跳过循环被 `plan and ...` 短路 -> 又打了一场(20AP 白花)。
         _ev = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
         _ev.state["phase"] = "bonus_clear"
-        _ev.ctx.bag["event_topped"] = {"0": "fixture 已顶"}
+        # 08-26 起老字符串条目一律无效(上期 10 条跨期串关烧了 820 AP),
+        #    fixture 必须是 v2 条目(关号可 None, 兜底路走 fb 键)且当天有效。
+        from routing_v2.flow.daybook import game_day as _gd
+        _ev.ctx.bag["event_topped"] = {
+            "0": {"stage": None, "fb": 0, "day": _gd(), "note": "fixture 已顶"}}
         _ev.ctx.bag["event_farm_plan"] = []
         _ev._plan_from_file = lambda: None       # 隔离真实计划文件
         _m = Machine(1)
@@ -2762,7 +2773,16 @@ def t_event_bonus_shop():
         _before = _tp.read_bytes() if _tp.exists() else None
         _ev2._topped_mark(7, "fixture 打赢")
         check("bag fixture 台账: 落账写进内存",
-              "7" in _ev2.ctx.bag["event_topped"])
+              "fb:7" in _ev2.ctx.bag["event_topped"]
+              and _ev2.ctx.bag["event_topped"]["fb:7"]["fb"] == 7)
+        _ev2.state["cur_stage_no"] = 11
+        _ev2._topped_mark(3, "fixture 打赢2")
+        check("进关时记了关号的落账用语义键",
+              "11" in _ev2.ctx.bag["event_topped"]
+              and _ev2.ctx.bag["event_topped"]["11"]["stage"] == 11)
+        check("老字符串条目一律判无效",
+              not _ev2._topped_ok("08-12 03:38 部队2 打赢")
+              and _ev2._topped_ok(_ev2.ctx.bag["event_topped"]["11"]))
         _after = _tp.read_bytes() if _tp.exists() else None
         check("真实台账文件未被测试写过", _before == _after)
 
@@ -2809,14 +2829,16 @@ def t_event_bonus_shop():
             check("新货出现后继续下滑, 不提前向上",
                   a_down is not None and a_down.kind == "swipe" and a_down.y > a_down.y2,
                   str(a_down))
+            # 08-26 起拒买 = 纯扫描: 下行触底即收 tab, 不再上翻回顶
+            #    (用户实看"瞎滑"实锤: 扫描模式跑着买路的探底+回滑两趟)。
+            saw_up = False
             a5 = None
             for _ in range(12):
                 a5 = step(v2)
                 if a5 is not None and a5.kind == "swipe" and a5.y < a5.y2:
+                    saw_up = True
                     break
-            check("拒买扫描下行停变后才上翻(不是买路探底回滑)",
-                  a5 is not None and a5.kind == "swipe" and a5.y < a5.y2,
-                  str(a5))
+            check("拒买扫描触底即收 tab, 全程零上翻", not saw_up, str(a5))
             for _ in range(6):
                 step(v1)
             fin = None
@@ -3149,7 +3171,7 @@ def t_alt_gates():
     event = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
     event.state["saw_other"] = True
     event_enter = event.decide(
-        _hall_obs(B(V.EVENT_LIVE, cx=0.30, cy=0.18), special=True),
+        _hall_obs(B(V.EVENT_LIVE, cx=0.30, cy=0.18, h=0.022), special=True),
         _hall_state("facility"))
     check("event facility 有大厅证据时转发 on_task_hall 进场",
           event_enter is not None and event_enter.is_tap
@@ -3157,7 +3179,7 @@ def t_alt_gates():
           str(event_enter))
     event_no_hall = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
     no_hall_action = event_no_hall.decide(
-        O(B(V.EVENT_LIVE, cx=0.30, cy=0.18),
+        O(B(V.EVENT_LIVE, cx=0.30, cy=0.18, h=0.022),
           B(V.BACK, cx=0.05, cy=0.05)),
         _hall_state("facility"))
     check("event facility 无大厅证据保持 no-op，不按返回制造乒乓",
@@ -3394,9 +3416,19 @@ def t_alt_gates():
 
     from routing_v2.act.ledger import Ledger
     from routing_v2.config import data_dir, merged
-    from routing_v2.config.schema import PROFILE
     from routing_v2.flow import daybook as _daybook
-    user = json.loads(PROFILE.read_text(encoding="utf-8"))
+    # 这块原来 json.loads(PROFILE.read_text()) 再断言 account.id == "alt" --
+    #    违反本文件 L53 "测试不许读 profile.json"。08-26 用户把运行账号切回
+    #    main, 四条用例红了一路, 红的是用户配置不是代码。要验的是**双账号
+    #    机制**(覆盖合并/桶隔离/邀请禁用), 合成 profile 全量自证。
+    main_targets = ["凯伊", "爱丽丝(战斗)", "爱丽丝"]
+    user = {
+        "account": {"id": "alt"},
+        "accounts": {"main": {},
+                     "alt": {"cafe": {"invite_targets": [],
+                                        "skip_invite": True}}},
+        "cafe": {"invite_targets": list(main_targets), "skip_invite": False},
+    }
     alt_cfg = merged(user)
     profile_unlocked = copy.deepcopy(user)
     profile_unlocked.setdefault("safety", {})["money_step_needs_human"] = False
@@ -3405,7 +3437,6 @@ def t_alt_gates():
     main_user = copy.deepcopy(user)
     main_user.setdefault("account", {})["id"] = "main"
     main_cfg = merged(main_user)
-    main_targets = ["凯伊", "爱丽丝(战斗)", "爱丽丝"]
     check("当前运行账号明确为 alt",
           alt_cfg["account"]["id"] == "alt")
     check("alt 邀请目标为空且明确禁用",
