@@ -129,8 +129,18 @@ class Machine:
         #    作数; unknown/blank 是**缺证据**, 缺证据凑不出"页面变了"。
         _tt = list(self._recent_ts)[-self.confirm:]
         _contig = all(b - a < 1.5 for a, b in zip(_tt, _tt[1:]))
+        # facility 是兜底签名(回大厅+返回, priority 4), 本职是把「没登记的
+        #    页面」从 unknown 升格成有退出动作的具名页 -- 不许从具名页手里
+        #    抢身份。08-26 取证(v2_20260826_154656 的 69 张 facility 帧):
+        #    全是具名页被浮层盖住特征的时刻(课程表房间面板/领取层/灰确认框),
+        #    cafe->facility->unknown 抖动唯一后果是刷屏+压制兜底恢复。
+        #    真到了没登记的房间仍有出路: 具名页特征消失 -> unknown ->
+        #    facility 照常提交。
+        _fac_steal = (tail[0] == "facility"
+                      and self._page not in ("unknown", "blank",
+                                             "lobby", "facility"))
         if (len(tail) == self.confirm and len(set(tail)) == 1
-                and tail[0] != self._page
+                and tail[0] != self._page and not _fac_steal
                 and (_contig or tail[0] not in ("unknown", "blank"))):
             old = self._page
             self._page = tail[0]

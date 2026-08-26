@@ -123,7 +123,10 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             return wait("等卡片翻面")
 
         self.state["rot"] = 0
-        self.log(f"进 [{i+1}/{len(srcs)}] {srcs[i]}")
+        # 这行原来每 tick 打一次(08-26 实锤: 一场 377 tick 刷 300+ 行,
+        #    把监控日志灌爆) -- 决策没变就别复读
+        if self.once(f"src_log{i}"):
+            self.log(f"进 [{i+1}/{len(srcs)}] {srcs[i]}")
         return tap_box(front, f"进 {srcs[i]}(前卡)", dy=_STORY_CARD_DY)
 
     #  大章节图  小章节（用户 2026-08-11 口述的路由规则）

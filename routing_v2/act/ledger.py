@@ -128,6 +128,8 @@ class Ledger:
         self.entries: List[Entry] = []
         self.breach: Optional[str] = None
         self._recheck = False              # 正在做第二次独立投票
+        # 无付费窗的下降挂起待确认: {v, page, n}
+        self._ext_suspect = None
         self._suspect: Optional[int] = None
         self._suspect_page: str = ""
         self._maxdigits: Dict[str, int] = {}
@@ -396,12 +398,38 @@ class Ledger:
                                 f"再出一条才停（tap 前的金钱闸不受影响）")
                     self._log(f"[ledger] {this}")
                 else:
-                    # 用户抽卡/手点: 记外部变动, 更新基线, 不 HALT。
-                    # 投票已经 settled; 不再换页复读, 免得停在同一页像死循环。
+                    # 用户抽卡/手点: 记外部变动, 不 HALT。但**单次读数不入账**:
+                    #    08-26 arena 实锤, 顶栏 2331/2316 双稳态误读半分钟摆
+                    #    3 次, 每次向下摆就多记一条假 EXTERNAL + 假基线。
+                    #    同页误读是稳定的(08-08 老教训), 确认取两条路之一:
+                    #    换页复读到同样低值, 或同页连续 3 次采样(自然节奏
+                    #    ~30s)仍是低值 -- 真花钱不会自己涨回去, 反弹即作废
+                    #    (作废逻辑在链尾, 那里才看得到 v >= prev 的帧)。
+                    #    挂起期间基线不动, 不加速采样(免得同页 3 次变 3 帧)。
+                    sus = self._ext_suspect
+                    if sus is None or v != sus["v"]:
+                        self._ext_suspect = {"v": v, "page": page, "n": 1}
+                        self._log(f"[ledger] {cls} {prev} 降到 {v} 且无 bot "
+                                  f"付费 tap -- 挂起待确认(换页复读或同页 3 次)")
+                        _e = Entry(time.time(), cls, v, page, flow,
+                                   "ext_suspect")
+                        self.entries.append(_e)
+                        self._write(_e)
+                        continue
+                    sus["n"] += 1
+                    if page == sus["page"] and sus["n"] < 3:
+                        _e = Entry(time.time(), cls, v, page, flow,
+                                   "ext_suspect")
+                        self.entries.append(_e)
+                        self._write(_e)
+                        continue
+                    self._ext_suspect = None
                     tag = "external"
                     this = (f"EXTERNAL: {cls} {prev} 降到 {v}（-{prev-v}）"
-                            f" 无 bot 付费/刷新/确认付费 tap -- 用户抽卡或手点，"
-                            f"更新基线，不 HALT @flow={flow} page={page}")
+                            f" 无 bot 付费/刷新/确认付费 tap, "
+                            f"{'换页复读' if page != sus['page'] else '同页 %d 次' % sus['n']}"
+                            f"确认 -- 用户抽卡或手点，更新基线，不 HALT "
+                            f"@flow={flow} page={page}")
                     self._log(f"[ledger] {this}")
             elif cls == R.CREDIT and prev is not None and v < prev:
                 if self._bot_spent_recently(cls):
@@ -420,6 +448,11 @@ class Ledger:
             if this:
                 if this.startswith("MONEY BREACH") or msg is None:
                     msg = this
+            if (cls == GUARDED and self._ext_suspect is not None
+                    and prev is not None and v >= prev):
+                self._ext_suspect = None
+                self._log(f"[ledger] {cls} 回到 {v} -- 此前的下降是读数抖动, "
+                          f"外部变动挂起作废")
             if cls == GUARDED and self._recheck and tag != "breach":
                 self._recheck = False        # 复读结果正常  警报解除
                 self._log(f"[ledger] 复读 {v}，与 {prev} 一致/未跌 -- 假警报解除")

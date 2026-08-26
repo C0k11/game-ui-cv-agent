@@ -2595,7 +2595,15 @@ def t_ledger():
             push_pyx(led_ext, 220)
             check("青辉石两次一致立基线",
                   led_ext.confirmed.get(_RD.PYROXENE) == 220)
+            # 08-26 起单次读数不入账: 顶栏双稳态误读(2331/2316 半分钟摆
+            #    3 次)每下摆一次就记一条假 EXTERNAL。第一读挂起, 换页复读
+            #    同低值(或同页 3 次)才入账, 反弹作废。
             ext_msg = push_pyx(led_ext, 190)
+            check("外部下降第一读挂起不入账",
+                  ext_msg is None
+                  and led_ext.confirmed.get(_RD.PYROXENE) == 220
+                  and any(e.tag == "ext_suspect" for e in led_ext.entries))
+            ext_msg = push_pyx(led_ext, 190, page="cafe")
             check("外部青辉石下降且无付费 tap 不 HALT",
                   ext_msg is not None and ext_msg.startswith("EXTERNAL")
                   and not money_watch_should_halt(ext_msg)
@@ -2604,6 +2612,12 @@ def t_ledger():
             check("外部下降写入 external 标签",
                   any(e.tag == "external" and e.cls == _RD.PYROXENE
                       for e in led_ext.entries))
+            n_ext = sum(1 for e in led_ext.entries if e.tag == "external")
+            push_pyx(led_ext, 175)
+            push_pyx(led_ext, 190)
+            check("读数抖动(降后反弹)不入外部账",
+                  sum(1 for e in led_ext.entries if e.tag == "external") == n_ext
+                  and led_ext._ext_suspect is None)
         finally:
             led_ext.path.unlink(missing_ok=True)
 
