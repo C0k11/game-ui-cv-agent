@@ -101,7 +101,18 @@ DEFAULTS: Dict[str, Any] = {
         "bonus_team": 2,               # 加成队 = 部队2
         "order": "clear_then_bonus",   # 先 Q1Qn 通关，再打加成
         "shop_plan_before_bonus": True,  # 先商店推算定缺哪种币，再按币种编队
+        # ⚠ farm_stages 是**死配置**: schema 里标着"旧表", 但 `flow/event.py`
+        #    从来没读过它(2026-08-26 全仓 grep 确认)。用户以为配了就生效,
+        #    实际打哪关一直是商店币档推算出来的。留着只是不想动老前端的表单,
+        #    真正生效的是下面两个。
         "farm_stages": {"10": 1, "11": 2},
+        # 按**关号**指定打哪几关加成 / 扫哪一关。空 = 沿用商店币档推算(老行为)。
+        #   关号是语义(Q11 永远是 Q11), 老的 from_bottom 是位置(列表一滚就变),
+        #   所以显式指定优先。关号从屏上读: 它印在得星星星正上方,
+        #   `read.stage_numbers()` 从得星框推 ROI 去 OCR, 再用"关号连续递增"
+        #   这个列表结构必然成立的事实补洞纠错。
+        "bonus_stages": [],            # 例: [10, 11] = 依次给 Q10/Q11 顶纪录
+        "sweep_stage": None,           # 例: 11 = 只扫 Q11
         "ap_reserve": 0,
         "min_ap_for_sweep": 20,
         "max_rounds": 1,
@@ -126,6 +137,11 @@ DEFAULTS: Dict[str, Any] = {
 
     #  课程表
     "schedule": {
+        # 选人方式。老行为是"取置信度最高的那个" -- 可置信度高低跟该不该给他
+        #   上课毫无关系, 结果同几个学生天天被抽中。默认改随机(用户 08-26)。
+        #   种子 = 游戏日, 所以同一天重跑抽到同一批(可复现), 换天自然换人。
+        "pick_order": "random",        # random / confidence
+        "max_students": 0,             # 本次最多上几节课, 0 = 不限(老行为)
         "target_students": [],
         "relationship_first": True,
         "areas": [],                   # 空 = 按屏上可见区域顺序
@@ -141,6 +157,11 @@ DEFAULTS: Dict[str, Any] = {
 
     #  商店（信用点）
     "shop": {
+        # 这两个原来只有代码里的默认值(facilities.py `_shop_opt`), profile 里
+        #   没有 -> 前端看不见、也改不了, 而且哪天默认值一改行为就静默翻转。
+        #   显式写进配置, 让前端成为权威(用户 08-26「根据前端的来」)。
+        "credit_buy": False,           # 信用点商店: 不点"选择购买"(用户: 不去)
+        "arena_shop": True,            # 战术大赛商店: 去(用户: 但是要去)
         "common_priority": [],
         "tactical_priority": [],
         "refresh_times": 0,            # 刷新要花青辉石  锁 0

@@ -234,8 +234,17 @@ class ScheduleFlow(ExitMixin, Flow):
                  and 0.20 < b.cy < 0.92 and id(b) not in owned
                  and b.cls not in tried
                  and not self._on_locked_card(obs, b)]
+        # 抽几个的上限。判据用**真上过课的次数**(`lessons`, 在「課程表開始」
+        #   兑现时才 +1), 不是"我点了几个头像" -- 点了没进房间不算数。
+        cap = int(self.cfg.get("max_students", 0) or 0)
+        if cap and int(self.state.get("lessons", 0) or 0) >= cap:
+            x = obs.find(V.CLOSE_X, 0.55)
+            why = f"本次上限 {cap} 个已上满 - 关面板收工"
+            if x is not None:
+                return tap_box(x, why, post=lambda: self.goto("switch", why))
+            return self._go("switch", why)
         if studs:
-            b = max(studs, key=lambda x: x.conf)
+            b = self._pick_student(studs)
             return self._enter_room(b, f"进 {b.cls} 的房间")
         # 面板上没绿勾的都点过一轮了 -> 这一区的课上完了
         x = obs.find(V.CLOSE_X, 0.55)
@@ -263,6 +272,27 @@ class ScheduleFlow(ExitMixin, Flow):
                     and 0.0 < box.cy - lk.cy < self._CARD_DY):
                 return True
         return False
+
+    def _pick_student(self, studs):
+        """从可选学生里挑一个。
+
+        `pick_order="confidence"` 是老行为(取置信度最高) -- 但**置信度高低
+        跟该不该给这个学生上课毫无关系**, 结果就是同几个人天天被抽中。
+        默认改成 `random`: 用户 08-26 "随机抽一些"。
+        种子固定成**游戏日**, 所以同一天重跑抽到同一批(可复现、好排查),
+        换一天自然换人。不用全局 random, 免得污染别处的随机性。
+        """
+        mode = str(self.cfg.get("pick_order", "random") or "random").lower()
+        if mode == "confidence":
+            return max(studs, key=lambda x: x.conf)
+        import random as _rnd
+        # 种子用**游戏日**(本类已有 `_game_day()`, 锚的是服务器刷新时区 --
+        #   拿裸 now() 会错 12 小时, [[game_day_timezone]] 那次的坑)。
+        r = _rnd.Random(self._game_day())
+        # 先按 cls 排序再抽 -- 检出顺序本身不稳定, 不排序的话"同种子同结果"
+        #   这个保证就不成立了。
+        pool = sorted(studs, key=lambda x: (x.cls, round(x.cy, 3), round(x.cx, 3)))
+        return r.choice(pool)
 
     def _enter_room(self, box, why: str):
         """点学生头像进房间。契约 = 真进了房间**必然**出现「課程表開始」。

@@ -72,7 +72,18 @@ def build(cfg: dict, ctx: Ctx, log=None) -> List[Flow]:
             on = mods.get(ALL[name].module, False)
         if not on:
             continue
-        for real in COMPOSITE.get(name, [name]):
+        members = COMPOSITE.get(name, [name])
+        for real in members:
+            # 组合成员的**单独开关**优先于父开关。
+            #   2026-08-26: `daily_routine` 一开就连带把 free_pack/club/craft/shop
+            #   四条全拉起来, 而 `modules` 里**根本没有 craft 这个键** ->
+            #   前端看不见、也关不掉。用户明确说"不去 craft", 只能改这里。
+            #   规矩: modules 里显式写了这个成员就听它的(True/False 都算),
+            #   没写才继承父开关 -- 老配置行为一步不变。
+            if real != name and real in mods and not mods.get(real):
+                say(f"[build] `{real}` 被 modules 显式关掉  跳过"
+                    f"（它是 `{name}` 的组合成员）")
+                continue
             cls = ALL.get(real)
             if cls is None:
                 if real not in PLANNED:      # PLANNED 的上面已经报过了

@@ -40,7 +40,7 @@
     }
   },
   "ui": {
-    "active": "v18",
+    "active": "v19",
     "_rollback_note": "2026-08-19 上线 v18 做弱类 live 对账 (用户拍板「配置好」)。回滚: active 改回 v17 秒退。v16-v18 部署的都是训练端 best.pt strip 形 (45.7MB), 推理必须 imgsz=960。",
     "task": "detect",
     "n_classes": 531,
@@ -245,6 +245,12 @@
         "notes": "数据=v18 重建: raw 标修复全量进集 (08-15~18 墙扫/翻类/删叠标), nc 528->531 (528任务资讯/529得星_1/530得星_2)。train 38176/val 1507; val 重洗泄漏 (CC 复测残留 1.0% 全贴线 d13)。量尺: best ep30 mAP50 0.9201/50-95 0.8932, 终验 0.919/0.892; 格子497(3006实例) 0.978/0.925。加载体检: 531 names 齐, 单帧 56ms@960。",
         "known_gap": "1)弱类 val=0 (489/450/527/107/413/50/521/530 等), 总 mAP 不代表它们, 只能 live 对账。2)529 train=0 (wash 三框已翻83), 模型不可能检出, flow 禁止依赖。3)450 首次剔除立即更新毒标 (v17 训进过 260 张), 空闲底栏不应再报 450, 待 live 实证。4)头 528->531 重装, 弱类 conf 分布可能整体移位, v17 时代的 0.20 拐杖阈值待重标定。",
         "acceptance": "2026-08-19 上线待 live 弱类对账 (清单 scratchpad/_v18_weakcls_live_checklist_20260819.md)。"
+      },
+      "v19": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v19/weights/best.pt",
+        "nc": 535,
+        "trained": "2026-08-26",
+        "note": "v18 warm + 大厅换皮补采(flywheel_v19_ui_20260821 592帧/8203框, 五轮人审). nc 531->535 新增 531-534 预设族. best=ep30, 60 epoch 早停. 干净尺子(ui_v2_valclean, 剔掉923个硬泄漏)上 mAP50 0.9693/50-95 0.9510, 同尺 v18 是 0.9673/0.9464. FP16(和 v18 同条件); 若 live 出双框, 退路是同一个 best 的未 strip FP32 版 epoch30.pt."
       }
     }
   },
