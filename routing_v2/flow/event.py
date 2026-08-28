@@ -837,15 +837,29 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #    对台账（不然 `bool(_plan)` 恒 False, 台账里明明顶过也拒绝扫荡）。
         _plan = (self.ctx.bag.get("event_farm_plan") or self._plan_from_file()
                  or [{"from_bottom": 0, "why": "无推算结果，兜底打最后一关"}])
-        _all_topped = bool(_plan) and all(
-            str(x["from_bottom"]) in _topped for x in _plan)
+        _want = [int(x) for x in (self.cfg.get("bonus_stages") or [])]
+        if _want:
+            # 用户显式点名: 放行判据 = 点名的关全部有**同关号**有效 v2 条目。
+            #    08-28 live 实锤(自相矛盾): 上面的加成分析刚说 Q10/Q11 全部
+            #    已顶过, 这里还在查老位置键 str(from_bottom) -> "台账没有
+            #    记录"拒绝扫荡。昨天没炸是因为当场赢了 2 场走 win>=1 分支,
+            #    纯跳过(隔天重进)第一次走到这就露馅。
+            _all_topped = all(self._topped_has(_topped, n) for n in _want)
+        else:
+            # 老口径: 位置键条目已废, 改查 v2 条目**内**记的 fb 字段
+            _all_topped = bool(_plan) and all(
+                any(self._topped_ok(v) and v.get("fb") == int(x["from_bottom"])
+                    for v in _topped.values())
+                for x in _plan)
         if self._bt()["win"] < 1 and not _all_topped:
             return self.finish(
                 Outcome.BLOCKED,
                 "没有确认过加成队赢下一场、台账里也没有本期顶纪录的记录，"
                 "拒绝扫荡（会按旧纪录的低倍率刷）")
         if self._bt()["win"] < 1:
-            self.log(f" 本轮没打，但台账显示这 {len(_plan)} 个通道的纪录"
+            _who = (f"指定关 {_want}" if _want
+                    else f"这 {len(_plan)} 个通道")
+            self.log(f" 本轮没打，但台账显示{_who}的纪录"
                      f"本期都由加成队顶过  允许扫荡（高倍率纪录会被自动套用）")
         budget = int(self.cfg.get("max_rounds", 0) or 0)
         if budget and self.state["swept"] >= budget:
@@ -939,10 +953,26 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                     Outcome.LEFTOVER,
                     f"AP {ap_now} < 一轮 {need} — 收工，**绝不买 AP**；"
                     f"{self.battle_stats()} / 扫荡 {self.state['swept']} 次")
+            # 上一发扫荡确认后的结算过渡帧上, 步进器和 AP 顶栏**都还是旧
+            #    渲染**(08-28 实锤: 49 扫完又读到"49 两帧一致"补了一发空 tap,
+            #    swept 虚记)。冷却 30 帧再考虑下一轮。
+            cd = int(self.state.get("sweep_cooldown", 0) or 0)
+            if cd > 0:
+                self.state["sweep_cooldown"] = cd - 1
+                return wait("上一发扫荡刚确认 — 等结算刷新(%d)" % cd)
             mx = qty_max_ok(obs, 0.20)
-            if mx is not None and self.pending("sweepmax"):
-                return tap_box(mx, "扫荡数量拉 MAX（游戏钳到 AP 付得起的次数）",
-                               once="sweepmax")
+            if self.pending("sweepmax"):
+                if mx is not None:
+                    return tap_box(mx, "扫荡数量拉 MAX（游戏钳到 AP 付得起的次数）",
+                                   once="sweepmax")
+                # MAX 键都没出来 = 面板还没就绪, 绝不带着旧数量盲按
+                if self.bump("max_wait") >= 20:
+                    return self.finish(
+                        Outcome.LEFTOVER,
+                        "扫荡面板 20 帧没等到 MAX 键 — 不带旧数量盲扫; "
+                        f"扫荡 {self.state['swept']} 次")
+                return wait("等扫荡面板出 MAX 键")
+            self.state["max_wait"] = 0
             sw = nav.real_sweep_start(obs, 0.35)
             if sw is not None:
                 # 数量 0 时「掃蕩開始」**照样是亮的**（实测 conf 0.986，
@@ -975,7 +1005,8 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                 return tap_box(sw, f"扫荡开始（数量 {n}, 连续两帧一致）",
                                counter="swept",
                                post=lambda q=n, t=_tot: self.state.update(
-                                   swept_qty=t + q, qty_prev=None))
+                                   swept_qty=t + q, qty_prev=None,
+                                   sweep_cooldown=30))
             if obs.has(V.CONFIRM_GREY, 0.45):
                 return self.finish(
                     Outcome.LEFTOVER,

@@ -92,7 +92,10 @@ _SPEND_IGNORE = frozenset({
 #   稳定错读复读一致, 把「双次投票」共识整个骗过 -> 台账凭空 +190,000
 #   又 -190,000。稳定错读跟着**页面**走, 换页就不复现 —— 所以防线是
 #   按页面关采样, 不是加投票次数。
-NO_SAMPLE_PAGES = {"formation", "battle", "battle_result", "grid_quest"}
+# arena 是 08-28 实锤新增: 该页顶栏 8/8 采样全错(2496 读成 2526/2552/5526),
+#    页面本身也没有任何青辉石操作, 采了只会下毒。
+NO_SAMPLE_PAGES = {"formation", "battle", "battle_result", "grid_quest",
+                   "arena"}
 
 
 @dataclass
@@ -130,6 +133,9 @@ class Ledger:
         self._recheck = False              # 正在做第二次独立投票
         # 无付费窗的下降挂起待确认: {v, page, n}
         self._ext_suspect = None
+        # 大幅上涨挂起待确认: {v, page} -- 位数不变的读大(2496->5526)绕过
+        #    读大闸, 单发即污染基线, 之后一切真读数全成"下降"
+        self._up_suspect = None
         self._suspect: Optional[int] = None
         self._suspect_page: str = ""
         self._maxdigits: Dict[str, int] = {}
@@ -410,14 +416,17 @@ class Ledger:
                     if sus is None or v != sus["v"]:
                         self._ext_suspect = {"v": v, "page": page, "n": 1}
                         self._log(f"[ledger] {cls} {prev} 降到 {v} 且无 bot "
-                                  f"付费 tap -- 挂起待确认(换页复读或同页 3 次)")
+                                  f"付费 tap -- 挂起待换页复读")
                         _e = Entry(time.time(), cls, v, page, flow,
                                    "ext_suspect")
                         self.entries.append(_e)
                         self._write(_e)
                         continue
-                    sus["n"] += 1
-                    if page == sus["page"] and sus["n"] < 3:
+                    if page == sus["page"]:
+                        # 同页复读不管几次都不作数 -- 08-08/08-28 两次实锤:
+                        #    同页误读是**稳定的**, N 次一致恰是误读特征。
+                        #    真外部消费在下一次换页(flow 交接必 force_sample)
+                        #    自然坐实, 不会漏。
                         _e = Entry(time.time(), cls, v, page, flow,
                                    "ext_suspect")
                         self.entries.append(_e)
@@ -426,9 +435,8 @@ class Ledger:
                     self._ext_suspect = None
                     tag = "external"
                     this = (f"EXTERNAL: {cls} {prev} 降到 {v}（-{prev-v}）"
-                            f" 无 bot 付费/刷新/确认付费 tap, "
-                            f"{'换页复读' if page != sus['page'] else '同页 %d 次' % sus['n']}"
-                            f"确认 -- 用户抽卡或手点，更新基线，不 HALT "
+                            f" 无 bot 付费/刷新/确认付费 tap, 换页复读确认"
+                            f" -- 用户抽卡或手点，更新基线，不 HALT "
                             f"@flow={flow} page={page}")
                     self._log(f"[ledger] {this}")
             elif cls == R.CREDIT and prev is not None and v < prev:
@@ -440,6 +448,26 @@ class Ledger:
                             f" 无 bot 付费 tap -- 用户升级等，更新基线，不 HALT "
                             f"@flow={flow} page={page}")
                     self._log(f"[ledger] {this}")
+            elif (cls == GUARDED and prev is not None
+                    and v > prev + 300):
+                # 位数不变的读大: 2496->5526 一发就把基线顶上去, 之后一切
+                #    真读数全成"下降"。>300 的上涨(奖励类单笔通常 <=300)
+                #    也要换页复读; 回落 = 误读作废。
+                up = self._up_suspect
+                if up is not None and v == up["v"] and page != up["page"]:
+                    self._up_suspect = None
+                    tag = "big_income"
+                    self._log(f"[ledger] {cls} {prev} 涨到 {v} 换页复读一致"
+                              f" -- 大额入账收下")
+                else:
+                    if up is None or v != up["v"]:
+                        self._up_suspect = {"v": v, "page": page}
+                        self._log(f"[ledger] {cls} {prev} 涨到 {v}(+{v-prev})"
+                                  f" -- 大额上涨挂起待换页复读(防读大污染基线)")
+                    _e = Entry(time.time(), cls, v, page, flow, "up_suspect")
+                    self.entries.append(_e)
+                    self._write(_e)
+                    continue
             elif cls == GUARDED and prev is not None and v > prev + 20000:
                 # 读高会掩盖真实掉钱 —— 异常上涨同样打标交人看
                 tag = "spike"
@@ -448,6 +476,11 @@ class Ledger:
             if this:
                 if this.startswith("MONEY BREACH") or msg is None:
                     msg = this
+            if (cls == GUARDED and self._up_suspect is not None
+                    and prev is not None and v <= prev + 300):
+                self._up_suspect = None
+                self._log(f"[ledger] {cls} 回到 {v} -- 此前的大额上涨是读大, "
+                          f"挂起作废")
             if (cls == GUARDED and self._ext_suspect is not None
                     and prev is not None and v >= prev):
                 self._ext_suspect = None
