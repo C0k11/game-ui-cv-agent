@@ -870,10 +870,18 @@ class MailFlow(ExitMixin, Flow):
         if obs.has(V.CLAIM_ONCE_GREY, 0.40):
             return self.finish(Outcome.CLEAN,
                                f"邮件领取 {self.state.get('claims',0)} 次（领取键已变灰）")
-        if st.frames_in_page < 40:
-            return wait("等邮件页控件")
-        return self.finish(Outcome.CLEAN,
-                           f"邮件领取 {self.state.get('claims',0)} 次")
+        # 领完的奖励层会把黄/灰键全盖住 -- 08-28 实锤: 旧代码 40 帧兜底
+        #    CLEAN 就走人, 层后面还有没有邮件根本没看(用户手动又收了一轮)。
+        #    先把层点掉; 只有**亲眼看到灰键**才算领完, 看不清就诚实 LEFTOVER。
+        cont = obs.find(V.STORY_TAP_CONTINUE, 0.45)
+        if cont is not None:
+            return tap_box(cont, "关掉领取奖励层（后面才看得到黄/灰键）")
+        if st.frames_in_page < 120:
+            return wait("等邮件页控件（黄键/灰键都没露出来）")
+        return self.finish(
+            Outcome.LEFTOVER,
+            f"邮件领取 {self.state.get('claims',0)} 次, 但 120 帧没等到灰键"
+            f" — 不定论领完（页面可能被层盖着）")
 
     # on_reward 的覆写已删（08-11）：原来是 `find([GOT_REWARD, CONFIRM], 0.40)`，
     #    而 `find(列表)` 是**全屏 conf argmax**不是优先级  永远选中

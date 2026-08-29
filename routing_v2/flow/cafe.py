@@ -53,7 +53,7 @@ class CafeFlow(ExitMixin, Flow):
     #    表现成"滑 8 次没找到"然后放弃邀请）。
     yolo = ("ui", "avatar")
     phases = ("enter", "earnings", "invite", "headpat",
-              "switch", "invite2", "headpat2", "exit")
+              "switch", "earnings2", "invite2", "headpat2", "exit")
 
     def setup(self) -> None:
         self.state.update(claimed=False, pats=0, invited=0, floor=1, backs=0,
@@ -137,6 +137,15 @@ class CafeFlow(ExitMixin, Flow):
 
     # earnings
     def do_earnings(self, obs, st):
+        return self._earnings(obs, st, key="earn_done", why="earn_why",
+                              nxt="invite")
+
+    def do_earnings2(self, obs, st):
+        # 店 2 收益(08-28 补): 完全同一套判据, 只是收敛 flag 和下一相位不同
+        return self._earnings(obs, st, key="earn2_done", why="earn2_why",
+                              nxt="invite2")
+
+    def _earnings(self, obs, st, *, key, why, nxt):
         """领收益。**能领就先领**，顺序不能反：收益弹窗**自己也有叉叉**，
         "叉叉优先"会把它关掉而不是领（2026-08-08 逐帧当场抓到）。
         用户口述的"进来先点叉叉"指的是**首进的角色说明弹窗** -- 那种弹窗上
@@ -153,15 +162,14 @@ class CafeFlow(ExitMixin, Flow):
         claim = obs.find(V.CLAIM_ACTIVE, 0.45)
         if claim is not None:
             return tap_box(claim, f"领取（{claim.cls}）", counter="claims",
-                           post=lambda: self.state.update(claimed=True,
-                                                          earn_done=True))
-        if self.state.get("earn_done"):
-            return self.goto_and_wait("invite", "收益这一步处理完了")
+                           post=lambda: self.state.update(claimed=True, **{key: True}))
+        if self.state.get(key):
+            return self.goto_and_wait(nxt, "收益这一步处理完了")
         # 面板开着但领取键是灰的 = 领不了。**不许当成领过了。**
         if obs.has(V.CLAIM_DONE, 0.45):
-            self.state.update(earn_done=True,
-                              earn_why="收益领取键是灰的（体力满了领不动？）")
-            return self.goto_and_wait("invite", "收益领不了")
+            self.state.update(**{key: True,
+                                 why: "收益领取键是灰的（体力满了领不动？）"})
+            return self.goto_and_wait(nxt, "收益领不了")
         # 挡路的弹窗（首进的角色说明）-- 相位机下这里不会再误伤邀请面板:
         #    邀请面板是 `invite` 相位的事，那个相位里根本不跑这条分支。
         x = obs.find(V.CLOSE_X, 0.55)
@@ -174,8 +182,8 @@ class CafeFlow(ExitMixin, Flow):
             #    可点的领取键，严格契约会一直不兑现、把整条链按死。
             return tap_box(earn, "打开咖啡厅收益面板")
         if self.phase_ticks > 30:
-            self.state.update(earn_done=True, earn_why="屏上找不到收益入口")
-            return self.goto_and_wait("invite", "屏上没有收益入口，跳过")
+            self.state.update(**{key: True, why: "屏上找不到收益入口"})
+            return self.goto_and_wait(nxt, "屏上没有收益入口，跳过")
         return wait("找收益入口")
 
     # invite (每厅一张券)
@@ -257,12 +265,31 @@ class CafeFlow(ExitMixin, Flow):
                 return wait("放弃邀请 - 等叉叉检出把面板关掉")
             return self.goto_and_wait(nxt, f"{fl} 号厅这一轮找不到邀请目标，不再开卷")
         if self.state.get(f"invited_f{fl}"):
-            # `post` 只保证「**tap 指令发出去了**」，而邀请**要再点一次確認
-            #    才算数**。退出前先给确认框 25 帧时间弹出来（overlay 优先级
-            #    高于相位处理器，确认框一出现就会被 `on_confirm_dialog` 接走）。
-            if not self.hold("after_invite", 25):
-                return wait("邀请已发出 - 等確認框弹出来（别急着走，走了这张券就白点了）")
             return self.goto_and_wait(nxt, f"{fl} 号厅邀请完成")
+        pend = self.state.get("invite_pending")
+        if pend and pend.get("fl") == fl:
+            # tap 发出去 != 邀请成立(08-28 实锤: 两次邀请 tap 契约全超时,
+            #    确认框根本没弹, 报告仍写"邀请 2 次")。兑现的**可观测事实**:
+            #    确认框出现(overlay 会接手点確認), 或列表自己收起(确认完成)。
+            #    失败形态 = 列表原样开着、确认框从没出现。
+            if obs.has(V.CONFIRM, 0.45) or not obs.has(V.CAFE_INVITE, 0.40):
+                self.state["invite_pending"] = None
+                self.state[f"invited_f{fl}"] = True
+                self.state.setdefault("invited_names", []).append(pend["name"])
+                self.state["invited"] = int(self.state.get("invited", 0)) + 1
+                self.log(f"邀请兑现: {pend['name']}（{fl} 号厅）")
+                return self.goto_and_wait(nxt, f"{fl} 号厅邀请完成")
+            if not self.hold("after_invite", 40):
+                return wait("邀请已点 - 等确认框弹出或列表收起")
+            self.state["invite_pending"] = None
+            self.state.pop("hold:after_invite", None)
+            self.state.pop("hold:after_invite:t", None)
+            n = self.bump(f"invite_retry_f{fl}")
+            if n < 2:
+                self.log(f"邀请 tap 没兑现（列表还开着, 第 {n} 次）— 重找目标再点")
+                return wait("重试邀请")
+            self.log(f"邀请 tap 连续 {n} 次没兑现 — 放弃这张券, **不计数**")
+            return self.goto_and_wait(nxt, f"{fl} 号厅邀请没点成（不计数）")
 
         panel = obs.has(V.CAFE_INVITE, 0.40)
         if not panel:
@@ -296,11 +323,13 @@ class CafeFlow(ExitMixin, Flow):
                 return wait(f"看到 {name} 但同行邀请键没检出")
 
             def _did(f=fl, n=name, cy=hit.cy):
-                self.log(f"邀请了 {n}（行 cy={cy:.3f}）")
-                self.state[f"invited_f{f}"] = True
-                self.state.setdefault("invited_names", []).append(n)
-            act = tap_box(same, f"邀请 {name}（同行邀请键）",
-                          counter="invited", post=_did)
+                # 只记"点出去了"; 计数在兑现分支(确认框/列表收起)才加 --
+                #    08-28 假账"邀请 2 次实际 0 次"在此根治
+                self.log(f"邀请键已点: {n}（行 cy={cy:.3f}, 待兑现）")
+                self.state["invite_pending"] = {"fl": f, "name": n}
+                self.state.pop("hold:after_invite", None)
+                self.state.pop("hold:after_invite:t", None)
+            act = tap_box(same, f"邀请 {name}（同行邀请键）", post=_did)
             # **行内按钮的容差必须显著小于半行距**，否则"同行"这个前提在 JIT
             #    复验阶段就被容差自己破坏掉（默认 ~0.048 vs 半行距 0.053）。
             act.anchor_tol = 0.030
@@ -428,6 +457,14 @@ class CafeFlow(ExitMixin, Flow):
         if chk is not None:
             return chk
         if not self._in_cafe(obs):
+            # 邀请列表还开着盖住主视图 -> 先关它(08-28 实锤: headpat2 对着
+            #    没关的列表 hold 满 40 tick 直接 exit, 店 2 摸头收益全跳过)
+            if obs.has(V.CAFE_INVITE, 0.40):
+                x = obs.find(V.CLOSE_X, 0.55)
+                if x is not None:
+                    return tap_box(x, "主视图被邀请列表盖着 — 先关掉",
+                                   expect_gone=(V.CAFE_INVITE,))
+                return wait("邀请列表开着但叉叉没检出 — 等一帧")
             # 要**连续** 40 tick 认不出才放弃（2026-08-13 live: 邀请完的
             #    过场动画期主视图锚点全被盖住, 原来 12 tick 就跳走 --
             #    优香刚被请进来, 头一次都没摸到。`hold` 是连续性计数,
@@ -526,7 +563,9 @@ class CafeFlow(ExitMixin, Flow):
             #    原来点完就留在 switch 相位，下一帧 `observe` 把 floor 校正成 2、
             #    2 也进了 visited -> todo 空 -> 直接 exit。人到了 2 号厅，
             #    邀请和摸头**一次都没做**。
-            self.goto("invite2", f"到了 {d} 号厅，接着干活")
+            # 08-28: 店 2 有自己的收益, 原相位链结构上没有这一步,
+            #    用户看到的"剩 1 个黄点"就是没人领的店 2 收益
+            self.goto("earnings2", f"到了 {d} 号厅，先领收益再干活")
         # 换厅必须**显式严格契约**: `observe` 每帧从屏上校正厅号，而换厅要加载
         #    好几百毫秒 -- 点击刚发出、页面还没切，下一帧就把 `floor` 校正回去，
         #    于是无限重点。到了目的厅，按钮会变成指向另一边的那个。
