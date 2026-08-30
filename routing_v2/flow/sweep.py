@@ -345,6 +345,14 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 return self._next_branch_or_done(
                     "数量步进全灰 — 没票可扫了", terminal=True)
 
+        # 上一发扫荡确认后的结算过渡帧上步进器还是旧渲染(08-29 实锤:
+        #    bounty/jfd 双双读到"数量 1"点出去、下一帧又按 6 补一发 --
+        #    票账靠票数对账兜住了, 但 tap 和日志都是虚的)。event 那条路
+        #    08-28 已修, 这里是 bounty/jfd/special/batch 共享路, 补齐同款。
+        cd = int(self.state.get("sweep_cd", 0) or 0)
+        if cd > 0:
+            self.state["sweep_cd"] = cd - 1
+            return wait("上一发扫荡刚确认 — 等结算刷新(%d)" % cd)
         mx = qty_max_ok(obs, 0.20)
         if mx is not None and self.pending("maxed"):
             return tap_box(mx, "数量拉 MAX（游戏会自己钳到付得起的次数）",
@@ -368,8 +376,16 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 return self._next_branch_or_done(
                     "步进器数量读出来是 0 —— 一次也扫不了（掃蕩鍵亮着也不点，"
                     "点下去就是买 AP/买票的框）", terminal=True)
+            # 数量连续两帧一致才按(08-29: MAX 后第一帧常是旧值 1);
+            #    读不出保持原有放行口径不动 bounty/jfd 已走通的路。
+            if n is not None:
+                if self.state.get("qty_seen") != n:
+                    self.state["qty_seen"] = n
+                    return wait(f"扫荡数量读到 {n} — 等下一帧复核")
             self.once_reset("maxed", "apcheck")
-            return tap_box(go, f"扫荡开始（数量 {n if n is not None else '?'}）")
+            return tap_box(go, f"扫荡开始（数量 {n if n is not None else '?'}）",
+                           post=lambda: self.state.update(sweep_cd=30,
+                                                          qty_seen=None))
         if obs.has(V.TASK_START, 0.35):
             return self._next_branch_or_done(
                 "面板上只有『任務開始』没有扫荡键 — 这关不能扫（未三星？），"

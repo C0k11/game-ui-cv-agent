@@ -306,7 +306,24 @@ class FreePackFlow(ExitMixin, Flow):
         if p is not None and self.pending("open_pack"):
             return tap_box(p, "日常第一枪: 购买青辉石入口  进页领免费包",
                            once="open_pack",
+                           post=lambda: self.state.update(entry_tapped=True),
                            expect=(V.COMBO_PACK, V.COMBO_PACK_SEL, V.FREE))
+        if self.state.get("entry_tapped"):
+            # 入口 tap 已发出: 转场帧上"入口从大厅消失"恰是**离开大厅的证据**,
+            #    不是"入口不存在"。08-29 实锤: hold(no_entry) 在转场里攒满
+            #    30 帧判了 UNKNOWN, done 闸按到契约兑现那一刻放行 -- 人已经
+            #    站在組合包页上, 收工理由还是"大厅没检出入口"。
+            #    等页面身份跟上; 120 帧没动静才重武装, 4 轮无果交人。
+            n = self.bump("entry_wait")
+            if n >= 120:
+                self.state["entry_wait"] = 0
+                if self.bump("entry_retries") > 3:
+                    return self.finish(
+                        Outcome.UNKNOWN,
+                        "入口点了 4 轮页面都没变 — 交人看")
+                self.state.pop("once:open_pack", None)
+                self.log("入口点了 120 帧页面没变 — 判定被吞, 重武装再点")
+            return wait("入口已点 — 等进組合包页")
         if self.hold("no_entry", 30):
             return self.finish(Outcome.UNKNOWN, "大厅没检出购买青辉石入口")
         return wait("等购买青辉石入口")

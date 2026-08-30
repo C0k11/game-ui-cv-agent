@@ -113,8 +113,13 @@ class CampaignFlow(ExitMixin, Flow):
         #    一次性参数, 用完就该清回 0。只作用于队列第一关。
         skip = int(self.cfg.get("skip_rounds", 0) or 0)
         if skip:
-            self.state["round_i"] = skip
-            self.log(f"断点续走: 跳过前 {skip} 步, 从第 {skip + 1} 步开始")
+            # 08-30: 不在这就设 round_i -- 这参数是 08-15 留在 profile 里的
+            #    调试遗留, 全新部署时也生效, 把 3-1 前两步吞了(队伍停在离
+            #    BOSS 两格处, 10 AP 挂半路)。暂存, 走子开局按**部署方式**定:
+            #    这一局自己点过 起点_黄 上队 = 全新开局, 配置声明也不听。
+            self.state["pending_skip"] = skip
+            self.log(f"skip_rounds={skip} 已暂存 — 只在真续走(进来时任务已"
+                     f"在图上)时生效")
 
     @staticmethod
     def _parse_stage(raw, hard: bool):
@@ -477,13 +482,23 @@ class CampaignFlow(ExitMixin, Flow):
             t = obs.find(V.HUB_CAMPAIGN, 0.45)
             if t is not None:
                 # 游戏会记住 Hard 页签, 进列表不一定出 普通关卡选中
+                n = int(self.state.get("hub_taps", 0))
                 act = tap_box(t, "进 任務 推图",
                               expect=(V.STAGE_NORMAL_SEL, V.STAGE_NORMAL,
-                                      V.STAGE_HARD_SEL, V.STAGE_HARD))
+                                      V.STAGE_HARD_SEL, V.STAGE_HARD),
+                              post=lambda k=n: self.state.update(hub_taps=k + 1))
                 # 任务关卡推图 框是磁贴顶上「Area N」标题条
                 #    (08-15 实帧 y 0.215-0.273), 框心偏上, 转场期点标题没进。
                 #    往下收到磁贴本体。
-                act.y = min(0.50, t.y2 + 0.08)
+                # 08-30 实锤: 双倍活动缎带把这个 cls 打到 0.25-0.45 一带,
+                #    框也从标题条胀到盖住「任務」大字(y2~0.35), y2+0.08 落进
+                #    卡下死区水面, 7 发全空。两道保险:
+                #    ①偏移封顶在卡底边内(第二排小卡 0.44 起, 0.395 是安全带);
+                #    ②连空 3 发换打法: 直接点框心 -- 标签印在卡上, 框心必在卡内。
+                if n >= 3:
+                    act.y = t.cy
+                else:
+                    act.y = min(0.395, t.y2 + 0.08)
                 return act
             return wait("找 任務 磁贴")
         if st.page == "campaign_stage":
@@ -610,7 +625,12 @@ class CampaignFlow(ExitMixin, Flow):
                                       for r in reads})
                     if want_ch not in seen_ch:
                         hops = self.state.get("area_hops", 0)
-                        if hops >= 8:
+                        # 预算按**距离**算, 不写死(08-30 实锤: 30 区回 3 区要
+                        #    27 跳, 写死 8 走到 16 区就"交人")。首读时把
+                        #    |当前-目标|+4 记下来当预算; 读不出首距才退 8。
+                        if "hop_budget" not in self.state and seen_ch:
+                            self.state["hop_budget"] = abs(seen_ch[0] - want_ch) + 4
+                        if hops >= int(self.state.get("hop_budget", 8)):
                             return self.finish(
                                 Outcome.UNKNOWN,
                                 f"切了 {hops} 次区域还没到第 {want_ch} 区"
@@ -633,10 +653,13 @@ class CampaignFlow(ExitMixin, Flow):
                             self.state["row_reads"] = {}
                             self.state["scrolls"] = 0
                             self.state.pop("stage_vote", None)
-                        return tap_box(arr,
-                                       f"目标 {cfgd} 在第 {want_ch} 区, 当前第 "
-                                       f"{seen_ch[0]} 区 -- 切区域（第 {hops + 1} 次）",
-                                       post=_hopped)
+                        _a = tap_box(arr,
+                                     f"目标 {cfgd} 在第 {want_ch} 区, 当前第 "
+                                     f"{seen_ch[0]} 区 -- 切区域（第 {hops + 1} 次）",
+                                     post=_hopped)
+                        # 屏上区号就是进度证据 -- 连发闸看它复位(见 gate.py)
+                        _a.progress = f"area:{seen_ch[0]}"
+                        return _a
                 # 目标不在可视区 -> **先扫后滑**: 按读到的号判方向翻列表
                 #    （2026-08-13 live: 列表自动归位在最新进度, 配置 2-1 时
                 #    可视区只有 2-2..2-5 -- 目标在上面, 要往回翻）。
@@ -791,6 +814,13 @@ class CampaignFlow(ExitMixin, Flow):
             # 航位推算的锚点: 本次部署时已走到第几回合（多区域地图第二次
             #    部署后, 累加方向只从这里开始算）
             self.state["deploy_round0"] = self.state["round_i"]
+            sk = int(self.state.pop("pending_skip", 0) or 0)
+            if sk and self.state.get("deployed_fresh"):
+                self.log(f"skip_rounds={sk} 配置了, 但本局是全新部署"
+                         f"(自己点的起点上队) — 忽略, 从第 1 步走")
+            elif sk:
+                self.state["round_i"] = sk
+                self.log(f"断点续走: 跳过前 {sk} 步, 从第 {sk + 1} 步开始")
             self.goto("walk", "PHASE 控件出现 = 真开局了")
             return wait("进回合")
         start_btn = obs.find(V.TASK_START, 0.45)
@@ -812,6 +842,7 @@ class CampaignFlow(ExitMixin, Flow):
                 cx, y1, y2 = box
                 anchor = sp if sp is not None else obs.find(
                     V.TASK_START_GREY, 0.35)
+                self.state["deployed_fresh"] = True
                 act = tap_box(anchor, "点起点格上队(框上1/3处)",
                               expect=(V.SORTIE,))
                 act.x, act.y = cx, y1 + 0.30 * (y2 - y1)

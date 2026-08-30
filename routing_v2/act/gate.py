@@ -426,6 +426,17 @@ class Gate:
             self._fires = 0
             self._last_fire_frame = 0
             return Verdict(True)
+        # 流内进度证据: 流从屏上读到的状态变了(act.progress, 例如切区读数
+        #    area:30 -> area:29) = 上一发同样生效了, 比照换页处理。
+        #    08-30 实锤: 切区循环页面身份不变、落点不变, 30->25 正常推进被
+        #    这道闸当死按钮杀掉。progress 是屏上读数不是文案, 往 reason 塞字
+        #    绕闸那条老路在这不通。
+        _prog = getattr(act, "progress", None)
+        if _prog is not None and _prog != getattr(self, "_last_prog", None):
+            self._last_prog = _prog
+            self._fires = 0
+            self._last_fire_frame = 0
+            return Verdict(True)
         # 页面没变：距离**上一发真的发出去**够了 retry_frames 帧才允许补一发。
         #    原来判的是 `frames_in_page >= retry_frames` —— 那是**电平**不是
         #      **边沿**：`frames_in_page` 只在换页时归零，一旦跨过 retry_frames
