@@ -328,7 +328,12 @@ class CampaignFlow(ExitMixin, Flow):
                     # 位移必须是**一步量级**(0.6~2.0 格距): 敌我混淆让绑定
                     #    在两个立绘间跳变时, 伪位移通常远超一步 -- 不设上限
                     #    会把绑定漂移当成走位(假回合推进)
-                    if (0.6 * dx0) ** 2 < dd < (2.0 * dx0) ** 2:
+                    _hi = (float("inf")
+                           if self.state.get("issued_do") == "portal"
+                           else (2.0 * dx0) ** 2)
+                    # portal 回合传送是多格量级, 2.0 格上限是防绑定漂移的,
+                    #    对真传送必须放开; 下限保留(仍要求真动了)。
+                    if (0.6 * dx0) ** 2 < dd < _hi:
                         m = self.state.get("moved_frames", 0) + 1
                         self.state["moved_frames"] = m
                         if m >= 2 and not self.state.get("moved_t"):
@@ -414,7 +419,9 @@ class CampaignFlow(ExitMixin, Flow):
         lack = []
         if needs.get("teams", 1) > 1:
             lack.append(f"{needs['teams']} 队协同(缺 当前聚焦队伍/切换键 判据)")
-        if needs.get("portal"):
+        # portal 已实现(08-30): 点击同 move, 事后地标推算作废转单位绑定,
+        #    位移证据放开上限。多队/exchange/属性队仍未实现, 继续拦。
+        if False and needs.get("portal"):
             lack.append("portal 传送(确认弹窗链未 live 验证)")
         if needs.get("exchange"):
             lack.append("exchange 换位(交換按钮无 cls)")
@@ -635,6 +642,14 @@ class CampaignFlow(ExitMixin, Flow):
                                 Outcome.UNKNOWN,
                                 f"切了 {hops} 次区域还没到第 {want_ch} 区"
                                 f"（现在读到 {reads}）-- 交人看")
+                        # 上一跳还没落地(区号读数仍= 出发值)就不许再跳:
+                        #    08-30 实锤双发 right 都读"第 3 区", 3 直接过冲 5。
+                        #    区号变化就是切区的进度证据; 60 帧没动 = 被吞, 重点。
+                        hf = self.state.get("hop_from")
+                        if hf is not None and seen_ch and seen_ch[0] == hf:
+                            if self.bump("hop_settle") < 60:
+                                return wait(f"切区后区号还停在 {hf} -- 等落地")
+                        self.state["hop_settle"] = 0
                         left = want_ch < seen_ch[0]
                         arr = obs.find(V.ARROW_LEFT if left else V.ARROW_RIGHT,
                                        0.40)
@@ -646,12 +661,14 @@ class CampaignFlow(ExitMixin, Flow):
                                     f"区域切换箭头检不出 -- 交人看")
                             return wait("目标在别的区域, 等区域切换箭头")
 
-                        def _hopped(k=hops + 1):
+                        def _hopped(k=hops + 1, frm=seen_ch[0]):
                             # 换区后行位置不变数字全变 -- 读号缓存/共识/滚动
                             #    计数全部作废, 重来
                             self.state["area_hops"] = k
                             self.state["row_reads"] = {}
                             self.state["scrolls"] = 0
+                            self.state["hop_from"] = frm
+                            self.state["hop_settle"] = 0
                             self.state.pop("stage_vote", None)
                         _a = tap_box(arr,
                                      f"目标 {cfgd} 在第 {want_ch} 区, 当前第 "
@@ -742,11 +759,37 @@ class CampaignFlow(ExitMixin, Flow):
         rows = obs.all(V.STAGE_ENTER, 0.45)
         same = min(rows, key=lambda b: abs(b.cy - anchor[1]), default=None)
         if same is not None and abs(same.cy - anchor[1]) < 0.05:
+            # 点之前重核行号: 锁行可能发生在过区动画的瞬帧上(08-30 实锤:
+            #    扫过 4 区的半帧锁了 4-1, 屏面落定 3 区) -- 按过期锚点点
+            #    入場 = 进错关烧 AP。星标定位锚行, 关号重读, 对不上解锁重找。
+            _stars = obs.all([V.STAR_0, V.STAR_3], 0.45)
+            _sb = min(_stars, key=lambda b: abs(b.cy - anchor[1]), default=None)
+            _got2 = None
+            if _sb is not None and abs(_sb.cy - anchor[1]) < 0.05:
+                _h = max(_sb.y2 - _sb.y1, 0.015)
+                _rect = (_sb.x1 - 1.25 * _h, _sb.y1 - 4.2 * _h,
+                         _sb.x1 + 5.0 * _h, _sb.y1 + 0.4 * _h)
+                _got2 = self._parse_stage(R.digits(obs.frame, _rect), on_hard)
+            if _got2 != self.state.get("stage"):
+                if _got2 is not None or self.bump("lock_recheck") >= 30:
+                    self.state.update(row_anchor=None, row_reads={},
+                                      lock_recheck=0)
+                    self.log(f"锚行现在读出 {_got2} != 目标 "
+                             f"{self.state.get('stage')} -- 解锁重找")
+                    return wait("锁行失效, 重找目标行")
+                return wait("锚行关号暂读不出, 复核中")
+            self.state["lock_recheck"] = 0
             act = tap_box(same, f"目标关 {self.state['stage']}（同行入場）",
                           expect=(V.TASK_START, V.TASK_START_GREY),
                           post=lambda: self.state.update(opened_popup=True))
             act.anchor_tol = 0.030      # 行内按钮容差要小于半行距
             return act
+        # 锁着的行 40 帧等不到同行入場键 = 锚点悬空(瞬帧锁行/滚动把行带走)
+        #    -- 解锁重找, 不许无限等(08-30: 这里原来干等了 4001 tick)。
+        if self.bump("lock_wait") >= 40:
+            self.state.update(row_anchor=None, row_reads={}, lock_wait=0)
+            self.log("锁行 40 帧等不到同行入場键 -- 解锁重找")
+            return wait("锁行失效, 重找目标行")
         return wait("目标行的入場键没检出（锁行等它）")
 
     # popup: 保证在「集中指挥」页签, 然后 任務開始
@@ -1003,7 +1046,15 @@ class CampaignFlow(ExitMixin, Flow):
         cur = None
         unit = self._bind_unit(obs)
         sp_lm = obs.find([V.GRID_START, V.GRID_START_GREY], 0.35)
-        if sp_lm is not None:
+        # 已执行的回合里有 portal = 队伍被传送过, 起点地标 + 方向累加的
+        #    航位推算从那一步起就不再描述真实位置 -- 整条链作废, 落到
+        #    单位绑定兜底(箭头->我方框->格, 自带两帧共识)。
+        _teleported = any(
+            m.get("do") == "portal"
+            for i in range(self.state.get("deploy_round0", 0),
+                           min(self.state["round_i"], len(plan)))
+            for m in plan[i])
+        if sp_lm is not None and not _teleported:
             ex, ey = sp_lm.cx, sp_lm.cy
             for i in range(self.state.get("deploy_round0", 0),
                            self.state["round_i"]):
@@ -1045,14 +1096,15 @@ class CampaignFlow(ExitMixin, Flow):
                 > 0.03 ** 2):
             return wait("绑格首帧, 等下一帧共识")
         moves = [m for m in plan[self.state["round_i"]]
-                 if m.get("do") == "move"]
+                 if m.get("do") in ("move", "portal")]
         if len(moves) != len(plan[self.state["round_i"]]) or len(moves) != 1:
-            # 预检在进关前就该拦掉 portal/exchange/多队 -- 走到这说明预检
+            # 预检在进关前就该拦掉 exchange/多队 -- 走到这说明预检
             #    漏了或答案被人改过, 照旧 fail-closed
             return self.finish(Outcome.UNKNOWN,
-                               f"回合 {self.state['round_i'] + 1} 不是单队单 move"
+                               f"回合 {self.state['round_i'] + 1} 不是单队单步"
                                f"（应被进关预检拦下）-- 不瞎走")
         d = moves[0]["dir"]
+        d_do = moves[0].get("do", "move")
         # **目的格候选排除自己站的格**（05 轮实锤: 绑格偏一格时 resolve 会解析
         #    回自己 -> 点自己=no-op -> 假到位）
         # 有格用格; 无格 wait/UNKNOWN, 不拿 BOSS/道具当落点（用户否掉硬搞）。
@@ -1085,12 +1137,14 @@ class CampaignFlow(ExitMixin, Flow):
         pv = ((unit.cx - sp_lm.cx, unit.cy - sp_lm.cy)
               if (sp_lm is not None and unit is not None) else None)
 
-        def _issued():
+        def _issued(dd_=d_do):
             self.state.update(issued=True, cycling=False, pe_absent=0,
-                              pre_vec=pv, moved_frames=0, moved_t=None)
+                              pre_vec=pv, moved_frames=0, moved_t=None,
+                              issued_do=dd_)
             self._wt_clear()
         act = tap_box(cell_box,
-                      f"回合 {self.state['round_i'] + 1}: 走 {d} -> "
+                      f"回合 {self.state['round_i'] + 1}: "
+                      f"{'踩传送门' if d_do == 'portal' else '走'} {d} -> "
                       f"({goal[0]:.3f},{goal[1]:.3f})"
                       + ("" if marked else "（无可走标记, 若不走动多半是够不着）"),
                       post=_issued)
