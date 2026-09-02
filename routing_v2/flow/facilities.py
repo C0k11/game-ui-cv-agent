@@ -18,7 +18,7 @@ from routing_v2.state.machine import StateView
 
 def _shelf_checked(obs: Observation) -> bool:
     """勾选证据. 全部选择键在场不算 -- 空闲店也有."""
-    return obs.has(V.GREEN_CHECK, 0.35) or obs.has(V.SHOP_ALL_SELECTED, 0.35)
+    return obs.has(V.GREEN_CHECK, 0.35)
 
 
 def _real_buy_selected(obs: Observation, conf: float = 0.40, *,
@@ -448,31 +448,15 @@ class ShopFlow(ExitMixin, Flow):
                      or not self._credit_buy_on())
         return bool(credit_ok and arena_ok)
 
-    def on_shop_pyroxene_tab(self, obs, st):
-        self.log("在青辉石 tab 上 — 立刻切回信用点 tab")
-        act = self._to_credit_tab(obs)
-        if act is not None:
-            return act
-        return wait("青辉石 tab 上, 等切回信用点(不退出、不买)")
-
     def _to_credit_tab(self, obs: Observation) -> Optional[Action]:
-        """信用点商店未选中态 train=0, 检不出就点青辉石选中态上方那一格(一般)."""
+        """切到信用点 tab。未选中态 62 样本极少, 检不出就交给 _on_credit_shelf
+        的货架判据(全部选择/选择购买 + 信用点价签)兜底。"""
         t = obs.find(V.SHOP_TAB_CREDIT, 0.35)
         if t is not None and self.pending("credittab"):
             return tap_box(t, "切到信用点 tab（安全 tab）", once="credittab")
-        pyx = obs.find(V.SHOP_TAB_PYROXENE_SEL, 0.40,
-                       region=(0.0, 0.08, 0.22, 0.98))
-        if pyx is not None and self.pending("credittab"):
-            h = max(pyx.y2 - pyx.y1, 0.04)
-            cy = max(0.12, pyx.cy - h * 1.15)
-            fake = Box(cls=V.SHOP_TAB_CREDIT, conf=0.40,
-                       x1=pyx.x1, y1=cy - h / 2, x2=pyx.x2, y2=cy + h / 2)
-            return tap_box(fake, "青辉石上方点一般/信用点 tab", once="credittab")
         return None
 
     def _on_credit_shelf(self, obs: Observation) -> bool:
-        if obs.has(V.SHOP_TAB_PYROXENE_SEL, 0.40):
-            return False
         arena_sel = obs.find(V.ARENA_SHOP_TAB_SEL, 0.40)
         if arena_sel is not None and arena_sel.cx >= 0.22:
             return False
@@ -515,8 +499,6 @@ class ShopFlow(ExitMixin, Flow):
         return " / ".join(seg)
 
     def on_shop(self, obs, st):
-        if obs.has(V.SHOP_TAB_PYROXENE_SEL, 0.40):
-            return self._to_credit_tab(obs) or wait("青辉石 tab, 先切回信用点")
         on_credit = self._on_credit_shelf(obs)
         # credit_buy 关: 不点全部选择/选择购买, 这段记跳过, 去大赛店买饮料.
         if not self._credit_buy_on():
@@ -592,7 +574,7 @@ class ShopFlow(ExitMixin, Flow):
         #    credit_buy 关时货架上仍有选择购买是预期, 不许报没买成.
         left = (_real_buy_selected(obs, 0.40)
                 or obs.find(V.SHOP_SELECT_ALL, 0.40)
-                or obs.find(V.SHOP_ALL_SELECTED, 0.40))
+)
         if left is not None and self._credit_buy_on():
             return self.finish(Outcome.LEFTOVER,
                                f"货架上还有可买项（`{left.cls}` conf {left.conf:.2f}）"

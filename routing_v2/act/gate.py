@@ -40,6 +40,7 @@ _EXPECT_DIALOG_AFTER = frozenset({
     V.SWEEP_START, V.TASK_START, V.SCHED_START, V.CRAFT_START,
     V.SHOP_BUY, V.SHOP_BUY_SELECTED, V.SHOP_SELECT_ALL,
     V.STORY_SKIP, V.STORY_MENU,            # 剧情「跳過」的确认
+    V.PRESET_APPLY,                        # 預設 組成 -> 「變更編輯」框(v20)
     V.CAFE_INVITE, V.SORTIE, V.QTY_MAX,
     V.CLAIM_ALL_YELLOW, V.CLAIM_ONCE_YELLOW, V.CLAIM_YELLOW,
     V.FREE,                               # 免费包键会弹确认框
@@ -59,6 +60,7 @@ _ALWAYS_DIALOG = frozenset({
     V.SHOP_BUY, V.SHOP_BUY_SELECTED, V.SHOP_SELECT_ALL,
     V.STORY_SKIP, V.STORY_MENU,
     V.CAFE_INVITE, V.SORTIE,
+    V.PRESET_APPLY,
 })
 # 步进器类: 点了之后**屏上不该出现任何等待物**, 自己也不消失 -- 默认契约
 #    expect_gone=(自己,) 对它永不兑现(MAX 点完还亮着), 也是 70 帧假超时。
@@ -67,10 +69,14 @@ _FIRE_AND_FORGET = frozenset({V.QTY_MAX})
 
 _NAV_SAFE = frozenset({
     V.COMBO_PACK, V.CURRENCY, V.CURRENCY_SEL,          # 切 tab
-    V.SHOP_TAB_CREDIT, V.SHOP_TAB_PYROXENE,
+    V.SHOP_TAB_CREDIT,
     V.ARENA_SHOP_TAB, V.ARENA_SHOP_TAB_SEL,            # 战术大赛商店 tab
     V.CLOSE_X, V.BACK, V.HOME, V.CANCEL,               # 关闭 / 退出 / 取消
 })
+
+# 危险锚: 检出只用来**认局面**, 任何 flow 都不许把它当落点(点了就是事故且不可逆)。
+#    542 部署菜单_解除 = 把已部署队伍撤下来(v20 新类, 09-01 用户拍板"留作危险锚")。
+_NEVER_TAP = frozenset({V.GRID_UNIT_UNDEPLOY})
 
 # **「上一发点的是花钱键」= 眼前这个双键框就是购买确认框**（08-10 实锤）。
 #   这一条补的是 `purchase_context` 的一个真盲区：組合包页点「購買」弹出的
@@ -207,6 +213,8 @@ class Gate:
               last_solid: Optional[str] = None) -> Verdict:
         """判据全部在 `act/money.py`（唯一一份）。这里只负责怎么处置。"""
         safety = self.cfg.get("safety", {})
+        if act.is_tap and act.target_cls in _NEVER_TAP:
+            return Verdict(False, f"危险锚 `{act.target_cls}` 绝不点(点了把已部署队伍撤下)")
 
         # 系统框保护：**永远不许在退出框上点確認**（確認=退出游戏）。
         #    放在闸里是因为八个 flow 都覆写了 on_confirm_dialog，
@@ -283,19 +291,6 @@ class Gate:
             self._log(f"    [gate] 在购买语境里（{ctxt}），但这一发点的是导航"
                       f"白名单里的 `{act.target_cls}`（不花钱） 放行")
         # 青辉石商店 tab 选中 = 站在花青辉石的位置上，只许退出
-        # 2026-08-12 修 latent bug：注释一直写「只许退出」，代码却拦掉
-        #    **所有**非 money 的 tap —— 而退出动作（返回键/叉叉/取消）和
-        #    `on_shop_pyroxene_tab` 里那句「切回信用点 tab」**全都是 tap**
-        #     真触发时 flow 会被自己的闸锁死在青辉石货架上，直到
-        #      `max_minutes_per_flow` 超时才脱身。
-        #    之所以一直没暴露：`青辉石商店_已选择` train=0/val=0、990 帧 0 检出，
-        #    这条判据恒 False，整段从没跑过（[[cls_ownership_audit]] 那族
-        #    「守卫悄悄死掉」）。 复用 `_NAV_SAFE`，让注释和代码一致。
-        if (money_rules.on_pyroxene_tab(obs) and act.is_tap and not act.money
-                and act.target_cls not in _NAV_SAFE):
-            return Verdict(False, "青辉石商店 tab 选中 — 只允许退出/切 tab 动作",
-                           halt=False)
-
         if not act.money:
             return Verdict(True)
 

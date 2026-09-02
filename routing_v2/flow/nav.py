@@ -57,7 +57,6 @@ _PARENT = {
     "craft": "lobby",
     "shop": "lobby",
     "arena_shop": "shop",
-    "shop_pyroxene_tab": "shop",
     "combo_pack": "shop",
     "mail": "lobby",
     "daily_mission": "lobby",
@@ -296,7 +295,7 @@ _EXITABLE = {
     "bounty_branch", "bounty_stage", "jfd_academy", "jfd_stage",
     "campaign_stage", "event_page", "event_quest_list", "event_ended", "event_shop",
     "facility",          # 没登记的设施页 —— 有退出控件，能安全走人
-    "combo_pack", "shop_pyroxene_tab", "confirm_dialog", "stage_popup",
+    "combo_pack", "confirm_dialog", "stage_popup",
     "sweep_dialog", "formation",
 }
 

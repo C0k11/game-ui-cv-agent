@@ -247,7 +247,3 @@ def system_dialog(obs: Observation, last_solid: Optional[str] = None,
         return None
     return "系统对话框（顶栏货币全无、也不在任何设施页上）—— 確認可能是**退出游戏**"
 
-
-def on_pyroxene_tab(obs: Observation) -> bool:
-    """站在青辉石商店 tab 上。不 halt（还能退出去），但只许发退出类动作。"""
-    return obs.has(V.SHOP_TAB_PYROXENE_SEL, 0.45)

@@ -203,6 +203,10 @@ DEFAULTS: Dict[str, Any] = {
         "stage": "",
         "stages": [],
         "skip_rounds": 0,
+        # 部署侧套預設(v20 新族 live 测试入口): {"team": 2, "tab": 1, "row": 2} = 出击前
+        #   把部队2 切出来, 开預設面板, 页签1 第2行 組成 -> 變更編輯 確認。None = 不动。
+        #   team=1 一律拒绝(用户推图队不许覆盖)。
+        "preset_apply": None,
     },
 
     #  邮件 / 每日任务 / 社团

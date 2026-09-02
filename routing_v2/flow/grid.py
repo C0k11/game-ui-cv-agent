@@ -10,7 +10,7 @@ BAAH 的答案(`data/baah_grid_solution/`, MIT)是方向序列(`fight_plan`), �
    - **单位不站自己格子的中心**: 立绘框心比格心**高 ~0.09**。朴素最近邻
      会把敌方绑到错误格子（实测第一个敌方离起点 0.048 < 离真格子 0.091,
      直接绑反）-> 归属判据是「**正下方**最近的格子」。
-   - `走格子_格子_可走`/`起点` 会叠在同一格上, 数格子必须按中心去重。
+   - `起点` 标记会叠在格子上, 数格子必须按中心去重。
 """
 from __future__ import annotations
 
@@ -25,11 +25,31 @@ from routing_v2.state import vocab as V
 #    原始件在 data/baah_grid_solution/ 只读不动）
 ANSWERS = Path("data/grid_answers")
 
-# 格子族: 所有"这里有一个六边形格子"的证据（可走/迷雾/起点都叠在格子位上）
-CELL_CLS = [V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_CELL_FOG,
-            V.GRID_START, V.GRID_START_GREY]
+# 格子族: 所有"这里有一个六边形格子"的证据（起点标记叠在格子位上）
+CELL_CLS = [V.GRID_CELL, V.GRID_START, V.GRID_START_GREY]
 # 无格框时只记补标, 不许拿 BOSS/道具/敌方当落点（用户 08-15 否掉硬搞）。
-LABEL_HINT = "走格子_格子 / 走格子_格子_可走（含 BOSS 格本体）"
+LABEL_HINT = "走格子_格子（含 BOSS 格本体）"
+
+# 部署菜单(解除/更換/變更位置)消退用的备选空处: 顶栏之下 / 底部 HUD 之上 / 左右边,
+#    按「离本帧全部检出框都 >= avoid」现选, 一个都不满足就 None(fail-closed 不瞎点)。
+_EMPTY_SPOTS = ((0.50, 0.14), (0.12, 0.50), (0.88, 0.50), (0.50, 0.93),
+                (0.30, 0.14), (0.70, 0.14))
+
+
+def empty_spot(obs: Observation, avoid: float = 0.08) -> Optional[Tuple[float, float]]:
+    for x, y in _EMPTY_SPOTS:
+        if all((b.cx - x) ** 2 + (b.cy - y) ** 2 >= avoid ** 2 for b in obs.boxes):
+            return (x, y)
+    return None
+
+
+def start_under_hover(obs: Observation, hover: Box, conf: float = 0.35) -> Optional[Box]:
+    """起点悬停▽(543)正下方最近的起点格(黄/灰)。▽在格子上方 ~0.05-0.10, 横向对齐。"""
+    cands = [b for b in obs.all([V.GRID_START, V.GRID_START_GREY], conf)
+             if b.cy > hover.cy and abs(b.cx - hover.cx) < 0.05]
+    if not cands:
+        return None
+    return min(cands, key=lambda b: b.cy - hover.cy)
 
 # BAAH 的 6 方向 -> (列步数的倍率, 行步数的倍率)。六边形没有 up/down。
 DIRS: Dict[str, Tuple[float, float]] = {

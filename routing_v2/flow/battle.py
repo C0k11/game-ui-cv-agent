@@ -187,8 +187,8 @@ class FormationMixin:
         if t is not None:
             return tap_box(t, f"切到部队{team}")
 
-        # 3 部队 / 4 部队没有高亮态 cls：只能靠"未选中态消失"反推，不可靠。
-        #  只要选中态确认不了，就**不出击**。
+        # 3/4 部队的高亮态 cls(544/545) v20 才有训练料(各 8 帧双皮), 上线前模型
+        #    检不出 -> 落到这里。规矩不变: 选中态确认不了就**不出击**。
         if st.frames_in_page >= self._FORM_GIVEUP_FRAMES:
             return self.finish(
                 "BLOCKED",

@@ -64,7 +64,6 @@ ARROW_RIGHT = "右切换"
 #  领取族
 CLAIM_ALL_YELLOW = "全部领取_黄"
 CLAIM_ALL_GREY = "全部领取_灰色"
-CLAIM_ONEKEY_GREY = "一键领取灰色"          # DEAD train=0
 CLAIM_ONCE_YELLOW = "一次领取黄色"
 CLAIM_ONCE_GREY = "一次领取灰色"
 CLAIM_YELLOW = "领取_黄"
@@ -157,30 +156,50 @@ SQUAD_2 = "2部队"
 SQUAD_2_HI = "2部队高亮"
 SQUAD_3 = "3部队"
 SQUAD_4 = "4部队"
+SQUAD_3_HI = "3部队高亮"          # 544 v20: 部署侧金字皮 + 编成页白字皮双皮各 8 帧
+SQUAD_4_HI = "4部队高亮"          # 545 同上
 SQUAD_QUICK_EDIT = "快速编辑"
 SQUAD_AUTO_EDIT = "自动编辑按钮"
+# 3/4 部队的高亮态 v20 才有训练料(544/545); v19 权重检不出时 formation_step 仍走
+#    "选中态确认不了就不出击"那条, 不会误出击。
 SQUAD_TABS = {1: (SQUAD_1, SQUAD_1_HI), 2: (SQUAD_2, SQUAD_2_HI),
-              3: (SQUAD_3, None), 4: (SQUAD_4, None)}
+              3: (SQUAD_3, SQUAD_3_HI), 4: (SQUAD_4, SQUAD_4_HI)}
 SKIP_BATTLE = "跳过战斗"
 SKIP_BATTLE_OFF = "跳过战斗未选"
 
+# 預設面板(v20 新族 531-541): 大厅 編輯->編成 右栏「預設」/ 部署侧编队面板右栏同位。
+#    面板 = 预设标题 锚 + 页签 1..4/最近(两态, 身份靠 cx 顺位) + 每行 讀取/編輯/複製/組成
+#    四钮(空预设行 複製/組成 灰)。套预设 = 点 組成 -> 弹「變更編輯」确认框 -> 確認 才写入
+#    当前部队(08-30 实测, 当时已取消未生效); 讀取 的语义还没单独验过, flow 只走 組成。
+#    任何一钮都不许在没有确认框语义保护的情况下自动点: 只有 flow/preset.py 的子链
+#    (state['preset_confirm'] 置位)才许在 變更編輯 框上点確認, 见 base.on_preset_change_dialog。
+PRESET_ENTRY = "预设入口"
+PRESET_TITLE = "预设标题"
+PRESET_TAB = "预设页签"
+PRESET_TAB_SEL = "预设页签_已选中"
+PRESET_LOAD = "预设_读取"
+PRESET_EDIT = "预设_编辑"
+PRESET_COPY = "预设_复制"
+PRESET_COPY_GREY = "预设_复制_灰色"
+PRESET_APPLY = "预设_组成"
+PRESET_APPLY_GREY = "预设_组成_灰色"
+PRESET_CHANGE_TITLE = "变更编辑标题"
+PRESET_PANEL_ANY = [PRESET_TAB, PRESET_TAB_SEL, PRESET_LOAD, PRESET_EDIT,
+                    PRESET_COPY, PRESET_COPY_GREY, PRESET_APPLY, PRESET_APPLY_GREY]
+
 # -- 走格子（集中指挥, v16 新增族; 2026-08-13 小号实测 conf 0.85-0.98）--
 GRID_CELL = "走格子_格子"
-# 498/499 训练料已改成 497, master 标 _废弃*。常量留给 v17 权重名和
-# offline 夹具; 走子按答案只点格子本体。
-GRID_CELL_FOG = "走格子_格子_迷雾"
-GRID_CELL_OPEN = "走格子_格子_可走"
 GRID_START = "走格子_起点_黄"
 GRID_START_GREY = "走格子_起点_灰"
 GRID_ARROW = "走格子_队伍箭头"
-# 502/510/507 已在 _classes.txt 标 _废弃*; detect 出口丢弃。常量留给
-# offline below() 夹具, 不是走子依据。走子只认格子本体族。
-GRID_BOSS = "走格子_BOSS标记"
-GRID_ITEM = "走格子_道具"
-# 2026-08-24 废案: 池子里约 40% 框的是敌方/BOSS, 我方定位改用 GRID_ARROW。
-#    常量留着不删(照 502/510/507 的先例), detect 出口已经不吐这个类了。
-GRID_ALLY = "走格子_我方"
-GRID_ENEMY = "走格子_敌方"
+# 部署阶段(v20 新增 543/542):
+#    起点悬停▽ 只挂在**还没上队**的起点格上方, 部署完即消失 -> 部署进度 = 数它的消长,
+#    也是「该点哪个起点」的选择依据(点它正下方那格, 别再点已上队的起点)。
+#    部署菜单_解除 = 误点已部署单位弹出的三键菜单里的「解除」: **危险锚**, 检出即表示
+#    菜单开着, 处置 = 点菜单外空处让它消退, 绝不点它(点了把队伍撤下来);
+#    gate._NEVER_TAP 兜底拦一切指向它的 tap。
+GRID_START_HOVER = "走格子_起点悬停"
+GRID_UNIT_UNDEPLOY = "部署菜单_解除"
 PHASE_END = "PHASE结束"
 PHASE_AUTO_ON = "PHASE自动结束_已勾选"
 PHASE_AUTO_OFF = "PHASE自动结束_未勾选"
@@ -224,7 +243,6 @@ QTY_MINUS_GREY = "减号灰色"
 #  商店
 SHOP_SELECT_ALL = "全部选择"
 SHOP_SELECT_ALL_GREY = "全部选择灰"
-SHOP_ALL_SELECTED = "已全部选择"
 SHOP_BUY = "购买"
 SHOP_BUY_GREY = "购买灰色"           # v15 起可用（train=212）
 SHOP_BUY_SELECTED = "选择购买"
@@ -249,8 +267,6 @@ SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"
 #    990 帧 0 检出, 那段防守从没跑过。常量留着不删(照 509/502/510/507 的先例),
 #    detect 出口已经不吐这个类了。
 #    别连坐: SHOP_BUY_PYROXENE(购买青辉石) 是**免费包入口**, 日常第一枪要用, 留着。
-SHOP_TAB_PYROXENE = "青辉石商店"
-SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"
 ARENA_SHOP_TAB = "战术大赛商店"
 ARENA_SHOP_TAB_SEL = "战术大赛商店已选择"
 ARENA_SHOP_CURRENCY = "战术大赛商店货币"
@@ -281,21 +297,24 @@ EVENT_AFTERSTORY = "後日談"           # 上期活动的特征物
 EVENT_MULTIPLIER = "双倍或三倍活动进行中"
 SPECIAL_DEFENSE = "据点防御"
 SPECIAL_CREDIT = "信用货币回收"
-# 这两个本该用来判"这关打过没"，但 **train=0 / val=0**，一框都没有。
-#     关卡完成度只能靠 关卡得星_0 / _3 间接判. 529/530 禁止引用 (见 STAR_*).
-EVENT_STAGE_STORY_SEEN = "活动剧情关卡_已看"     # DEAD
-EVENT_STAGE_BATTLE_DONE = "活动站斗关卡_已打"    # DEAD
+EVENT_STAGE_STORY_SEEN = "活动剧情关卡_已看"
+EVENT_STAGE_BATTLE_DONE = "活动站斗关卡_已打"
+# 关卡完成度只能靠 关卡得星_0 / _3 间接判. 529/530 禁止引用 (见 STAR_*).
 
 #  剧情 / 挖矿
 STORY_MAIN = "主线剧情"
 STORY_SHORT = "短篇剧情"
 STORY_SIDE = "支线剧情"
 STORY_ENTER_CHAPTER = "进入章节"
-STORY_SKIP = "跳过故事键"
-STORY_SKIP_DISABLED = "跳过故事键不可用"
+# 141 的真身是「双箭头 >>」这个**图形**, 不只是剧情跳过: 09-02 逐类看图, 574 框里
+#    410 框是战斗内右上的 >>(暂停键旁 cy~0.065)/结算 SKIP>>, 真剧情 MENU 下拉里的
+#    >>(cy~0.166) 只有 164 框; 432 灰态 209 框全部是战斗内。用户拍板: 不拆类, 起统称,
+#    **语境由 flow 判**: pages story_cutscene 对它限区域 y>=0.10 + forbid 战斗暂停。
+STORY_SKIP = "双箭头跳过键"
+STORY_SKIP_DISABLED = "双箭头跳过键_不可用"
 STORY_TAP_CONTINUE = "点击继续字样"
 STORY_MENU = "剧情menu"              # 用这个（train=335）
-STORY_MENU_DEAD = "故事菜单键"        # DEAD train=0，别用
+STORY_MENU_DEAD = "故事菜单键"
 STORY_NODE_DONE = "剧情图标已完成"
 STORY_NODE_UNDONE = "剧情图标未完成"
 STORY_QUIT = "剧情中断退出"
@@ -305,7 +324,6 @@ NODE_DONE = "完成"
 NODE_DONE_GREY = "完成_灰色"
 SCENE_DONE = "战斗图标已完成"
 BOND_LEVELUP = "羁绊升级"
-REGION_LEVELUP = "地区升级"
 
 #  MomoTalk
 MOMO_TAB = "momotalk学生聊天区域按钮"
@@ -334,10 +352,6 @@ STORY_ESCAPE_CHAIN = [STORY_MENU, STORY_SKIP]
 # 处理（require() 会放行但打日志），不是"没登记就是死类"。
 HEALTH: Dict[str, Tuple[int, int]] = {
     BATTLE_LOSE: (6, 28),
-    EVENT_STAGE_STORY_SEEN: (0, 0),
-    EVENT_STAGE_BATTLE_DONE: (0, 0),
-    STORY_MENU_DEAD: (0, 0),
-    CLAIM_ONEKEY_GREY: (0, 0),
     BATTLE_WIN: (32, 20),
     BATTLE_COMPLETE: (121, 1),
     EVENT_AFTERSTORY: (33, 753),

@@ -32,6 +32,11 @@ CONF = 0.45          # 页面签名的统一门槛。金钱相关判据自己再
 TOPBAR: Rect = (0.0, 0.0, 1.0, 0.12)
 BODY: Rect = (0.0, 0.12, 1.0, 1.0)          # 弹窗体（顶栏以下）
 TOP_RIGHT: Rect = (0.78, 0.0, 1.0, 0.30)
+# 剧情跳过键(双箭头 >>)的**专属**区域: 真剧情的 >> 在 MENU 下拉里 cy~0.166, 而同一个
+#    图形在战斗内 HUD(暂停键旁 cy~0.065)/结算 SKIP>>(cy~0.04) 也出现, 且训练框七成是
+#    后者(09-02 逐类看图)。y 下界 0.10 把两者分开; MENU 本身仍用 TOP_RIGHT。
+#    interrupt.py 的逃生链复用这同一个常量, 别各写一份。
+TOP_RIGHT_STORY_SKIP: Rect = (0.78, 0.10, 1.0, 0.30)
 BOTTOM: Rect = (0.0, 0.80, 1.0, 1.0)
 RIGHT_PANEL: Rect = (0.55, 0.10, 1.0, 0.92)
 
@@ -85,17 +90,19 @@ INTERRUPTS: List[Sig] = [
         #    三个老成员一个都匹配不上  页面不判成 story_cutscene  逃生链根本
         #    不会被调用  卡死在那个框上。它属于过场链的一环，必须认进来。
         any_of=[V.STORY_MENU, V.STORY_SKIP, V.STORY_TAP_CONTINUE, V.STORY_QUIT],
-        where={V.STORY_MENU: TOP_RIGHT, V.STORY_SKIP: TOP_RIGHT},
+        where={V.STORY_MENU: TOP_RIGHT, V.STORY_SKIP: TOP_RIGHT_STORY_SKIP},
         # `点击继续字样` 在**奖励页**上也有（领完东西那一屏）——
         #    2026-08-08 实测咖啡厅收益结算被误判成剧情过场。动作碰巧同样是
         #    "点掉"所以无害，但判据该收紧：屏上在**给**你东西就不是过场。
-        forbid=[V.GOT_REWARD, V.BATTLE_WIN, V.BATTLE_COMPLETE],
+        # 战斗内 HUD 的 >> 与剧情跳过键同类(141 统称): 暂停键在场 = 在打仗不是过场
+        #    (剧情过场上从来没有暂停键); 结算帧靠 战斗完成/胜利 挡。
+        forbid=[V.GOT_REWARD, V.BATTLE_WIN, V.BATTLE_COMPLETE, V.BATTLE_PAUSE],
         priority=90, interrupt=True,
         note="剧情过场**不吃 KEYCODE_BACK**（08-07 连按5次实测无响应）。"
              "整个活动被开场剧情挡死过一次。唯一出路：menu跳过确认。"),
 
     Sig("levelup",
-        any_of=[V.BOND_LEVELUP, V.REGION_LEVELUP],
+        any_of=[V.BOND_LEVELUP],
         priority=85, interrupt=True,
         note="全屏升级过场，点任意处消掉"),
 
@@ -103,6 +110,9 @@ INTERRUPTS: List[Sig] = [
     Sig("quit_dialog",
         need=[V.CONFIRM, V.CANCEL],
         forbid=[V.AP, V.CREDIT, V.PYROXENE, V.BACK, V.HOME,
+                # 預設面板的「變更編輯」框(v20): 弹窗帧顶栏压暗常检不出货币,
+                #    标题 cls 是它属于游戏内的正向证据, 别当退出框点了取消。
+                V.PRESET_CHANGE_TITLE,
                 # 剧情「跳過」确认框也是 確認+取消、没顶栏没返回键  完全
                 #    命中本签名，而它 priority 95 > story_cutscene 90 且 instant
                 #     稳赢  逃生链最后一步被点成"取消"，回到 08-07
@@ -238,6 +248,14 @@ PAGES: List[Sig] = [
     Sig("squad_quick_edit", need=[V.SQUAD_AUTO_EDIT], priority=70,
         note="编队-快速編輯面板：自動填充 + 確認。绝不能被当成结算/通知框"),
 
+    # 預設侧面板(v20): 编成页 / 部署侧编队面板右栏「預設」点开。它盖住右栏, 底下的
+    #    出击/部队页签可能仍检得出 -> 必须比 formation(65)/squad_quick_edit(70) 更具体,
+    #    否则 flow 会在面板开着时去点出击。锚 = 预设标题(面板专属)。
+    Sig("preset_panel", need=[V.PRESET_TITLE], any_of=V.PRESET_PANEL_ANY,
+        priority=72,
+        note="預設侧面板: 页签 1..4/最近 + 每行 讀取/編輯/複製/組成。"
+             "只有 flow/preset.py 的子链才许点行内钮; 别的 flow 撞上就叉掉"),
+
     Sig("formation", need=[V.SORTIE],
         priority=65,
         note="编队页。老状态机不认它  落到 STRAY  差点去点返回键。"
@@ -249,8 +267,7 @@ PAGES: List[Sig] = [
     #    priority 要压过 stage_popup(55): 部署完、`任务开始` 变亮的那几帧
     #    两个签名同时满足, 这时人在地图上不在弹窗上。
     Sig("grid_quest", pred=lambda obs: (
-            len(obs.all([V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_CELL_FOG],
-                        0.45)) >= 3
+            len(obs.all(V.GRID_CELL, 0.45)) >= 3
             and obs.has([V.GRID_START, V.GRID_START_GREY, V.GRID_ARROW,
                          V.TASK_START_GREY], 0.45)),
         priority=58,
@@ -349,12 +366,10 @@ PAGES: List[Sig] = [
         where={V.CURRENCY_SEL: (0.0, 0.10, 0.24, 0.98),
                V.CURRENCY: (0.0, 0.10, 0.24, 0.98),
                V.SHOP_BUY: (0.40, 0.15, 1.0, 0.98)},
-        forbid=[V.SHOP_TAB_CREDIT_SEL, V.SHOP_TAB_PYROXENE_SEL,
+        forbid=[V.SHOP_TAB_CREDIT_SEL,
                 V.ARENA_SHOP_TAB_SEL, V.SHOP_SELECT_ALL, V.SHOP_SELECT_ALL_GREY],
         priority=47, note="活动商店（左栏币种 tab 或货架购买键；见 forbid 排他）"),
 
-    Sig("shop_pyroxene_tab", need=[V.SHOP_TAB_PYROXENE_SEL], priority=52,
-        note="进了青辉石 tab = 正在花青辉石的位置。立刻退出去"),
     # 别只靠 `战术大赛商店已选择` 认这一页（08-11 live 实测：tab **明明已高亮**，
     #    该 cls conf 只有 **0.116**，而同一个 tab 的未选中态 `战术大赛商店` 反而 0.81
     #    —— 这个族的**选中态几乎没训过**）。结果是页面判不成 arena_shop、
@@ -381,12 +396,11 @@ PAGES: List[Sig] = [
         #      页面掉成 unknown、flow 0 tap 空转 36 秒。
         #      **别拿一个自己也欠拟合的 cls 当准入证据。**
         where={V.ARENA_SHOP_CURRENCY: (0.40, 0.02, 1.0, 0.98)},
-        forbid=[V.SHOP_TAB_PYROXENE_SEL],
         priority=46, note="战术大赛商店：**货架区**出现大赛币价签才算数。"
              "tab 选中态 `战术大赛商店已选择` 不可信 —— 它认的是"
              "「左栏选中的那一行」，大決戰被选中时也给 0.95"),
     Sig("shop",
-        any_of=[V.SHOP_SELECT_ALL, V.SHOP_SELECT_ALL_GREY, V.SHOP_ALL_SELECTED,
+        any_of=[V.SHOP_SELECT_ALL, V.SHOP_SELECT_ALL_GREY,
                 V.SHOP_TAB_CREDIT_SEL, V.SHOP_BUY_SELECTED],
         forbid=[V.COMBO_PACK, V.COMBO_PACK_SEL],
         priority=30, note="商店货架"),
@@ -402,7 +416,8 @@ PAGES: List[Sig] = [
     Sig("daily_mission",
         any_of=[V.CLAIM_ALL_YELLOW, V.CLAIM_ALL_GREY],
         forbid=[V.CRAFT_QUICK, V.CLAIM_ONCE_YELLOW], priority=28,
-        note="每日任务。一键领取灰色 train=0，不能拿它判'已领完'"),
+        note="每日任务。灰态判据只认 全部领取_灰色(413); 415 一键领取灰色 是同一控件的"
+             "旧名, 全库 0 框, 废案"),
 
     Sig("club", need=[V.CLUB], priority=30, note="社团"),
 
@@ -440,6 +455,13 @@ PAGES: List[Sig] = [
     #    **页面**去竞争，于是页面身份在 mail <-> ack_dialog 之间来回抖了几十次，
     #    flow 每次都拿到"刚换页"的状态、闸每次都放行  同一个領取键点了 65 下。
     #    真相是：底页一直是 mail，確認框只是盖在上面。分开跟踪，抖动立刻消失。
+    # 「變更編輯」确认框(v20): 預設面板点 組成/讀取 后弹, 確認 = 把预设阵容写进当前
+    #    部队(覆盖!)。要压过 confirm_dialog(15): 通用双键框的默认动作是点確認, 在这个
+    #    框上等于随手改掉用户的编队。
+    Sig("preset_change_dialog", need=[V.PRESET_CHANGE_TITLE, V.CONFIRM],
+        priority=16, overlay=True,
+        note="預設 變更編輯 确认框: 只有预设子链自己请求的才許確認, 否则取消"),
+
     Sig("confirm_dialog", need=[V.CONFIRM, V.CANCEL], priority=15, overlay=True,
         note="双键决策框 —— 有取消键 = 这是个**决策**，按各 flow 的意图处理"),
 

@@ -35,8 +35,11 @@ from typing import Optional
 from routing_v2.act.action import Action, halt, tap_box, wait
 from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
+from routing_v2.state.pages import TOP_RIGHT_STORY_SKIP as _TOP_RIGHT_SKIP
 
-# 剧情逃生的三段链在 UI 上的位置约束（都实测过）
+# 剧情逃生的三段链在 UI 上的位置约束（都实测过）。跳过键(双箭头 >>)另限 y>=0.10:
+#    同一图形在战斗 HUD 里挂在 cy~0.065, 真剧情 MENU 下拉里的在 cy~0.166
+#    (常量与 pages.story_cutscene 同源, 单一定义)。
 _TOP_RIGHT = (0.78, 0.0, 1.0, 0.30)
 _MID = (0.28, 0.52, 0.88, 0.88)
 
@@ -159,7 +162,7 @@ class Interrupts:
             return tap_box(cf, "剧情逃生: 确认略過")
         if time.time() - self._story_ts < 3.0:
             return wait("剧情逃生: 等略過确认框弹出")
-        skip = obs.find(V.STORY_SKIP, 0.40, region=_TOP_RIGHT)
+        skip = obs.find(V.STORY_SKIP, 0.40, region=_TOP_RIGHT_SKIP)
         if skip is not None:
             self._story_ts = time.time()
             return tap_box(skip, "剧情逃生: 跳过故事键")
@@ -185,7 +188,7 @@ class Interrupts:
            早就是 wait 收尾，这里是唯一的例外，补齐。
            代价上限 = 多等 confirm_frames 帧（过场真没了打断自然解除）。
         """
-        b = obs.find([V.BOND_LEVELUP, V.REGION_LEVELUP], 0.45)
+        b = obs.find(V.BOND_LEVELUP, 0.45)
         if b is not None:
             return tap_box(b, "升级过场: 点掉")
         return wait("升级过场还锁着，但这一帧没检出可点的横幅 — 等，不交回 flow 乱点")

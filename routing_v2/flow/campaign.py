@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import re
 
-from routing_v2.act.action import Action, tap_box, wait
+from routing_v2.act.action import Action, tap_at, tap_box, wait
 from routing_v2.flow import grid, nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome
+from routing_v2.flow.preset import PresetMixin
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
@@ -80,7 +81,7 @@ def resolve_queue(cfg):
     return queue, []
 
 
-class CampaignFlow(ExitMixin, Flow):
+class CampaignFlow(PresetMixin, ExitMixin, Flow):
     name = "campaign"
     module = "campaign"
     entry_page = "task_hall"
@@ -798,7 +799,7 @@ class CampaignFlow(ExitMixin, Flow):
         #    断崖式掉到 0.77x1, `grid_quest` pred 不成立, page 落在 facility）。
         #    **屏上有任何格子 = 已经在地图上**, 低阈直判。
         if (st.page == "grid_quest"
-                or obs.has([V.GRID_CELL, V.GRID_CELL_OPEN, V.GRID_START],
+                or obs.has([V.GRID_CELL, V.GRID_START],
                            0.35)):
             self.goto("grid", "进地图了（格子在屏上）")
             return wait("进相位 grid")
@@ -817,7 +818,7 @@ class CampaignFlow(ExitMixin, Flow):
         if start is not None:
             # 进关花 AP（非 premium）; 走格子地图的格子就是到达证据
             return tap_box(start, "任務開始（进关花 AP）",
-                           expect=(V.GRID_CELL, V.GRID_CELL_OPEN))
+                           expect=(V.GRID_CELL,))
         # 灰的 任務開始 有两个语义: 弹窗上灰 = AP 不够; **部署屏上灰 = 还没
         #    上队**（2026-08-13 live 误报实录: 人已经在地图上, 报了"AP不够"）。
         #    只有弹窗页签还在场时才许下 AP 结论。
@@ -842,8 +843,24 @@ class CampaignFlow(ExitMixin, Flow):
                                 0.35)):
             x = obs.find(V.CLOSE_X, 0.55)
             return tap_box(x, "部署屏被弹窗盖住(有叉叉无部署控件) -- 叉掉")
-        # 点了起点会弹编队页(出击键) -- 相位机下页面 handler 不跑, 在这处理
-        if st.page == "formation" or obs.has(V.SORTIE, 0.45):
+        # 误点已部署单位会弹三键菜单(解除/更換/變更位置, 6-1 手驾实证)。542 解除是
+        #    **危险锚**: 检出 = 菜单开着; 处置 = 点菜单外空处让它消退, 绝不点它
+        #    (点了把队伍撤下来; gate._NEVER_TAP 再兜一层)。
+        if obs.has(V.GRID_UNIT_UNDEPLOY, 0.40):
+            spot = grid.empty_spot(obs)
+            if spot is None:
+                return wait("部署菜单(解除在场)弹着, 找不到离所有检出框都够远的空处 -- 不动")
+            return tap_at(spot[0], spot[1],
+                          "部署菜单弹出(解除在场) -- 点空处消退, 绝不点解除",
+                          justify="菜单外任意空处都能消退菜单(08-31 手驾实证); 落点是"
+                                  "离本帧全部检出框 >=0.08 的备选点, 按检出现选, 不是版面常量")
+        # 点了起点会弹编队页(出击键) -- 相位机下页面 handler 不跑, 在这处理。
+        #    預設面板/變更編輯框盖在编队面板上时也走这里(套预设子链, 配置门控)。
+        if (st.page in ("formation", "preset_panel") or obs.has(V.SORTIE, 0.45)
+                or obs.has(V.PRESET_TITLE, 0.40)):
+            pre = self._preset_before_sortie(obs)
+            if pre is not None:
+                return pre
             s = obs.find(V.SORTIE, 0.45)
             if s is not None:
                 return tap_box(s, "编队确认: 出击（队伍上到起点格）",
@@ -876,8 +893,17 @@ class CampaignFlow(ExitMixin, Flow):
             # 还没上队: 点起点格（黄 = 可部署）。起点降到 0.35 -- 2 章地图
             #    整族 conf 断崖（见下面那条 UNKNOWN 的理由）。
             sp = obs.find(V.GRID_START, 0.35)
-            box = self.state.get("start_box") or (
-                sp and (sp.cx, sp.y1, sp.y2))
+            # 起点悬停▽(543) 只挂在还没上队的起点上方: 有它就点它正下方那格, 别再点
+            #    已上队的起点(多起点图 6-1 实证); 它的数量 = 还差几队没上。
+            hovers = obs.all(V.GRID_START_HOVER, 0.35)
+            under = grid.start_under_hover(obs, hovers[0]) if hovers else None
+            if under is not None:
+                sp = under
+            if hovers and self.state.get("hover_n") != len(hovers):
+                self.state["hover_n"] = len(hovers)
+                self.log(f"部署进度: 还有 {len(hovers)} 个起点未上队(悬停▽)")
+            box = ((sp.cx, sp.y1, sp.y2) if under is not None
+                   else self.state.get("start_box") or (sp and (sp.cx, sp.y1, sp.y2)))
             if box is not None:
                 # 落点取**框的上三分之一** -- 2-5 实帧: 起点框重心偏下
                 #    (cy=0.483 而 START 六边形贴图在 y 0.30-0.42), 按框心点
@@ -901,6 +927,44 @@ class CampaignFlow(ExitMixin, Flow):
                     "已采帧待标注, 不瞎点")
             return wait("找起点格（这章地图检出弱, 多看几帧）")
         return wait("等部署界面")
+
+    # 部署侧编队面板: 按配置先给指定部队套預設, 再出击(v20 新族的 live 测试入口)。
+    #    cfg campaign.preset_apply = {"team": 2, "tab": 1, "row": 2} 或 None(默认不动)。
+    #    部队1 是用户的推图队, team=1 直接拒绝 -- 套预设会覆盖阵容且不可逆。
+    def _preset_before_sortie(self, obs):
+        plan = self.cfg.get("preset_apply") or None
+        if not isinstance(plan, dict):
+            return None
+        if self.state.get("preset_applied") and not self.state.get("preset_want"):
+            return None                        # 本局已套过
+        try:
+            team = int(plan.get("team", 0))
+            tab = int(plan.get("tab", 0))
+            row = int(plan.get("row", 0))
+        except (TypeError, ValueError):
+            return self.finish(Outcome.BLOCKED, f"preset_apply 配置不合法: {plan!r}")
+        if team not in V.SQUAD_TABS or not 1 <= tab <= 4 or not 1 <= row <= 4:
+            return self.finish(Outcome.BLOCKED,
+                               f"preset_apply 配置越界: {plan!r} (team 2-4, tab/row 1-4)")
+        if team == 1:
+            return self.finish(Outcome.BLOCKED, "preset_apply 指向部队1(用户推图队) -- 拒绝覆盖")
+        if not self.state.get("preset_want"):
+            # 先把目标部队页签切成高亮再开面板 -- 套到别的队上就是事故
+            tab_cls, hi_cls = V.SQUAD_TABS[team]
+            if not obs.has(hi_cls, 0.45):
+                t = obs.find(tab_cls, 0.45)
+                if t is not None:
+                    return tap_box(t, f"套預設前切到部队{team}", expect=(hi_cls,))
+                return wait(f"套預設前等部队{team}页签")
+            self.preset_start(tab, row)
+            self.log(f"部队{team} 已选中, 开始套預設(页签{tab} 第{row}行)")
+        act = self.preset_step(obs)
+        if act is not None:
+            return act
+        if self.state.get("preset_applied"):
+            self.log(f"預設已套用到部队{team}, 出击")
+            return None
+        return wait("套預設中")
 
     # walk: 按答案 rounds 逐回合走
     def do_walk(self, obs, st):
@@ -1125,12 +1189,6 @@ class CampaignFlow(ExitMixin, Flow):
             return wait(f"方向 {d} 暂时解析不到格子, 再看几帧")
         cell_box = min(obs.all(grid.CELL_CLS, 0.35),
                        key=lambda b: (b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2)
-        # 黄描边(可走)只做**标注不做门**: 缺标记多半是漏检（2 章断崖）, 硬门
-        #    会把能走的关拦死; 但"目标格没有黄描边=真够不着=点了没反馈"是已知
-        #    最难判的失败形态, 把这个事实写进 reason, 重发耗尽时人一眼能定位
-        opens = obs.all(V.GRID_CELL_OPEN, 0.30)
-        marked = any((b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2
-                     < (0.4 * dx) ** 2 for b in opens)
         # 位移证据的基线: 落子时刻 单位相对起点地标 的向量（相机不变量）。
         #    航位推算路线下立绘可能没检出 -- 那就这轮不启用位移证据(None)
         self.state["dx_est"] = dx
@@ -1145,21 +1203,19 @@ class CampaignFlow(ExitMixin, Flow):
         act = tap_box(cell_box,
                       f"回合 {self.state['round_i'] + 1}: "
                       f"{'踩传送门' if d_do == 'portal' else '走'} {d} -> "
-                      f"({goal[0]:.3f},{goal[1]:.3f})"
-                      + ("" if marked else "（无可走标记, 若不走动多半是够不着）"),
+                      f"({goal[0]:.3f},{goal[1]:.3f})",
                       post=_issued)
-        # 落点校正: 可走/起点**标记**贴图重心偏下, 拿它的框心点会压到两行
+        # 落点校正: 起点**标记**贴图重心偏下, 拿它的框心点会压到两行
         #    格子的缝上(H2-2 r2 实锤: 目标格本体被敌人立绘挡住没检出, 4 发
         #    全点在格界上游戏不收)。格子本体框在场就吸附它的框心;
         #    只有标记撑着时往上收 1/4 框高(起点框上 1/3 修正的同族病)。
-        body = [b for b in obs.all([V.GRID_CELL, V.GRID_CELL_FOG], 0.35)
+        body = [b for b in obs.all(V.GRID_CELL, 0.35)
                 if (b.cx - goal[0]) ** 2 + (b.cy - goal[1]) ** 2
                 < (0.4 * dx) ** 2]
         if body:
             b0 = max(body, key=lambda b: b.conf)
             act.x, act.y = b0.cx, b0.cy
-        elif cell_box.cls in (V.GRID_CELL_OPEN, V.GRID_START,
-                              V.GRID_START_GREY):
+        elif cell_box.cls in (V.GRID_START, V.GRID_START_GREY):
             act.y = cell_box.cy - 0.25 * (cell_box.y2 - cell_box.y1)
         return act
 

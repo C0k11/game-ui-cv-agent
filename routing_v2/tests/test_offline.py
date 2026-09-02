@@ -1456,10 +1456,11 @@ def t_vocab():
     check("DEAD/WEAK 分级和 HEALTH 表自洽",
           DEAD == {c for c, (t, _) in HEALTH.items() if t == 0}
           and WEAK == {c for c, (t, _) in HEALTH.items() if 0 < t < 100})
-    _dead = next(iter(DEAD), None)
-    check("表里确实还有死类（没有的话这道闸就没意义了）", _dead is not None,
-          f"死类 {len(DEAD)} 个")
-    if _dead is not None:
+    # 2026-09-02 起词表里不再留死类(废案常量全删), 这道闸用合成死类验机制。
+    check("词表里没有死类残留", not DEAD, f"死类 {sorted(DEAD)}")
+    _dead = "__synthetic_dead__"
+    DEAD.add(_dead)
+    try:
         try:
             require(_dead)
             ok = False
@@ -1468,6 +1469,8 @@ def t_vocab():
         check("拿死类当唯一信号  import 期就抛", ok, _dead)
         require(_dead, sole_signal=False)           # 当'或'成员：放行+警告
         check("死类当'或'成员  放行", True)
+    finally:
+        DEAD.discard(_dead)
 
 
 def t_route():
@@ -1749,17 +1752,17 @@ def t_route():
     # 走格子几何层（fixture = walk_20260813_083604 帧119 的真实检出, 人工核对过）
     from routing_v2.flow import grid as _grid
     _gb = [B(V.GRID_START, conf=0.96, cx=0.385, cy=0.482),
-           B(V.GRID_CELL_OPEN, conf=0.96, cx=0.385, cy=0.488),   # 叠在起点上
+           B(V.GRID_CELL, conf=0.96, cx=0.385, cy=0.488),   # 格子本体叠在起点标记下
            B(V.GRID_CELL, conf=0.95, cx=0.429, cy=0.603),
            B(V.GRID_CELL, conf=0.96, cx=0.525, cy=0.602),
            B(V.GRID_CELL, conf=0.94, cx=0.616, cy=0.603),
            B(V.GRID_CELL, conf=0.96, cx=0.477, cy=0.722),
-           B(V.GRID_ENEMY, conf=0.95, cx=0.424, cy=0.512),
-           B(V.GRID_ENEMY, conf=0.92, cx=0.469, cy=0.627),
-           B(V.GRID_BOSS, conf=0.85, cx=0.599, cy=0.522)]
+           B("敌方立绘", conf=0.95, cx=0.424, cy=0.512),   # 非词表噪声, below() 不看 cls
+           B("敌方立绘", conf=0.92, cx=0.469, cy=0.627),
+           B("BOSS立绘", conf=0.85, cx=0.599, cy=0.522)]
     _go = Observation(boxes=_gb, seq=1, w=3840, h=2160)
     _cs = _grid.cells(_go)
-    check("可走/起点叠在同一格上要去重（5 个格心不是 6 个）", len(_cs) == 5,
+    check("起点标记叠在格子上要去重（5 个格心不是 6 个）", len(_cs) == 5,
           str(len(_cs)))
     _st = _grid.steps(_cs)
     check("步长从检出现量（dx~0.096 dy~0.12）",
@@ -1768,7 +1771,7 @@ def t_route():
     _dx, _dy = _st
     # 单位不站格心: 立绘框心比格心高 ~0.09, 朴素最近邻会把敌方绑到起点(0.048)
     #   而不是真格子(0.091) -- 归属必须「正下方最近」
-    _e1 = next(b for b in _gb if b.cls == V.GRID_ENEMY and b.cy < 0.55)
+    _e1 = next(b for b in _gb if b.cls == "敌方立绘" and b.cy < 0.55)
     _c1 = _grid.below(_e1, _cs, _dx)
     check("敌方绑到正下方的格子, 不是欧氏最近的起点",
           _c1 is not None and abs(_c1[0] - 0.429) < 0.01
@@ -3610,17 +3613,6 @@ def t_shelf_walk():
     check("大厅入口点底栏商店不是购买青辉石",
           a_ent is not None and a_ent.target_cls == V.NAV_SHOP
           and a_ent.y > 0.88, str(a_ent))
-    # 2026-08-24 起 56/61 已是废案, detect 出口不吐 -> 这条路线现实中永不触发。
-    #    用例留着当**安全网的回归**: 哪天有人把类翻回来, 逻辑还得是"切回信用点"
-    #    而不是点购买或退出。
-    pyx = O(B(V.SHOP_TAB_PYROXENE_SEL, cx=0.05, cy=0.30, w=0.06, h=0.04),
-            B(V.SHOP_BUY, cx=0.70, cy=0.50))
-    a_tab = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None)).on_shop_pyroxene_tab(
-        pyx, Machine(1).update(pyx))
-    check("青辉石 tab 切回信用点, 不点购买/不退出",
-          a_tab is not None and a_tab.kind == "tap"
-          and a_tab.target_cls != V.SHOP_BUY
-          and a_tab.y < 0.30, str(a_tab))
     grey_buy = O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.19),
                  B(V.GREEN_CHECK, cx=0.88, cy=0.20),
                  B(V.SHOP_BUY_SELECTED_GREY, cx=0.91, cy=0.92),
@@ -4371,6 +4363,137 @@ def t_prod_three_0820():
           "tab_tries" in ALL["event"](ctx).state)
 
 
+def t_v20_wiring():
+    """v20 新族接线(09-02): 141/432 统称 + 剧情逃生守卫, 預設面板/確认框签名,
+    3/4 部队高亮, 542 危险锚, 543 悬停选起点, 預設子链(配置门控)。"""
+    print("\n v20 接线 ")
+    from routing_v2.act.gate import Gate
+    from routing_v2.act.action import tap_box as _tb
+    from routing_v2.flow.base import Ctx
+    # 1 双箭头 >> 在战斗 HUD(暂停键旁)不触发剧情逃生; MENU 下拉里的才是
+    battle = O(B(V.BATTLE_PAUSE, cx=0.93, cy=0.065), B(V.STORY_SKIP, cx=0.965, cy=0.065),
+               B(V.BATTLE_3X, cx=0.9, cy=0.9))
+    m = classify(battle)
+    check("战斗内 >>(cy 0.065)+暂停键 不判 story_cutscene",
+          m.interrupt is None and m.page == "battle", repr(m))
+    story = O(B(V.STORY_MENU, cx=0.941, cy=0.055), B(V.STORY_SKIP, cx=0.946, cy=0.166))
+    check("剧情 MENU 下拉 >>(cy 0.166) 判 story_cutscene",
+          classify(story).interrupt == "story_cutscene", repr(classify(story)))
+    only_hi = O(B(V.STORY_SKIP, cx=0.965, cy=0.065))
+    check("孤零零一个 cy 0.065 的 >> 不当剧情过场",
+          classify(only_hi).interrupt is None, repr(classify(only_hi)))
+    check("类名统称落到 vocab",
+          V.STORY_SKIP == "双箭头跳过键" and V.STORY_SKIP_DISABLED == "双箭头跳过键_不可用")
+    # 2 預設面板 / 變更編輯框 签名
+    panel = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
+              B(V.PRESET_TAB, cx=0.2197, cy=0.226), B(V.PRESET_APPLY, cx=0.8965, cy=0.40),
+              B(V.SORTIE, cx=0.85, cy=0.90))
+    check("預設面板盖过 formation", classify(panel).page == "preset_panel", repr(classify(panel)))
+    dlg = O(B(V.PRESET_CHANGE_TITLE, cx=0.50, cy=0.135), B(V.CONFIRM, cx=0.594, cy=0.799),
+            B(V.CANCEL, cx=0.405, cy=0.802), B(V.CLOSE_X, cx=0.733, cy=0.134))
+    check("變更編輯框 = preset_change_dialog overlay(压过 confirm_dialog)",
+          classify(dlg).overlay == "preset_change_dialog", repr(classify(dlg)))
+    check("變更編輯框(顶栏压暗)不当系统退出框",
+          classify(dlg).interrupt != "quit_dialog", repr(classify(dlg)))
+    # 3 默认处理: 不是自己请求的 -> 取消; 请求过的 -> 確認; 面板 -> 叉掉
+    fl = ALL["mail"](Ctx(cfg=cfg(), log=lambda m: None))
+    st = Machine(1).update(dlg)
+    a = fl.on_preset_change_dialog(dlg, st)
+    check("默认: 變更編輯框点取消", a is not None and a.target_cls == V.CANCEL, str(a))
+    fl.state["preset_confirm"] = True
+    a = fl.on_preset_change_dialog(dlg, st)
+    check("预设子链请求过 -> 点確認(once=pr_confirm)",
+          a is not None and a.target_cls == V.CONFIRM and a.once_key == "pr_confirm", str(a))
+    panel_x = O(*panel.boxes, B(V.CLOSE_X, cx=0.733, cy=0.134))
+    a = fl.on_preset_panel(panel_x, Machine(1).update(panel_x))
+    check("默认: 預設面板叉掉(不碰行内钮)", a is not None and a.target_cls == V.CLOSE_X, str(a))
+    # 4 3/4 部队高亮接进 SQUAD_TABS
+    check("SQUAD_TABS 3/4 有高亮态",
+          V.SQUAD_TABS[3] == (V.SQUAD_3, V.SQUAD_3_HI)
+          and V.SQUAD_TABS[4] == (V.SQUAD_4, V.SQUAD_4_HI))
+    # 5 542 危险锚: 闸拦, campaign 点空处消退
+    g = Gate(cfg(), log=lambda m: None)
+    grid_menu = O(B(V.GRID_UNIT_UNDEPLOY, cx=0.60, cy=0.46), B(V.GRID_CELL, cx=0.5, cy=0.5),
+                  B(V.GRID_CELL, cx=0.6, cy=0.5), B(V.GRID_CELL, cx=0.7, cy=0.5),
+                  B(V.TASK_START, cx=0.9, cy=0.9))
+    v = g.money(_tb(B(V.GRID_UNIT_UNDEPLOY, cx=0.60, cy=0.46), "x"), grid_menu)
+    check("闸: 指向 部署菜单_解除 的 tap 一律拦", not v.ok and not v.halt, v.why)
+    cp = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
+    cp.goto("grid")
+    a = cp.do_grid(grid_menu, Machine(1).update(grid_menu))
+    check("campaign: 菜单开着 -> 点空处(无 cls 落点), 不点解除",
+          a is not None and a.kind == "tap" and a.target_cls == "(no-cls)", str(a))
+    # 6 543 悬停▽: 点它正下方的起点, 不点已上队的那个
+    deploy = O(B(V.TASK_START_GREY, cx=0.85, cy=0.90),
+               B(V.GRID_START, cx=0.40, cy=0.60), B(V.GRID_START, cx=0.60, cy=0.60, conf=0.7),
+               B(V.GRID_START_HOVER, cx=0.60, cy=0.52),
+               *[B(V.GRID_CELL, cx=0.3 + 0.1 * i, cy=0.72) for i in range(4)])
+    cp2 = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
+    cp2.goto("grid")
+    a = cp2.do_grid(deploy, Machine(1).update(deploy))
+    check("悬停▽下的起点被选中(cx 0.60, 不是 conf 更高的 0.40)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.60) < 0.01, str(a))
+    # 7 預設子链(配置门控)全程
+    c3 = cfg()
+    c3["campaign"]["preset_apply"] = {"team": 2, "tab": 1, "row": 2}
+    cp3 = ALL["campaign"](Ctx(cfg=c3, log=lambda m: None))
+    cp3.goto("grid")
+    form = O(B(V.SORTIE, cx=0.85, cy=0.90), B(V.SQUAD_1_HI, cx=0.15, cy=0.30),
+             B(V.SQUAD_2, cx=0.15, cy=0.40), B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
+    a = cp3.do_grid(form, Machine(1).update(form))
+    check("套預設前先切部队2", a is not None and a.target_cls == V.SQUAD_2, str(a))
+    form2 = O(B(V.SORTIE, cx=0.85, cy=0.90), B(V.SQUAD_1, cx=0.15, cy=0.30),
+              B(V.SQUAD_2_HI, cx=0.15, cy=0.40), B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
+    a = cp3.do_grid(form2, Machine(1).update(form2))
+    check("部队2高亮后开預設面板",
+          a is not None and a.target_cls == V.PRESET_ENTRY and a.once_key == "pr_open", str(a))
+    cp3.state["once:pr_open"] = True
+    pan = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
+            B(V.PRESET_TAB, cx=0.2197, cy=0.226),
+            B(V.PRESET_APPLY, cx=0.8965, cy=0.40), B(V.PRESET_APPLY, cx=0.8965, cy=0.50),
+            B(V.SORTIE, cx=0.85, cy=0.95))
+    a = cp3.do_grid(pan, Machine(1).update(pan))
+    check("页签1已选中 -> 点第2行 組成",
+          a is not None and a.target_cls == V.PRESET_APPLY and abs(a.y - 0.50) < 0.01
+          and a.once_key == "pr_apply", str(a))
+    cp3.state["once:pr_apply"] = True
+    a.post()
+    check("組成点出去后 preset_confirm 置位", cp3.state.get("preset_confirm") is True)
+    a = cp3.on_preset_change_dialog(dlg, Machine(1).update(dlg))
+    check("變更編輯框 -> 確認", a is not None and a.target_cls == V.CONFIRM, str(a))
+    cp3.state["once:pr_confirm"] = True
+    a.post()
+    pan_x = O(*pan.boxes, B(V.CLOSE_X, cx=0.733, cy=0.134))
+    a = cp3.do_grid(pan_x, Machine(1).update(pan_x))
+    check("套用后面板还开着 -> 叉掉", a is not None and a.target_cls == V.CLOSE_X, str(a))
+    cp3.state["once:pr_close"] = True
+    a = cp3.do_grid(form2, Machine(1).update(form2))
+    check("面板关了 -> 出击(套预设只做一次)", a is not None and a.target_cls == V.SORTIE, str(a))
+    # 空预设行(組成灰) -> BLOCKED 不点; team=1 -> 拒绝
+    c4 = cfg()
+    c4["campaign"]["preset_apply"] = {"team": 2, "tab": 1, "row": 1}
+    cp4 = ALL["campaign"](Ctx(cfg=c4, log=lambda m: None))
+    cp4.goto("grid")
+    cp4.do_grid(form2, Machine(1).update(form2))
+    cp4.state["once:pr_open"] = True
+    grey = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
+             B(V.PRESET_APPLY_GREY, cx=0.8965, cy=0.40), B(V.SORTIE, cx=0.85, cy=0.95))
+    a = cp4.do_grid(grey, Machine(1).update(grey))
+    check("空预设行(組成灰) -> BLOCKED 不点",
+          cp4.outcome == "BLOCKED" and (a is None or a.kind != "tap"), str(a))
+    c5 = cfg()
+    c5["campaign"]["preset_apply"] = {"team": 1, "tab": 1, "row": 1}
+    cp5 = ALL["campaign"](Ctx(cfg=c5, log=lambda m: None))
+    cp5.goto("grid")
+    a = cp5.do_grid(form, Machine(1).update(form))
+    check("preset_apply 指向部队1 -> 拒绝", cp5.outcome == "BLOCKED", str(a))
+    # 没配置 -> 编队页照旧直接出击
+    cp6 = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
+    cp6.goto("grid")
+    a = cp6.do_grid(form, Machine(1).update(form))
+    check("没配 preset_apply -> 编队页直接出击", a is not None and a.target_cls == V.SORTIE, str(a))
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -4395,6 +4518,7 @@ if __name__ == "__main__":
     t_daily_fix_0820()
     t_story_stack_0821()
     t_schedule_locked_card_0821()
+    t_v20_wiring()
     print("\n" + "" * 52)
     if FAILS:
         print(f" {len(FAILS)} 项没过:")

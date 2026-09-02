@@ -275,6 +275,38 @@ class Flow:
         cf = obs.find(V.CONFIRM, 0.45)
         return tap_box(cf, "确认（单键通知框）") if cf is not None else None
 
+    def on_preset_change_dialog(self, obs: Observation, st: StateView) -> Optional[Action]:
+        """「變更編輯」确认框(預設面板点 組成/讀取 弹出)的**默认**处理: 取消。
+
+        確認 = 把预设阵容**覆盖**进当前部队 -- 通用 on_confirm_dialog 的"默认点確認"
+           在这个框上等于随手改掉用户的编队(部队1 是用户的推图队, 不可逆)。
+           只有 flow/preset.py 的子链自己请求的(state['preset_confirm'] 置位)才許確認。
+        """
+        if self.state.get("preset_confirm"):
+            cf = obs.find(V.CONFIRM, 0.45)
+            if cf is not None:
+                def _applied():
+                    self.state.pop("preset_confirm", None)
+                    self.state["preset_applied"] = True
+                return tap_box(cf, "預設 變更編輯: 確認(预设子链请求)",
+                               once="pr_confirm", post=_applied)
+            return wait("變更編輯框: 等確認键")
+        c = obs.find(V.CANCEL, 0.45)
+        if c is not None:
+            return tap_box(c, "變更編輯框不是本 flow 请求的 -- 取消(不改编队)")
+        x = obs.find(V.CLOSE_X, 0.55)
+        if x is not None:
+            return tap_box(x, "變更編輯框: 叉掉")
+        return wait("變更編輯框: 无取消/叉叉, 不点確認")
+
+    def on_preset_panel(self, obs: Observation, st: StateView) -> Optional[Action]:
+        """預設侧面板的**默认**处理: 叉掉。行内 讀取/編輯/複製/組成 一律不碰。
+        要套预设的 flow 混入 flow/preset.py 的 PresetMixin 覆写这里。"""
+        x = obs.find(V.CLOSE_X, 0.55)
+        if x is not None:
+            return tap_box(x, "預設面板不是本 flow 要的 -- 叉掉")
+        return wait("預設面板开着但叉叉没检出 -- 不碰行内钮")
+
     def on_reward(self, obs: Observation, st: StateView) -> Optional[Action]:
         # 语义优先级，不是 conf argmax（`获得奖励` 是横幅不是按钮，见 battle.py）
         # **子类绝不许用 `obs.find([A, B])` 覆写这个方法**（08-11 live 实锤）：
@@ -349,7 +381,7 @@ class Flow:
         return tap_box(x, "领完了  叉掉面板") if x is not None else None
 
     def on_levelup(self, obs: Observation, st: StateView) -> Optional[Action]:
-        b = obs.find([V.BOND_LEVELUP, V.REGION_LEVELUP], 0.40)
+        b = obs.find(V.BOND_LEVELUP, 0.40)
         return tap_box(b, "点掉升级过场") if b is not None else None
 
     def on_offsite(self, obs: Observation, st: StateView) -> Optional[Action]:
