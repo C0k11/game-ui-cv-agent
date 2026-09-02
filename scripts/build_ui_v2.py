@@ -384,6 +384,24 @@ REAL_SOURCES += _clean_dirs(FLYWHEEL_TRAIN_DAYS) + [
     #    标注口径: 挂锁只标锁体不含提梁 / tile 身份由文字给 / 走格子只标格子和自己人
     #      (BOSS 脚下那格要标, 脚印不标) / 废案类框已全部剔除。
     "flywheel_v19_ui_20260821",
+    # v20 (2026-08-30 ~ 09-01): 预设面板全族 + 多队部署侧 + story/cafe 补采。
+    #    类表 535 -> 546 (`_classes_next.txt`), 这四个池的 classes.txt 是 546 行,
+    #    **只能用 --master _classes_next.txt 建集**, 用 535 那张会 SCHEMA DRIFT。
+    #    标注口径: 弹窗帧只标弹窗自身元素; 页签掐签体不含斜角(同 493/494);
+    #    按钮贴字; 436/437 一律金标几何; 545 3/4部队高亮双皮各 8 帧压过 MIN_UNIQUE。
+    "flywheel_v20_preset_20260830",   # 104帧: 预设面板/确认框/编成页
+    "flywheel_v20_grid_20260831",     # 79帧: 6-1 部署/菜单/SKIP两态/走子/弹窗
+    "flywheel_v20_story_20260831",    # 33帧: 剧情 hub/章节图/节点图(黄点方案, 无新类)
+    "flywheel_v20_cafe_20260831",     # 14帧: 咖啡厅两店全景/浮层/家具预设面板
+    # 从 v2_20260830_* 十个 campaign 飞轮池里挑出的 39 帧(437 地图皮 30 / 543 悬停 9),
+    #    现役权重 conf 0.5 重预标 + 系统修正后拷入; 原池 748 帧等 dashboard 人审再并,
+    #    同图会被 md5 去重, 不会双计。
+    "flywheel_v20_fromfly_20260901",
+    # 09-02 补拍(大号, ADB screencap 3840x2160, 16 帧): 62 信用点商店(未选中, 全库
+    #    此前只 1 帧) x5 + 495 集中指挥/496 简易攻略_已选中 x5 + 配对态(54/421/422/470)。
+    #    目标类几何 = 本 session 检出同位 / v2alt_tabs 金标; 其余框 v19 预标 conf0.5
+    #    按态 allowlist 过滤(scratchpad/_v20_gap_label.py)。同日单 session, 整批 train。
+    "flywheel_v20_gap_20260902",
 ]
 REAL_SOURCES = [s for s in REAL_SOURCES if s not in set(MOVED_TO_VAL)]
 VAL_SOURCES += _clean_dirs(FLYWHEEL_VAL_DAYS) + [
@@ -457,6 +475,10 @@ VAL_SOURCES += _clean_dirs(FLYWHEEL_VAL_DAYS) + [
     # v18 格子 holdout 208。与 _TRAIN_v18 同图的会被 md5 踢出, 不要删 train 救 val。
     # 量尺仍不测 489/450/527/528; 类号未逐框, 不当干净。
     "_val_v18",
+    # v20 预设面板 val: 08-31 独立 session 重开面板拍的 13 帧, 与 train 池
+    #    (08-30) 不同日不同 session; 预设族 531-541 + 确认框 540 靠它有尺子。
+    #    部署侧新类 542-545 仍 val=0, 只能 live 验(记在案)。
+    "_val_v20_preset_20260831",
 ] + MOVED_TO_VAL
 
 TARGET = 30            # moderate oversample floor (was 200 — the overfit driver)
@@ -545,6 +567,13 @@ def frames_in(sd: Path):
                   if not f.stem.endswith("_ann"))
 
 
+# 废案行(master 名带 _废弃 前缀)的框不进 train/val: detect 层本来就丢弃这些类,
+#    留在集里只是白训 79 个死头(2026-09-02 实测 5,441 框, 509 走格子_我方一类
+#    2,173 框且四成是敌方噪声)。main() 读完 master 后填充; 空集 = 不过滤。
+DEPRECATED_IDX: set = set()
+_DROPPED_DEP = [0]
+
+
 def _keep_ui_lines(cleaned: str, nc: int):
     out = []
     for ln in cleaned.splitlines():
@@ -554,6 +583,9 @@ def _keep_ui_lines(cleaned: str, nc: int):
         if c >= nc or HEAD_LO <= c <= HEAD_HI:   # 越界 或 头像段  drop
             continue
         if c in DROP_UI:                          # 战场角色类  归 battle 模型
+            continue
+        if c in DEPRECATED_IDX:                   # 废案类  不训
+            _DROPPED_DEP[0] += 1
             continue
         out.append(ln)
     return out
@@ -589,6 +621,9 @@ def main() -> int:
     master = master_path.read_text(encoding="utf-8").splitlines()
     nc = len(master)
     print(f"[schema] master = {nc} classes (last: {master[-1]!r})")
+    DEPRECATED_IDX.clear()
+    DEPRECATED_IDX.update(i for i, n in enumerate(master) if n.startswith("_废弃"))
+    print(f"[schema] deprecated rows = {len(DEPRECATED_IDX)} (their boxes are dropped)")
 
     # Verify each source's classes.txt is a PREFIX of master (no reorder drift).
     for s in REAL_SOURCES + SYNTH_SOURCES + VAL_SOURCES:
@@ -796,6 +831,7 @@ def main() -> int:
     # 图片落地方式体检: copy 不为 0 就说明有图在白占磁盘(见 link_image 注释)
     _ls = dict(_LINK_STAT)
     print(f"[link] {_ls}" + ("   有真拷贝, 检查是否跨卷" if _ls.get("copy") else ""))
+    print(f"[deprecated] dropped {_DROPPED_DEP[0]} boxes of _废弃 classes")
     print(f"[done] {OUT_ROOT}  (nc={nc}, train={n_train}, val={n_val})")
 
     #  report key class counts (instances in train)

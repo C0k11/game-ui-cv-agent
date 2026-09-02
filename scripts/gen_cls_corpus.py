@@ -13,13 +13,20 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
+import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(r"D:/Project/ai game secretary")
 SCRATCH = Path(__file__).resolve().parent
+# 默认读线上表; 新类进了 _classes_next 而权重还没上线时用 --master _classes_next.txt
+#    (09-02 起: 语义表必须和 build 用的那张表同 nc, 三方对齐的一环)。
 CLASSES = ROOT / "data" / "raw_images" / "_classes.txt"
+if "--master" in sys.argv:
+    CLASSES = ROOT / "data" / "raw_images" / sys.argv[sys.argv.index("--master") + 1]
 OUT = ROOT / "data" / "ui_cls_semantics.md"
 
 # 状态后缀 -> 归族时剥掉。顺序有意义(长的先剥)。
@@ -112,11 +119,13 @@ av_tr = sum(1 for i, _ in av_live if TR.get(i, 0) > 0)
 
 L = []
 A = L.append
-A(f"# ui cls 语料库 -- v16 / nc={len(names)}")
+_built = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(DS / "data.yaml"))) \
+    if (DS / "data.yaml").exists() else "?"
+A(f"# ui cls 语料库 -- {CLASSES.name} nc={len(names)} / ui_v2 build {_built}")
 A("")
 A("> **写任何检测/导航逻辑前先查这里**。判断一律用 cls, OCR 只读数字。")
 A("> 事实层(idx / 框数 / vocab / 引用) 由 `scripts/gen_cls_corpus.py` 从")
-A("> `_classes.txt` + v16 数据集 + 源码**自动生成**, 不会过期; 语义列要人写。")
+A(f"> `{CLASSES.name}` + 当前 ui_v2 build + 源码**自动生成**, 不会过期; 语义列要人写。")
 A("")
 A("## 一眼看全")
 A("")
@@ -126,8 +135,8 @@ A(f"| master 表总行数 | {len(names)}（现役 {len(live)} / 废案 {len(dead
 A(f"| 其中 **UI 模型自己的类** | **{len(ui_live)}**（这才是 UI 的分母） |")
 A(f"| 其中 学生名（avatar 模型, idx 143-394） | {len(av_live)}，在 ui_v2 里有框的 {av_tr} |")
 A("| 其中 战场实体（battle 模型, idx 476-483） | 8（用户点名不进 UI） |")
-A(f"| v16 ui_v2 train | {sum(TR.values()):,} 框 / {NTR:,} 帧 |")
-A(f"| v16 ui_v2 val | {sum(VA.values()):,} 框 / {NVA:,} 帧 |")
+A(f"| ui_v2 train | {sum(TR.values()):,} 框 / {NTR:,} 帧 |")
+A(f"| ui_v2 val | {sum(VA.values()):,} 框 / {NVA:,} 帧 |")
 A(f"| UI 类 **train=0**（模型没学过） | **{t0}** |")
 A(f"| UI 类 **val=0**（测不出来） | **{v0}** |")
 A(f"| UI 类 **不在 vocab**（代码用不上） | **{nov}** |")

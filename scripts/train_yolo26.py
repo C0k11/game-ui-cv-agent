@@ -1110,6 +1110,40 @@ TRAIN_CONFIGS = {
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
     },
+    "ui_yolo26m_v20": {
+        # v20 (2026-09-01) = v19 warm + 预设面板全族 / 多队部署侧 / story / cafe 补采。
+        # 超参照抄 v19 一个不动(只变数据)。nc 535 -> 546:
+        #   535 预设_编辑 / 536 预设_复制 / 537 预设_复制_灰色 / 538 预设页签 /
+        #   539 预设页签_已选中 / 540 变更编辑标题 / 541 预设入口 / 542 部署菜单_解除 /
+        #   543 走格子_起点悬停 / 544 3部队高亮 / 545 4部队高亮。
+        # 数据: 新进 flywheel_v20_{preset,grid,story,cafe} 230 帧 + fromfly 39 帧,
+        #   val 新进 _val_v20_preset_20260831 13 帧(独立 session)。
+        # 这轮最该验的:
+        #   1 预设族 531-541 (v19 只有 4 帧全瞎, 这次 36-86 帧/类且有 val);
+        #   2 437 跳过战斗未选 地图皮 (v19 0 检出, 这次 3+30 帧);
+        #   3 542-545 部署侧新类各 8 帧压 MIN_UNIQUE 线, val=0 只能 live 验;
+        #   4 109 任务开始 vs 108 扫荡开始 的 stage_popup 混淆是否修掉。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        # v19 run 只留了 strip 形 best.pt(43.6MB, 无 best_real.pt), warm-start 只要
+        #   权重, strip 形够用(Transferred 行会少新类 cls 头那几项, 符合预期)。
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v19" / "weights" / "best.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v20",
+        "cache": False,
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "ui_yolo26m_v19": {
         # v19 (2026-08-24) = v18 warm + 大厅换皮补采第一次进集。
         # **超参一个不动, 照抄 v18** -- 这轮只变数据。变两个变量就说不清是哪个
