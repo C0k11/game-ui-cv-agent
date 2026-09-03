@@ -26,18 +26,18 @@ OCR 只读数字字段（体力、票数、货币），不参与任何判断。
 
 | 用途 | 模型 | 职责 | 备注 |
 |---|---|---|---|
-| UI 导航 | YOLO26m v19（v20 训练中） | 按钮、页签、弹窗、角标，驱动全部导航和点击 | imgsz=960 |
+| UI 导航 | YOLO26m v20（v21 训练中） | 按钮、页签、弹窗、角标，驱动全部导航和点击 | imgsz=960 |
 | 角色识别 | YOLO26x v6 | 检测框加角色身份一次推理给出，含战斗技能卡的灰置、充能状态 | ~10 ms |
 | 战斗单位 | YOLO26s v11 | 我方、敌方、Boss、胜利横幅、HUD | ~12 ms |
 | 数字读取 | PP-OCRv4，按 BA 字形微调 | 只读数字 | ~50 ms |
 
-现役版本以 `data/model_registry.json` 的 `active` 为准（UI 为 `v19`），运行时解析
+现役版本以 `data/model_registry.json` 的 `active` 为准（UI 为 `v20`），运行时解析
 权重路径，回滚改一行 `active`。推理必须 `imgsz=960`。总 mAP 不代表弱类和 val=0
 的类，这些只能 live 对账。
 
-类表 `data/raw_images/_classes.txt`（535 行，线上权重用）按行号索引，永不删行；
-废案只加 `_废弃N_` 前缀，检测层按名字屏蔽。新类先进 `_classes_next.txt`
-（546 行，479 现役 / 67 废案），新权重上线后再转正。每个类是什么、训练量多少、
+类表 `data/raw_images/_classes.txt`（546 行，479 现役 / 67 废案，与 v20 线上权重同表）
+按行号索引，永不删行；废案只加 `_废弃N_` 前缀，检测层按名字屏蔽。要加新类时先复制
+成 `_classes_next.txt` 追加并用它建集训练，新权重上线后再转正。每个类是什么、训练量多少、
 被哪个 flow 引用，见自动生成的 `data/ui_cls_semantics.md`。
 
 导航里只剩两处没有 cls 支撑的点击，都只在大厅收起 UI 变成空屏时点背景唤醒
@@ -48,10 +48,13 @@ OCR 只读数字字段（体力、票数、货币），不参与任何判断。
 模型全部自行标注。素材来自 bot 实际跑线时录制的干净帧，用 Android 内部
 `screencap` 抓取，画面里没有桌面层的调试元素。
 
-- 素材池 612 个目录、107,412 帧，已标注 68,340 帧、980,952 个框
-- 当前 UI 数据集（`_classes_next.txt`，nc=546）：train 38,861 帧（去重后 38,648 唯一帧，
-  <30 帧的类过采样到 30），val 11,048 帧；构建时按内容去重、剔除 train/val 同图、
-  丢弃废案类的框
+- 素材池 596 个目录、112,060 帧，已标注 66,438 帧、970,467 个框
+- 2026-09-03 做过一次全池标注体检与修复：用人审金标池的像素中位模板逐框匹配（与模型无关，
+  避免模型学会脏标后自证一致），结论是位置漂移不到 1%，真问题是框口径按池分裂；按金标口径
+  吸附约 5,600 框、活动商店 只框字的转成整图标 1,780、改类 86、删幽灵与边条垃圾框 209，
+  再按 v20 检出补漏标约 7,000（两态类用像素规则定状态）。全部改动带修前备份和逐条台账
+- 当前 UI 数据集（v21，nc=546）：train 38,945 帧（去重后 38,741 唯一帧，<30 帧的类
+  过采样到 30），val 11,052 帧；构建时按内容去重、剔除 train/val 同图、丢弃废案类的框
 - val 按天或按独立录制 session 划分，与 train 不同源；新类没有独立 val 时只能 live 验
 
 ## 付费安全
@@ -131,10 +134,11 @@ py -u scripts/bot_play_quest.py 10 11 12
 
 迭代一个 UI 模型的完整循环：
 
-1. 控制台里采集新帧并标注；新类先追加到 `data/raw_images/_classes_next.txt`
-2. 构建数据集：`py -X utf8 scripts/build_ui_v2.py --clean --master _classes_next.txt`
-3. 训练：`py -X utf8 scripts/train_yolo26.py ui_yolo26m_v20`（超参照抄上一版，只变数据）
-4. 重生成类语义表：`py -X utf8 scripts/gen_cls_corpus.py --master _classes_next.txt`
+1. 控制台里采集新帧并标注；只在加新类时才复制出 `data/raw_images/_classes_next.txt` 追加
+2. 构建数据集：`py -X utf8 scripts/build_ui_v2.py --clean`（加了新类时带 `--master _classes_next.txt`）
+3. 训练：`py -X utf8 scripts/train_yolo26.py ui_yolo26m_v21`（超参照抄上一版，只变数据；
+   中断后 `--resume`，显存踩线时 `--resume --batch 10`）
+4. 重生成类语义表：`py -X utf8 scripts/gen_cls_corpus.py`
 5. 上线：冻结权重，把 `data/model_registry.json` 里对应条目的 `active` 指向新版本，
    再把 `_classes_next.txt` 转正为 `_classes.txt`
 
@@ -157,7 +161,7 @@ py -u scripts/bot_play_quest.py 10 11 12
     data/
       model_registry.json   现役模型版本，单一真相源
       ui_cls_semantics.md   类语义表（自动生成）
-      raw_images/           标注帧 + _classes.txt / _classes_next.txt 主类表
+      raw_images/           标注帧 + _classes.txt 主类表
       grid_answers/         走格子答案（由 BAAH 开源解法转换）
 
 模型权重、数据集和 HF 缓存放在仓库之外的独立目录（已 gitignore），路径由
