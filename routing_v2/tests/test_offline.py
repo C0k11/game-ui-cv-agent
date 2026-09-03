@@ -275,9 +275,11 @@ def t_pages():
           classify(ingame).interrupt != "quit_dialog",
           f"实际 {classify(ingame).interrupt}")
 
-    # 上期活动
-    check("後日談  event_ended",
-          classify(O(B(V.EVENT_AFTERSTORY), B(V.EVENT_SHOP))).page == "event_ended")
+    # 上期活动余韵期: 後日談 不再单独成页(09-03), 这种帧就是普通活动页,
+    #    由 flow 按"有没有 Quest 页签 / 入场行"决定退出
+    check("後日談 不再单独成页 -> event_page",
+          classify(O(B(V.EVENT_AFTERSTORY), B(V.EVENT_SHOP))).page == "event_page",
+          f"实际 {classify(O(B(V.EVENT_AFTERSTORY), B(V.EVENT_SHOP))).page}")
 
 
 #  2. 连续 N 帧确认
@@ -4470,6 +4472,42 @@ def t_v20_wiring():
     a = cp3.do_grid(form2, Machine(1).update(form2))
     check("面板关了 -> 出击(套预设只做一次)", a is not None and a.target_cls == V.SORTIE, str(a))
     # 空预设行(組成灰) -> BLOCKED 不点; team=1 -> 拒绝
+    # 7b 页签几何兜底: 只检出选中的页签1(v20 live 538 未选中态 0 检出), 要页签 2
+    #    -> 按面板版式在第 2 槽落点(tap_at, 锚 预设标题); 选中态由帧像素判(深底 = 选中)
+    c3b = cfg()
+    c3b["campaign"]["preset_apply"] = {"team": 2, "tab": 2, "row": 1}
+    cp3b = ALL["campaign"](Ctx(cfg=c3b, log=lambda m: None))
+    cp3b.goto("grid")
+    cp3b.do_grid(form, Machine(1).update(form))
+    cp3b.do_grid(form2, Machine(1).update(form2))
+    cp3b.state["once:pr_open"] = True
+    import numpy as _np
+    _fr = _np.full((1080, 1920, 3), 245, _np.uint8)
+    _fr[int(0.1985 * 1080):int(0.2535 * 1080), int(0.0375 * 1920):int(0.1535 * 1920)] = (90, 60, 40)
+    pan_g = Observation(boxes=[B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
+                               B(V.PRESET_APPLY, cx=0.8965, cy=0.40), B(V.SORTIE, cx=0.85, cy=0.95)],
+                        seq=1, w=1920, h=1080, frame=_fr)
+    a = cp3b.do_grid(pan_g, Machine(1).update(pan_g))
+    check("页签2没检出 -> 几何兜底在第2槽落点(锚 预设标题)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.2197) < 0.01 and abs(a.y - 0.226) < 0.01
+          and a.require == V.PRESET_TITLE and a.once_key == "pr_tab", str(a))
+    cp3b.state["once:pr_tab"] = True
+    _fr2 = _fr.copy()
+    _fr2[int(0.1985 * 1080):int(0.2535 * 1080), :] = 245
+    _fr2[int(0.1985 * 1080):int(0.2535 * 1080), int(0.1617 * 1920):int(0.2777 * 1920)] = (90, 60, 40)
+    pan_g2 = Observation(boxes=[B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB, cx=0.0955, cy=0.226),
+                                B(V.PRESET_APPLY, cx=0.8965, cy=0.40), B(V.SORTIE, cx=0.85, cy=0.95)],
+                         seq=2, w=1920, h=1080, frame=_fr2)
+    a = cp3b.do_grid(pan_g2, Machine(1).update(pan_g2))
+    check("页签2像素判为选中 -> 点第1行 組成",
+          a is not None and a.target_cls == V.PRESET_APPLY and a.once_key == "pr_apply", str(a))
+    pan_g3 = Observation(boxes=[B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
+                                B(V.PRESET_APPLY, cx=0.8965, cy=0.40), B(V.SORTIE, cx=0.85, cy=0.95)],
+                         seq=3, w=1920, h=1080)
+    a = cp3b.do_grid(pan_g3, Machine(1).update(pan_g3))
+    check("没有帧像素 -> 页签2态不明, 只等不点",
+          a is not None and a.kind == "wait", str(a))
+
     c4 = cfg()
     c4["campaign"]["preset_apply"] = {"team": 2, "tab": 1, "row": 1}
     cp4 = ALL["campaign"](Ctx(cfg=c4, log=lambda m: None))

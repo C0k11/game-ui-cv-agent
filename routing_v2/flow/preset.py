@@ -18,13 +18,65 @@ from __future__ import annotations
 
 from typing import Optional
 
-from routing_v2.act.action import Action, tap_box, wait
-from routing_v2.percept.observe import Observation
+from routing_v2.act.action import Action, tap_at, tap_box, wait
+from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
 
 _SCROLL_CAP = 3
 # 行头「N部隊」标签与该行 組成 钮的 cy 容差(同一行)
 _ROW_TOL = 0.06
+# 页签几何兜底(2026-09-03): v20 live 未选中页签 538 一个都检不出(选中态 539 也只 0.4-0.7), 子链会卡在
+#    "页签只检出 1 个"。面板是全屏固定 overlay, 5 个页签槽在 16:9 归一化坐标下位置固定
+#    (flywheel_v21_preset_20260903 26 帧金标量得: cx 等距, cy 0.226, 0.116 x 0.055)。
+#    只在检出凑不齐时用: 有检出的槽用检出(cls 定态), 没检出的槽按几何合成, 选中态用帧像素
+#    (选中 = 深蓝底 V~90, 未选中 = 白底 V~245)。锚 预设标题 必须在标准位(cy 0.135), 偏了 = 版式不同, 不用几何。
+#    几何落点走 tap_at(锚 预设标题 JIT 复验), 点完仍只认"页签 k 已选中"才往下走, 版式变了最多点到隔壁页签, 不会误套。
+_TAB_SLOT_CX = (0.0955, 0.2197, 0.345, 0.470, 0.595)
+_TAB_CY, _TAB_W, _TAB_H = 0.226, 0.116, 0.055
+_TAB_MATCH_TOL = 0.05
+_TAB_TITLE_CY = 0.135
+_TAB_SEL_V_MAX = 120
+
+
+def _tab_slots(obs: Observation, title):
+    """5 个页签槽 -> [(Box, selected, src)]。selected None = 没检出也没帧像素可判;
+    整体 None = 版式不认识(标题不在标准位 / 检出的页签一个都不在槽上), 调用方回退老口径。"""
+    if title is None or abs(title.cy - _TAB_TITLE_CY) > 0.05:
+        return None
+    det = obs.all([V.PRESET_TAB, V.PRESET_TAB_SEL], 0.40)
+    arr = None
+    fr = getattr(obs, "frame", None)
+    if fr is not None:
+        try:
+            import numpy as np
+            a = np.asarray(fr)
+            if a.ndim == 3 and a.shape[0] >= 8 and a.shape[1] >= 8:
+                arr = a
+        except Exception:
+            arr = None
+    out, used = [], set()
+    for cx in _TAB_SLOT_CX:
+        near = [b for b in det if id(b) not in used
+                and abs(b.cx - cx) <= _TAB_MATCH_TOL and abs(b.cy - _TAB_CY) <= _TAB_MATCH_TOL]
+        if near:
+            b = max(near, key=lambda b: b.conf)
+            used.add(id(b))
+            out.append((b, b.cls == V.PRESET_TAB_SEL, "cls"))
+            continue
+        box = Box(cls=V.PRESET_TAB, conf=0.0, x1=cx - _TAB_W / 2, y1=_TAB_CY - _TAB_H / 2,
+                  x2=cx + _TAB_W / 2, y2=_TAB_CY + _TAB_H / 2)
+        sel = None
+        if arr is not None:
+            h, w = arr.shape[:2]
+            xa, xb = int((cx - _TAB_W * 0.3) * w), int((cx + _TAB_W * 0.3) * w)
+            ya, yb = int((_TAB_CY - _TAB_H * 0.3) * h), int((_TAB_CY + _TAB_H * 0.3) * h)
+            roi = arr[ya:yb, xa:xb]
+            if roi.size:
+                sel = bool(float(roi.max(axis=2).mean()) < _TAB_SEL_V_MAX)
+        out.append((box, sel, "geom"))
+    if det and not used:
+        return None
+    return out
 
 
 class PresetMixin:
@@ -64,14 +116,27 @@ class PresetMixin:
                 return tap_box(ent, "預設: 打开面板", once="pr_open",
                                expect=(V.PRESET_TITLE,))
             return wait("預設: 等入口键" if self.pending("pr_open") else "預設: 等面板打开")
-        # 页签: 身份 = cx 顺位
-        tabs = sorted(obs.all([V.PRESET_TAB, V.PRESET_TAB_SEL], 0.40), key=lambda b: b.cx)
+        # 页签: 身份 = cx 顺位; 检出凑不齐时按面板几何补槽(见 _tab_slots)
         k = want["tab"]
-        if len(tabs) < k:
-            return wait(f"預設: 页签只检出 {len(tabs)} 个, 要第 {k} 个")
-        if tabs[k - 1].cls != V.PRESET_TAB_SEL:
+        slots = _tab_slots(obs, obs.find(V.PRESET_TITLE, 0.40))
+        if slots is None or k > len(slots):
+            tabs = sorted(obs.all([V.PRESET_TAB, V.PRESET_TAB_SEL], 0.40), key=lambda b: b.cx)
+            if len(tabs) < k:
+                return wait(f"預設: 页签只检出 {len(tabs)} 个, 要第 {k} 个")
+            slot, selected, src = tabs[k - 1], tabs[k - 1].cls == V.PRESET_TAB_SEL, "cls"
+        else:
+            slot, selected, src = slots[k - 1]
+        if selected is None:
+            return wait(f"預設: 页签 {k} 没检出, 帧像素也判不了选中态 -- 等")
+        if not selected:
             if self.pending("pr_tab"):
-                return tap_box(tabs[k - 1], f"預設: 切到页签 {k}", once="pr_tab")
+                if src == "cls":
+                    return tap_box(slot, f"預設: 切到页签 {k}", once="pr_tab")
+                return tap_at(slot.cx, slot.cy, f"預設: 切到页签 {k} (几何兜底: 页签 cls 没检出)",
+                              justify="預設面板是全屏固定 overlay, 5 个页签槽位按 flywheel_v21_preset 26 帧金标量得; "
+                                      "只在 预设标题 处于标准位时用; 版式变了最多点到隔壁页签, "
+                                      "点完仍只认 页签 k 选中态(cls 或像素) 才会去点 組成",
+                              require=V.PRESET_TITLE, once="pr_tab")
             return wait(f"預設: 等页签 {k} 变选中态")
         # 行: 优先用行头「N部隊」白字标签定行; 检不出时按 cy 顺位(只在未滚动时可信)
         r = want["row"]

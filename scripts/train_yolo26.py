@@ -1132,7 +1132,9 @@ TRAIN_CONFIGS = {
         "patience": 30,
         "save_period": 5,
         "imgsz": 960,
-        "batch": 12,
+        # batch 12 在 09-03 首发踩显存线(DWM 等外部占用 2.3G, 整卡 21.6/23G, PCIe 25-36GB/s 换页, 1.3s/it, 功耗 190W);
+        # 改 10 留 3G 余量, nbs=64 累积 6 步等效 60, 与 v20 的 12x5 一致。
+        "batch": 10,
         "out_name": "ui_yolo26m_v21",
         "cache": False,
         "workers": 8,

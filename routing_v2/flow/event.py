@@ -143,13 +143,6 @@ class EventEntryMixin:
                        post=lambda: (self.state.update(saw_other=False),
                                      self.state.pop("ev_seen_since", None)))
 
-    # -- 进错活动: 上期余韵 ----
-    def on_event_ended(self, obs, st):
-        """`後日談` 在场 = 上期活动余韵期。退出去重进，别在这里刷。"""
-        self.log("进到上期活动了（检出 後日談） 退出去重进")
-        self.note_lines.append("误入上期活动一次，已退出重进")
-        return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
-
     # -- 进错活动: 引导型（没有活动关卡的那种）----
     def on_event_guide_hub(self, obs, st):
         """进到「引导型活动」了（夏萊總結算这类）-- 这不是我要打的活动。
@@ -235,6 +228,9 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         活动的版面**上标的，CODE:BOX 两页签版面下正好落在 Story 上）。
         用 cls：`活动quest`(未选中) 在场就点它；`活动quest_已选择` 在场说明
         已经在 Quest 页了。"""
+        if st.changed:
+            # 每次新进到活动页都重新给一次"没有 Quest 页签就退"的机会
+            self.state.pop("noquest_exiting", None)
         if obs.has(V.EVENT_QUEST_SEL, 0.40):
             return wait("已在 Quest 页签，等关卡行渲染")
         tab = obs.find(V.EVENT_QUEST, 0.35, region=(0.0, 0.0, 1.0, 0.34))
@@ -244,9 +240,24 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             self.state["tab_tries"] = int(self.state.get("tab_tries") or 0) + 1
             return tap_box(tab, "切到 Quest 页签")
         if self.stalled(st, 120):
-            return self.finish(Outcome.UNKNOWN,
-                               "活动页里既没有 `活动quest` 也没有 `活动quest_已选择`"
-                               " — 这个活动的版面没见过，交人看")
+            # 没有 Quest 页签 = 这个活动页上没有可打的关卡: 上期余韵期(底栏只剩 商店/任務/後日談)
+            #    或别的没关卡的版面。用户 09-03 口径: 能不能打**只看有没有入场行和关卡得星**,
+            #    不认 後日談 这类特征物(原 event_ended 页已删)。退出去重进(轮播闸再抽一次),
+            #    上限同引导型活动 GUIDE_HUB_MAX_TRIES, 到顶交人看。
+            #    计次按"进来一次"数(st.changed 边沿清标记), 不按 tick 数 -- 否则 3 tick 就到顶。
+            if not self.state.get("noquest_exiting"):
+                self.state["noquest_exiting"] = True
+                n = self.bump("noquest_hits")
+                self.log(f"活动页 120 帧没有 Quest 页签(第 {n} 次) -- 这个活动没有可打的关卡, 退出去重进")
+                if self.once("noquest_note"):
+                    self.note_lines.append("进到没有 Quest 页签的活动页(没有可打的关卡), 已退出重进")
+            n = int(self.state.get("noquest_hits", 0))
+            cap = int(self.cfg.get("guide_hub_max_tries", GUIDE_HUB_MAX_TRIES) or GUIDE_HUB_MAX_TRIES)
+            if n > cap:
+                return self.finish(Outcome.UNKNOWN,
+                                   "活动页里既没有 `活动quest` 也没有 `活动quest_已选择`,"
+                                   f" 退出重进 {cap} 次仍如此 -- 这个活动的版面没见过, 交人看")
+            return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
         return wait("等 Quest 页签 cls")
 
     #  关卡列表

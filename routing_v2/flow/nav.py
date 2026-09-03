@@ -48,7 +48,6 @@ _PARENT = {
     "event_page": "task_hall",
     "event_quest_list": "task_hall",
     "event_guide_hub": "task_hall",
-    "event_ended": "task_hall",
     "event_shop": "event_page",
     "cafe": "lobby",
     "cafe_invite_list": "cafe",
@@ -293,7 +292,7 @@ _EXITABLE = {
     "shop", "arena_shop", "mail", "daily_mission", "club", "momo_list",
     "momo_chat", "story_hub", "story_nodes", "task_hall", "arena",
     "bounty_branch", "bounty_stage", "jfd_academy", "jfd_stage",
-    "campaign_stage", "event_page", "event_quest_list", "event_ended", "event_shop",
+    "campaign_stage", "event_page", "event_quest_list", "event_shop",
     "facility",          # 没登记的设施页 —— 有退出控件，能安全走人
     "combo_pack", "confirm_dialog", "stage_popup",
     "sweep_dialog", "formation",

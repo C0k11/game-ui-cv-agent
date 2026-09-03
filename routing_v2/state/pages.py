@@ -301,15 +301,12 @@ PAGES: List[Sig] = [
                 V.EVENT_STORY, V.EVENT_STORY_SEL, V.EVENT_REWARD_INFO],
         priority=40, note="活动主页（还没确定在哪个页签）"),
 
-    Sig("event_ended",
-        any_of=[V.EVENT_AFTERSTORY],
-        priority=48, note="上期活动余韵期（後日談是它的特征物）—— 只能领尾奖，退出去"),
-
     # 它必须**盖过 event_quest_list(45)**：夏萊那两帧上 `活动商店` 0.55 +
     #    入场键 2 个，正好满足 event_quest_list 的 any_of + "至少一行关卡"，
     #    08-11 live 就是这么被认成关卡列表、然后去点「入場」的 —— 而那一下
     #    直接把 bot 送去普通 任務 关卡列表（**刷什么是用户的策略**，bot 不许自己选）。
-    #    priority 也要压过 event_shop(47) / event_ended(48)。
+    #    priority 也要压过 event_shop(47)。(event_ended 页 09-03 已删: 後日談 不再是页面判据,
+    #    上期余韵期的活动页按 event_page 走, 由 flow 用"有没有 Quest 页签"处理)
     Sig("event_guide_hub", pred=_is_event_guide_hub, priority=49,
         note="引导型活动主页（夏萊總結算这类）：遊戲指南写「不存在活動關卡」，"
              "「入場」按钮直接把你送去**普通** 任務/特殊任務。"
