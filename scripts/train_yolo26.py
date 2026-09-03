@@ -36,6 +36,11 @@ YOLO_ROOT = ML_CACHE / "models" / "yolo"
 
 # Global resume flag — set by main() from --resume CLI arg
 RESUME_FLAG: bool = False
+# Optional batch override for --resume (ultralytics check_resume allows imgsz/batch/
+# device/close_mosaic to change on resume). Use it to step down when WDDM shows
+# Non Local Usage > 0 (VRAM spill = silent slowdown); nbs=64 accumulation keeps the
+# effective batch ~constant (12x5=60, 10x6=60, 8x8=64).
+RESUME_BATCH: int = 0
 
 # Base weight — already in repo root + data/models
 BASE_WEIGHT_CANDIDATES = [
@@ -1110,6 +1115,35 @@ TRAIN_CONFIGS = {
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.0, "scale": 0.0, "translate": 0.0,
     },
+    "ui_yolo26m_v21": {
+        # v21 (2026-09-03) = v20 warm + 全池标注修复: 口径按金标吸附/按池批量系数 ~5,600 框, 活动商店 只框字转整图标 1,780,
+        #   改类 86, 删幽灵与蓝边条 209, 按 v20 检出补漏标 ~7,000(两态类用像素规则定状态);
+        #   新池 flywheel_v21_preset_20260903 26 帧(预设面板 5 个页签态 + 3/4部队高亮)。
+        # 超参照抄 v20 一个不动(只变数据)。nc 546 不变, 类表已转正 _classes.txt。
+        # 这轮最该验:
+        #   1 538 预设页签(v20 live 未选中页签 0 检出, 选中 0.41);
+        #   2 528 任务资讯 弹窗标题变体(v20 live 漏, 底部按钮变体正常);
+        #   3 步进器族 / 任务开始 / 快速编辑 口径统一后逐类 AP, 117 MAX_灰色 与 97 活动剧情_已选择 的 v20 回归是否恢复;
+        #   4 val 补了 ~2,700 漏标后整体 P 应上升(旧 val 把正确检出当假阳)。
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v20" / "weights" / "best.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 12,
+        "out_name": "ui_yolo26m_v21",
+        "cache": False,
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "ui_yolo26m_v20": {
         # v20 (2026-09-01) = v19 warm + 预设面板全族 / 多队部署侧 / story / cafe 补采。
         # 超参照抄 v19 一个不动(只变数据)。nc 535 -> 546:
@@ -1375,7 +1409,10 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
     if RESUME_FLAG and last_pt.exists():
         print(f"  RESUME from: {last_pt}")
         model = YOLO(str(last_pt))
-        results = model.train(resume=True)
+        resume_kwargs = {"batch": RESUME_BATCH} if RESUME_BATCH else {}
+        if resume_kwargs:
+            print(f"  resume override: {resume_kwargs}")
+        results = model.train(resume=True, **resume_kwargs)
         best = YOLO_ROOT / "runs" / cfg["out_name"] / "weights" / "best.pt"
         if best.exists():
             print(f"  done: {best}")
@@ -1471,12 +1508,16 @@ def main() -> int:
         help="Which dataset to train on (default: all)",
     )
     ap.add_argument("--dry-run", action="store_true", help="Print plan without training")
+    ap.add_argument("--batch", type=int, default=0,
+                    help="With --resume: override batch size (VRAM spill escape hatch)")
     ap.add_argument("--resume", action="store_true",
                     help="Resume from last.pt (preserves epoch + LR scheduler state)")
     args = ap.parse_args()
 
     global RESUME_FLAG
     RESUME_FLAG = args.resume
+    global RESUME_BATCH
+    RESUME_BATCH = args.batch
     targets = list(TRAIN_CONFIGS.keys()) if args.config == "all" else [args.config]
     results = []
     for cfg_name in targets:

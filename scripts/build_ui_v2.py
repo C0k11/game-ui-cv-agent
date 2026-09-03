@@ -402,6 +402,7 @@ REAL_SOURCES += _clean_dirs(FLYWHEEL_TRAIN_DAYS) + [
     #    目标类几何 = 本 session 检出同位 / v2alt_tabs 金标; 其余框 v19 预标 conf0.5
     #    按态 allowlist 过滤(scratchpad/_v20_gap_label.py)。同日单 session, 整批 train。
     "flywheel_v20_gap_20260902",
+    "flywheel_v21_preset_20260903",   # 09-03 live 采: 预设面板 5 个页签态 x4 帧 + 3/4部队高亮 x3 帧, 页签框按版式几何标(v20 live 未选中页签 0 检出)
 ]
 REAL_SOURCES = [s for s in REAL_SOURCES if s not in set(MOVED_TO_VAL)]
 VAL_SOURCES += _clean_dirs(FLYWHEEL_VAL_DAYS) + [

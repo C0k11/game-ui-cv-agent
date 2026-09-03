@@ -40,10 +40,10 @@
     }
   },
   "ui": {
-    "active": "v19",
+    "active": "v20",
     "_rollback_note": "2026-08-19 上线 v18 做弱类 live 对账 (用户拍板「配置好」)。回滚: active 改回 v17 秒退。v16-v18 部署的都是训练端 best.pt strip 形 (45.7MB), 推理必须 imgsz=960。",
     "task": "detect",
-    "n_classes": 531,
+    "n_classes": 546,
     "n_classes_in_use": 160,
     "_infer_imgsz": 960,
     "_infer_note": "MUST infer at imgsz=960 (training size). @1920 = 0 detections.",
@@ -251,8 +251,19 @@
         "nc": 535,
         "trained": "2026-08-26",
         "note": "v18 warm + 大厅换皮补采(flywheel_v19_ui_20260821 592帧/8203框, 五轮人审). nc 531->535 新增 531-534 预设族. best=ep30, 60 epoch 早停. 干净尺子(ui_v2_valclean, 剔掉923个硬泄漏)上 mAP50 0.9693/50-95 0.9510, 同尺 v18 是 0.9673/0.9464. FP16(和 v18 同条件); 若 live 出双框, 退路是同一个 best 的未 strip FP32 版 epoch30.pt."
+      },
+      "v20": {
+        "path": "D:/Project/ml_cache/models/yolo/runs/ui_yolo26m_v20/weights/best.pt",
+        "model_arch": "yolo26m",
+        "trained_on": "2026-09-03",
+        "n_classes": 546,
+        "epoch_deployed": "ep56 best (70ep, v19 warm), strip 45.7MB",
+        "notes": "nc 535->546: 预设族 531-541 / 542 部署菜单_解除 / 543 走格子_起点悬停 / 544 3部队高亮 / 545 4部队高亮; 141/432 统称 双箭头跳过键. 同尺对账(val<535 类) v20 0.9554 vs v19 0.9553, P 0.922->0.946. 全 546 类 val mAP50-95 0.9562.",
+        "known_gap": "528 任务资讯 val AP 0.065 (7 实例); 432 P 0.60 误报多; 117 MAX_灰色 0.965->0.895, 97 活动剧情_已选择 0.982->0.912 回归待 live 看; 542-545 val=0.",
+        "acceptance": "2026-09-03 live 验收中: 预设链 531-541 / 437 地图皮 / 542-545 / 109 vs 108 / 62 / 468 / 141 统称. 回滚: active 改回 v19 秒退."
       }
-    }
+    },
+    "_prev_active": "v19"
   },
   "emoticon": {
     "active": "v26n",
