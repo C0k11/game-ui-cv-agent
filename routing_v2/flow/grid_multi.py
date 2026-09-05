@@ -340,7 +340,26 @@ class GridMultiMixin:
             if L and L not in dep:
                 want = (L, sp)
         if want is None:
-            # 剩下的起点没有标记可见: 多半被底部卡条/屏边挡住 -> 朝它的推算位置拖地图
+            # 标记(543/501)检不出但那个起点本身就在屏内(09-05 replay: v21 对倒三角时有时无) -> 等 8 帧, 还没标记就
+            #    直接点它: 它不在 mt_deployed 里, 上面没队(有队的起点标记才会消失, 而我们数的就是这个)。
+            #    真被卡条/屏边挡住(推算位置在屏外或底部卡条带)才拖地图。
+            for L in remaining:
+                v = mapd["starts"].get(L)
+                if not v:
+                    continue
+                ex, ey = px_of(tuple(v), origin, dx, dy)
+                if 0.05 < ex < 0.95 and 0.10 < ey < 0.70:
+                    sb_near = min(sb, key=lambda b: (b.cx - ex) ** 2 + (b.cy - ey) ** 2, default=None)
+                    if sb_near is not None and (sb_near.cx - ex) ** 2 + (sb_near.cy - ey) ** 2 < (0.5 * dx) ** 2:
+                        if self.bump("mt_nomark") < 8:
+                            return wait(f"起点 {L} 在屏内但标记没检出, 等几帧再点(第 {self.state['mt_nomark']} 帧)")
+                        self.state["mt_nomark"] = 0
+                        self.state["mt_dep_target"] = L
+                        act = tap_box(sb_near, f"点起点 {L} 上队(标记 8 帧没检出, 起点在屏内且未记上场, 第 {len(dep) + 1}/{need} 队)",
+                                      expect=(V.SORTIE,))
+                        act.x, act.y = sb_near.cx, sb_near.y1 + 0.30 * (sb_near.y2 - sb_near.y1)
+                        return act
+            # 剩下的起点没有标记可见且不在屏内: 多半被底部卡条/屏边挡住 -> 朝它的推算位置拖地图
             return self._mt_drag_to_start(mapd, remaining, origin, dx, dy, cs)
         L, sp = want
         self.state["mt_dep_target"] = L
@@ -484,6 +503,11 @@ class GridMultiMixin:
                 return self.finish(Outcome.UNKNOWN, "回合中 60s 点阵对不齐(起点/格子检出不足) -- 不瞎点")
             return wait("点阵对齐中")
         self._wt_clear("mt_walk_align")
+        # 相机两帧共识: 开局/每次行动后地图会平移 1-2s, 平移中按上一帧算的落点会打到格界(09-05 第 6 次 live:
+        #    首发落在两格缝上没走, 10s 后才重发)。原点比上一帧漂 > 0.01 就只观察不落子。
+        lo = self.state.get("mt_last_origin")
+        self.state["mt_last_origin"] = [origin[0], origin[1]]
+        camera_still = (lo is not None and abs(lo[0] - origin[0]) < 0.01 and abs(lo[1] - origin[1]) < 0.01)
         focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
         pos: Dict[str, Optional[list]] = self.state.setdefault("mt_pos", {})
         # 上一发的事后证据
@@ -513,6 +537,8 @@ class GridMultiMixin:
                 return wait(f"等动作 {pend['ai'] + 1} 的事后证据(焦点/相位)")
         if ai >= len(acts):
             return self._mt_round_issued(acts)
+        if not camera_still:
+            return wait("相机在平移(原点两帧不一致), 等它停稳再落子")
         act = acts[ai]
         team = act.get("team")
         do = act.get("do", "move")
@@ -533,7 +559,10 @@ class GridMultiMixin:
                        justify="左下角「N部隊」切队药丸没有 cls(v22 采了料); 16:9 部署/回合 HUD 固定, 三关 40+ 帧位置不变; "
                                "点空只是不换焦点, 下一帧箭头位置就是证据, 有界重试后 UNKNOWN",
                        require=V.PHASE_END)
-            a.progress = f"focus:{focus or '?'}:{n}"
+            # progress 只放**观测到的焦点**, 不放尝试次数: 09-05 live 第 6 次 run 把次数放进去, 连发闸把每一发
+            #    都当"有进展", 6 tick 连点 6 下药丸, 焦点在 A/B 间来回翻, 读数永远追不上。焦点没变时交给连发闸
+            #    按 retry_frames 节流(约 2-4s 一发), 正好给相机平移和箭头刷新留时间。
+            a.progress = f"focus:{focus or '?'}"
             return a
         cur = pos.get(team)
         if cur is None:

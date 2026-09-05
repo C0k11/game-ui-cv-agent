@@ -4779,6 +4779,41 @@ def t_grid_multi_0905():
     class _SVe:
         page = "unknown"; frames_in_page = 60; last_solid = "unknown"; overlay = None
     check("nav: unknown+接近空屏 60 帧 -> 空屏逃生点背景唤醒", _nav.blank_escape(_SVe(), obs=empty) is not None)
+    # 09-05 第 6 次 live 复盘: 相机平移中不落子 / 标记检不出但起点在屏内 8 帧后直接点 / 多队中途断掉 -> 中斷任務
+    fl6 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    fl6.goto("walk")
+    fl6.state.update(mt_map=mp, mt_pos={"A": [0, 0], "B": [4, -2]}, round_i=0)
+    fl6.mt_new_round()
+    mv1 = O(*[cellB(x + 0.03, y) for x, y in cells], startB(0.313 + 0.03, 0.599, V.GRID_START_GREY),
+            B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.313 + 0.03, 0.42))
+    a = fl6.decide(ph, Machine(1).update(ph))
+    a = fl6.decide(mv1, Machine(1).update(mv1))
+    check("相机平移中(原点两帧差 0.03) -> 只等不落子", a is not None and a.kind == "wait" and "相机" in a.reason, str(a))
+    a = fl6.decide(mv1, Machine(1).update(mv1))
+    check("相机停稳(两帧原点一致) -> 落子", a is not None and a.kind == "tap" and abs(a.x - (0.358 + 0.03)) < 0.01, str(a))
+    fl7 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    fl7.goto("grid")
+    fl7.state.update(mt_map=mp, mt_deployed=["A"])
+    nomark = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599), startB(0.500, 0.367), B(V.TASK_START, cx=0.915, cy=0.923))
+    a = None
+    for _ in range(9):
+        a = fl7.decide(nomark, Machine(1).update(nomark))
+        if a is not None and a.kind == "tap":
+            break
+    check("起点 B 在屏内但标记 8 帧没检出 -> 直接点 B 的起点(不拖图)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.500) < 0.01 and fl7.state.get("mt_dep_target") == "B", str(a))
+    fl8 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    info = O(B(V.CONFIRM, cx=0.678, cy=0.822), B(V.CLOSE_X, cx=0.778, cy=0.138), B("体力", cx=0.441, cy=0.032))
+    class _SVi:
+        page = "unknown"; frames_in_page = 5; last_solid = "unknown"; overlay = None; changed = False; flapping = False
+    a = fl8.decide(info, _SVi())
+    check("多队关中途断掉再进(任務資訊框, 无地图) -> 点 中斷任務(確認左移 0.358), 不点確認续走",
+          a is not None and a.kind == "tap" and abs(a.x - (0.678 - 0.358)) < 0.01 and abs(a.y - 0.822) < 0.01 and a.require == V.CONFIRM, str(a))
+    _c1 = cfg()
+    _c1["campaign"] = {"stage": "3-1"}
+    fl9 = ALL["campaign"](Ctx(cfg=_c1, log=lambda m: None))
+    a = fl9.decide(info, _SVi())
+    check("单队关同一框仍点確認续走(老行为不变)", a is not None and a.target_cls == V.CONFIRM, str(a))
 
 
 if __name__ == "__main__":

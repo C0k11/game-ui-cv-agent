@@ -541,6 +541,17 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
         if (st.page in ("battle_result", "unknown")
                 and obs.has(V.CONFIRM, 0.45) and obs.has(V.CLOSE_X, 0.45)):
             cf = obs.find(V.CONFIRM, 0.45)
+            # 多队关中途断掉再进来: 队伍位置/点阵地图都没了, 续走等于瞎走 -> 中斷任務(退还大部分 AP)重来。
+            #    中断任务 cls(526)欠拟合检不出, 用同排三键几何: 中斷任務 / 重新挑戰 / 確認 等距, 間距 0.178
+            #    (09-05 10-4 实帧: 0.320 / 0.500 / 0.678, cy 同 0.822); 锚 確認 在场才点, 之后弹「是否中斷」
+            #    双键框由通用确认处理器点確認。
+            if self._multi() and not self.state.get("mt_map") and self.pending("mt_abort"):
+                a = tap_at(cf.cx - 0.358, cf.cy,
+                           "多队关中途断掉, 无地图无位置 -- 中斷任務 重来(退 AP)",
+                           justify="任務資訊框三键等距同排, 中斷任務 = 確認 左移 2 x 0.179(09-05 实帧); 中断任务 cls 欠拟合; "
+                                   "点空只是框还开着, 下一帧再来; 錨 確認 必须在场",
+                           require=V.CONFIRM, once="mt_abort")
+                return a
             return tap_box(cf, "关掉任務資訊框（点確認, 任务继续）")
         return wait("等任务大厅")
 
