@@ -42,6 +42,7 @@ HEADPAT_DRY_FRAMES = 7
 PAT_SETTLE_SEC = 1.4
 MAX_PANS_PER_FLOOR = 2
 MAX_PATS_PER_FLOOR = 40
+HP_LOST_S = 8.0          # 邀请后进场动画 3-5s 不在主视图; 09-05 用 40 帧(23fps 下 1.7s)判"离开"把两个厅的摸头相位都跳过了
 
 
 class CafeFlow(ExitMixin, Flow):
@@ -438,6 +439,14 @@ class CafeFlow(ExitMixin, Flow):
                 return b
         return None
 
+    def _mark_swept(self) -> None:
+        """记下"这个厅扫干净过"(厅号是 _verify_floor 每帧按屏上按钮校正过的)."""
+        fl = int(self.state.get("floor", 1) or 1)
+        sw = list(self.state.get("swept_floors") or [])
+        if fl not in sw:
+            sw.append(fl)
+        self.state["swept_floors"] = sw
+
     def _headpat(self, obs, st, *, nxt: str):
         """当前视角 loop-until-dry -> 左滑露出右侧 -> 右滑（2 倍距离）露出左侧 -> 收工。
 
@@ -469,10 +478,18 @@ class CafeFlow(ExitMixin, Flow):
             #    过场动画期主视图锚点全被盖住, 原来 12 tick 就跳走 --
             #    优香刚被请进来, 头一次都没摸到。`hold` 是连续性计数,
             #    中途认出一帧就归零, 不会把偶发漏检累加成放弃。）
-            if self.hold("hp_lost", 40):
-                return self.goto_and_wait(nxt, "不在咖啡厅主视图了")
+            # 09-05 用户抓到 2 号厅一次没摸: 邀请兑现后主视图被进场动画盖 3-5s, 40 帧就判"不在主视图"离开了摸头相位
+            #    (两个厅都发生), 之后靠黄点兜底只回了 1 号厅. 改墙钟 HP_LOST_S.
+            t0 = float(self.state.get("hp_lost_t", 0) or 0)
+            if not t0:
+                self.state["hp_lost_t"] = time.time()
+            elif time.time() - t0 > HP_LOST_S:
+                self.state["hp_lost_t"] = 0
+                return self.goto_and_wait(nxt, f"不在咖啡厅主视图了({HP_LOST_S:.0f}s)")
             return wait("等回到咖啡厅主视图（过场/动画中）")
+        self.state["hp_lost_t"] = 0
         if self.state.get("pats", 0) >= MAX_PATS_PER_FLOOR:
+            self._mark_swept()
             return self.goto_and_wait(nxt, "摸头到上限")
 
         # 摸完一个要等动画走完再摸下一个，不然第二下会落在动画中途的空位上。
@@ -507,6 +524,7 @@ class CafeFlow(ExitMixin, Flow):
 
         pans = self.state.get("pans", 0)
         if pans >= MAX_PANS_PER_FLOOR:
+            self._mark_swept()
             return self.goto_and_wait(nxt, "两个方向都扫干净了")
         fl = self.state.get("floor", 1)
         done = lambda n=pans + 1, d=dwell: self._after_pan(n, d)
@@ -591,9 +609,13 @@ class CafeFlow(ExitMixin, Flow):
                     self.state["backs"] += 1
                     self.state.update(floor=d, expect_floor=d, pat_ts=0.0,
                                       dry=0, pans=0, patted=[])
-                if not self.state.get("reswept"):
-                    self.state["reswept"] = True
-                    self.goto("headpat2", "黄点挂在移动按钮上，过去再扫一遍")
+                # 09-05: 一次性的 reswept 让第二次回头(去 2 号厅)只挪不扫, 2 号厅零摸头.
+                #    按厅记"扫干净过", 没扫过的厅就过去再扫(每厅最多 2 次, 外层 backs<4 兜底).
+                swept = self.state.get("swept_floors") or []
+                k = int(self.state.get(f"resweep:{dst}", 0))
+                if dst not in swept and k < 2:
+                    self.state[f"resweep:{dst}"] = k + 1
+                    self.goto("headpat2", f"黄点挂在移动按钮上, {dst} 号厅还没扫干净过, 过去扫")
                 return tap_box(mv, f"黄点挂在移动按钮上 - 去 {dst} 号厅",
                                post=_mv)
         pats, inv = self.state.get("pats", 0), self.state.get("invited", 0)
