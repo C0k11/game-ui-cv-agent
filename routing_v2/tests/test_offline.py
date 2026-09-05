@@ -4959,6 +4959,17 @@ def t_grid_multi_0905():
         if fl.state.get("mt_pos", {}).get("A") is not None:
             break
     check("位置未知的队按箭头绑回 (8,0)", fl.state.get("mt_pos", {}).get("A") == [8, 0], str(fl.state.get("mt_pos")))
+    # 两支队都位置未知(都传送过), 全员行动完等新回合: 箭头出现在未知格 = 新回合聚焦部队 1 的队 -> 绑给它
+    fl.state.update(issued=True, mt_pending=None, mt_ai=2, cycling=False)
+    fl.state["mt_pos"] = {"A": None, "B": None}
+    fl.state["mt_team_squad"] = {"A": 2, "B": 1}
+    fl.state["mt_acted"] = ["A", "B"]
+    fl.state["mt_issue_t"] = 0
+    cs_, sb_ = [c for c in cells], []
+    got = fl._mt_focus(O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.688, 0.42)),
+                       cs_, dx, dy, (0.313, 0.599))
+    check("两队未知 + 等新回合: 箭头 (8,0) 归部队 1 的队 B", got[0] == "B" and fl.state["mt_pos"].get("B") == [8, 0] and fl.state["mt_pos"].get("A") is None, f"{got} {fl.state['mt_pos']}")
+    fl.state["mt_pos"]["A"] = [8, 0]; fl.state["mt_pos"]["B"] = None
     # 11-3 第 5 跑: 最后一个行动的队踩传送格 -> 传送后没有别的队可切, 焦点不离开它; 相位循环没抓到, 新回合箭头在它头上的
     #    **新位置** -- 箭头连续两帧落在所有已知队之外的格 = 已传送到那(位置改绑), 传送成立
     fl.state.update(issued=False, mt_pending=None, mt_ai=1, mt_need_end=False, cycling=False, round_i=0, mt_settle_until=0, mt_focus_prev=None)

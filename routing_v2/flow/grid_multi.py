@@ -759,10 +759,23 @@ class GridMultiMixin:
         if pend and pend.get("do") in ("move", "exchange") and tuple(l) == tuple(pend.get("target") or ()):
             return pend["team"], l
         unknown = [L for L, v in pos.items() if v is None]
-        if len(unknown) == 1:
-            pos[unknown[0]] = list(l)
-            self.log(f"队 {unknown[0]}(传送后位置未知) 按箭头绑回 {l}")
-            return unknown[0], l
+        if unknown:
+            cand = unknown[0] if len(unknown) == 1 else None
+            if cand is None:
+                # 多支队位置未知(H15-3 第 11 跑: A、C 都传送了): 按游戏规则此刻该聚焦谁就绑谁 --
+                #    全员行动完(等新回合)是部队 1 的队, 回合中是部队号最小的没行动队; 它位置未知才绑, 否则不猜.
+                sq = self.state.get("mt_team_squad") or {}
+                acted = set(self.state.get("mt_acted") or [])
+                if self.state.get("issued") or all(L in acted for L in pos):
+                    order = sorted(pos.keys(), key=lambda L: int(sq.get(L, 99) or 99))
+                else:
+                    order = sorted([L for L in pos if L not in acted], key=lambda L: int(sq.get(L, 99) or 99))
+                if order and order[0] in unknown:
+                    cand = order[0]
+            if cand is not None:
+                pos[cand] = list(l)
+                self.log(f"队 {cand}(传送后位置未知) 按箭头绑回 {l}" + (f"(未知的还有 {[L for L in unknown if L != cand]}, 按部队号规则归它)" if len(unknown) > 1 else ""))
+                return cand, l
         # 传送中的队(点了传送格还没拿到证据, 11-3 第 5 跑实锤): 它是本回合最后一个行动的队时传送后没有别的队可切, 焦点不离开它,
         #    相位循环又没抓到 -> 新回合箭头在它头上的**新位置**. 箭头连续两帧落在所有已知队之外(也不是原位/传送格)的同一格 =
         #    它已传送到那, 位置改绑.
