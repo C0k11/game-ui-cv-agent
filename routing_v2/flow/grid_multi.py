@@ -693,10 +693,14 @@ class GridMultiMixin:
         if (focus is None and idle_ok and not pend and obs.find(V.GRID_ARROW, 0.25) is None):
             acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
             rest = [L for L, v in pos.items() if v is not None and L not in acted]
-            if len(rest) == 1:
+            # 游戏规则: 回合开局聚焦部队 1, 之后自动切给**部队号最小**的没行动的队 -> 没行动的队按部队号排, 第一个就是焦点
+            #    (11-3 实锤: 开局箭头整段检不出, 两队都没行动, 上一版只处理"只剩一队"于是干等 25s 收工)
+            sq = self.state.get("mt_team_squad") or {}
+            rest.sort(key=lambda L: int(sq.get(L, 99) or 99))
+            if rest and (len(rest) == 1 or all(L in sq for L in rest)):
                 focus, focus_lat = rest[0], tuple(pos[rest[0]])
                 if self.bump("mt_focus_infer") % 40 == 1:
-                    self.log(f"箭头没检出(立绘遮挡?), 本回合只剩队 {focus} 没行动, 按自动切队规则视焦点为它")
+                    self.log(f"箭头没检出(立绘遮挡?), 没行动的队按部队号 {[(L, sq.get(L)) for L in rest]} 排, 视焦点为 {focus}")
         if focus is not None:
             self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
         if not idle_ok:
