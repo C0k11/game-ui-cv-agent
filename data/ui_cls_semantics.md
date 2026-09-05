@@ -1,4 +1,4 @@
-# ui cls 语料库 -- _classes_next.txt nc=546 / ui_v2 build 2026-09-02 03:09
+# ui cls 语料库 -- _classes_next.txt nc=563 / ui_v2 build 2026-09-05 12:00
 
 > **写任何检测/导航逻辑前先查这里**。判断一律用 cls, OCR 只读数字。
 > 事实层(idx / 框数 / vocab / 引用) 由 `scripts/gen_cls_corpus.py` 从
@@ -8,15 +8,15 @@
 
 | | |
 |---|---|
-| master 表总行数 | 546（现役 479 / 废案 67） |
-| 其中 **UI 模型自己的类** | **208**（这才是 UI 的分母） |
+| master 表总行数 | 563（现役 496 / 废案 67） |
+| 其中 **UI 模型自己的类** | **225**（这才是 UI 的分母） |
 | 其中 学生名（avatar 模型, idx 143-394） | 252，在 ui_v2 里有框的 0 |
 | 其中 战场实体（battle 模型, idx 476-483） | 8（用户点名不进 UI） |
-| ui_v2 train | 563,133 框 / 38,861 帧 |
-| ui_v2 val | 155,454 框 / 11,048 帧 |
-| UI 类 **train=0**（模型没学过） | **5** |
-| UI 类 **val=0**（测不出来） | **18** |
-| UI 类 **不在 vocab**（代码用不上） | **5** |
+| ui_v2 train | 629,213 框 / 43,237 帧 |
+| ui_v2 val | 144,817 框 / 10,062 帧 |
+| UI 类 **train=0**（模型没学过） | **7** |
+| UI 类 **val=0**（测不出来） | **24** |
+| UI 类 **不在 vocab**（代码用不上） | **22** |
 
 禁 **`_classes.txt` 是三个模型共用的 master 表** —— 拿 528 当 UI 分母会
    把 252 个学生名算成「UI 缺口」（[[val_set_crisis]] 那条教训）。上表已分段。
@@ -30,214 +30,252 @@
 
 | 族 | idx | 类名 | train | val | vocab | 被谁用 |
 |---|---|---|---|---|---|---|
-| **MAX** | 111 | `MAX_可点击` | 680 | 132 | o | base,event_shop,facilities,gate,money |
-|  | 117 | `MAX_灰色` | 907 | 183 | o | base,money |
-| **MIN** | 112 | `MIN_灰色` | 997 | 262 | o | money |
-|  | 114 | `MIN_可点击` | 575 | 55 | o | facilities,money |
-| **任务开始** | 109 | `任务开始` | 1,253 | 226 | o | arena,campaign,event,gate,pages,sweep |
-|  | 521 | `任务开始_灰色` | 244 | 19 | o | campaign,pages |
-| **信用点商店** | 54 | `信用点商店_已选中` | 863 | 270 | o | facilities,pages |
+| **MAX** | 111 | `MAX_可点击` | 519 | 93 | o | base,event_shop,facilities,gate,money |
+|  | 117 | `MAX_灰色` | 1,162 | 212 | o | base,money |
+| **MIN** | 112 | `MIN_灰色` | 1,061 | 249 | o | money |
+|  | 114 | `MIN_可点击` | 586 | 55 | o | facilities,money |
+| **任务开始** | 109 | `任务开始` | 1,374 | 202 | o | arena,campaign,event,gate,grid_multi,pages,sweep |
+|  | 521 | `任务开始_灰色` | 286 | 25 | o | campaign,grid_multi,pages |
+| **信用点商店** | 54 | `信用点商店_已选中` | 881 | 261 | o | facilities,pages |
 |  | 62 | `信用点商店` 注意val=0 | 30 | 0 | o | facilities,gate |
-| **全部领取** | 107 | `全部领取_黄` | 239 | 39 | o | event,facilities,gate,money,pages |
-|  | 413 | `全部领取_灰色` | 254 | 47 | o | facilities,pages |
-| **双箭头跳过键** | 141 | `双箭头跳过键` | 336 | 205 | o | gate,interrupt,pages |
-|  | 432 | `双箭头跳过键_不可用` | 70 | 139 | o | - |
-| **完成** | 426 | `完成` | 257 | 347 | o | facilities,mining,pages |
-|  | 490 | `完成_灰色` | 71 | 34 | o | facilities |
-| **批量扫荡方案** | 493 | `批量扫荡方案` | 273 | 42 | **x** | - |
+| **全部领取** | 107 | `全部领取_黄` | 254 | 34 | o | event,facilities,gate,money,pages |
+|  | 413 | `全部领取_灰色` | 267 | 51 | o | facilities,pages |
+| **双箭头跳过键** | 141 | `双箭头跳过键` | 433 | 208 | o | gate,interrupt,pages |
+|  | 432 | `双箭头跳过键_不可用` | 89 | 235 | o | - |
+| **完成** | 426 | `完成` | 259 | 348 | o | facilities,mining,pages |
+|  | 490 | `完成_灰色` | 74 | 34 | o | facilities |
+| **批量扫荡方案** | 493 | `批量扫荡方案` | 274 | 42 | **x** | - |
 |  | 494 | `批量扫荡方案_已选中` | 47 | 7 | **x** | - |
-| **活动quest** | 94 | `活动quest` | 81 | 215 | o | event,pages |
-|  | 100 | `活动quest_已选择` | 947 | 370 | o | event,pages |
-| **活动剧情** | 93 | `活动剧情` | 431 | 390 | o | pages |
-|  | 97 | `活动剧情_已选择` | 3 | 286 | o | pages |
-| **简易攻略** | 422 | `简易攻略` | 149 | 36 | o | campaign |
+| **活动quest** | 94 | `活动quest` | 463 | 284 | o | event,pages |
+|  | 100 | `活动quest_已选择` | 1,144 | 273 | o | event,pages |
+| **活动剧情** | 93 | `活动剧情` | 635 | 279 | o | event,pages |
+|  | 97 | `活动剧情_已选择` | 32 | 270 | o | event,pages |
+| **简易攻略** | 422 | `简易攻略` | 169 | 36 | o | campaign |
 |  | 496 | `简易攻略_已选中` 注意val=0 | 36 | 0 | o | campaign,pages |
-| **货币** | 101 | `货币_已选择` | 963 | 390 | o | event_shop,gate,pages |
-|  | 102 | `货币` | 600 | 864 | o | event_shop,gate,pages |
-| **走格子_起点** | 500 | `走格子_起点_黄` | 1,216 | 54 | o | campaign,grid,pages |
-|  | 506 | `走格子_起点_灰` | 2,425 | 260 | o | campaign,grid,pages |
-| **预设_复制** | 536 | `预设_复制` | 72 | 10 | o | - |
-|  | 537 | `预设_复制_灰色` | 90 | 8 | o | - |
-| **预设_组成** | 533 | `预设_组成` | 74 | 10 | o | gate,preset |
-|  | 534 | `预设_组成_灰色` | 96 | 8 | o | preset |
-| **预设页签** | 538 | `预设页签` | 324 | 36 | o | preset |
-|  | 539 | `预设页签_已选中` | 81 | 9 | o | preset |
-| **领取** | 106 | `领取_黄` | 944 | 168 | o | facilities,gate,money |
-|  | 396 | `领取_灰` | 476 | 74 | o | - |
-| **领取奖励** | 89 | `领取奖励_黄` | 628 | 249 | o | arena,event,gate,money |
-|  | 90 | `领取奖励_灰` | 1,009 | 322 | o | - |
-| 1部队 | 119 | `1部队` | 183 | 17 | o | - |
-| 1部队高亮 | 125 | `1部队高亮` | 873 | 261 | o | - |
-| 2部队 | 126 | `2部队` | 301 | 36 | o | - |
-| 2部队高亮 | 120 | `2部队高亮` | 114 | 17 | o | - |
-| 3部队 | 123 | `3部队` | 385 | 54 | o | - |
-| 3部队高亮 | 544 | `3部队高亮` 注意val=0 | 30 | 0 | o | - |
-| 4部队 | 122 | `4部队` | 383 | 54 | o | - |
+| **货币** | 101 | `货币_已选择` | 970 | 436 | o | event_shop,gate,pages |
+|  | 102 | `货币` | 612 | 864 | o | event_shop,gate,pages |
+| **走格子_起点** | 500 | `走格子_起点_黄` | 1,579 | 96 | o | campaign,grid,grid_multi,pages |
+|  | 506 | `走格子_起点_灰` | 3,865 | 394 | o | campaign,grid,grid_multi,pages |
+| **预设_复制** | 536 | `预设_复制` | 510 | 51 | o | - |
+|  | 537 | `预设_复制_灰色` | 188 | 11 | o | - |
+| **预设_组成** | 533 | `预设_组成` | 516 | 50 | o | gate,preset |
+|  | 534 | `预设_组成_灰色` | 220 | 13 | o | preset |
+| **预设_读取** | 532 | `预设_读取` | 749 | 72 | o | preset |
+|  | 561 | `预设_读取_灰色` 注意val=0 | 40 | 0 | **x** | - |
+| **预设页签** | 538 | `预设页签` | 1,498 | 130 | o | preset |
+|  | 539 | `预设页签_已选中` | 390 | 31 | o | preset |
+| **领取** | 106 | `领取_黄` | 975 | 145 | o | facilities,gate,money |
+|  | 396 | `领取_灰` | 520 | 92 | o | - |
+| **领取奖励** | 89 | `领取奖励_黄` | 662 | 222 | o | arena,event,gate,money |
+|  | 90 | `领取奖励_灰` | 1,073 | 310 | o | - |
+| 1部队 | 119 | `1部队` | 360 | 21 | o | - |
+| 1部队高亮 | 125 | `1部队高亮` | 1,179 | 240 | o | - |
+| 2部队 | 126 | `2部队` | 566 | 50 | o | - |
+| 2部队高亮 | 120 | `2部队高亮` | 282 | 16 | o | - |
+| 3部队 | 123 | `3部队` | 808 | 62 | o | - |
+| 3部队高亮 | 544 | `3部队高亮` | 38 | 5 | o | - |
+| 4部队 | 122 | `4部队` | 816 | 67 | o | - |
 | 4部队高亮 | 545 | `4部队高亮` 注意val=0 | 30 | 0 | o | - |
-| Emoticon_Action | 451 | `Emoticon_Action` | 3,134 | 704 | o | cafe |
-| MomoTalk | 8 | `MomoTalk` | 6,048 | 1,578 | o | momotalk |
-| PHASE结束 | 503 | `PHASE结束` | 2,903 | 268 | o | campaign |
-| PHASE自动结束_已勾选 | 504 | `PHASE自动结束_已勾选` | 2,012 | 296 | o | campaign |
-| PHASE自动结束_未勾选 | 505 | `PHASE自动结束_未勾选` | 90 | 3 | o | campaign |
-| momotalk学生聊天区域已进入 | 449 | `momotalk学生聊天区域已进入` | 730 | 507 | o | momotalk,pages |
+| Emoticon_Action | 451 | `Emoticon_Action` | 3,275 | 706 | o | cafe |
+| MomoTalk | 8 | `MomoTalk` | 6,290 | 1,391 | o | momotalk |
+| PHASE结束 | 503 | `PHASE结束` | 3,739 | 306 | o | campaign,grid_multi,pages |
+| PHASE自动结束_已勾选 | 504 | `PHASE自动结束_已勾选` | 3,044 | 337 | o | campaign,grid_multi,pages |
+| PHASE自动结束_未勾选 | 505 | `PHASE自动结束_未勾选` | 90 | 3 | o | campaign,grid_multi,pages |
+| momotalk学生聊天区域已进入 | 449 | `momotalk学生聊天区域已进入` | 731 | 508 | o | momotalk,pages |
 | momotalk学生聊天区域按钮 | 448 | `momotalk学生聊天区域按钮` | 34 | 52 | o | momotalk,pages |
-| new | 429 | `new` | 428 | 407 | o | mining,pages |
-| skip键 | 137 | `skip键` | 227 | 49 | o | base,nav,pages |
-| 一次领取灰色 | 416 | `一次领取灰色` | 168 | 59 | o | facilities,pages |
-| 一次领取黄色 | 417 | `一次领取黄色` | 777 | 35 | o | facilities,gate,money,pages |
-| 一般能量饮料 | 473 | `一般能量饮料` | 2,263 | 105 | o | facilities |
-| 三一 | 407 | `三一` | 127 | 37 | o | - |
-| 下级能量饮料 | 472 | `下级能量饮料` | 2,376 | 130 | o | facilities |
-| 中断任务 | 524 | `中断任务` 注意val=0 | 2 | 0 | o | - |
-| 主线剧情 | 423 | `主线剧情` | 113 | 34 | o | mining,pages |
-| 任务关卡推图 | 67 | `任务关卡推图` | 1,375 | 424 | o | arena,campaign,event,mining,nav,pages,sweep |
-| 任务大厅入口 | 17 | `任务大厅入口` | 6,197 | 1,471 | o | arena,campaign,event,mining,nav,sweep |
-| 任务资讯 | 528 | `任务资讯` | 309 | 7 | o | campaign |
-| 体力 | 18 | `体力` | 34,385 | 8,979 | o | arena,battle,bounty,campaign,event,event_shop,facilities,jfd,ledger,mining,momotalk,money,pages,sweep |
-| 信用点 | 3 | `信用点` | 35,633 | 9,952 | o | facilities,ledger,money,pages |
-| 信用货币回收 | 454 | `信用货币回收` | 52 | 15 | o | - |
-| 免费 | 446 | `免费` | 470 | 127 | o | facilities,gate,interrupt,money |
-| 入场键 | 79 | `入场键` | 6,082 | 4,441 | o | campaign,event,mining,pages,sweep |
-| 入场键没解锁 | 82 | `入场键没解锁` | 3,125 | 319 | o | campaign,event,mining,pages,sweep |
-| 全体课程表 | 41 | `全体课程表` | 1,113 | 282 | o | pages,schedule |
-| 全部选择 | 55 | `全部选择` | 3,013 | 305 | o | facilities,gate,pages |
-| 全部选择灰 | 404 | `全部选择灰` | 305 | 66 | o | facilities,pages |
-| 关卡得星_0 | 83 | `关卡得星_0` | 1,673 | 226 | o | campaign,event,pages |
+| new | 429 | `new` | 428 | 410 | o | mining,pages |
+| skip键 | 137 | `skip键` | 308 | 54 | o | base,nav,pages |
+| 一次领取灰色 | 416 | `一次领取灰色` | 579 | 64 | o | facilities,pages |
+| 一次领取黄色 | 417 | `一次领取黄色` | 377 | 32 | o | facilities,gate,money,pages |
+| 一般能量饮料 | 473 | `一般能量饮料` | 2,271 | 99 | o | facilities |
+| 三一 | 407 | `三一` | 137 | 31 | o | - |
+| 下级能量饮料 | 472 | `下级能量饮料` | 2,385 | 127 | o | facilities |
+| 中断任务 | 524 | `中断任务` 注意val=0 | 38 | 0 | o | - |
+| 主线剧情 | 423 | `主线剧情` | 111 | 34 | o | mining,pages |
+| 任务关卡推图 | 67 | `任务关卡推图` | 1,527 | 341 | o | arena,campaign,event,mining,nav,pages,sweep |
+| 任务大厅入口 | 17 | `任务大厅入口` | 6,438 | 1,289 | o | arena,campaign,event,gate,mining,nav,sweep |
+| 任务资讯 | 528 | `任务资讯` | 1,003 | 32 | o | campaign |
+| 体力 | 18 | `体力` | 37,506 | 8,078 | o | arena,battle,bounty,campaign,event,event_shop,facilities,gate,jfd,ledger,mining,momotalk,money,nav,pages,sweep |
+| 信用点 | 3 | `信用点` | 38,898 | 9,011 | o | facilities,gate,ledger,money,nav,pages |
+| 信用货币回收 | 454 | `信用货币回收` | 59 | 15 | o | - |
+| 免费 | 446 | `免费` | 497 | 111 | o | facilities,gate,interrupt,money |
+| 入场键 | 79 | `入场键` | 7,026 | 3,819 | o | campaign,event,mining,pages,sweep |
+| 入场键没解锁 | 82 | `入场键没解锁` | 3,408 | 325 | o | campaign,event,mining,pages,sweep |
+| 全体课程表 | 41 | `全体课程表` | 1,190 | 275 | o | pages,schedule |
+| 全部选择 | 55 | `全部选择` | 2,673 | 220 | o | facilities,gate,pages |
+| 全部选择灰 | 404 | `全部选择灰` | 673 | 138 | o | facilities,pages |
+| 关卡得星_0 | 83 | `关卡得星_0` | 1,893 | 179 | o | campaign,event,pages |
 | 关卡得星_1 | 529 | `关卡得星_1` 禁train=0 | 0 | 0 | **x** | - |
-| 关卡得星_2 | 530 | `关卡得星_2` 注意val=0 | 43 | 0 | **x** | - |
-| 关卡得星_3 | 84 | `关卡得星_3` | 3,970 | 3,489 | o | campaign,event,pages |
-| 减号 | 115 | `减号` | 601 | 57 | o | facilities,money,sweep |
-| 减号灰色 | 113 | `减号灰色` | 800 | 254 | o | money,sweep |
-| 出击 | 124 | `出击` | 762 | 212 | o | arena,battle,campaign,gate,pages |
-| 制造入口 | 14 | `制造入口` | 5,877 | 1,581 | o | facilities |
-| 前往大厅文字按钮 | 138 | `前往大厅文字按钮` | 213 | 23 | o | - |
+| 关卡得星_2 | 530 | `关卡得星_2` | 44 | 1 | **x** | - |
+| 关卡得星_3 | 84 | `关卡得星_3` | 4,730 | 2,927 | o | campaign,event,pages |
+| 减号 | 115 | `减号` | 613 | 56 | o | facilities,money,sweep |
+| 减号灰色 | 113 | `减号灰色` | 879 | 234 | o | money,sweep |
+| 出击 | 124 | `出击` | 1,229 | 204 | o | arena,battle,campaign,gate,grid_multi,pages |
+| 切队药丸 | 546 | `切队药丸` 禁train=0 | 0 | 0 | **x** | - |
+| 切队药丸_1部队 | 557 | `切队药丸_1部队` | 582 | 15 | **x** | - |
+| 切队药丸_2部队 | 558 | `切队药丸_2部队` | 388 | 9 | **x** | - |
+| 切队药丸_3部队 | 559 | `切队药丸_3部队` | 78 | 12 | **x** | - |
+| 切队药丸_4部队 | 560 | `切队药丸_4部队` 禁train=0 | 0 | 0 | **x** | - |
+| 制造入口 | 14 | `制造入口` | 6,119 | 1,390 | o | facilities |
+| 前往大厅文字按钮 | 138 | `前往大厅文字按钮` | 245 | 23 | o | - |
 | 前往羁绊剧情 | 441 | `前往羁绊剧情` | 31 | 14 | o | momotalk,money,pages |
-| 剧情 | 68 | `剧情` | 1,367 | 422 | o | mining,nav |
-| 剧情menu | 431 | `剧情menu` | 409 | 113 | o | gate,interrupt,money,pages |
+| 剧情 | 68 | `剧情` | 1,517 | 338 | o | mining,nav |
+| 剧情menu | 431 | `剧情menu` | 410 | 114 | o | gate,interrupt,money,pages |
 | 剧情new | 428 | `剧情new` 禁train=0 | 0 | 0 | o | - |
-| 剧情中断退出 | 433 | `剧情中断退出` | 31 | 12 | o | interrupt,pages |
-| 剧情图标已完成 | 427 | `剧情图标已完成` | 450 | 437 | o | mining,pages |
-| 剧情图标未完成 | 430 | `剧情图标未完成` | 430 | 422 | o | mining,momotalk,pages |
+| 剧情中断退出 | 433 | `剧情中断退出` | 31 | 14 | o | interrupt,pages |
+| 剧情图标已完成 | 427 | `剧情图标已完成` | 450 | 442 | o | mining,pages |
+| 剧情图标未完成 | 430 | `剧情图标未完成` | 430 | 424 | o | mining,momotalk,pages |
 | 剧情观看 | 434 | `剧情观看` | 31 | 14 | o | interrupt |
-| 加号 | 26 | `加号` | 47,878 | 13,064 | o | money,sweep |
-| 加号灰色 | 116 | `加号灰色` | 922 | 204 | o | money,sweep |
-| 加载中 | 22 | `加载中` | 1,918 | 463 | o | money,pages |
-| 千年 | 408 | `千年` | 126 | 37 | o | - |
-| 千年研究所 | 40 | `千年研究所` | 275 | 24 | o | - |
-| 双倍或三倍活动进行中 | 452 | `双倍或三倍活动进行中` | 8,232 | 3,119 | o | - |
-| 取消键 | 118 | `取消键` | 1,225 | 346 | o | arena,base,event_shop,facilities,gate,interrupt,money,nav,pages |
-| 变更编辑标题 | 540 | `变更编辑标题` | 30 | 2 | o | pages,preset |
-| 右切换 | 1 | `右切换` | 8,026 | 2,228 | o | campaign,mining |
-| 咖啡厅入口 | 9 | `咖啡厅入口` | 6,013 | 1,686 | o | cafe,pages |
-| 咖啡厅收益 | 25 | `咖啡厅收益` | 1,517 | 313 | o | cafe,pages |
-| 咖啡厅邀请卷 | 24 | `咖啡厅邀请卷` | 585 | 156 | o | cafe,pages |
-| 商店入口 | 15 | `商店入口` | 6,004 | 1,602 | o | facilities |
-| 回大厅按钮 | 28 | `回大厅按钮` | 20,620 | 6,090 | o | gate,money,nav,pages |
-| 困难关卡 | 81 | `困难关卡` | 369 | 164 | o | campaign,pages |
-| 困难关卡选中 | 419 | `困难关卡选中` | 126 | 204 | o | campaign,pages |
-| 夏莱办公室 | 36 | `夏莱办公室` | 261 | 21 | o | schedule |
-| 夏莱居住区 | 37 | `夏莱居住区` | 270 | 22 | o | - |
-| 奖励资讯 | 475 | `奖励资讯` | 156 | 16 | o | event,pages |
-| 学生momotalk信息未读 | 439 | `学生momotalk信息未读` | 5,028 | 1,824 | o | momotalk,pages |
-| 学生信息回复选项 | 440 | `学生信息回复选项` | 378 | 89 | o | momotalk,pages |
-| 学生入口 | 11 | `学生入口` | 6,005 | 1,582 | o | - |
-| 学生发送信息中 | 438 | `学生发送信息中` | 457 | 125 | o | momotalk,pages |
-| 学院交流会 | 71 | `学院交流会` | 1,296 | 420 | o | jfd |
-| 学院交流会票 | 406 | `学院交流会票` | 530 | 172 | o | jfd,pages |
-| 左切换 | 0 | `左切换` | 8,767 | 2,555 | o | campaign,schedule |
+| 加号 | 26 | `加号` | 52,468 | 11,300 | o | money,nav,sweep |
+| 加号灰色 | 116 | `加号灰色` | 1,422 | 328 | o | money,sweep |
+| 加载中 | 22 | `加载中` | 2,409 | 475 | o | arena,grid_multi,money,pages |
+| 千年 | 408 | `千年` | 137 | 31 | o | - |
+| 千年研究所 | 40 | `千年研究所` | 278 | 23 | o | - |
+| 双倍或三倍活动进行中 | 452 | `双倍或三倍活动进行中` | 8,652 | 2,876 | o | - |
+| 取消键 | 118 | `取消键` | 1,313 | 337 | o | arena,base,event_shop,facilities,gate,interrupt,money,nav,pages |
+| 变更编辑标题 | 540 | `变更编辑标题` | 30 | 2 | o | grid_multi,pages,preset |
+| 右切换 | 1 | `右切换` | 8,482 | 1,995 | o | campaign,mining |
+| 咖啡厅入口 | 9 | `咖啡厅入口` | 6,262 | 1,499 | o | cafe,pages |
+| 咖啡厅收益 | 25 | `咖啡厅收益` | 1,571 | 307 | o | cafe,pages |
+| 咖啡厅邀请卷 | 24 | `咖啡厅邀请卷` | 608 | 182 | o | cafe,pages |
+| 商店入口 | 15 | `商店入口` | 6,240 | 1,411 | o | facilities |
+| 回大厅按钮 | 28 | `回大厅按钮` | 22,522 | 5,339 | o | gate,money,nav,pages |
+| 困难关卡 | 81 | `困难关卡` | 385 | 164 | o | campaign,pages |
+| 困难关卡选中 | 419 | `困难关卡选中` | 135 | 209 | o | campaign,pages |
+| 夏莱办公室 | 36 | `夏莱办公室` | 266 | 19 | o | schedule |
+| 夏莱居住区 | 37 | `夏莱居住区` | 276 | 20 | o | - |
+| 奖励资讯 | 475 | `奖励资讯` | 283 | 16 | o | event,pages |
+| 学生momotalk信息未读 | 439 | `学生momotalk信息未读` | 5,036 | 1,825 | o | momotalk,pages |
+| 学生信息回复选项 | 440 | `学生信息回复选项` | 378 | 90 | o | momotalk,pages |
+| 学生入口 | 11 | `学生入口` | 6,240 | 1,389 | o | - |
+| 学生发送信息中 | 438 | `学生发送信息中` | 457 | 129 | o | momotalk,pages |
+| 学院交流会 | 71 | `学院交流会` | 1,438 | 337 | o | jfd |
+| 学院交流会票 | 406 | `学院交流会票` | 573 | 154 | o | jfd,pages |
+| 左切换 | 0 | `左切换` | 9,247 | 2,397 | o | campaign,schedule |
 | 开始制造 | 444 | `开始制造` | 42 | 13 | o | facilities,gate,pages |
-| 开始制造灰色 | 485 | `开始制造灰色` | 377 | 11 | o | facilities,pages |
-| 弹窗叉叉 | 19 | `弹窗叉叉` | 9,175 | 2,461 | o | arena,base,cafe,campaign,event,facilities,gate,interrupt,momotalk,nav,pages,preset,schedule,sweep |
-| 後日談 | 491 | `後日談` | 235 | 737 | o | pages |
+| 开始制造灰色 | 485 | `开始制造灰色` | 377 | 13 | o | facilities,pages |
+| 弹窗叉叉 | 19 | `弹窗叉叉` | 9,964 | 2,341 | o | arena,base,cafe,campaign,event,facilities,gate,interrupt,momotalk,nav,pages,preset,schedule,sweep |
+| 後日談 | 491 | `後日談` | 568 | 404 | o | event,pages |
 | 快速制造 | 443 | `快速制造` | 161 | 36 | o | facilities,pages |
-| 快速编辑 | 121 | `快速编辑` | 1,057 | 278 | o | battle |
-| 悬赏通缉 | 69 | `悬赏通缉` | 1,280 | 414 | o | bounty |
-| 悬赏通缉票 | 85 | `悬赏通缉票` | 481 | 221 | o | bounty,pages |
+| 快速编辑 | 121 | `快速编辑` | 1,541 | 262 | o | battle |
+| 悬赏通缉 | 69 | `悬赏通缉` | 1,417 | 334 | o | bounty |
+| 悬赏通缉票 | 85 | `悬赏通缉票` | 565 | 160 | o | bounty,pages |
 | 战斗图标已完成 | 447 | `战斗图标已完成` 注意val=0 | 3 | 0 | o | - |
-| 战斗完成 | 467 | `战斗完成` | 185 | 26 | o | battle,money,pages |
-| 战斗开始 | 411 | `战斗开始` | 7 | 1 | o | - |
-| 战术大赛 | 75 | `战术大赛` | 1,218 | 404 | o | arena |
-| 战术大赛商店 | 469 | `战术大赛商店` | 95 | 20 | o | facilities,gate |
-| 战术大赛商店已选择 | 470 | `战术大赛商店已选择` | 2,401 | 135 | o | facilities,gate,pages |
-| 战术大赛商店货币 | 471 | `战术大赛商店货币` | 9,250 | 482 | o | facilities,pages |
-| 战术大赛对战选择区域 | 92 | `战术大赛对战选择区域` | 2,441 | 843 | o | arena |
-| 战术大赛票 | 91 | `战术大赛票` | 1,412 | 528 | o | arena,pages |
-| 房间区域未解锁 | 50 | `房间区域未解锁` | 2,089 | 103 | o | cafe,schedule |
-| 扫荡开始 | 108 | `扫荡开始` | 650 | 166 | o | arena,gate,nav,pages,sweep |
-| 批量扫荡 | 455 | `批量扫荡` | 526 | 375 | o | campaign,pages |
+| 战斗完成 | 467 | `战斗完成` | 234 | 32 | o | battle,money,pages |
+| 战斗开始 | 411 | `战斗开始` | 30 | 2 | o | - |
+| 战术大赛 | 75 | `战术大赛` | 1,348 | 330 | o | arena |
+| 战术大赛_失败 | 556 | `战术大赛_失败` 注意val=0 | 3 | 0 | **x** | - |
+| 战术大赛_胜利 | 555 | `战术大赛_胜利` 注意val=0 | 2 | 0 | **x** | - |
+| 战术大赛商店 | 469 | `战术大赛商店` | 99 | 18 | o | facilities,gate |
+| 战术大赛商店已选择 | 470 | `战术大赛商店已选择` | 2,414 | 130 | o | facilities,gate,pages |
+| 战术大赛商店货币 | 471 | `战术大赛商店货币` | 9,291 | 467 | o | facilities,pages |
+| 战术大赛对战选择区域 | 92 | `战术大赛对战选择区域` | 2,581 | 787 | o | arena |
+| 战术大赛票 | 91 | `战术大赛票` | 1,510 | 472 | o | arena,pages |
+| 房间区域未解锁 | 50 | `房间区域未解锁` | 2,157 | 120 | o | cafe,schedule |
+| 扫荡开始 | 108 | `扫荡开始` | 710 | 140 | o | arena,gate,nav,pages,sweep |
+| 批量扫荡 | 455 | `批量扫荡` | 560 | 375 | o | campaign,pages |
 | 批量扫荡开始 | 456 | `批量扫荡开始` | 112 | 11 | o | pages |
-| 批量扫荡开始灰色 | 457 | `批量扫荡开始灰色` | 68 | 24 | o | pages |
-| 招募入口 | 16 | `招募入口` | 6,014 | 1,691 | o | - |
-| 据点防御 | 453 | `据点防御` | 52 | 15 | o | - |
+| 批量扫荡开始灰色 | 457 | `批量扫荡开始灰色` | 68 | 31 | o | pages |
+| 招募入口 | 16 | `招募入口` | 6,250 | 1,499 | o | - |
+| 据点防御 | 453 | `据点防御` | 59 | 15 | o | - |
 | 支线剧情 | 425 | `支线剧情` | 89 | 34 | o | mining,pages |
-| 攻击编制 | 435 | `攻击编制` | 217 | 86 | o | arena |
+| 攻击编制 | 435 | `攻击编制` | 238 | 71 | o | arena |
 | 故事菜单键 | 140 | `故事菜单键` 禁train=0 | 0 | 0 | o | - |
-| 教室 | 88 | `教室` | 97 | 66 | o | - |
-| 普通关卡 | 420 | `普通关卡` | 126 | 203 | o | campaign,pages |
-| 普通关卡选中 | 80 | `普通关卡选中` | 395 | 164 | o | campaign,pages |
-| 材料不足 | 486 | `材料不足` | 146 | 11 | o | facilities |
-| 格黑娜 | 409 | `格黑娜` | 121 | 37 | o | - |
-| 格黑娜学院中央区 | 38 | `格黑娜学院中央区` | 274 | 22 | o | - |
-| 每日领奖 | 7 | `每日领奖` | 6,154 | 1,608 | o | facilities,money |
-| 沙漠铁道 | 87 | `沙漠铁道` | 96 | 66 | o | - |
-| 活动任务 | 96 | `活动任务` | 1,120 | 1,031 | o | event,pages |
-| 活动关卡产出额外加成 | 110 | `活动关卡产出额外加成` | 442 | 35 | o | - |
+| 教室 | 88 | `教室` | 119 | 46 | o | - |
+| 普通关卡 | 420 | `普通关卡` | 136 | 207 | o | campaign,pages |
+| 普通关卡选中 | 80 | `普通关卡选中` | 426 | 164 | o | campaign,pages |
+| 材料不足 | 486 | `材料不足` | 154 | 11 | o | facilities |
+| 格黑娜 | 409 | `格黑娜` | 130 | 31 | o | - |
+| 格黑娜学院中央区 | 38 | `格黑娜学院中央区` | 274 | 23 | o | - |
+| 每日领奖 | 7 | `每日领奖` | 6,406 | 1,413 | o | facilities,money |
+| 沙漠铁道 | 87 | `沙漠铁道` | 121 | 46 | o | - |
+| 活动任务 | 96 | `活动任务` | 1,679 | 584 | o | event,pages |
+| 活动关卡产出额外加成 | 110 | `活动关卡产出额外加成` | 472 | 32 | o | - |
 | 活动剧情关卡_已看 | 98 | `活动剧情关卡_已看` 禁train=0 | 0 | 0 | o | - |
-| 活动商店 | 95 | `活动商店` | 1,234 | 1,353 | o | event_shop,pages |
+| 活动商店 | 95 | `活动商店` | 1,887 | 824 | o | event,event_shop,pages |
 | 活动站斗关卡_已打 | 99 | `活动站斗关卡_已打` 禁train=0 | 0 | 0 | o | - |
-| 灰色确认 | 23 | `灰色确认` | 103 | 92 | o | base,event,event_shop,facilities,money,pages,sweep |
-| 点击继续字样 | 142 | `点击继续字样` | 519 | 149 | o | base,battle,facilities,interrupt,money,nav,pages |
-| 特殊任务 | 70 | `特殊任务` | 1,356 | 423 | o | nav |
+| 灰色确认 | 23 | `灰色确认` | 106 | 91 | o | base,event,event_shop,facilities,money,pages,sweep |
+| 点击继续字样 | 142 | `点击继续字样` | 553 | 142 | o | base,battle,facilities,interrupt,money,nav,pages |
+| 特殊任务 | 70 | `特殊任务` | 1,505 | 340 | o | nav |
 | 短篇剧情 | 424 | `短篇剧情` | 90 | 34 | o | mining,pages |
-| 确认键 | 20 | `确认键` | 3,527 | 598 | o | arena,base,battle,cafe,campaign,event_shop,facilities,gate,interrupt,mining,momotalk,money,nav,pages,schedule,sweep |
-| 社交入口 | 13 | `社交入口` | 6,006 | 1,615 | o | facilities |
-| 社团 | 51 | `社团` | 114 | 60 | o | facilities,pages |
-| 移动至2号点 | 27 | `移动至2号点` | 991 | 286 | o | cafe,pages |
-| 移动至一号店 | 34 | `移动至一号店` | 517 | 129 | o | cafe,pages |
-| 立即前往 | 468 | `立即前往` 注意val=0 | 70 | 0 | **x** | - |
-| 等待时间 | 526 | `等待时间` | 1,196 | 358 | o | arena |
-| 红点 | 5 | `红点` | 39,025 | 12,677 | o | event,nav |
-| 组合包已选择 | 445 | `组合包已选择` | 357 | 99 | o | facilities,gate,interrupt,money,pages |
-| 组合包未选择 | 414 | `组合包未选择` | 308 | 26 | o | facilities,gate,interrupt,pages |
-| 绿勾 | 403 | `绿勾` | 8,560 | 1,331 | o | facilities,schedule |
-| 编辑入口 | 12 | `编辑入口` | 6,002 | 1,596 | o | - |
-| 羁绊升级 | 398 | `羁绊升级` | 69 | 27 | o | base,interrupt,pages |
-| 自动编辑按钮 | 127 | `自动编辑按钮` | 42 | 5 | o | battle,pages |
-| 获得奖励 | 397 | `获得奖励` | 915 | 233 | o | base,battle,facilities,money,pages |
-| 课程表入口 | 10 | `课程表入口` | 6,006 | 1,646 | o | schedule |
-| 课程表开始 | 400 | `课程表开始` | 209 | 52 | o | gate,schedule |
-| 课程表票 | 35 | `课程表票` | 4,148 | 1,091 | o | schedule |
-| 货币数量显示区域 | 104 | `货币数量显示区域` | 824 | 363 | o | money |
-| 购买 | 103 | `购买` | 14,609 | 2,386 | o | event_shop,facilities,gate,pages,shelf_walk |
-| 购买灰色 | 489 | `购买灰色` | 12,729 | 2,236 | o | event_shop,facilities,shelf_walk |
-| 购买青辉石 | 395 | `购买青辉石` | 6,063 | 1,607 | o | facilities,gate,money |
-| 走格子_格子 | 497 | `走格子_格子` | 29,291 | 3,108 | o | campaign,grid,pages |
-| 走格子_起点悬停 | 543 | `走格子_起点悬停` 注意val=0 | 48 | 0 | o | campaign |
-| 走格子_队伍箭头 | 501 | `走格子_队伍箭头` | 1,595 | 157 | o | campaign,pages |
-| 距离奖励获得结束 | 474 | `距离奖励获得结束` | 183 | 88 | o | - |
-| 距离结束还剩 | 405 | `距离结束还剩` | 1,103 | 385 | o | event |
-| 跳过战斗 | 436 | `跳过战斗` | 842 | 178 | o | arena |
-| 跳过战斗未选 | 437 | `跳过战斗未选` | 142 | 91 | o | arena |
-| 返回键 | 31 | `返回键` | 20,678 | 6,121 | o | base,battle,event,gate,money,nav,pages |
-| 进入章节 | 139 | `进入章节` | 42 | 35 | o | event,mining,momotalk,pages |
+| 确认键 | 20 | `确认键` | 3,831 | 577 | o | arena,base,battle,cafe,campaign,event_shop,facilities,gate,grid_multi,interrupt,mining,momotalk,money,nav,pages,schedule,sweep |
+| 社交入口 | 13 | `社交入口` | 6,241 | 1,422 | o | facilities |
+| 社团 | 51 | `社团` | 120 | 59 | o | facilities,pages |
+| 移动至2号点 | 27 | `移动至2号点` | 1,024 | 293 | o | cafe,pages |
+| 移动至一号店 | 34 | `移动至一号店` | 531 | 126 | o | cafe,pages |
+| 立即前往 | 468 | `立即前往` 注意val=0 | 67 | 0 | **x** | - |
+| 等待时间 | 526 | `等待时间` | 1,276 | 400 | o | arena |
+| 红点 | 5 | `红点` | 40,502 | 12,082 | o | event,nav |
+| 组合包已选择 | 445 | `组合包已选择` | 380 | 83 | o | facilities,gate,interrupt,money,pages |
+| 组合包未选择 | 414 | `组合包未选择` | 323 | 20 | o | facilities,gate,interrupt,pages |
+| 绿勾 | 403 | `绿勾` | 8,740 | 1,301 | o | facilities,schedule |
+| 编辑入口 | 12 | `编辑入口` | 6,238 | 1,403 | o | - |
+| 编队_空槽 | 562 | `编队_空槽` | 232 | 28 | **x** | - |
+| 羁绊升级 | 398 | `羁绊升级` | 78 | 26 | o | base,interrupt,pages |
+| 自动编辑按钮 | 127 | `自动编辑按钮` | 47 | 3 | o | battle,pages |
+| 获得奖励 | 397 | `获得奖励` | 1,035 | 222 | o | arena,base,battle,facilities,money,pages |
+| 课程表入口 | 10 | `课程表入口` | 6,242 | 1,491 | o | schedule |
+| 课程表开始 | 400 | `课程表开始` | 220 | 46 | o | gate,schedule |
+| 课程表票 | 35 | `课程表票` | 4,320 | 977 | o | schedule |
+| 货币数量显示区域 | 104 | `货币数量显示区域` | 829 | 399 | o | money |
+| 购买 | 103 | `购买` | 14,644 | 2,459 | o | event_shop,facilities,gate,pages,shelf_walk |
+| 购买灰色 | 489 | `购买灰色` | 12,911 | 2,314 | o | event_shop,facilities,shelf_walk |
+| 购买青辉石 | 395 | `购买青辉石` | 6,305 | 1,413 | o | facilities,gate,money |
+| 走格子_传送格 | 547 | `走格子_传送格` | 463 | 55 | **x** | - |
+| 走格子_变更位置菜单 | 549 | `走格子_变更位置菜单` 注意val=0 | 3 | 0 | **x** | - |
+| 走格子_格子 | 497 | `走格子_格子` | 43,281 | 5,318 | o | campaign,grid,pages |
+| 走格子_起点悬停 | 543 | `走格子_起点悬停` 注意val=0 | 48 | 0 | o | campaign,grid_multi |
+| 走格子_选择菜单 | 548 | `走格子_选择菜单` 注意val=0 | 3 | 0 | **x** | - |
+| 走格子_队伍箭头 | 501 | `走格子_队伍箭头` | 2,507 | 228 | o | campaign,grid_multi,pages |
+| 距离奖励获得结束 | 474 | `距离奖励获得结束` | 249 | 62 | o | - |
+| 距离结束还剩 | 405 | `距离结束还剩` | 1,176 | 341 | o | event |
+| 跳过战斗 | 436 | `跳过战斗` | 1,829 | 232 | o | arena |
+| 跳过战斗未选 | 437 | `跳过战斗未选` | 145 | 94 | o | arena |
+| 返回键 | 31 | `返回键` | 22,577 | 5,363 | o | base,battle,campaign,event,gate,grid_multi,money,nav,pages |
+| 进入章节 | 139 | `进入章节` | 44 | 37 | o | event,mining,momotalk,pages |
 | 进入羁绊剧情 | 442 | `进入羁绊剧情` | 31 | 15 | o | momotalk,money,pages |
-| 选择购买 | 450 | `选择购买` | 2,026 | 96 | o | event_shop,facilities,gate,pages |
+| 选择购买 | 450 | `选择购买` | 2,025 | 94 | o | event_shop,facilities,gate,pages |
 | 选择购买灰色 | 527 | `选择购买灰色` 注意val=0 | 30 | 0 | o | facilities |
-| 邀请键 | 32 | `邀请键` | 1,320 | 130 | o | cafe,gate,pages |
-| 邮件箱 | 4 | `邮件箱` | 6,304 | 1,610 | o | facilities |
-| 部署菜单_解除 | 542 | `部署菜单_解除` 注意val=0 | 34 | 0 | o | campaign,gate |
-| 重新挑战 | 525 | `重新挑战` 注意val=0 | 2 | 0 | o | - |
-| 阿拜多斯高中 | 39 | `阿拜多斯高中` | 259 | 22 | o | - |
+| 邀请键 | 32 | `邀请键` | 1,346 | 138 | o | cafe,gate,pages |
+| 邮件箱 | 4 | `邮件箱` | 6,557 | 1,414 | o | facilities |
+| 部署菜单_解除 | 542 | `部署菜单_解除` 注意val=0 | 30 | 0 | o | campaign,gate,grid_multi |
+| 重新挑战 | 525 | `重新挑战` 注意val=0 | 38 | 0 | o | - |
+| 阿拜多斯高中 | 39 | `阿拜多斯高中` | 264 | 20 | o | - |
 | 集中指挥 | 495 | `集中指挥` 注意val=0 | 36 | 0 | o | campaign |
-| 集中指挥已选中 | 421 | `集中指挥已选中` | 73 | 11 | o | campaign,pages |
-| 青辉石 | 30 | `青辉石` | 29,847 | 8,701 | o | arena,event_shop,facilities,interrupt,ledger,money,pages |
-| 预设_编辑 | 535 | `预设_编辑` | 132 | 16 | o | - |
-| 预设_读取 | 532 | `预设_读取` | 140 | 16 | o | preset |
-| 预设入口 | 541 | `预设入口` | 76 | 2 | o | preset |
-| 预设标题 | 531 | `预设标题` | 90 | 9 | o | campaign,pages,preset |
-| 领取蓝色 | 418 | `领取蓝色` | 915 | 45 | o | facilities,gate,money,pages |
-| 高架公路 | 86 | `高架公路` | 98 | 66 | o | - |
-| 黄点 | 6 | `黄点` | 22,938 | 7,745 | o | cafe,mining,nav |
+| 集中指挥已选中 | 421 | `集中指挥已选中` | 92 | 11 | o | campaign,pages |
+| 青辉石 | 30 | `青辉石` | 33,072 | 7,815 | o | arena,event_shop,facilities,gate,interrupt,ledger,money,nav,pages |
+| 预设_编辑 | 535 | `预设_编辑` | 738 | 70 | o | - |
+| 预设入口 | 541 | `预设入口` | 420 | 14 | o | preset |
+| 预设标题 | 531 | `预设标题` | 393 | 32 | o | campaign,grid_multi,pages,preset |
+| 预设行头_1部队 | 550 | `预设行头_1部队` | 34 | 5 | **x** | - |
+| 预设行头_2部队 | 551 | `预设行头_2部队` | 54 | 5 | **x** | - |
+| 预设行头_3部队 | 552 | `预设行头_3部队` | 56 | 2 | **x** | - |
+| 预设行头_4部队 | 553 | `预设行头_4部队` | 44 | 1 | **x** | - |
+| 预设行头_5部队 | 554 | `预设行头_5部队` 注意val=0 | 6 | 0 | **x** | - |
+| 领取蓝色 | 418 | `领取蓝色` | 939 | 42 | o | facilities,gate,money,pages |
+| 高架公路 | 86 | `高架公路` | 123 | 47 | o | - |
+| 黄点 | 6 | `黄点` | 24,199 | 6,975 | o | cafe,mining,nav |
+
+## v22 新类语义（人写, 2026-09-05）
+
+这些类 2026-09-05 进 `_classes_next.txt`(idx 546-562), 训练中的 v22 权重才认得; 上线前 `routing_v2/state/vocab.py` 要补常量,
+运行时对应的几何/OCR 兜底(預設入口 / 任務資訊 / Quest 页签 / 中斷任務 / 药丸 / 換位菜单 / 預設行号)撤掉。
+
+| idx | 类名 | 是什么 | 谁用 / 怎么用 |
+|---|---|---|---|
+| 546 | `_废弃546_切队药丸_通用类零框` | 通用药丸类, 拆成 _N部队 后零框 | 不用 |
+| 547 | `走格子_传送格` | 地图上带向上箭头图标的六边形格(蓝=普通/红=敌侧/黄框=选中), 11-1 与 H15-3 有 | grid_multi: 答案 `portal` 的落点, 点下去弹「是否移動該部隊」确认框. **待用户确认这个图标就是传送格** |
+| 548 | `走格子_选择菜单` | 点到友军立绘时弹出的單位菜单上圆图标(選擇) | grid_multi: 见到即"落点打在友军身上", 关菜单换点 |
+| 549 | `走格子_变更位置菜单` | 同上下圆图标(變更位置 = 交换) | grid_multi: 答案 `exchange` 点它确认 |
+| 550-554 | `预设行头_N部队` | 預設面板每行左侧「N部隊」标签 | preset: 定行, 不再 OCR 行号 |
+| 555 | `战术大赛_胜利` | 大赛「戰鬥結果」框 WIN! 横幅(版式固定) | arena: 胜负记账(现在只数出击) |
+| 556 | `战术大赛_失败` | 同上 LOSE 横幅 | arena: 同上 |
+| 557-560 | `切队药丸_N部队` | 回合中左下「N部隊」药丸, 文字 = 当前聚焦部队号, 点它在未行动队之间循环 | grid_multi: 焦点第二证据(第一证据是黄箭头); 4部队 今天零帧 |
+| 561 | `预设_读取_灰色` | 預設面板 讀取 键灰态(不可读取) | preset: 灰不点, 与 预设_读取 成对 |
+| 562 | `编队_空槽` | 编队页 STRIKER 位 EMPTY 占位 | preset/campaign: 队伍未编好禁出击 |
+
+口径: 两态族(亮/灰)在弹窗压暗帧上按看到的态标 = 灰态(不可点), 09-05 已把老池 1,776 处压暗亮态改灰; 走格子_起点 黄/灰按 START 字色
+(框内 70% 区域黄像素比例 > 0.12), 选中格的黄框不算; 被立绘/横幅挡住的格子按点阵一致性标满格, 学生卡面板下面的格不标.
 
 ## 现役但代码里用不上（不在 vocab）
 
@@ -246,11 +284,28 @@
 
 | idx | 类名 | train | val |
 |---|---|---|---|
-| 468 | `立即前往` | 70 | 0 |
-| 493 | `批量扫荡方案` | 273 | 42 |
+| 468 | `立即前往` | 67 | 0 |
+| 493 | `批量扫荡方案` | 274 | 42 |
 | 494 | `批量扫荡方案_已选中` | 47 | 7 |
 | 529 | `关卡得星_1` | 0 | 0 |
-| 530 | `关卡得星_2` | 43 | 0 |
+| 530 | `关卡得星_2` | 44 | 1 |
+| 546 | `切队药丸` | 0 | 0 |
+| 547 | `走格子_传送格` | 463 | 55 |
+| 548 | `走格子_选择菜单` | 3 | 0 |
+| 549 | `走格子_变更位置菜单` | 3 | 0 |
+| 550 | `预设行头_1部队` | 34 | 5 |
+| 551 | `预设行头_2部队` | 54 | 5 |
+| 552 | `预设行头_3部队` | 56 | 2 |
+| 553 | `预设行头_4部队` | 44 | 1 |
+| 554 | `预设行头_5部队` | 6 | 0 |
+| 555 | `战术大赛_胜利` | 2 | 0 |
+| 556 | `战术大赛_失败` | 3 | 0 |
+| 557 | `切队药丸_1部队` | 582 | 15 |
+| 558 | `切队药丸_2部队` | 388 | 9 |
+| 559 | `切队药丸_3部队` | 78 | 12 |
+| 560 | `切队药丸_4部队` | 0 | 0 |
+| 561 | `预设_读取_灰色` | 40 | 0 |
+| 562 | `编队_空槽` | 232 | 28 |
 
 ## 废案（禁 只能改名不能删行 —— `_classes.txt` 按行号索引）
 
