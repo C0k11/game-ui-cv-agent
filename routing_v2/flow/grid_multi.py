@@ -180,6 +180,26 @@ def align(mapd: dict, cells_px: List[Tuple[float, float]], starts_px: List[Tuple
     return (ox, oy), sc
 
 
+def _menu_icon_at(frame, x: float, y: float):
+    """(x,y) 归一化处是不是「選擇/變更位置」那种白圆底蓝 glyph 的菜单图标。True/False; 没帧 -> None(不核对)。"""
+    if frame is None:
+        return None
+    try:
+        import cv2
+        import numpy as np
+        h, w = frame.shape[:2]
+        cx, cy = int(x * w), int(y * h)
+        r = max(3, int(0.006 * w))
+        patch = frame[max(0, cy - r):cy + r + 1, max(0, cx - r):cx + r + 1]
+        if patch.size == 0:
+            return None
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        blue = (hsv[..., 1] >= 90) & (hsv[..., 0] >= 95) & (hsv[..., 0] <= 130) & (hsv[..., 2] >= 120)
+        return bool(blue.mean() >= 0.15)
+    except Exception:
+        return None
+
+
 class GridMultiMixin:
     """挂在 CampaignFlow 上。状态全在 self.state['mt_*'], 单队关不碰这里。"""
 
@@ -519,6 +539,8 @@ class GridMultiMixin:
         self.state["mt_last_origin"] = [origin[0], origin[1]]
         camera_still = (lo is not None and abs(lo[0] - origin[0]) < 0.01 and abs(lo[1] - origin[1]) < 0.01)
         focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
+        if focus is not None:
+            self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
         pos: Dict[str, Optional[list]] = self.state.setdefault("mt_pos", {})
         # 上一发的事后证据
         pend = self.state.get("mt_pending")
@@ -654,9 +676,21 @@ class GridMultiMixin:
         return self.finish(Outcome.UNKNOWN, f"答案动作 {do!r} 不认识 -- 不瞎点")
 
     def _mt_exchange_menu(self, obs: Observation, pend: dict) -> Action:
-        """菜单已弹(上一发点了友军格): 点 變更位置。"""
+        """菜单已弹(上一发点了友军格): 点 變更位置。**先用像素核对菜单图标真在那**: 10-3 live 实锤, 友军格那一发没把
+        菜单点出来, 第二发几何落点就成了 A 往左下走一格, 整回合白给。图标 = 白圆底 + 蓝色箭头 glyph, 圆心 7x7 里饱和蓝
+        像素占比 >= 0.15 才算菜单在; 地图底色是低饱和浅蓝, 分得开。没帧(离线)时不核对。"""
         px = pend.get("px") or [0.5, 0.5]
         x, y = px[0] + MENU_EXCHANGE_DXY[0], px[1] + MENU_EXCHANGE_DXY[1]
+        seen = _menu_icon_at(getattr(obs, "frame", None), x, y)
+        if seen is False:
+            n = self.bump(f"mt_menu_wait:{pend['ai']}")
+            if n <= 6:
+                return wait(f"友军格点了但菜单图标还没出现(第 {n} 帧), 不盲点 變更位置")
+            # 菜单没弹出来: 回到第一步重点友军格(有界, 由外层 6s 超时重发兜底)
+            self.state[f"mt_menu_wait:{pend['ai']}"] = 0
+            pend["stage"] = 0
+            self.state["mt_pending"] = None
+            return wait("菜单 6 帧没出现, 收回换位第一步重点友军格")
 
         def _st2():
             pend["stage"] = 2
