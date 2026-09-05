@@ -4868,9 +4868,9 @@ def t_grid_multi_0905():
     flw = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     flw.goto("walk")
     onmap = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928),
-              B(V.BACK, cx=0.045, cy=0.052), arrow(0.313, 0.42))
+              B(V.TASK_INFO, cx=0.776, cy=0.922), arrow(0.313, 0.42))
     a = flw.decide(onmap, Machine(1).update(onmap))
-    check("进程重开落在地图上(多队无地图) -> 点返回键叫出 任務資訊框", a is not None and a.target_cls == V.BACK, str(a))
+    check("进程重开落在地图上(多队无地图) -> 点 任務資訊 叫出面板(回合中没有返回键)", a is not None and a.target_cls == V.TASK_INFO, str(a))
     a = flw.decide(info, _SVi())
     check("任務資訊框出来后 -> 中斷任務", a is not None and a.kind == "tap" and abs(a.x - (0.678 - 0.358)) < 0.01, str(a))
     _c1 = cfg()

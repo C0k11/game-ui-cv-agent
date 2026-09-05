@@ -565,9 +565,11 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             a.post = lambda: self.state.update(mt_aborted=True)
             return a
         if cf is None and obs.has([V.PHASE_END, V.PHASE_AUTO_ON, V.PHASE_AUTO_OFF], 0.40):
-            b = obs.find(V.BACK, 0.45)
+            # 回合中顶栏左上是倒计时不是返回键(09-05 第 12 次 live 实帧), 叫面板用右下的 任務資訊 钮(528, 地图上 0.96+);
+            #    部署屏才有返回键, 作兜底。
+            b = obs.find(V.TASK_INFO, 0.45) or obs.find(V.BACK, 0.45)
             if b is not None and self.bump("mt_abort_back") <= 3:
-                return tap_box(b, "多队残局(无地图): 点返回键叫出 任務資訊框 好中斷任務", expect=(V.CONFIRM,))
+                return tap_box(b, "多队残局(无地图): 叫出 任務資訊框 好中斷任務", expect=(V.CONFIRM,))
         return None
 
     # stage_list: 点**得星_0 那一行的入場键**（下一关就是没有星的那关 --
