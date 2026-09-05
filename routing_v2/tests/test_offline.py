@@ -4576,6 +4576,8 @@ def t_grid_multi_0905():
     GM.MENU_WAIT_S = 0.0
     GM.FORM_SETTLE_S = 0.0
     GM.PR_OPEN_RETRY_S = 0.0
+    GM.CAM_MOVE_MIN = 0.0         # 离线夹具相机不动, move 的焦点切走证据不要求原点漂移
+    GM.CELL_TAP_DOWN = 0.0        # 夹具断言落点=格心; 立绘避让的下压量是常量, 不在这里验
     dx, dy = 0.093, 0.117
     teams2 = [{"name": "A", "attr": "blue", "pos": "left-down"}, {"name": "B", "attr": "red", "pos": "right-up"}]
     asg = GM.assign_starts([(0.500, 0.367), (0.313, 0.599)], teams2, dx, dy)

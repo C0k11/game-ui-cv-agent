@@ -51,6 +51,8 @@ DRAG = 0.28
 PRESET_ENTRY_XY = (0.937, 0.672)
 # 墙钟门槛(离线用例置 0): 空闲要持续多久才许落子; 点完友军格等菜单弹稳多久
 IDLE_HOLD_S = 1.5
+CAM_MOVE_MIN = 0.015     # 真走过一步相机必平移(实测 0.05-0.19); move 的"焦点切走"证据要伴随原点漂移 >= 这个值(测试里置 0)
+CELL_TAP_DOWN = 0.33     # 走格落点压到格心下方这么多行距: 单位立绘从格心向上长, 相机放大时会盖住相邻格心(10-3 第 4 跑实锤)
 MENU_WAIT_S = 1.2
 FORM_SETTLE_S = 1.5      # 编队面板滑入动画期间点右栏图标会被吞(09-05 live), 面板出现后先等这么久
 PR_OPEN_RETRY_S = 4.0    # 点了預設入口这么久还没见 预设标题 = 那一发被吞, 重点(最多 3 次)
@@ -682,18 +684,29 @@ class GridMultiMixin:
         self.state["mt_still_n"] = sn
         camera_still = sn >= 4        # 缓动收尾极慢, 两帧 0.01 内会误判停稳(10-3/10-4 实锤首发被吞), 要连续 4 帧
         focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
-        if focus is not None:
-            self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
         pos: Dict[str, Optional[list]] = self.state.setdefault("mt_pos", {})
         idle_ok = self._mt_idle_ok(obs)
         pend = self.state.get("mt_pending")
+        # 箭头压在白发/浅色立绘上时 v21 整段检不出(10-3 第 4 跑 25s 全 None). 游戏空闲、没有挂起动作、本回合只剩一队
+        #    没行动 -> 按游戏"自动切给下一支没行动的队"的规则, 焦点就是它。
+        if (focus is None and idle_ok and not pend and obs.find(V.GRID_ARROW, 0.25) is None):
+            acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
+            rest = [L for L, v in pos.items() if v is not None and L not in acted]
+            if len(rest) == 1:
+                focus, focus_lat = rest[0], tuple(pos[rest[0]])
+                if self.bump("mt_focus_infer") % 40 == 1:
+                    self.log(f"箭头没检出(立绘遮挡?), 本回合只剩队 {focus} 没行动, 按自动切队规则视焦点为它")
+        if focus is not None:
+            self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
         if not idle_ok:
             if pend:
                 pend["t"] = max(float(pend.get("t", 0)), time.time() - 5.0)   # 动画期不计超时(最多回拨 5s)
             return wait("游戏在放动画/加载(PHASE 弱或加载中), 不落子不判证据")
         # 上一发的事后证据
         if pend:
-            done = self._mt_pending_done(pend, focus, focus_lat)
+            o0 = pend.get("origin0")
+            moved = (o0 is None) or (abs(origin[0] - o0[0]) + abs(origin[1] - o0[1]) >= CAM_MOVE_MIN)
+            done = self._mt_pending_done(pend, focus, focus_lat, moved)
             if done:
                 self._mt_dbg(obs, f"evidence {pend['team']} {pend['do']} focus={focus}@{focus_lat}")
                 self._mt_apply(pend)
@@ -799,14 +812,17 @@ class GridMultiMixin:
 
             def _issued(ai=ai, team=team, do=do, d=d, tgt=tgt):
                 self.state["mt_pending"] = {"ai": ai, "team": team, "do": do, "dir": d,
-                                            "from": list(cur), "target": list(tgt), "t": time.time()}
+                                            "from": list(cur), "target": list(tgt), "t": time.time(),
+                                            "origin0": [origin[0], origin[1]]}
                 self.state["mt_ex_stage"] = 0
                 if ai == len(acts) - 1:
                     self._mt_mark_issued(acts)
-            a = tap_at(px[0], px[1],
+            # 落点压到格子下部: 单位立绘从格心向上长, 相机放大时盖住相邻格心, 点在友军身上 = 切焦点不是走(10-3 第 4 跑实锤)
+            ty = px[1] + (CELL_TAP_DOWN * dy if do != "portal" else 0.0)
+            a = tap_at(px[0], ty,
                        f"回合 {self.state['round_i'] + 1} 动作 {ai + 1}/{len(acts)}: 队 {team} "
                        f"{'踩传送门' if do == 'portal' else '走'} {d} -> {tgt}",
-                       justify="落点 = 本帧检出的格心(或对齐可信的地图格心), 由点阵对齐得来, 不是版面常量",
+                       justify="落点 = 本帧检出的格心(或对齐可信的地图格心)向下压 0.33 行距避开立绘, 由点阵对齐得来, 不是版面常量",
                        require=V.PHASE_END)
             a.post = _issued
             self._mt_dbg(obs, f"tap move {team} {d} focus={focus}@{focus_lat} px={px[0]:.3f},{px[1]:.3f} origin={origin[0]:.3f},{origin[1]:.3f}")
@@ -886,7 +902,7 @@ class GridMultiMixin:
             return (ex, ey)
         return None
 
-    def _mt_pending_done(self, pend: dict, focus: Optional[str], focus_lat) -> bool:
+    def _mt_pending_done(self, pend: dict, focus: Optional[str], focus_lat, moved: bool = True) -> bool:
         do = pend["do"]
         tgt = tuple(pend["target"])
         # 位置表要等这里返回 True 才更新, 所以看"箭头落在哪个格"(focus_lat), 别看按旧位置表猜出来的队名:
@@ -897,7 +913,9 @@ class GridMultiMixin:
         if do == "move" and focus_lat is not None and focus_lat == tgt:
             return True                     # 箭头已在目标格(只剩它一队时焦点不切, 它已站过去)
         if focus is not None and focus != pend["team"]:
-            return True                     # 游戏把焦点切给下一队 = 上一队的行动被消费
+            # 10-3 第 4 跑: 落点打在友军立绘上 -> 游戏只是切了焦点, 队没走, 却被当"行动被消费". 真走过相机必平移,
+            #    move 的这条证据要伴随原点漂移(moved); 换位/传送不走这里.
+            return bool(moved) if do == "move" else True
         if self.state.get("cycling"):
             return True                     # 相位循环了
         return False
