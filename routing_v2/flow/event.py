@@ -231,8 +231,15 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         if st.changed:
             # 每次新进到活动页都重新给一次"没有 Quest 页签就退"的机会
             self.state.pop("noquest_exiting", None)
+            self.once_reset("ev_popup_close")
         if obs.has(V.EVENT_QUEST_SEL, 0.40):
             return wait("已在 Quest 页签，等关卡行渲染")
+        # 首次进活动会盖一层「遊戲指南 (1/6)」/公告弹窗(2026-09-05 live 实锤), 页签和关卡行都被挡住;
+        #    弹窗右上有 叉叉 而 Quest 页签不在场 = 先叉掉再说, 每次进页只叉一次, 免得把正常页面的叉叉当弹窗连点。
+        x = obs.find(V.CLOSE_X, 0.55, region=(0.30, 0.05, 1.0, 0.60))
+        if x is not None and not obs.has(V.EVENT_QUEST, 0.35) and self.pending("ev_popup_close"):
+            return tap_box(x, "活动页盖着弹窗(指南/公告), 先叉掉", once="ev_popup_close",
+                           expect_gone=(V.CLOSE_X,))
         tab = obs.find(V.EVENT_QUEST, 0.35, region=(0.0, 0.0, 1.0, 0.34))
         if tab is not None:
             # 08-20 复盘崩: setup 漏 tab_tries 时 `state["tab_tries"] += 1`
@@ -418,6 +425,22 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                                post=lambda: self.state.update(in_reward=True))
 
         rows, locked = self._rows(obs)
+        # 页签误读保险(2026-09-05 live 实锤): 这期活动的 Story 页签选中态被认成 活动quest_已选择(0.64-0.78),
+        #    剧情行也有 入場 键, 老逻辑会去点第一行进剧情然后无限循环。Quest 页签的每个解锁行都带 关卡得星,
+        #    剧情行一颗星都没有 -> 行全无星 = 不在 Quest 页签: 能看见 活动quest 就切过去, 看不见就退出重进(有上限)。
+        if rows and all(star is None for _, star in rows):
+            tab = obs.find(V.EVENT_QUEST, 0.35, region=(0.0, 0.0, 1.0, 0.34))
+            if tab is not None and self.pending("ev_tab_fix"):
+                return tap_box(tab, "关卡行全无得星 = 当前不是 Quest 页签(剧情页签误读), 切到 Quest", once="ev_tab_fix",
+                               expect=(V.STAR_0, V.STAR_3))
+            if not self.hold("no_star_rows", 40):
+                return wait("关卡行全无得星, 连续确认中(剧情页签误读?)")
+            n = self.bump("noquest_hits")
+            cap = int(self.cfg.get("guide_hub_max_tries", GUIDE_HUB_MAX_TRIES) or GUIDE_HUB_MAX_TRIES)
+            if n > cap:
+                return self.finish(Outcome.UNKNOWN, "关卡行全无得星且看不到 Quest 页签, 退出重进 %d 次仍如此 -- 交人看" % cap)
+            self.log(f"关卡行全无得星且 Quest 页签不在场(第 {n} 次) -- 退出重进")
+            return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
         if not rows:
             # 同样要 hold：入场后的过渡帧上整列关卡都会短暂消失
             if not self.hold("no_rows", 60):

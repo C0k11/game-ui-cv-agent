@@ -275,6 +275,27 @@ def t_pages():
           classify(ingame).interrupt != "quit_dialog",
           f"实际 {classify(ingame).interrupt}")
 
+    # 活动页首进盖着「遊戲指南」弹窗(09-05 live): 叉叉在场、Quest 页签不在场 -> 先叉掉, 只叉一次
+    ev_guide = O(B(V.EVENT_SHOP, cx=0.216, cy=0.883), B(V.CLOSE_X, cx=0.925, cy=0.215),
+                 B(V.BACK, cx=0.045, cy=0.052))
+    evf = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    _m = Machine(1)
+    _st = _m.update(ev_guide)
+    a = evf.on_event_page(ev_guide, _st)
+    check("活动页盖指南弹窗 -> 先叉掉", a is not None and a.target_cls == V.CLOSE_X and a.once_key == "ev_popup_close", str(a))
+    evf.state["once:ev_popup_close"] = True
+    _st = _m.update(ev_guide)          # 第二帧: 页面没变(changed=False), once 不该被重置
+    a = evf.on_event_page(ev_guide, _st)
+    check("同一页叉过一次后不再连点叉叉", a is None or a.kind != "tap" or a.target_cls != V.CLOSE_X, str(a))
+
+    # Story 页签被误读成 Quest 已选(09-05 live): 行全无得星 + 能看见 活动quest -> 切页签, 不点剧情行的入場
+    ev_story_rows = O(B(V.EVENT_QUEST_SEL, cx=0.60, cy=0.154), B(V.EVENT_QUEST, cx=0.738, cy=0.155),
+                      B(V.STAGE_ENTER, cx=0.883, cy=0.277), B(V.STAGE_ENTER_LOCKED, cx=0.883, cy=0.436),
+                      B(V.EVENT_SHOP, cx=0.216, cy=0.883))
+    evf2 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+    a = evf2.on_event_quest_list(ev_story_rows, Machine(1).update(ev_story_rows))
+    check("关卡行无得星 -> 切到 活动quest 而不是点入場", a is not None and a.target_cls == V.EVENT_QUEST, str(a))
+
     # 上期活动余韵期: 後日談 不再单独成页(09-03), 这种帧就是普通活动页,
     #    由 flow 按"有没有 Quest 页签 / 入场行"决定退出
     check("後日談 不再单独成页 -> event_page",
