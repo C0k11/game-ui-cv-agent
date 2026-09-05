@@ -962,6 +962,10 @@ class GridMultiMixin:
                 frm = getattr(obs, "frame", None)
                 m1 = _menu_icon_at(frm, fpx[0] + MENU_EXCHANGE_DXY[0], fpx[1] + MENU_EXCHANGE_DXY[1])
                 m2 = _menu_icon_at(frm, fpx[0] + MENU_SELECT_DXY[0], fpx[1] + MENU_SELECT_DXY[1])
+                if frm is not None and m1 is False and m2 is False:
+                    # 焦点切到别队且它头上没弹單位菜单 = 这一步被游戏收下后自动切队了. 短距离一步相机未必平移(H15-3 第 19 跑:
+                    #    A 从 (2,2) 走到 (4,2) 相机没动, 箭头转到 C 头上, 却因"没平移"不认, 10s 后重发去点 A 自己), 不再要求 moved.
+                    moved = True
                 if m1 and m2:
                     k = f"mt_tapidx:{self.state['round_i']}:{pend['ai']}"
                     self.state[k] = int(self.state.get(k, 0)) + 1
@@ -986,7 +990,7 @@ class GridMultiMixin:
                     return self._mt_round_issued(acts)
                 return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作(先等 4s 让游戏切焦点/相机停稳)")
             # 传送: 确认框 + 传送动画 + (最后一发时)敌方回合都在这一发之后, 证据来得晚, 给 25s
-            if time.time() - float(pend.get("t", 0)) > (25.0 if pend["do"] == "portal" else (10.0 if pend["do"] != "exchange" else 6.0)):
+            if time.time() - float(pend.get("t", 0)) > (25.0 if pend["do"] == "portal" else (15.0 if pend["do"] != "exchange" else 6.0)):
                 n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")
                 if n > 3:
                     return self.finish(Outcome.UNKNOWN,
