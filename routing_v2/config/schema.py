@@ -207,6 +207,12 @@ DEFAULTS: Dict[str, Any] = {
         #   把部队2 切出来, 开預設面板, 页签1 第2行 組成 -> 變更編輯 確認。None = 不动。
         #   team=1 一律拒绝(用户推图队不许覆盖)。
         "preset_apply": None,
+        # 多队关(答案 needs.teams > 1, 6 章起 184 关 2 队 / Hard 15 章起 16 关 3 队): 部署时按答案属性挑部队。
+        #   grid_squads = {"red": 1, "yellow": 2, "blue": 3, "purple": 3, "any": 1} 属性 -> 部队号(1-4);
+        #   None = 不挑, 按游戏默认顺序(第 k 个起点上部队 k)。属性: red=爆发 yellow=贯穿 blue=神秘 purple=振动。
+        "grid_squads": None,
+        # False = 多队关一律进关前 BLOCKED(回到 09-05 之前的行为)
+        "multi_team": True,
     },
 
     #  邮件 / 每日任务 / 社团

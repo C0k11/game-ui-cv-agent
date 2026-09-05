@@ -1,0 +1,704 @@
+# -*- coding: utf-8 -*-
+"""多队走格子(2 队 / 3 队, exchange, portal) -- campaign 的子链, 2026-09-05 大号 10-1 / 10-2 / 11-1 手驾实测后写。
+
+实测机制(全部 live 验证, 见 memory grid_multi_20260905):
+  部署   每个 START 上方挂一个黄色倒三角(543 起点悬停, 模型常把它认成 501 队伍箭头 -- 同一张贴图,
+         部署阶段两类一律并成"标记"); 点 START 开编队面板, 游戏自动把下一支没上的部队高亮,
+         出击 后相机会平移; 上一队后 任務開始 就已经变黄 -- **不能像单队那样见黄就点**,
+         必须数到 needs.teams 支都上了。被底部学生卡条挡住的 START 要拖地图(11-1 实锤)。
+  回合   开局聚焦部队 1(箭头在它头上); 一队行动完游戏自动把焦点切到下一支没行动的队;
+         行动完自动结束 PHASE(勾着 自动结束)。答案里某回合不含某队时不会自动结束, 要手点 PHASE結束
+         + 确认「尚未行動」框。
+  切队   点友军格**不换焦点**, 弹「選擇 / 變更位置」双键菜单; 左下角循环图标「N部隊」药丸键循环切焦点
+         (BAAH 写死 (82,554) 的那个键), 相机跟着平移到新焦点队。
+  换位   exchange = 聚焦 A 后点 B 所在格 -> 菜单 -> 變更位置 -> A/B 互换, **不消耗行动**, 焦点仍在 A。
+  传送   portal = 点传送格 -> 「通知 / 是否移動該部隊？」双键框 -> 確認 -> 队伍消失在别处出现,
+         **消耗行动**, 焦点切到下一队。传送后该队位置未知, 等它再被聚焦时用箭头绑回。
+  地图   相机每次行动后都平移, 屏幕坐标一帧一变; 唯一不变的是格子点阵。所以这里把地图存成
+         **点阵坐标**(起点 A 为原点, 列用半格计 c2, 行 r), 每帧用可见起点/格子把点阵对齐到屏幕,
+         队伍位置按答案方向在点阵里航位推算(exchange 互换, portal 置未知)。
+         踩开关格会**长出新格**(10-1/10-2 的桥), 对齐可信时把新格并进地图。
+
+菜单键 / 药丸键 / 传送格 都还没有 cls(v22 采了料), 本版用几何落点 + 事后证据(箭头位置)兜底;
+   每一发几何点击都带 justify, 版式变了最坏是点空, 不会点到危险控件(部署菜单_解除 由 gate 拦)。
+"""
+from __future__ import annotations
+
+import itertools
+import math
+import time
+from typing import Dict, List, Optional, Tuple
+
+from routing_v2.act.action import Action, swipe, tap_at, tap_box, wait
+from routing_v2.flow import grid
+from routing_v2.flow.base import Outcome
+from routing_v2.percept.observe import Box, Observation
+from routing_v2.state import vocab as V
+
+# 部署阶段"这个起点还没上队"的标记: 543 悬停倒三角; 模型常把同一张贴图认成 501 箭头(部署屏上不可能有真箭头)
+DEPLOY_MARKS = [V.GRID_START_HOVER, V.GRID_ARROW]
+STARTS = [V.GRID_START, V.GRID_START_GREY]
+
+# 左下角「N部隊」切队药丸(16:9 归一化, 10-1/10-2/11-1 三关 40+ 帧位置不变: 药丸 x 0.02-0.11, y 0.75-0.80)
+SWITCH_PILL = (0.062, 0.775)
+# 点友军格弹出的双键菜单, 相对被点格心的偏移(10-2 r1 实测: 格 (0.515,0.544), 變更位置 图标 (0.432,0.528),
+#    選擇 图标 (0.437,0.421)); 菜单挂在单位左侧, 相机不缩放, 偏移是常量
+MENU_EXCHANGE_DXY = (-0.083, -0.016)
+MENU_SELECT_DXY = (-0.078, -0.123)
+# 拖地图找被挡住的起点: 一次拖 0.28 屏高/宽
+DRAG = 0.28
+
+# 6 方向在点阵里的步(列按半格 c2 计, 行 r; 右下 = 半格右 + 一行下)
+DIR_LAT: Dict[str, Tuple[int, int]] = {
+    "right": (2, 0), "left": (-2, 0),
+    "right-up": (1, -1), "right-down": (1, 1),
+    "left-up": (-1, -1), "left-down": (-1, 1),
+}
+# 8 向部署方位 -> 屏幕方向(y 向下); center = 零向量(离质心最近的那个起点)
+_S2 = 0.7071
+POS_VEC = {"up": (0.0, -1.0), "down": (0.0, 1.0), "left": (-1.0, 0.0), "right": (1.0, 0.0),
+           "left-up": (-_S2, -_S2), "right-up": (_S2, -_S2),
+           "left-down": (-_S2, _S2), "right-down": (_S2, _S2), "center": (0.0, 0.0)}
+
+
+#  纯几何(无状态, 离线可测)
+
+def assign_starts(starts: List[Tuple[float, float]], teams: List[dict],
+                  dx: Optional[float] = None, dy: Optional[float] = None) -> Optional[Dict[str, int]]:
+    """起点框心 x 答案 teams(pos) -> {队名: 起点下标}。起点数 != 队数 -> None。
+
+    方位 = 相对全部起点质心的方向(BAAH position 语义: 2 队 left/right, 3 队 up/center/down)。
+    穷举排列取总分最高: 有向方位得 cos(方位, 偏移), center 得 1-|偏移|/max。偏移按格距归一(dx,dy)
+    再算角度, 不然 16:9 下斜向会被纵向拉偏。排列打分比逐个最近方位稳: 11-1 的 up 起点单独看更像
+    right-up, 但 (up,down) 的排列总分 1.78 远高于反过来的 -1.78。"""
+    n = len(starts)
+    if n == 0 or n != len(teams):
+        return None
+    if n == 1:
+        return {teams[0]["name"]: 0}
+    sx = dx or 1.0
+    sy = dy or 1.0
+    cx = sum(s[0] for s in starts) / n
+    cy = sum(s[1] for s in starts) / n
+    offs = [((s[0] - cx) / sx, (s[1] - cy) / sy) for s in starts]
+    mx = max(math.hypot(*o) for o in offs) or 1.0
+    best = None
+    for perm in itertools.permutations(range(n)):
+        score = 0.0
+        for t, si in zip(teams, perm):
+            v = POS_VEC.get(t.get("pos"), (0.0, 0.0))
+            o = offs[si]
+            d = math.hypot(*o)
+            if v == (0.0, 0.0):
+                score += 1.0 - d / mx
+            elif d > 1e-6:
+                score += (v[0] * o[0] + v[1] * o[1]) / d
+        if best is None or score > best[0]:
+            best = (score, perm)
+    return {t["name"]: si for t, si in zip(teams, best[1])}
+
+
+def lat_of(px: Tuple[float, float], origin: Tuple[float, float], dx: float, dy: float) -> Tuple[int, int]:
+    """屏幕点 -> 点阵坐标 (c2, r)。原点是点阵 (0,0) 的屏幕位置。六边形错行: 同一连通点阵里 c2 与 r 同奇偶,
+    远处格子 dx 累计误差可能把 c2 舍到错的奇偶, 往精确值那侧拨一格纠正。"""
+    r = int(round((px[1] - origin[1]) / dy))
+    fc = 2.0 * (px[0] - origin[0]) / dx
+    c2 = int(round(fc))
+    if (c2 + r) % 2 != 0:
+        c2 = c2 + 1 if fc > c2 else c2 - 1
+    return (c2, r)
+
+
+def px_of(lat: Tuple[int, int], origin: Tuple[float, float], dx: float, dy: float) -> Tuple[float, float]:
+    return (origin[0] + lat[0] * dx / 2.0, origin[1] + lat[1] * dy)
+
+
+def lat_add(a: Tuple[int, int], d: str) -> Optional[Tuple[int, int]]:
+    v = DIR_LAT.get(d)
+    if v is None:
+        return None
+    return (a[0] + v[0], a[1] + v[1])
+
+
+def build_map(cells_px: List[Tuple[float, float]], starts_px: List[Tuple[float, float]],
+              teams: List[dict], dx: float, dy: float) -> Optional[dict]:
+    """部署屏首帧(全部起点可见)建点阵地图。原点 = 答案第一队的起点。"""
+    asg = assign_starts(starts_px, teams, dx, dy)
+    if asg is None:
+        return None
+    origin = starts_px[asg[teams[0]["name"]]]
+    starts = {name: list(lat_of(starts_px[i], origin, dx, dy)) for name, i in asg.items()}
+    cells = set(tuple(v) for v in starts.values())
+    for c in cells_px:
+        cells.add(lat_of(c, origin, dx, dy))
+    return {"cells": sorted(cells), "starts": starts}
+
+
+def align(mapd: dict, cells_px: List[Tuple[float, float]], starts_px: List[Tuple[float, float]],
+          dx: float, dy: float) -> Optional[Tuple[Tuple[float, float], int]]:
+    """把点阵地图对齐到本帧 -> (原点屏幕坐标, 得分)。对不齐 -> None(fail-closed, 调用方等下一帧)。
+
+    假设 = 每个可见起点 x 每个已知起点; 一个起点都没检出时退回 格子 x 地图格(最多 12x40 组)。
+    得分 = 落在地图格上的检出格数 + 2 x 落在起点位的检出起点数; 起点假设优先。
+    门槛 max(3, 半数检出格), 且要比次优高 >= 1, 不然对称地图会二义。"""
+    mcells = set(tuple(c) for c in mapd["cells"])
+    mstarts = {k: tuple(v) for k, v in mapd["starts"].items()}
+    sset = set(mstarts.values())
+    hyps = []
+    for s in starts_px:
+        for L, sl in mstarts.items():
+            hyps.append((s[0] - sl[0] * dx / 2.0, s[1] - sl[1] * dy, 1))
+    if not hyps:
+        for c in cells_px[:12]:
+            for m in list(mcells)[:40]:
+                hyps.append((c[0] - m[0] * dx / 2.0, c[1] - m[1] * dy, 0))
+    scored = []
+    for ox, oy, pri in hyps:
+        sc = 0
+        for x, y in cells_px:
+            c2, r = lat_of((x, y), (ox, oy), dx, dy)
+            if (c2, r) in mcells:
+                ex, ey = px_of((c2, r), (ox, oy), dx, dy)
+                if abs(ex - x) < 0.35 * dx and abs(ey - y) < 0.35 * dy:
+                    sc += 1
+        for x, y in starts_px:
+            if lat_of((x, y), (ox, oy), dx, dy) in sset:
+                sc += 2
+        scored.append((sc, pri, ox, oy))
+    if not scored:
+        return None
+    scored.sort(key=lambda t: (-t[0], -t[1]))
+    sc, _, ox, oy = scored[0]
+    if sc < max(3, len(cells_px) // 2):
+        return None
+    # 次优若是**不同原点**且分数只差 <1 -> 二义
+    for sc2, _, ox2, oy2 in scored[1:]:
+        if abs(ox2 - ox) > 0.3 * dx or abs(oy2 - oy) > 0.3 * dy:
+            if sc - sc2 < 1:
+                return None
+            break
+    return (ox, oy), sc
+
+
+class GridMultiMixin:
+    """挂在 CampaignFlow 上。状态全在 self.state['mt_*'], 单队关不碰这里。"""
+
+    #  开关 / 状态
+
+    def _multi(self) -> bool:
+        a = self.state.get("answer") or {}
+        try:
+            return int((a.get("needs") or {}).get("teams", 1)) > 1
+        except (TypeError, ValueError):
+            return False
+
+    def _mt_teams(self) -> List[dict]:
+        return list((self.state.get("answer") or {}).get("teams") or [])
+
+    def _mt_names(self) -> List[str]:
+        return [t["name"] for t in self._mt_teams()]
+
+    def mt_reset(self) -> None:
+        for k in [k for k in self.state if k.startswith("mt_")]:
+            self.state.pop(k, None)
+
+    def mt_new_round(self) -> None:
+        """相位循环完成(do_walk 里 round_i += 1 之后)调。还挂着的动作 = 被这次循环消费了, 先记账。"""
+        pend = self.state.get("mt_pending")
+        if pend:
+            self._mt_apply(pend)
+        self.state["mt_ai"] = 0
+        self.state["mt_pending"] = None
+        self.state["mt_acted"] = []
+        self.state["mt_need_end"] = False
+        self.state.pop("mt_end_taps", None)
+        for k in [k for k in self.state if k.startswith("mt_focus:") or k.startswith("mt_reissue:")]:
+            self.state.pop(k, None)
+
+    def _mt_frame(self, obs: Observation, conf: float = 0.30):
+        """本帧几何: (格心列表, 起点框列表, dx, dy, 原点) 或 None。"""
+        cs = grid.cells(obs, conf)
+        stp = grid.steps(cs)
+        if stp is None:
+            return None
+        dx, dy = stp
+        sb = obs.all(STARTS, 0.35)
+        mapd = self.state.get("mt_map")
+        origin = None
+        if mapd:
+            got = align(mapd, cs, [(b.cx, b.cy) for b in sb], dx, dy)
+            if got is not None:
+                origin = got[0]
+                self._mt_grow_map(mapd, cs, origin, dx, dy, got[1], obs)
+        return cs, sb, dx, dy, origin
+
+    def _mt_grow_map(self, mapd, cs, origin, dx, dy, score, obs) -> None:
+        """对齐可信(>=5 分)时把连续两帧都看到的新格并进地图(踩开关长出来的桥)。"""
+        if score < 5:
+            return
+        known = set(tuple(c) for c in mapd["cells"])
+        seen = set()
+        for x, y in cs:
+            l = lat_of((x, y), origin, dx, dy)
+            ex, ey = px_of(l, origin, dx, dy)
+            if l not in known and abs(ex - x) < 0.35 * dx and abs(ey - y) < 0.35 * dy:
+                seen.add(l)
+        prev = set(tuple(v) for v in self.state.get("mt_newc") or [])
+        add = seen & prev
+        if add:
+            mapd["cells"] = sorted(known | add)
+            self.log(f"地图长出新格 {sorted(add)}(连续两帧检出)")
+        self.state["mt_newc"] = sorted(seen - add)
+
+    #  部署
+
+    def mt_deploy_step(self, obs: Observation, st) -> Optional[Action]:
+        """多队部署: 数着上队, 上齐了才 任務開始。返回 None 表示交回 do_grid 的通用分支(弹窗/菜单已在上面处理)。"""
+        ans = self.state.get("answer") or {}
+        need = int((ans.get("needs") or {}).get("teams", 1))
+        teams = self._mt_teams()
+        dep: List[str] = self.state.setdefault("mt_deployed", [])
+        # 真开局的事实 = PHASE 控件出现
+        if obs.has(V.PHASE_END, 0.40) or obs.has(V.PHASE_AUTO_ON, 0.40):
+            if len(dep) < need:
+                self.log(f"PHASE 控件出现但只记到 {len(dep)}/{need} 队上场 -- 按屏上事实进回合, 剩下的队按未部署处理")
+            self._mt_start_walk()
+            self.goto("walk", "PHASE 控件出现 = 真开局了(多队)")
+            return wait("进回合")
+        # 编队面板: 先按配置挑部队, 再出击
+        if (st.page in ("formation", "preset_panel") or obs.has(V.SORTIE, 0.45)
+                or obs.has(V.PRESET_TITLE, 0.40)):
+            return self._mt_formation(obs)
+        fr = self._mt_frame(obs, 0.35)
+        if fr is None:
+            if self._overdue("mt_nogrid", 60):
+                return self.finish(Outcome.UNKNOWN, "部署屏 60s 量不出格距 -- 感知不足, 不瞎点")
+            return wait("部署屏: 等格子检出")
+        self._wt_clear("mt_nogrid")
+        cs, sb, dx, dy, origin = fr
+        # 首帧建地图: 起点数必须等于答案队数
+        if self.state.get("mt_map") is None:
+            if len(sb) == need and len(cs) >= 3:
+                m = build_map(cs, [(b.cx, b.cy) for b in sb], teams, dx, dy)
+                if m is not None:
+                    self.state["mt_map"] = m
+                    self.log(f"多队地图建好: 起点 {m['starts']} 格 {len(m['cells'])}")
+                    return wait("地图建好, 下一帧开始部署")
+            n = self.bump("mt_map_wait")
+            if n > 40:
+                return self.finish(Outcome.UNKNOWN,
+                                   f"部署屏 40 帧里可见起点 {len(sb)} 个 != 答案 {need} 队 -- 起点检出不全, 不瞎点")
+            return wait(f"等全部 {need} 个起点同时可见({len(sb)} 个)")
+        mapd = self.state["mt_map"]
+        # 上一队刚出击: 它的标记消失了才算真上了(数事实)
+        pend = self.state.get("mt_dep_pending")
+        marks = self._mt_marks(obs)
+        under = []
+        for m in marks:
+            sp = grid.start_under_hover(obs, m)
+            if sp is not None:
+                under.append(sp)
+        if origin is not None:
+            names_under = set()
+            for sp in under:
+                L = self._mt_start_letter(mapd, sp, origin, dx, dy)
+                if L:
+                    names_under.add(L)
+            if pend and pend not in names_under:
+                if pend not in dep:
+                    dep.append(pend)
+                    self.log(f"队 {pend} 已上场({len(dep)}/{need})")
+                self.state["mt_dep_pending"] = None
+            elif pend and pend in names_under:
+                # 出击了标记还在 = 那一发没成, 让它重新点
+                self.state["mt_dep_pending"] = None
+        if len(dep) >= need:
+            start_btn = obs.find(V.TASK_START, 0.45)
+            if start_btn is not None:
+                return tap_box(start_btn, f"任務開始({need}/{need} 队都上了)",
+                               expect=(V.PHASE_END, V.PHASE_AUTO_ON, V.PHASE_AUTO_OFF))
+            return wait("上齐了, 等 任務開始 变黄")
+        # 还差队: 找一个没上的起点(优先答案顺序里下一个)
+        if origin is None:
+            n = self.bump("mt_align_fail")
+            if n > 30:
+                return self.finish(Outcome.UNKNOWN, "部署屏 30 帧点阵对不齐 -- 不瞎点")
+            return wait("点阵对不齐, 再看一帧")
+        self.state["mt_align_fail"] = 0
+        remaining = [n for n in self._mt_names() if n not in dep]
+        want = None
+        for L in remaining:
+            for sp in under:
+                if self._mt_start_letter(mapd, sp, origin, dx, dy) == L:
+                    want = (L, sp)
+                    break
+            if want:
+                break
+        if want is None and under:
+            sp = under[0]
+            L = self._mt_start_letter(mapd, sp, origin, dx, dy)
+            if L and L not in dep:
+                want = (L, sp)
+        if want is None:
+            # 剩下的起点没有标记可见: 多半被底部卡条/屏边挡住 -> 朝它的推算位置拖地图
+            return self._mt_drag_to_start(mapd, remaining, origin, dx, dy, cs)
+        L, sp = want
+        self.state["mt_dep_target"] = L
+        act = tap_box(sp, f"点起点 {L} 上队(框上 1/3 处, 第 {len(dep) + 1}/{need} 队)", expect=(V.SORTIE,))
+        act.x, act.y = sp.cx, sp.y1 + 0.30 * (sp.y2 - sp.y1)
+        return act
+
+    def _mt_marks(self, obs: Observation) -> List[Box]:
+        return obs.all(DEPLOY_MARKS, 0.30)
+
+    def _mt_start_letter(self, mapd, sp: Box, origin, dx, dy) -> Optional[str]:
+        l = lat_of((sp.cx, sp.cy), origin, dx, dy)
+        for L, v in mapd["starts"].items():
+            if tuple(v) == l:
+                return L
+        # 起点文字框心比格心略偏, 容 1 格内最近
+        best = None
+        for L, v in mapd["starts"].items():
+            d = abs(v[0] - l[0]) + abs(v[1] - l[1])
+            if d <= 2 and (best is None or d < best[0]):
+                best = (d, L)
+        return best[1] if best else None
+
+    def _mt_drag_to_start(self, mapd, remaining, origin, dx, dy, cs) -> Action:
+        """未上队起点的标记看不见(被底部卡条/屏边挡, 11-1 实锤): 把地图朝屏中拖, 拖动几何全部从检出推:
+        手柄 = 离屏中最近的检出格心(拖真格子, 不拖 HUD), 位移 = 把起点推算位置拉到屏中的向量(封顶 DRAG)。"""
+        n = self.bump("mt_drags")
+        if n > 4:
+            return self.finish(Outcome.UNKNOWN, f"拖了 4 次地图仍找不到未上队起点 {remaining} 的标记 -- 交人看")
+        tx, ty = None, None
+        for L in remaining:
+            v = mapd["starts"].get(L)
+            if v:
+                tx, ty = px_of(tuple(v), origin, dx, dy)
+                break
+        if not cs:
+            return wait("没有检出格子可当拖动手柄, 等一帧")
+        mid_x = sum(c[0] for c in cs) / len(cs)
+        mid_y = sum(c[1] for c in cs) / len(cs)
+        handle = min(cs, key=lambda c: (c[0] - mid_x) ** 2 + (c[1] - mid_y) ** 2)
+        if tx is None:
+            ddx, ddy = 0.0, -DRAG            # 位置未知: 先往上拖(卡条在底部是最常见的遮挡)
+        else:
+            ddx = max(-DRAG, min(DRAG, mid_x - tx))
+            ddy = max(-DRAG, min(DRAG, mid_y - ty))
+            if abs(ddx) < 0.05 and abs(ddy) < 0.05:
+                ddx, ddy = 0.0, -DRAG
+        return swipe(handle[0], handle[1], handle[0] + ddx, handle[1] + ddy,
+                     f"起点 {remaining[0]} 的标记检不出(推算在 {tx if tx is None else round(tx, 2)},"
+                     f"{ty if ty is None else round(ty, 2)}) -- 拖地图 ({ddx:+.2f},{ddy:+.2f})(第 {n} 次)")
+
+    def _mt_formation(self, obs: Observation) -> Optional[Action]:
+        """编队面板: grid_squads 配置了属性->部队号就先切到那支部队, 再出击。"""
+        pre = self._preset_before_sortie(obs)
+        if pre is not None:
+            return pre
+        L = self.state.get("mt_dep_target")
+        hi = None
+        for n, (tab, hi_cls) in V.SQUAD_TABS.items():
+            if obs.has(hi_cls, 0.45):
+                hi = n
+                break
+        want = self._mt_want_squad(L)
+        if want and hi is not None and hi != want:
+            k = self.bump(f"mt_sq:{L}")
+            if k <= 3:
+                tab = obs.find(V.SQUAD_TABS[want][0], 0.45)
+                if tab is not None:
+                    return tap_box(tab, f"队 {L} 按配置用部队{want}(当前高亮部队{hi})", expect=(V.SQUAD_TABS[want][1],))
+            elif k == 4:
+                self.log(f"部队{want} 切不过去(可能已上场/页签检不出), 队 {L} 就用当前高亮的部队{hi}")
+        s = obs.find(V.SORTIE, 0.45)
+        if s is None:
+            return wait("编队页, 等出击键")
+        if L is None:
+            return tap_box(s, "编队确认: 出击(多队, 起点归属未知)", expect=(V.TASK_START, V.TASK_START_GREY))
+
+        def _post(L=L, hi=hi):
+            self.state["mt_dep_pending"] = L
+            if hi is not None:
+                self.state.setdefault("mt_team_squad", {})[L] = hi
+        return tap_box(s, f"编队确认: 出击(队 {L} = 部队{hi or '?'})",
+                       expect=(V.TASK_START, V.TASK_START_GREY), post=_post)
+
+    def _mt_want_squad(self, L: Optional[str]) -> Optional[int]:
+        cfgm = self.cfg.get("grid_squads") or None
+        if not isinstance(cfgm, dict) or L is None:
+            return None
+        attr = "any"
+        for t in self._mt_teams():
+            if t["name"] == L:
+                attr = t.get("attr") or "any"
+        v = cfgm.get(attr, cfgm.get("any"))
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            return None
+        return v if 1 <= v <= 4 else None
+
+    def _mt_start_walk(self) -> None:
+        mapd = self.state.get("mt_map") or {"starts": {}}
+        self.state["mt_pos"] = {L: list(v) for L, v in mapd["starts"].items()}
+        self.mt_new_round()
+
+    #  回合
+
+    def _mt_focus(self, obs: Observation, cs, dx, dy, origin) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
+        """箭头 -> 正下方格 -> 点阵 -> 是哪支队。(队名或 None, 箭头格点阵坐标或 None)"""
+        arrow = obs.find(V.GRID_ARROW, 0.30)
+        if arrow is None or origin is None:
+            return None, None
+        cell = grid.below(arrow, cs, dx)
+        if cell is None:
+            return None, None
+        l = lat_of(cell, origin, dx, dy)
+        pos = self.state.get("mt_pos") or {}
+        best = None
+        for L, v in pos.items():
+            if v is None:
+                continue
+            d = abs(v[0] - l[0]) + abs(v[1] - l[1])
+            if d <= 1 and (best is None or d < best[0]):
+                best = (d, L)
+        if best is not None:
+            return best[1], l
+        unknown = [L for L, v in pos.items() if v is None]
+        if len(unknown) == 1:
+            pos[unknown[0]] = list(l)
+            self.log(f"队 {unknown[0]}(传送后位置未知) 按箭头绑回 {l}")
+            return unknown[0], l
+        return None, l
+
+    def mt_walk_step(self, obs: Observation, st, plan, cs, dx, dy) -> Action:
+        """do_walk 在我方回合(PHASE 在场, 未 issued)时进来: 逐个执行本回合的动作。"""
+        acts = list(plan[self.state["round_i"]])
+        ai = int(self.state.get("mt_ai", 0))
+        fr = self._mt_frame(obs)
+        origin = fr[4] if fr else None
+        if origin is None:
+            if self._overdue("mt_walk_align", 60):
+                return self.finish(Outcome.UNKNOWN, "回合中 60s 点阵对不齐(起点/格子检出不足) -- 不瞎点")
+            return wait("点阵对齐中")
+        self._wt_clear("mt_walk_align")
+        focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
+        pos: Dict[str, Optional[list]] = self.state.setdefault("mt_pos", {})
+        # 上一发的事后证据
+        pend = self.state.get("mt_pending")
+        if pend:
+            done = self._mt_pending_done(pend, focus, focus_lat)
+            if done:
+                self._mt_apply(pend)
+                self.state["mt_pending"] = None
+                ai = int(pend["ai"]) + 1
+                self.state["mt_ai"] = ai
+                if ai >= len(acts):
+                    return self._mt_round_issued(acts)
+                return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作")
+            if time.time() - float(pend.get("t", 0)) > (10.0 if pend["do"] != "exchange" else 6.0):
+                n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")
+                if n > 3:
+                    return self.finish(Outcome.UNKNOWN,
+                                       f"回合 {self.state['round_i'] + 1} 动作 {pend['ai'] + 1}({pend['team']} {pend['do']} {pend.get('dir')}) 重发 3 次都没证据 -- 交人看")
+                self.log(f"动作 {pend['ai'] + 1} 超时无证据, 重发(第 {n} 次)")
+                self.state["mt_pending"] = None
+                if pend["do"] == "exchange":
+                    self.state["mt_ex_stage"] = 0
+            else:
+                if pend["do"] == "exchange" and pend.get("stage") == 1:
+                    return self._mt_exchange_menu(obs, pend)
+                return wait(f"等动作 {pend['ai'] + 1} 的事后证据(焦点/相位)")
+        if ai >= len(acts):
+            return self._mt_round_issued(acts)
+        act = acts[ai]
+        team = act.get("team")
+        do = act.get("do", "move")
+        d = act.get("dir")
+        if team not in pos:
+            return self.finish(Outcome.UNKNOWN, f"答案里的队 {team} 不在部署记录 {list(pos)} 里 -- 不瞎点")
+        # 先把焦点切到这支队
+        if focus != team:
+            n = self.bump(f"mt_focus:{self.state['round_i']}:{ai}")
+            cap = 2 * max(2, len(pos)) + 2
+            if n > cap:
+                return self.finish(Outcome.UNKNOWN,
+                                   f"切了 {cap} 次焦点仍聚不到队 {team}(现在 {focus}) -- 交人看")
+            if focus is None and n % 2 == 0:
+                return wait("箭头没检出, 等一帧再切焦点")
+            a = tap_at(SWITCH_PILL[0], SWITCH_PILL[1],
+                       f"焦点在 {focus or '?'}, 要 {team} -- 点左下切队药丸(第 {n} 次)",
+                       justify="左下角「N部隊」切队药丸没有 cls(v22 采了料); 16:9 部署/回合 HUD 固定, 三关 40+ 帧位置不变; "
+                               "点空只是不换焦点, 下一帧箭头位置就是证据, 有界重试后 UNKNOWN",
+                       require=V.PHASE_END)
+            a.progress = f"focus:{focus or '?'}:{n}"
+            return a
+        cur = pos.get(team)
+        if cur is None:
+            return wait(f"队 {team} 位置未知(传送后), 等箭头绑回")
+        cur = tuple(cur)
+        if do == "move" or do == "portal":
+            tgt = cur if (do == "portal" and d == "center") else lat_add(cur, d or "")
+            if tgt is None:
+                return self.finish(Outcome.UNKNOWN, f"答案方向 {d!r} 不认识 -- 不瞎点")
+            px = self._mt_cell_px(tgt, cs, origin, dx, dy)
+            if px is None:
+                if self.hold("mt_no_goal", 20):
+                    path = self._dump_grid_miss(obs)
+                    return self.finish(Outcome.UNKNOWN,
+                                       f"队 {team} {do} {d}: 目标点阵 {tgt} 处没有检出的格子也不在地图里 -- 不瞎点"
+                                       + (f" 干净帧 {path}" if path else ""))
+                return wait(f"队 {team} {do} {d}: 目标格暂未检出, 再看几帧")
+
+            def _issued(ai=ai, team=team, do=do, d=d, tgt=tgt):
+                self.state["mt_pending"] = {"ai": ai, "team": team, "do": do, "dir": d,
+                                            "from": list(cur), "target": list(tgt), "t": time.time()}
+                self.state["mt_ex_stage"] = 0
+                if ai == len(acts) - 1:
+                    self._mt_mark_issued(acts)
+            a = tap_at(px[0], px[1],
+                       f"回合 {self.state['round_i'] + 1} 动作 {ai + 1}/{len(acts)}: 队 {team} "
+                       f"{'踩传送门' if do == 'portal' else '走'} {d} -> {tgt}",
+                       justify="落点 = 本帧检出的格心(或对齐可信的地图格心), 由点阵对齐得来, 不是版面常量",
+                       require=V.PHASE_END)
+            a.post = _issued
+            return a
+        if do == "exchange":
+            tgt = lat_add(cur, d or "")
+            other = None
+            for L, v in pos.items():
+                if L != team and v is not None and tuple(v) == tgt:
+                    other = L
+            if tgt is None or other is None:
+                return self.finish(Outcome.UNKNOWN,
+                                   f"队 {team} exchange {d}: 目标 {tgt} 上没有友军(位置 {pos}) -- 答案与推算不符, 不瞎点")
+            px = self._mt_cell_px(tgt, cs, origin, dx, dy)
+            if px is None:
+                return wait(f"队 {team} exchange: 友军 {other} 所在格未检出, 再看一帧")
+
+            def _issued2(ai=ai, team=team, d=d, tgt=tgt, other=other, px=px):
+                self.state["mt_pending"] = {"ai": ai, "team": team, "do": "exchange", "dir": d, "other": other,
+                                            "from": list(cur), "target": list(tgt), "px": list(px),
+                                            "stage": 1, "t": time.time()}
+                if ai == len(acts) - 1:
+                    self._mt_mark_issued(acts)
+            a = tap_at(px[0], px[1],
+                       f"回合 {self.state['round_i'] + 1} 动作 {ai + 1}/{len(acts)}: 队 {team} 与 {other} 换位, 先点友军格 {tgt}",
+                       justify="点友军格弹「選擇/變更位置」菜单(10-2 实测), 落点是本帧检出格心",
+                       require=V.PHASE_END)
+            a.post = _issued2
+            return a
+        return self.finish(Outcome.UNKNOWN, f"答案动作 {do!r} 不认识 -- 不瞎点")
+
+    def _mt_exchange_menu(self, obs: Observation, pend: dict) -> Action:
+        """菜单已弹(上一发点了友军格): 点 變更位置。"""
+        px = pend.get("px") or [0.5, 0.5]
+        x, y = px[0] + MENU_EXCHANGE_DXY[0], px[1] + MENU_EXCHANGE_DXY[1]
+
+        def _st2():
+            pend["stage"] = 2
+            pend["t"] = time.time()
+            self.state["mt_pending"] = pend
+        a = tap_at(x, y, f"队 {pend['team']} 与 {pend['other']} 换位: 点菜单「變更位置」",
+                   justify="菜单挂在被点单位左侧, 图标相对格心偏移 (-0.083,-0.016) 为 10-2 实测常量(相机不缩放); "
+                           "菜单键无 cls(v22 采了料); 点空的后果只是没换位, 事后证据 = 箭头落到目标格, 超时重发有界",
+                   require=V.PHASE_END)
+        a.post = _st2
+        return a
+
+    def _mt_cell_px(self, tgt, cs, origin, dx, dy) -> Optional[Tuple[float, float]]:
+        """目标点阵 -> 屏幕落点: 优先本帧检出格心(0.5 格内), 其次地图里有这格(对齐可信)就用推算点。"""
+        ex, ey = px_of(tgt, origin, dx, dy)
+        near = min(cs, key=lambda c: (c[0] - ex) ** 2 + (c[1] - ey) ** 2, default=None)
+        if near is not None and (near[0] - ex) ** 2 + (near[1] - ey) ** 2 <= (0.5 * dx) ** 2:
+            return near
+        mapd = self.state.get("mt_map") or {"cells": []}
+        if list(tgt) in [list(c) for c in mapd["cells"]] and 0.03 < ex < 0.97 and 0.08 < ey < 0.88:
+            return (ex, ey)
+        return None
+
+    def _mt_pending_done(self, pend: dict, focus: Optional[str], focus_lat) -> bool:
+        do = pend["do"]
+        tgt = tuple(pend["target"])
+        # 位置表要等这里返回 True 才更新, 所以看"箭头落在哪个格"(focus_lat), 别看按旧位置表猜出来的队名:
+        #    换位后箭头在友军原来的格上, 旧表会把它认成友军; 走完后箭头在目标格上, 旧表谁也对不上。
+        if do == "exchange":
+            # 换位不消耗行动: 焦点仍在本队, 箭头落到友军原来的格 = 换成了
+            return pend.get("stage") == 2 and focus_lat == tgt
+        if do == "move" and focus_lat is not None and focus_lat == tgt:
+            return True                     # 箭头已在目标格(只剩它一队时焦点不切, 它已站过去)
+        if focus is not None and focus != pend["team"]:
+            return True                     # 游戏把焦点切给下一队 = 上一队的行动被消费
+        if self.state.get("cycling"):
+            return True                     # 相位循环了
+        return False
+
+    def _mt_apply(self, pend: dict) -> None:
+        pos = self.state.setdefault("mt_pos", {})
+        team = pend["team"]
+        do = pend["do"]
+        if do == "move":
+            pos[team] = list(pend["target"])
+        elif do == "portal":
+            pos[team] = None
+        elif do == "exchange":
+            other = pend["other"]
+            pos[team], pos[other] = list(pend["target"]), list(pend["from"])
+        if do != "exchange":
+            acted = self.state.setdefault("mt_acted", [])
+            if team not in acted:
+                acted.append(team)
+        self.log(f"动作确认: 队 {team} {do} {pend.get('dir')} -> 位置 {pos}")
+
+    def _mt_mark_issued(self, acts) -> None:
+        """本回合最后一个动作发出去了: 置 issued 交给 do_walk 的相位循环时钟(最后一发之后 PHASE 立刻消失,
+        事后证据来不及看, 循环本身就是证据; mt_new_round 会把还挂着的动作记账)。
+        need_end = 答案本回合有队不行动(exchange 不算行动) -> 游戏不会自动结束, 之后手点 PHASE結束。"""
+        actors = {m.get("team") for m in acts if m.get("do", "move") != "exchange"}
+        all_teams = set((self.state.get("mt_pos") or {}).keys())
+        self.state["mt_need_end"] = bool(all_teams - actors)
+        self.state.update(issued=True, cycling=False, pe_absent=0, pre_vec=None,
+                          moved_t=None, moved_frames=0, issued_do="multi")
+        self.state["mt_issue_t"] = time.time()
+        self._wt_clear()
+
+    def _mt_round_issued(self, acts) -> Action:
+        """本回合动作都有证据了(pe 仍在场): 交给 do_walk 的相位循环等待。"""
+        if not self.state.get("issued"):
+            self._mt_mark_issued(acts)
+        return wait(f"回合 {self.state['round_i'] + 1} 的 {len(acts)} 个动作都发了, 等相位循环"
+                    + ("(有队没行动, 要手点 PHASE結束)" if self.state.get("mt_need_end") else ""))
+
+    def mt_issued_step(self, obs: Observation, pe: bool) -> Optional[Action]:
+        """do_walk 的 issued 分支里先问这里(每帧): 还挂着的动作先看事后证据; 有队没行动 -> 点 PHASE結束
+        (「尚未行動」确认框由 base 通用处理器点確認)。返回 None = 交回 do_walk 的通用相位循环等待。"""
+        if not pe or self.state.get("cycling"):
+            return None
+        pend = self.state.get("mt_pending")
+        if pend:
+            fr = self._mt_frame(obs)
+            if fr is not None and fr[4] is not None:
+                cs, sb, dx, dy, origin = fr
+                focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
+                if pend.get("do") == "exchange" and pend.get("stage") == 1:
+                    return self._mt_exchange_menu(obs, pend)
+                if self._mt_pending_done(pend, focus, focus_lat):
+                    self._mt_apply(pend)
+                    self.state["mt_pending"] = None
+                    self.state["mt_ai"] = int(pend["ai"]) + 1
+        if not self.state.get("mt_need_end"):
+            return None
+        if self.state.get("mt_pending"):
+            return wait("最后一个动作还没看到事后证据, 先不手点 PHASE結束")
+        if time.time() - float(self.state.get("mt_issue_t", 0)) < 4.0:
+            return wait("答案本回合有队不动, 4s 内相位没自动结束就手点 PHASE結束")
+        n = self.bump("mt_end_taps")
+        if n > 4:
+            return self.finish(Outcome.UNKNOWN, "PHASE結束 点了 4 次相位仍不循环 -- 交人看")
+        b = obs.find(V.PHASE_END, 0.40)
+        if b is None:
+            return None
+        return tap_box(b, f"本回合答案不含全部队伍, 手点 PHASE結束(第 {n} 次; 「尚未行動」框由通用确认处理)",
+                       expect_gone=(V.PHASE_END,))

@@ -1429,7 +1429,8 @@ def t_invariants():
     #     白名单：只有 sweep（悬赏/JFD）和 event（活动）会真的开关卡。
     # campaign 是合法例外: 它的本职就是花 AP 打关, 且 stage 由用户配置、
     #   没配就 BLOCKED（策略是用户的, bot 只负责走）
-    _STAGE_OK = {"sweep.py", "event.py", "campaign.py"}
+    #   grid_multi 是 campaign 的多队子链(数够队才点 任務開始), 同一例外。
+    _STAGE_OK = {"sweep.py", "event.py", "campaign.py", "grid_multi.py"}
     bad2 = []
     for p in (root / "flow").glob("*.py"):
         if p.name in _STAGE_OK:
@@ -1932,10 +1933,16 @@ def t_route():
     _cfgb["campaign"] = {"stage": "11-1"}
     _cpb = ALL["campaign"](Ctx(cfg=_cfgb, log=lambda m: None))
     _ab = _cpb.decide(O(), _SV(page="task_hall", frames_in_page=5))
-    check("答案要多队/portal -- 进关前预检 BLOCKED, AP 一分不花",
-          _cpb.outcome == "BLOCKED"
-          and any("进关前拦下" in l for l in _cpb.note_lines),
-          f"{_cpb.outcome} {_cpb.note_lines}")
+    # 09-05 起多队/portal/exchange 由 grid_multi 承接: 默认放行; 配置 multi_team=false 才回到进关前 BLOCKED
+    check("答案要多队/portal -- 09-05 起默认放行(grid_multi 承接), 不再进关前 BLOCKED",
+          _cpb.outcome != "BLOCKED", f"{_cpb.outcome} {_cpb.note_lines}")
+    _cfgb2 = cfg()
+    _cfgb2["campaign"] = {"stage": "11-1", "multi_team": False}
+    _cpb2 = ALL["campaign"](Ctx(cfg=_cfgb2, log=lambda m: None))
+    _cpb2.decide(O(), _SV(page="task_hall", frames_in_page=5))
+    check("multi_team=false 时多队关仍在进关前 BLOCKED, AP 一分不花",
+          _cpb2.outcome == "BLOCKED" and any("进关前拦下" in l for l in _cpb2.note_lines),
+          f"{_cpb2.outcome} {_cpb2.note_lines}")
     # 真多区域: 计划没走完游戏弹回部署屏 -> 回 grid 相位重新部署,
     #    round_i 不动（继续同一份答案, 不是换"下一区域的解法"）
     _cpr = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
@@ -4553,6 +4560,227 @@ def t_v20_wiring():
     check("没配 preset_apply -> 编队页直接出击", a is not None and a.target_cls == V.SORTIE, str(a))
 
 
+def t_grid_multi_0905():
+    """多队走格子子链(09-05 大号 10-1/10-2/11-1 手驾实测后写): 起点方位分配 / 点阵建图与对齐 /
+    数够队才 任務開始 / grid_squads 挑部队 / 切队药丸 / 逐动作事后证据 / 换位菜单 / 传送置未知再绑回 /
+    有队不动手点 PHASE結束 / 被挡起点拖地图(几何从检出推)。"""
+    print("\n-- 多队走格子 0905 ----")
+    from routing_v2.flow import grid_multi as GM
+    dx, dy = 0.093, 0.117
+    teams2 = [{"name": "A", "attr": "blue", "pos": "left-down"}, {"name": "B", "attr": "red", "pos": "right-up"}]
+    asg = GM.assign_starts([(0.500, 0.367), (0.313, 0.599)], teams2, dx, dy)
+    check("10-1: left-down/right-up 起点分配", asg == {"A": 1, "B": 0}, str(asg))
+    asg = GM.assign_starts([(0.382, 0.718), (0.569, 0.255)],
+                           [{"name": "A", "pos": "up"}, {"name": "B", "pos": "down"}], dx, dy)
+    check("11-1: up/down 起点分配(单看 up 更像 right-up, 排列总分定)", asg == {"A": 1, "B": 0}, str(asg))
+    asg = GM.assign_starts([(0.5, 0.30), (0.5, 0.65), (0.5, 0.48)],
+                           [{"name": "A", "pos": "up"}, {"name": "B", "pos": "center"}, {"name": "C", "pos": "down"}], dx, dy)
+    check("3 队 up/center/down 分配(center = 离质心最近)", asg == {"A": 0, "B": 2, "C": 1}, str(asg))
+    o = (0.313, 0.599)
+    check("lat_of: 右下 (1,1) / 右 (2,0) / 奇偶纠正",
+          GM.lat_of((0.313 + dx / 2, 0.599 + dy), o, dx, dy) == (1, 1)
+          and GM.lat_of((0.313 + dx, 0.599), o, dx, dy) == (2, 0)
+          and GM.lat_of((0.313 + dx * 1.0, 0.599 + dy), o, dx, dy)[0] % 2 == 1)
+    cells = [(0.313, 0.599), (0.406, 0.372), (0.501, 0.370), (0.360, 0.487), (0.546, 0.483),
+             (0.407, 0.602), (0.688, 0.603), (0.358, 0.721), (0.453, 0.721), (0.547, 0.723)]
+    mp = GM.build_map(cells, [(0.313, 0.599), (0.500, 0.367)], teams2, dx, dy)
+    check("建图: 起点 A=(0,0) B=(4,-2), 格数 10",
+          mp is not None and mp["starts"] == {"A": [0, 0], "B": [4, -2]} and len(mp["cells"]) == 10, str(mp))
+    sh = (0.085, 0.030)
+    cells2 = [(x + sh[0], y + sh[1]) for x, y in cells[:8]]
+    got = GM.align(mp, cells2, [(0.313 + sh[0], 0.599 + sh[1])], dx, dy)
+    check("对齐: 相机平移后原点跟着走(只见起点 A + 8 格)",
+          got is not None and abs(got[0][0] - (0.313 + sh[0])) < 0.01 and abs(got[0][1] - (0.599 + sh[1])) < 0.01, str(got))
+    got2 = GM.align(mp, cells2, [(0.500 + sh[0], 0.367 + sh[1])], dx, dy)
+    check("对齐: 只见起点 B 也能定原点", got2 is not None and abs(got2[0][0] - (0.313 + sh[0])) < 0.01, str(got2))
+    got3 = GM.align(mp, cells2, [], dx, dy)
+    check("对齐: 一个起点都没检出时靠格子形状(不对称)", got3 is not None and abs(got3[0][0] - (0.313 + sh[0])) < 0.01, str(got3))
+
+    def cellB(x, y, conf=0.97):
+        return B(V.GRID_CELL, conf=conf, cx=x, cy=y, w=0.09, h=0.14)
+
+    def startB(x, y, cls=V.GRID_START, conf=0.95):
+        return B(cls, conf=conf, cx=x, cy=y, w=0.06, h=0.032)
+
+    def arrow(x, y, conf=0.95):
+        return B(V.GRID_ARROW, conf=conf, cx=x, cy=y, w=0.026, h=0.04)
+
+    _c = cfg()
+    _c["campaign"] = {"stage": "10-1"}
+    fl = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    fl.goto("grid")
+    dep0 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599), startB(0.500, 0.367),
+             B(V.GRID_START_HOVER, cx=0.312, cy=0.538, w=0.02, h=0.036), arrow(0.500, 0.306, 0.35),
+             B(V.TASK_START_GREY, cx=0.916, cy=0.925))
+    a = fl.decide(dep0, Machine(1).update(dep0))
+    check("部署首帧建图(等一帧)", a is not None and a.kind == "wait" and bool(fl.state.get("mt_map")), str(a))
+    a = fl.decide(dep0, Machine(1).update(dep0))
+    check("第二帧点答案第一队 A 的起点(left-down 0.313 框上 1/3), 不点 B",
+          a is not None and a.kind == "tap" and abs(a.x - 0.313) < 0.01 and a.y < 0.599 and fl.state.get("mt_dep_target") == "A", str(a))
+    form1 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261), B(V.SQUAD_2, cx=0.051, cy=0.370))
+    a = fl.decide(form1, Machine(1).update(form1))
+    check("编队页出击(队 A)", a is not None and a.target_cls == V.SORTIE, str(a))
+    a.post()
+    check("出击 post: A 待确认 + A=部队1",
+          fl.state.get("mt_dep_pending") == "A" and fl.state.get("mt_team_squad", {}).get("A") == 1)
+    sh = (0.085, -0.024)
+    dep1 = O(*[cellB(x + sh[0], y + sh[1]) for x, y in cells], startB(0.313 + sh[0], 0.599 + sh[1]),
+             startB(0.500 + sh[0], 0.367 + sh[1]), arrow(0.500 + sh[0], 0.306 + sh[1], 0.61),
+             B(V.TASK_START, cx=0.915, cy=0.923))
+    a = fl.decide(dep1, Machine(1).update(dep1))
+    check("1/2 上场时 任務開始 已黄也不点, 去点 B 的起点(相机平移后位置)",
+          a is not None and a.kind == "tap" and abs(a.x - (0.500 + sh[0])) < 0.01 and a.target_cls != V.TASK_START, str(a))
+    check("A 已上场计数(标记消失 = 事实)", fl.state.get("mt_deployed") == ["A"], str(fl.state.get("mt_deployed")))
+    form2 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1, cx=0.053, cy=0.261), B(V.SQUAD_2_HI, cx=0.051, cy=0.370))
+    a = fl.decide(form2, Machine(1).update(form2))
+    a.post()
+    dep2 = O(*[cellB(x + sh[0], y + sh[1]) for x, y in cells], startB(0.313 + sh[0], 0.599 + sh[1]),
+             startB(0.500 + sh[0], 0.367 + sh[1]), B(V.TASK_START, cx=0.915, cy=0.923))
+    a = fl.decide(dep2, Machine(1).update(dep2))
+    check("2/2 都上了才点 任務開始", a is not None and a.target_cls == V.TASK_START, str(a))
+    check("B=部队2", fl.state.get("mt_team_squad", {}).get("B") == 2, str(fl.state.get("mt_team_squad")))
+    _c3 = cfg()
+    _c3["campaign"] = {"stage": "10-1", "grid_squads": {"red": 3, "blue": 1}}
+    fl3 = ALL["campaign"](Ctx(cfg=_c3, log=lambda m: None))
+    fl3.goto("grid")
+    fl3.state.update(mt_map=mp, mt_deployed=["A"], mt_dep_target="B")
+    form3 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1, cx=0.053, cy=0.261), B(V.SQUAD_2_HI, cx=0.051, cy=0.370),
+              B(V.SQUAD_3, cx=0.05, cy=0.48))
+    a = fl3.decide(form3, Machine(1).update(form3))
+    check("grid_squads: red->部队3, 高亮是部队2 -> 先切 3部队", a is not None and a.target_cls == V.SQUAD_3, str(a))
+    ph = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928),
+           B(V.PHASE_AUTO_ON, cx=0.893, cy=0.832), arrow(0.313, 0.42))
+    fl.decide(ph, Machine(1).update(ph))
+    check("PHASE 出现 -> walk, 队伍位置 = 起点点阵",
+          fl.phase == "walk" and fl.state.get("mt_pos") == {"A": [0, 0], "B": [4, -2]}, f"{fl.phase} {fl.state.get('mt_pos')}")
+    a = None
+    for _ in range(3):
+        a = fl.decide(ph, Machine(1).update(ph))
+        if a is not None and a.kind == "tap":
+            break
+    check("r1 动作1: 焦点在 A, 点 A 右下的检出格 (0.358,0.721)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.358) < 0.01 and abs(a.y - 0.721) < 0.01, str(a))
+    a.post()
+    check("落子后挂起 pending(A -> (1,1)), 不是最后一发所以未 issued",
+          (fl.state.get("mt_pending") or {}).get("target") == [1, 1] and not fl.state.get("issued"))
+    ph2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), startB(0.500, 0.367, V.GRID_START_GREY),
+             B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.500, 0.19))
+    fl.decide(ph2, Machine(1).update(ph2))
+    check("箭头到 B 头上 = A 的动作被消费, A 位置 (1,1), 动作指针 1",
+          fl.state.get("mt_pos", {}).get("A") == [1, 1] and fl.state.get("mt_ai") == 1, f"{fl.state.get('mt_pos')} ai={fl.state.get('mt_ai')}")
+    a = fl.decide(ph2, Machine(1).update(ph2))
+    check("r1 动作2: 焦点在 B, 点 B 右下格 (0.546,0.483)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.546) < 0.01 and abs(a.y - 0.483) < 0.01, str(a))
+    a.post()
+    check("最后一发即 issued; 全员行动 -> 不需手点 PHASE結束", bool(fl.state.get("issued")) and not fl.state.get("mt_need_end"))
+    gone = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY))
+    for _ in range(4):
+        fl.decide(gone, Machine(1).update(gone))
+    fl.decide(ph, Machine(1).update(ph))
+    check("循环后进回合 2, 挂起的 B 动作记账 (5,-1), 动作指针归零",
+          fl.state.get("round_i") == 1 and fl.state.get("mt_pos", {}).get("B") == [5, -1] and fl.state.get("mt_ai") == 0,
+          f"round={fl.state.get('round_i')} pos={fl.state.get('mt_pos')}")
+    ph3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.358, 0.54))
+    a = fl.decide(ph3, Machine(1).update(ph3))
+    check("r2 首动作是 B 但焦点在 A -> 点左下切队药丸(几何, JIT 锚 PHASE結束)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.062) < 0.01 and abs(a.y - 0.775) < 0.01 and a.require == V.PHASE_END, str(a))
+    ph4 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.546, 0.30))
+    a = fl.decide(ph4, Machine(1).update(ph4))
+    check("焦点到 B 后: B 右下 (6,0) 处还没有格子 -> 等(不瞎点)", a is not None and a.kind == "wait", str(a))
+    ph5 = O(*ph4.boxes, cellB(0.592, 0.601))
+    a = fl.decide(ph5, Machine(1).update(ph5))
+    check("桥格出现后落子 (0.592,0.601)", a is not None and a.kind == "tap" and abs(a.x - 0.592) < 0.01, str(a))
+    fl.decide(ph5, Machine(1).update(ph5))
+    check("桥格连续两帧检出并入地图 (6,0)", [6, 0] in [list(c) for c in fl.state["mt_map"]["cells"]], str(fl.state["mt_map"]["cells"][-3:]))
+    a.post()
+    fl.state.update(mt_pending=None, mt_ai=0, issued=False, cycling=False, round_i=0)
+    fl.state["mt_pos"] = {"A": [1, 1], "B": [2, 0]}
+    fl.state["answer"] = dict(fl.state["answer"], rounds=[[{"team": "A", "do": "exchange", "dir": "right-up"},
+                                                         {"team": "A", "do": "move", "dir": "left-up"}]])
+    fl.mt_new_round()
+    exo = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.358, 0.54))
+    a = fl.decide(exo, Machine(1).update(exo))
+    check("exchange 第一步: 点友军 B 所在格 (0.407,0.602)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.407) < 0.01 and abs(a.y - 0.602) < 0.01, str(a))
+    a.post()
+    a = fl.decide(exo, Machine(1).update(exo))
+    check("exchange 第二步: 点菜单 變更位置(格心偏移 -0.083,-0.016)",
+          a is not None and a.kind == "tap" and abs(a.x - (0.407 - 0.083)) < 0.01 and abs(a.y - (0.602 - 0.016)) < 0.01, str(a))
+    a.post()
+    ex2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.407, 0.42))
+    fl.decide(ex2, Machine(1).update(ex2))
+    check("箭头落到 B 原来的格 = 换位成功, 位置互换, 不算行动",
+          fl.state.get("mt_pos") == {"A": [2, 0], "B": [1, 1]} and fl.state.get("mt_acted") == [],
+          f"{fl.state.get('mt_pos')} acted={fl.state.get('mt_acted')}")
+    a = fl.decide(ex2, Machine(1).update(ex2))
+    check("换位后 A 再走 left-up -> (1,-1) 检出格 (0.360,0.487)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.360) < 0.01 and abs(a.y - 0.487) < 0.01, str(a))
+    a.post()
+    check("最后一发 issued, 且 B 本回合不动 -> 要手点 PHASE結束", bool(fl.state.get("issued")) and bool(fl.state.get("mt_need_end")))
+    ex3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.360, 0.30))
+    a = fl.decide(ex3, Machine(1).update(ex3))
+    check("4s 内先不手点 PHASE結束(等自动结束)", a is not None and a.kind == "wait", str(a))
+    fl.state["mt_issue_t"] = 0
+    a = fl.decide(ex3, Machine(1).update(ex3))
+    check("箭头已在 A 目标格(证据记账 (1,-1)) + 超 4s -> 手点 PHASE結束",
+          a is not None and a.target_cls == V.PHASE_END and fl.state.get("mt_pos", {}).get("A") == [1, -1], f"{a} {fl.state.get('mt_pos')}")
+    fl.state.update(issued=False, mt_pending=None, mt_ai=0, mt_need_end=False, cycling=False, round_i=0)
+    fl.state["mt_pos"] = {"A": [0, 0], "B": [4, -2]}
+    fl.state["answer"] = dict(fl.state["answer"], rounds=[[{"team": "A", "do": "portal", "dir": "right-down"},
+                                                         {"team": "B", "do": "move", "dir": "left-down"}]])
+    fl.mt_new_round()
+    po = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.313, 0.42))
+    a = fl.decide(po, Machine(1).update(po))
+    check("portal: 点传送格(A 右下 (0.358,0.721)); 确认框交给通用 on_confirm_dialog",
+          a is not None and a.kind == "tap" and abs(a.x - 0.358) < 0.01, str(a))
+    a.post()
+    po2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.500, 0.19))
+    fl.decide(po2, Machine(1).update(po2))
+    check("传送后焦点切到 B = 消费; A 位置置未知", fl.state.get("mt_pos", {}).get("A") is None and fl.state.get("mt_ai") == 1, str(fl.state.get("mt_pos")))
+    fl.state.update(mt_ai=0, mt_pending=None)
+    fl.state["answer"] = dict(fl.state["answer"], rounds=[[{"team": "A", "do": "move", "dir": "left"}]])
+    po3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.688, 0.42))
+    fl.decide(po3, Machine(1).update(po3))
+    check("位置未知的队按箭头绑回 (8,0)", fl.state.get("mt_pos", {}).get("A") == [8, 0], str(fl.state.get("mt_pos")))
+    fl4 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    fl4.goto("grid")
+    fl4.state.update(mt_map=mp, mt_deployed=["B"])
+    vis = [(x, y + 0.30) for x, y in cells if y + 0.30 < 0.85]
+    hid = O(*[cellB(x, y) for x, y in vis], startB(0.500, 0.667), B(V.TASK_START, cx=0.915, cy=0.923))
+    a = fl4.decide(hid, Machine(1).update(hid))
+    check("A 起点被卡条挡住(推算 y=0.90, 无标记) -> 拖地图: 手柄是检出格心, 往上拖",
+          a is not None and a.kind == "swipe" and any(abs(a.x - x) < 1e-6 and abs(a.y - y) < 1e-6 for x, y in vis) and a.y2 < a.y, str(a))
+    print(f"  多队 lack: {fl4._capability_lack()!r}")
+    # 09-05 live 事故: 归位在藏 UI 大厅按返回键 -> 「是否結束？」 -> 取消 -> 下一帧只剩 確認 被当 ack 点了 -> 游戏退出
+    from routing_v2.flow import nav as _nav
+    from routing_v2.act.action import tap_box as _tb2
+    g5 = Gate(cfg(), log=lambda m: None)
+    dlg = O(B(V.CANCEL, cx=0.401, cy=0.702), B(V.CONFIRM, cx=0.598, cy=0.699), B(V.CLOSE_X, cx=0.692, cy=0.230),
+            B("信用点", cx=0.533, cy=0.05), B("体力", cx=0.409, cy=0.05))
+    g5.note_fired(Action(kind="key", keycode="KEYCODE_BACK", reason="x"), 10)
+    v = g5.allow(_tb2(B(V.CONFIRM, cx=0.598, cy=0.699), "x"), dlg, fresh=lambda: None, page_changed=False,
+                 frames_in_page=12, last_solid="unknown")
+    check("闸: 上一发是系统返回键 -> 確認 一律拦(退出框)", not v.ok and "返回键" in v.why, v.why)
+    g5.note_fired(_tb2(B(V.CANCEL, cx=0.401, cy=0.702), "x"), 20)
+    ack = O(B(V.CONFIRM, cx=0.598, cy=0.699), B("信用点", cx=0.533, cy=0.05), B("体力", cx=0.409, cy=0.05))
+    v = g5.allow(_tb2(B(V.CONFIRM, cx=0.598, cy=0.699), "x"), ack, fresh=lambda: None, page_changed=False,
+                 frames_in_page=22, last_solid="unknown")
+    check("闸: 刚点过取消 3s 内 -> 只剩 確認 的帧不点(框在关)", not v.ok and "取消" in v.why, v.why)
+    g5._last_fire_t = 0.0
+    v = g5.allow(_tb2(B(V.CONFIRM, cx=0.598, cy=0.699), "x"), ack, fresh=lambda: None, page_changed=False,
+                 frames_in_page=60, last_solid="unknown")
+    check("闸: 取消 3s 之后的 確認 恢复原判(不因这条规则拦)", "刚点过取消" not in v.why, v.why)
+    empty = O(B(V.CLOSE_X, conf=0.32, cx=0.961, cy=0.058), B("黄点", conf=0.31, cx=0.19, cy=0.947))
+    check("nav: 接近空屏(只有 <0.5 杂框)不按系统返回键", _nav.back_key(empty, "x") is None)
+    check("nav: 有实框时返回键照发", _nav.back_key(O(B(V.CLOSE_X, cx=0.9, cy=0.1)), "x") is not None)
+    _svu = Machine(1).update(empty)
+    for _ in range(50):
+        _svu = Machine(1).update(empty)
+    class _SVe:
+        page = "unknown"; frames_in_page = 60; last_solid = "unknown"; overlay = None
+    check("nav: unknown+接近空屏 60 帧 -> 空屏逃生点背景唤醒", _nav.blank_escape(_SVe(), obs=empty) is not None)
+
+
 if __name__ == "__main__":
     t_pages()
     t_machine()
@@ -4578,6 +4806,7 @@ if __name__ == "__main__":
     t_story_stack_0821()
     t_schedule_locked_card_0821()
     t_v20_wiring()
+    t_grid_multi_0905()
     print("\n" + "" * 52)
     if FAILS:
         print(f" {len(FAILS)} 项没过:")

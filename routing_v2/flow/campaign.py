@@ -22,6 +22,7 @@ import re
 from routing_v2.act.action import Action, tap_at, tap_box, wait
 from routing_v2.flow import grid, nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome
+from routing_v2.flow.grid_multi import GridMultiMixin
 from routing_v2.flow.preset import PresetMixin
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Observation
@@ -81,7 +82,7 @@ def resolve_queue(cfg):
     return queue, []
 
 
-class CampaignFlow(PresetMixin, ExitMixin, Flow):
+class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
     name = "campaign"
     module = "campaign"
     entry_page = "task_hall"
@@ -179,6 +180,7 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
             moved_t=None, moved_frames=0, start_box=None,
             dx_est=None, deploy_round0=0)
         self.state["cell_acc"] = []
+        self.mt_reset()
         self._reset_row_cache()
         self._wt_clear()
         for k in [k for k in self.state if k.startswith("hold:")]:
@@ -418,14 +420,21 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
             return None
         needs = ans.get("needs") or {}
         lack = []
-        if needs.get("teams", 1) > 1:
-            lack.append(f"{needs['teams']} 队协同(缺 当前聚焦队伍/切换键 判据)")
-        # portal 已实现(08-30): 点击同 move, 事后地标推算作废转单位绑定,
-        #    位移证据放开上限。多队/exchange/属性队仍未实现, 继续拦。
-        if False and needs.get("portal"):
-            lack.append("portal 传送(确认弹窗链未 live 验证)")
-        if needs.get("exchange"):
-            lack.append("exchange 换位(交換按钮无 cls)")
+        # 09-05: 多队 / exchange / portal 全部由 grid_multi 子链承接(10-1/10-2/11-1 手驾实测后写)。
+        #    这里只拦 4 队以上(部队页签只有 4 个)、配置关掉的多队、答案里不认识的动作/方向。
+        if needs.get("teams", 1) > 4:
+            lack.append(f"{needs['teams']} 队(部队页签只有 4 个)")
+        if needs.get("teams", 1) > 1 and self.cfg.get("multi_team", True) is False:
+            lack.append(f"{needs['teams']} 队协同(配置 campaign.multi_team=false 关着)")
+        rounds = ans.get("rounds") or []
+        bad = sorted({str(m.get("do", "move")) for r in rounds for m in r} - {"move", "exchange", "portal"})
+        if bad:
+            lack.append(f"答案含不认识的动作 {bad}")
+        badd = sorted({str(m.get("dir")) for r in rounds for m in r
+                       if not (m.get("do") == "portal" and m.get("dir") == "center")
+                       and m.get("dir") not in grid.DIRS})
+        if badd:
+            lack.append(f"答案含不认识的方向 {badd}")
         if lack:
             return (f"{ans.get('stage', '?')} 的答案需要 " + " + ".join(lack))
         return None
@@ -649,7 +658,11 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
                         hf = self.state.get("hop_from")
                         if hf is not None and seen_ch and seen_ch[0] == hf:
                             if self.bump("hop_settle") < 60:
-                                return wait(f"切区后区号还停在 {hf} -- 等落地")
+                                # 读数缓存按**行位置**键, 切区后行位不变、数字变 -- 缓存会把出发区号
+                                #    一直"读"下去, 60 帧后被当成没点上再点一次, 过冲(09-05 live 实锤:
+                                #    11 -> 9 -> 11, 5 跳预算烧光交人)。等落地期间每帧重读, 不吃缓存。
+                                self.state["row_reads"] = {}
+                                return wait(f"切区后区号还停在 {hf} -- 等落地(每帧重读)")
                         self.state["hop_settle"] = 0
                         left = want_ch < seen_ch[0]
                         arr = obs.find(V.ARROW_LEFT if left else V.ARROW_RIGHT,
@@ -854,6 +867,12 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
                           "部署菜单弹出(解除在场) -- 点空处消退, 绝不点解除",
                           justify="菜单外任意空处都能消退菜单(08-31 手驾实证); 落点是"
                                   "离本帧全部检出框 >=0.08 的备选点, 按检出现选, 不是版面常量")
+        # 多队关(needs.teams > 1): 部署/编队/任務開始 全走 grid_multi 子链(数着上队, 上齐才开;
+        #    上一队后 任務開始 就已经变黄, 单队那条"见黄就点"在这里会只带一队开局)。
+        if self._multi():
+            act = self.mt_deploy_step(obs, st)
+            if act is not None:
+                return act
         # 点了起点会弹编队页(出击键) -- 相位机下页面 handler 不跑, 在这处理。
         #    預設面板/變更編輯框盖在编队面板上时也走这里(套预设子链, 配置门控)。
         if (st.page in ("formation", "preset_panel") or obs.has(V.SORTIE, 0.45)
@@ -1010,6 +1029,8 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
                               pre_vec=None, moved_t=None, moved_frames=0)
             self.state["cell_acc"] = []
             self._wt_clear()
+            # 多队: 重新部署要重建起点地图和上队计数(位置在 PHASE 出现时按新起点重置)
+            self.state.update(mt_deployed=[], mt_map=None, mt_dep_pending=None, mt_pending=None)
             self.goto("grid", f"回合 {self.state['round_i'] + 1} 前被要求重新部署"
                               f"（多区域地图, 部署后继续同一份答案）")
             return wait("重新部署")
@@ -1042,6 +1063,10 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
             return tap_box(ao, "勾上 PHASE 自动结束（回合时钟靠相位循环）",
                            expect=(V.PHASE_AUTO_ON,))
         if self.state.get("issued"):
+            if self._multi():
+                _ma = self.mt_issued_step(obs, pe)
+                if _ma is not None:
+                    return _ma
             if not pe:
                 # cycling 由 observe() 按连续 3 帧缺席判定（页面无关）,
                 #    这里不再单帧置位 -- 单帧漏检当循环会造成假回合推进
@@ -1056,6 +1081,7 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
                                   pe_absent=0, bind_last=None,
                                   pre_vec=None, moved_t=None, moved_frames=0)
                 self.state["round_i"] += 1
+                self.mt_new_round()
                 self.state.pop("hold:move_wait", None)
                 self._wt_clear()
                 self.log(f"相位循环完成 - 进回合 {self.state['round_i'] + 1}")
@@ -1068,6 +1094,14 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
             #    位移已确认 = 游戏收下了这一步, 禁止重发, 等 observe 置 cycling。
             if self.state.get("moved_t"):
                 return wait("等相位循环（位移已确认）")
+            if self._multi() and self.hold("move_wait", 150):
+                # 多队: 动作都有事后证据却不自动结束 = 有队没行动(答案/推算偏差), 手点 PHASE結束 收回合,
+                #    不重发落子(重点已行动队的格会弹菜单)。mt_issued_step 有界 4 次后 UNKNOWN。
+                if not self.state.get("mt_need_end"):
+                    self.state["mt_need_end"] = True
+                    self.state["mt_issue_t"] = 0
+                    self.log("多队回合发完 150 tick 相位没循环 -- 改手点 PHASE結束")
+                return wait("多队: 等手点 PHASE結束 收回合")
             if self.hold("move_wait", 150):
                 n = self.bump(f"reissue:{self.state['round_i']}")
                 if n > 3:
@@ -1102,6 +1136,9 @@ class CampaignFlow(PresetMixin, ExitMixin, Flow):
             return wait("格子检出不足, 等一帧")
         self._wt_clear("no_cells")
         dx, dy = stp
+        # 多队关: 逐动作执行(焦点切换 / 换位 / 传送 / 手动结束相位)全在 grid_multi 子链
+        if self._multi():
+            return self.mt_walk_step(obs, st, plan, cs, dx, dy)
         # **航位推算优先**: 当前逻辑格 = 起点地标 + 本区已确认执行的答案方向
         #    累加（相机不变, 不依赖我方立绘检出）。H2-2 r2 实锤的病: 单位自己
         #    的格子被立绘挡住没检出, below() 就近绑到隔壁起点格 -> "right-down"
