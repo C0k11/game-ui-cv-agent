@@ -4738,6 +4738,23 @@ def t_grid_multi_0905():
     ex3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.360, 0.30))
     a = fl.decide(ex3, Machine(1).update(ex3))
     check("4s 内先不手点 PHASE結束(等自动结束)", a is not None and a.kind == "wait", str(a))
+    # 最后一发 10s 没证据 -> 收回 issued 重发(有界)
+    flx = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    flx.goto("walk")
+    flx.state.update(mt_map=mp, mt_pos={"A": [0, 0], "B": [4, -2]}, round_i=0)
+    flx.state["answer"] = dict(flx.state["answer"], rounds=[[{"team": "A", "do": "move", "dir": "right-down"}]])
+    flx.mt_new_round()
+    flx.state.update(issued=True, mt_need_end=False, mt_ai=0,
+                     mt_pending={"ai": 0, "team": "A", "do": "move", "dir": "right-down", "from": [0, 0], "target": [1, 1], "t": 0})
+    a = flx.decide(ph, Machine(1).update(ph))
+    check("最后一发 10s 无证据 -> 收回 issued 重发", a is not None and a.kind == "wait" and "重发" in a.reason and not flx.state.get("issued") and flx.state.get("mt_pending") is None, str(a))
+    flx.state.update(mt_settle_until=0, mt_focus_prev=None)
+    a = None
+    for _ in range(4):      # 相机两帧共识 + 焦点两帧共识
+        a = flx.decide(ph, Machine(1).update(ph))
+        if a is not None and a.kind == "tap":
+            break
+    check("重发: 再次点 A 右下格", a is not None and a.kind == "tap" and abs(a.x - 0.358) < 0.01, str(a))
     fl.state["mt_issue_t"] = 0
     a = fl.decide(ex3, Machine(1).update(ex3))
     check("箭头已在 A 目标格(证据记账 (1,-1)) + 超 4s -> 手点 PHASE結束",

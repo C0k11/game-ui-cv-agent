@@ -739,6 +739,21 @@ class GridMultiMixin:
                     self._mt_apply(pend)
                     self.state["mt_pending"] = None
                     self.state["mt_ai"] = int(pend["ai"]) + 1
+                    self.state["mt_settle_until"] = time.time() + 2.5
+            pend = self.state.get("mt_pending")
+            if pend and time.time() - float(pend.get("t", 0)) > 10.0:
+                # 最后一发没被游戏收下(09-05 第 8 次 live: B 的落子发了, 回合資訊仍是 1, flow 干等到相位上限):
+                #    和非最后一发同样有界重发 -- 收回 issued, 让 mt_walk_step 按原 ai 再发一次。
+                n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")
+                if n > 3:
+                    return self.finish(Outcome.UNKNOWN,
+                                       f"回合 {self.state['round_i'] + 1} 最后动作({pend['team']} {pend['do']} {pend.get('dir')}) 重发 3 次都没证据 -- 交人看")
+                self.log(f"最后动作 {pend['ai'] + 1} 超时无证据, 收回 issued 重发(第 {n} 次)")
+                self.state.update(mt_pending=None, issued=False, mt_need_end=False, cycling=False, pe_absent=0)
+                self.state["mt_settle_until"] = 0
+                self.state["mt_focus_prev"] = None
+                self.state.pop("hold:move_wait", None)
+                return wait("重发最后一个动作")
         if not self.state.get("mt_need_end"):
             return None
         if self.state.get("mt_pending"):
