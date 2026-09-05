@@ -157,7 +157,10 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             cl = obs.find(V.CLAIM_REWARD_YELLOW, 0.45)
             if cl is not None:
                 return tap_box(cl, "进门先领大赛奖励（黄）", counter="entry_claims")
-            # 进门这一轮没有可领的  直接标记做完，别每帧再找
+            # 奖励光束/加载过渡帧上黄键会漏检一两帧(09-05 审计: 領了 每日獎勵 后的光束帧没框, entry_claims 当场封 3,
+            #    時間獎勵 溢出 1,253K/1,000K 一整轮没领)。连续 6 帧没黄键且屏上无 加载中/获得奖励 才算进门这一轮领完。
+            if obs.has([V.LOADING, V.GOT_REWARD], 0.40) or not self.hold("entry_noclaim", 6):
+                return wait("进门领奖: 等奖励层/过渡帧过去再确认没得领")
             self.state["entry_claims"] = 3
         if not (tix is not None and tix > 0):
             # 没票（或读不出票）才去领奖励 —— 读不出时也允许领，因为领奖励
@@ -253,15 +256,20 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             #    leftover, 第 5 场没打. 从未读过才 fail-closed; 进门有剩余
             #    按已点场次接着等对手行.
             t0 = self.state.get("tickets0")
-            used = int(self.state.get("fights", 0))
+            # 09-05 审计: fights 数的是点对手行次数, 第 5 次点行后详情面板收起的过渡帧上 rows/af 皆空、票被压暗读不出,
+            #    used=fights=5 不小于 t0=5 -> 落到 stalled(60), 而 frames_in_page 在面板页早就过百 -> 当场
+            #    「票数读不出」LEFTOVER, 第 5 张票没打. 真出击次数用 sorties(出击 post 记); 收工判据用内容 hold,
+            #    不用 frames_in_page(面板开关期间页面身份都是 arena, 它不代表停滞).
+            used = int(self.state.get("sorties", 0))
             if t0 is not None and used < int(t0):
-                if self.stalled(st, 180):
+                if self.hold("arena_wait_rows", 180):
                     return self._wrap(
-                        f"进门票 {t0} 已点 {used} 场, 对手行一直没有")
-                return wait(f"票本帧读不出，进门 {t0} 已点 {used} 场，继续等对手行")
-            if self.stalled(st, 60):
+                        f"进门票 {t0} 已出击 {used} 场, 对手行一直没有")
+                return wait(f"票本帧读不出，进门 {t0} 已出击 {used} 场，继续等对手行")
+            if self.hold("arena_noread", 60):
                 return self._wrap("票数读不出  fail-closed，不出战")
-        if self.stalled(st, 120):
+            return wait("票本帧读不出, 连续确认中")
+        if self.hold("arena_norows", 120):
             return self._wrap("大赛页没有对手行 cls")
         return wait("等对手列表")
 
@@ -326,6 +334,7 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
 
         def _sortied():
             self.state["sortie_ts"] = _t.time()
+            self.state["sorties"] = int(self.state.get("sorties", 0)) + 1
             # 冷却闸复位: 下一场重新读等待時間（含 60s 可疑放行的复位）。
             for k in ("cd_t0", "cd_gate_off", "hold:cd_clear", "hold:cd_clear:t"):
                 self.state.pop(k, None)
@@ -358,7 +367,7 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
 
     def _wrap(self, why):
         t0, t1 = self.state["tickets0"], self.state["tickets"]
-        det = f"打 {self.state['fights']} 场，{self.battle_stats()}"
+        det = f"出击 {self.state.get('sorties', 0)} 场(点对手行 {self.state['fights']} 次)，{self.battle_stats()}"
         if t0 is not None and t1 is not None:
             det += f"，票 {t0}{t1}"
         if t1 is not None and t1 > 0:

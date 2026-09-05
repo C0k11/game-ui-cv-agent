@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Optional
 
 from routing_v2.act.action import Action, tap_at, tap_box, wait
@@ -25,6 +26,8 @@ from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
 
 _SCROLL_CAP = 4
+# 切页签后行区重绘约 1s: 立刻点 組成 会被吞或点到旧行(09-05 部署侧 7 连发无一见到 變更編輯; 手驾等 5s 后一发就弹)
+TAB_SETTLE_S = 1.2
 # 行头「N部隊」标签与该行 組成 钮的 cy 容差(同一行)
 _ROW_TOL = 0.06
 # 页签几何兜底(2026-09-03): v20 live 未选中页签 538 一个都检不出(选中态 539 也只 0.4-0.7), 子链会卡在
@@ -87,7 +90,7 @@ class PresetMixin:
     def preset_start(self, tab: int, row: int) -> None:
         """登记要套的预设: 页签 tab(1..4), 行 row(1..4)。清掉上一轮的进度标记。"""
         self.state["preset_want"] = {"tab": int(tab), "row": int(row)}
-        for k in ("preset_applied", "preset_confirm", "pr_scroll"):
+        for k in ("preset_applied", "preset_confirm", "pr_scroll", "pr_tab_t"):
             self.state.pop(k, None)
         self.once_reset("pr_open", "pr_tab", "pr_apply", "pr_confirm", "pr_close")
 
@@ -133,13 +136,19 @@ class PresetMixin:
         if not selected:
             if self.pending("pr_tab"):
                 if src == "cls":
-                    return tap_box(slot, f"預設: 切到页签 {k}", once="pr_tab")
-                return tap_at(slot.cx, slot.cy, f"預設: 切到页签 {k} (几何兜底: 页签 cls 没检出)",
+                    return tap_box(slot, f"預設: 切到页签 {k}", once="pr_tab",
+                                   post=lambda: self.state.update(pr_tab_t=time.time()))
+                a = tap_at(slot.cx, slot.cy, f"預設: 切到页签 {k} (几何兜底: 页签 cls 没检出)",
                               justify="預設面板是全屏固定 overlay, 5 个页签槽位按 flywheel_v21_preset 26 帧金标量得; "
                                       "只在 预设标题 处于标准位时用; 版式变了最多点到隔壁页签, "
                                       "点完仍只认 页签 k 选中态(cls 或像素) 才会去点 組成",
                               require=V.PRESET_TITLE, once="pr_tab")
+                a.post = lambda: self.state.update(pr_tab_t=time.time())
+                return a
             return wait(f"預設: 等页签 {k} 变选中态")
+        tt = float(self.state.get("pr_tab_t", 0) or 0)
+        if tt and time.time() - tt < TAB_SETTLE_S:
+            return wait(f"預設: 页签刚切换, 等 {TAB_SETTLE_S:.1f}s 行区停稳再点 組成")
         # 行: 面板可滚动且不止 4 行(09-05 live: 4部隊/5部隊 也在), 顺位/滚动计数都不可靠。
         #    定行 = 每个 組成 钮左上方行头「N部隊」的 N 用数字 OCR 读(只读数字, 铁律内; 09-05 实帧 4/5 读准);
         #    其次行头 cls, 再次未滚动时的 cy 顺位。找不到就按读到的行号决定往上还是往下滑。

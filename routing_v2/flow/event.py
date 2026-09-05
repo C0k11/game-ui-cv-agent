@@ -35,7 +35,7 @@ import time
 
 from typing import List, Optional
 
-from routing_v2.act.action import Action, swipe, tap_box, wait
+from routing_v2.act.action import Action, swipe, tap_at, tap_box, wait
 from routing_v2.flow import nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome, qty_max_ok
 from routing_v2.flow.battle import BattleMixin, FormationMixin
@@ -68,6 +68,18 @@ ROW_TOL = 0.055          # 入场键 与 得星 认为"同一行"的 cy 容差
 GUIDE_HUB_MAX_TRIES = 3
 
 
+def _hub_evidence(obs) -> str:
+    """疑似引导型活动页的证据串。09-05: 结论曾写死成「夏萊總結算」, 那次其实是当期活动的 Story 页签(页签类欠训)。"""
+    fam = [V.EVENT_QUEST, V.EVENT_QUEST_SEL, V.EVENT_STORY, V.EVENT_STORY_SEL,
+           V.EVENT_TASK, V.EVENT_REWARD_INFO, V.EVENT_AFTERSTORY]
+    tabs = sorted(obs.all(fam, 0.20), key=lambda b: -b.conf)[:3]
+    top = ", ".join(f"{b.cls}:{b.conf:.2f}" for b in tabs) or "无"
+    shop = obs.find(V.EVENT_SHOP, 0.20)
+    return (f"入场键 {obs.count(V.STAGE_ENTER, 0.45)} / 已锁 {obs.count(V.STAGE_ENTER_LOCKED, 0.45)} / "
+            f"得星 {obs.count([V.STAR_0, V.STAR_3], 0.35)} / 活动商店 {(shop.conf if shop else 0.0):.2f} / "
+            f"页签族>=0.20: {top}")
+
+
 class EventEntryMixin:
     """大厅 -> 任务大厅(轮播闸) -> 活动页 的进场链，event / event_shop 共用。
 
@@ -89,6 +101,7 @@ class EventEntryMixin:
             self.state["saw_other"] = True
             # 405 断了 -- 轮播真在转, 常驻计时作废
             self.state.pop("ev_seen_since", None)
+            self.state.pop("ev_405_cx", None)
             if self.stalled(st, 300):
                 return self.finish(
                     Outcome.SKIPPED,
@@ -121,6 +134,13 @@ class EventEntryMixin:
         #    注意上面那句 `saw_other=True` 留在 decide 期是**对的**：那是
         #      「我这一帧看见了别的入口」这个**观测事实**，不是动作副作用。
         #      观测可以在 decide 期记，动作后果只能挂 post -- 这条界线要分清。
+        # 09-05 实帧: 轮播滑动中 474「距離獎勵獲得結束」文字被认成 405(0.93-0.96, cx 0.049-0.057 且逐帧左移),
+        #    静止的 405 cx 约 0.078。要求连续两帧 405 在场且 cx 变化 < 0.006 才发; 滑动帧每帧移 0.01 以上过不了,
+        #    代价只是多等一帧。
+        pc = self.state.get("ev_405_cx")
+        self.state["ev_405_cx"] = cur.cx
+        if pc is None or abs(pc - cur.cx) >= 0.006:
+            return wait("405 刚出现或还在滑动(cx %.3f) -- 等下一帧坐实静止再发" % cur.cx)
         dy = cur.h * HUB_TILE_RATIO
         lo, hi = HUB_TILE_DY_BAND
         if not (lo <= dy <= hi):
@@ -171,12 +191,12 @@ class EventEntryMixin:
         if st.changed or not self.state.get("guide_seen"):
             self.state["guide_seen"] = True
             n = self.bump("guide_hits")
-            self.log(f"进到**引导型活动**了（第 {n} 次）：这个活动没有活动关卡，"
-                     f"页面上那两个「入場」通向普通 任務/特殊任務 -- 退出去重进")
+            self.log(f"进到**疑似引导型活动页**（第 {n} 次）: 无得星且页签族不在场 -- 退出去重进; "
+                     f"证据: {_hub_evidence(obs)}")
             # 竣工报告里要看得见（completion_gap：跑完了 != 活干完了）
             if self.once("guide_note"):
                 self.note_lines.append(
-                    "轮播抽中了没有活动关卡的引导型活动（夏萊總結算这类），已退出重进")
+                    "轮播进到疑似引导型活动页(无得星/页签族不在场), 已退出重进; 若当期活动确有关卡, 先查页签族检出")
         n = int(self.state.get("guide_hits", 0))
 
         if n >= int(self.cfg.get("guide_hub_max_tries", GUIDE_HUB_MAX_TRIES)
@@ -192,8 +212,8 @@ class EventEntryMixin:
                 # 退不出去（退出控件全检不出）-- 那就当场收工，别无限耗着
                 return self.finish(
                     Outcome.BLOCKED,
-                    "连续进到引导型活动（夏萊總結算这类，没有活动关卡），"
-                    "而且退不出这一页 — 停手交人审")
+                    "连续进到疑似引导型活动页(无得星/页签族不在场), "
+                    "而且退不出这一页 -- 停手交人审; 证据: " + _hub_evidence(obs))
 
         return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
 
@@ -433,6 +453,18 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             if tab is not None and self.pending("ev_tab_fix"):
                 return tap_box(tab, "关卡行全无得星 = 当前不是 Quest 页签(剧情页签误读), 切到 Quest", once="ev_tab_fix",
                                expect=(V.STAR_0, V.STAR_3))
+            # Quest 页签 cls 在这版皮上 0/15 检出(train 81) -> 按首行入场键几何点 Quest 页签, 每次进页一发。
+            #    09-05 PRAY-BALL 实帧: 首行 入場 (0.883,0.266,w0.039,h0.036), 页签栏 Story|Quest|Challenge 在
+            #    列表正上方, Quest 页签 (0.736,0.152) => dx=-3.7w, dy=-3.2h。只在列表没滚动(首行 cy<0.32)时用。
+            e1 = rows[0][0]
+            if tab is None and e1.cy < 0.32 and self.pending("ev_tab_geo"):
+                a = tap_at(e1.cx - 3.7 * e1.w, e1.cy - 3.2 * e1.h,
+                           "关卡行全无得星且 Quest 页签 cls 没检出 -- 按首行入场键几何点 Quest 页签",
+                           justify="活动页页签栏固定在关卡列表正上方, 与首行入場键的偏移按 09-05 PRAY-BALL 实帧量得; "
+                                   "只在列表未滚动时点; 锚 活动商店 在场; 点空只是页签没切, 契约不兑现走原退出路径",
+                           require=V.EVENT_SHOP, once="ev_tab_geo")
+                a.expect = (V.STAR_0, V.STAR_3, V.EVENT_QUEST_SEL)
+                return a
             if not self.hold("no_star_rows", 40):
                 return wait("关卡行全无得星, 连续确认中(剧情页签误读?)")
             n = self.bump("noquest_hits")
@@ -1159,11 +1191,11 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             tries = int(self.state.get("guide_hits", 0))
             return self.finish(
                 Outcome.BLOCKED,
-                f"轮播位上「夏萊總結算」和当期活动**共用同一个 405 入口**，"
-                f"连续 {tries} 次都进到了没有活动关卡的引导型活动。"
-                f"已退回 {st.page}，本轮不刷活动 —— "
-                f"**绝不自作主张去打 任務/特殊任務**（刷什么是用户的策略）。"
-                f"要么等轮播换一轮再跑 event，要么在前端明确指定活动")
+                f"连续 {tries} 次进到疑似引导型活动页(关卡行无得星且 Quest/Story 页签族检不出; "
+                f"09-05 实锤过一次其实是当期活动的 Story 页签, 页签类欠训)。"
+                f"已退回 {st.page}, 本轮不刷活动 -- "
+                f"绝不自作主张去打 任務/特殊任務(刷什么是用户的策略)。"
+                f"查: 页签族检出 / 活动页是否落在 Story 页签 / 轮播位是否另有活动")
         if self.state["phase"] == "shop_plan":
             # 交给 runner：把 event_shop flow 插到队列最前面，回来后继续。
             # 必须**结束本轮**而不是 wait（08-09 实锤）：runner 只在 flow

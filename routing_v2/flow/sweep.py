@@ -444,9 +444,13 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
     def _wrap(self, why: str) -> Action:
         t0, t1 = self.state["tickets0"], self.state["tickets"]
         used = (t0 - t1) if (t0 is not None and t1 is not None) else None
-        det = f"扫荡 {self.state['sweeps']} 次, {self.battle_stats()}"
+        det = f"扫荡 {self.state['sweeps']} 批"
+        bt = self._bt()
+        if bt.get("win") or bt.get("unknown"):
+            # 扫荡结算走 overlay, BattleMixin 的胜负计数在扫荡流里永远 0/0, 只在真有战斗计数时才拼(09-05 审计)
+            det += f", {self.battle_stats()}"
         if used is not None:
-            det += f", 票 {t0}{t1}(用了 {used})"
+            det += f", 票 {t0}->{t1}(用了 {used})"
         # 竣工判据：票没用完 = LEFTOVER，别谎报 CLEAN
         # 但**配了票配额时剩票是设计不是漏活**：用户明确说"一个地区用几张"，
         #   照旧报 LEFTOVER 会让每一轮都挂假警报，久了就没人看 exit_report 了。

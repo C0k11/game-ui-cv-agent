@@ -188,8 +188,13 @@ def _is_event_guide_hub(o: Observation) -> bool:
     #  否定：有关卡得星 = 这是正常活动的关卡列表
     if o.has(_GUIDE_HUB_NOT_STARS, 0.35):
         return False
-    #  否定：有 quest/剧情 页签或活动任务 = 正常活动页
-    if o.has(_GUIDE_HUB_NOT_TABS, 0.40):
+    #  否定：有锁着的入场行 = 正常关卡列表(Story/Quest 页签都是 01 开 02-05 锁; 09-05 PRAY-BALL 的 Story 页签
+    #    被判成 hub: 剧情行无得星 + 页签族两类近乎瞎(活动quest train 81 / 活动剧情_已选择 train 3)); 引导型 hub
+    #    (夏萊 两帧)那两行都是解锁的入场键。
+    if o.has(V.STAGE_ENTER_LOCKED, CONF):
+        return False
+    #  否定：有 quest/剧情 页签或活动任务 = 正常活动页(09-05: 页签族在这版皮上 0.25-0.40 抖, 门槛降到 0.25)
+    if o.has(_GUIDE_HUB_NOT_TABS, 0.25):
         return False
     #  排他：票券型关卡列表
     if o.has(_GUIDE_HUB_NOT_TICKETS, 0.40):

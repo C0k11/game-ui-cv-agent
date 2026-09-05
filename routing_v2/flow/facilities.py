@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 import routing_v2.percept.read as R
-from routing_v2.act.action import Action, tap_box, wait
+from routing_v2.act.action import Action, swipe, tap_box, wait
 from routing_v2.flow import nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome, qty_max_ok
 from routing_v2.percept.observe import Box, Observation
@@ -559,7 +559,9 @@ class ShopFlow(ExitMixin, Flow):
         if (self._arena_shop_on()
                 and not self.state.get("arena_done")
                 and not self.state.get("arena_skip")):
-            if not self.hold("no_arena_tab", 60):
+            # 09-05 审计: 第 2 次滑后 戰術大賽 行已露出(cls469 漏检, 币图标 0.78 在场 3 tick)却在 60 帧后记成没入口;
+            #    见过 tab/币图标就把放弃门槛放宽到 180 帧, 给补滑/停稳留时间.
+            if not self.hold("no_arena_tab", 180 if self.state.get("arena_tab_seen") else 60):
                 return wait("信用点这栏完了 — 找战术大赛 tab（还没放弃）")
             self.state["arena_skip"] = True
             self.log("左栏里滑不出战术大赛 tab — 这一段记成没找到入口，不谎报")
@@ -625,6 +627,8 @@ class ShopFlow(ExitMixin, Flow):
         #    之后落个标记"，它**本身不阻止重复决策**。于是 live 连点两次：
         #    `@(0.067,0.503)` 和 `@(0.067,0.442)`（左栏滚了、落点变了，
         #    连 dedup 都当成新目标放行）。 补上 pending 闸。
+        if tab is not None:
+            self.state["arena_tab_seen"] = True
         if tab is not None and self.pending("arenatab"):
             # **滑完要等左栏停稳再点**（2026-08-13 live 实锤: t30 滑、t40 点，
             #    那一刻列表还在惯性滚，落点落到了上一行 —— 点到了**大決戰**）。
@@ -640,8 +644,9 @@ class ShopFlow(ExitMixin, Flow):
                             f" -> {tab.cy:.3f}）— 等停稳再点")
             n = int(self.state.get("tab_steady", 0)) + 1
             self.state["tab_steady"] = n
-            if n < 4:
-                return wait(f"「戰術大賽」tab 稳定 {n}/4 帧")
+            # 09-05 审计: 4 帧和 swipe 的 settle 契约(8 tick 且 0.5s)打架, 币图标只露了 3 tick 就被列表回弹带走; 2 帧够
+            if n < 2:
+                return wait(f"「戰術大賽」tab 稳定 {n}/2 帧")
             return tap_box(tab, "切到「戰術大賽」商店 tab", once="arenatab")
         if tab is not None:
             return wait("已经点过「戰術大賽」tab 了 — 等页面切过去，别重复点")
@@ -658,8 +663,14 @@ class ShopFlow(ExitMixin, Flow):
         #   拿当前选中的那个 tab 的 cx 当左栏轴线，别写死 0.068。
         col = obs.find([V.SHOP_TAB_CREDIT_SEL, V.SHOP_TAB_CREDIT,
                         V.ARENA_SHOP_TAB_SEL], 0.35)
+        if col is not None and col.cx <= 0.20:
+            self.state["tab_col"] = (col.cx, col.h)
         if col is None or col.cx > 0.20:
-            return None                    # 找不到左栏轴线就别瞎滑
+            # 09-05 审计: 第 2 次滑后 信用点 tab 滚出视口, 这里 return None 让第 3 次滑动预算永远用不上. 见过左栏
+            #    轴线就用先前检出的 tab 几何补滑(cx 与框高都来自检出); 从没见过才不滑.
+            if self.state.get("tab_col") is None:
+                return None                # 找不到左栏轴线就别瞎滑
+            col = None
         n = int(self.state.get("tabscroll", 0))
         if n >= 3:                         # capped（用户："滑一下就行别猛滑"）
             # 2026-08-12：这里原来设的是 `arena_done=True` —— 和"**买完了**"
@@ -679,10 +690,16 @@ class ShopFlow(ExitMixin, Flow):
         #    半小时后在 sweep.py 抓到同族 bug 才回头把这处一起改了）
         # 几何全部从检出推（x 本来就是 col.cx，y 之前还写死 0.75->0.35）。
         #   左栏 tab 的框高就是"一行多高"，滑 3 行。
+        # 滑幅: 左栏 tab 文字框高 0.033 只有真实行距 0.11 的 1/3.3(09-05 实帧), 按 3 个框高滑只滚 0.9 行; 3 行 = 10 个框高.
+        if col is None:
+            cx, hh = float(self.state["tab_col"][0]), float(self.state["tab_col"][1])
+            return swipe(cx, 0.80, cx, max(0.30, 0.80 - 10.0 * hh),
+                         f"左栏往下滑露出「戰術大賽」tab（第 {n+1} 次, 轴线用先前检出的 tab 几何）",
+                         post=lambda: self.state.update(tabscroll=n + 1))
         sw = nav.list_swipe(
             obs, [V.SHOP_TAB_CREDIT_SEL, V.SHOP_TAB_CREDIT,
                   V.ARENA_SHOP_TAB, V.ARENA_SHOP_TAB_SEL],
-            f"左栏往下滑露出「戰術大賽」tab（第 {n+1} 次）",
+            f"左栏往下滑露出「戰術大賽」tab（第 {n+1} 次）", rows=10.0,
             post=lambda: self.state.update(tabscroll=n + 1))
         if sw is not None:
             return sw

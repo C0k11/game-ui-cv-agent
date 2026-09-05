@@ -474,6 +474,10 @@ class ExitMixin:
     """
 
     def exit_step(self, obs: Observation, prefer_close: bool = True):
+        #  奖励层在场时叉叉/返回键都会打在动画上(09-05 免费包: 领完包的黄条帧上按了返回键+叉叉 -> 「現在無法使用」吐司);
+        #    点击继续 由 overlay 处理器点, 这里只等.
+        if obs.has(V.GOT_REWARD, 0.40):
+            return wait("退出: 奖励层在场, 等它落定再退")
         #  取消键最优先 —— 模态框上它是唯一有效的出口
         c = obs.find(V.CANCEL, 0.45)
         if c is not None:

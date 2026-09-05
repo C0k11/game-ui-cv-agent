@@ -133,6 +133,10 @@ def wake_hidden_lobby(obs: Observation, st: StateView, flow) -> Optional[Action]
     navn = obs.count(V.LOBBY_NAV, 0.30)
     if len(obs.boxes) > 0 and navn >= 2:
         return None
+    # 09-05 审计: 社交浮层(社團/好友/幫手 卡)底栏 NAV<2 但屏上有 社团 0.97 等实框, 这里照样提议点背景(x3);
+    #    有任何 >=0.5 的非顶栏框就不是藏 UI.
+    if not screen_empty(obs):
+        return None
     # 09-05 live: 进程刚起时 last_solid 恒为 unknown, 藏 UI 的大厅(闲置立绘)零检出 -> 这里不接, flow 在 enter
     #    上干等到超时(两次实录)。放宽: last_solid 还没认出过任何页, 且接近空屏持续 45 帧, 也唤醒一次
     #    (战斗/剧情的黑帧 last_solid 不会是 unknown, 进不来; 真是加载页点一下也无害)。
@@ -159,7 +163,7 @@ def wake_hidden_lobby(obs: Observation, st: StateView, flow) -> Optional[Action]
 #     而那本来就是同一个真入口。**零误报**。
 #   所以低阈通道的安全边界是: 已确认在大厅 + 低阈候选唯一。
 # v19 把新皮训回去之后, 把 _NAV_TASKS_FLOOR 调回 0.45 即可, 结构不用改。
-_NAV_TASKS_FLOOR = 0.03
+_NAV_TASKS_FLOOR = 0.45      # 09-05: v21 定稳态 0.92-0.96, 低阈口子只在滑入帧上制造无效点击, 调回
 _task_entry_cache = {"seq": None, "box": None}
 
 

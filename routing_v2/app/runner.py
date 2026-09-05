@@ -253,6 +253,7 @@ class Runner:
         #     按当前 flow 的声明推模型；没声明就退回 ui。
         models = getattr(self._flow, "yolo", None) or ("ui",)
         boxes = detect.infer(frame, tuple(models))
+        self._cur_seq = seq            # 存帧名用的是 seq, trace 也记一份, 审计才能把帧和决策对上
         return Observation(boxes=boxes, frame=frame, seq=seq, age=age,
                            ts=time.time(), w=w, h=h)
 
@@ -341,7 +342,7 @@ class Runner:
         if self._trace is None:
             return
         try:
-            rec = {"tick": self.stats.ticks,
+            rec = {"tick": self.stats.ticks, "seq": getattr(self, "_cur_seq", None),
                    "flow": getattr(self._flow, "name", None),
                    "page": st.page, "raw": st.raw,
                    "overlay": st.overlay, "interrupt": st.interrupt,

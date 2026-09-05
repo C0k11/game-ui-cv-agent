@@ -24,6 +24,8 @@ except Exception:
 
 import routing_v2.act.money as money_rules                    # noqa: E402
 from routing_v2.act.action import Action                      # noqa: E402
+import routing_v2.flow.preset as _preset_mod                  # noqa: E402
+_preset_mod.TAB_SETTLE_S = 0.0     # 离线不等页签切换后的墙钟停稳
 from routing_v2.act.gate import Gate                          # noqa: E402
 from routing_v2.flow.base import Ctx                          # noqa: E402
 from routing_v2.flow.registry import ALL                      # noqa: E402
@@ -643,6 +645,7 @@ def t_flows():
     check("§轮播 405 已在场（可能在窗口尾巴） 不点",
           a is not None and a.kind == "wait", str(a))
     ev.decide(hall_other, m3.update(hall_other))          # 看见别的了
+    ev.decide(hall_cur, m3.update(hall_cur))              # 09-05: 405 要连续两帧 cx 静止才发, 第一帧只观察
     a = ev.decide(hall_cur, m3.update(hall_cur))
     check("§轮播 捕到 (非405405) 跃迁  点", a is not None and a.is_tap, str(a))
     if a is not None and a.is_tap:
@@ -3218,6 +3221,8 @@ def t_alt_gates():
 
     event = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
     event.state["saw_other"] = True
+    event.decide(_hall_obs(B(V.EVENT_LIVE, cx=0.30, cy=0.18, h=0.022), special=True),
+                 _hall_state("facility"))                 # 09-05: 405 第一帧只观察(cx 静止判据)
     event_enter = event.decide(
         _hall_obs(B(V.EVENT_LIVE, cx=0.30, cy=0.18, h=0.022), special=True),
         _hall_state("facility"))

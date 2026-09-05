@@ -132,6 +132,12 @@ _MIN_HOLD = 4
 #    tick 不是时间单位, 零等待上线后纯帧数判据全部缩水）。
 #    不是 sleep: 帧照抓、决策照做, 只是派发按住 -- 零等待铁律不破。
 _MIN_HOLD_S = 0.5
+# 严格契约超时的墙钟地板(09-05 日常 live): feed 2560x1440 跑 23-27 fps, retry_frames=38 只合 1.5s;
+#    购买青辉石面板(压暗加载 2-3s)、邮箱、預設 組成 -> 變更編輯 框都要 2s 上下才出来, 1.5s 就判「没生效」
+#    重发, 重发那一下落在刚开的面板/确认框上(免费包 5 连发, 部署侧 組成 7 连发无一见到确认框)。
+#    帧数和墙钟合取: 帧数够了还得满 _STRICT_MIN_S 才算严格超时; 宽松档不动(那是常态兜底)。
+#    大赛 出击 -> WIN/LOSE 结果框实测 51-56 tick(约 2.3s), 2.5 还在假超时边缘, 取 3.0。
+_STRICT_MIN_S = 3.0
 # 宽松契约超时地板。补发/严格档走 retry_frames; 宽松档是
 #   max(本地板, retry_frames//6)。二者必须拆开: 70 收到 38 时
 #   若宽松仍按比例 //6, 会塌成 6 帧; 若收到旧值 25 更会塌成 4 帧,
@@ -347,7 +353,10 @@ class Gate:
         #    打到框外的（HUB 活动入口 +0.075 打卡片本体，框标的是倒计时气泡）。
         if act.anchor is not None:
             ax, ay = act.anchor
-            tol = act.anchor_tol or 0.02
+            # 09-05 审计: 0.02 放过了两种"目标在动": 悬赏結算框下滑退场(確認 y 逐帧 0.726->0.807, 第二发砸在关卡面板
+            #    奖励条上)、大赛列表涟漪帧上入场键换行. 静止控件的帧间抖动 <0.003, 容差收到 0.008; 动的目标按下面的
+            #    settle 按住等它停稳, 不是丢弃.
+            tol = act.anchor_tol or 0.008
             near = min(still, key=lambda b: (b.cx - ax) ** 2 + (b.cy - ay) ** 2)
             drift = ((near.cx - ax) ** 2 + (near.cy - ay) ** 2) ** 0.5
             if drift > tol:
@@ -670,7 +679,7 @@ class Gate:
         #      「点完自己还在」的控件（加号、翻页箭头）靠宽松超时兜底，
         #      代价可以接受，换来的是同屏同族按钮不会被连着点掉。
         lim = _contract_lim(p["loose"], retry_frames)
-        if p["n"] >= lim:
+        if p["n"] >= lim and (p["loose"] or time.time() - p.get("t0", 0.0) >= _STRICT_MIN_S):
             self._pending = None
             self.stats["expect_timeout"] += 1
             if p["loose"]:
@@ -736,7 +745,7 @@ class Gate:
                 self._pending = None
             return ""
         lim = _contract_lim(p["loose"], retry_frames)
-        if p["n"] >= lim:
+        if p["n"] >= lim and (p["loose"] or time.time() - p.get("t0", 0.0) >= _STRICT_MIN_S):
             self._pending = None
             self.stats["expect_timeout"] += 1
             if not p["loose"]:

@@ -219,6 +219,26 @@ def icon_strip(box: Box, x_from: float, x_to: float, y_pad: float,
             min(1.0, box.y2 + pad))
 
 
+def _with_margin(crop):
+    """裁块四周补一圈底色(上下各 1/4 高, 左右各 1/5 宽), 颜色取裁块外圈像素中位数。
+
+    09-05 日常 live: 页内顶栏(任务大厅/大赛页)的 青辉石 "5,476" 稳定读成 "476", 信用点 "36,497,932" 读成
+       "36497" -- 首/尾片段贴着裁边时 RapidOCR 检测阶段把它们整段丢掉, 台账基线被截断值污染(446 -> 5476
+       记成 +5030, 再读 476 记成 -5000)。1440p 51 帧实测: 原裁法 青辉石 25/51 对, 补边后 51/51;
+       信用点 22/47 -> 34/47(剩下的是 7/5、8/9 单字识别错, 靠投票)。补的是纯色边, 不引入新纹理。
+    """
+    import cv2
+    import numpy as np
+    ch, cw = crop.shape[:2]
+    if ch < 4 or cw < 4 or crop.ndim != 3:
+        return crop
+    ring = np.concatenate([crop[0].reshape(-1, 3), crop[-1].reshape(-1, 3),
+                           crop[:, 0].reshape(-1, 3), crop[:, -1].reshape(-1, 3)])
+    med = [int(v) for v in np.median(ring, axis=0)]
+    return cv2.copyMakeBorder(crop, ch // 4, ch // 4, cw // 5, cw // 5,
+                              cv2.BORDER_CONSTANT, value=med)
+
+
 def digits(frame, rect: Rect) -> Optional[str]:
     """裁一块跑 OCR，只留数字/分隔符。返回原始串，解析交 parse_count。
 
@@ -236,7 +256,7 @@ def digits(frame, rect: Rect) -> Optional[str]:
         x2, y2 = min(w, int(rect[2] * w)), min(h, int(rect[3] * h))
         if x2 - x1 < 4 or y2 - y1 < 4:
             return None
-        crop = frame[y1:y2, x1:x2]
+        crop = _with_margin(frame[y1:y2, x1:x2])
         ch, cw = crop.shape[:2]
         if ch < 40:                                   # 小字放大，OCR 明显更准
             sc = 40.0 / ch
