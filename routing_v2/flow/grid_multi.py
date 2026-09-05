@@ -565,7 +565,9 @@ class GridMultiMixin:
         panel = obs.has(V.PRESET_TITLE, 0.40)
         # 開面板那一发有界重试: 点过 pr_open 但 PR_OPEN_RETRY_S 内没见 预设标题 -> 清 once 再点(最多 3 次), 3 次都吞就放弃套預設
         t_open = float(self.state.get("mt_pr_open_t", 0) or 0)
-        if not panel and t_open and time.time() - t_open > PR_OPEN_RETRY_S and not self.pending("pr_open"):
+        # 變更編輯 确认框盖住面板标题时 panel=False, 不是面板没开(09-05 10-3 live: 每支队都多打一行"面板没开重点"并清了 once)
+        if (not panel and t_open and time.time() - t_open > PR_OPEN_RETRY_S and not self.pending("pr_open")
+                and not obs.has(V.PRESET_CHANGE_TITLE, 0.40) and not self.state.get("preset_applied")):
             k = self.bump(f"mt_pr_open_n:{L}")
             if k >= 3:
                 self.log(f"队 {L}: 預設入口点了 {k} 次面板都没开 -- 放弃套預設, 用当前部队出击(要人工检查 預設入口 检出/版式)")
