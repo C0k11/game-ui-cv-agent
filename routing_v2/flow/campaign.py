@@ -531,6 +531,11 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             # 开局就压着关卡弹窗(上一轮残留/用户手开) -- 交给 stage_list 处理
             self.goto("stage_list", "开局就有关卡弹窗")
             return wait("进相位 stage_list")
+        if st.page in ("formation", "preset_panel") or obs.has(V.SORTIE, 0.45):
+            # 进程重开落在部署侧编队面板上(09-05 live: 叉掉残留預設面板后 enter 对着编队页干等 4001 tick):
+            #    这是部署中途, 交给 grid 相位(多队走 mt_deploy_step, 单队走原编队分支)
+            self.goto("grid", "开局就在编队面板上(部署中途), 相位接手")
+            return wait("进相位 grid")
         if st.page == "grid_quest":
             # 已经走过步/绑过格 = 续走, 进 walk 不要再经 grid
             #    (do_grid 会重写 deploy_round0, 航位从起点重算)。

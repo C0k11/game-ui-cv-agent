@@ -4957,6 +4957,11 @@ def t_grid_multi_0905():
         page = "preset_panel"; frames_in_page = 5; last_solid = "formation"; overlay = None; changed = False; flapping = False
     a = fls.decide(pan, _SVp())
     check("进程重开时残留預設面板(无子链) -> enter 相位直接叉掉", a is not None and a.target_cls == V.CLOSE_X and "残留" in a.reason, str(a))
+    flf = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    class _SVf:
+        page = "formation"; frames_in_page = 5; last_solid = "grid_quest"; overlay = None; changed = False; flapping = False
+    flf.decide(form1, _SVf())
+    check("进程重开落在编队面板上 -> enter 转 grid 相位接手部署", flf.phase == "grid", flf.phase)
     fl8 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     info = O(B(V.CONFIRM, cx=0.678, cy=0.822), B(V.CLOSE_X, cx=0.778, cy=0.138), B("体力", cx=0.441, cy=0.032))
     class _SVi:
