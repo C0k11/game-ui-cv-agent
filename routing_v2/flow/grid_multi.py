@@ -519,9 +519,12 @@ class GridMultiMixin:
                 self.state["mt_pending"] = None
                 ai = int(pend["ai"]) + 1
                 self.state["mt_ai"] = ai
+                # 动作被消费后游戏还要放完移动动画、自己把焦点切给下一队、相机再平移(实测 1-2s);
+                #    这段时间里读到的焦点是过渡态, 拿它去点药丸会把游戏刚切好的焦点又翻回去(09-05 第 7 次 live)。
+                self.state["mt_settle_until"] = time.time() + 2.5
                 if ai >= len(acts):
                     return self._mt_round_issued(acts)
-                return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作")
+                return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作(先等 2.5s 让游戏切焦点)")
             if time.time() - float(pend.get("t", 0)) > (10.0 if pend["do"] != "exchange" else 6.0):
                 n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")
                 if n > 3:
@@ -539,31 +542,50 @@ class GridMultiMixin:
             return self._mt_round_issued(acts)
         if not camera_still:
             return wait("相机在平移(原点两帧不一致), 等它停稳再落子")
+        if time.time() < float(self.state.get("mt_settle_until", 0)):
+            return wait("等游戏放完动画/自己切焦点(2.5s 静默期)")
         act = acts[ai]
         team = act.get("team")
         do = act.get("do", "move")
         d = act.get("dir")
         if team not in pos:
             return self.finish(Outcome.UNKNOWN, f"答案里的队 {team} 不在部署记录 {list(pos)} 里 -- 不瞎点")
-        # 先把焦点切到这支队
+        # 焦点读数两帧共识(箭头在切换/平移中会闪)
+        fprev = self.state.get("mt_focus_prev")
+        self.state["mt_focus_prev"] = focus
+        if focus != fprev:
+            return wait(f"焦点读数 {fprev} -> {focus}, 等下一帧共识")
+        # 先把焦点切到这支队。**只在明确看见箭头在别的队头上时才点药丸**: 箭头没检出(回合开始横幅/动画)
+        #    时点药丸会把默认焦点翻走(09-05 第 7 次 live 开局就翻了两下)。次数按真发出去的药丸计(post), 不按帧计。
         if focus != team:
-            n = self.bump(f"mt_focus:{self.state['round_i']}:{ai}")
+            key = f"mt_pill:{self.state['round_i']}:{ai}"
+            n = int(self.state.get(key, 0))
             cap = 2 * max(2, len(pos)) + 2
-            if n > cap:
+            if n >= cap:
                 return self.finish(Outcome.UNKNOWN,
-                                   f"切了 {cap} 次焦点仍聚不到队 {team}(现在 {focus}) -- 交人看")
-            if focus is None and n % 2 == 0:
-                return wait("箭头没检出, 等一帧再切焦点")
+                                   f"药丸点了 {n} 次焦点仍聚不到队 {team}(现在 {focus}) -- 交人看")
+            if focus is None:
+                if self._overdue("mt_no_arrow", 25):
+                    return self.finish(Outcome.UNKNOWN, "25s 没看到队伍箭头(焦点未知), 不瞎点药丸 -- 交人看")
+                return wait("箭头没检出(焦点未知), 等它出现再决定要不要切队")
+            self._wt_clear("mt_no_arrow")
+
+            def _pill(key=key):
+                self.state[key] = int(self.state.get(key, 0)) + 1
+                self.state["mt_settle_until"] = time.time() + 2.5
+                self.state["mt_focus_prev"] = None
             a = tap_at(SWITCH_PILL[0], SWITCH_PILL[1],
-                       f"焦点在 {focus or '?'}, 要 {team} -- 点左下切队药丸(第 {n} 次)",
+                       f"焦点在 {focus}, 要 {team} -- 点左下切队药丸(第 {n + 1} 次)",
                        justify="左下角「N部隊」切队药丸没有 cls(v22 采了料); 16:9 部署/回合 HUD 固定, 三关 40+ 帧位置不变; "
                                "点空只是不换焦点, 下一帧箭头位置就是证据, 有界重试后 UNKNOWN",
                        require=V.PHASE_END)
+            a.post = _pill
             # progress 只放**观测到的焦点**, 不放尝试次数: 09-05 live 第 6 次 run 把次数放进去, 连发闸把每一发
             #    都当"有进展", 6 tick 连点 6 下药丸, 焦点在 A/B 间来回翻, 读数永远追不上。焦点没变时交给连发闸
             #    按 retry_frames 节流(约 2-4s 一发), 正好给相机平移和箭头刷新留时间。
             a.progress = f"focus:{focus or '?'}"
             return a
+        self._wt_clear("mt_no_arrow")
         cur = pos.get(team)
         if cur is None:
             return wait(f"队 {team} 位置未知(传送后), 等箭头绑回")
