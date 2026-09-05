@@ -4915,8 +4915,8 @@ def t_grid_multi_0905():
         a = fl.decide(ex2, Machine(1).update(ex2))
         if a is not None and a.kind == "tap":
             break
-    check("换位后 A 再走 left-up -> (1,-1) 检出格 (0.360,0.487)",
-          a is not None and a.kind == "tap" and abs(a.x - 0.360) < 0.01 and abs(a.y - 0.487) < 0.01, str(a))
+    check("换位后 A 再走 left-up -> (1,-1) 检出格 (0.360,0.487)(友军 B 在下方两行, 落点允许在格内上抬)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.360) < 0.01 and abs(a.y - 0.487) < 0.05, str(a))
     a.post()
     check("最后一发 issued, 且 B 本回合不动 -> 要手点 PHASE結束", bool(fl.state.get("issued")) and bool(fl.state.get("mt_need_end")))
     ex3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.360, 0.30))

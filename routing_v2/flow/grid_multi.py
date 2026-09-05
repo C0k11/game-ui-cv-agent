@@ -897,7 +897,7 @@ class GridMultiMixin:
         # 箭头压在白发/浅色立绘上时 v21 整段检不出(10-3 第 4 跑 25s 全 None). 游戏空闲、没有挂起动作、本回合只剩一队
         #    没行动 -> 按游戏"自动切给下一支没行动的队"的规则, 焦点就是它。
         if (focus is None and idle_ok and not pend and obs.find(V.GRID_ARROW, 0.25) is None):
-            acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
+            acted = {acts[i].get("team") for i in range(min(ai, len(acts))) if acts[i].get("do", "move") != "exchange"}   # 换位不消耗行动
             rest = [L for L, v in pos.items() if v is not None and L not in acted]
             # 游戏规则: 回合开局聚焦部队 1, 之后自动切给**部队号最小**的没行动的队 -> 没行动的队按部队号排, 第一个就是焦点
             #    (11-3 实锤: 开局箭头整段检不出, 两队都没行动, 上一版只处理"只剩一队"于是干等 25s 收工)
@@ -921,7 +921,7 @@ class GridMultiMixin:
                 # 药丸只在**没行动**的部队里按部队号循环(H15-3 第 15 跑实锤: A 走完后按 8 次药丸, 文字只在 2/3 部隊之间翻,
                 #    从不回到 1). 第 13 跑回合 4 看到的 A->B(B 已"记"行动)说明那次 B 的行动证据是假的(落点打在友军上).
                 sq = self.state.get("mt_team_squad") or {}
-                acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
+                acted = {acts[i].get("team") for i in range(min(ai, len(acts))) if acts[i].get("do", "move") != "exchange"}
                 rest = sorted([L for L in pos if L not in acted], key=lambda L: int(sq.get(L, 99) or 99))
                 if base in rest and all(L in sq for L in rest):
                     exp = rest[(rest.index(base) + eff) % len(rest)]
@@ -992,6 +992,7 @@ class GridMultiMixin:
                                        f"回合 {self.state['round_i'] + 1} 动作 {pend['ai'] + 1}({pend['team']} {pend['do']} {pend.get('dir')}) 重发 3 次都没证据 -- 交人看")
                 self.log(f"动作 {pend['ai'] + 1} 超时无证据, 重发(第 {n} 次)")
                 self.state["mt_pending"] = None
+                self.state[f"mt_tapidx:{self.state['round_i']}:{pend['ai']}"] = n     # 重发换一个落点候选(可能是立绘挡住了格心)
                 if pend["do"] == "exchange":
                     self.state["mt_ex_stage"] = 0
             else:
@@ -1199,15 +1200,20 @@ class GridMultiMixin:
         都被盖住就按 attempt 轮流取候选(至少换着点). 传送格不偏(格心即是)."""
         if do == "portal":
             return px[0], px[1]
-        boxes = []
+        boxes, centers = [], []
         for L, v in pos.items():
             if L == team or v is None:
                 continue
             fx, fy = px_of(tuple(v), origin, dx, dy)
-            boxes.append((fx - 0.8 * dx, fx + 0.8 * dx, fy - 1.8 * dy, fy + 0.3 * dy))
+            centers.append((fx, fy))
+            boxes.append((fx - 1.05 * dx, fx + 1.05 * dx, fy - 1.8 * dy, fy + 0.3 * dy))   # 带翅膀/长发的立绘比一格还宽
         cands = [(px[0], px[1] + CELL_TAP_DOWN * dy), (px[0], px[1]), (px[0], px[1] - 0.33 * dy),
                  (px[0] - 0.3 * dx, px[1] + 0.15 * dy), (px[0] + 0.3 * dx, px[1] + 0.15 * dy),
                  (px[0] - 0.3 * dx, px[1] - 0.3 * dy), (px[0] + 0.3 * dx, px[1] - 0.3 * dy)]
+        near = [c for c in centers if abs(c[0] - px[0]) <= 1.6 * dx and -0.5 * dy <= (c[1] - px[1]) <= 2.2 * dy]
+        if near:
+            # 旁边有友军(它的立绘可能盖到这格): 候选点按"离最近友军脚下最远"排, 翅膀/头发通常盖不到格子远离它的那个角
+            cands.sort(key=lambda c: -min(((c[0] - f[0]) / dx) ** 2 + ((c[1] - f[1]) / dy) ** 2 for f in near))
         free = [c for c in cands if not any(x1 <= c[0] <= x2 and y1 <= c[1] <= y2 for x1, x2, y1, y2 in boxes)]
         pool = free if free else cands
         return pool[attempt % len(pool)]
