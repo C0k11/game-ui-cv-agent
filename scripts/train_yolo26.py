@@ -1156,7 +1156,8 @@ TRAIN_CONFIGS = {
         # 这轮最该验: 切队药丸_N部队(多队 flow 焦点信号) / 队伍箭头压立绘 / 回合中任务资讯 / 部署侧预设入口 / 预设_读取_灰色 /
         #   编队_空槽 / 战术大赛_胜利·失败 / 活动 quest·剧情 页签四态.
         "kind": "detect",
-        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        # 09-05: 训练期 val 用去掉 855 个硬泄漏帧的 ui_v2_valclean(9,207 帧), best.pt 选型与曲线才诚实; train 仍是 ui_v2/images/train
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data_valclean.yaml",
         "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v21" / "weights" / "best.pt"),
         "epochs": 70,
         "patience": 30,
