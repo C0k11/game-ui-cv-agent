@@ -4847,6 +4847,12 @@ def t_grid_multi_0905():
     a = fl8.decide(info, _SVi())
     check("多队关中途断掉再进(任務資訊框, 无地图) -> 点 中斷任務(確認左移 0.358), 不点確認续走",
           a is not None and a.kind == "tap" and abs(a.x - (0.678 - 0.358)) < 0.01 and abs(a.y - 0.822) < 0.01 and a.require == V.CONFIRM, str(a))
+    a.post()
+    fl8.goto("result")
+    class _SVl:
+        page = "campaign_stage"; frames_in_page = 5; last_solid = "campaign_stage"; overlay = None; changed = False; flapping = False
+    a = fl8.decide(O(B(V.STAGE_ENTER, cx=0.87, cy=0.5)), _SVl())
+    check("中断后回到列表 -> 不报 CLEAN, 重置后重进同一关(stage_list)", fl8.phase == "stage_list" and fl8.outcome is None and fl8.state.get("stage") == _c["campaign"]["stage"], f"{fl8.phase} {fl8.outcome} {fl8.state.get(chr(115)+chr(116)+chr(97)+chr(103)+chr(101))}")
     _c1 = cfg()
     _c1["campaign"] = {"stage": "3-1"}
     fl9 = ALL["campaign"](Ctx(cfg=_c1, log=lambda m: None))

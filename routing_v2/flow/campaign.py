@@ -551,6 +551,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
                            justify="任務資訊框三键等距同排, 中斷任務 = 確認 左移 2 x 0.179(09-05 实帧); 中断任务 cls 欠拟合; "
                                    "点空只是框还开着, 下一帧再来; 錨 確認 必须在场",
                            require=V.CONFIRM, once="mt_abort")
+                a.post = lambda: self.state.update(mt_aborted=True)
                 return a
             return tap_box(cf, "关掉任務資訊框（点確認, 任务继续）")
         return wait("等任务大厅")
@@ -1276,6 +1277,17 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             cf = obs.find(V.CONFIRM, 0.45)
             return tap_box(cf, "结算確認") if cf is not None else wait("等結算")
         if st.page == "campaign_stage":
+            # 中断任务后被送回列表 != 打完(09-05 第 9 次 live 误报 CLEAN "走完 0 回合"): 重置回合/多队状态, 重进同一关
+            if self.state.pop("mt_aborted", False):
+                k = self.bump("mt_abort_n")
+                if k > 2:
+                    return self.finish(Outcome.BLOCKED, f"{self.state.get('stage')} 中断重进 {k - 1} 次仍没打完 -- 交人看")
+                stage = self.state.get("stage")
+                self._reset_for_next_stage()
+                self.state["mt_abort_n"] = k
+                self._load_current(stage)
+                self.goto("stage_list", f"中断任务后重进 {stage}(第 {k} 次)")
+                return wait("重进同一关")
             n = self.state["round_i"]
             return self._after_stage_clean(
                 f"{self.state['stage']} 按答案走完 {n} 回合, "
