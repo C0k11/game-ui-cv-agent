@@ -4871,8 +4871,10 @@ def t_grid_multi_0905():
               B(V.TASK_INFO, cx=0.776, cy=0.922), arrow(0.313, 0.42))
     a = flw.decide(onmap, Machine(1).update(onmap))
     check("进程重开落在地图上(多队无地图) -> 点 任務資訊 叫出面板(回合中没有返回键)", a is not None and a.target_cls == V.TASK_INFO, str(a))
-    a = flw.decide(info, _SVi())
-    check("任務資訊框出来后 -> 中斷任務", a is not None and a.kind == "tap" and abs(a.x - (0.678 - 0.358)) < 0.01, str(a))
+    class _SVo:
+        page = "grid_quest"; frames_in_page = 5; last_solid = "grid_quest"; overlay = "ack_dialog"; changed = False; flapping = False
+    a = flw.decide(info, _SVo())
+    check("任務資訊框被判成单键通知框(overlay) -> 不点確認, 走 中斷任務", a is not None and a.kind == "tap" and abs(a.x - (0.678 - 0.358)) < 0.01, str(a))
     _c1 = cfg()
     _c1["campaign"] = {"stage": "3-1"}
     fl9 = ALL["campaign"](Ctx(cfg=_c1, log=lambda m: None))

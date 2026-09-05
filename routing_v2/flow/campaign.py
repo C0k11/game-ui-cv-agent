@@ -550,6 +550,16 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             return tap_box(cf, "关掉任務資訊框（点確認, 任务继续）")
         return wait("等任务大厅")
 
+    def on_ack_dialog(self, obs, st):
+        """任務資訊框(確認 + 叉叉, 无取消)会被判成单键通知框, 基类默认点確認 = 任务继续。多队残局(无地图)时
+        这一下会把刚叫出来的面板又关掉(09-05 第 13 次 live), 这里改走 中斷任務。其余情况照基类。"""
+        if (self._multi() and not self.state.get("mt_map") and obs.has(V.CLOSE_X, 0.45)
+                and self.phase in ("enter", "grid", "walk")):
+            a = self.mt_abort_step(obs)
+            if a is not None:
+                return a
+        return super().on_ack_dialog(obs, st)
+
     def mt_abort_step(self, obs):
         """多队关中途断掉再进来(进程重开, 队伍位置/点阵地图都没了): 续走等于瞎走 -> 中斷任務(退还大部分 AP)重来。
         任務資訊框开着就点 中斷任務; 没开(归位已把它点掉, 人在地图上)就先点左上返回键把它叫出来。
