@@ -4733,6 +4733,20 @@ def t_grid_multi_0905():
           fl.state.get("mt_pos", {}).get("A") == [1, 1] and fl.state.get("mt_ai") == 1, f"{fl.state.get('mt_pos')} ai={fl.state.get('mt_ai')}")
     a = fl.decide(ph2, Machine(1).update(ph2))
     check("动作确认后 2.5s 静默期内只等(让游戏自己切焦点)", a is not None and a.kind == "wait" and "静默" in a.reason, str(a))
+    # 11-3 第 2 跑: 第 1 发前点过药丸(mt_pill:0:0), A 走完后箭头压白发检不出; 只剩 B 没行动 -> 仍按规则推断焦点=B
+    fl.state["mt_settle_until"] = 0
+    fl.state["mt_pill:0:0"] = 1
+    ph2n = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), startB(0.500, 0.367, V.GRID_START_GREY),
+             B(V.PHASE_END, cx=0.915, cy=0.928))
+    a = None
+    for _ in range(14):
+        a = fl.decide(ph2n, Machine(1).update(ph2n))
+        if a is not None and a.kind == "tap":
+            break
+    check("上一发的药丸已随动作消费, 只剩 B 没行动且箭头没检出 -> 推断焦点 B, 落 B 右下格 (0.546,0.483)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.546) < 0.01 and abs(a.y - 0.483) < 0.01, str(a))
+    fl.state.pop("mt_pill:0:0", None)
+    fl.state["mt_focus_prev"] = None
     fl.state["mt_settle_until"] = 0
     a = None
     for _ in range(14):
