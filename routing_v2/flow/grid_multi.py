@@ -1360,6 +1360,30 @@ class GridMultiMixin:
                     last_actor = acted[-1] if acted else None
                     if self.bump("mt_issued_dbg") % 150 == 1:
                         self._mt_dbg(obs, f"issued-wait focus={focus} first={first} last={last_actor} acted={acted} pos={self.state.get('mt_pos')}")
+                    # 全员"已记"行动却看到黄箭头(真检出, 能行动)一直停在**部队 1 以外**的某队头上 >10s: 相位没自动结束 = 那支队其实
+                    #    没行动(某一发的证据是假的, H15-3 第 20 跑: B 的箭头黄着停了 4001 tick). 回头补它这回合的动作.
+                    ar_real = obs.find(V.GRID_ARROW, 0.25) is not None
+                    if focus is not None and focus != first and ar_real:
+                        kk = f"mt_stuck_focus:{focus}"
+                        if self.state.get(kk) is None:
+                            self.state[kk] = time.time()
+                        elif time.time() - float(self.state[kk]) > 10.0:
+                            self.state[kk] = None
+                            acts_r = list(self.state.get("answer", {}).get("rounds", [[]])[self.state["round_i"]])                                 if self.state.get("answer") else []
+                            idx = next((i for i, m in enumerate(acts_r) if m.get("team") == focus and m.get("do", "move") != "exchange"), None)
+                            if idx is not None:
+                                self.log(f"全员已记行动但黄箭头停在 {focus} 头上 >10s = 它其实没走成, 回头补它的动作 {idx + 1}")
+                                acted = self.state.setdefault("mt_acted", [])
+                                if focus in acted:
+                                    acted.remove(focus)
+                                self.state.update(mt_ai=idx, issued=False, mt_pending=None, cycling=False, pe_absent=0,
+                                                  mt_need_end=False, mt_focus_prev=None)
+                                self.state["mt_settle_until"] = 0
+                                self.state[f"mt_reissue:{self.state['round_i']}:{idx}"] = 0
+                                return wait("补发没走成的动作")
+                    else:
+                        for kk in [k for k in self.state if k.startswith("mt_stuck_focus:")]:
+                            self.state[kk] = None
                     if focus is not None and focus == first and last_actor != first:
                         k = self.bump("mt_newround_frames")
                         if k >= 2:
