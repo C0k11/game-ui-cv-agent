@@ -229,6 +229,24 @@ def _pill_sig(frame):
         return None
 
 
+def _pill_diff(a, b) -> int:
+    try:
+        import numpy as np
+        return int((np.abs(a.astype(int) - b.astype(int)) > 40).sum())
+    except Exception:
+        return 10 ** 6
+
+
+def _pill_match(sig, sigs: dict):
+    """当前药丸签名和本关里记住的各部队签名比: 最近的 <15 个像素不同且次近的 >=40 才算认出, 返回部队号或 None."""
+    if sig is None or not sigs:
+        return None
+    ds = sorted((_pill_diff(sig, s), n) for n, s in sigs.items())
+    if ds[0][0] < 15 and (len(ds) == 1 or ds[1][0] >= 40):
+        return ds[0][1]
+    return None
+
+
 def _pill_changed(a, b) -> bool:
     if a is None or b is None:
         return False
@@ -286,6 +304,35 @@ class GridMultiMixin:
                 self.log(f"决策帧 {path.rsplit('/', 1)[-1]}: {note}")
         except Exception:
             pass
+
+    def _mt_focus_pill(self, obs: Observation, focus, focus_lat, pos, idle_ok: bool):
+        """药丸文字签名字典(本关内自学): 焦点被箭头/规则认出来时, 把此刻左下「N部隊」文字区的签名记到该部队号名下; 箭头检不出时
+        拿当前签名去字典里认, 认出哪个部队号焦点就是哪支队. 不读数字、不点按钮, 只是同一关里"这块文字长这样 = 部队 N"的记忆
+        (H15-3 第 13/14 跑: 箭头压在 START 字样/深发上整段检不出, 而药丸文字永远露着). 点药丸后 1.5s 内文字在换, 不学."""
+        if not idle_ok:
+            return focus, focus_lat
+        sig = _pill_sig(getattr(obs, "frame", None))
+        if sig is None:
+            return focus, focus_lat
+        sq_map = self.state.get("mt_team_squad") or {}
+        sigs = self.state.setdefault("mt_pill_sigs", {})
+        if focus is not None:
+            if self.state.get("mt_pill_wait_sig") is None and focus in sq_map:
+                n = int(sq_map[focus] or 0)
+                if n:
+                    clash = [m for m, s in sigs.items() if m != n and _pill_diff(sig, s) < 15]
+                    if not clash:
+                        sigs[n] = sig
+            return focus, focus_lat
+        m = _pill_match(sig, sigs)
+        if m is None:
+            return focus, focus_lat
+        team = next((L for L, h in sq_map.items() if int(h or 0) == m), None)
+        if team is None:
+            return focus, focus_lat
+        if self.bump("mt_pill_sig_infer") % 40 == 1:
+            self.log(f"箭头没检出, 左下药丸文字与本关记住的部队{m}签名一致, 视焦点为 {team}")
+        return team, (tuple(pos[team]) if pos.get(team) is not None else None)
 
     def _mt_idle_ok(self, obs: Observation) -> bool:
         """游戏空闲闸(09-05 10-3 live 实锤): 踩敌人格的 SKIP 战斗有 3-5s 爆炸/VICTORY 动画, 期间右下角轮流盖着
@@ -846,6 +893,7 @@ class GridMultiMixin:
         pos: Dict[str, Optional[list]] = self.state.setdefault("mt_pos", {})
         idle_ok = self._mt_idle_ok(obs)
         pend = self.state.get("mt_pending")
+        focus, focus_lat = self._mt_focus_pill(obs, focus, focus_lat, pos, idle_ok)
         # 箭头压在白发/浅色立绘上时 v21 整段检不出(10-3 第 4 跑 25s 全 None). 游戏空闲、没有挂起动作、本回合只剩一队
         #    没行动 -> 按游戏"自动切给下一支没行动的队"的规则, 焦点就是它。
         if (focus is None and idle_ok and not pend and obs.find(V.GRID_ARROW, 0.25) is None):
@@ -1195,6 +1243,7 @@ class GridMultiMixin:
             if fr is not None and fr[4] is not None:
                 cs, sb, dx, dy, origin = fr
                 focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
+                focus, focus_lat = self._mt_focus_pill(obs, focus, focus_lat, self.state.get("mt_pos") or {}, True)
                 if pend.get("do") == "exchange" and pend.get("stage") == 1:
                     return self._mt_exchange_menu(obs, pend)
                 if self._mt_pending_done(pend, focus, focus_lat):
@@ -1227,6 +1276,7 @@ class GridMultiMixin:
                 if fr is not None and fr[4] is not None:
                     cs, sb, dx, dy, origin = fr
                     focus, _fl = self._mt_focus(obs, cs, dx, dy, origin)
+                    focus, _fl = self._mt_focus_pill(obs, focus, _fl, self.state.get("mt_pos") or {}, True)
                     names = self._mt_names()
                     # 新回合游戏聚焦的是**部队 1**, 而部队 1 未必是答案里的第一支队(10-3 第 5 跑: 编队面板记着上次选的
                     #    部队 2, A 用了部队 2、B 用了部队 1; 按 names[0]=A 等箭头, 回合 2 箭头在 B 头上, 4001 tick 没等到)
