@@ -4841,6 +4841,21 @@ def t_grid_multi_0905():
         if a is not None and "箭头" in a.reason:
             break
     check("箭头没检出(焦点未知) -> 不点药丸只等", a is not None and a.kind == "wait" and "箭头" in a.reason, str(a))
+    # 药丸文字区变过 1 次(焦点真切了) + 箭头仍没检出 -> 从点前焦点 A 按部队号循环推: 没行动的 [A(1),B(2)] -> B, 直接落 B 的格
+    fl.state["mt_pill:1:0:eff"] = 1
+    fl.state["mt_pill:1:0:t"] = 0
+    fl.state["mt_settle_until"] = 0
+    a = None
+    for _ in range(14):
+        a = fl.decide(noarrow, Machine(1).update(noarrow))
+        if a is not None and a.kind == "tap":
+            break
+    check("药丸生效 1 次无箭头 -> 视焦点为 B, 去落 B 的目标格(等格子检出的 wait 也算通过)",
+          a is not None and (a.kind == "tap" or (a.kind == "wait" and "目标格" in a.reason)), str(a))
+    fl.state.pop("mt_pill:1:0:eff", None)
+    fl.state["mt_focus_prev"] = None
+    for k in [k for k in fl.state if k.startswith("hold:mt_no_goal")]:
+        fl.state.pop(k, None)
     ph4 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.546, 0.30))
     a = None
     for _ in range(14):

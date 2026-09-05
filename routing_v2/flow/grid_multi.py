@@ -210,6 +210,36 @@ def _menu_icon_at(frame, x: float, y: float):
         return None
 
 
+def _pill_sig(frame):
+    """左下「N部隊」药丸文字区的小签名(64x24 灰度), 用来判"药丸按下去后文字变了没"(部队号变了 = 焦点真切了).
+    只是 HUD 固定区的变化检测, 不读数字、不定位按钮. 没帧 -> None."""
+    if frame is None:
+        return None
+    try:
+        import cv2
+        h, w = frame.shape[:2]
+        x1, x2 = int(0.030 * w), int(0.105 * w)
+        y1, y2 = int(0.758 * h), int(0.792 * h)
+        patch = frame[y1:y2, x1:x2]
+        if patch.size == 0:
+            return None
+        g = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+        return cv2.resize(g, (64, 24), interpolation=cv2.INTER_AREA)
+    except Exception:
+        return None
+
+
+def _pill_changed(a, b) -> bool:
+    if a is None or b is None:
+        return False
+    try:
+        import numpy as np
+        d = np.abs(a.astype(int) - b.astype(int))
+        return int((d > 40).sum()) >= 30
+    except Exception:
+        return False
+
+
 class GridMultiMixin:
     """挂在 CampaignFlow 上。状态全在 self.state['mt_*'], 单队关不碰这里。"""
 
@@ -833,6 +863,37 @@ class GridMultiMixin:
                 focus, focus_lat = rest[0], tuple(pos[rest[0]])
                 if self.bump("mt_focus_infer") % 40 == 1:
                     self.log(f"箭头没检出(立绘遮挡?), 没行动的队按部队号 {[(L, sq.get(L)) for L in rest]} 排, 视焦点为 {focus}")
+        # 点过药丸后箭头仍检不出(H15-3 第 12 跑: 箭头压在 START 字样和粉发上 25s 全 None): 药丸文字区(「N部隊」)在每次按下后
+        #    变了 = 焦点真切了一次; 药丸按部队号在没行动的队里循环, 从点药丸前的已知焦点数过去就是现在的焦点. 药丸没变化(被吞)不推.
+        if focus is None and idle_ok and not pend and obs.find(V.GRID_ARROW, 0.25) is None:
+            key = f"mt_pill:{self.state['round_i']}:{ai}"
+            base = self.state.get(f"{key}:base")
+            eff = int(self.state.get(f"{key}:eff", 0))
+            if base is not None and eff >= 1 and time.time() - float(self.state.get(f"{key}:t", 0)) > 3.0:
+                acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
+                sq = self.state.get("mt_team_squad") or {}
+                rest = sorted([L for L in pos if L not in acted], key=lambda L: int(sq.get(L, 99) or 99))
+                if base in rest and all(L in sq for L in rest):
+                    exp = rest[(rest.index(base) + eff) % len(rest)]
+                    focus = exp
+                    focus_lat = tuple(pos[exp]) if pos.get(exp) is not None else None
+                    if self.bump("mt_pill_infer") % 40 == 1:
+                        self.log(f"药丸按下后文字变了 {eff} 次但箭头没检出, 从点前焦点 {base} 按部队号循环推, 视焦点为 {exp}")
+        # 药丸签名: 每帧更新"按下前"的基线; 按下后与基线不同 -> 记一次生效
+        fr_now = getattr(obs, "frame", None)
+        if fr_now is not None:
+            sig = _pill_sig(fr_now)
+            pend_sig = self.state.get("mt_pill_wait_sig")
+            if pend_sig is not None and sig is not None:
+                k2, base_sig, t_tap = pend_sig
+                if _pill_changed(base_sig, sig):
+                    self.state[k2 + ":eff"] = int(self.state.get(k2 + ":eff", 0)) + 1
+                    self.state["mt_pill_wait_sig"] = None
+                    self.state["mt_pill_last_sig"] = sig
+                elif time.time() - t_tap > 4.0:
+                    self.state["mt_pill_wait_sig"] = None      # 4s 没变化 = 那一发被吞, 不计
+            if self.state.get("mt_pill_wait_sig") is None:
+                self.state["mt_pill_last_sig"] = sig
         if focus is not None:
             self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
         if not idle_ok:
@@ -915,10 +976,14 @@ class GridMultiMixin:
                 return wait("箭头没检出(焦点未知), 等它出现再决定要不要切队")
             self._wt_clear("mt_no_arrow")
 
-            def _pill(key=key):
+            def _pill(key=key, focus=focus):
                 self.state[key] = int(self.state.get(key, 0)) + 1
                 self.state["mt_settle_until"] = time.time() + 5.0    # 切队后相机缓动 3-4s, 早到的点击被吞(10-3 实锤)
                 self.state["mt_focus_prev"] = None
+                self.state.setdefault(f"{key}:base", focus)          # 点药丸前的焦点(已知才会走到这里)
+                self.state[f"{key}:t"] = time.time()
+                if self.state.get("mt_pill_last_sig") is not None:
+                    self.state["mt_pill_wait_sig"] = (key, self.state["mt_pill_last_sig"], time.time())
             a = tap_at(SWITCH_PILL[0], SWITCH_PILL[1],
                        f"焦点在 {focus}, 要 {team} -- 点左下切队药丸(第 {n + 1} 次)",
                        justify="左下角「N部隊」切队药丸没有 cls(v22 采了料); 16:9 部署/回合 HUD 固定, 三关 40+ 帧位置不变; "
