@@ -138,6 +138,27 @@ _MIN_HOLD_S = 0.5
 #    帧数和墙钟合取: 帧数够了还得满 _STRICT_MIN_S 才算严格超时; 宽松档不动(那是常态兜底)。
 #    大赛 出击 -> WIN/LOSE 结果框实测 51-56 tick(约 2.3s), 2.5 还在假超时边缘, 取 3.0。
 _STRICT_MIN_S = 3.0
+# 页面定稳闸(09-05 审计): 大厅/社团/商店入场动画里第一发 tap 5 处被游戏吞, 每处赔 38 帧, 商店里还烧掉唯一滑动锚.
+#    页面刚认出(frames_in_page < _SETTLE_FIP)时, 决策帧与最新帧上稳定锚的位移 > _SETTLE_TOL = 页面还在滑入,
+#    按住等停稳(不丢弃). 静止 UI 的帧间抖动 < 0.003. 决策帧就是最新帧时(单帧测试/慢 feed)不介入.
+_SETTLE_FIP = 40
+_SETTLE_TOL = 0.004
+_SETTLE_ANCHORS = (V.BACK, V.HOME, V.AP, V.CREDIT, V.PYROXENE, V.NAV_TASKS)
+
+
+def _ui_motion(a, b):
+    """两帧之间稳定锚(>=0.5)的最大位移(归一化); 没有共同锚返回 None."""
+    worst = None
+    for c in _SETTLE_ANCHORS:
+        xa = [x for x in a.boxes if x.cls == c and x.conf >= 0.5]
+        xb = [x for x in b.boxes if x.cls == c and x.conf >= 0.5]
+        if not xa or not xb:
+            continue
+        for x in xa:
+            y = min(xb, key=lambda q: (q.cx - x.cx) ** 2 + (q.cy - x.cy) ** 2)
+            d = ((y.cx - x.cx) ** 2 + (y.cy - x.cy) ** 2) ** 0.5
+            worst = d if worst is None else max(worst, d)
+    return worst
 # 宽松契约超时地板。补发/严格档走 retry_frames; 宽松档是
 #   max(本地板, retry_frames//6)。二者必须拆开: 70 收到 38 时
 #   若宽松仍按比例 //6, 会塌成 6 帧; 若收到旧值 25 更会塌成 4 帧,
@@ -327,12 +348,24 @@ class Gate:
 
     #   落地复验（JIT）
     def jit(self, act: Action, obs: Observation,
-            fresh: Callable[[], Optional[Observation]]) -> Verdict:
+            fresh: Callable[[], Optional[Observation]], frames_in_page: int = 999) -> Verdict:
         """派发前用**最新帧**确认目标还在。
 
         `fresh()` 由 runner 提供：返回比 obs 更新的 Observation，或 None
         （没有更新的帧 = 决策帧就是最新的 = 无需复验）。
         """
+        if (act.is_tap or act.kind == "swipe") and frames_in_page < _SETTLE_FIP:
+            f0 = fresh()
+            if f0 is not None and f0.seq != obs.seq:
+                mv = _ui_motion(obs, f0)
+                if mv is not None and mv > _SETTLE_TOL:
+                    self.stats["settle_hold"] = self.stats.get("settle_hold", 0) + 1
+                    if not self._pending:
+                        self._pending = {"expect": (), "expect_gone": (),
+                                         "cls": act.target_cls, "reason": "等页面停稳",
+                                         "n": 2, "loose": True, "settle": True}
+                    return Verdict(False, f"页面刚切过来还在滑入(稳定锚位移 {mv:.3f} > {_SETTLE_TOL}) -- 按住等停稳")
+                fresh = (lambda _f=f0: _f)      # 已经抓过最新帧, 下面复用, 别再推一次
         if not act.is_tap or act.require is None:
             return Verdict(True)
         f = fresh()
@@ -771,7 +804,7 @@ class Gate:
                                retry_frames=retry_frames)),
                            ("dedup", lambda: self.dedup(
                                act, page_changed, frames_in_page, retry_frames)),
-                           ("jit", lambda: self.jit(act, obs, fresh))):
+                           ("jit", lambda: self.jit(act, obs, fresh, frames_in_page))):
             v = _fn()
             v.by = v.by or _name
             rollback = rollback or v.rollback_once

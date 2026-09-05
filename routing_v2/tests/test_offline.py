@@ -4915,6 +4915,18 @@ def t_grid_multi_0905():
     class _SVe:
         page = "unknown"; frames_in_page = 60; last_solid = "unknown"; overlay = None
     check("nav: unknown+接近空屏 60 帧 -> 空屏逃生点背景唤醒", _nav.blank_escape(_SVe(), obs=empty) is not None)
+    # 09-05 页面定稳闸: 页面刚认出且顶栏/返回键还在滑入 -> 按住; 停稳 -> 放行; 页面已认出很久 -> 不介入
+    g6 = Gate(cfg(), log=lambda m: None)
+    o_dec = O(B(V.BACK, cx=0.045, cy=0.052), B(V.CREDIT, cx=0.533, cy=0.051), B("邮件箱", cx=0.902, cy=0.050), seq=3)
+    o_mov = O(B(V.BACK, cx=0.045, cy=0.066), B(V.CREDIT, cx=0.533, cy=0.065), B("邮件箱", cx=0.902, cy=0.050), seq=7)
+    o_still = O(B(V.BACK, cx=0.045, cy=0.052), B(V.CREDIT, cx=0.533, cy=0.051), B("邮件箱", cx=0.902, cy=0.050), seq=8)
+    v = g6.jit(_tb2(B("邮件箱", cx=0.902, cy=0.050), "x"), o_dec, lambda: o_mov, frames_in_page=5)
+    check("闸: 页面刚切过来顶栏还在滑入 -> 按住不发", not v.ok and "滑入" in v.why, v.why)
+    g6b = Gate(cfg(), log=lambda m: None)
+    v = g6b.jit(_tb2(B("邮件箱", cx=0.902, cy=0.050), "x"), o_dec, lambda: o_still, frames_in_page=5)
+    check("闸: 顶栏停稳 -> 放行", v.ok, v.why)
+    v = g6b.jit(_tb2(B("邮件箱", cx=0.902, cy=0.050), "x"), o_dec, lambda: o_mov, frames_in_page=200)
+    check("闸: 页面已认出很久, 定稳闸不介入(目标本身没动)", v.ok, v.why)
     # 09-05 第 6 次 live 复盘: 相机平移中不落子 / 标记检不出但起点在屏内 8 帧后直接点 / 多队中途断掉 -> 中斷任務
     fl6 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     fl6.goto("walk")
