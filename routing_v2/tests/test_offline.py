@@ -4694,6 +4694,26 @@ def t_grid_multi_0905():
     fl4.state["answer"] = dict(fl3.state["answer"])
     p4 = fl4._mt_preset_plan({"blue": [[2, 3], [3, 1]]})
     check("列表配置: blue 配了两个預設 -> A/B 各一个, C 没得用不套", p4 == {"A": [2, 3], "B": [3, 1]}, str(p4))
+    # 编队面板上起点归属未知(进程重开/残局) -> 不盲出击, 按返回键退回部署屏
+    flu = ALL["campaign"](Ctx(cfg=dict(_cp, campaign={"stage": "10-1"}), log=lambda m: None))
+    flu.state["answer"] = dict(fl3.state["answer"])
+    flu.goto("grid")
+    flu.state.update(mt_map={"starts": {"A": [0, 0], "B": [4, -2], "C": [1, 5]}, "cells": []}, mt_dep_target=None)
+    fu = O(B(V.SORTIE, cx=0.920, cy=0.913), B(V.BACK, cx=0.045, cy=0.052), B(V.SQUAD_TABS[1][1], cx=0.07, cy=0.30))
+    a = flu.decide(fu, Machine(1).update(fu))
+    check("编队面板起点归属未知 -> 点返回键退回部署屏(不点出击)", a is not None and a.kind == "tap" and a.target_cls == V.BACK, str(a))
+    # 出击 3 次面板还在(部队空的) -> 补套一个还没用过的預設
+    flx = ALL["campaign"](Ctx(cfg=dict(_cp, campaign={"stage": "10-1", "grid_presets": _c3}), log=lambda m: None))
+    flx.state["answer"] = dict(fl3.state["answer"], teams=[{"name": "A", "attr": "blue"}, {"name": "B", "attr": "blue"}])
+    flx.goto("grid")
+    flx.state.update(mt_map={"starts": {"A": [0, 0], "B": [4, -2]}, "cells": []}, mt_dep_target="B",
+                     mt_form_seen_t=1.0, mt_preset_done={"B": {"tab": 2, "row": 1}}, mt_pr_entry_wait=0)
+    flx.state["mt_sortie_n:B"] = 3
+    fx = O(B(V.SORTIE, cx=0.920, cy=0.913), B(V.SQUAD_TABS[1][1], cx=0.07, cy=0.30))
+    a = flx.decide(fx, Machine(1).update(fx))
+    check("出击 3 次不收 -> 给 B 换一个没用过的預設(两队用了 blue/red, 剩 yellow(2,2)), 清 preset_done 重套",
+          a is not None and a.kind == "wait" and flx.state.get("mt_preset_plan", {}).get("B") == [2, 2] and "B" not in flx.state.get("mt_preset_done", {}),
+          f"{a} plan={flx.state.get('mt_preset_plan')} done={flx.state.get('mt_preset_done')}")
     check("預設登记为 页签2 第3行", flp.state.get("preset_want") == {"tab": 2, "row": 3}, str(flp.state.get("preset_want")))
     # 預設入口检不出(部署侧面板 v21 常漏): 6 帧后按右栏几何点开
     flq = ALL["campaign"](Ctx(cfg=_cp, log=lambda m: None))

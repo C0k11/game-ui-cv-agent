@@ -530,12 +530,53 @@ class GridMultiMixin:
         if s is None:
             return wait("编队页, 等出击键")
         if L is None:
-            return tap_box(s, "编队确认: 出击(多队, 起点归属未知)", expect=(V.TASK_START, V.TASK_START_GREY))
+            # 起点归属未知(进程重开/残局落在编队面板上): 不知道这是哪支队、该套哪个預設, 盲出击会把一支空部队或别的阵容
+            #    送上场(09-05 H15-3: 部队 1 被套預設抽空后, 出击 点了 7 次「部隊尚未編輯」). 返回退回部署屏重新认起点.
+            n = self.bump("mt_form_unknown_back")
+            if n > 6:
+                return self.finish(Outcome.UNKNOWN, "编队面板上认不出这是哪支队, 返回 6 次仍在面板上 -- 交人看")
+            b = obs.find(V.BACK, 0.45)
+            if b is not None:
+                return tap_box(b, "编队面板: 起点归属未知(进程重开/残局), 不盲出击, 返回退回部署屏重认起点", expect_gone=(V.SORTIE,))
+            return wait("编队面板(起点归属未知): 等返回键")
+        # 出击 发了 3 次面板还在 = 游戏不收(多半是部队空的, 「部隊尚未編輯」吐司没有 cls): 这支队没套過預設就补套一个还没用过的
+        #    預設, 套过了/没得套就交人, 不再对着空部队连点.
+        sn = int(self.state.get(f"mt_sortie_n:{L}", 0))
+        if sn >= 3 and not self.state.get(f"mt_sortie_rescue:{L}"):
+            self.state[f"mt_sortie_rescue:{L}"] = True
+            cfgp = self.cfg.get("grid_presets") or None
+            plan = self._mt_preset_plan(cfgp) if isinstance(cfgp, dict) else {}
+            used = {tuple(v) for v in plan.values()}
+            spare = None
+            if isinstance(cfgp, dict):
+                for spec in cfgp.values():
+                    items = spec if (isinstance(spec, (list, tuple)) and spec and isinstance(spec[0], (list, tuple))) else [spec]
+                    for it in items:
+                        try:
+                            p = (int(it[0]), int(it[1]))
+                        except (TypeError, ValueError, IndexError):
+                            continue
+                        if p not in used and 1 <= p[0] <= 4 and 1 <= p[1] <= 4:
+                            spare = p
+                            break
+                    if spare:
+                        break
+            if spare is None:
+                return self.finish(Outcome.UNKNOWN,
+                                   f"队 {L}(部队{hi or '?'}) 出击 3 次游戏不收(部队多半是空的), 没有还没用过的預設可补 -- 交人看")
+            plan[L] = [spare[0], spare[1]]
+            self.state["mt_preset_plan"] = plan
+            self.state.setdefault("mt_preset_done", {}).pop(L, None)
+            self.state.get("mt_preset_done", {}).pop(f"{L}:giveup", None)
+            self.state["mt_form_seen_t"] = 0
+            self.log(f"队 {L}(部队{hi or '?'}) 出击 3 次游戏不收(部队多半是空的), 补套还没用过的預設 页签{spare[0]} 第{spare[1]}行")
+            return wait("补套預設")
 
         def _post(L=L, hi=hi):
             self.state["mt_dep_pending"] = L
             self.state["mt_form_seen_t"] = 0
             self.state["mt_pr_entry_wait"] = 0
+            self.state[f"mt_sortie_n:{L}"] = int(self.state.get(f"mt_sortie_n:{L}", 0)) + 1
             if hi is not None:
                 self.state.setdefault("mt_team_squad", {})[L] = hi
         return tap_box(s, f"编队确认: 出击(队 {L} = 部队{hi or '?'})",
