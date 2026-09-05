@@ -4759,13 +4759,13 @@ def t_grid_multi_0905():
     flx.state.update(mt_map=mp, mt_pos={"A": [0, 0], "B": [4, -2]}, round_i=0)
     flx.state["answer"] = dict(flx.state["answer"], rounds=[[{"team": "A", "do": "move", "dir": "right-down"}]])
     flx.mt_new_round()
-    flx.state.update(issued=True, mt_need_end=False, mt_ai=0,
+    flx.state.update(issued=True, mt_need_end=False, mt_ai=0, mt_idle_n=5,
                      mt_pending={"ai": 0, "team": "A", "do": "move", "dir": "right-down", "from": [0, 0], "target": [1, 1], "t": 0})
     a = flx.decide(ph, Machine(1).update(ph))
     check("最后一发 10s 无证据 -> 收回 issued 重发", a is not None and a.kind == "wait" and "重发" in a.reason and not flx.state.get("issued") and flx.state.get("mt_pending") is None, str(a))
-    flx.state.update(mt_settle_until=0, mt_focus_prev=None)
+    flx.state.update(mt_settle_until=0, mt_focus_prev=None, mt_idle_n=5)
     a = None
-    for _ in range(4):      # 相机两帧共识 + 焦点两帧共识
+    for _ in range(6):      # 空闲 3 帧 + 相机两帧共识 + 焦点两帧共识
         a = flx.decide(ph, Machine(1).update(ph))
         if a is not None and a.kind == "tap":
             break
@@ -4836,14 +4836,17 @@ def t_grid_multi_0905():
     fl6.goto("walk")
     fl6.state.update(mt_map=mp, mt_pos={"A": [0, 0], "B": [4, -2]}, round_i=0)
     fl6.mt_new_round()
-    fl6.state["mt_settle_until"] = 0
+    fl6.state.update(mt_settle_until=0, mt_idle_n=5)
     mv1 = O(*[cellB(x + 0.03, y) for x, y in cells], startB(0.313 + 0.03, 0.599, V.GRID_START_GREY),
             B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.313 + 0.03, 0.42))
     a = fl6.decide(ph, Machine(1).update(ph))
     a = fl6.decide(mv1, Machine(1).update(mv1))
     check("相机平移中(原点两帧差 0.03) -> 只等不落子", a is not None and a.kind == "wait" and "相机" in a.reason, str(a))
-    fl6.decide(mv1, Machine(1).update(mv1))     # 焦点两帧共识
-    a = fl6.decide(mv1, Machine(1).update(mv1))
+    a = None
+    for _ in range(4):      # 焦点两帧共识
+        a = fl6.decide(mv1, Machine(1).update(mv1))
+        if a is not None and a.kind == "tap":
+            break
     check("相机停稳(两帧原点一致) -> 落子", a is not None and a.kind == "tap" and abs(a.x - (0.358 + 0.03)) < 0.01, str(a))
     fl7 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     fl7.goto("grid")

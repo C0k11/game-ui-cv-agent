@@ -238,6 +238,16 @@ class GridMultiMixin:
         for k in [k for k in self.state if k.startswith("mt_focus:") or k.startswith("mt_reissue:")]:
             self.state.pop(k, None)
 
+    def _mt_idle_ok(self, obs: Observation) -> bool:
+        """游戏空闲闸(09-05 10-3 live 实锤): 踩敌人格的 SKIP 战斗有 3-5s 爆炸/VICTORY 动画, 期间右下角轮流盖着
+        「Now Loading」和横幅, 箭头会闪一下 -- 这一闪被当成"上一发已消费", 紧接着的两发全打在动画里被吞。
+        空闲 = PHASE結束 高分在场 且 没有 加载中, **连续 3 帧**(VICTORY 那一帧 PHASE 会露出来一下)。
+        不空闲时既不落子也不采信证据, 挂起动作的超时钟也暂停。"""
+        idle = obs.has(V.PHASE_END, 0.60) and not obs.has(V.LOADING, 0.40)
+        n = (int(self.state.get("mt_idle_n", 0)) + 1) if idle else 0
+        self.state["mt_idle_n"] = n
+        return n >= 3
+
     def _mt_frame(self, obs: Observation, conf: float = 0.30):
         """本帧几何: (格心列表, 起点框列表, dx, dy, 原点) 或 None。"""
         cs = grid.cells(obs, conf)
@@ -542,8 +552,13 @@ class GridMultiMixin:
         if focus is not None:
             self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
         pos: Dict[str, Optional[list]] = self.state.setdefault("mt_pos", {})
-        # 上一发的事后证据
+        idle_ok = self._mt_idle_ok(obs)
         pend = self.state.get("mt_pending")
+        if not idle_ok:
+            if pend:
+                pend["t"] = max(float(pend.get("t", 0)), time.time() - 5.0)   # 动画期不计超时(最多回拨 5s)
+            return wait("游戏在放动画/加载(PHASE 弱或加载中), 不落子不判证据")
+        # 上一发的事后证据
         if pend:
             done = self._mt_pending_done(pend, focus, focus_lat)
             if done:
@@ -772,6 +787,10 @@ class GridMultiMixin:
         if not pe or self.state.get("cycling"):
             return None
         pend = self.state.get("mt_pending")
+        if not self._mt_idle_ok(obs):
+            if pend:
+                pend["t"] = max(float(pend.get("t", 0)), time.time() - 5.0)
+            return wait("游戏在放动画/加载, 等空闲再判最后一发的证据")
         if pend:
             fr = self._mt_frame(obs)
             if fr is not None and fr[4] is not None:
