@@ -285,6 +285,7 @@ class GridMultiMixin:
         pend = self.state.get("mt_pending")
         if pend:
             self._mt_apply(pend)
+        self._phase_t0 = self.ticks - 1          # 进新回合也是进展, 相位卡死计时器归零
         # 新回合开场有 MY PHASE 横幅 + 相机回摆 1-2s(09-05 第 14 次 live: 每回合首发都在这窗口里打空, 10s 后重发才中)
         self.state["mt_settle_until"] = time.time() + 5.0
         self.state["mt_focus_prev"] = None
@@ -1273,6 +1274,8 @@ class GridMultiMixin:
             acted = self.state.setdefault("mt_acted", [])
             if team not in acted:
                 acted.append(team)
+        # 每确认一步都是进展: 相位卡死计时器归零(H15-3 五回合的 walk 相位远超 4000 tick 的 phase_cap, 第 18 跑在回合 2 被判"卡了")
+        self._phase_t0 = self.ticks - 1
         self.log(f"动作确认: 队 {team} {do} {pend.get('dir')} -> 位置 {pos}")
 
     def _mt_mark_issued(self, acts) -> None:
