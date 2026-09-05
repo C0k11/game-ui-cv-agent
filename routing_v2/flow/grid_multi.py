@@ -864,15 +864,16 @@ class GridMultiMixin:
                 if self.bump("mt_focus_infer") % 40 == 1:
                     self.log(f"箭头没检出(立绘遮挡?), 没行动的队按部队号 {[(L, sq.get(L)) for L in rest]} 排, 视焦点为 {focus}")
         # 点过药丸后箭头仍检不出(H15-3 第 12 跑: 箭头压在 START 字样和粉发上 25s 全 None): 药丸文字区(「N部隊」)在每次按下后
-        #    变了 = 焦点真切了一次; 药丸按部队号在没行动的队里循环, 从点药丸前的已知焦点数过去就是现在的焦点. 药丸没变化(被吞)不推.
+        #    变了 = 焦点真切了一次; 药丸按部队号在全部上场部队里循环(含已行动的), 从点药丸前的已知焦点数过去就是现在的焦点. 药丸没变化(被吞)不推.
         if focus is None and idle_ok and not pend and obs.find(V.GRID_ARROW, 0.25) is None:
             key = f"mt_pill:{self.state['round_i']}:{ai}"
             base = self.state.get(f"{key}:base")
             eff = int(self.state.get(f"{key}:eff", 0))
             if base is not None and eff >= 1 and time.time() - float(self.state.get(f"{key}:t", 0)) > 3.0:
-                acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
+                # 药丸在**全部**上场部队里按部队号循环, 行动过的也在圈里(H15-3 第 13 跑回合 4: B 走完后从 A 按一次药丸, 药丸文字是
+                #    「2部隊」= B, 不是跳到没行动的 C)
                 sq = self.state.get("mt_team_squad") or {}
-                rest = sorted([L for L in pos if L not in acted], key=lambda L: int(sq.get(L, 99) or 99))
+                rest = sorted(pos.keys(), key=lambda L: int(sq.get(L, 99) or 99))
                 if base in rest and all(L in sq for L in rest):
                     exp = rest[(rest.index(base) + eff) % len(rest)]
                     focus = exp
