@@ -891,9 +891,14 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
         #    不会误叉 任務資訊 之外的东西 -- 那个面板叉掉也无害）。
         if (obs.has(V.CLOSE_X, 0.55)
                 and not obs.has([V.TASK_START, V.TASK_START_GREY, V.SORTIE],
-                                0.35)):
+                                0.35)
+                # 預設面板也带叉叉且盖住 出击(09-05 live: 几何点开的面板被这里立刻叉掉 3 次): 子链在跑或面板件在场就不叉
+                and not self.state.get("preset_want")
+                and not obs.has([V.PRESET_TITLE] + V.PRESET_PANEL_ANY, 0.40)):
             x = obs.find(V.CLOSE_X, 0.55)
             return tap_box(x, "部署屏被弹窗盖住(有叉叉无部署控件) -- 叉掉")
+        if self._multi():
+            self.mt_note_menu(obs)
         # 误点已部署单位会弹三键菜单(解除/更換/變更位置, 6-1 手驾实证)。542 解除是
         #    **危险锚**: 检出 = 菜单开着; 处置 = 点菜单外空处让它消退, 绝不点它
         #    (点了把队伍撤下来; gate._NEVER_TAP 再兜一层)。

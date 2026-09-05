@@ -381,7 +381,11 @@ class GridMultiMixin:
                 return self.finish(Outcome.UNKNOWN, "部署屏 30 帧点阵对不齐 -- 不瞎点")
             return wait("点阵对不齐, 再看一帧")
         self.state["mt_align_fail"] = 0
-        remaining = [n for n in self._mt_names() if n not in dep]
+        sortied = set((self.state.get("mt_team_squad") or {}).keys())
+        remaining = [n for n in self._mt_names() if n not in dep and n not in sortied]
+        if not remaining and len(dep) < need:
+            # 出击都发过了只是标记消失还没看到: 等标记帧, 别再去点起点(点已上队的起点会弹 解除 菜单)
+            return wait(f"{len(dep)}/{need} 上场已记, 其余出击已发, 等标记消失确认")
         want = None
         for L in remaining:
             for sp in under:
@@ -410,18 +414,31 @@ class GridMultiMixin:
                         if self.bump("mt_nomark") < 8:
                             return wait(f"起点 {L} 在屏内但标记没检出, 等几帧再点(第 {self.state['mt_nomark']} 帧)")
                         self.state["mt_nomark"] = 0
-                        self.state["mt_dep_target"] = L
                         act = tap_box(sb_near, f"点起点 {L} 上队(标记 8 帧没检出, 起点在屏内且未记上场, 第 {len(dep) + 1}/{need} 队)",
-                                      expect=(V.SORTIE,))
+                                      expect=(V.SORTIE,),
+                                      post=lambda L=L: self.state.update(mt_dep_target=L, mt_probe=L))
+                        # 这是探针: 弹编队 = 真没上; 弹 解除 菜单 = 其实已上(进程重开续局), mt_note_menu 会记上场
                         act.x, act.y = sb_near.cx, sb_near.y1 + 0.30 * (sb_near.y2 - sb_near.y1)
                         return act
             # 剩下的起点没有标记可见且不在屏内: 多半被底部卡条/屏边挡住 -> 朝它的推算位置拖地图
             return self._mt_drag_to_start(mapd, remaining, origin, dx, dy, cs)
         L, sp = want
-        self.state["mt_dep_target"] = L
-        act = tap_box(sp, f"点起点 {L} 上队(框上 1/3 处, 第 {len(dep) + 1}/{need} 队)", expect=(V.SORTIE,))
+        act = tap_box(sp, f"点起点 {L} 上队(框上 1/3 处, 第 {len(dep) + 1}/{need} 队)", expect=(V.SORTIE,),
+                      post=lambda L=L: self.state.update(mt_dep_target=L, mt_probe=None))
+        # 归属只在这一发真发出去后才记(post): 被连发闸吞掉的决策帧也改状态 = 数意图, 09-05 live 把 A 起点上的队记成了 B
         act.x, act.y = sp.cx, sp.y1 + 0.30 * (sp.y2 - sp.y1)
         return act
+
+    def mt_note_menu(self, obs: Observation) -> None:
+        """do_grid 在处理 部署菜单_解除 之前调: 刚探针点过的起点弹出了这个菜单 = 那格已经有队(续局), 记上场。"""
+        L = self.state.get("mt_probe")
+        if L and obs.has(V.GRID_UNIT_UNDEPLOY, 0.40):
+            dep = self.state.setdefault("mt_deployed", [])
+            if L not in dep:
+                dep.append(L)
+                self.log(f"起点 {L} 点开了 解除 菜单 = 已有队在上面(续局), 记为已上场({len(dep)})")
+            self.state["mt_probe"] = None
+            self.state["mt_dep_target"] = None
 
     def _mt_marks(self, obs: Observation) -> List[Box]:
         return obs.all(DEPLOY_MARKS, 0.30)

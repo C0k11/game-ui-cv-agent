@@ -4621,7 +4621,9 @@ def t_grid_multi_0905():
     check("部署首帧建图(等一帧)", a is not None and a.kind == "wait" and bool(fl.state.get("mt_map")), str(a))
     a = fl.decide(dep0, Machine(1).update(dep0))
     check("第二帧点答案第一队 A 的起点(left-down 0.313 框上 1/3), 不点 B",
-          a is not None and a.kind == "tap" and abs(a.x - 0.313) < 0.01 and a.y < 0.599 and fl.state.get("mt_dep_target") == "A", str(a))
+          a is not None and a.kind == "tap" and abs(a.x - 0.313) < 0.01 and a.y < 0.599 and fl.state.get("mt_dep_target") is None, str(a))
+    a.post()
+    check("起点归属在 post(真发出去)才记", fl.state.get("mt_dep_target") == "A")
     form1 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261), B(V.SQUAD_2, cx=0.051, cy=0.370))
     a = fl.decide(form1, Machine(1).update(form1))
     check("编队页出击(队 A)", a is not None and a.target_cls == V.SORTIE, str(a))
@@ -4636,6 +4638,7 @@ def t_grid_multi_0905():
     check("1/2 上场时 任務開始 已黄也不点, 去点 B 的起点(相机平移后位置)",
           a is not None and a.kind == "tap" and abs(a.x - (0.500 + sh[0])) < 0.01 and a.target_cls != V.TASK_START, str(a))
     check("A 已上场计数(标记消失 = 事实)", fl.state.get("mt_deployed") == ["A"], str(fl.state.get("mt_deployed")))
+    a.post()                                  # 起点 B 那一发真发出去 -> 归属 B
     form2 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1, cx=0.053, cy=0.261), B(V.SQUAD_2_HI, cx=0.051, cy=0.370))
     a = fl.decide(form2, Machine(1).update(form2))
     a.post()
@@ -4934,7 +4937,21 @@ def t_grid_multi_0905():
         if a is not None and a.kind == "tap":
             break
     check("起点 B 在屏内但标记 8 帧没检出 -> 直接点 B 的起点(不拖图)",
-          a is not None and a.kind == "tap" and abs(a.x - 0.500) < 0.01 and fl7.state.get("mt_dep_target") == "B", str(a))
+          a is not None and a.kind == "tap" and abs(a.x - 0.500) < 0.01, str(a))
+    a.post()
+    check("探针发出: 归属 B + probe 标记", fl7.state.get("mt_dep_target") == "B" and fl7.state.get("mt_probe") == "B")
+    menu = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599), startB(0.500, 0.367), B(V.TASK_START, cx=0.915, cy=0.923),
+             B(V.GRID_UNIT_UNDEPLOY, cx=0.60, cy=0.46))
+    a = fl7.decide(menu, Machine(1).update(menu))
+    check("探针点出 解除 菜单 = B 其实已上场(续局): 记上场 + 点空处消退",
+          "B" in fl7.state.get("mt_deployed", []) and a is not None and a.kind == "tap" and a.target_cls == "(no-cls)", f"{fl7.state.get('mt_deployed')} {a}")
+    # 預設面板开着时 do_grid 顶部的"有叉叉就叉"守卫不许叉它
+    flg = ALL["campaign"](Ctx(cfg=_cp, log=lambda m: None))
+    flg.goto("grid")
+    flg.state.update(mt_map=mp, mt_deployed=[], mt_dep_target="A", preset_want={"tab": 2, "row": 3})
+    pan = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.CLOSE_X, cx=0.955, cy=0.139), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226))
+    a = flg.decide(pan, Machine(1).update(pan))
+    check("預設面板开着(子链在跑) -> 不被'有叉叉无部署控件'守卫叉掉", not (a is not None and a.target_cls == V.CLOSE_X and "盖住" in a.reason), str(a))
     fl8 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     info = O(B(V.CONFIRM, cx=0.678, cy=0.822), B(V.CLOSE_X, cx=0.778, cy=0.138), B("体力", cx=0.441, cy=0.032))
     class _SVi:
