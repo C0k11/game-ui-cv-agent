@@ -1004,9 +1004,15 @@ class GridMultiMixin:
                     cs, sb, dx, dy, origin = fr
                     focus, _fl = self._mt_focus(obs, cs, dx, dy, origin)
                     names = self._mt_names()
-                    first = names[0] if names else None
+                    # 新回合游戏聚焦的是**部队 1**, 而部队 1 未必是答案里的第一支队(10-3 第 5 跑: 编队面板记着上次选的
+                    #    部队 2, A 用了部队 2、B 用了部队 1; 按 names[0]=A 等箭头, 回合 2 箭头在 B 头上, 4001 tick 没等到)
+                    sq = self.state.get("mt_team_squad") or {}
+                    ones = [L for L, h in sq.items() if int(h or 0) == 1]
+                    first = ones[0] if ones else (names[0] if names else None)
                     acted = list(self.state.get("mt_acted") or [])
                     last_actor = acted[-1] if acted else None
+                    if self.bump("mt_issued_dbg") % 40 == 1:
+                        self._mt_dbg(obs, f"issued-wait focus={focus} first={first} last={last_actor} acted={acted} pos={self.state.get('mt_pos')}")
                     if focus is not None and focus == first and last_actor != first:
                         k = self.bump("mt_newround_frames")
                         if k >= 2:
