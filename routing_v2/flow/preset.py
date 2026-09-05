@@ -16,13 +16,15 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from routing_v2.act.action import Action, tap_at, tap_box, wait
+from routing_v2.percept import read as R
 from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
 
-_SCROLL_CAP = 3
+_SCROLL_CAP = 4
 # 行头「N部隊」标签与该行 組成 钮的 cy 容差(同一行)
 _ROW_TOL = 0.06
 # 页签几何兜底(2026-09-03): v20 live 未选中页签 538 一个都检不出(选中态 539 也只 0.4-0.7), 子链会卡在
@@ -138,28 +140,45 @@ class PresetMixin:
                                       "点完仍只认 页签 k 选中态(cls 或像素) 才会去点 組成",
                               require=V.PRESET_TITLE, once="pr_tab")
             return wait(f"預設: 等页签 {k} 变选中态")
-        # 行: 优先用行头「N部隊」白字标签定行; 检不出时按 cy 顺位(只在未滚动时可信)
+        # 行: 面板可滚动且不止 4 行(09-05 live: 4部隊/5部隊 也在), 顺位/滚动计数都不可靠。
+        #    定行 = 每个 組成 钮左上方行头「N部隊」的 N 用数字 OCR 读(只读数字, 铁律内; 09-05 实帧 4/5 读准);
+        #    其次行头 cls, 再次未滚动时的 cy 顺位。找不到就按读到的行号决定往上还是往下滑。
         r = want["row"]
         applies = obs.rows([V.PRESET_APPLY, V.PRESET_APPLY_GREY], 0.40)
         target = None
+        seen_nums = []
+        fr = getattr(obs, "frame", None)
+        if fr is not None:
+            for b in applies:
+                txt = R.digits(fr, (0.05, b.cy - 0.155, 0.14, b.cy - 0.095))
+                m = re.search(r"\d", txt or "")
+                if m:
+                    num = int(m.group())
+                    seen_nums.append(num)
+                    if num == r and target is None:
+                        target = b
         tab_cls = V.SQUAD_TABS.get(r, (None, None))[0]
         label = obs.find(tab_cls, 0.40) if tab_cls else None
-        if label is not None and applies:
+        if target is None and label is not None and applies:
             near = min(applies, key=lambda b: abs(b.cy - label.cy))
             if abs(near.cy - label.cy) <= _ROW_TOL:
                 target = near
-        if target is None and len(applies) >= r and not self.state.get("pr_scroll"):
+        if (target is None and not seen_nums and len(applies) >= r
+                and not self.state.get("pr_scroll")):
             target = applies[r - 1]
         if target is None:
             n = int(self.state.get("pr_scroll", 0))
             if n >= _SCROLL_CAP:
                 return self.finish("BLOCKED",
-                                   f"預設面板滑了 {n} 次仍找不到第 {r} 行 -- 不瞎点")
+                                   f"預設面板滑了 {n} 次仍找不到第 {r} 行(读到行号 {seen_nums}) -- 不瞎点")
             from routing_v2.flow.nav import list_swipe
+            up = bool(seen_nums) and min(seen_nums) > r
             sw = list_swipe(obs, [V.PRESET_APPLY, V.PRESET_APPLY_GREY, V.PRESET_LOAD],
-                            f"預設面板往下滑露出第 {r} 行(第 {n + 1} 次)",
+                            f"預設面板往{'上' if up else '下'}滑露出第 {r} 行(读到 {seen_nums}, 第 {n + 1} 次)",
                             post=lambda: self.state.update(pr_scroll=n + 1))
             if sw is not None:
+                if up:
+                    sw.y, sw.y2 = sw.y2, sw.y        # 同一根轴反向拖
                 return sw
             return wait("預設面板: 行内钮一个都没检出, 推不出滑动几何")
         if target.cls == V.PRESET_APPLY_GREY:
