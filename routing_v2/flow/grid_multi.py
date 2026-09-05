@@ -767,7 +767,7 @@ class GridMultiMixin:
                 # 09-05 10-3 第 3 跑同处第二次收工: 等待期没有任何决策帧, 复盘无据. 每 40 帧和收工前各落一帧带状态.
                 n = self.bump("mt_noarrow_frames")
                 late = self._overdue("mt_no_arrow", 25)
-                if n % 40 == 1 or late:
+                if n % 150 == 1 or late:
                     ar = obs.find(V.GRID_ARROW, 0.25)
                     self._mt_dbg(obs, f"noarrow#{n} arrow={None if ar is None else (round(ar.cx, 3), round(ar.cy, 3), round(ar.conf, 2))} "
                                       f"focus_lat={focus_lat} origin={None if origin is None else (round(origin[0], 3), round(origin[1], 3))} "
@@ -1011,7 +1011,7 @@ class GridMultiMixin:
                     first = ones[0] if ones else (names[0] if names else None)
                     acted = list(self.state.get("mt_acted") or [])
                     last_actor = acted[-1] if acted else None
-                    if self.bump("mt_issued_dbg") % 40 == 1:
+                    if self.bump("mt_issued_dbg") % 150 == 1:
                         self._mt_dbg(obs, f"issued-wait focus={focus} first={first} last={last_actor} acted={acted} pos={self.state.get('mt_pos')}")
                     if focus is not None and focus == first and last_actor != first:
                         k = self.bump("mt_newround_frames")
