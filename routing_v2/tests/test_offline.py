@@ -4567,6 +4567,8 @@ def t_grid_multi_0905():
     有队不动手点 PHASE結束 / 被挡起点拖地图(几何从检出推)。"""
     print("\n-- 多队走格子 0905 ----")
     from routing_v2.flow import grid_multi as GM
+    GM.IDLE_HOLD_S = 0.0          # 离线不等墙钟(空闲持续 / 菜单弹稳)
+    GM.MENU_WAIT_S = 0.0
     dx, dy = 0.093, 0.117
     teams2 = [{"name": "A", "attr": "blue", "pos": "left-down"}, {"name": "B", "attr": "red", "pos": "right-up"}]
     asg = GM.assign_starts([(0.500, 0.367), (0.313, 0.599)], teams2, dx, dy)
@@ -4649,6 +4651,21 @@ def t_grid_multi_0905():
               B(V.SQUAD_3, cx=0.05, cy=0.48))
     a = fl3.decide(form3, Machine(1).update(form3))
     check("grid_squads: red->部队3, 高亮是部队2 -> 先切 3部队", a is not None and a.target_cls == V.SQUAD_3, str(a))
+    # grid_presets: 队 A(blue) -> 預設 页签2 第3行, 编队面板先走預設子链(開面板), 套完才出击
+    _cp = cfg()
+    _cp["campaign"] = {"stage": "10-1", "grid_presets": {"red": [2, 1], "blue": [2, 3]}}
+    flp = ALL["campaign"](Ctx(cfg=_cp, log=lambda m: None))
+    flp.goto("grid")
+    flp.state.update(mt_map=mp, mt_deployed=[], mt_dep_target="A")
+    formp = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261), B(V.SQUAD_2, cx=0.051, cy=0.370),
+              B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
+    a = flp.decide(formp, Machine(1).update(formp))
+    check("grid_presets: 队 A(blue) 先开預設面板(不直接出击)", a is not None and a.target_cls == V.PRESET_ENTRY, str(a))
+    check("預設登记为 页签2 第3行", flp.state.get("preset_want") == {"tab": 2, "row": 3}, str(flp.state.get("preset_want")))
+    flp.state.update(preset_applied=True)
+    flp.state.pop("preset_want", None)
+    a = flp.decide(formp, Machine(1).update(formp))
+    check("預設套完 -> 出击, 并记 A 已套", a is not None and a.target_cls == V.SORTIE and flp.state.get("mt_preset_done", {}).get("A") == {"tab": 2, "row": 3}, str(a))
     ph = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928),
            B(V.PHASE_AUTO_ON, cx=0.893, cy=0.832), arrow(0.313, 0.42))
     fl.decide(ph, Machine(1).update(ph))

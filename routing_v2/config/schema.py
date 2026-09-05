@@ -211,6 +211,9 @@ DEFAULTS: Dict[str, Any] = {
         #   grid_squads = {"red": 1, "yellow": 2, "blue": 3, "purple": 3, "any": 1} 属性 -> 部队号(1-4);
         #   None = 不挑, 按游戏默认顺序(第 k 个起点上部队 k)。属性: red=爆发 yellow=贯穿 blue=神秘 purple=振动。
         "grid_squads": None,
+        # 多队关部署时按答案属性给当前部队套預設: {"red": [页签, 行], "yellow": [...], "blue": [...], "purple": [...]}。
+        #   用户 09-05: 預設栏目 2 的 1/2/3 行 = 红(爆发)/黄(贯穿)/紫蓝(振动+神秘)。None = 不套。
+        "grid_presets": None,
         # False = 多队关一律进关前 BLOCKED(回到 09-05 之前的行为)
         "multi_team": True,
     },

@@ -47,6 +47,9 @@ MENU_EXCHANGE_DXY = (-0.083, -0.016)
 MENU_SELECT_DXY = (-0.078, -0.123)
 # 拖地图找被挡住的起点: 一次拖 0.28 屏高/宽
 DRAG = 0.28
+# 墙钟门槛(离线用例置 0): 空闲要持续多久才许落子; 点完友军格等菜单弹稳多久
+IDLE_HOLD_S = 1.5
+MENU_WAIT_S = 1.2
 
 # 6 方向在点阵里的步(列按半格 c2 计, 行 r; 右下 = 半格右 + 一行下)
 DIR_LAT: Dict[str, Tuple[int, int]] = {
@@ -253,9 +256,16 @@ class GridMultiMixin:
         空闲 = PHASE結束 高分在场 且 没有 加载中, **连续 3 帧**(VICTORY 那一帧 PHASE 会露出来一下)。
         不空闲时既不落子也不采信证据, 挂起动作的超时钟也暂停。"""
         idle = obs.has(V.PHASE_END, 0.60) and not obs.has(V.LOADING, 0.40)
-        n = (int(self.state.get("mt_idle_n", 0)) + 1) if idle else 0
-        self.state["mt_idle_n"] = n
-        return n >= 3
+        now = time.time()
+        if not idle:
+            self.state["mt_idle_since"] = None
+            self.state["mt_idle_n"] = 0
+            return False
+        if not self.state.get("mt_idle_since"):
+            self.state["mt_idle_since"] = now
+        self.state["mt_idle_n"] = int(self.state.get("mt_idle_n", 0)) + 1
+        # 连续空闲 >= 1.5s: SKIP 战斗的两段加载之间会露出 VICTORY 横幅帧(PHASE 在、无加载中), 按帧数会漏过去
+        return (now - float(self.state["mt_idle_since"])) >= IDLE_HOLD_S and self.state["mt_idle_n"] >= 3
 
     def _mt_frame(self, obs: Observation, conf: float = 0.30):
         """本帧几何: (格心列表, 起点框列表, dx, dy, 原点) 或 None。"""
@@ -454,7 +464,8 @@ class GridMultiMixin:
                      f"{ty if ty is None else round(ty, 2)}) -- 拖地图 ({ddx:+.2f},{ddy:+.2f})(第 {n} 次)")
 
     def _mt_formation(self, obs: Observation) -> Optional[Action]:
-        """编队面板: grid_squads 配置了属性->部队号就先切到那支部队, 再出击。"""
+        """编队面板: grid_presets 配置了属性->預設(页签,行)就先给当前部队套預設; grid_squads 配置了属性->部队号
+        就先切到那支部队; 然后出击。"""
         pre = self._preset_before_sortie(obs)
         if pre is not None:
             return pre
@@ -464,6 +475,9 @@ class GridMultiMixin:
             if obs.has(hi_cls, 0.45):
                 hi = n
                 break
+        pr = self._mt_preset_step(obs, L, hi)
+        if pr is not None:
+            return pr
         want = self._mt_want_squad(L)
         if want and hi is not None and hi != want:
             k = self.bump(f"mt_sq:{L}")
@@ -485,6 +499,47 @@ class GridMultiMixin:
                 self.state.setdefault("mt_team_squad", {})[L] = hi
         return tap_box(s, f"编队确认: 出击(队 {L} = 部队{hi or '?'})",
                        expect=(V.TASK_START, V.TASK_START_GREY), post=_post)
+
+    def _mt_preset_step(self, obs: Observation, L: Optional[str], hi: Optional[int]) -> Optional[Action]:
+        """按答案属性给**当前高亮部队**套預設(用户 09-05: 預設栏目 2 的三行 = 红/黄/紫蓝三队)。
+        cfg campaign.grid_presets = {"red": [2, 1], "yellow": [2, 2], "blue": [2, 3], "purple": [2, 3]}; attr any / 没配 -> 不套。
+        走 PresetMixin 子链(預設入口 -> 页签 -> 行 組成 -> 變更編輯 確認 -> 叉掉面板); 每支队只套一次(mt_preset_done)。
+        多队关按属性配队是用户明确要的, 这里不受"部队1 不许覆盖"限制(那条是日常单队跑的保护)。"""
+        cfgp = self.cfg.get("grid_presets") or None
+        if not isinstance(cfgp, dict) or L is None:
+            return None
+        attr = "any"
+        for t in self._mt_teams():
+            if t["name"] == L:
+                attr = t.get("attr") or "any"
+        spec = cfgp.get(attr)
+        if not spec:
+            return None
+        try:
+            tab, row = int(spec[0]), int(spec[1])
+        except (TypeError, ValueError, IndexError):
+            self.log(f"grid_presets[{attr}] 配置不合法: {spec!r}, 不套")
+            return None
+        if not (1 <= tab <= 4 and 1 <= row <= 4):
+            self.log(f"grid_presets[{attr}] 越界: {spec!r}, 不套")
+            return None
+        done = self.state.setdefault("mt_preset_done", {})
+        if done.get(L):
+            return None
+        if not self.state.get("preset_want") and not self.state.get("preset_applied"):
+            if hi is None:
+                return wait(f"队 {L}: 等编队面板部队高亮出来再套預設")
+            self.preset_start(tab, row)
+            self.log(f"队 {L}({attr}) 用部队{hi}, 套預設 页签{tab} 第{row}行")
+        act = self.preset_step(obs)
+        if act is not None:
+            return act
+        if self.preset_done():
+            done[L] = {"tab": tab, "row": row}
+            self.state.pop("preset_applied", None)
+            self.log(f"队 {L} 預設已套用, 出击")
+            return None
+        return wait(f"队 {L} 套預設中")
 
     def _mt_want_squad(self, L: Optional[str]) -> Optional[int]:
         cfgm = self.cfg.get("grid_squads") or None
@@ -716,7 +771,14 @@ class GridMultiMixin:
         像素占比 >= 0.15 才算菜单在; 地图底色是低饱和浅蓝, 分得开。没帧(离线)时不核对。"""
         px = pend.get("px") or [0.5, 0.5]
         x, y = px[0] + MENU_EXCHANGE_DXY[0], px[1] + MENU_EXCHANGE_DXY[1]
-        seen = _menu_icon_at(getattr(obs, "frame", None), x, y)
+        # 菜单弹出有 ~1s 动画, 早点会穿到底下的格子(10-3 live: 0.3s 后就点, 变成乱走一步); 手驾 2s 后点必中
+        if time.time() - float(pend.get("t", 0)) < MENU_WAIT_S:
+            return wait(f"友军格点了, 等 {MENU_WAIT_S:.1f}s 让菜单弹稳")
+        fr = getattr(obs, "frame", None)
+        seen = _menu_icon_at(fr, x, y)
+        seen2 = _menu_icon_at(fr, px[0] + MENU_SELECT_DXY[0], px[1] + MENU_SELECT_DXY[1])
+        if seen is True and seen2 is False:
+            seen = False          # 两个图标同在才算菜单(单个蓝斑可能是爆炸特效/图标误判)
         if seen is False:
             n = self.bump(f"mt_menu_wait:{pend['ai']}")
             if n <= 6:
