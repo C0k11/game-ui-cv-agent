@@ -4567,8 +4567,10 @@ def t_grid_multi_0905():
     有队不动手点 PHASE結束 / 被挡起点拖地图(几何从检出推)。"""
     print("\n-- 多队走格子 0905 ----")
     from routing_v2.flow import grid_multi as GM
-    GM.IDLE_HOLD_S = 0.0          # 离线不等墙钟(空闲持续 / 菜单弹稳)
+    GM.IDLE_HOLD_S = 0.0          # 离线不等墙钟(空闲持续 / 菜单弹稳 / 编队面板停稳 / 開面板重试)
     GM.MENU_WAIT_S = 0.0
+    GM.FORM_SETTLE_S = 0.0
+    GM.PR_OPEN_RETRY_S = 0.0
     dx, dy = 0.093, 0.117
     teams2 = [{"name": "A", "attr": "blue", "pos": "left-down"}, {"name": "B", "attr": "red", "pos": "right-up"}]
     asg = GM.assign_starts([(0.500, 0.367), (0.313, 0.599)], teams2, dx, dy)
@@ -4659,7 +4661,11 @@ def t_grid_multi_0905():
     flp.state.update(mt_map=mp, mt_deployed=[], mt_dep_target="A")
     formp = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261), B(V.SQUAD_2, cx=0.051, cy=0.370),
               B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
-    a = flp.decide(formp, Machine(1).update(formp))
+    a = None
+    for _ in range(6):      # 面板停稳等待(离线置 0, 仍要一帧记时间)
+        a = flp.decide(formp, Machine(1).update(formp))
+        if a is not None and a.kind == "tap":
+            break
     check("grid_presets: 队 A(blue) 先开預設面板(不直接出击)", a is not None and a.target_cls == V.PRESET_ENTRY, str(a))
     check("預設登记为 页签2 第3行", flp.state.get("preset_want") == {"tab": 2, "row": 3}, str(flp.state.get("preset_want")))
     # 預設入口检不出(部署侧面板 v21 常漏): 6 帧后按右栏几何点开
@@ -4674,6 +4680,15 @@ def t_grid_multi_0905():
             break
     check("預設入口 6 帧没检出 -> 几何点 (0.937,0.672) 开面板(锚 出击)",
           a is not None and a.kind == "tap" and abs(a.x - 0.937) < 0.01 and abs(a.y - 0.672) < 0.01 and a.require == V.SORTIE and a.once_key == "pr_open", str(a))
+    a.post()
+    flq.state["once:pr_open"] = True          # 模拟 runner 记 once
+    flq.state["mt_pr_open_t"] = 1.0            # 早就点过, 面板一直没开
+    a = None
+    for _ in range(10):
+        a = flq.decide(formq, Machine(1).update(formq))
+        if a is not None and a.kind == "tap":
+            break
+    check("開面板那一发被吞 -> 清 once 重点(有界)", a is not None and a.kind == "tap" and a.once_key == "pr_open" and flq.state.get("mt_pr_open_n:A") == 1, f"{a} n={flq.state.get('mt_pr_open_n:A')}")
     flp.state.update(preset_applied=True)
     flp.state.pop("preset_want", None)
     a = flp.decide(formp, Machine(1).update(formp))

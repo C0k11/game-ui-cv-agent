@@ -52,6 +52,8 @@ PRESET_ENTRY_XY = (0.937, 0.672)
 # 墙钟门槛(离线用例置 0): 空闲要持续多久才许落子; 点完友军格等菜单弹稳多久
 IDLE_HOLD_S = 1.5
 MENU_WAIT_S = 1.2
+FORM_SETTLE_S = 1.5      # 编队面板滑入动画期间点右栏图标会被吞(09-05 live), 面板出现后先等这么久
+PR_OPEN_RETRY_S = 4.0    # 点了預設入口这么久还没见 预设标题 = 那一发被吞, 重点(最多 3 次)
 
 # 6 方向在点阵里的步(列按半格 c2 计, 行 r; 右下 = 半格右 + 一行下)
 DIR_LAT: Dict[str, Tuple[int, int]] = {
@@ -497,6 +499,8 @@ class GridMultiMixin:
 
         def _post(L=L, hi=hi):
             self.state["mt_dep_pending"] = L
+            self.state["mt_form_seen_t"] = 0
+            self.state["mt_pr_entry_wait"] = 0
             if hi is not None:
                 self.state.setdefault("mt_team_squad", {})[L] = hi
         return tap_box(s, f"编队确认: 出击(队 {L} = 部队{hi or '?'})",
@@ -528,23 +532,48 @@ class GridMultiMixin:
         done = self.state.setdefault("mt_preset_done", {})
         if done.get(L):
             return None
+        if done.get(f"{L}:giveup"):
+            return None
+        # 面板刚滑入时点右栏图标会被吞(09-05 live 第 8 次: 几何点了一下, once 卡死 4001 tick): 面板出现后先等 FORM_SETTLE_S
+        if not self.state.get("mt_form_seen_t"):
+            self.state["mt_form_seen_t"] = time.time()
+            return wait(f"队 {L}: 编队面板刚出现, 等 {FORM_SETTLE_S:.1f}s 再套預設")
+        if time.time() - float(self.state["mt_form_seen_t"]) < FORM_SETTLE_S:
+            return wait(f"队 {L}: 等编队面板停稳再套預設")
         if not self.state.get("preset_want") and not self.state.get("preset_applied"):
             if hi is None:
                 return wait(f"队 {L}: 等编队面板部队高亮出来再套預設")
             self.preset_start(tab, row)
             self.log(f"队 {L}({attr}) 用部队{hi}, 套預設 页签{tab} 第{row}行")
+        panel = obs.has(V.PRESET_TITLE, 0.40)
+        # 開面板那一发有界重试: 点过 pr_open 但 PR_OPEN_RETRY_S 内没见 预设标题 -> 清 once 再点(最多 3 次), 3 次都吞就放弃套預設
+        t_open = float(self.state.get("mt_pr_open_t", 0) or 0)
+        if not panel and t_open and time.time() - t_open > PR_OPEN_RETRY_S and not self.pending("pr_open"):
+            k = self.bump(f"mt_pr_open_n:{L}")
+            if k >= 3:
+                self.log(f"队 {L}: 預設入口点了 {k} 次面板都没开 -- 放弃套預設, 用当前部队出击(要人工检查 預設入口 检出/版式)")
+                done[f"{L}:giveup"] = True
+                self.state.pop("preset_want", None)
+                return None
+            self.log(f"队 {L}: 預設入口点了 {PR_OPEN_RETRY_S:.0f}s 面板没开 -- 重点(第 {k + 1} 次)")
+            self.once_reset("pr_open")
+            self.state["mt_pr_open_t"] = 0
         act = self.preset_step(obs)
+        if (act is not None and act.kind == "tap" and act.once_key == "pr_open"):
+            act.post = lambda: self.state.update(mt_pr_open_t=time.time())
         if (act is not None and act.kind == "wait" and "等入口键" in act.reason
-                and not obs.has(V.PRESET_TITLE, 0.40) and obs.has(V.SORTIE, 0.45)):
+                and not panel and obs.has(V.SORTIE, 0.45)):
             # 部署侧编队面板右栏第 4 个图标就是 預設, v21 在这一版式上常检不出(09-05 live 3 帧 0 检出, 单队 09-03 时 0.88);
             #    面板是全屏固定版式(快速編輯/起始技能/部隊資訊/預設 竖排), 等 6 帧没检出就按几何点, 点完只认 预设标题 出现。
             n = self.bump("mt_pr_entry_wait")
             if n >= 6 and self.pending("pr_open"):
-                return tap_at(PRESET_ENTRY_XY[0], PRESET_ENTRY_XY[1],
-                              f"預設入口 6 帧没检出, 按编队面板右栏几何点開面板(队 {L})",
-                              justify="编队面板右栏四个图标竖排固定(16:9 归一化 預設 在 (0.937,0.672), 08-31/09-03 金标与 09-05 实帧一致); "
-                                      "锚 出击 在场才点; 点空只是面板没开, 下一帧再来; 开没开只认 预设标题",
-                              require=V.SORTIE, once="pr_open")
+                a = tap_at(PRESET_ENTRY_XY[0], PRESET_ENTRY_XY[1],
+                           f"預設入口 6 帧没检出, 按编队面板右栏几何点開面板(队 {L})",
+                           justify="编队面板右栏四个图标竖排固定(16:9 归一化 預設 在 (0.937,0.672), 08-31/09-03 金标与 09-05 实帧一致); "
+                                   "锚 出击 在场才点; 点空只是面板没开, 下一帧再来; 开没开只认 预设标题",
+                           require=V.SORTIE, once="pr_open")
+                a.post = lambda: self.state.update(mt_pr_open_t=time.time())
+                return a
         if act is not None:
             return act
         if self.preset_done():
