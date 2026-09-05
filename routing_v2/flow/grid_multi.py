@@ -729,6 +729,11 @@ class GridMultiMixin:
         d = act.get("dir")
         if team not in pos:
             return self.finish(Outcome.UNKNOWN, f"答案里的队 {team} 不在部署记录 {list(pos)} 里 -- 不瞎点")
+        # 无箭头时钟: 只要这一帧焦点认出来了(不管是不是要动的那支队)就清, 不能只在"焦点在别队"分支里清
+        #    (09-05 10-3 实锤: 开局 STAGE START 横幅 20 多秒焦点 None 起了钟, 第 1 发焦点==队 走了"相等"分支没清,
+        #     第 2 发焦点一时没认出就直接判 25s 无箭头收工).
+        if focus is not None:
+            self._wt_clear("mt_no_arrow")
         # 焦点读数两帧共识(箭头在切换/平移中会闪)
         fprev = self.state.get("mt_focus_prev")
         self.state["mt_focus_prev"] = focus
