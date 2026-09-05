@@ -126,8 +126,6 @@ def real_sweep_start(obs: Observation, conf: float = 0.35):
 
 def wake_hidden_lobby(obs: Observation, st: StateView, flow) -> Optional[Action]:
     """大厅闲置约 6 秒会收起全部 UI。只在刚从大厅掉到 blank/unknown 时唤醒。"""
-    if st.last_solid != "lobby":
-        return None
     if st.page not in ("unknown", "blank"):
         return None
     if st.overlay:
@@ -135,6 +133,12 @@ def wake_hidden_lobby(obs: Observation, st: StateView, flow) -> Optional[Action]
     navn = obs.count(V.LOBBY_NAV, 0.30)
     if len(obs.boxes) > 0 and navn >= 2:
         return None
+    # 09-05 live: 进程刚起时 last_solid 恒为 unknown, 藏 UI 的大厅(闲置立绘)零检出 -> 这里不接, flow 在 enter
+    #    上干等到超时(两次实录)。放宽: last_solid 还没认出过任何页, 且接近空屏持续 45 帧, 也唤醒一次
+    #    (战斗/剧情的黑帧 last_solid 不会是 unknown, 进不来; 真是加载页点一下也无害)。
+    if st.last_solid != "lobby":
+        if not (st.last_solid == "unknown" and st.frames_in_page >= 45 and screen_empty(obs)):
+            return None
     if not flow.pending("lobby_wake"):
         return None
     return tap_at(
@@ -474,14 +478,19 @@ def back_key(obs: Observation, why: str) -> Optional[Action]:
     # 接近空屏(没有一个 >=0.5 的框): 藏了 UI 的大厅 / 加载 / 过场。09-05 live 实锤: 进程刚起 last_solid
     #    还是 unknown, 藏 UI 大厅上 wake_hidden_lobby 不接, 归位按了返回键 -> 退出框。空屏上返回键永远
     #    不是对的动作(等或唤醒才是), 这里直接不发。
-    if not any(b.conf >= 0.5 for b in obs.boxes):
+    if screen_empty(obs):
         return None
     return Action(kind="key", keycode="KEYCODE_BACK", reason=why)
 
 
+# 顶栏常驻件: 公告网页面板盖着大厅时它们照样 0.95, 判"空屏"时不算数
+_TOPBAR = frozenset({V.CREDIT, V.AP, V.PYROXENE, V.PLUS, V.DOT_RED})
+
+
 def screen_empty(obs: Optional[Observation]) -> bool:
-    """接近空屏: 一个 >=0.5 的框都没有(藏 UI 的大厅只剩几个 0.3 的杂框, 页面身份是 unknown 不是 blank)。"""
-    return obs is None or not any(b.conf >= 0.5 for b in obs.boxes)
+    """接近空屏: 除顶栏常驻件外一个 >=0.5 的框都没有(藏 UI 的大厅只剩几个 0.3 的杂框; 登录公告 webview
+    盖着时只剩顶栏货币 + 右上角 0.3 的叉叉; 两种页面身份都是 unknown/blank)。"""
+    return obs is None or not any(b.conf >= 0.5 and b.cls not in _TOPBAR for b in obs.boxes)
 
 
 def blank_escape(st: StateView, min_frames: int = 45, obs: Optional[Observation] = None) -> Optional[Action]:
@@ -505,6 +514,16 @@ def blank_escape(st: StateView, min_frames: int = 45, obs: Optional[Observation]
         return None
     if st.frames_in_page < min_frames:
         return None
+    # 09-05 live: 登录后的「公告」网页面板(整块 webview)模型零检出, 只有右上角灰圆叉 0.3 上下 -- 页面身份 blank,
+    #    点中央只会点开一条公告。空屏够久且右上角有个低分叉叉 -> 先叉它(几何落点=那个低分框心, tap_at 不设
+    #    JIT 锚, 因为 0.3 过不了 0.45 的复验; 点空无害)。
+    if obs is not None:
+        xs = [b for b in obs.boxes if b.cls == V.CLOSE_X and b.conf >= 0.25 and b.cx > 0.85 and b.cy < 0.15]
+        if xs:
+            x = max(xs, key=lambda b: b.conf)
+            return tap_at(x.cx, x.cy, f"空屏 {st.frames_in_page} 帧且右上角有低分叉叉({x.conf:.2f}) -- 先叉掉(公告网页面板)",
+                          justify="登录公告是 webview, 模型只在右上角认出 0.3 左右的叉叉; 空屏持续 45 帧以上时它是唯一线索; "
+                                  "落点取该低分框心而非常量, 点空无害")
     # 黑名单而不是白名单：真正危险的只有"战斗相关页面"（那里点中央可能
     #    触发学生技能）。用白名单（只许大厅之后）的话，**进程刚起来时
     #    last_solid 还是 unknown，bot 会永久卡死在 blank 上**（08-08 实测）。
