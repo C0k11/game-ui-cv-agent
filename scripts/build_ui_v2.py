@@ -403,6 +403,13 @@ REAL_SOURCES += _clean_dirs(FLYWHEEL_TRAIN_DAYS) + [
     #    按态 allowlist 过滤(scratchpad/_v20_gap_label.py)。同日单 session, 整批 train。
     "flywheel_v20_gap_20260902",
     "flywheel_v21_preset_20260903",   # 09-03 live 采: 预设面板 5 个页签态 x4 帧 + 3/4部队高亮 x3 帧, 页签框按版式几何标(v20 live 未选中页签 0 检出)
+    # v22 (2026-09-05): 类表 546 -> 563 (`_classes_next.txt`), 只能用 --master _classes_next.txt 建集。
+    #    四个池 classes.txt 都是 _classes_next 的前缀(561/563 行)。
+    "flywheel_v22_newcls_20260905",   # 1,206 帧: 切队药丸_1/2部队(OCR 离线定类 420/295) / 回合中任务资讯 / 部署侧预设入口 / 奖励资讯 /
+                                      #    预设行头_1..5部队 / 活动页签四态 / 中断任务 / 重新挑战 / 换位菜单; v21 预标 + 主对话逐张审过的新框
+    "flywheel_v22_ui_extra_20260905", # 302 帧: 预设_读取_灰色 44 + 讀取/編輯 几何补框(行内其它键定行, 饱和度定态) + 编队_空槽(EMPTY 占位, 模板匹配) 120 帧
+    "flywheel_v22_arrow_20260905",    # 队伍箭头压立绘/压 START 字样 v21 检不出的帧: 黄三角连通块几何补框(主对话核过拼图)
+    "flywheel_v22_daily_20260905",    # 09-05 日常 run 干净帧 + 手驾页面帧: v21 预标 + 战术大赛_胜利/失败(大赛结果框横幅, 版式固定)
 ]
 REAL_SOURCES = [s for s in REAL_SOURCES if s not in set(MOVED_TO_VAL)]
 VAL_SOURCES += _clean_dirs(FLYWHEEL_VAL_DAYS) + [

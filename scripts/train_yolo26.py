@@ -1146,6 +1146,34 @@ TRAIN_CONFIGS = {
         "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
         "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
     },
+    "ui_yolo26m_v22": {
+        # v22 (2026-09-05) = v21 warm + 老池修复 + 多队走格子/日常弱类补采. nc 546 -> 563 (`_classes_next.txt`):
+        #   547 切队药丸(通用, 池里已不用) / 548 走格子_传送格 / 549 走格子_选择菜单 / 550 走格子_变更位置菜单 /
+        #   551-555 预设行头_1..5部队 / 556 战术大赛_胜利 / 557 战术大赛_失败 / 558-561 切队药丸_1..4部队(药丸文字 = 当前部队号) /
+        #   562 预设_读取_灰色 / 563 编队_空槽(EMPTY 占位).
+        # 数据: 老池 train ADD 82/DELETE 8/SNAP 1, val ADD 161/DELETE 9/SNAP 5(_v22audit 三步扫描 + 人审);
+        #   新池 flywheel_v22_{newcls,ui_extra,arrow,daily}_20260905. 超参照抄 v21.
+        # 这轮最该验: 切队药丸_N部队(多队 flow 焦点信号) / 队伍箭头压立绘 / 回合中任务资讯 / 部署侧预设入口 / 预设_读取_灰色 /
+        #   编队_空槽 / 战术大赛_胜利·失败 / 活动 quest·剧情 页签四态.
+        "kind": "detect",
+        "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
+        "base": str(YOLO_ROOT / "runs" / "ui_yolo26m_v21" / "weights" / "best.pt"),
+        "epochs": 70,
+        "patience": 30,
+        "save_period": 5,
+        "imgsz": 960,
+        "batch": 10,
+        "out_name": "ui_yolo26m_v22",
+        "cache": False,
+        "workers": 8,
+        "lr0": 0.005,
+        "weight_decay": 0.0005,
+        "dropout": 0.0,
+        "mosaic": 0.5, "close_mosaic": 10, "copy_paste": 0.3, "mixup": 0.0,
+        "scale": 0.3, "translate": 0.1,
+        "hsv_h": 0.0, "hsv_s": 0.0, "hsv_v": 0.3,
+        "fliplr": 0.0, "flipud": 0.0, "degrees": 0.0, "perspective": 0.0,
+    },
     "ui_yolo26m_v20": {
         # v20 (2026-09-01) = v19 warm + 预设面板全族 / 多队部署侧 / story / cafe 补采。
         # 超参照抄 v19 一个不动(只变数据)。nc 535 -> 546:
