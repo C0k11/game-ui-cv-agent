@@ -697,7 +697,9 @@ class GridMultiMixin:
             #    (11-3 实锤: 开局箭头整段检不出, 两队都没行动, 上一版只处理"只剩一队"于是干等 25s 收工)
             sq = self.state.get("mt_team_squad") or {}
             rest.sort(key=lambda L: int(sq.get(L, 99) or 99))
-            if rest and (len(rest) == 1 or all(L in sq for L in rest)):
+            # 本回合点过药丸后焦点是人为循环出来的, 不再服从"部队号最小的没行动队"规则 -> 不推断, 只等箭头
+            pill_used = any(k.startswith(f"mt_pill:{self.state['round_i']}:") and v for k, v in self.state.items())
+            if rest and not pill_used and (len(rest) == 1 or all(L in sq for L in rest)):
                 focus, focus_lat = rest[0], tuple(pos[rest[0]])
                 if self.bump("mt_focus_infer") % 40 == 1:
                     self.log(f"箭头没检出(立绘遮挡?), 没行动的队按部队号 {[(L, sq.get(L)) for L in rest]} 排, 视焦点为 {focus}")
