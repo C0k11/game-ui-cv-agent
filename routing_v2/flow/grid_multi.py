@@ -1021,6 +1021,16 @@ class GridMultiMixin:
                             self.log("箭头回到部队 1 头上(全员已行动) = 新回合(相位横幅帧被打断时的第二路时钟)")
                             return wait("新回合证据: 箭头回到部队 1")
                         return wait("箭头在部队 1 头上, 再看一帧确认新回合")
+                    if (focus is not None and focus == first and last_actor == first
+                            and time.time() - float(self.state.get("mt_issue_t", 0)) > 8.0):
+                        # 10-3 第 8 跑回合 2: 最后行动的就是部队 1, 箭头留在它头上, "箭头回到部队 1"分不出新回合.
+                        #    最后一发发出 8s 以上且空闲(前面已过空闲闸) = 自动结束+敌方回合早已过去, 判新回合(第三路时钟).
+                        if self.bump("mt_newround_same") >= 3:
+                            self.state["mt_newround_same"] = 0
+                            self.state["cycling"] = True
+                            self.log("部队 1 收尾且箭头留在它头上, 最后一发后已空闲 8s 以上 = 新回合(第三路时钟)")
+                            return wait("新回合证据: 部队 1 收尾 + 空闲 8s")
+                        return wait("部队 1 收尾, 空闲计数中确认新回合")
                     self.state["mt_newround_frames"] = 0
             return None
         if self.state.get("mt_pending"):
