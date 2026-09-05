@@ -4998,6 +4998,15 @@ def t_grid_multi_0905():
               B(V.TASK_INFO, cx=0.776, cy=0.922), arrow(0.313, 0.42))
     a = flw.decide(onmap, Machine(1).update(onmap))
     check("进程重开落在地图上(多队无地图) -> 点 任務資訊 叫出面板(回合中没有返回键)", a is not None and a.target_cls == V.TASK_INFO, str(a))
+    # 09-05: 回合中 任务资讯 cls 检不出(train 46) -> 按 PHASE結束 左移 0.140 几何点
+    flw2 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    flw2.goto("walk")
+    onmap2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928),
+               arrow(0.313, 0.42))
+    a = flw2.decide(onmap2, Machine(1).update(onmap2))
+    check("多队残局: 任務資訊 cls 没检出 -> 按 PHASE結束 几何点(左移 0.140, 锚 PHASE結束)",
+          a is not None and a.kind == "tap" and abs(a.x - (0.915 - 0.140)) < 0.01 and abs(a.y - 0.928) < 0.01
+          and a.require == V.PHASE_END, str(a))
     class _SVo:
         page = "grid_quest"; frames_in_page = 5; last_solid = "grid_quest"; overlay = "ack_dialog"; changed = False; flapping = False
     a = flw.decide(info, _SVo())

@@ -591,6 +591,18 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             b = obs.find(V.TASK_INFO, 0.45) or obs.find(V.BACK, 0.45)
             if b is not None and self.bump("mt_abort_back") <= 3:
                 return tap_box(b, "多队残局(无地图): 叫出 任務資訊框 好中斷任務", expect=(V.CONFIRM,))
+            # 09-05 10-3 live: 回合中 任务资讯 cls(train 46)整段 0 检出, 顶栏是倒计时没有返回键 -> 干等 60s 收工.
+            #    底栏 任務資訊|PHASE結束 并排固定(实帧 (0.776,0.930)/(0.916,0.933)), 按 PHASE結束 左移 0.140 几何点;
+            #    契约 expect 確認(面板出现), 不兑现由闸退回 once 再点.
+            pe = obs.find(V.PHASE_END, 0.40)
+            if b is None and pe is not None and self.pending("mt_abort_geo"):
+                a = tap_at(pe.cx - 0.140, pe.cy,
+                           "多队残局(无地图): 任務資訊 cls 没检出, 按 PHASE結束 左移 0.140 几何叫出面板",
+                           justify="回合中底栏 任務資訊 与 PHASE結束 并排固定, 09-05 实帧 (0.776,0.930)/(0.916,0.933); "
+                                   "锚 PHASE結束 在场才点; 点空只是面板没开, 契约不兑现下一轮再点",
+                           require=V.PHASE_END, once="mt_abort_geo")
+                a.expect = (V.CONFIRM,)
+                return a
         return None
 
     # stage_list: 点**得星_0 那一行的入場键**（下一关就是没有星的那关 --
