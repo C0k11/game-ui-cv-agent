@@ -4724,6 +4724,18 @@ def t_grid_multi_0905():
     a.post()
     check("落子后挂起 pending(A -> (1,1)), 不是最后一发所以未 issued",
           (fl.state.get("mt_pending") or {}).get("target") == [1, 1] and not fl.state.get("issued"))
+    # 落子后出现过加载中(runner 打的戳晚于落子) = 踩敌人格 SKIP 战斗/相位切了, 无需箭头即记账(11-3 第 7 跑)
+    fl.state["mt_pending"]["t0"] = time.time() - 2.0
+    fl.state["loading_seen_t"] = time.time() - 1.0
+    nb = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928))
+    for _ in range(6):
+        fl.decide(nb, Machine(1).update(nb))
+        if fl.state.get("mt_ai") == 1:
+            break
+    check("落子后见过加载中 -> 不等箭头, A 记到 (1,1), 动作指针 1",
+          fl.state.get("mt_pos", {}).get("A") == [1, 1] and fl.state.get("mt_ai") == 1 and fl.state.get("mt_pending") is None,
+          f"{fl.state.get('mt_pos')} ai={fl.state.get('mt_ai')}")
+    fl.state.pop("loading_seen_t", None)
     ph2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), startB(0.500, 0.367, V.GRID_START_GREY),
              B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.500, 0.19))
     for _ in range(6):

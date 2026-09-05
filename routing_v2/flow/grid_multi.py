@@ -863,7 +863,7 @@ class GridMultiMixin:
 
             def _issued(ai=ai, team=team, do=do, d=d, tgt=tgt):
                 self.state["mt_pending"] = {"ai": ai, "team": team, "do": do, "dir": d,
-                                            "from": list(cur), "target": list(tgt), "t": time.time(),
+                                            "from": list(cur), "target": list(tgt), "t": time.time(), "t0": time.time(),
                                             "origin0": [origin[0], origin[1]]}
                 self.state["mt_ex_stage"] = 0
                 if ai == len(acts) - 1:
@@ -956,6 +956,10 @@ class GridMultiMixin:
     def _mt_pending_done(self, pend: dict, focus: Optional[str], focus_lat, moved: bool = True) -> bool:
         do = pend["do"]
         tgt = tuple(pend["target"])
+        # 落子之后出现过「加载中」= 踩上了敌人格(SKIP 战斗)或相位切了, 这一步肯定被游戏收下了. 这是最硬的证据:
+        #    箭头压白发检不出、加载后 7s 静默期又跳过了"箭头到目标格"的那几帧时(11-3 第 7 跑), 靠它记账.
+        if do in ("move", "portal") and float(self.state.get("loading_seen_t") or 0) > float(pend.get("t0") or 1e18) + 0.3:
+            return True
         # 位置表要等这里返回 True 才更新, 所以看"箭头落在哪个格"(focus_lat), 别看按旧位置表猜出来的队名:
         #    换位后箭头在友军原来的格上, 旧表会把它认成友军; 走完后箭头在目标格上, 旧表谁也对不上。
         if do == "exchange":
