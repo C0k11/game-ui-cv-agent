@@ -753,6 +753,11 @@ class GridMultiMixin:
             dl = lat_of(cell, origin, dx, dy)
             if abs(dl[0] - est[0]) + abs(dl[1] - est[1]) <= 1:
                 l = dl
+        # 正在走的那支队: 箭头跟着它落到目标格时, 位置表里它还在原地, 上面的已知位置匹配不到 -> 这是它, 不是别的队
+        #    (H15-3 第 11 跑: B 走到 (0,2) 的箭头被当成传送后位置未知的 A 绑到了 (0,2), 两队同格)
+        pend = self.state.get("mt_pending")
+        if pend and pend.get("do") in ("move", "exchange") and tuple(l) == tuple(pend.get("target") or ()):
+            return pend["team"], l
         unknown = [L for L, v in pos.items() if v is None]
         if len(unknown) == 1:
             pos[unknown[0]] = list(l)
@@ -761,7 +766,6 @@ class GridMultiMixin:
         # 传送中的队(点了传送格还没拿到证据, 11-3 第 5 跑实锤): 它是本回合最后一个行动的队时传送后没有别的队可切, 焦点不离开它,
         #    相位循环又没抓到 -> 新回合箭头在它头上的**新位置**. 箭头连续两帧落在所有已知队之外(也不是原位/传送格)的同一格 =
         #    它已传送到那, 位置改绑.
-        pend = self.state.get("mt_pending")
         if (not unknown and pend and pend.get("do") == "portal" and pend.get("team") in pos
                 and tuple(l) != tuple(pend.get("from") or ()) and tuple(l) != tuple(pend.get("target") or ())):
             prev = self.state.get("mt_portal_land_prev")
