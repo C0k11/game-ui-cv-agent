@@ -954,6 +954,23 @@ class GridMultiMixin:
         if pend:
             o0 = pend.get("origin0")
             moved = (o0 is None) or (abs(origin[0] - o0[0]) + abs(origin[1] - o0[1]) >= CAM_MOVE_MIN)
+            # 落点打在友军立绘上: 游戏给那支友军弹「選擇/變更位置」單位菜单并把焦点切给它 -- 和"走成了, 游戏自动切给下一队"
+            #    长得一样(焦点切走 + 相机平移). 菜单图标在场就是铁证: 不算走, 关菜单, 换落点重发.
+            if pend.get("do") == "move" and focus is not None and focus != pend["team"] and pos.get(focus) is not None:
+                fpx = px_of(tuple(pos[focus]), origin, dx, dy)
+                frm = getattr(obs, "frame", None)
+                m1 = _menu_icon_at(frm, fpx[0] + MENU_EXCHANGE_DXY[0], fpx[1] + MENU_EXCHANGE_DXY[1])
+                m2 = _menu_icon_at(frm, fpx[0] + MENU_SELECT_DXY[0], fpx[1] + MENU_SELECT_DXY[1])
+                if m1 and m2:
+                    k = f"mt_tapidx:{self.state['round_i']}:{pend['ai']}"
+                    self.state[k] = int(self.state.get(k, 0)) + 1
+                    self.log(f"动作 {pend['ai'] + 1}: 落点打在友军 {focus} 立绘上(它弹出了 選擇/變更位置 菜单), 不算走; "
+                             f"关菜单后换落点重发(第 {self.state[k] + 1} 个候选)")
+                    self.state["mt_pending"] = None
+                    self.state["mt_settle_until"] = time.time() + 1.5
+                    self.state["mt_focus_prev"] = None
+                    return tap_at(0.50, 0.12, "点地图空白处关掉误弹的單位菜单",
+                                  justify="菜单开着时任何落子都先被它吃掉; 顶部中央是地图空白, 点它只收菜单不落子", require=V.PHASE_END)
             done = self._mt_pending_done(pend, focus, focus_lat, moved)
             if done:
                 self._mt_dbg(obs, f"evidence {pend['team']} {pend['do']} focus={focus}@{focus_lat}")
@@ -1100,9 +1117,10 @@ class GridMultiMixin:
                 self.state["mt_ex_stage"] = 0
                 if ai == len(acts) - 1:
                     self._mt_mark_issued(acts)
-            # 落点压到格子下部: 单位立绘从格心向上长, 相机放大时盖住相邻格心, 点在友军身上 = 切焦点不是走(10-3 第 4 跑实锤)
-            ty = px[1] + (CELL_TAP_DOWN * dy if do != "portal" else 0.0)
-            a = tap_at(px[0], ty,
+            # 落点: 避开友军立绘(_mt_tap_point), 同一发因打在友军身上重发时换下一个候选点
+            tx, ty = self._mt_tap_point(px, team, pos, origin, dx, dy, do,
+                                        int(self.state.get(f"mt_tapidx:{self.state['round_i']}:{ai}", 0)))
+            a = tap_at(tx, ty,
                        f"回合 {self.state['round_i'] + 1} 动作 {ai + 1}/{len(acts)}: 队 {team} "
                        f"{'踩传送门' if do == 'portal' else '走'} {d} -> {tgt}",
                        justify="落点 = 本帧检出的格心(或对齐可信的地图格心)向下压 0.33 行距避开立绘, 由点阵对齐得来, 不是版面常量",
@@ -1173,6 +1191,26 @@ class GridMultiMixin:
                    require=V.PHASE_END)
         a.post = _st2
         return a
+
+    def _mt_tap_point(self, px, team, pos, origin, dx, dy, do, attempt: int = 0) -> Tuple[float, float]:
+        """目标格上的落点. 友军立绘从各自格心向上长(约 1.8 行高, 左右各 0.8 格宽: 大翅膀/长发角色比一格宽得多), 会整个盖住
+        相邻格(09-05 H15-3 回合 2 实锤: A 要去的 (4,2) 被站在 (3,3) 的 C 盖住, 连点三跑都成了"选中 C + 弹單位菜单").
+        候选点按 下压 0.33 行 / 格心 / 上抬 0.33 行 / 左右各偏 0.3 格 的顺序取第 attempt 个不落在任何友军立绘框里的;
+        都被盖住就按 attempt 轮流取候选(至少换着点). 传送格不偏(格心即是)."""
+        if do == "portal":
+            return px[0], px[1]
+        boxes = []
+        for L, v in pos.items():
+            if L == team or v is None:
+                continue
+            fx, fy = px_of(tuple(v), origin, dx, dy)
+            boxes.append((fx - 0.8 * dx, fx + 0.8 * dx, fy - 1.8 * dy, fy + 0.3 * dy))
+        cands = [(px[0], px[1] + CELL_TAP_DOWN * dy), (px[0], px[1]), (px[0], px[1] - 0.33 * dy),
+                 (px[0] - 0.3 * dx, px[1] + 0.15 * dy), (px[0] + 0.3 * dx, px[1] + 0.15 * dy),
+                 (px[0] - 0.3 * dx, px[1] - 0.3 * dy), (px[0] + 0.3 * dx, px[1] - 0.3 * dy)]
+        free = [c for c in cands if not any(x1 <= c[0] <= x2 and y1 <= c[1] <= y2 for x1, x2, y1, y2 in boxes)]
+        pool = free if free else cands
+        return pool[attempt % len(pool)]
 
     def _mt_cell_px(self, tgt, cs, origin, dx, dy) -> Optional[Tuple[float, float]]:
         """目标点阵 -> 屏幕落点: 优先本帧检出格心(0.5 格内), 其次地图里有这格(对齐可信)就用推算点。"""
