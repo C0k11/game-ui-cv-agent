@@ -233,6 +233,15 @@ class Gate:
         #    所以 `last_solid` 降为**辅助**：它明确是大厅时更可疑，但不再是唯一。
         if act.is_tap and act.target_cls == V.CONFIRM:
             prev = self._last[2] if self._last else None
+            # 09-05 live 实锤(游戏被点退出): 归位在藏 UI 的大厅按了返回键 -> 「是否結束？」框 -> 点了取消
+            #    -> 取消先消失、確認还在的那一帧被当成 ack 框点了確認。顶栏货币在大厅退出框上是**可见的**,
+            #    system_dialog 那套判据看不出来。规矩: 上一发是**返回键**的, 眼前任何 確認 都不许点(返回键
+            #    弹出的只可能是退出框/"放弃"类框); 上一发是**取消**的, 30 帧内不许点 確認(同一个框在关)。
+            if prev == "KEY:KEYCODE_BACK":
+                return Verdict(False, "上一发是系统返回键, 眼前的確認可能是「是否結束？」(退出游戏) -- 只许取消/等")
+            import time as _t
+            if prev == V.CANCEL and _t.time() - float(getattr(self, "_last_fire_t", 0.0)) < 3.0:
+                return Verdict(False, "刚点过取消(3s 内), 眼前的確認多半是同一个正在关的框 -- 等它消失")
             requested = prev in _EXPECT_DIALOG_AFTER
             if not requested:
                 sysd = money_rules.system_dialog(obs, last_solid, strict=True)
@@ -481,6 +490,8 @@ class Gate:
         self._fires = (self._fires + 1) if same else 1
         self._last = (x, y, key)
         self._last_fire_frame = frames_in_page
+        import time as _t
+        self._last_fire_t = _t.time()
 
     #   推进闸（1 step ahead）
     def arm(self, act: Action, obs: Optional[Observation] = None) -> None:

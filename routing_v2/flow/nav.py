@@ -471,10 +471,20 @@ def back_key(obs: Observation, why: str) -> Optional[Action]:
     """
     if obs.count(V.LOBBY_NAV, 0.35) >= 3:
         return None
+    # 接近空屏(没有一个 >=0.5 的框): 藏了 UI 的大厅 / 加载 / 过场。09-05 live 实锤: 进程刚起 last_solid
+    #    还是 unknown, 藏 UI 大厅上 wake_hidden_lobby 不接, 归位按了返回键 -> 退出框。空屏上返回键永远
+    #    不是对的动作(等或唤醒才是), 这里直接不发。
+    if not any(b.conf >= 0.5 for b in obs.boxes):
+        return None
     return Action(kind="key", keycode="KEYCODE_BACK", reason=why)
 
 
-def blank_escape(st: StateView, min_frames: int = 45) -> Optional[Action]:
+def screen_empty(obs: Optional[Observation]) -> bool:
+    """接近空屏: 一个 >=0.5 的框都没有(藏 UI 的大厅只剩几个 0.3 的杂框, 页面身份是 unknown 不是 blank)。"""
+    return obs is None or not any(b.conf >= 0.5 for b in obs.boxes)
+
+
+def blank_escape(st: StateView, min_frames: int = 45, obs: Optional[Observation] = None) -> Optional[Action]:
     """空屏（零检出）持续够久  点中央唤回 UI。
 
     两道前提，缺一不可:
@@ -487,7 +497,13 @@ def blank_escape(st: StateView, min_frames: int = 45) -> Optional[Action]:
          别的地方的 blank 一律是加载/过场，等就行了。
     """
     from routing_v2.act.action import tap_at
-    if st.page != "blank" or st.frames_in_page < min_frames:
+    # 09-05: unknown 但接近空屏(只有 <0.5 的杂框)同样当空屏 -- 藏 UI 的大厅进程刚起时就是这样,
+    #    不唤醒就会走到归位的返回键(见 back_key)。
+    if st.page == "unknown" and obs is not None and screen_empty(obs):
+        pass
+    elif st.page != "blank" or st.frames_in_page < min_frames:
+        return None
+    if st.frames_in_page < min_frames:
         return None
     # 黑名单而不是白名单：真正危险的只有"战斗相关页面"（那里点中央可能
     #    触发学生技能）。用白名单（只许大厅之后）的话，**进程刚起来时

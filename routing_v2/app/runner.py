@@ -372,8 +372,8 @@ class Runner:
         # 若是过场则等于推进对话；若是加载则无害。
         # 前提是 **len(boxes)==0** —— 屏上什么都没有，也就没有按钮会被误点。
         #    这跟老代码那个盲点「編輯模式」的 bug 有本质区别（那次屏上有框）。
-        if st.page == "blank":
-            a = nav.blank_escape(st)
+        if st.page == "blank" or (st.page == "unknown" and nav.screen_empty(obs)):
+            a = nav.blank_escape(st, obs=obs)
             return a if (a is not None and self.state_blank_taps() < 6) else None
 
         if st.page == "unknown":
