@@ -297,7 +297,11 @@ def t_pages():
                       B(V.EVENT_SHOP, cx=0.216, cy=0.883))
     evf2 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
     a = evf2.on_event_quest_list(ev_story_rows, Machine(1).update(ev_story_rows))
-    check("关卡行无得星 -> 切到 活动quest 而不是点入場", a is not None and a.target_cls == V.EVENT_QUEST, str(a))
+    # 用户 09-05: 剧情页签先把解锁的剧情行看完(interrupt 跳过剧情), 都进过了再切 Quest
+    check("关卡行无得星(剧情页签) -> 先进剧情行看剧情", a is not None and a.target_cls == V.STAGE_ENTER, str(a))
+    a.post()
+    a = evf2.on_event_quest_list(ev_story_rows, Machine(1).update(ev_story_rows))
+    check("剧情行都进过了 -> 切到 活动quest 而不是再点入場", a is not None and a.target_cls == V.EVENT_QUEST, str(a))
 
     # 上期活动余韵期: 後日談 不再单独成页(09-03), 这种帧就是普通活动页,
     #    由 flow 按"有没有 Quest 页签 / 入场行"决定退出

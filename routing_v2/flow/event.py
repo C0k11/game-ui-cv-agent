@@ -449,6 +449,22 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         #    剧情行也有 入場 键, 老逻辑会去点第一行进剧情然后无限循环。Quest 页签的每个解锁行都带 关卡得星,
         #    剧情行一颗星都没有 -> 行全无星 = 不在 Quest 页签: 能看见 活动quest 就切过去, 看不见就退出重进(有上限)。
         if rows and all(star is None for _, star in rows):
+            # 用户 09-05: 先把活动剧情看完, 再打 Quest(没有剧情栏目的活动才直接 Quest 速推). 剧情行有 入場 无得星,
+            #    看完一行才解锁下一行; 已看 cls(活动剧情关卡_已看) train=0 用不上 -> 按行序记账: 从上到下第一个解锁且
+            #    本轮没进过的剧情行进去, 剧情场景由 interrupt 的 MENU->SKIP 链跳过, 回到列表再进下一行; 都进过了再切 Quest.
+            if self.cfg.get("event_story_first", True):
+                done_idx = set(self.state.get("ev_story_done") or [])
+                order = sorted(rows, key=lambda rs: rs[0].cy)
+                for i, (e, _s) in enumerate(order):
+                    if i in done_idx or int(self.state.get(f"ev_story_enter:{i}", 0)) >= 3:
+                        continue
+
+                    def _mark(i=i):
+                        d = set(self.state.get("ev_story_done") or [])
+                        d.add(i)
+                        self.state["ev_story_done"] = sorted(d)
+                        self.state[f"ev_story_enter:{i}"] = int(self.state.get(f"ev_story_enter:{i}", 0)) + 1
+                    return tap_box(e, f"活动剧情: 进第 {i + 1} 行剧情关(看完剧情再切 Quest)", post=_mark)
             tab = obs.find(V.EVENT_QUEST, 0.35, region=(0.0, 0.0, 1.0, 0.34))
             if tab is not None and self.pending("ev_tab_fix"):
                 return tap_box(tab, "关卡行全无得星 = 当前不是 Quest 页签(剧情页签误读), 切到 Quest", once="ev_tab_fix",
