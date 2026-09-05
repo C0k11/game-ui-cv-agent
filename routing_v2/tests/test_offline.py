@@ -4654,8 +4654,9 @@ def t_grid_multi_0905():
     fl.decide(ph, Machine(1).update(ph))
     check("PHASE 出现 -> walk, 队伍位置 = 起点点阵",
           fl.phase == "walk" and fl.state.get("mt_pos") == {"A": [0, 0], "B": [4, -2]}, f"{fl.phase} {fl.state.get('mt_pos')}")
+    fl.state["mt_settle_until"] = 0           # 开局 3s 静默(离线不等墙钟)
     a = None
-    for _ in range(3):
+    for _ in range(4):
         a = fl.decide(ph, Machine(1).update(ph))
         if a is not None and a.kind == "tap":
             break
@@ -4696,6 +4697,8 @@ def t_grid_multi_0905():
     check("循环后进回合 2, 挂起的 B 动作记账 (5,-1), 动作指针归零",
           fl.state.get("round_i") == 1 and fl.state.get("mt_pos", {}).get("B") == [5, -1] and fl.state.get("mt_ai") == 0,
           f"round={fl.state.get('round_i')} pos={fl.state.get('mt_pos')}")
+    check("新回合后进入 3s 静默(开场横幅/相机回摆)", fl.state.get("mt_settle_until", 0) > 0)
+    fl.state["mt_settle_until"] = 0
     ph3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.358, 0.54))
     fl.state["mt_settle_until"] = 0
     fl.decide(ph3, Machine(1).update(ph3))      # 焦点两帧共识
@@ -4833,6 +4836,7 @@ def t_grid_multi_0905():
     fl6.goto("walk")
     fl6.state.update(mt_map=mp, mt_pos={"A": [0, 0], "B": [4, -2]}, round_i=0)
     fl6.mt_new_round()
+    fl6.state["mt_settle_until"] = 0
     mv1 = O(*[cellB(x + 0.03, y) for x, y in cells], startB(0.313 + 0.03, 0.599, V.GRID_START_GREY),
             B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.313 + 0.03, 0.42))
     a = fl6.decide(ph, Machine(1).update(ph))

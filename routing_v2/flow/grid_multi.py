@@ -207,6 +207,9 @@ class GridMultiMixin:
         pend = self.state.get("mt_pending")
         if pend:
             self._mt_apply(pend)
+        # 新回合开场有 MY PHASE 横幅 + 相机回摆 1-2s(09-05 第 14 次 live: 每回合首发都在这窗口里打空, 10s 后重发才中)
+        self.state["mt_settle_until"] = time.time() + 3.0
+        self.state["mt_focus_prev"] = None
         self.state["mt_ai"] = 0
         self.state["mt_pending"] = None
         self.state["mt_acted"] = []
