@@ -266,10 +266,13 @@ PAGES: List[Sig] = [
     #    之间摆 -- 而格子族 cls 0.93-0.97 稳定, 数量就是最硬的证据）。
     #    priority 要压过 stage_popup(55): 部署完、`任务开始` 变亮的那几帧
     #    两个签名同时满足, 这时人在地图上不在弹窗上。
+    #    09-05 10-3 live: 回合中两个起点都站着人, 起点_灰 0.41-0.62 在 0.45 上下抖 -> grid_quest/unknown 每秒翻面,
+    #    walk 半数帧在"过场"里等。回合中 PHASE 控件(0.95+)就是最硬的结构锚, 一并接受。
     Sig("grid_quest", pred=lambda obs: (
             len(obs.all(V.GRID_CELL, 0.45)) >= 3
             and obs.has([V.GRID_START, V.GRID_START_GREY, V.GRID_ARROW,
-                         V.TASK_START_GREY], 0.45)),
+                         V.TASK_START_GREY, V.PHASE_END, V.PHASE_AUTO_ON,
+                         V.PHASE_AUTO_OFF], 0.45)),
         priority=58,
         note="走格子地图（3D 俯视, 同资产不同相机域）。格子>=3 + 任一结构锚"),
 

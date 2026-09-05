@@ -471,13 +471,20 @@ class GridMultiMixin:
 
     def _mt_focus(self, obs: Observation, cs, dx, dy, origin) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
         """箭头 -> 正下方格 -> 点阵 -> 是哪支队。(队名或 None, 箭头格点阵坐标或 None)"""
-        arrow = obs.find(V.GRID_ARROW, 0.30)
+        # 箭头阈值 0.25: 10-3 实帧箭头只有 0.28-0.53(浅底 + 立绘遮), 0.30 会时有时无 -> 焦点 None 25s 交人。
+        #    两帧共识兜误检。
+        arrow = obs.find(V.GRID_ARROW, 0.25)
         if arrow is None or origin is None:
             return None, None
+        # 队伍脚下的格常被立绘挡住检不出(10-3 起点 B 上站着人, 格/起点都没检出), below() 会就近绑到别的格。
+        #    四关实测箭头心到脚下格心 = 1.50-1.57 行距, 用这个几何直接投到点阵; 检出格与投影一致才用检出格。
+        est = lat_of((arrow.cx, arrow.cy + 1.55 * dy), origin, dx, dy)
         cell = grid.below(arrow, cs, dx)
-        if cell is None:
-            return None, None
-        l = lat_of(cell, origin, dx, dy)
+        l = est
+        if cell is not None:
+            dl = lat_of(cell, origin, dx, dy)
+            if abs(dl[0] - est[0]) + abs(dl[1] - est[1]) <= 1:
+                l = dl
         pos = self.state.get("mt_pos") or {}
         best = None
         for L, v in pos.items():
