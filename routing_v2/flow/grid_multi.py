@@ -755,6 +755,29 @@ class GridMultiMixin:
                 self.state.pop("hold:move_wait", None)
                 return wait("重发最后一个动作")
         if not self.state.get("mt_need_end"):
+            # 第二路回合时钟(09-05 第 10 次 live): 相位切换的横幅帧被当「加载中」打断, do_walk 看不到 PHASE 消失,
+            #    observe 的 pe_absent 永远数不到 3, 新回合开始了 flow 还在"等相位循环"。全员都行动完之后, 箭头再次
+            #    出现在**部队 1(第一支上场的队)**头上 = 游戏开了新回合(同一回合里行动完的队不会再被聚焦)。
+            #    最后一个行动的队就是部队 1 时分不清(它没走成也会这样), 那种情况仍走原时钟 + 超时重发。
+            if (not self.state.get("mt_pending") and not self.state.get("cycling")
+                    and time.time() - float(self.state.get("mt_issue_t", 0)) > 3.0):
+                fr = self._mt_frame(obs)
+                if fr is not None and fr[4] is not None:
+                    cs, sb, dx, dy, origin = fr
+                    focus, _fl = self._mt_focus(obs, cs, dx, dy, origin)
+                    names = self._mt_names()
+                    first = names[0] if names else None
+                    acted = list(self.state.get("mt_acted") or [])
+                    last_actor = acted[-1] if acted else None
+                    if focus is not None and focus == first and last_actor != first:
+                        k = self.bump("mt_newround_frames")
+                        if k >= 2:
+                            self.state["mt_newround_frames"] = 0
+                            self.state["cycling"] = True
+                            self.log("箭头回到部队 1 头上(全员已行动) = 新回合(相位横幅帧被打断时的第二路时钟)")
+                            return wait("新回合证据: 箭头回到部队 1")
+                        return wait("箭头在部队 1 头上, 再看一帧确认新回合")
+                    self.state["mt_newround_frames"] = 0
             return None
         if self.state.get("mt_pending"):
             return wait("最后一个动作还没看到事后证据, 先不手点 PHASE結束")

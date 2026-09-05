@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -4677,6 +4678,17 @@ def t_grid_multi_0905():
           a is not None and a.kind == "tap" and abs(a.x - 0.546) < 0.01 and abs(a.y - 0.483) < 0.01, str(a))
     a.post()
     check("最后一发即 issued; 全员行动 -> 不需手点 PHASE結束", bool(fl.state.get("issued")) and not fl.state.get("mt_need_end"))
+    # 第二路回合时钟: PHASE 消失的帧被打断没看到, 但箭头回到部队 1(A, 已在 (1,1))头上 = 新回合
+    fl.state["mt_pending"] = None
+    fl.state["mt_acted"] = ["A", "B"]
+    fl.state["mt_pos"]["B"] = [5, -1]
+    fl.state["mt_issue_t"] = 0
+    nr = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.358, 0.54))
+    fl.decide(nr, Machine(1).update(nr))
+    a = fl.decide(nr, Machine(1).update(nr))
+    check("全员行动后箭头回到部队 1 头上(两帧) -> 判新回合(置 cycling)", fl.state.get("cycling") is True, str(a))
+    fl.state.update(cycling=False, issued=True, mt_pending={"ai": 1, "team": "B", "do": "move", "dir": "right-down", "from": [4, -2], "target": [5, -1], "t": time.time()})
+    fl.state["mt_pos"]["B"] = [4, -2]
     gone = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY))
     for _ in range(4):
         fl.decide(gone, Machine(1).update(gone))
