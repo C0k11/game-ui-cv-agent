@@ -424,6 +424,15 @@ class Feed:
                 with self._lock:
                     self._ts = time.time()
                 continue
+            if dead_decode and revive < 40 and self._is_static():
+                # 09-05: InvalidDataError 后静止页本来就不来新帧, 只看"重建后零解码"会无限换流(10-3 第 6 跑 10 连重启,
+                #    bot 盲了 3 分钟; 活动商店页也这么卡死过). 独立 ADB 截屏与最后解出的帧一致 = 页面静止、最后一帧就是
+                #    真屏, 续命(<=40 次); 真屏变了而流不出帧才是废流, 那时才换流.
+                static_streak += 1
+                revive += 1
+                with self._lock:
+                    self._ts = time.time()
+                continue
             static_streak = 0
             revive = 0
             if dead_decode:

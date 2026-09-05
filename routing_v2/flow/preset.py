@@ -90,7 +90,7 @@ class PresetMixin:
     def preset_start(self, tab: int, row: int) -> None:
         """登记要套的预设: 页签 tab(1..4), 行 row(1..4)。清掉上一轮的进度标记。"""
         self.state["preset_want"] = {"tab": int(tab), "row": int(row)}
-        for k in ("preset_applied", "preset_confirm", "pr_scroll", "pr_tab_t"):
+        for k in ("preset_applied", "preset_confirm", "pr_scroll", "pr_tab_t", "preset_dialog_seen"):
             self.state.pop(k, None)
         self.once_reset("pr_open", "pr_tab", "pr_apply", "pr_confirm", "pr_close")
 
@@ -103,6 +103,13 @@ class PresetMixin:
         if not want:
             return None
         panel = obs.has(V.PRESET_TITLE, 0.40)
+        if obs.has(V.PRESET_CHANGE_TITLE, 0.40) and self.state.get("preset_confirm"):
+            self.state["preset_dialog_seen"] = True
+        elif self.state.get("preset_dialog_seen") and self.state.get("preset_confirm") and not self.state.get("preset_applied"):
+            # 09-05 10-3 第 6 跑: 變更編輯 框的 確認 被通用 ack 处理器抢先点掉, 预设处理器的 post 没跑 -> preset_applied 没置 ->
+            #    子链以为面板没开又去重开(第二次 組成). 組成 点过 + 框见过又没了 = 套上了, 不依赖是谁点的 確認.
+            self.state["preset_applied"] = True
+            self.state.pop("preset_dialog_seen", None)
         if self.state.get("preset_applied"):
             if panel:
                 x = obs.find(V.CLOSE_X, 0.55)
