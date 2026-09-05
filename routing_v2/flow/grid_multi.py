@@ -751,7 +751,15 @@ class GridMultiMixin:
                 return self.finish(Outcome.UNKNOWN,
                                    f"药丸点了 {n} 次焦点仍聚不到队 {team}(现在 {focus}) -- 交人看")
             if focus is None:
-                if self._overdue("mt_no_arrow", 25):
+                # 09-05 10-3 第 3 跑同处第二次收工: 等待期没有任何决策帧, 复盘无据. 每 40 帧和收工前各落一帧带状态.
+                n = self.bump("mt_noarrow_frames")
+                late = self._overdue("mt_no_arrow", 25)
+                if n % 40 == 1 or late:
+                    ar = obs.find(V.GRID_ARROW, 0.25)
+                    self._mt_dbg(obs, f"noarrow#{n} arrow={None if ar is None else (round(ar.cx, 3), round(ar.cy, 3), round(ar.conf, 2))} "
+                                      f"focus_lat={focus_lat} origin={None if origin is None else (round(origin[0], 3), round(origin[1], 3))} "
+                                      f"pos={pos} pend={self.state.get('mt_pending')}")
+                if late:
                     return self.finish(Outcome.UNKNOWN, "25s 没看到队伍箭头(焦点未知), 不瞎点药丸 -- 交人看")
                 return wait("箭头没检出(焦点未知), 等它出现再决定要不要切队")
             self._wt_clear("mt_no_arrow")
