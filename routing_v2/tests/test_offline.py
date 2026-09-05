@@ -4656,7 +4656,7 @@ def t_grid_multi_0905():
           fl.phase == "walk" and fl.state.get("mt_pos") == {"A": [0, 0], "B": [4, -2]}, f"{fl.phase} {fl.state.get('mt_pos')}")
     fl.state["mt_settle_until"] = 0           # 开局 3s 静默(离线不等墙钟)
     a = None
-    for _ in range(4):
+    for _ in range(14):
         a = fl.decide(ph, Machine(1).update(ph))
         if a is not None and a.kind == "tap":
             break
@@ -4667,14 +4667,20 @@ def t_grid_multi_0905():
           (fl.state.get("mt_pending") or {}).get("target") == [1, 1] and not fl.state.get("issued"))
     ph2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), startB(0.500, 0.367, V.GRID_START_GREY),
              B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.500, 0.19))
-    fl.decide(ph2, Machine(1).update(ph2))
+    for _ in range(6):
+        fl.decide(ph2, Machine(1).update(ph2))
+        if fl.state.get("mt_ai") == 1:
+            break
     check("箭头到 B 头上 = A 的动作被消费, A 位置 (1,1), 动作指针 1",
           fl.state.get("mt_pos", {}).get("A") == [1, 1] and fl.state.get("mt_ai") == 1, f"{fl.state.get('mt_pos')} ai={fl.state.get('mt_ai')}")
     a = fl.decide(ph2, Machine(1).update(ph2))
     check("动作确认后 2.5s 静默期内只等(让游戏自己切焦点)", a is not None and a.kind == "wait" and "静默" in a.reason, str(a))
     fl.state["mt_settle_until"] = 0
-    fl.decide(ph2, Machine(1).update(ph2))      # 焦点读数两帧共识
-    a = fl.decide(ph2, Machine(1).update(ph2))
+    a = None
+    for _ in range(14):
+        a = fl.decide(ph2, Machine(1).update(ph2))
+        if a is not None and a.kind == "tap":
+            break
     check("r1 动作2: 焦点在 B, 点 B 右下格 (0.546,0.483)",
           a is not None and a.kind == "tap" and abs(a.x - 0.546) < 0.01 and abs(a.y - 0.483) < 0.01, str(a))
     a.post()
@@ -4691,7 +4697,7 @@ def t_grid_multi_0905():
     fl.state.update(cycling=False, issued=True, mt_pending={"ai": 1, "team": "B", "do": "move", "dir": "right-down", "from": [4, -2], "target": [5, -1], "t": time.time()})
     fl.state["mt_pos"]["B"] = [4, -2]
     gone = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY))
-    for _ in range(4):
+    for _ in range(14):
         fl.decide(gone, Machine(1).update(gone))
     fl.decide(ph, Machine(1).update(ph))
     check("循环后进回合 2, 挂起的 B 动作记账 (5,-1), 动作指针归零",
@@ -4701,21 +4707,30 @@ def t_grid_multi_0905():
     fl.state["mt_settle_until"] = 0
     ph3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.358, 0.54))
     fl.state["mt_settle_until"] = 0
-    fl.decide(ph3, Machine(1).update(ph3))      # 焦点两帧共识
-    a = fl.decide(ph3, Machine(1).update(ph3))
+    a = None
+    for _ in range(14):
+        a = fl.decide(ph3, Machine(1).update(ph3))
+        if a is not None and a.kind == "tap":
+            break
     check("r2 首动作是 B 但焦点在 A -> 点左下切队药丸(几何, JIT 锚 PHASE結束)",
           a is not None and a.kind == "tap" and abs(a.x - 0.062) < 0.01 and abs(a.y - 0.775) < 0.01 and a.require == V.PHASE_END, str(a))
     a.post()
     check("药丸 post: 计 1 次 + 进入 2.5s 静默", fl.state.get("mt_pill:1:0") == 1 and fl.state.get("mt_settle_until", 0) > 0)
     noarrow = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928))
     fl.state["mt_settle_until"] = 0
-    fl.decide(noarrow, Machine(1).update(noarrow))
-    a = fl.decide(noarrow, Machine(1).update(noarrow))
+    a = None
+    for _ in range(14):
+        a = fl.decide(noarrow, Machine(1).update(noarrow))
+        if a is not None and "箭头" in a.reason:
+            break
     check("箭头没检出(焦点未知) -> 不点药丸只等", a is not None and a.kind == "wait" and "箭头" in a.reason, str(a))
     ph4 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.546, 0.30))
-    fl.decide(ph4, Machine(1).update(ph4))
-    a = fl.decide(ph4, Machine(1).update(ph4))
-    check("焦点到 B 后: B 右下 (6,0) 处还没有格子 -> 等(不瞎点)", a is not None and a.kind == "wait", str(a))
+    a = None
+    for _ in range(14):
+        a = fl.decide(ph4, Machine(1).update(ph4))
+        if a is not None and "目标格" in a.reason:
+            break
+    check("焦点到 B 后: B 右下 (6,0) 处还没有格子 -> 等(不瞎点)", a is not None and a.kind == "wait" and "目标格" in a.reason, str(a))
     ph5 = O(*ph4.boxes, cellB(0.592, 0.601))
     a = fl.decide(ph5, Machine(1).update(ph5))
     check("桥格出现后落子 (0.592,0.601)", a is not None and a.kind == "tap" and abs(a.x - 0.592) < 0.01, str(a))
@@ -4729,8 +4744,11 @@ def t_grid_multi_0905():
     fl.mt_new_round()
     exo = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.358, 0.54))
     fl.state.update(mt_settle_until=0, mt_focus_prev=None)
-    fl.decide(exo, Machine(1).update(exo))
-    a = fl.decide(exo, Machine(1).update(exo))
+    a = None
+    for _ in range(14):
+        a = fl.decide(exo, Machine(1).update(exo))
+        if a is not None and a.kind == "tap":
+            break
     check("exchange 第一步: 点友军 B 所在格 (0.407,0.602)",
           a is not None and a.kind == "tap" and abs(a.x - 0.407) < 0.01 and abs(a.y - 0.602) < 0.01, str(a))
     a.post()
@@ -4744,14 +4762,19 @@ def t_grid_multi_0905():
           fl.state.get("mt_pos") == {"A": [2, 0], "B": [1, 1]} and fl.state.get("mt_acted") == [],
           f"{fl.state.get('mt_pos')} acted={fl.state.get('mt_acted')}")
     fl.state.update(mt_settle_until=0, mt_focus_prev=None)
-    fl.decide(ex2, Machine(1).update(ex2))
-    a = fl.decide(ex2, Machine(1).update(ex2))
+    a = None
+    for _ in range(14):
+        a = fl.decide(ex2, Machine(1).update(ex2))
+        if a is not None and a.kind == "tap":
+            break
     check("换位后 A 再走 left-up -> (1,-1) 检出格 (0.360,0.487)",
           a is not None and a.kind == "tap" and abs(a.x - 0.360) < 0.01 and abs(a.y - 0.487) < 0.01, str(a))
     a.post()
     check("最后一发 issued, 且 B 本回合不动 -> 要手点 PHASE結束", bool(fl.state.get("issued")) and bool(fl.state.get("mt_need_end")))
     ex3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.360, 0.30))
-    a = fl.decide(ex3, Machine(1).update(ex3))
+    a = None
+    for _ in range(6):
+        a = fl.decide(ex3, Machine(1).update(ex3))
     check("4s 内先不手点 PHASE結束(等自动结束)", a is not None and a.kind == "wait", str(a))
     # 最后一发 10s 没证据 -> 收回 issued 重发(有界)
     flx = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
@@ -4765,7 +4788,7 @@ def t_grid_multi_0905():
     check("最后一发 10s 无证据 -> 收回 issued 重发", a is not None and a.kind == "wait" and "重发" in a.reason and not flx.state.get("issued") and flx.state.get("mt_pending") is None, str(a))
     flx.state.update(mt_settle_until=0, mt_focus_prev=None, mt_idle_n=5)
     a = None
-    for _ in range(6):      # 空闲 3 帧 + 相机两帧共识 + 焦点两帧共识
+    for _ in range(14):      # 空闲 3 帧 + 相机两帧共识 + 焦点两帧共识
         a = flx.decide(ph, Machine(1).update(ph))
         if a is not None and a.kind == "tap":
             break
@@ -4781,18 +4804,27 @@ def t_grid_multi_0905():
     fl.mt_new_round()
     po = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.313, 0.42))
     fl.state.update(mt_settle_until=0, mt_focus_prev=None)
-    fl.decide(po, Machine(1).update(po))
-    a = fl.decide(po, Machine(1).update(po))
+    a = None
+    for _ in range(14):
+        a = fl.decide(po, Machine(1).update(po))
+        if a is not None and a.kind == "tap":
+            break
     check("portal: 点传送格(A 右下 (0.358,0.721)); 确认框交给通用 on_confirm_dialog",
           a is not None and a.kind == "tap" and abs(a.x - 0.358) < 0.01, str(a))
     a.post()
     po2 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.500, 0.19))
-    fl.decide(po2, Machine(1).update(po2))
+    for _ in range(6):
+        fl.decide(po2, Machine(1).update(po2))
+        if fl.state.get("mt_ai") == 1:
+            break
     check("传送后焦点切到 B = 消费; A 位置置未知", fl.state.get("mt_pos", {}).get("A") is None and fl.state.get("mt_ai") == 1, str(fl.state.get("mt_pos")))
     fl.state.update(mt_ai=0, mt_pending=None, mt_settle_until=0, mt_focus_prev=None)
     fl.state["answer"] = dict(fl.state["answer"], rounds=[[{"team": "A", "do": "move", "dir": "left"}]])
     po3 = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.688, 0.42))
-    fl.decide(po3, Machine(1).update(po3))
+    for _ in range(6):
+        fl.decide(po3, Machine(1).update(po3))
+        if fl.state.get("mt_pos", {}).get("A") is not None:
+            break
     check("位置未知的队按箭头绑回 (8,0)", fl.state.get("mt_pos", {}).get("A") == [8, 0], str(fl.state.get("mt_pos")))
     fl4 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     fl4.goto("grid")
@@ -4843,7 +4875,7 @@ def t_grid_multi_0905():
     a = fl6.decide(mv1, Machine(1).update(mv1))
     check("相机平移中(原点两帧差 0.03) -> 只等不落子", a is not None and a.kind == "wait" and "相机" in a.reason, str(a))
     a = None
-    for _ in range(4):      # 焦点两帧共识
+    for _ in range(14):      # 焦点两帧共识
         a = fl6.decide(mv1, Machine(1).update(mv1))
         if a is not None and a.kind == "tap":
             break
@@ -4853,7 +4885,7 @@ def t_grid_multi_0905():
     fl7.state.update(mt_map=mp, mt_deployed=["A"])
     nomark = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599), startB(0.500, 0.367), B(V.TASK_START, cx=0.915, cy=0.923))
     a = None
-    for _ in range(9):
+    for _ in range(14):
         a = fl7.decide(nomark, Machine(1).update(nomark))
         if a is not None and a.kind == "tap":
             break

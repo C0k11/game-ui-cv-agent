@@ -228,7 +228,7 @@ class GridMultiMixin:
         if pend:
             self._mt_apply(pend)
         # 新回合开场有 MY PHASE 横幅 + 相机回摆 1-2s(09-05 第 14 次 live: 每回合首发都在这窗口里打空, 10s 后重发才中)
-        self.state["mt_settle_until"] = time.time() + 3.0
+        self.state["mt_settle_until"] = time.time() + 5.0
         self.state["mt_focus_prev"] = None
         self.state["mt_ai"] = 0
         self.state["mt_pending"] = None
@@ -237,6 +237,15 @@ class GridMultiMixin:
         self.state.pop("mt_end_taps", None)
         for k in [k for k in self.state if k.startswith("mt_focus:") or k.startswith("mt_reissue:")]:
             self.state.pop(k, None)
+
+    def _mt_dbg(self, obs: Observation, note: str) -> None:
+        """决策帧落盘(复盘用; runner 存的是换页帧不是决策帧, 09-05 复盘被这个坑了两轮)。"""
+        try:
+            path = self._dump_grid_miss(obs)
+            if path:
+                self.log(f"决策帧 {path.rsplit('/', 1)[-1]}: {note}")
+        except Exception:
+            pass
 
     def _mt_idle_ok(self, obs: Observation) -> bool:
         """游戏空闲闸(09-05 10-3 live 实锤): 踩敌人格的 SKIP 战斗有 3-5s 爆炸/VICTORY 动画, 期间右下角轮流盖着
@@ -508,23 +517,28 @@ class GridMultiMixin:
             return None, None
         # 队伍脚下的格常被立绘挡住检不出(10-3 起点 B 上站着人, 格/起点都没检出), below() 会就近绑到别的格。
         #    四关实测箭头心到脚下格心 = 1.50-1.57 行距, 用这个几何直接投到点阵; 检出格与投影一致才用检出格。
-        est = lat_of((arrow.cx, arrow.cy + 1.55 * dy), origin, dx, dy)
+        pos = self.state.get("mt_pos") or {}
+        # 先按**已知队伍位置**匹配: 箭头挂在单位头顶, 头顶高度随角色变(10-3 实测 1.0-1.6 行), 自由投影会把
+        #    邻格的队认错(把站在 (2,0) 的 B 投到 (1,1), 触发假"已到目标")。同列(|dx|<0.5 格距)且箭头在格心上方
+        #    0.6-2.0 行的队里取 x 最近的。
+        cands = []
+        for L, v in pos.items():
+            if v is None:
+                continue
+            ex, ey = px_of(tuple(v), origin, dx, dy)
+            if abs(ex - arrow.cx) <= 0.5 * dx and 0.6 * dy <= (ey - arrow.cy) <= 2.0 * dy:
+                cands.append((abs(ex - arrow.cx), L, tuple(v)))
+        if cands:
+            cands.sort()
+            return cands[0][1], cands[0][2]
+        # 没有已知队在箭头下面: 自由投影(传送后位置未知的队靠这个绑回)
+        est = lat_of((arrow.cx, arrow.cy + 1.3 * dy), origin, dx, dy)
         cell = grid.below(arrow, cs, dx)
         l = est
         if cell is not None:
             dl = lat_of(cell, origin, dx, dy)
             if abs(dl[0] - est[0]) + abs(dl[1] - est[1]) <= 1:
                 l = dl
-        pos = self.state.get("mt_pos") or {}
-        best = None
-        for L, v in pos.items():
-            if v is None:
-                continue
-            d = abs(v[0] - l[0]) + abs(v[1] - l[1])
-            if d <= 1 and (best is None or d < best[0]):
-                best = (d, L)
-        if best is not None:
-            return best[1], l
         unknown = [L for L, v in pos.items() if v is None]
         if len(unknown) == 1:
             pos[unknown[0]] = list(l)
@@ -547,7 +561,10 @@ class GridMultiMixin:
         #    首发落在两格缝上没走, 10s 后才重发)。原点比上一帧漂 > 0.01 就只观察不落子。
         lo = self.state.get("mt_last_origin")
         self.state["mt_last_origin"] = [origin[0], origin[1]]
-        camera_still = (lo is not None and abs(lo[0] - origin[0]) < 0.01 and abs(lo[1] - origin[1]) < 0.01)
+        still = (lo is not None and abs(lo[0] - origin[0]) < 0.006 and abs(lo[1] - origin[1]) < 0.006)
+        sn = (int(self.state.get("mt_still_n", 0)) + 1) if still else 0
+        self.state["mt_still_n"] = sn
+        camera_still = sn >= 4        # 缓动收尾极慢, 两帧 0.01 内会误判停稳(10-3/10-4 实锤首发被吞), 要连续 4 帧
         focus, focus_lat = self._mt_focus(obs, cs, dx, dy, origin)
         if focus is not None:
             self._wt_clear("mt_no_arrow")      # 看见箭头就清, 不管这一帧走哪个分支(10-3 实锤: 挂着换位证据时计时器没清, 一转身就交人)
@@ -562,16 +579,17 @@ class GridMultiMixin:
         if pend:
             done = self._mt_pending_done(pend, focus, focus_lat)
             if done:
+                self._mt_dbg(obs, f"evidence {pend['team']} {pend['do']} focus={focus}@{focus_lat}")
                 self._mt_apply(pend)
                 self.state["mt_pending"] = None
                 ai = int(pend["ai"]) + 1
                 self.state["mt_ai"] = ai
                 # 动作被消费后游戏还要放完移动动画、自己把焦点切给下一队、相机再平移(实测 1-2s);
                 #    这段时间里读到的焦点是过渡态, 拿它去点药丸会把游戏刚切好的焦点又翻回去(09-05 第 7 次 live)。
-                self.state["mt_settle_until"] = time.time() + 2.5
+                self.state["mt_settle_until"] = time.time() + 4.0
                 if ai >= len(acts):
                     return self._mt_round_issued(acts)
-                return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作(先等 2.5s 让游戏切焦点)")
+                return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作(先等 4s 让游戏切焦点/相机停稳)")
             if time.time() - float(pend.get("t", 0)) > (10.0 if pend["do"] != "exchange" else 6.0):
                 n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")
                 if n > 3:
@@ -619,7 +637,7 @@ class GridMultiMixin:
 
             def _pill(key=key):
                 self.state[key] = int(self.state.get(key, 0)) + 1
-                self.state["mt_settle_until"] = time.time() + 2.5
+                self.state["mt_settle_until"] = time.time() + 5.0    # 切队后相机缓动 3-4s, 早到的点击被吞(10-3 实锤)
                 self.state["mt_focus_prev"] = None
             a = tap_at(SWITCH_PILL[0], SWITCH_PILL[1],
                        f"焦点在 {focus}, 要 {team} -- 点左下切队药丸(第 {n + 1} 次)",
@@ -662,6 +680,7 @@ class GridMultiMixin:
                        justify="落点 = 本帧检出的格心(或对齐可信的地图格心), 由点阵对齐得来, 不是版面常量",
                        require=V.PHASE_END)
             a.post = _issued
+            self._mt_dbg(obs, f"tap move {team} {d} focus={focus}@{focus_lat} px={px[0]:.3f},{px[1]:.3f} origin={origin[0]:.3f},{origin[1]:.3f}")
             return a
         if do == "exchange":
             tgt = lat_add(cur, d or "")
@@ -687,6 +706,7 @@ class GridMultiMixin:
                        justify="点友军格弹「選擇/變更位置」菜单(10-2 实测), 落点是本帧检出格心",
                        require=V.PHASE_END)
             a.post = _issued2
+            self._mt_dbg(obs, f"tap exchange1 {team}->{other} focus={focus}@{focus_lat} px={px[0]:.3f},{px[1]:.3f}")
             return a
         return self.finish(Outcome.UNKNOWN, f"答案动作 {do!r} 不认识 -- 不瞎点")
 
@@ -711,6 +731,7 @@ class GridMultiMixin:
             pend["stage"] = 2
             pend["t"] = time.time()
             self.state["mt_pending"] = pend
+        self._mt_dbg(obs, f"tap exchange2 menu at {x:.3f},{y:.3f} icon={seen}")
         a = tap_at(x, y, f"队 {pend['team']} 与 {pend['other']} 换位: 点菜单「變更位置」",
                    justify="菜单挂在被点单位左侧, 图标相对格心偏移 (-0.083,-0.016) 为 10-2 实测常量(相机不缩放); "
                            "菜单键无 cls(v22 采了料); 点空的后果只是没换位, 事后证据 = 箭头落到目标格, 超时重发有界",
