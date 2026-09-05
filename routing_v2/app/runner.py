@@ -1081,6 +1081,9 @@ class Runner:
                 self.interrupts.flow_handles_purchase = bool(
                     getattr(flow, "handles_purchase_dialog", False))
                 act = self.interrupts.handle(st.interrupt, obs)
+                if st.interrupt == "loading":
+                    # 加载中的帧 flow 看不到(这里就吃掉了): 给 flow 打个时间戳, 多队走格子按它判"加载后 7s 内不算空闲"
+                    flow.state["loading_seen_t"] = time.time()
             if st.interrupt != "loading":
                 _d = self.interrupts.note_no_loading()
                 if _d is not None:

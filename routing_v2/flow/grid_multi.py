@@ -51,6 +51,7 @@ DRAG = 0.28
 PRESET_ENTRY_XY = (0.937, 0.672)
 # 墙钟门槛(离线用例置 0): 空闲要持续多久才许落子; 点完友军格等菜单弹稳多久
 IDLE_HOLD_S = 1.5
+LOAD_QUIET_S = 7.0       # 加载中(SKIP 战斗/相位横幅)之后这么久内不算空闲: 还有约 3s 的 S VICTORY 横幅, 期间点击被吞(测试里置 0)
 CAM_MOVE_MIN = 0.015     # 真走过一步相机必平移(实测 0.05-0.19); move 的"焦点切走"证据要伴随原点漂移 >= 这个值(测试里置 0)
 CELL_TAP_DOWN = 0.33     # 走格落点压到格心下方这么多行距: 单位立绘从格心向上长, 相机放大时会盖住相邻格心(10-3 第 4 跑实锤)
 MENU_WAIT_S = 1.2
@@ -261,12 +262,15 @@ class GridMultiMixin:
         「Now Loading」和横幅, 箭头会闪一下 -- 这一闪被当成"上一发已消费", 紧接着的两发全打在动画里被吞。
         空闲 = PHASE結束 高分在场 且 没有 加载中, **连续 3 帧**(VICTORY 那一帧 PHASE 会露出来一下)。
         不空闲时既不落子也不采信证据, 挂起动作的超时钟也暂停。"""
-        idle = obs.has(V.PHASE_END, 0.60) and not obs.has(V.LOADING, 0.40)
+        # 加载中的帧 runner 在全局打断层就吃掉了(flow 看不到这些帧), runner 往 state 打 loading_seen_t 时间戳;
+        #    加载(SKIP 战斗/相位横幅)之后还有约 3s 的 S VICTORY/横幅(PHASE 在场, v21 没横幅的类), 横幅期间点击被吞、证据也
+        #    不可信(11-3 第 5/6 跑: 传送格那一发两次丢在横幅里, 相机随后才平移) -> 加载后 LOAD_QUIET_S 内不算空闲
         now = time.time()
+        if obs.has(V.LOADING, 0.40):
+            self.state["loading_seen_t"] = now
+        recent_load = (now - float(self.state.get("loading_seen_t") or 0)) < LOAD_QUIET_S
+        idle = obs.has(V.PHASE_END, 0.60) and not obs.has(V.LOADING, 0.40) and not recent_load
         if not idle:
-            pend = self.state.get("mt_pending")
-            if pend and obs.has(V.LOADING, 0.40):
-                pend["battle"] = True      # 这一发踩到了敌人(SKIP 战斗有加载): 事后还有约 3s 的 S VICTORY 横幅, 期间点击被吞
             self.state["mt_idle_since"] = None
             self.state["mt_idle_n"] = 0
             return False
@@ -752,9 +756,7 @@ class GridMultiMixin:
                 self.state["mt_ai"] = ai
                 # 动作被消费后游戏还要放完移动动画、自己把焦点切给下一队、相机再平移(实测 1-2s);
                 #    这段时间里读到的焦点是过渡态, 拿它去点药丸会把游戏刚切好的焦点又翻回去(09-05 第 7 次 live)。
-                # 踩过敌人的一发: SKIP 战斗结束后还有约 3s 的 S VICTORY 横幅(PHASE 在、无加载中, 空闲闸拦不住, v21 没这横幅的类),
-                #    横幅期间点击被吞, 之后游戏才切焦点、平移相机(11-3 第 5 跑: 4s 就发, 传送格那一发丢在横幅里) -> 多等 5s
-                self.state["mt_settle_until"] = time.time() + (9.0 if pend.get("battle") else 4.0)
+                self.state["mt_settle_until"] = time.time() + 4.0
                 if ai >= len(acts):
                     return self._mt_round_issued(acts)
                 return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作(先等 4s 让游戏切焦点/相机停稳)")
@@ -843,12 +845,21 @@ class GridMultiMixin:
                 return self.finish(Outcome.UNKNOWN, f"答案方向 {d!r} 不认识 -- 不瞎点")
             px = self._mt_cell_px(tgt, cs, origin, dx, dy)
             if px is None:
-                if self.hold("mt_no_goal", 20):
+                # 目标格被敌人/立绘整个盖住时检不出, 地图也从没见过它(11-3 第 6 跑: B 传送后左边一格上站着两台机甲, 20 帧后交人);
+                #    走一步的目标必与当前格相邻, 答案说那有格就有格 -> 连续 8 帧没检出就按点阵投影落点(屏内才算)
+                ex, ey = px_of(tgt, origin, dx, dy)
+                adj = (abs(tgt[0] - cur[0]) + abs(tgt[1] - cur[1])) <= 2
+                if self.hold("mt_no_goal_proj", 8) and adj and 0.03 < ex < 0.97 and 0.10 < ey < 0.86:
+                    px = (ex, ey)
+                    if self.bump("mt_proj_log") % 20 == 1:
+                        self.log(f"队 {team} {do} {d}: 目标格 {tgt} 没检出也不在地图里(被敌人/立绘盖住?), 按点阵投影落点 ({ex:.3f},{ey:.3f})")
+                elif self.hold("mt_no_goal", 20):
                     path = self._dump_grid_miss(obs)
                     return self.finish(Outcome.UNKNOWN,
                                        f"队 {team} {do} {d}: 目标点阵 {tgt} 处没有检出的格子也不在地图里 -- 不瞎点"
                                        + (f" 干净帧 {path}" if path else ""))
-                return wait(f"队 {team} {do} {d}: 目标格暂未检出, 再看几帧")
+                else:
+                    return wait(f"队 {team} {do} {d}: 目标格暂未检出, 再看几帧")
 
             def _issued(ai=ai, team=team, do=do, d=d, tgt=tgt):
                 self.state["mt_pending"] = {"ai": ai, "team": team, "do": do, "dir": d,

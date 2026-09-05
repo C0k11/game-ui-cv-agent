@@ -4577,6 +4577,7 @@ def t_grid_multi_0905():
     print("\n-- 多队走格子 0905 ----")
     from routing_v2.flow import grid_multi as GM
     GM.IDLE_HOLD_S = 0.0          # 离线不等墙钟(空闲持续 / 菜单弹稳 / 编队面板停稳 / 開面板重试)
+    GM.LOAD_QUIET_S = 0.0         # 加载后的静默墙钟, 单独一处用例临时置回 7
     GM.MENU_WAIT_S = 0.0
     GM.FORM_SETTLE_S = 0.0
     GM.PR_OPEN_RETRY_S = 0.0
@@ -4803,6 +4804,22 @@ def t_grid_multi_0905():
         if a is not None and "目标格" in a.reason:
             break
     check("焦点到 B 后: B 右下 (6,0) 处还没有格子 -> 等(不瞎点)", a is not None and a.kind == "wait" and "目标格" in a.reason, str(a))
+    a = None
+    for _ in range(12):
+        a = fl.decide(ph4, Machine(1).update(ph4))
+        if a is not None and a.kind == "tap":
+            break
+    check("目标格 8 帧仍没检出也不在地图里 -> 相邻一步按点阵投影落子 (0.592,0.599)(敌人/立绘盖住的格)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.592) < 0.01 and abs(a.y - 0.599) < 0.012, str(a))
+    # 加载中(SKIP 战斗/相位横幅)之后 LOAD_QUIET_S 内不算空闲: live 里加载帧 runner 吃掉并打 loading_seen_t 戳
+    GM.LOAD_QUIET_S = 7.0
+    fl.state["loading_seen_t"] = time.time()
+    a = fl.decide(ph4, Machine(1).update(ph4))
+    check("加载后 7s 内不算空闲 -> 不落子不判证据", a is not None and a.kind == "wait" and "动画/加载" in a.reason, str(a))
+    GM.LOAD_QUIET_S = 0.0
+    fl.state.pop("loading_seen_t", None)
+    for _ in range(3):
+        fl.decide(ph4, Machine(1).update(ph4))     # 空闲闸要连续 3 帧, 把上面那帧"不空闲"冲掉
     ph5 = O(*ph4.boxes, cellB(0.592, 0.601))
     a = fl.decide(ph5, Machine(1).update(ph5))
     check("桥格出现后落子 (0.592,0.601)", a is not None and a.kind == "tap" and abs(a.x - 0.592) < 0.01, str(a))
