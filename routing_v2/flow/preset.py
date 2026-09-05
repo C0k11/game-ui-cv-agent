@@ -171,16 +171,29 @@ class PresetMixin:
             if n >= _SCROLL_CAP:
                 return self.finish("BLOCKED",
                                    f"預設面板滑了 {n} 次仍找不到第 {r} 行(读到行号 {seen_nums}) -- 不瞎点")
-            from routing_v2.flow.nav import list_swipe
+            # 滑动几何全从行内钮推: 轴 = 钮的 cx 中位, 行距 = 相邻行 cy 差, 一次滑 1.2 行(面板一屏只见 2 行, 滑 3 行会一步跳到底,
+            #    09-05 live: 1/2 行直接跳到 4/5 行); 往上滑要从**最上一行钮**起拖, 起点落在页签栏上不会滚(live 三次白拖)。
+            btns = obs.all([V.PRESET_APPLY, V.PRESET_APPLY_GREY, V.PRESET_LOAD], 0.35)
+            if not btns:
+                return wait("預設面板: 行内钮一个都没检出, 推不出滑动几何")
+            from routing_v2.act.action import swipe as _swipe
+            xs = sorted(b.cx for b in btns)
+            cx = xs[len(xs) // 2]
+            cys = sorted(set(round(b.cy, 2) for b in btns))
+            gaps = [b - a for a, b in zip(cys, cys[1:]) if b - a > 0.08]
+            rowh = sorted(gaps)[len(gaps) // 2] if gaps else max(b.y2 - b.y1 for b in btns) * 6.5
             up = bool(seen_nums) and min(seen_nums) > r
-            sw = list_swipe(obs, [V.PRESET_APPLY, V.PRESET_APPLY_GREY, V.PRESET_LOAD],
-                            f"預設面板往{'上' if up else '下'}滑露出第 {r} 行(读到 {seen_nums}, 第 {n + 1} 次)",
-                            post=lambda: self.state.update(pr_scroll=n + 1))
-            if sw is not None:
-                if up:
-                    sw.y, sw.y2 = sw.y2, sw.y        # 同一根轴反向拖
-                return sw
-            return wait("預設面板: 行内钮一个都没检出, 推不出滑动几何")
+            if up:
+                y0 = min(b.cy for b in btns)
+                y1 = min(0.92, y0 + 1.2 * rowh)
+            else:
+                y0 = max(b.cy for b in btns)
+                y1 = max(0.08, y0 - 1.2 * rowh)
+            if abs(y1 - y0) < 0.05:
+                return wait("預設面板: 滑动距离推不出来")
+            return _swipe(cx, y0, cx, y1,
+                          f"預設面板往{'上' if up else '下'}滑露出第 {r} 行(读到 {seen_nums}, 第 {n + 1} 次)",
+                          post=lambda: self.state.update(pr_scroll=n + 1))
         if target.cls == V.PRESET_APPLY_GREY:
             return self.finish("BLOCKED", f"預設 页签{k} 第{r}行 是空预设(組成灰) -- 不套")
         if self.pending("pr_apply"):
