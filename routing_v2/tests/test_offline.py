@@ -4662,6 +4662,18 @@ def t_grid_multi_0905():
     a = flp.decide(formp, Machine(1).update(formp))
     check("grid_presets: 队 A(blue) 先开預設面板(不直接出击)", a is not None and a.target_cls == V.PRESET_ENTRY, str(a))
     check("預設登记为 页签2 第3行", flp.state.get("preset_want") == {"tab": 2, "row": 3}, str(flp.state.get("preset_want")))
+    # 預設入口检不出(部署侧面板 v21 常漏): 6 帧后按右栏几何点开
+    flq = ALL["campaign"](Ctx(cfg=_cp, log=lambda m: None))
+    flq.goto("grid")
+    flq.state.update(mt_map=mp, mt_deployed=[], mt_dep_target="A")
+    formq = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261), B(V.SQUAD_2, cx=0.051, cy=0.370))
+    a = None
+    for _ in range(8):
+        a = flq.decide(formq, Machine(1).update(formq))
+        if a is not None and a.kind == "tap":
+            break
+    check("預設入口 6 帧没检出 -> 几何点 (0.937,0.672) 开面板(锚 出击)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.937) < 0.01 and abs(a.y - 0.672) < 0.01 and a.require == V.SORTIE and a.once_key == "pr_open", str(a))
     flp.state.update(preset_applied=True)
     flp.state.pop("preset_want", None)
     a = flp.decide(formp, Machine(1).update(formp))

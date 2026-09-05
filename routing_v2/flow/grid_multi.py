@@ -47,6 +47,8 @@ MENU_EXCHANGE_DXY = (-0.083, -0.016)
 MENU_SELECT_DXY = (-0.078, -0.123)
 # 拖地图找被挡住的起点: 一次拖 0.28 屏高/宽
 DRAG = 0.28
+# 编队面板右栏「預設」图标(16:9 归一化; 快速編輯 0.247 / 起始技能 0.39 / 部隊資訊 0.53 / 預設 0.672)
+PRESET_ENTRY_XY = (0.937, 0.672)
 # 墙钟门槛(离线用例置 0): 空闲要持续多久才许落子; 点完友军格等菜单弹稳多久
 IDLE_HOLD_S = 1.5
 MENU_WAIT_S = 1.2
@@ -532,6 +534,17 @@ class GridMultiMixin:
             self.preset_start(tab, row)
             self.log(f"队 {L}({attr}) 用部队{hi}, 套預設 页签{tab} 第{row}行")
         act = self.preset_step(obs)
+        if (act is not None and act.kind == "wait" and "等入口键" in act.reason
+                and not obs.has(V.PRESET_TITLE, 0.40) and obs.has(V.SORTIE, 0.45)):
+            # 部署侧编队面板右栏第 4 个图标就是 預設, v21 在这一版式上常检不出(09-05 live 3 帧 0 检出, 单队 09-03 时 0.88);
+            #    面板是全屏固定版式(快速編輯/起始技能/部隊資訊/預設 竖排), 等 6 帧没检出就按几何点, 点完只认 预设标题 出现。
+            n = self.bump("mt_pr_entry_wait")
+            if n >= 6 and self.pending("pr_open"):
+                return tap_at(PRESET_ENTRY_XY[0], PRESET_ENTRY_XY[1],
+                              f"預設入口 6 帧没检出, 按编队面板右栏几何点開面板(队 {L})",
+                              justify="编队面板右栏四个图标竖排固定(16:9 归一化 預設 在 (0.937,0.672), 08-31/09-03 金标与 09-05 实帧一致); "
+                                      "锚 出击 在场才点; 点空只是面板没开, 下一帧再来; 开没开只认 预设标题",
+                              require=V.SORTIE, once="pr_open")
         if act is not None:
             return act
         if self.preset_done():
