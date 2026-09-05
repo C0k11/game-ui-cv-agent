@@ -541,6 +541,51 @@ class GridMultiMixin:
         return tap_box(s, f"编队确认: 出击(队 {L} = 部队{hi or '?'})",
                        expect=(V.TASK_START, V.TASK_START_GREY), post=_post)
 
+    def _mt_preset_plan(self, cfgp: dict) -> dict:
+        """一次性给每支队分配 (页签, 行), 存 state[mt_preset_plan](mt_reset 清). 同属性的队不止一支而该属性只配了一个
+        預設时(H15-3: 三支 blue, 用户栏目 2 只有一行蓝队)不能给它们套同一个預設: 套預設会把学生从已上场的部队里抽走
+        (09-05 live: A 套完蓝队后部队 1 被抽空, B 再套同一行, 組成 点 7 次游戏不响应). 后面的队改用**还没用过的**其它預設
+        (按配置顺序), 都用完了就不套(用部队现有阵容), 各记一行日志. 配置值可以是 [tab,row] 或 [[tab,row], ...]."""
+        plan = self.state.get("mt_preset_plan")
+        if isinstance(plan, dict) and plan:
+            return plan
+
+        def norm(spec):
+            items = spec if (isinstance(spec, (list, tuple)) and spec and isinstance(spec[0], (list, tuple))) else [spec]
+            out = []
+            for it in items:
+                try:
+                    tab, row = int(it[0]), int(it[1])
+                except (TypeError, ValueError, IndexError):
+                    self.log(f"grid_presets 配置不合法: {it!r}, 跳过")
+                    continue
+                if 1 <= tab <= 4 and 1 <= row <= 4:
+                    out.append((tab, row))
+                else:
+                    self.log(f"grid_presets 越界: {it!r}, 跳过")
+            return out
+
+        by_attr = {a: norm(s) for a, s in cfgp.items() if s}
+        used = set()
+        plan = {}
+        for t in self._mt_teams():
+            L = t["name"]
+            attr = t.get("attr") or "any"
+            pick = next((p for p in by_attr.get(attr, []) if p not in used), None)
+            if pick is None and by_attr.get(attr):
+                for a2, lst in by_attr.items():
+                    pick = next((p for p in lst if p not in used), None)
+                    if pick is not None:
+                        self.log(f"队 {L}({attr}) 的預設已被同属性的队用掉(同一預設不能套两支队), 改用 {a2} 的預設 页签{pick[0]} 第{pick[1]}行")
+                        break
+                if pick is None:
+                    self.log(f"队 {L}({attr}) 没有还没用过的預設, 不套(用部队现有阵容)")
+            if pick is not None:
+                used.add(pick)
+                plan[L] = [pick[0], pick[1]]
+        self.state["mt_preset_plan"] = plan
+        return plan
+
     def _mt_preset_step(self, obs: Observation, L: Optional[str], hi: Optional[int]) -> Optional[Action]:
         """按答案属性给**当前高亮部队**套預設(用户 09-05: 預設栏目 2 的三行 = 红/黄/紫蓝三队)。
         cfg campaign.grid_presets = {"red": [2, 1], "yellow": [2, 2], "blue": [2, 3], "purple": [2, 3]}; attr any / 没配 -> 不套。
@@ -553,17 +598,10 @@ class GridMultiMixin:
         for t in self._mt_teams():
             if t["name"] == L:
                 attr = t.get("attr") or "any"
-        spec = cfgp.get(attr)
+        spec = self._mt_preset_plan(cfgp).get(L)
         if not spec:
             return None
-        try:
-            tab, row = int(spec[0]), int(spec[1])
-        except (TypeError, ValueError, IndexError):
-            self.log(f"grid_presets[{attr}] 配置不合法: {spec!r}, 不套")
-            return None
-        if not (1 <= tab <= 4 and 1 <= row <= 4):
-            self.log(f"grid_presets[{attr}] 越界: {spec!r}, 不套")
-            return None
+        tab, row = spec
         done = self.state.setdefault("mt_preset_done", {})
         if done.get(L):
             return None

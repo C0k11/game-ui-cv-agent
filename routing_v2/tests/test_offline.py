@@ -4682,6 +4682,18 @@ def t_grid_multi_0905():
         if a is not None and a.kind == "tap":
             break
     check("grid_presets: 队 A(blue) 先开預設面板(不直接出击)", a is not None and a.target_cls == V.PRESET_ENTRY, str(a))
+    # H15-3: 三支同属性队, 该属性只配一个預設 -> 第 2/3 支改用还没用过的其它預設(同一預設套两支队会把已上场部队抽空)
+    _c3 = {"red": [2, 1], "yellow": [2, 2], "blue": [2, 3], "purple": [2, 3]}
+    fl3 = ALL["campaign"](Ctx(cfg=dict(_cp, campaign={"stage": "10-1", "grid_presets": _c3}), log=lambda m: None))
+    fl3.state["answer"] = {"stage": "H15-3", "teams": [{"name": "A", "attr": "blue"}, {"name": "B", "attr": "blue"}, {"name": "C", "attr": "blue"}],
+                           "rounds": [[]], "needs": {"teams": 3, "portal": True, "exchange": True, "attrs": ["blue"]}}
+    p3 = fl3._mt_preset_plan(_c3)
+    check("三支 blue 队: A 用 blue(2,3), B 改用 red(2,1), C 改用 yellow(2,2), purple 与 blue 同行不重复用",
+          p3 == {"A": [2, 3], "B": [2, 1], "C": [2, 2]}, str(p3))
+    fl4 = ALL["campaign"](Ctx(cfg=dict(_cp, campaign={"stage": "10-1", "grid_presets": {"blue": [[2, 3], [3, 1]]}}), log=lambda m: None))
+    fl4.state["answer"] = dict(fl3.state["answer"])
+    p4 = fl4._mt_preset_plan({"blue": [[2, 3], [3, 1]]})
+    check("列表配置: blue 配了两个預設 -> A/B 各一个, C 没得用不套", p4 == {"A": [2, 3], "B": [3, 1]}, str(p4))
     check("預設登记为 页签2 第3行", flp.state.get("preset_want") == {"tab": 2, "row": 3}, str(flp.state.get("preset_want")))
     # 預設入口检不出(部署侧面板 v21 常漏): 6 帧后按右栏几何点开
     flq = ALL["campaign"](Ctx(cfg=_cp, log=lambda m: None))
