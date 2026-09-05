@@ -918,10 +918,11 @@ class GridMultiMixin:
             base = self.state.get(f"{key}:base")
             eff = int(self.state.get(f"{key}:eff", 0))
             if base is not None and eff >= 1 and time.time() - float(self.state.get(f"{key}:t", 0)) > 3.0:
-                # 药丸在**全部**上场部队里按部队号循环, 行动过的也在圈里(H15-3 第 13 跑回合 4: B 走完后从 A 按一次药丸, 药丸文字是
-                #    「2部隊」= B, 不是跳到没行动的 C)
+                # 药丸只在**没行动**的部队里按部队号循环(H15-3 第 15 跑实锤: A 走完后按 8 次药丸, 文字只在 2/3 部隊之间翻,
+                #    从不回到 1). 第 13 跑回合 4 看到的 A->B(B 已"记"行动)说明那次 B 的行动证据是假的(落点打在友军上).
                 sq = self.state.get("mt_team_squad") or {}
-                rest = sorted(pos.keys(), key=lambda L: int(sq.get(L, 99) or 99))
+                acted = {acts[i].get("team") for i in range(min(ai, len(acts)))}
+                rest = sorted([L for L in pos if L not in acted], key=lambda L: int(sq.get(L, 99) or 99))
                 if base in rest and all(L in sq for L in rest):
                     exp = rest[(rest.index(base) + eff) % len(rest)]
                     focus = exp
@@ -1009,8 +1010,29 @@ class GridMultiMixin:
             n = int(self.state.get(key, 0))
             cap = 2 * max(2, len(pos)) + 2
             if n >= cap:
+                # 药丸只在没行动的队里循环: 点了一圈又一圈都到不了 team = 游戏认为它已经行动过 -> 上一发其实被收下了
+                #    (H15-3 第 15 跑: A 走一格后相机没平移、箭头又压在 C 头上, 证据闸没认, 超时重发时药丸怎么也切不回 A).
+                #    条件: 这一发之前有过超时重发(mt_reissue), 且药丸切出过 >=2 个不同的别队(签名/规则认出的). 按答案目标记账.
+                seen = self.state.get(f"{key}:seen") or []
+                if int(self.state.get(f"mt_reissue:{self.state['round_i']}:{ai}", 0)) >= 1 and len(set(seen)) >= 2 \
+                        and do in ("move", "portal") and pos.get(team) is not None:
+                    tgt = pos[team] if (do == "portal" and d == "center") else lat_add(tuple(pos[team]), d or "")
+                    if tgt is not None:
+                        fake = {"ai": ai, "team": team, "do": do, "dir": d, "from": list(pos[team]), "target": list(tgt), "t": time.time()}
+                        self.log(f"药丸点了 {n} 次只在 {sorted(set(seen))} 之间切, 到不了 {team} = 游戏认为它已行动: 上一发其实成了, 按答案记账 {tgt}")
+                        self._mt_apply(fake)
+                        self.state["mt_ai"] = ai + 1
+                        self.state["mt_settle_until"] = time.time() + 2.0
+                        self.state["mt_focus_prev"] = None
+                        if ai + 1 >= len(acts):
+                            return self._mt_round_issued(acts)
+                        return wait("按药丸循环推断上一发已被收下, 进下一动作")
                 return self.finish(Outcome.UNKNOWN,
                                    f"药丸点了 {n} 次焦点仍聚不到队 {team}(现在 {focus}) -- 交人看")
+            if focus is not None:
+                seen = self.state.setdefault(f"{key}:seen", [])
+                if focus not in seen:
+                    seen.append(focus)
             if focus is None:
                 # 09-05 10-3 第 3 跑同处第二次收工: 等待期没有任何决策帧, 复盘无据. 每 40 帧和收工前各落一帧带状态.
                 n = self.bump("mt_noarrow_frames")
