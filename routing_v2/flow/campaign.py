@@ -545,16 +545,30 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             #    中断任务 cls(526)欠拟合检不出, 用同排三键几何: 中斷任務 / 重新挑戰 / 確認 等距, 間距 0.178
             #    (09-05 10-4 实帧: 0.320 / 0.500 / 0.678, cy 同 0.822); 锚 確認 在场才点, 之后弹「是否中斷」
             #    双键框由通用确认处理器点確認。
-            if self._multi() and not self.state.get("mt_map") and self.pending("mt_abort"):
-                a = tap_at(cf.cx - 0.358, cf.cy,
-                           "多队关中途断掉, 无地图无位置 -- 中斷任務 重来(退 AP)",
-                           justify="任務資訊框三键等距同排, 中斷任務 = 確認 左移 2 x 0.179(09-05 实帧); 中断任务 cls 欠拟合; "
-                                   "点空只是框还开着, 下一帧再来; 錨 確認 必须在场",
-                           require=V.CONFIRM, once="mt_abort")
-                a.post = lambda: self.state.update(mt_aborted=True)
-                return a
+            if self._multi() and not self.state.get("mt_map"):
+                return self.mt_abort_step(obs) or wait("多队残局: 等 中斷任務 生效")
             return tap_box(cf, "关掉任務資訊框（点確認, 任务继续）")
         return wait("等任务大厅")
+
+    def mt_abort_step(self, obs):
+        """多队关中途断掉再进来(进程重开, 队伍位置/点阵地图都没了): 续走等于瞎走 -> 中斷任務(退还大部分 AP)重来。
+        任務資訊框开着就点 中斷任務; 没开(归位已把它点掉, 人在地图上)就先点左上返回键把它叫出来。
+        中断任务 cls(526)欠拟合检不出, 用同排三键几何: 中斷任務 / 重新挑戰 / 確認 等距(09-05 10-4 实帧 0.320/0.500/0.678,
+        cy 同 0.822), 锚 確認 在场才点; 之后弹「是否中斷」双键框由通用确认处理器点確認。"""
+        cf = obs.find(V.CONFIRM, 0.45)
+        if cf is not None and obs.has(V.CLOSE_X, 0.45) and self.pending("mt_abort"):
+            a = tap_at(cf.cx - 0.358, cf.cy,
+                       "多队关中途断掉, 无地图无位置 -- 中斷任務 重来(退 AP)",
+                       justify="任務資訊框三键等距同排, 中斷任務 = 確認 左移 2 x 0.179(09-05 实帧); 中断任务 cls 欠拟合; "
+                               "点空只是框还开着, 下一帧再来; 锚 確認 必须在场",
+                       require=V.CONFIRM, once="mt_abort")
+            a.post = lambda: self.state.update(mt_aborted=True)
+            return a
+        if cf is None and obs.has([V.PHASE_END, V.PHASE_AUTO_ON, V.PHASE_AUTO_OFF], 0.40):
+            b = obs.find(V.BACK, 0.45)
+            if b is not None and self.bump("mt_abort_back") <= 3:
+                return tap_box(b, "多队残局(无地图): 点返回键叫出 任務資訊框 好中斷任務", expect=(V.CONFIRM,))
+        return None
 
     # stage_list: 点**得星_0 那一行的入場键**（下一关就是没有星的那关 --
     #    游戏会自动把它归位到可视区, 老规矩）。
@@ -1021,6 +1035,14 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             return wait("进相位 result")
 
         plan = self._plan()
+        if self._multi() and not self.state.get("mt_map"):
+            # 进程重开落到地图上(09-05 第 11 次 live: 归位把任務資訊框点掉, enter 直接进 walk), 没地图不能走
+            a = self.mt_abort_step(obs)
+            if a is not None:
+                return a
+            if self._overdue("mt_abort_wait", 60):
+                return self.finish(Outcome.UNKNOWN, "多队残局无地图, 60s 没能叫出/点到 中斷任務 -- 交人看")
+            return wait("多队残局无地图: 等 任務資訊框 / 中斷任務")
         if self.state["round_i"] >= len(plan):
             self.goto("result", "答案回合走完了")
             return wait("等结算")

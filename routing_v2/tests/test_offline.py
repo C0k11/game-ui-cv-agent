@@ -4865,6 +4865,14 @@ def t_grid_multi_0905():
         page = "campaign_stage"; frames_in_page = 5; last_solid = "campaign_stage"; overlay = None; changed = False; flapping = False
     a = fl8.decide(O(B(V.STAGE_ENTER, cx=0.87, cy=0.5)), _SVl())
     check("中断后回到列表 -> 不报 CLEAN, 重置后重进同一关(stage_list)", fl8.phase == "stage_list" and fl8.outcome is None and fl8.state.get("stage") == _c["campaign"]["stage"], f"{fl8.phase} {fl8.outcome} {fl8.state.get(chr(115)+chr(116)+chr(97)+chr(103)+chr(101))}")
+    flw = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    flw.goto("walk")
+    onmap = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928),
+              B(V.BACK, cx=0.045, cy=0.052), arrow(0.313, 0.42))
+    a = flw.decide(onmap, Machine(1).update(onmap))
+    check("进程重开落在地图上(多队无地图) -> 点返回键叫出 任務資訊框", a is not None and a.target_cls == V.BACK, str(a))
+    a = flw.decide(info, _SVi())
+    check("任務資訊框出来后 -> 中斷任務", a is not None and a.kind == "tap" and abs(a.x - (0.678 - 0.358)) < 0.01, str(a))
     _c1 = cfg()
     _c1["campaign"] = {"stage": "3-1"}
     fl9 = ALL["campaign"](Ctx(cfg=_c1, log=lambda m: None))
