@@ -264,6 +264,9 @@ class GridMultiMixin:
         idle = obs.has(V.PHASE_END, 0.60) and not obs.has(V.LOADING, 0.40)
         now = time.time()
         if not idle:
+            pend = self.state.get("mt_pending")
+            if pend and obs.has(V.LOADING, 0.40):
+                pend["battle"] = True      # 这一发踩到了敌人(SKIP 战斗有加载): 事后还有约 3s 的 S VICTORY 横幅, 期间点击被吞
             self.state["mt_idle_since"] = None
             self.state["mt_idle_n"] = 0
             return False
@@ -272,6 +275,15 @@ class GridMultiMixin:
         self.state["mt_idle_n"] = int(self.state.get("mt_idle_n", 0)) + 1
         # 连续空闲 >= 1.5s: SKIP 战斗的两段加载之间会露出 VICTORY 横幅帧(PHASE 在、无加载中), 按帧数会漏过去
         return (now - float(self.state["mt_idle_since"])) >= IDLE_HOLD_S and self.state["mt_idle_n"] >= 3
+
+    def _mt_observe(self, obs: Observation, st) -> None:
+        """每帧都来(含 overlay 帧). 传送格点下去后游戏弹「通知 / 是否移動該部隊？」双键框, 那些帧 step 不经过(通用确认处理器
+        点的 確認), 在这里记"见过确认框" = 传送格那一发被游戏收下了(11-3 第 5 跑: 框见过、传送成了, flow 却按无证据重发)."""
+        pend = self.state.get("mt_pending")
+        if not pend or pend.get("do") != "portal":
+            return
+        if obs.has(V.CONFIRM, 0.60) and not obs.has(V.PHASE_END, 0.60):
+            pend["dialog_seen"] = True
 
     def _mt_frame(self, obs: Observation, conf: float = 0.30):
         """本帧几何: (格心列表, 起点框列表, dx, dy, 原点) 或 None。"""
@@ -663,6 +675,22 @@ class GridMultiMixin:
             pos[unknown[0]] = list(l)
             self.log(f"队 {unknown[0]}(传送后位置未知) 按箭头绑回 {l}")
             return unknown[0], l
+        # 传送中的队(点了传送格还没拿到证据, 11-3 第 5 跑实锤): 它是本回合最后一个行动的队时传送后没有别的队可切, 焦点不离开它,
+        #    相位循环又没抓到 -> 新回合箭头在它头上的**新位置**. 箭头连续两帧落在所有已知队之外(也不是原位/传送格)的同一格 =
+        #    它已传送到那, 位置改绑.
+        pend = self.state.get("mt_pending")
+        if (not unknown and pend and pend.get("do") == "portal" and pend.get("team") in pos
+                and tuple(l) != tuple(pend.get("from") or ()) and tuple(l) != tuple(pend.get("target") or ())):
+            prev = self.state.get("mt_portal_land_prev")
+            self.state["mt_portal_land_prev"] = list(l)
+            if prev is not None and tuple(prev) == tuple(l):
+                T = pend["team"]
+                pos[T] = list(l)
+                pend["landed"] = list(l)
+                self.log(f"队 {T}(传送中) 箭头连续两帧落在已知队之外的格 {l} = 已传送到那, 位置改绑")
+                return T, l
+        else:
+            self.state["mt_portal_land_prev"] = None
         return None, l
 
     def mt_walk_step(self, obs: Observation, st, plan, cs, dx, dy) -> Action:
@@ -724,11 +752,14 @@ class GridMultiMixin:
                 self.state["mt_ai"] = ai
                 # 动作被消费后游戏还要放完移动动画、自己把焦点切给下一队、相机再平移(实测 1-2s);
                 #    这段时间里读到的焦点是过渡态, 拿它去点药丸会把游戏刚切好的焦点又翻回去(09-05 第 7 次 live)。
-                self.state["mt_settle_until"] = time.time() + 4.0
+                # 踩过敌人的一发: SKIP 战斗结束后还有约 3s 的 S VICTORY 横幅(PHASE 在、无加载中, 空闲闸拦不住, v21 没这横幅的类),
+                #    横幅期间点击被吞, 之后游戏才切焦点、平移相机(11-3 第 5 跑: 4s 就发, 传送格那一发丢在横幅里) -> 多等 5s
+                self.state["mt_settle_until"] = time.time() + (9.0 if pend.get("battle") else 4.0)
                 if ai >= len(acts):
                     return self._mt_round_issued(acts)
                 return wait(f"动作 {ai}/{len(acts)} 已确认, 下一动作(先等 4s 让游戏切焦点/相机停稳)")
-            if time.time() - float(pend.get("t", 0)) > (10.0 if pend["do"] != "exchange" else 6.0):
+            # 传送: 确认框 + 传送动画 + (最后一发时)敌方回合都在这一发之后, 证据来得晚, 给 25s
+            if time.time() - float(pend.get("t", 0)) > (25.0 if pend["do"] == "portal" else (10.0 if pend["do"] != "exchange" else 6.0)):
                 n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")
                 if n > 3:
                     return self.finish(Outcome.UNKNOWN,
@@ -919,6 +950,12 @@ class GridMultiMixin:
         if do == "exchange":
             # 换位不消耗行动: 焦点仍在本队, 箭头落到友军原来的格 = 换成了
             return pend.get("stage") == 2 and focus_lat == tgt
+        if do == "portal":
+            if pend.get("landed") and focus == pend["team"]:
+                return True                 # 传送落点已由箭头绑到(_mt_focus), 传送成立
+            frm = tuple(pend.get("from") or ())
+            if pend.get("dialog_seen") and not (focus == pend["team"] and focus_lat == frm):
+                return True                 # 「是否移動該部隊？」框见过(通用处理器点了確認)且箭头不在原位 = 传送成立
         if do == "move" and focus_lat is not None and focus_lat == tgt:
             return True                     # 箭头已在目标格(只剩它一队时焦点不切, 它已站过去)
         if focus is not None and focus != pend["team"]:
@@ -936,7 +973,8 @@ class GridMultiMixin:
         if do == "move":
             pos[team] = list(pend["target"])
         elif do == "portal":
-            pos[team] = None
+            pos[team] = list(pend["landed"]) if pend.get("landed") else None   # 落点绑到了就用, 否则等再被聚焦时绑回
+            self.state["mt_portal_land_prev"] = None
         elif do == "exchange":
             other = pend["other"]
             pos[team], pos[other] = list(pend["target"]), list(pend["from"])
@@ -988,7 +1026,7 @@ class GridMultiMixin:
                     self.state["mt_ai"] = int(pend["ai"]) + 1
                     self.state["mt_settle_until"] = time.time() + 2.5
             pend = self.state.get("mt_pending")
-            if pend and time.time() - float(pend.get("t", 0)) > 10.0:
+            if pend and time.time() - float(pend.get("t", 0)) > (25.0 if pend.get("do") == "portal" else 10.0):
                 # 最后一发没被游戏收下(09-05 第 8 次 live: B 的落子发了, 回合資訊仍是 1, flow 干等到相位上限):
                 #    和非最后一发同样有界重发 -- 收回 issued, 让 mt_walk_step 按原 ai 再发一次。
                 n = self.bump(f"mt_reissue:{self.state['round_i']}:{pend['ai']}")

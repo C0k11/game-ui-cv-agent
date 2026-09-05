@@ -289,6 +289,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
     #    锁定**不用**战斗那套 ReID -- 格子不动, 位置累积就够; 单位离散跳格,
     #    每步重新按「正下方」绑格, 没有连续跟踪问题。
     def observe(self, obs, st) -> None:
+        self._mt_observe(obs, st)      # 多队: 传送确认框只在 overlay 帧上, step 看不到, 在这里记
         # 战斗计数按**页面事实的边沿**记（battle -> 非battle 记一场）。
         #    旧版把计数挂在 battle_result 里点確認那一发的 post 上 --
         #    结算被 overlay/确认链吃掉就没路过那分支, 2-1 首通报了"战斗 0 场"

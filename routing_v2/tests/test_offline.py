@@ -4898,6 +4898,52 @@ def t_grid_multi_0905():
         if fl.state.get("mt_pos", {}).get("A") is not None:
             break
     check("位置未知的队按箭头绑回 (8,0)", fl.state.get("mt_pos", {}).get("A") == [8, 0], str(fl.state.get("mt_pos")))
+    # 11-3 第 5 跑: 最后一个行动的队踩传送格 -> 传送后没有别的队可切, 焦点不离开它; 相位循环没抓到, 新回合箭头在它头上的
+    #    **新位置** -- 箭头连续两帧落在所有已知队之外的格 = 已传送到那(位置改绑), 传送成立
+    fl.state.update(issued=False, mt_pending=None, mt_ai=1, mt_need_end=False, cycling=False, round_i=0, mt_settle_until=0, mt_focus_prev=None)
+    fl.state["mt_pos"] = {"A": [1, 1], "B": [4, -2]}
+    fl.state["mt_acted"] = ["A"]
+    fl.state["answer"] = dict(fl.state["answer"], rounds=[[{"team": "A", "do": "move", "dir": "right-down"},
+                                                         {"team": "B", "do": "portal", "dir": "right-down"}]])
+    pl = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.500, 0.19))
+    a = None
+    for _ in range(14):
+        a = fl.decide(pl, Machine(1).update(pl))
+        if a is not None and a.kind == "tap":
+            break
+    check("最后一发 portal: 点 B 右下的传送格 (0.546,0.483)",
+          a is not None and a.kind == "tap" and abs(a.x - 0.546) < 0.01 and abs(a.y - 0.483) < 0.01, str(a))
+    a.post()
+    check("portal 发出后 issued + pending", bool(fl.state.get("issued")) and (fl.state.get("mt_pending") or {}).get("do") == "portal", str(fl.state.get("mt_pending")))
+    land = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928), arrow(0.688, 0.42))
+    for _ in range(8):
+        fl.decide(land, Machine(1).update(land))
+        if fl.state.get("mt_pending") is None:
+            break
+    check("箭头两帧落在已知队之外的 (8,0) -> B 传送落点改绑 (8,0), 动作记消费",
+          fl.state.get("mt_pos", {}).get("B") == [8, 0] and fl.state.get("mt_pending") is None and fl.state.get("mt_ai") == 2,
+          f"{fl.state.get('mt_pos')} pend={fl.state.get('mt_pending')} ai={fl.state.get('mt_ai')}")
+    # 传送确认框「通知 / 是否移動該部隊？」只在 overlay 帧上(通用处理器点 確認), observe 记"见过" = 那一发被收下
+    fl.state.update(issued=False, mt_pending=None, mt_ai=1, mt_need_end=False, cycling=False, mt_settle_until=0, mt_focus_prev=None)
+    fl.state["mt_pos"] = {"A": [1, 1], "B": [4, -2]}
+    fl.state["mt_acted"] = ["A"]
+    a = None
+    for _ in range(14):
+        a = fl.decide(pl, Machine(1).update(pl))
+        if a is not None and a.kind == "tap":
+            break
+    a.post()
+    dlg = O(B(V.CONFIRM, cx=0.598, cy=0.918), B(V.CANCEL, cx=0.40, cy=0.918))
+    fl.observe(dlg, Machine(1).update(dlg))
+    check("overlay 帧上见到确认框 -> pending 记 dialog_seen", (fl.state.get("mt_pending") or {}).get("dialog_seen") is True, str(fl.state.get("mt_pending")))
+    noarr = O(*[cellB(x, y) for x, y in cells], startB(0.313, 0.599, V.GRID_START_GREY), B(V.PHASE_END, cx=0.915, cy=0.928))
+    for _ in range(8):
+        fl.decide(noarr, Machine(1).update(noarr))
+        if fl.state.get("mt_pending") is None:
+            break
+    check("确认框见过 + 箭头不在 B 原位 -> 传送成立, B 位置置未知等绑回",
+          fl.state.get("mt_pending") is None and fl.state.get("mt_pos", {}).get("B") is None and fl.state.get("mt_ai") == 2,
+          f"{fl.state.get('mt_pos')} pend={fl.state.get('mt_pending')}")
     fl4 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     fl4.goto("grid")
     fl4.state.update(mt_map=mp, mt_deployed=["B"])
