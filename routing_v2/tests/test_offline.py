@@ -4952,6 +4952,11 @@ def t_grid_multi_0905():
     pan = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.CLOSE_X, cx=0.955, cy=0.139), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226))
     a = flg.decide(pan, Machine(1).update(pan))
     check("預設面板开着(子链在跑) -> 不被'有叉叉无部署控件'守卫叉掉", not (a is not None and a.target_cls == V.CLOSE_X and "盖住" in a.reason), str(a))
+    fls = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
+    class _SVp:
+        page = "preset_panel"; frames_in_page = 5; last_solid = "formation"; overlay = None; changed = False; flapping = False
+    a = fls.decide(pan, _SVp())
+    check("进程重开时残留預設面板(无子链) -> enter 相位直接叉掉", a is not None and a.target_cls == V.CLOSE_X and "残留" in a.reason, str(a))
     fl8 = ALL["campaign"](Ctx(cfg=_c, log=lambda m: None))
     info = O(B(V.CONFIRM, cx=0.678, cy=0.822), B(V.CLOSE_X, cx=0.778, cy=0.138), B("体力", cx=0.441, cy=0.032))
     class _SVi:

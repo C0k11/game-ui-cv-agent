@@ -150,6 +150,12 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
         saved = self.state.get("phase")
         if saved and saved in self.phases and not self.phase:
             self.goto(saved, "续上相位")
+        # 残留的預設面板(上一进程套預設中途断掉, 09-05 live: enter 相位对着它干等 4001 tick): 不是本轮子链开的就叉掉。
+        #    預設面板是页面不是 overlay, 相位分派下 on_preset_panel 不会被调, 只能在这里接。
+        if obs.has(V.PRESET_TITLE, 0.40) and not self.state.get("preset_want"):
+            x = obs.find(V.CLOSE_X, 0.55)
+            if x is not None:
+                return tap_box(x, "残留的預設面板(不是本轮开的) -- 叉掉", expect_gone=(V.PRESET_TITLE,))
         return None
 
     def finish(self, outcome: str, why: str = ""):
