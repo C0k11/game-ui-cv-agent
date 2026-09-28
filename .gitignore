@@ -183,3 +183,10 @@ routing_v2/_*.jpg
 routing_v2/_*.png
 
 # dHash 对账缓存与切出来的干净 val, 都在 ml_cache 下, 不入库
+
+# ui_v3 金标帧与复核副本(图片数据, 本地保留), 不入库
+/data/gold_v3*/
+/data/ui_v3_old/
+
+# 本地编辑器配置, 不入库
+.cursor/
