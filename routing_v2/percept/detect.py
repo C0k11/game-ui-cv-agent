@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -106,6 +107,22 @@ def resolve(model_key: str) -> Path:
     return path
 
 
+# 推理设备: 默认交给 ultralytics(有 CUDA 就 0 号卡)。DETECT_DEVICE=cpu 可强制 CPU;
+#    CUDA 报错(09-07 实锤: 4090 显存 ECC 不可纠正错误, 任何 CUDA 调用都失败)时
+#    本进程自动改 CPU 重试一次并记一行, 之后一直 CPU —— 检测器不能因为卡坏了就
+#    静默返回 0 框(那会让每条 flow 都当"页面认不出"空转)。
+_device = os.environ.get("DETECT_DEVICE") or None
+_cuda_dead = False
+
+
+def _dev_kw() -> dict:
+    return {"device": _device} if _device else {}
+
+
+def _cuda_fail(e: Exception) -> bool:
+    return "CUDA" in str(e) or "cuda" in str(e).lower()
+
+
 def load(tag: str = "ui"):
     """按 tag 载模型（进程内单例）。tag: ui / avatar / battle / emoticon。"""
     key = {"ui": "ui", "avatar": "fused_avatar",
@@ -113,6 +130,7 @@ def load(tag: str = "ui"):
     with _lock:
         if tag not in _models:
             from ultralytics import YOLO
+            _probe_cuda()
             path = resolve(key)
             m = YOLO(str(path))
             _models[tag] = m
@@ -135,9 +153,10 @@ def warm(tags=("ui",)):
         m = load(t)
         try:
             m(np.zeros((640, 640, 3), dtype=np.uint8),
-              conf=0.5, imgsz=_IMGSZ.get(t, 960), verbose=False)
-        except Exception:
-            pass
+              conf=0.5, imgsz=_IMGSZ.get(t, 960), verbose=False, **_dev_kw())
+        except Exception as e:
+            if _cuda_fail(e):
+                _fall_to_cpu(e)
 
 
 def infer(frame, tags=("ui",), conf_override: Optional[float] = None) -> List[Box]:
@@ -151,10 +170,23 @@ def infer(frame, tags=("ui",), conf_override: Optional[float] = None) -> List[Bo
         m = load(tag)
         c = conf_override if conf_override is not None else _CONF.get(tag, 0.25)
         try:
-            res = m(frame, conf=c, imgsz=_IMGSZ.get(tag, 960), verbose=False)
+            res = m(frame, conf=c, imgsz=_IMGSZ.get(tag, 960), verbose=False, **_dev_kw())
         except Exception as e:
-            print(f"[detect] {tag} 推理失败: {e}", flush=True)
-            continue
+            if _cuda_fail(e) and not _cuda_dead:
+                _fall_to_cpu(e)
+                try:
+                    try:
+                        m.to("cpu")          # 权重已经搬上坏卡的话要先搬回来
+                    except Exception:
+                        pass
+                    res = m(frame, conf=c, imgsz=_IMGSZ.get(tag, 960), verbose=False,
+                            **_dev_kw())
+                except Exception as e2:
+                    print(f"[detect] {tag} CPU 重试也失败: {e2}", flush=True)
+                    continue
+            else:
+                print(f"[detect] {tag} 推理失败: {e}", flush=True)
+                continue
         table = _names.get(tag) or {}
         for r in res:
             for b in r.boxes:
@@ -168,6 +200,49 @@ def infer(frame, tags=("ui",), conf_override: Optional[float] = None) -> List[Bo
                                x1=x1 / w, y1=y1 / h, x2=x2 / w, y2=y2 / h,
                                model=tag))
     return out
+
+
+_probed = False
+
+
+def _cap_cpu_threads() -> None:
+    """CPU 推理别把 32 线程全吃光: 09-07 实测满线程时 scrcpy 解码线程饿死,
+    feed 反复报「codec 孤儿 零解码」重启, 整条 flow 卡住。默认留一半核给解码/OCR,
+    DETECT_CPU_THREADS 可改。"""
+    try:
+        import torch
+        n = int(os.environ.get("DETECT_CPU_THREADS") or max(4, (os.cpu_count() or 16) // 3))
+        torch.set_num_threads(n)
+        print(f"[detect] CPU 推理线程数 {n}", flush=True)
+    except Exception:
+        pass
+
+
+def _probe_cuda() -> None:
+    """载模型前先摸一下 CUDA(一次): 坏卡上第一次推理会把进程里的 CUDA 上下文
+    弄脏, 之后 m.to("cpu") 重试也照样报 ECC 错(09-07 实测); 提前探到就直接 CPU。"""
+    global _probed, _device
+    if _probed or _device:
+        if not _probed and _device == "cpu":
+            _cap_cpu_threads()
+        _probed = True
+        return
+    _probed = True
+    try:
+        import torch
+        if torch.cuda.is_available():
+            (torch.ones(2, device="cuda") * 2).sum().item()
+    except Exception as e:
+        _fall_to_cpu(e)
+
+
+def _fall_to_cpu(e: Exception) -> None:
+    global _device, _cuda_dead
+    _cuda_dead = True
+    _device = "cpu"
+    _cap_cpu_threads()
+    print(f"[detect] CUDA 挂了({str(e).splitlines()[0][:80]}) -- 本进程改 CPU 推理, 会慢",
+          flush=True)
 
 
 def stats() -> dict:
