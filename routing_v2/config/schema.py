@@ -24,7 +24,7 @@ DEFAULTS: Dict[str, Any] = {
 
     #  账号（台账分桶键）
     # 08-15 复盘: event_topped/daybook/课程表房间账/ledger 过去全挤在同一批
-    #    文件里, 键只有游戏日/倒数第几关 —— 大小号换着跑会互相把「今天做过/
+    #    文件里, 键只有游戏日/倒数第几关 -- 大小号换着跑会互相把「今天做过/
     #    本期顶过」当成自己的账（ledger_20260813.jsonl 里 05:48 大号 59M,
     #    08:49 小号 35,544, 同一份文件）。空 = 拒绝开跑（fail-closed）。
     "account": {"id": ""},
@@ -42,8 +42,8 @@ DEFAULTS: Dict[str, Any] = {
         "arena": True,
         "mail": True,
         "daily_mission": True,
-        "story_mining": False,     # 剧情挖矿 —— 默认关，前端按钮开
-        "momotalk": False,         # MomoTalk 好感度 —— 默认关，前端按钮开
+        "story_mining": False,     # 剧情挖矿 -- 默认关，前端按钮开
+        "momotalk": False,         # MomoTalk 好感度 -- 默认关，前端按钮开
         "campaign": False,         # 任務推图：默认关，要推哪几关见 campaign.stages
         "batch_sweep": False,
         "special_sweep": False,
@@ -57,7 +57,7 @@ DEFAULTS: Dict[str, Any] = {
               "momotalk", "story_mining"],
 
     #  AP 怎么分（用户点名）
-    # 用户原话：「有活动刷活动，但我认为可以给 user 选择 —— 都刷活动，还是
+    # 用户原话：「有活动刷活动，但我认为可以给 user 选择 -- 都刷活动，还是
     #            都刷双三倍的地方，还是分配百分比体力」
     # 三种意图都用**同一个百分比表**表达，不需要额外的模式枚举：
     #     都刷活动      {"event": 100}
@@ -86,7 +86,7 @@ DEFAULTS: Dict[str, Any] = {
     },
 
     #  学院交流会
-    # 三个学院都有 cls（三一/千年/格黑娜，各 84 train）—— 顺序即优先级
+    # 三个学院都有 cls（三一/千年/格黑娜，各 84 train）-- 顺序即优先级
     "jfd": {
         "academies": ["千年", "三一", "格黑娜"],
         "difficulty": "highest",
@@ -105,7 +105,7 @@ DEFAULTS: Dict[str, Any] = {
         "clear_preset": None,
         "order": "clear_then_bonus",   # 先 Q1Qn 通关，再打加成
         "shop_plan_before_bonus": True,  # 先商店推算定缺哪种币，再按币种编队
-        # ⚠ farm_stages 是**死配置**: schema 里标着"旧表", 但 `flow/event.py`
+        # 注意: farm_stages 是**死配置**: schema 里标着"旧表", 但 `flow/event.py`
         #    从来没读过它(2026-08-26 全仓 grep 确认)。用户以为配了就生效,
         #    实际打哪关一直是商店币档推算出来的。留着只是不想动老前端的表单,
         #    真正生效的是下面两个。
@@ -253,7 +253,7 @@ DEFAULTS: Dict[str, Any] = {
         "max_minutes_per_flow": 15,
         "save_frames": True,           # 落干净帧（飞轮素材，常开）
         "unknown_escape": True,        # 长时间 UNKNOWN 时允许温和逃生
-        "allow_home_escape": False,    # 回大厅当兜底 —— 默认关，见 §A1
+        "allow_home_escape": False,    # 回大厅当兜底 -- 默认关，见 §A1
     },
 
     # 国际服新皮: 任务大厅入口大厅稳帧过不了 0.45。
@@ -576,7 +576,7 @@ def data_dir(cfg: dict) -> Path:
     aid = str(((cfg or {}).get("account") or {}).get("id") or "").strip()
     if not aid or any(c in aid for c in "\\/:*?\"<>|"):
         raise ValueError(
-            "profile.json 缺 account.id（台账分桶键）— 拒绝开跑: "
+            "profile.json 缺 account.id（台账分桶键）- 拒绝开跑: "
             "大小号共用台账会互相把「今天做过/本期顶过」当成自己的账")
     p = DATA_ROOT / aid
     p.mkdir(parents=True, exist_ok=True)
@@ -590,13 +590,13 @@ def load(path: Path | str | None = None) -> dict:
         try:
             user = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            print(f"[config] profile 解析失败({e}) — 用默认值，不静默带病跑",
+            print(f"[config] profile 解析失败({e}) - 用默认值，不静默带病跑",
                   flush=True)
     return merged(user)
 
 
 # mojibake 自检（2026-08-10 实伤）：UTF-8 的中文被按 Latin-1/GBK 解一遍后，
-#    会变成 `æå®¤`（教室）这种串 —— 特征是**大量 U+00C0~U+00FF 的拉丁补充字符**。
+#    会变成 `æå®¤`（教室）这种串 -- 特征是**大量 U+00C0~U+00FF 的拉丁补充字符**。
 #    一旦写进 profile，`bounty.branches` 之类就永远匹配不上屏上的 cls，
 #    而且**不报错、不停机，只是那条 flow 静默选不中分支**。属于「静默失败」族，
 #    最难查，所以在唯一的写盘口拦住。
@@ -608,7 +608,7 @@ def _mojibake(node) -> list:
     bad = []
     if isinstance(node, str):
         n = sum(1 for ch in node if ord(ch) in _MOJI)
-        # 两个以上拉丁补充字符连出现，且没有正常 CJK —— 正常中文配置不会这样
+        # 两个以上拉丁补充字符连出现，且没有正常 CJK -- 正常中文配置不会这样
         if n >= 2 and not any("一" <= ch <= "鿿" for ch in node):
             bad.append(node)
     elif isinstance(node, dict):
@@ -627,7 +627,7 @@ def save(cfg: dict, path: Path | str | None = None) -> Path:
         raise ValueError(
             "配置里有乱码字符串，拒绝写盘（写进去会让 flow 静默选不中分支）：\n  "
             + "\n  ".join(sorted(set(bad))[:8])
-            + "\n八成是客户端按错误编码读写了 JSON —— 请用 UTF-8 重发。")
+            + "\n八成是客户端按错误编码读写了 JSON -- 请用 UTF-8 重发。")
     p = Path(path or PROFILE)
     p.parent.mkdir(parents=True, exist_ok=True)
     out = copy.deepcopy(cfg)

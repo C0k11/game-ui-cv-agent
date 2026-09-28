@@ -1048,7 +1048,7 @@ TRAIN_CONFIGS = {
         # 过拟合 (v6b 实锤: UI val 0.892 高 / live 崩, 咖啡厅入口 val>0.9 live 仅 0.25)。头像
         # synth (_fused_synth_remap) 保留 (影响小)。synth:real 2.03~0.89。同 v6b 参数
         # (lr0 0.0015 护头像 / mosaic 0.3 / close_mosaic 5 / patience 40 / from fused v4 重来)。
-        # ️ 训前必须重建 ui_v2 (build_ui_v2 已砍 _synth_ui_swap)。UI 弱类暂靠 skill 兜底, v7 飞轮补。
+        #  训前必须重建 ui_v2 (build_ui_v2 已砍 _synth_ui_swap)。UI 弱类暂靠 skill 兜底, v7 飞轮补。
         "kind": "detect",
         "data": YOLO_ROOT / "dataset" / "ui_v2" / "data.yaml",
         "base": str(YOLO_ROOT / "runs" / "fused_avatar_yolo26x_v4" / "weights" / "best_manual.pt"),

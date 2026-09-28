@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Move EMPTY-label frames (0 boxes) out of prefill pools (user 2026-06-13:
 挂机立绘模式没有任何UI的frame可以删). A frame whose v9 prefill found nothing is
-either the idle-showcase 立绘 screen or a capture glitch — zero training value
+either the idle-showcase 立绘 screen or a capture glitch - zero training value
 for the UI classes. Moved (not hard-deleted) to data/_empty_frames_backup/<pool>/
 so it's recoverable.
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""票券扫荡型的公共骨架 —— 悬赏通缉 / 学院交流会共用。
+"""票券扫荡型的公共骨架 -- 悬赏通缉 / 学院交流会共用。
 
 流程（全部 live 验过）:
   大厅  任务大厅  tile  **分支选择（动态扫 cls）**  关卡列表（滑到底）
@@ -9,7 +9,7 @@
   · **屏上票数是唯一权威**，台账只在读不出时兜底
     （老代码用台账当上限，7/7 满票只派 4 次就触顶，浪费 3 张）
   · **读不出 = fail-closed 不出击**；但 fail-closed 只挡得住 None，
-    **挡不住"读大"** —— 零票被读成 9 票那次就是这么弃掉 6 张票的。
+    **挡不住"读大"** -- 零票被读成 9 票那次就是这么弃掉 6 张票的。
     所以还要看"扫荡开始"变没变灰 + 結算後票数有没有真的减少。
   · **绝不买票**（票不够就收工）。
 
@@ -175,7 +175,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                                    f"（期望 {list(self.branch_cls)}）")
             return wait("等分支 cls")
         # 2026-08-12 用户 live 抓到「同时点了三一和千年」。根因：
-        #    `opts` 只收**这一帧检出到的**分支，而 `branch_i` 是**位置索引** ——
+        #    `opts` 只收**这一帧检出到的**分支，而 `branch_i` 是**位置索引** --
         #    某帧「千年」漏检  opts=[三一,格黑娜]  opts[0] 是三一  点三一；
         #    下一帧千年又检出来了  opts[0] 变回千年  再点千年。
         #    **同一个 i 在不同帧指向不同分支**  一口气点掉两个学院。
@@ -216,7 +216,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         # 换分支**必须真的走回去**，不能只把索引加一（2026-08-12 体外复现）:
         #    原来 `_next_branch_or_done` 只 `branch_i += 1` 然后 return wait，
         #    而 wait 不产生任何动作、页面身份不变，于是**同一个判据下一 tick
-        #    原样再成立** —— 实测 tick61/62/63 连着把 branch_i 推到 3 收工，
+        #    原样再成立** -- 实测 tick61/62/63 连着把 branch_i 推到 3 收工，
         #    日志连打三行「换下一个分支」，屏幕从头到尾停在第一个学院的关卡列表，
         #    千年/格黑娜一张票没打就报了结果。
         #    （用户 08-12:「学园交流会也有黄点说明之前也没打好」的另一半原因。）
@@ -232,7 +232,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 self.log(f"票数 {tix}（屏上读出，唯一权威）")
             self.state["tickets"] = tix
             # 分支配额：用**票数差**算已用几张（数事实，不用计数器）。
-            #   基线在进这个分支的列表页第一次读到票时落 —— 纯观测，可在 decide 期记。
+            #   基线在进这个分支的列表页第一次读到票时落 -- 纯观测，可在 decide 期记。
             bn = str(self.state.get("branch_name") or "")
             if self.state.get("branch_tix0") is None:
                 self.state["branch_tix0"] = tix
@@ -252,14 +252,14 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                 if self.cfg.get("use_tickets") == "keep_n" else 0
             if tix <= keep:
                 return self._next_branch_or_done(
-                    f"票用完了（剩 {tix}，保留线 {keep}）— 绝不买票",
+                    f"票用完了（剩 {tix}，保留线 {keep}）- 绝不买票",
                     terminal=True)
 
         enters = obs.all(V.STAGE_ENTER, 0.45, region=STAGE_PANEL)
         if not enters:
             # "没关可打"必须连续 60 tick 成立（§A3 内容层，见 flow/base.hold）
             if not self.hold("no_enter", 60):
-                return wait("这一帧没看到入场键 — 连续确认中，别被过渡帧骗了")
+                return wait("这一帧没看到入场键 - 连续确认中，别被过渡帧骗了")
             if obs.has(V.STAGE_ENTER_LOCKED, 0.45, region=STAGE_PANEL):
                 return self._next_branch_or_done("这个分支只有锁着的关")
             if tix is None:
@@ -277,14 +277,14 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         #      **就是**最高难度。之前那段「滑到底」的代码才是第 9 关的真凶：
         #      滑动把列表滑过头/滑歪，反而离开了正确位置
         #      （用户实测 bounty 扫到了第 9 关而不是最后一关）。
-        #    我第一版把滑动次数上限从 8 提到 25，方向完全错了 —— 那是让它
+        #    我第一版把滑动次数上限从 8 提到 25，方向完全错了 -- 那是让它
         #      **滑得更多**，而正解是**一次都不滑**。memory 早记过这条
         #      「用户纠正死滑动路由（新活动游戏会自动归位下一关）」，我又犯了一次。
         #    例外与"什么时候才真的该滑"（用户 2026-08-12 补全的完整规则）:
         #      · **商店 / 活动商店**：进去**永远停在最上面**  要看下面的货架必须滑。
         #        （这两处的 swipe 在 `event_shop.py` / `facilities.py`，不在本 flow。）
         #      · **关卡列表**：只有在「**已经清到最后面了、却要回头打前面的关**」时
-        #        才需要往回滑；触发条件是 —— **目标关号没找到 / 屏上所见的关号比
+        #        才需要往回滑；触发条件是 -- **目标关号没找到 / 屏上所见的关号比
         #        目标大 / 关号被截断**。
         #         也就是说，滑动必须由「**读到的关号和目标对不上**」驱动，
         #          而不是由"我猜列表还没到底"驱动。
@@ -293,12 +293,12 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         #        而它恰好**永远不需要滑**（屏上最低那个就是最难）。
         #      将来做 `fixed_stage`（指定打第几关）时才需要实现"按关号回滑"，
         #        届时关号读法见 memory：关号 `2-3` **整列读**可行、单裁必 None。
-        #    **滑歪了怎么复位 —— 退出去重进，别接着滑**（用户 2026-08-12）:
+        #    **滑歪了怎么复位 -- 退出去重进，别接着滑**（用户 2026-08-12）:
         #      原话「即使你往回滑动了，**退出去重新进活动又会给你把该账号打到的
         #      最后关卡显示给你**」。 列表位置是游戏自己维护的，重进即归位。
         #      这也是为什么"滑到底"这套逻辑从根上就是多余的：**想要的位置本来
         #      就是默认位置**，任何滑动都只会让它偏离，而偏离后的正解是重进
-        #      （一次导航），不是再滑回去（多次盲滑，还会污染 OCR 读数 ——
+        #      （一次导航），不是再滑回去（多次盲滑，还会污染 OCR 读数 --
         #      08-12 实测删掉滑动后，票数从假的 `6` 变成真值 `0`）。
         if self.cfg.get("difficulty", "highest") == "highest":
             target = max(enters, key=lambda b: b.cy)   # 屏上最低 = 最高难度
@@ -315,17 +315,17 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
             return (self.exit_step(obs, prefer_close=False)
                     or wait("换分支: 先关掉这个面板"))
         # AP 闸（JFD 那类要 AP 的）。游戏自己会把 MAX 钳到付得起的次数，
-        # 所以只要够一次就可以放心 MAX —— 老代码那道
+        # 所以只要够一次就可以放心 MAX -- 老代码那道
         # `ap ≥ 票数×每次AP` 的闸会在票多 AP 少时退化成"只扫 1 次"。
         if self.costs_ap and self.once("apcheck"):
             ap = R.read_topbar(obs, R.AP)
             if ap is not None and ap < self.ap_per_sweep:
                 return self._next_branch_or_done(
-                    f"AP {ap} < 一次扫荡 {self.ap_per_sweep} — 收工（绝不买 AP）",
+                    f"AP {ap} < 一次扫荡 {self.ap_per_sweep} - 收工（绝不买 AP）",
                     terminal=True)
 
         # 没票守卫：**数量步进整行全灰**（减号灰+加号灰、行内无亮态）= 票 0。
-        #    08-08 实测：MAX 排干 6 票回到面板，flow 还想再扫 —— 0 票按下去
+        #    08-08 实测：MAX 排干 6 票回到面板，flow 还想再扫 -- 0 票按下去
         #    游戏会弹**用青辉石买票**的框。加号/减号必须按行配对看（顶栏的
         #    加号永远是亮的，全屏 has() 会误判）。
         mg = obs.find(V.QTY_MINUS_GREY, 0.45)
@@ -334,7 +334,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
             if (obs.has(V.PLUS_GREY, 0.45, region=row)
                     and not obs.has(V.QTY_MINUS, 0.45, region=row)
                     and not obs.has(V.PLUS, 0.45, region=row)):
-                # 步进锁死 = 票 0，这是**屏上事实**，记进台账 —— 不记的话
+                # 步进锁死 = 票 0，这是**屏上事实**，记进台账 -- 不记的话
                 # 收尾会拿扫荡前的旧票数报"还剩 N 张没花"（08-09 帧证：
                 # 数量 0 / 票预览 0- / AP 已扣，报告却说 票 66 LEFTOVER）
                 self.state["tickets"] = 0
@@ -343,7 +343,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
                     return tap_box(x, "步进器整行全灰 = 没票可扫  关面板",
                                    once="noticket_x")
                 return self._next_branch_or_done(
-                    "数量步进全灰 — 没票可扫了", terminal=True)
+                    "数量步进全灰 - 没票可扫了", terminal=True)
 
         # 上一发扫荡确认后的结算过渡帧上步进器还是旧渲染(08-29 实锤:
         #    bounty/jfd 双双读到"数量 1"点出去、下一帧又按 6 补一发 --
@@ -352,7 +352,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         cd = int(self.state.get("sweep_cd", 0) or 0)
         if cd > 0:
             self.state["sweep_cd"] = cd - 1
-            return wait("上一发扫荡刚确认 — 等结算刷新(%d)" % cd)
+            return wait("上一发扫荡刚确认 - 等结算刷新(%d)" % cd)
         mx = qty_max_ok(obs, 0.20)
         if mx is not None and self.pending("maxed"):
             return tap_box(mx, "数量拉 MAX（游戏会自己钳到付得起的次数）",
@@ -365,7 +365,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         if go is not None:
             # 数量闸（2026-08-11 特殊任務实帧逼出来的）：数量 **0** 时
             #    「掃蕩開始」**照样是亮的**（conf 0.986，不是灰态），点下去游戏
-            #    弹「購買AP 30」—— 正是 30 青辉石那次近失的入口。
+            #    弹「購買AP 30」-- 正是 30 青辉石那次近失的入口。
             #    上面那道「步进器整行全灰」在 AP 流上**分不开 0 和 1**
             #    （数量到上限 1 时 MIN/−/+/MAX 同样全灰） 必须读那个数。
             #    **只做加法**：读出 0 才拦；读不出(None)退回原有行为，
@@ -374,26 +374,26 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
             if n == 0:
                 self.state["tickets"] = 0
                 return self._next_branch_or_done(
-                    "步进器数量读出来是 0 —— 一次也扫不了（掃蕩鍵亮着也不点，"
+                    "步进器数量读出来是 0 -- 一次也扫不了（掃蕩鍵亮着也不点，"
                     "点下去就是买 AP/买票的框）", terminal=True)
             # 数量连续两帧一致才按(08-29: MAX 后第一帧常是旧值 1);
             #    读不出保持原有放行口径不动 bounty/jfd 已走通的路。
             if n is not None:
                 if self.state.get("qty_seen") != n:
                     self.state["qty_seen"] = n
-                    return wait(f"扫荡数量读到 {n} — 等下一帧复核")
+                    return wait(f"扫荡数量读到 {n} - 等下一帧复核")
             self.once_reset("maxed", "apcheck")
             return tap_box(go, f"扫荡开始（数量 {n if n is not None else '?'}）",
                            post=lambda: self.state.update(sweep_cd=30,
                                                           qty_seen=None))
         if obs.has(V.TASK_START, 0.35):
             return self._next_branch_or_done(
-                "面板上只有『任務開始』没有扫荡键 — 这关不能扫（未三星？），"
+                "面板上只有『任務開始』没有扫荡键 - 这关不能扫（未三星？），"
                 "扫荡流不打真战斗")
 
         # 灰态的扫荡键 = 这一关现在扫不了
         if obs.has(V.CONFIRM_GREY, 0.45):
-            return self._next_branch_or_done("扫荡键是灰的 — 条件不满足")
+            return self._next_branch_or_done("扫荡键是灰的 - 条件不满足")
         if self.stalled(st, 90):
             return self._next_branch_or_done("任務資訊 里没有扫荡/开始键")
         return wait("任務資訊: 等扫荡键")
@@ -418,7 +418,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         """换下一个分支；`terminal=True` 表示这条理由对**所有分支**都成立。
 
         票是分支共用的（悬赏 1/6 总数、交流会同理），所以「票用完 / 票读不出 /
-           AP 不够」在别的分支上一样成立 —— 挨个走过去只是白跑三趟导航。
+           AP 不够」在别的分支上一样成立 -- 挨个走过去只是白跑三趟导航。
            只有「这个分支没关可打 / 只有锁着的关 / 这个分支配额用完」才该换。
         """
         if self.state.get("switching"):
@@ -426,7 +426,7 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         want = (self.cfg.get("branches") or self.cfg.get("academies")
                 or list(self._plan().keys()))
         self.state["branch_i"] += 1
-        # branch_tix0 必须跟着分支一起清 —— 不清的话下一个分支拿上一个的
+        # branch_tix0 必须跟着分支一起清 -- 不清的话下一个分支拿上一个的
         #   票基线算 used，配额会瞬间"用完"直接跳过。
         self.state.update(branch_name="", branch_tix0=None)
         self.once_reset("maxed", "apcheck")
@@ -464,19 +464,19 @@ class TicketSweepFlow(BattleMixin, ExitMixin, Flow):
         if t1 is None:
             return self.finish(Outcome.UNKNOWN, f"{why}；{det}（票数读不出，干没干净不确定）")
         # 2026-08-12 用户点名:「学园交流会**也有黄点**说明之前也没打好」。
-        #    当轮 jfd 报 `CLEAN: 没票可扫；扫荡 1 次, 票 60(用了 6)` ——
+        #    当轮 jfd 报 `CLEAN: 没票可扫；扫荡 1 次, 票 60(用了 6)` --
         #    **扫荡 1 次却说用掉 6 张票**，而任务大厅磁贴上黄点还在。
         #     票基线 `tickets0` 是读大来的假数（`0/6` 被读成 `6/6` 之类），
         #      收尾拿假基线算出"用了 6"，于是**没打的活被报成干净**。
         #    **两个独立观测互相打架时，不许挑一个当真相报 CLEAN**：
         #      `sweeps` 是数事实（tap 真发出去才 +1），票差值是 OCR 读的；
         #      差得离谱就说明票读数不可信  报 UNKNOWN，让它在报告里红着。
-        #    不用 `used > sweeps` 直接判——一次扫荡可能扣多张票（MAX 批量）。
+        #    不用 `used > sweeps` 直接判--一次扫荡可能扣多张票（MAX 批量）。
         #      只在**扫荡次数为 0 却"用掉"了票**这种硬矛盾上出声。
         if used is not None and used > 0 and int(self.state.get("sweeps", 0)) == 0:
             return self.finish(
                 Outcome.UNKNOWN,
-                f"{why}；{det} — 票差值说用了 {used} 张但**一次扫荡都没发出去**，"
+                f"{why}；{det} - 票差值说用了 {used} 张但**一次扫荡都没发出去**，"
                 f"票基线多半是读大的假数，这个分支到底打没打**不确定**")
         return self.finish(Outcome.CLEAN, f"{why}；{det}")
 

@@ -3,7 +3,7 @@
 Why: our val set is 29 manual + 450 synth + 19 negatives. The synth subset
 shares distribution with train synth (same templates, same char pool, same
 aug pipeline), so default Ultralytics .val() reports an inflated mAP50.
-The 29 manual frames are real game screenshots — they're the only signal
+The 29 manual frames are real game screenshots - they're the only signal
 that means anything for production.
 
 Usage:
@@ -109,7 +109,7 @@ def main() -> int:
 
     print()
     print("=" * 60)
-    print(f" Manual-only val (29 frames) — {weights_path.name}")
+    print(f" Manual-only val (29 frames) - {weights_path.name}")
     print("=" * 60)
     print(f"  mAP50    = {out['mAP50']:.4f}")
     print(f"  mAP50-95 = {out['mAP50_95']:.4f}")

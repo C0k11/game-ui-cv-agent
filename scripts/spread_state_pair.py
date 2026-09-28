@@ -2,7 +2,7 @@
 """两段式状态对扩散器: 模板定位 + 像素特征判亮/灰, 一次同时补两个 cls。
 
 为什么不能直接用 spread_template_label.py 扩散灰态(2026-08-02 实测定罪):
-`TM_CCOEFF_NORMED` 归一化时**减去均值**, 正好把亮度差消掉只匹配形状 —
+`TM_CCOEFF_NORMED` 归一化时**减去均值**, 正好把亮度差消掉只匹配形状 -
 而「購買」二字亮态灰态形状完全一样。实测样板帧 frame_000366: 亮态 103
 得分 0.9591, 比一半灰态(0.8623-0.8704)还高  单靠模板分**必然**把亮态
 污染成灰态。所以状态对必须两段式:
@@ -11,7 +11,7 @@
 
 判据在 806 个人审定稿框上标定: 灰 V≤143 / 亮 V≥167 (中间 24 点空隙),
 V<158 & B-R<83 二分 806/806 = 100%。**这组数值只对「購買」有效**,
-换按钮必须重新标定 — 「全部選擇」的灰比亮更亮(白底钮去饱和), 方向是反的。
+换按钮必须重新标定 - 「全部選擇」的灰比亮更亮(白底钮去饱和), 方向是反的。
 
 Usage:
   py -X utf8 scripts/spread_state_pair.py --bright-cls 103 --dark-cls 489 \
@@ -215,7 +215,7 @@ def main() -> None:
             txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"APPLIED {dict(n)}")
     else:
-        print("(dry — 审 sheet 后加 --apply)")
+        print("(dry - 审 sheet 后加 --apply)")
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ def main():
     labeled_b = sorted(n for n in combat if any(b[0] == BISHOP for b in frames[n]))
     tpl_b = [(n, next(b for b in frames[n] if b[0] == BISHOP)) for n in labeled_b]
     SCALE = 0.5
-    # 按连续已标段抽模板(段首/段中/段尾各一) — 均匀抽样会漏掉用户补的
+    # 按连续已标段抽模板(段首/段中/段尾各一) - 均匀抽样会漏掉用户补的
     # 小段新形态(boss 转阶段后模板对不上 = 上轮 p50 掉到 0.60 的根因)。
     segs = []
     for n, b in tpl_b:
@@ -218,7 +218,7 @@ def main():
     all_sp = [b for _, b in sp1 + sp3]
     if sp1 and sp3 and all_sp:
         med_sp = [0] + list(np.median(np.array([b[1:] for b in all_sp]), axis=0))
-        # 模板从"用户确认过的三倍速帧"没法自动知道 — 用两类各自 crop 的
+        # 模板从"用户确认过的三倍速帧"没法自动知道 - 用两类各自 crop 的
         # 聚类中心互相打分: 若两类模板本身高度相似 = 模型在乱分, 报告出来。
         t1 = [crop(read(n), med_sp) for n, _ in sp1[:: max(1, len(sp1) // 8)]]
         t3 = [crop(read(n), med_sp) for n, _ in sp3[:: max(1, len(sp3) // 8)]]

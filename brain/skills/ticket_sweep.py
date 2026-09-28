@@ -1,4 +1,4 @@
-"""TicketSweepSkill — shared base for 悬赏通缉(bounty) + 学院交流会(JFD).
+"""TicketSweepSkill - shared base for 悬赏通缉(bounty) + 学院交流会(JFD).
 
 Verified flow (interactive probe 2026-06-01, data/_missions_probe_log.md).
 bounty & JFD are isomorphic ("票券扫荡型"); this base captures the common flow
@@ -11,14 +11,14 @@ and subclasses fill in the ticket cls / hub tile / branch picker / AP cost.
    at the sweep-confirm dialog: if a 青辉石 icon sits in the dialog BODY
      (a buy dialog) OR the confirm is greyed (灰色确认 = insufficient)  CANCEL.
 Tickets are SHARED across branches (probe: 1/6 total), so one MAX sweep on a
-single branch drains them all — we pick ONE configured branch, no iteration.
+single branch drains them all - we pick ONE configured branch, no iteration.
 
 State machine
 ----
 enter        lobby  NAV_TASKS  hub  _HUB_TILE  on-page (ticket cls).
 ticket_check digit-OCR ticket X/Y. 0  exit. >0  branch.
 branch       subclass _click_branch() navigates to the configured branch's
-             stage list (bounty: cls tiles; JFD: position — no cls, v6 gap).
+             stage list (bounty: cls tiles; JFD: position - no cls, v6 gap).
 stage        find 入场键 in the right panel, swipe to the bottom (positions
              stabilize), click the lowest (= highest difficulty) 入场键.
 sortie       任務資訊 popup.  pyroxene-buy guard. If _COSTS_AP, gate on AP.
@@ -53,7 +53,7 @@ _DONE_CONFIRM_BAND = (0.30, 0.74, 0.70, 0.90)
 # OCR 抖动就够把整轮票判死; 单位口径见 BaseSkill.mark)
 _POST_SWEEP_READ_SEC = 6.0
 # tick-vs-墙钟家族(2026-07-28, agent 扫描 5 条全核实): zero-wait 后本文件
-# 各 tick 闸缩水 6-10 倍 — enter 22 tick 只剩 3.3-5.5s(一次稳定门阻塞 4s 就
+# 各 tick 闸缩水 6-10 倍 - enter 22 tick 只剩 3.3-5.5s(一次稳定门阻塞 4s 就
 # 吃光), 120 tick 总预算只剩 18-30s(JFD 8 轮单扫根本跑不完, 超时还不走 _exit
 # 把 bot 丢在模态上)。全部改「帧数 AND 墙钟」合取, ×1.6 年代等效, 不收窄:
 _SKILL_BUDGET_SEC = 180.0    # 旧 120 tick×1.6≈192s 口径
@@ -63,14 +63,14 @@ _STAGE_WAIT_SEC = 14.0       # 旧 10 tick×1.6
 _MAX_RENDER_SEC = 3.0        # 弹窗动画实测 1-2s; 超时后的固定位 MAX 兜底本身无害
 # A 青辉石 icon inside THIS band = a buy dialog (NOT the top-bar balance at cy<0.10).
 # Deep-dive C5 (2026-06-09): aligned to schedule's LIVE-VERIFIED region (icon
-# at cy≈0.577 > old 0.48 bound — same miss risk as arena C4).
+# at cy≈0.577 > old 0.48 bound - same miss risk as arena C4).
 _PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
 # Stage list lives in the right panel.
 _STAGE_PANEL = (0.58, 0.12, 1.0, 0.98)
 # 任務資訊 popup MAX button fixed pos (right of 加号; proven on special_sweep
 # 2026-06-15). Fallback when cls111 MAX_可点击 is missed  防只扫1票.
 _POS_TICKET_MAX = (0.84, 0.42)
-# Re-click the 入場键 this many times if 任務資訊 never opens (a dropped tap —
+# Re-click the 入場键 this many times if 任務資訊 never opens (a dropped tap -
 # root-fixed by AdbInput._IO_LOCK, but kept as self-healing so a single lost
 # enter never costs the whole sweep). Live 2026-06-15: swept 0, manual same-pos
 # tap opened it  tap was lost, not mis-aimed.
@@ -160,7 +160,7 @@ class TicketSweepSkill(BaseSkill):
             return ("UNKNOWN", "票数从未读出, 且 0 次扫荡")
         if getattr(self, "_post_sweep_unread", False):
             return ("UNKNOWN",
-                    f"扫了 {self._sweep_cycles} 轮, 但收尾时票数读不出 —— "
+                    f"扫了 {self._sweep_cycles} 轮, 但收尾时票数读不出 -- "
                     f"**不知道**是否扫光")
         if self._tickets is None:
             return ("UNKNOWN", f"扫了 {self._sweep_cycles} 轮, 票数未知")
@@ -186,32 +186,32 @@ class TicketSweepSkill(BaseSkill):
     # Counter strips, anchored on the YOLO ticket badge and measured in ICON
     # WIDTHS so they track the badge instead of hard-coded screen fractions.
     # 2026-07-27 全语料标定(579 帧, `scratchpad/tk_*.py`): the counter has TWO
-    # layouts and the old single strip only ever covered one of them —
+    # layouts and the old single strip only ever covered one of them -
     #   cy~0.14 分支页  「持有票券   X/Y」 4 字标签  数字在 4.19–5.39 iw
     #   cy~0.28 关卡列表「懸賞通緝票券 X/Y」6 字标签  数字在 6.12–7.31 iw
     # 多两个汉字就把数字推出了旧 strip 的右界(icon.x2+0.112)  **关卡列表页的
-    # 票数 0/211 帧读得出, 0.0%** —— 不是"这一次读不出", 是从来没读出来过。
+    # 票数 0/211 帧读得出, 0.0%** -- 不是"这一次读不出", 是从来没读出来过。
     _TICKET_WINDOWS = ((4.0, 6.4), (6.0, 8.4), (4.0, 8.0))
     # y 留白是真正的开关: 旧值 0.4*bh 让 DB 检测器在关卡列表页**整条返回空**
     # (同一张帧把上下留白放到 1.2*bh 立刻检出 '6/6' score 0.75)。加宽 x、放大、
-    # 拉对比度全部无效 —— 试过, 全线 None, 拉对比度还把本来能读的那条弄坏了。
+    # 拉对比度全部无效 -- 试过, 全线 None, 拉对比度还把本来能读的那条弄坏了。
     _TICKET_YPAD = 1.2
 
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """digit-OCR the 持有票券 X/Y next to the ticket icon.  money defense #1
         (0 tickets  never sortie  never the buy-pyroxene trap), so the read
-        must be robust — and "robust" cuts both ways: an over-read is worse than
+        must be robust - and "robust" cuts both ways: an over-read is worse than
         no read, because `tickets == 0  exit` is the SOURCE gate that keeps the
         buy-ticket dialog from ever appearing.
 
         2026-07-27 全语料实测(4K 帧 351 张 = live 口径, 低分辨率帧 live 不会
-        走到 —— run_digit_ocr 对 <3200 宽的帧自动换 ADB 4K 干净帧重抓):
+        走到 -- run_digit_ocr 对 <3200 宽的帧自动换 ADB 4K 干净帧重抓):
         | 方案  | cy0.14 分支页 | cy0.28 关卡列表 | 零票屏读成 >0 |
         | 旧    | 139/140 99.3% | **0/211 0.0%**  | **18/114 = 15.8%** |
         | 现    | 139/140 99.3% | **211/211 100%**| **0/114** |
         那 18 次是旧 strip 把屏幕上明明白白的「持有票券 0/6」读成 `'9/0'`(8 张
         逐张目检过真值全是 0/6)  `_ticket_check` 拿到 9  出击  0 票出击弹出的
-        正是青辉石買票框。**fail-closed 只挡 None, 挡不住读大** —— 这是旧代码里
+        正是青辉石買票框。**fail-closed 只挡 None, 挡不住读大** -- 这是旧代码里
         真实存在的掉钱路径, 不是本次改动引入的。
         """
         if screen.frame is None:
@@ -228,7 +228,7 @@ class TicketSweepSkill(BaseSkill):
             # plainly top-left). The counter is a stable page fixture
             # fixed-region OCR fallback on the DIGITS zone only (0708 新皮肤
             # 「持有票券 6/6」布局, 两页帧离线验证 '6/6' )。
-            # 这条没有 YOLO 锚, 所以要求 raw 里必须有 '/' —— 不带斜杠的裸数字
+            # 这条没有 YOLO 锚, 所以要求 raw 里必须有 '/' -- 不带斜杠的裸数字
             # 可能是页面标题/别的读数蹭进来的, 宁可 None。
             raw = run_digit_ocr(screen.frame, (0.115, 0.121, 0.185, 0.163))
             res = parse_count(raw)
@@ -250,7 +250,7 @@ class TicketSweepSkill(BaseSkill):
                 return raw, None
             #  分母为 0 的读数一律丢弃: 计数器的分母是**上限**, 永远不会是 0。
             # `9/0` 就是零票屏被读大的那个形状(实测 15 次, 真值全是 0/6)。
-            # 反过来 `cur > tot` **不能**当无效 —— 帧上确凿存在 `14/6`/`15/6`,
+            # 反过来 `cur > tot` **不能**当无效 -- 帧上确凿存在 `14/6`/`15/6`,
             # 票是可以超出每日回满上限的。拿它当闸会误杀合法读数。
             if r[1] == 0:
                 return raw, None
@@ -263,7 +263,7 @@ class TicketSweepSkill(BaseSkill):
                 continue
             # 交叉复核(2026-07-27): 同一串数字换一个**位移过的**窗口再读一次,
             # 两次必须给出同一个 cur 才采信。单窗口 OCR 会把斜体 6 认成 9
-            # (实测: 语料 4K 帧 1/139, 低分辨率与形变帧上更高) —— 而票数**读大**
+            # (实测: 语料 4K 帧 1/139, 低分辨率与形变帧上更高) -- 而票数**读大**
             # 意味着 0 票时仍去出击, 撞的正是青辉石買票框。位移窗口的 crop 内容
             # 不同, 识别错误不完全相关, 所以"两窗独立同意"能滤掉相当一部分。
             # 不一致时**跳过这个窗口继续试**而不是直接 None: 直接 None 会把
@@ -271,7 +271,7 @@ class TicketSweepSkill(BaseSkill):
             _r2, v2 = _read(xl - 0.5, xr + 0.5)
             if v2 != v:
                 self.log(f"[tkdbg] 交叉复核不一致 win({xl},{xr})={v} "
-                         f"vs 位移窗={v2} (raw {last_raw!r} / {_r2!r}) — 弃这个窗口")
+                         f"vs 位移窗={v2} (raw {last_raw!r} / {_r2!r}) - 弃这个窗口")
                 continue
             return v
         self.log(f"[tkdbg] icon@({icon.x1:.3f},{icon.y1:.3f},{icon.x2:.3f},"
@@ -283,7 +283,7 @@ class TicketSweepSkill(BaseSkill):
         # Calibrated clean-frame read (2026-06-11): the generic read_count span
         # left-truncated 199/240  '1/240' live  JFD exited with 13 sweeps of
         # AP unspent. _read_topbar_clean votes over clean ADB frames with the
-        # per-currency span (AP 0.06) — fail to the live read only if no clean
+        # per-currency span (AP 0.06) - fail to the live read only if no clean
         # source is registered.
         try:
             from brain.pipeline import _read_topbar_clean
@@ -294,7 +294,7 @@ class TicketSweepSkill(BaseSkill):
             pass
         # span 单位 = 图标宽(2026-07-27): 旧 `span=0.10` 是屏幕宽度比例, 换分辨率/
         # 窗口大小就失准。参数与 `_topbar_strip_map()[体力]` 对齐(网格标定 88.1%,
-        # y 留白 1.6bh —— AP 要**松**, 与信用点的 0.5 方向相反)。
+        # y 留白 1.6bh -- AP 要**松**, 与信用点的 0.5 方向相反)。
         res = self.read_count(screen, UC.TOPBAR_AP, side="right",
                               span_iw=4.9, y_pad_bh=1.60)
         return res[0] if res is not None else None
@@ -312,7 +312,7 @@ class TicketSweepSkill(BaseSkill):
          正交的结构判据兜底; 真購買AP框 stepper@0.96/0.97, 纯AP/票确认框被 dim
          盖住底层 popup  stepper 零检出, 不误伤。)
 
-        **体力通道已删除(2026-07-26)** —— 与 event_quest._dialog_is_purchase
+        **体力通道已删除(2026-07-26)** -- 与 event_quest._dialog_is_purchase
         同形, 一起改(铁律: 任何一处金钱判据被证伪, 当天 grep 全仓同形一起改;
         2026-07-11 就是因为只改了 event_quest 没迁 schedule, 同一个洞留了两周
         才铸成 30 青辉石课程表票事故)。
@@ -394,7 +394,7 @@ class TicketSweepSkill(BaseSkill):
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
             #  Hall scan (user iron rule 2026-06-11): the per-activity dot is
-            # only visible HERE — tile with no red/yellow dot = no work today,
+            # only visible HERE - tile with no red/yellow dot = no work today,
             # exit gracefully instead of entering blind.
             has_work = self.hall_tile_dot(screen, self._HUB_TILE)
             if has_work is False:
@@ -428,7 +428,7 @@ class TicketSweepSkill(BaseSkill):
 
         # Deep-dive C7 (2026-06-09): unreadable ticket count must FAIL CLOSED.
         # The old "proceed, confirm-dialog guard backstops" relied on a guard
-        # whose region was mis-sized (C5) — 票数读不出  不出击, period
+        # whose region was mis-sized (C5) - 票数读不出  不出击, period
         # (money rule #3: 0/unknown tickets  never sortie).
         if self._phase_ticks > 8:
             self.log("ticket count unreadable after retries  exit (money fail-closed)")
@@ -453,7 +453,7 @@ class TicketSweepSkill(BaseSkill):
             return act
 
         if self._phase_ticks > 12 and self.since("phase") > _BRANCH_WAIT_SEC:
-            self.log("branch select timeout — trying stage anyway")
+            self.log("branch select timeout - trying stage anyway")
             self._goto("stage")
             return action_wait(300, "branch timeout  stage")
         return action_wait(400, "selecting branch")
@@ -488,7 +488,7 @@ class TicketSweepSkill(BaseSkill):
     def _sortie(self, screen: ScreenState) -> Dict[str, Any]:
         #  Defense  (early): a buy dialog can pop here too.
         if self._pyroxene_buy_dialog(screen):
-            self.log(" pyroxene buy dialog at sortie — cancel + exit")
+            self.log(" pyroxene buy dialog at sortie - cancel + exit")
             return self._cancel_and_exit(screen)
 
         # Confirm dialog already up  confirm state.
@@ -500,7 +500,7 @@ class TicketSweepSkill(BaseSkill):
             # 任務資訊 not open yet. The 入場 tap intermittently DROPS under adbd
             # contention (live 2026-06-15: skill tap lost  popup never showed
             # 0 tickets swept; manual same-pos tap opened it). Root-fixed by the
-            # AdbInput I/O lock; self-healing backstop here — re-click the 入場键
+            # AdbInput I/O lock; self-healing backstop here - re-click the 入場键
             # (bounded) instead of giving up with tickets unspent.
             # 2026-07-27 live 实锤: 旧判据是 `_phase_ticks > 7`(**tick 当计时器**)。
             # tick 速率实测跨度极大(memory frame_age/completion_gap: 自主跑
@@ -508,13 +508,13 @@ class TicketSweepSkill(BaseSkill):
             # 是 **1.05s ~ 16s，差 15 倍**。太短就把"游戏还在加载"误判成"tap 丢了"，
             # 白重试甚至耗尽退出(本轮实测: 连点 3 次入場  retries 用尽  exit，
             # **6 张悬赏票一张没花**)。
-            # 改墙钟, 且走 `since()`(= game_clock, 会扣掉 step 门的人工停顿) ——
+            # 改墙钟, 且走 `since()`(= game_clock, 会扣掉 step 门的人工停顿) --
             # 否则逐帧门控时人审一慢就必然触发这条误判。
-            # ️3.0s 这个值**没有"入場任務資訊"的实测支撑**, 是按"比自主跑 7tick
+            # 3.0s 这个值**没有"入場任務資訊"的实测支撑**, 是按"比自主跑 7tick
             #   的 1.75s 宽、比慢 run 的 16s 严"取的折中。待用飞轮帧量准后再定。
             #   (仍留 `_phase_ticks >= 2`: 至少观察两帧再判, 防第一帧就误触。)
-            # ️同文件还有 4 处 tick-as-timer 未改(L363 >8 / L385 >12 / L399 >10 /
-            #   L571 <=18) —— 它们今天没有实锤, 按"不修没坏的判据"暂不动。
+            # 同文件还有 4 处 tick-as-timer 未改(L363 >8 / L385 >12 / L399 >10 /
+            #   L571 <=18) -- 它们今天没有实锤, 按"不修没坏的判据"暂不动。
             if self._phase_ticks >= 2 and self.since("phase") > 3.0:
                 if self._sortie_retries < _SORTIE_MAX_RETRIES:
                     self._sortie_retries += 1
@@ -528,7 +528,7 @@ class TicketSweepSkill(BaseSkill):
             return action_wait(400, "waiting for 任務資訊 popup")
 
         # AP gate (JFD): the MAX button sweeps as many times as AP+tickets allow
-        # — the GAME caps it, never overspends (you can't go negative on AP).
+        # - the GAME caps it, never overspends (you can't go negative on AP).
         # So MAX is safe whenever AP ≥ one sweep; the old `ap ≥ tix×AP_PER_SWEEP`
         # gate wrongly fell back to a SINGLE sweep whenever full tickets couldn't
         # all be afforded (live 2026-06-09: 24 tickets needed 360 AP > 240 cap
@@ -566,7 +566,7 @@ class TicketSweepSkill(BaseSkill):
                 # 只扫1票。上一发被吞就回滚计数, 直到真点出去两发才落 latch。
                 if self.action_suppressed and self._max_fires > 0:
                     self._max_fires -= 1
-                    self.log("MAX fire 被稳定门吞 — 回滚计数")
+                    self.log("MAX fire 被稳定门吞 - 回滚计数")
                 self._max_fires = getattr(self, "_max_fires", 0) + 1
                 if self._max_fires >= 2:
                     self._maxed = True
@@ -636,7 +636,7 @@ class TicketSweepSkill(BaseSkill):
 
         # Sweep done already (掃蕩完成 popped)  result.
         # 2026-07-27 live 实锤(bounty 6 张票 + 2 倍奖励差点又白丢): 这条分支在
-        # **掃蕩前的确认框**上误触发 —— 「要使用6懸賞通緝票券掃蕩6次嗎?」弹出时,
+        # **掃蕩前的确认框**上误触发 -- 「要使用6懸賞通緝票券掃蕩6次嗎?」弹出时,
         # 確認键从下往上**弹入动画**, 途中扫过 _DONE_CONFIRM_BAND(y 0.74-0.90),
         # 而它的终值在 cy 0.699(带外)。于是: 假计一次 cycle  goto result
         # **真正的確認从没点过**  result 里票数被弹窗挡住读不出  exit  点叉叉
@@ -650,13 +650,13 @@ class TicketSweepSkill(BaseSkill):
         #  只加负门禁, 不删裸 確認 信号(剩下 336 帧无取消键的可能是 获得奖励
         #   漏检的真完成弹窗, 那正是这条裸信号存在的理由)。
         # 这条规则 money_safety 2026-06-10 就写过("確認+取消同帧 = 不是结果弹窗"),
-        # 一直没传导到这里 —— 与 y 留白同款"修一处没 grep 全仓"。
+        # 一直没传导到这里 -- 与 y 留白同款"修一处没 grep 全仓"。
         _cancel_up = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None
         if (not _cancel_up) and (
                 self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None
                 or self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND) is not None):
             # Could be the 掃蕩完成 reward popup (确认键 lower at ~0.81).
-            # sweep_cycles 落账移到这里(到达证据=掃蕩完成弹窗) — 旧码在点
+            # sweep_cycles 落账移到这里(到达证据=掃蕩完成弹窗) - 旧码在点
             # 确认键前 +1+goto result, 确认被吞时假报 cycle 完成(JFD"没去"
             # 真相, 2026-07-22 用户抓)。goto 一次性, 不会重复计。
             self._sweep_cycles += 1
@@ -665,7 +665,7 @@ class TicketSweepSkill(BaseSkill):
             return action_wait(150, "sweep done popup  result")
 
         # 帧龄防误杀(2026-07-21 live tick640/669 实锤): 点完 扫荡开始 的下一
-        # tick 帧仍是未变暗的 任務資訊(扫荡开始+stepper 可见, 无确认键) —
+        # tick 帧仍是未变暗的 任務資訊(扫荡开始+stepper 可见, 无确认键) -
         # _purchase_structure 会把 popup 自带 stepper 当购买框 X 掉整个弹窗
         # (0 票扫出+假报完成)。确认框 cls 证据出现前不跑 abort 判定; 真购买框
         # 下 扫荡开始 被 dim 压掉检不出(t46 同源实证), 不会误放行。
@@ -679,11 +679,11 @@ class TicketSweepSkill(BaseSkill):
                 and self.find_cls(screen, UC.BTN_CONFIRM_GREY, conf=_CLS_CONF,
                                   region=_CONFIRM_BAND) is None
                 and not self._pyroxene_buy_dialog(screen)):
-            return action_wait(350, "confirm: 帧仍停任務資訊(pre-transition) — 等确认框")
+            return action_wait(350, "confirm: 帧仍停任務資訊(pre-transition) - 等确认框")
 
         #  pyroxene buy dialog  cancel + exit.
         if self._pyroxene_buy_dialog(screen):
-            self.log(" pyroxene buy dialog at confirm — cancel + exit")
+            self.log(" pyroxene buy dialog at confirm - cancel + exit")
             return self._cancel_and_exit(screen)
 
         #  购买框结构闸(青辉石漏检兜底, 2026-07-11): stepper/体力在 body
@@ -698,24 +698,24 @@ class TicketSweepSkill(BaseSkill):
             or self.find_cls(screen, UC.BTN_CONFIRM_GREY, conf=_CLS_CONF, region=_CONFIRM_BAND) is not None
             or self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None)
         if _dialog_btn_up and self._purchase_structure(screen):
-            self.log(" purchase-dialog structure at confirm — cancel + exit")
+            self.log(" purchase-dialog structure at confirm - cancel + exit")
             return self._cancel_and_exit(screen)
 
         #  greyed confirm = insufficient (AP/ticket)  cancel + exit.
         if self.find_cls(screen, UC.BTN_CONFIRM_GREY, conf=_CLS_CONF, region=_CONFIRM_BAND) is not None:
-            self.log(" confirm greyed (insufficient) — cancel + exit")
+            self.log(" confirm greyed (insufficient) - cancel + exit")
             return self._cancel_and_exit(screen)
 
         confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_CONFIRM_BAND)
         if confirm is not None:
-            # after-ack(2026-07-22): 不提前 goto result / 不提前计 cycle —
+            # after-ack(2026-07-22): 不提前 goto result / 不提前计 cycle -
             # 点击被吞时留在 confirm(入口对账 fall-through 会重点); 真点上后
             # 掃蕩完成弹窗出现  顶部 sweep-done 分支落账+进 result。
-            self.log("confirm sweep — currency verified (票券), 等掃蕩完成落地")
-            # `_force_settle` 在这里是**防御性标记, 不是 bug 修复** —— 说清楚,
+            self.log("confirm sweep - currency verified (票券), 等掃蕩完成落地")
+            # `_force_settle` 在这里是**防御性标记, 不是 bug 修复** -- 说清楚,
             # 免得后人以为它解决了什么(2026-07-28 我自己先误判过一次):
             # 本 reason 不含 `_dedup_click` 关键词豁免表里的任何词, 所以它**本来就**
-            # 走稳定门, 打不打这个 flag 行为完全一样。打上是为了钉死这条语义 ——
+            # 走稳定门, 打不打这个 flag 行为完全一样。打上是为了钉死这条语义 --
             # 将来谁把 reason 改成含「確認/confirm 键」之类的字样, 也不会悄悄退化成
             # "跳过稳定门"。(reason 措辞当控制信号的坑见 memory reason_string_as_api。)
             #
@@ -736,15 +736,15 @@ class TicketSweepSkill(BaseSkill):
         return action_wait(350, "waiting for sweep-confirm dialog")
 
     def _result(self, screen: ScreenState) -> Dict[str, Any]:
-        # 掃蕩完成 reward popup — re-detect (WGC transition frames). Dismiss via
+        # 掃蕩完成 reward popup - re-detect (WGC transition frames). Dismiss via
         # the lower 确认键, or GOT_REWARD header / 点击继续字样.
         # 2026-07-27: 取消键在屏  这**不是**结果弹窗, 是个确认框(全语料 494 帧
-        # 结果弹窗里带取消键的 **0 帧**)。走到这里说明上游误判了 —— 不能拿"关奖励"
+        # 结果弹窗里带取消键的 **0 帧**)。走到这里说明上游误判了 -- 不能拿"关奖励"
         # 的手去点确认框的確認(那是不受控消费), 也不能干等到票数读不出就收工
         # (今天 bounty 就是这么把 6 张票 + 2 倍奖励丢掉的)。退回 confirm, 交给带
         # 全部金钱闸的正规 handler 判定。
         if self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None:
-            self.log("result 见取消键  不是结果弹窗(是确认框) — 退回 confirm")
+            self.log("result 见取消键  不是结果弹窗(是确认框) - 退回 confirm")
             self._goto("confirm")
             return action_wait(200, "result 误入  回 confirm")
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
@@ -761,7 +761,7 @@ class TicketSweepSkill(BaseSkill):
         # Reward dismissed  re-read tickets. MAX drains all  usually 0 now.
         if self._sweep_cycles >= self._MAX_SWEEP_CYCLES:
             self.log("sweep cycle cap  exit")
-            # 帽退时票数没重读过 — 报 UNKNOWN, 不带入场陈旧值假报 LEFTOVER
+            # 帽退时票数没重读过 - 报 UNKNOWN, 不带入场陈旧值假报 LEFTOVER
             self._post_sweep_unread = True
             self._goto("exit")
             return action_wait(300, "sweep cap  exit")
@@ -769,7 +769,7 @@ class TicketSweepSkill(BaseSkill):
         tickets = self._read_tickets(screen)
         if tickets is not None and tickets <= 0:
             # 必须回写 _tickets(2026-07-25 workflow 实锤): 主成功路径原先不回写,
-            # exit_report 拿着入场旧值(如 6)把每一次"扫光收工"误报成 LEFTOVER —
+            # exit_report 拿着入场旧值(如 6)把每一次"扫光收工"误报成 LEFTOVER -
             # 且 exit_report 的 CLEAN-after-sweep 分支因此成了不可达死码。
             self._tickets = tickets
             self.log("tickets drained (0)  exit")
@@ -789,7 +789,7 @@ class TicketSweepSkill(BaseSkill):
         #   单位错: `_phase_ticks > 8` 是 **tick**, zero-wait 后自主跑
         #     0.15-0.25 s/tick(口径见 BaseSkill.mark)  真实只有 **1.2-2.0s**,
         #     一次 OCR 抖动就够把整轮票判死。改墙钟 6s 重读窗。
-        #   结论错: "读不出" 被写成 "MAX likely drained" —— 这就是
+        #   结论错: "读不出" 被写成 "MAX likely drained" -- 这就是
         #     [[completion-gap]] 里"悬赏票剩多少 未知"那一格的来源。**没读到
         #     就不许下资源结论**, 改成 UNKNOWN 并落进竣工判据供出口审计。
         if self.since("post_sweep") > _POST_SWEEP_READ_SEC:
@@ -828,7 +828,7 @@ class TicketSweepSkill(BaseSkill):
                 self._enter_ticks = 0
                 self.clear_timer("enter_wall")   # 回炉重跑 enter 的墙钟也要归零
                 return action_wait(300, "0-sweep 对账不平  回炉重试")
-            # Stay on the hub — the next campaign skill re-uses it.
+            # Stay on the hub - the next campaign skill re-uses it.
             self.log(f"done on hub ({self._sweep_cycles} sweeps)")
             _tag = (" [0 sweeps, tickets unspent]"
                     if (self._sweep_cycles == 0 and (self._tickets or 0) > 0) else "")
@@ -839,14 +839,14 @@ class TicketSweepSkill(BaseSkill):
         # 一直没传导到这里)。2026-07-27 live 实锤为什么必须这样:
         # 停在「要使用6票掃蕩6次嗎? 取消/確認」这种**模态**上时, 旧顺序先找
         # BTN_CLOSE_X, 而屏上那个被检成 弹窗叉叉(0.96) 的小  **根本不吃点击**
-        # —— 连点 6 次画面纹丝不动(帧证据 data/walk_20260727_e7_frames/)。
+        # -- 连点 6 次画面纹丝不动(帧证据 data/walk_20260727_e7_frames/)。
         # 模态框的唯一正解是它自己的「取消」。
         # 顺序: 取消 > 完成弹窗的確認 > X > 返回键。
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
         if cancel is not None:
             self.log("exit: 模态框有取消键  点取消(绝不点確認)")
             return action_click_box(cancel, "exit: cancel dialog")
-        # A leftover 掃蕩完成 / dialog blocks ESC — dismiss its 确认键/X first.
+        # A leftover 掃蕩完成 / dialog blocks ESC - dismiss its 确认键/X first.
         done_confirm = self.find_cls(screen, UC.BTN_CONFIRM, conf=_CLS_CONF, region=_DONE_CONFIRM_BAND)
         if done_confirm is not None:
             return action_click_box(done_confirm, "exit: dismiss leftover result")

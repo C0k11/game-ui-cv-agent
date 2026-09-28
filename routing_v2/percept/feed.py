@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""scrcpy 帧源 —— 唯一的帧来路。`latest()` 实测 **0ms**。
+"""scrcpy 帧源 -- 唯一的帧来路。`latest()` 实测 **0ms**。
 
 从 `brain/scrcpy_feed.py` 移植（那是老代码里少数几块真金），改动:
   · 换用 routing_v2 自己的 device.IO_LOCK / resolve_serial
@@ -7,14 +7,14 @@
   · 只出 (frame, age, seq)，seq 是主循环"对齐 fps"的唯一依据
 
 **流寿命 17.0s 定律**（2026-07-28 三组对照实测）: MuMu12 对每个 scrcpy 镜像流
-有内在 17.0s 寿命 —— 30fps/8M、10fps/8M、30fps/4M 全部死在 t+17.0（误差 <0.1s），
+有内在 17.0s 寿命 -- 30fps/8M、10fps/8M、30fps/4M 全部死在 t+17.0（误差 <0.1s），
 与帧数/码率/输入无关；死后 server 进程仍活、socket 不断，只是永不再出帧。
 修法 = **预热轮换（双缓冲）**: 活到 _ROTATE_AT 就预热新流（首帧稳定 0.20s）
 原子交接  旧流收尸，全程零盲窗。150s 验证：11 次轮换全成，零 >0.5s 间隙。
 换手后的流实测最短只活过 13.5s，_ROTATE_AT 必须留余量，别调回 12。
 
 MuMu12 多 display 陷阱: display 0 = Android 桌面 launcher，BA 跑在独立
-EXTERNAL display（实测 2）。scrcpy-client 硬编码 display_id=0 会抓到桌面 ——
+EXTERNAL display（实测 2）。scrcpy-client 硬编码 display_id=0 会抓到桌面 --
 `find_app_display()` 自动定位，**找不到就 raise，绝不拿 0 凑数**（拿 0 的后果是
 feed 永远盯着桌面而 watchdog 一声不吭）。
 """
@@ -41,7 +41,7 @@ def find_app_display(serial: str, pkg: str = _PKG) -> Optional[int]:
 
     `mCurrentFocus` **不可信**（memory §C 早就记过）：MuMu + Unity 全屏不注册
        window focus，实测过它报前台是 `app.lawnchair`（Android 桌面）而游戏
-       好好在大厅。2026-08-08 又撞了一次 —— 游戏进程活着，焦点查不到，
+       好好在大厅。2026-08-08 又撞了一次 -- 游戏进程活着，焦点查不到，
        scrcpy 直接起不来。
      三级找法，**任何一级都不许回退 display 0**（0 是桌面，回退了 feed 会
        永远盯着桌面而 watchdog 一声不吭）:
@@ -189,7 +189,7 @@ class Feed:
             did = find_app_display(self._serial)
             if did is None:
                 raise RuntimeError("BA 焦点窗口不在任何 display（游戏没起？）"
-                                   " — 拒绝回退 display 0（那是桌面）")
+                                   " - 拒绝回退 display 0（那是桌面）")
             self._display_id = did
         client = _make_client(adb.device(serial=self._serial), self._max_fps, did)
         holder = {"got": False}
@@ -284,7 +284,7 @@ class Feed:
     def _on_frame(self, frame):
         if frame is None:
             return
-        # 稀疏采样（~30x40x3 像素，微秒级）。容差 >2.0 才算"内容变了"——
+        # 稀疏采样（~30x40x3 像素，微秒级）。容差 >2.0 才算"内容变了"--
         # 流轮换后同一画面重解码会有 ±1 级噪声，精确比对会把轮换误判成变化。
         small = frame[::73, ::97].astype(np.int16)
         with self._lock:
@@ -324,10 +324,10 @@ class Feed:
     def _is_static(self) -> bool:
         """age 大时区分「画面静止」vs「真断流」。
 
-        H.264 静止页天然不出帧 —— 老架构在 lobby/hub 静止页疯狂重启，重启风暴
+        H.264 静止页天然不出帧 -- 老架构在 lobby/hub 静止页疯狂重启，重启风暴
         反把流打烂（2026-07-15 实锤）。用**独立 ADB 链**抓一张比对：一致 = 静止，
         且意味着 feed 最后一帧就是当前真实屏幕，刷新帧龄是语义正确的。
-        判据用 12x8 分块 max diff —— 全图均值差看不见按钮级变化。
+        判据用 12x8 分块 max diff -- 全图均值差看不见按钮级变化。
         """
         try:
             import cv2

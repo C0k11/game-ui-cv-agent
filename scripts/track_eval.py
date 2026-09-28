@@ -2,11 +2,11 @@
 """tracker 离线评测: 检测缓存一次  ByteTrack/BoT-SORT 参数网格  GT 链指标.
 
 combat AI 2.0 tracker Phase 1 的地基: 拿人审过的凹轴池当 GT, 量化
-"锁定稳定性"(id 不换人)——这是按轴放技能的前提, 检测 AP 高≠锁得住。
+"锁定稳定性"(id 不换人)--这是按轴放技能的前提, 检测 AP 高≠锁得住。
 
 流程:
-  1. --cache   v8 对池逐帧检测(conf0.05, 身份类), 存 _detcache/*.npz — GPU 只跑这一次
-  2. (默认)    用缓存喂手动 BYTETracker/BOTSORT 实例扫参数网格 — 纯 CPU, 秒级/配置
+  1. --cache   v8 对池逐帧检测(conf0.05, 身份类), 存 _detcache/*.npz - GPU 只跑这一次
+  2. (默认)    用缓存喂手动 BYTETracker/BOTSORT 实例扫参数网格 - 纯 CPU, 秒级/配置
   3. GT 链     人审 label 的身份类框按 IoU 匈牙利串成链(gap≤2 保活) = "真实的人"
   4. 指标      每帧 GT<->track 框匈牙利(IoU≥0.45):
                purity   链上主 tid 占比(=锁定不换人的程度, 关键指标)
@@ -36,7 +36,7 @@ from vision.io_utils import imread_any  # noqa: E402
 
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 CACHE_DIR = RAW / "_detcache"
-# 身份类=会移动的作战单位(484战斗失败是横幅不算)。模型加类这里必须跟着加 —
+# 身份类=会移动的作战单位(484战斗失败是横幅不算)。模型加类这里必须跟着加 -
 # 2026-07-25 实锤漏过 483 大蛇(v10 已训, 薇娜池=大蛇素材, 漏了=该池 GT 链全丢)
 IDENTITY_MASTER = {476, 477, 478, 479, 480, 481, 482, 483}
 GT_MIN_CHAIN = 5          # 短于此的 GT 链不评(开场淡入/结算残帧)
@@ -275,7 +275,7 @@ def evaluate(track_frames, chains):
 
 def slots_demo(track_frames, chains, n_frames):
     """开场站位=编成序(左右)。GT 我方链按首现帧+cx 排序发 slot,
-    报告各 slot 的锁定质量 — 这就是实战"第3个位置放EX"要依赖的映射。"""
+    报告各 slot 的锁定质量 - 这就是实战"第3个位置放EX"要依赖的映射。"""
     ally = [c for c in chains
             if Counter(cls for cls, _ in c.values()).most_common(1)[0][0] == 476]
     ally.sort(key=lambda c: min(c))

@@ -2,7 +2,7 @@
 """bot 控牌打活动 Quest (combat 2.0 v7, 2026-07-15).
 
 背景: 加成满配队(自动编队 100/105)含 Lv1-36 低级角色, AUTO 打 Q10
-超时 DEFEAT — 用户拍板: 70级满加成队人手随便过, 输在放牌逻辑;
+超时 DEFEAT - 用户拍板: 70级满加成队人手随便过, 输在放牌逻辑;
 AUTO 不可靠 bot 自己放牌; 胜利才记加成; farm 只刷最后三关(Q10/11/12)。
 
 v7 架构(playbook 4.8 定案): 战斗感知走 scrcpy 视频流(~25fps, 帧龄
@@ -112,13 +112,13 @@ def main():
             if rows and sig == prev_sig:      # 滑不动了 = 到底
                 k = 13 - q
                 if len(rows) < k:
-                    print(f"  到底但视野{len(rows)}行 < 倒数{k} — 停",
+                    print(f"  到底但视野{len(rows)}行 < 倒数{k} - 停",
                           flush=True)
                     return False
                 cy, (px, py) = rows[-k]
                 num = read_row_num(fr, cy)
                 if num is not None and num != q:
-                    print(f"  行序倒数{k}=Q{q} 但OCR读{num} — 矛盾停",
+                    print(f"  行序倒数{k}=Q{q} 但OCR读{num} - 矛盾停",
                           flush=True)
                     return False
                 print(f"  Q{q}=倒数第{k}行 cy={cy:.2f} OCR辅证={num}",
@@ -183,7 +183,7 @@ def main():
     fly_dir.mkdir(parents=True, exist_ok=True)
     feed = ScrcpyFeed(log=lambda m: print(m, flush=True))
     if not feed.start():
-        print("scrcpy feed 起不来 — 停(不盲打)", flush=True)
+        print("scrcpy feed 起不来 - 停(不盲打)", flush=True)
         return
     f0, _, _ = feed.latest()
     print(f"scrcpy feed OK {f0.shape[1]}x{f0.shape[0]}", flush=True)
@@ -224,10 +224,10 @@ def main():
         for attempt in range(MAX_RETRY):
             print(f"[Q{q}] 第{attempt+1}次", flush=True)
             if not find_and_enter(q):
-                print(f"[Q{q}] 找不到入口 — 停")
+                print(f"[Q{q}] 找不到入口 - 停")
                 return
             if not formation_and_sortie():
-                print(f"[Q{q}] 编队失败 — 停")
+                print(f"[Q{q}] 编队失败 - 停")
                 return
             result = play_battle()
             # 结算/败页收尾三连(win 也走同链)

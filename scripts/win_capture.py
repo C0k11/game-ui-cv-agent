@@ -38,7 +38,7 @@ except Exception:
     pass
 
 try:
-    # PrintWindow(hwnd, hdcBlt, nFlags) — explicit signature so 64-bit handles
+    # PrintWindow(hwnd, hdcBlt, nFlags) - explicit signature so 64-bit handles
     # aren't truncated to int (HANDLE/HDC are pointer-width).
     user32.PrintWindow.argtypes = (wintypes.HWND, wintypes.HDC, wintypes.UINT)
     user32.PrintWindow.restype = wintypes.BOOL
@@ -379,7 +379,7 @@ def get_client_rect_on_screen(hwnd: int) -> Rect:
     return Rect(left=left, top=top, right=right, bottom=bottom)
 
 
-# Per-hwnd locked capture method ("printwindow"/"window"/"desktop") — set once
+# Per-hwnd locked capture method ("printwindow"/"window"/"desktop") - set once
 # AUTO probing finds a non-blank method, so subsequent frames skip the 3-way
 # probe (perf). Cleared/re-probed if the locked method later returns blank.
 _CAPTURE_LOCK: dict = {}
@@ -511,7 +511,7 @@ def capture_client(hwnd: int) -> Image.Image:
         """PrintWindow + PW_RENDERFULLCONTENT(2): asks the window to redraw
         itself into a memory DC. Works for GPU/DirectX-accelerated windows
         (MuMu) and is independent of WHICH monitor the window is on or whether
-        it's occluded — unlike BitBlt(hwnd) [black on GPU surfaces] and
+        it's occluded - unlike BitBlt(hwnd) [black on GPU surfaces] and
         GetDC(0)+BitBlt [only the primary monitor]. This is the multi-monitor
         fix: capture by window handle, not by screen region."""
         with _dpi_aware_context():
@@ -527,7 +527,7 @@ def capture_client(hwnd: int) -> Image.Image:
         hbmp = gdi32.CreateCompatibleBitmap(hdc_screen, w, h)
         old = gdi32.SelectObject(hdc_mem, hbmp)
         try:
-            # PW_RENDERFULLCONTENT=2 — required for DirectComposition / GPU
+            # PW_RENDERFULLCONTENT=2 - required for DirectComposition / GPU
             # surfaces (MuMu). 0 alone returns black for them.
             ok = user32.PrintWindow(hwnd, hdc_mem, 2)
             if not ok:
@@ -551,7 +551,7 @@ def capture_client(hwnd: int) -> Image.Image:
 
     def _is_blank(im: Image.Image) -> bool:
         """Frame carries no game content: near-black OR near-uniform (MuMu's
-        empty render surface is a flat dark grey ~#1a1f29, avg≈33 — NOT caught
+        empty render surface is a flat dark grey ~#1a1f29, avg≈33 - NOT caught
         by a black-only test, which is why the old fallback never fired)."""
         try:
             sim = im.resize((32, 32), resample=Image.BILINEAR).convert("RGB")
@@ -604,7 +604,7 @@ def capture_client(hwnd: int) -> Image.Image:
 
         # AUTO: probe methods ONCE, then LOCK the first one that yields a
         # non-blank frame and reuse it every call. Probing all 3 every frame
-        # (3× GetDIBits of a 2364×1331×4 buffer) was a major FPS sink — that's
+        # (3× GetDIBits of a 2364×1331×4 buffer) was a major FPS sink - that's
         # what dropped capture below 60fps after the multi-monitor fix. We
         # re-probe only if the locked method starts returning blank (e.g. game
         # switched to a black loading screen and PrintWindow degraded).
@@ -634,6 +634,6 @@ def capture_client(hwnd: int) -> Image.Image:
             if not _is_blank(img):
                 _CAPTURE_LOCK[hwnd] = name   # lock the winner for next frames
                 return img
-        # all methods blank (game genuinely not rendering) — return whatever we
+        # all methods blank (game genuinely not rendering) - return whatever we
         # got so the no-BA-UI detector can do its 30-tick wait/abort.
         return first_img if first_img is not None else _capture_window_dc()

@@ -34,7 +34,7 @@ _ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
 
 
 def _adb_io_lock():
-    """AdbInput 类级 _IO_LOCK — feed 的所有 adb 子进程必须与 input tap
+    """AdbInput 类级 _IO_LOCK - feed 的所有 adb 子进程必须与 input tap
     串行(2026-06-15 实锤: 同 transport 并发多MB screencap 丢 MotionEvent;
     2026-07-16 审计: watchdog screencap 绕锁 = 同根因复发路径)."""
     from mumu_runner import AdbInput
@@ -42,7 +42,7 @@ def _adb_io_lock():
 
 
 def _default_serial() -> str:
-    """别写死端口 —— MuMu 实例重启会换号(2026-07-28: 755516384)。"""
+    """别写死端口 -- MuMu 实例重启会换号(2026-07-28: 755516384)。"""
     try:
         from brain.mumu_port import mumu_serial
         return mumu_serial()
@@ -53,7 +53,7 @@ def _default_serial() -> str:
 def find_app_display(serial: str | None = None,
                      pkg: str = "com.nexon.bluearchive"):
     """dumpsys window 按 display 分段找 pkg 焦点窗口所在 displayId.
-    找不到(BA 没起)  None: 调用方绝不能拿 display 0 凑数 — 0 是
+    找不到(BA 没起)  None: 调用方绝不能拿 display 0 凑数 - 0 是
     Android 桌面 launcher, feed 会永远盯着桌面且 watchdog 不报错."""
     serial = serial or _default_serial()
     with _adb_io_lock():
@@ -142,10 +142,10 @@ class ScrcpyFeed:
     """后台线程持帧: latest() 返回 (frame_bgr, age_s, seq); 线程安全.
 
     流寿命 17.0s 定律(2026-07-28 三组对照实测): MuMu12 对每个 scrcpy
-    镜像流有内在 **17.0s** 寿命上限 — 30fps/8M、10fps/8M、30fps/4M 全部
+    镜像流有内在 **17.0s** 寿命上限 - 30fps/8M、10fps/8M、30fps/4M 全部
     死在 t+17.0(误差 <0.1s), 与帧数/码率/输入无关; 死后 server 进程仍活、
     socket 不断, 只是永不再出帧。这就是"每 ~20s 断流 3.5s"(task#17,
-    2026-07-21 埋点)的全部真相 — 旧架构等死+重启 = 每 17s 一个 3-5s 盲窗。
+    2026-07-21 埋点)的全部真相 - 旧架构等死+重启 = 每 17s 一个 3-5s 盲窗。
 
     修法 = 预热轮换(双缓冲): 双流并行实测 per-instance 定时器(A 死 t+17.3,
     B 起于 t+8.6 死于 t+25.6 = 自己的 17.0s), 且并存 8s+ 互不干扰。
@@ -155,7 +155,7 @@ class ScrcpyFeed:
     静止画面(H.264 天然不出帧)仍由 _is_static() 独立链证实内容=当前屏。
 
     换手后的流实测最短只活过 13.5s(对照实验 V1, 可能受静止期影响),
-    比裸流 17.0s 短 — _ROTATE_AT 必须给最坏 13.5s 留余量, 别调回 12。"""
+    比裸流 17.0s 短 - _ROTATE_AT 必须给最坏 13.5s 留余量, 别调回 12。"""
 
     _ROTATE_AT = 10.0    # 实际节奏 ~10.5-11s(+watchdog 1s 粒度), 对 13.5s 余量>2s
 
@@ -182,7 +182,7 @@ class ScrcpyFeed:
 
     def _start_client(self):
         """起一个新 client 并返回 (client, first_frame_holder).
-        不赋值 self._client — 调用方决定何时交接(轮换需要新旧并存窗口)."""
+        不赋值 self._client - 调用方决定何时交接(轮换需要新旧并存窗口)."""
         from adbutils import adb
         import scrcpy
         did = self._display_id
@@ -190,7 +190,7 @@ class ScrcpyFeed:
             did = find_app_display(self._serial)
             if did is None:
                 raise RuntimeError("BA 焦点窗口不在任何 display(没起?)"
-                                   " — 拒绝回退 display 0(桌面)")
+                                   " - 拒绝回退 display 0(桌面)")
             self._display_id = did
         dev = adb.device(serial=self._serial)
         client = _make_client(dev, self._max_fps, did)
@@ -226,11 +226,11 @@ class ScrcpyFeed:
     def _is_static(self) -> bool:
         """age 大时区分「画面静止」vs「真断流」: ADB screencap(独立链)
         与 feed 最后帧对比, 一致=静止(H.264 静止页天然不出帧, 不该重启
-        — 2026-07-15 实锤: lobby/hub 静止页 watchdog 误判断流疯狂重启,
+        - 2026-07-15 实锤: lobby/hub 静止页 watchdog 误判断流疯狂重启,
         重启风暴反把流打烂)。一致也意味着 feed 帧内容=当前真实屏幕,
         刷新帧龄是语义正确的。对比失败(ADB 挂)按断流处理。
         判据用 12x8 分块 max diff(2026-07-16 审计: 全图均值差看不见
-        按钮级变化 — 4K 按钮缩到 64x36 只占 ~10px, 贡献 ~1 << 阈值)."""
+        按钮级变化 - 4K 按钮缩到 64x36 只占 ~10px, 贡献 ~1 << 阈值)."""
         try:
             import cv2
             with _adb_io_lock():     # 与 input tap 串行(丢 tap 同根因)
@@ -305,13 +305,13 @@ class ScrcpyFeed:
                 static_streak = 0
                 continue
             # 连续 N 次判静止仍无新帧  强制重启一次验流活性
-            # (死 socket 停在安静页会被静止判定无限续命 — 审计实锤)
+            # (死 socket 停在安静页会被静止判定无限续命 - 审计实锤)
             # 2026-07-28 实测: 旧值 20 且本循环 `time.sleep(1.0)`  静止 **~20s**
             # 就强制重启一次(注释里写的 "~90s" 对不上代码)。step_walk 逐帧门控时
             # 画面静止几十秒是常态(人在审帧/改代码), 实录 **每 21-36s 重启一次,
-            # 一段日志里 10 次** —— 每次都要在 Android 侧重建 MediaCodec +
+            # 一段日志里 10 次** -- 每次都要在 Android 侧重建 MediaCodec +
             # VirtualDisplay, 正是这段注释自己警告的"重启风暴"。
-            # 提到 120(~2min): 代价可控 —— `_is_static()` 每轮都用**独立 ADB 链**
+            # 提到 120(~2min): 代价可控 -- `_is_static()` 每轮都用**独立 ADB 链**
             # 与真实屏幕比过, 判静止就意味着"feed 最后一帧 == 当前屏幕", 拿到的
             # 画面是对的; 而死 socket 一旦屏幕真变化, 下一轮 `_is_static()` 立刻
             # 返回 False  马上重启。所以"无限续命"的窗口只存在于屏幕也没变的

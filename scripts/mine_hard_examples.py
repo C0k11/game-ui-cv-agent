@@ -1,7 +1,7 @@
 """Data flywheel: mine hard examples from trajectory using a trained fused_avatar model.
 
 Runs the trained fused_avatar detector on every trajectory frame and identifies
-predictions that are "interesting for the next training round" — typically:
+predictions that are "interesting for the next training round" - typically:
 
   * Medium-conf detections (0.10-0.45): model knows something is there but isn't
     sure which character  classifier needs more samples to disambiguate.
@@ -99,7 +99,7 @@ def find_avatar_context_ticks(limit: int) -> List[Path]:
 
 def is_confidence_split(boxes_xyxy, classes, confs, iou_thr: float = 0.5) -> bool:
     """True if any pair of boxes overlap (IoU >= thr) but have different classes
-    and both conf < 0.5 — classic 'classifier confused' pattern."""
+    and both conf < 0.5 - classic 'classifier confused' pattern."""
     n = len(boxes_xyxy)
     for i in range(n):
         if confs[i] >= 0.5:

@@ -72,7 +72,7 @@ COSTUME_SUFFIXES = (
 #   indices  395..454 : UI-B - 后期为 ui/unified 训练追加的 60 个 UI 类
 #                       (购买青辉石 / 领取_灰 / 获得奖励 / 选择购买 /
 #                        Emoticon_Action / 学院名 三一·千年·格黑娜 / ...)
-# ️ 早期假设 "143.. 全是角色"  load_character_names 用 master[143:] 把 UI-B
+#  早期假设 "143.. 全是角色"  load_character_names 用 master[143:] 把 UI-B
 #    误吸成角色, fused_avatar_v2(v5) 因此混学 60 个 UI cls (nc 252312)。
 #    现在精确取 143..394 (排除 UI-B), fused 回归纯头像 + 技能牌(复用头像名)。
 MASTER_UI_BOUNDARY = 143
@@ -985,14 +985,14 @@ def build_template_driven_synth(
                 bri = random.uniform(float(bri_jit[0]), float(bri_jit[1]))
                 resized = np.clip(resized.astype(np.float32) * bri, 0, 255).astype(np.uint8)
                 # 灰度 aug: 技能牌 COST 不够 = 低饱和 + **压暗**的暗灰牌(NOT 提亮泛白)。
-                # ️ 实测铁证(_gray_measure.py 量 _v5_card_viz 真实牌 vs synth):
+                #  实测铁证(_gray_measure.py 量 _v5_card_viz 真实牌 vs synth):
                 #   真实灰牌 饱和均值仅 12-13(近灰), 明度比同帧彩牌暗 ×0.76~0.90,
                 #   暗部 p10=21~72(保留暗部)。v5 旧版 `g*0.5+110` 把灰牌做成"亮灰白"
                 #   (明度中位162/暗部p10被抬到137=暗部全丢)  真实暗灰牌 v5 检测漏35%
                 #   (card_00 灰牌直接漏框 / card_09 灰牌 conf 仅0.28)。
                 # 修: 降饱和(非全0)+ 压暗(随场景浮动)+ 不抬黑位(保暗部), 贴合真实。
                 if random.random() < gray_prob:
-                    # ️ 实测铁证(_cardzoom 放大 card_03/09 牌1): 真实灰牌(COST不够)= 去色灰白
+                    #  实测铁证(_cardzoom 放大 card_03/09 牌1): 真实灰牌(COST不够)= 去色灰白
                     # + COST 充能**扇形进度**造成的**对角强对比明暗分界**(暗侧深灰三角 ×~0.5 +
                     # 亮侧亮灰 ×1.0, 分界位置=充能进度)。这是费用不够期间的**常态**(用户实战确认),
                     # 非稀少瞬间。旧版均匀灰/弱柔渐变没覆盖此分界  v5 真实灰牌漏35%。

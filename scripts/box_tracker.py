@@ -3,21 +3,21 @@ Kalman-style constant-velocity coast + predictive lead-aim.
 
 This is the "aimbot-feel" tracker. Three things make a lock look external-grade:
 
-1. ASSOCIATION that survives VFX — ByteTrack two-stage (high-conf first, then
+1. ASSOCIATION that survives VFX - ByteTrack two-stage (high-conf first, then
    low-conf 0.05-0.15 rescue) + center-distance matching. (Kept from v1.)
-2. SMOOTH yet RESPONSIVE position — the One-Euro filter: heavy smoothing when
+2. SMOOTH yet RESPONSIVE position - the One-Euro filter: heavy smoothing when
    the target is slow (kills jitter), light smoothing when fast (kills lag).
    This is the AR/VR-industry standard answer to the jitter-vs-latency tradeoff,
    replacing the old fixed-alpha EMA.
-3. PREDICTION that hides end-to-end latency — the display box is drawn at where
+3. PREDICTION that hides end-to-end latency - the display box is drawn at where
    the target WILL be (pos + velocity × latency), not where it was N ms ago.
    Velocity is tracked in px/sec (time-aware, frame-rate independent) and the
    lead is clamped so noisy velocity can't fling the box ("explosive drift" the
-   old freeze-coast was avoiding — solved properly with cap+decay, not by
+   old freeze-coast was avoiding - solved properly with cap+decay, not by
    disabling prediction).
 
 Occlusion handling: when a track gets no detection it COASTS along its (decayed,
-capped) velocity instead of freezing — short occlusions (a few frames) keep
+capped) velocity instead of freezing - short occlusions (a few frames) keep
 gliding naturally; the velocity decays so a long blind coast settles instead of
 flying off; after max_age with no detection the track dies.
 
@@ -160,9 +160,9 @@ class TrackedBox:
 
     def predict(self) -> None:
         """Bookkeeping only: age the track. Called on EVERY track each frame
-        BEFORE matching. Position/velocity are NOT touched here — a matched
+        BEFORE matching. Position/velocity are NOT touched here - a matched
         track is corrected in update(), an unmatched track coasts in coast().
-        (Standard SORT predict/update separation — keeps velocity from
+        (Standard SORT predict/update separation - keeps velocity from
         decaying while we're still tracking.)"""
         self.age += 1
         self.time_since_update += 1
@@ -262,13 +262,13 @@ class BoxTracker:
     - Same-class NMS prevents box splitting
 
     Tuning knobs (aimbot feel):
-      lead_ms        — how far ahead to predict; set ≈ measured end-to-end
+      lead_ms        - how far ahead to predict; set ≈ measured end-to-end
                        latency (capture+infer+render+display). 0 = no lead.
-      min_cutoff     — One-Euro floor: lower = smoother at rest (more jitter
+      min_cutoff     - One-Euro floor: lower = smoother at rest (more jitter
                        kill), higher = snappier.
-      beta           — One-Euro speed relax: higher = less lag when moving.
-      coast_decay    — per-frame velocity decay while coasting (occluded).
-      max_age        — frames a track survives with no detection.
+      beta           - One-Euro speed relax: higher = less lag when moving.
+      coast_decay    - per-frame velocity decay while coasting (occluded).
+      max_age        - frames a track survives with no detection.
     """
 
     def __init__(self, max_age: int = 30, min_hits: int = 1,
@@ -316,7 +316,7 @@ class BoxTracker:
         if dt is None or dt <= 0:
             dt = _DEFAULT_DT
 
-        # Age all tracks (bookkeeping only — no position/velocity change yet)
+        # Age all tracks (bookkeeping only - no position/velocity change yet)
         for t in self._tracks:
             t.predict()
 

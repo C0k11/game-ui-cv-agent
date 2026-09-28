@@ -1,4 +1,4 @@
-"""DailyMissionSkill — claim 每日任务 rewards (pure-YOLO rewrite of daily_tasks).
+"""DailyMissionSkill - claim 每日任务 rewards (pure-YOLO rewrite of daily_tasks).
 
 Verified flow (interactive probe 2026-06-01, data/_daily_reward_probe_log.md).
  CRITICAL distinction the probe corrected:
@@ -7,12 +7,12 @@ Verified flow (interactive probe 2026-06-01, data/_daily_reward_probe_log.md).
   We enter via NAV_DAILY_REWARD, never NAV_TASKS.
 
 The 全體 tab aggregates every task category, so claiming there covers
-每天/每週/成就/挑戰 — no tab switching needed.
+每天/每週/成就/挑戰 - no tab switching needed.
 
  MUST RUN LAST: the other dailies (cafe/craft/bounty/arena/...) must complete
 first to unlock these mission rewards. Placed at the end of DailyRoutine.
 
- NEVER touch 立即前往 (the "go" button on UNFINISHED tasks — events/challenges/
+ NEVER touch 立即前往 (the "go" button on UNFINISHED tasks - events/challenges/
 campaign). We only ever click the exact 全部领取_黄 / 领取_黄 claim cls, so an
 unfinished task's go-button is never clicked.
 
@@ -51,7 +51,7 @@ _NO_YELLOW_DONE = 5     # consecutive ticks w/ no 全部领取_黄 (no grey/popu
 _NO_YELLOW_SEC = 8.0     # 5×1.6
 _DRY_SINGLE_SEC = 4.8    # 3×1.6
 _CLAIM_SINGLE_MAX = 20
-_CLAIM_SINGLE_SEC = 32.0  # 20×1.6 — 纯 tick 的 OR 闸不一起改会先开枪
+_CLAIM_SINGLE_SEC = 32.0  # 20×1.6 - 纯 tick 的 OR 闸不一起改会先开枪
 _EXIT_MAX = 14
 
 
@@ -89,7 +89,7 @@ class DailyMissionSkill(BaseSkill):
     def should_run(self, screen: ScreenState) -> bool:
         # Run when a red dot sits by the 每日领奖 entry AND the n/8 daily-task
         # counter says enough dailies are finished (n ≥ 7). Entry not visible
-        # defer (True). (Rewards unlock as other dailies finish — run it last.)
+        # defer (True). (Rewards unlock as other dailies finish - run it last.)
         entry = self.find_cls(screen, UC.NAV_DAILY_REWARD, conf=0.40)
         if entry is None:
             # Fall back to a region scan (the entry cls is weak, 16f).
@@ -178,7 +178,7 @@ class DailyMissionSkill(BaseSkill):
             if act is not None:
                 self._entered = True
                 return act
-            self.log("on lobby but no 每日领奖 cls — YOLO gap; waiting")
+            self.log("on lobby but no 每日领奖 cls - YOLO gap; waiting")
             return action_wait(400, "waiting for 每日领奖 cls")
 
         if self._phase_ticks > _ENTER_MAX:
@@ -239,7 +239,7 @@ class DailyMissionSkill(BaseSkill):
             return action_wait(300, "single lost page  exit")
 
         # Remaining individual 领取_黄 (meta tasks like 完成每日任務8次). NEVER
-        # touch 立即前往 — we only match the exact claim cls.
+        # touch 立即前往 - we only match the exact claim cls.
         single = self.find_cls(screen, UC.CLAIM_YELLOW, conf=_CLS_CONF)
         if single is not None:
             self._dry_singles = 0
@@ -247,7 +247,7 @@ class DailyMissionSkill(BaseSkill):
             self.log(f"领取_黄 single (#{self._single_claims})")
             return action_click_box(single, "claim single daily-mission reward")
 
-        # No 黄 this frame — require 3 CONSECUTIVE dry frames before done
+        # No 黄 this frame - require 3 CONSECUTIVE dry frames before done
         # (deep-dive r2 C6): the old "claim_all gone  done" shortcut exited on
         # a single flicker frame and left remaining 单项黄 unclaimed.
         self._dry_singles = getattr(self, "_dry_singles", 0) + 1
@@ -283,7 +283,7 @@ class DailyMissionSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "daily_mission exit: back")
-        # Pace blind ESC — every-tick spam outruns transitions and pops the
+        # Pace blind ESC - every-tick spam outruns transitions and pops the
         # lobby 是否結束 quit prompt repeatedly (live 2026-06-10).
         if self._phase_ticks % 3 != 0:
             return action_wait(600, "exit: settle before next ESC")

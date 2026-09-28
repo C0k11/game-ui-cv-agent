@@ -22,7 +22,7 @@ Strategy:
 Safe to re-run: idempotent if seed set already matches master.
 
 Future-compat: the universal-master add_class API still works after
-trimming — appending a brand-new class just grows the (smaller) master.
+trimming - appending a brand-new class just grows the (smaller) master.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ BACKUP_ROOT = RAW / "_backups"
 def backup_all_labels() -> Path:
     """Snapshot every .txt file under raw_images + trajectories before mutating.
 
-    Returns the timestamped backup dir for log/printing.  Cheap operation —
+    Returns the timestamped backup dir for log/printing.  Cheap operation -
     labels are small text files.  Rollback = `cp -r <backup>/. data/`.
     """
     import shutil
@@ -120,7 +120,7 @@ def main() -> int:
         "--exclude",
         action="append",
         default=[],
-        help="Explicit drop list — class names to remove even if present in seed "
+        help="Explicit drop list - class names to remove even if present in seed "
              "(use for misclick/duplicate classes the seed dataset accidentally has).",
     )
     ap.add_argument("--dry-run", action="store_true",
@@ -129,7 +129,7 @@ def main() -> int:
 
     old_master = load_classes(MASTER_FILE)
     if not old_master:
-        print(f"[err] no master at {MASTER_FILE} — bootstrap first by accessing /api/v1/datasets/images")
+        print(f"[err] no master at {MASTER_FILE} - bootstrap first by accessing /api/v1/datasets/images")
         return 1
     print(f"[old] master has {len(old_master)} classes")
 
@@ -237,7 +237,7 @@ def main() -> int:
             if new_lines:
                 lf.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
             else:
-                # Empty after dropping — remove the file entirely
+                # Empty after dropping - remove the file entirely
                 lf.unlink()
                 total_files_emptied += 1
             if file_dropped:

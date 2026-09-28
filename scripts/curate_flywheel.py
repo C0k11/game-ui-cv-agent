@@ -5,7 +5,7 @@ Takes the raw clean-frame run dirs (ADB screencap, overlay-free), drops
 near-duplicate frames (idle/cooldown screens repeat for minutes at 1f/2.5s),
 merges everything into ONE data/raw_images/<out> dataset (PNGJPG), and
 pre-labels each kept frame with the current ui model (5-column YOLO txt with
-MASTER class indices — never a 6th column, see flywheel_label_import memory).
+MASTER class indices - never a 6th column, see flywheel_label_import memory).
 
 Usage:
   py -X utf8 scripts/curate_flywheel.py --out run_20260610_v8queue ^
@@ -108,14 +108,14 @@ def main() -> None:
     (out_dir / "classes.txt").write_text("\n".join(master) + "\n", encoding="utf-8")
 
     # 4) GPU batch pre-label with the ui model. 5 columns ONLY (cls xc yc w h,
-    #    normalized) — a 6th column would be parsed as an OBB angle.
+    #    normalized) - a 6th column would be parsed as an OBB angle.
     from ultralytics import YOLO
     model = YOLO(str(UI_WEIGHTS))
     boxes_written, skipped_names = 0, set()
     BATCH = 16
     for s in range(0, len(out_paths), BATCH):
         chunk = out_paths[s:s + BATCH]
-        # imgsz=960: the training/serving size — tiny cls (dots/badges) lose
+        # imgsz=960: the training/serving size - tiny cls (dots/badges) lose
         # their few-pixel color signal at the 640 default (live 2026-06-10).
         for path, res in zip(chunk, model.predict(chunk, conf=args.conf, imgsz=960, verbose=False)):
             h, w = res.orig_shape

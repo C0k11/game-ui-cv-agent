@@ -77,7 +77,7 @@ def main():
             d = dets(ui, fr, 0.35)
             names = {n for n, *_ in d}
             # 正锚活动quest_已选择(实测在部分列表状态漏检) 关卡得星_3
-            # 精确匹配 — Challenge 行灰星是独立类「关卡得星_0」(idx83),
+            # 精确匹配 - Challenge 行灰星是独立类「关卡得星_0」(idx83),
             # 旧 startswith 在 Challenge tab 会误通过(2026-07-17 实锤,
             # "视野有得星徽章=必在 Quest"的旧假设错误)
             if "活动quest_已选择" in names or "关卡得星_3" in names:
@@ -143,7 +143,7 @@ def main():
                 print("    切部队2", flush=True)
                 time.sleep(2.5)
             time.sleep(1.2)
-        print("    编队页感知循环 14 轮未完成 — 停")
+        print("    编队页感知循环 14 轮未完成 - 停")
         return False
 
     def fight_and_settle() -> bool:
@@ -173,7 +173,7 @@ def main():
         target = todo[0]
         fr = ensure_quest_tab()
         if fr is None:
-            print("    Quest tab 正锚(活动quest_已选择)拿不到 — 停")
+            print("    Quest tab 正锚(活动quest_已选择)拿不到 - 停")
             return
         rows = list_rows(fr)
         nums = [q for q, _ in rows if q]
@@ -181,7 +181,7 @@ def main():
         hit = next(((q, cy) for q, cy in rows if q == target), None)
         if hit is None:
             if not nums:
-                print("    列表无检出 — 停(人工看)")
+                print("    列表无检出 - 停(人工看)")
                 return
             if target < min(nums):
                 adb._shell("input swipe 2760 700 2760 1500 500")
@@ -201,7 +201,7 @@ def main():
             ledger_save(led)
             print(f"   Q{target} 加成记录入账", flush=True)
         else:
-            print(f"   Q{target} 战斗超时 — 停")
+            print(f"   Q{target} 战斗超时 - 停")
             return
 
     print("[A] 12关加成全记录 ", flush=True)
@@ -211,7 +211,7 @@ def main():
     # None 或 <20(单次成本)  收工, 绝不试探点扫荡开始(fail-closed)
     fr = ensure_quest_tab()
     if fr is None:
-        print("[B] Quest tab 正锚拿不到 — 停")
+        print("[B] Quest tab 正锚拿不到 - 停")
         return
     ap = None
     for n, c, x1, y1, x2, y2, W, H in dets(ui, fr, 0.5):
@@ -228,14 +228,14 @@ def main():
             break
     print(f"[B] 扫前 AP={ap}", flush=True)
     if ap is None or ap < 20:
-        print("[B] AP 读不出/不足 20 — 收工(绝不试探)", flush=True)
+        print("[B] AP 读不出/不足 20 - 收工(绝不试探)", flush=True)
         return
     # B1. Q12 = 滑到底后倒数第 1 行入场键(结构化定位, 零 OCR 依赖)
     prev_sig = None
     for _ in range(10):
         fr = ensure_quest_tab()
         if fr is None:
-            print("[B] Quest tab 正锚丢失 — 停")
+            print("[B] Quest tab 正锚丢失 - 停")
             return
         d = dets(ui, fr, 0.5)
         entries = sorted(
@@ -250,14 +250,14 @@ def main():
         adb._shell("input swipe 2760 1500 2760 700 500")
         time.sleep(2.0)
     else:
-        print("[B] 找不到Q12 — 停")
+        print("[B] 找不到Q12 - 停")
         return
     # B2. 扫荡面板全 cls 驱动(fail-closed: 检不出就停, 绝不盲点)
     fr = adb.capture_frame()
     d = dets(ui, fr, 0.5)
     mx = next((b for b in d if b[0] == "MAX_可点击"), None)
     if mx is None:
-        print("[B] MAX_可点击 检不出 — 不扫, 人工看", flush=True)
+        print("[B] MAX_可点击 检不出 - 不扫, 人工看", flush=True)
         return
     tap(int((mx[2] + mx[4]) / 2), int((mx[3] + mx[5]) / 2))
     time.sleep(2.5)
@@ -271,7 +271,7 @@ def main():
                if y1 / H > 0.12 and n in _DANGER]
     sw = next((b for b in d if b[0] == "扫荡开始" and b[1] >= 0.5), None)
     if sw is None:
-        print("[B] 扫荡开始 检不出 — 不扫, 人工看", flush=True)
+        print("[B] 扫荡开始 检不出 - 不扫, 人工看", flush=True)
         return
     tap(int((sw[2] + sw[4]) / 2), int((sw[3] + sw[5]) / 2))
     time.sleep(5)
@@ -297,7 +297,7 @@ def main():
     else:
         if "取消键" in names:
             tap(1540, 1570)
-        print(f"[B] 确认框结构闸拦截(body={body_bad}) — 不扫, 人工看",
+        print(f"[B] 确认框结构闸拦截(body={body_bad}) - 不扫, 人工看",
               flush=True)
     print("done", flush=True)
 

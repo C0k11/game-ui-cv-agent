@@ -18,7 +18,7 @@
 上锁区域**结构上碰不到**(2026-08-21 用户口述 + live 复核): 路由是
    夏莱办公室 -> 全体课程表面板选学生 -> 開始 -> 关面板 -> **ARROW_LEFT 翻下一区**,
    全程不回区域选择列表; 而选人是从面板列表里选的, 锁房间根本不在面板上。
-   所以这里**没有也不需要**显式查锁 —— 早先写的「`房间区域未解锁`(50) 在场的
+   所以这里**没有也不需要**显式查锁 -- 早先写的「`房间区域未解锁`(50) 在场的
    房间跳过」是过时说法, 代码里从来没有那一步, 别照着它去加。
 cls 50 本身是好的: 区域内页那种绿锁 live 0.95-0.97(小号 Lv30 实测 5 个锁房间全中);
    区域选择列表上「招募XX學生」那种灰锁 0 检出, 但路由不走那儿, 不影响。
@@ -155,10 +155,10 @@ class ScheduleFlow(ExitMixin, Flow):
             return self._go("roster", "已经在课程表里")
         if obs.cols(V.SCHOOL_AREAS, 0.40):
             return self._go("navigate", "落在区域选择页")
-        # 别按 tick 数收工 —— 2026-08-13 live 实测: 进课程表要走两次加载，
+        # 别按 tick 数收工 -- 2026-08-13 live 实测: 进课程表要走两次加载，
         #    转场帧全是 blank/unknown，`phase_ticks > 60` 在**还在加载**的时候
         #    就把整条 flow 判死（当轮 schedule 一节课都没上，报 UNKNOWN）。
-        #    真正的失败判据是「**在大厅上点了入口却始终进不去**」——
+        #    真正的失败判据是「**在大厅上点了入口却始终进不去**」--
         #    数的是"点了几次没生效"这个事实，不是干等了几帧。
         if self.state.get("enter_taps", 0) >= 4:
             return self._go("exit", "点了 4 次课程表入口都没进去")
@@ -187,7 +187,7 @@ class ScheduleFlow(ExitMixin, Flow):
         #    就是夏莱办公室然后开课程表找人，然后往左箭头路由，我们起点都进错了」）。
         #    老代码 brain/skills/schedule.py:1058 白纸黑字:
         #      `Sequence (once): click 夏莱办公室 -> ARROW_LEFT (jump to last region)`
-        #    —— 办公室是列表第 0 行的**全环锚点**，从它起跳 ARROW_LEFT 一圈才闭合。
+        #    -- 办公室是列表第 0 行的**全环锚点**，从它起跳 ARROW_LEFT 一圈才闭合。
         #    我上一版写成"按屏上从左到右取第一个"，于是进了夏莱居住区。
         want = self.cfg.get("areas") or []
         ordered = [b for n in want for b in seen if b.cls == n] if want else []
@@ -319,7 +319,7 @@ class ScheduleFlow(ExitMixin, Flow):
                 #    绿勾只长在**已获得**的学生头像上；房间里摆的是没获得的角色时,
                 #    票照样消耗、课照样上，屏上却什么都不变 -> 光靠绿勾的话
                 #    roster 下一帧又挑中同一个房间，票一张张烧光在同一间屋子里。
-                #     记在 `tried` 里 —— 它本来就是"这一区别再点这个"的台账。
+                #     记在 `tried` 里 -- 它本来就是"这一区别再点这个"的台账。
                 n = self.state.pop("room_of", None)
                 if n:
                     self.state.setdefault("tried", []).append(n)
@@ -364,7 +364,7 @@ class ScheduleFlow(ExitMixin, Flow):
         arrow = obs.find(V.ARROW_LEFT, 0.40)
         if arrow is not None:
             def _next(k=n):
-                # 换区域清绿勾累积表（位置相关）。**`tried` 不清** —— 它现在是
+                # 换区域清绿勾累积表（位置相关）。**`tried` 不清** -- 它现在是
                 #    按游戏日落盘的房间台账，学生名全服唯一，跨区域仍然有效；
                 #    清了就等于把今天的账撕了（本地记录方案的要点）。
                 self.state["regions_seen"] = k

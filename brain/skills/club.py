@@ -1,4 +1,4 @@
-"""ClubSkill — daily 社團 sign-in for free 10 AP (pure-YOLO rewrite).
+"""ClubSkill - daily 社團 sign-in for free 10 AP (pure-YOLO rewrite).
 
 Verified flow (interactive probe 2026-06-01, data/_social_probe_log.md). The
 old skill was WRONG: it looked for a 領取 claim cls and relied on the OCR popup
@@ -8,7 +8,7 @@ handler (dead in pure-YOLO mode). The probe found the real flow:
   cancel)  sign-in done. The 10 AP goes to the MAILBOX (mail skill claims it),
   not immediately to the balance.
 
-Two YOLO gaps the skill works around (documented, fix in v6 — task #22):
+Two YOLO gaps the skill works around (documented, fix in v6 - task #22):
 - The 3 social cards (社團/好友/幫手) have no reliable cls (社團/CLUB cls 51
   recall-missed at conf<0.20). We click the 社團 card via CLUB cls when seen,
   else via a normalized offset DOWN-LEFT of its red dot (probe: card body
@@ -83,7 +83,7 @@ class ClubSkill(BaseSkill):
         """社團簽到獎勵 = a centered 确认键 with NO 取消键 (single-button).
 
         2026-07-25 全仓金钱审计 #4: 排除项原本**只有 取消键 一个 cls**(47f
-        训练样本, 本来就是弱类) —— 它一漏检, 任何双键代价框都会被当成簽到奖励
+        训练样本, 本来就是弱类) -- 它一漏检, 任何双键代价框都会被当成簽到奖励
         直接点確認。schedule 那起 30 青辉石事故证明了"单点排除信号会整条哑火"。
         补一路正交的结构信号: body 里出现数量步进器 = 这是个要选数量付费的框,
         绝不是簽到奖励(簽到框 body 只有奖励图标 + 一个確認)。
@@ -94,7 +94,7 @@ class ClubSkill(BaseSkill):
         if self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF) is not None:
             return None  # 2-button dialog = not the checkin (don't mishandle)
         if self.has_qty_stepper(screen):
-            self.log(" 数量步进器在屏 = 付费框, 不是社團簽到 — 不点確認")
+            self.log(" 数量步进器在屏 = 付费框, 不是社團簽到 - 不点確認")
             return None
         return confirm
 
@@ -178,7 +178,7 @@ class ClubSkill(BaseSkill):
             x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
             if x is not None:
                 return action_click_box(x, "close stray popup blocking lobby nav")
-            self.log("on lobby but no 社交入口 — YOLO gap; waiting")
+            self.log("on lobby but no 社交入口 - YOLO gap; waiting")
             return action_wait(400, "waiting for 社交入口 cls")
 
         if self._phase_ticks > _ENTER_MAX:
@@ -199,7 +199,7 @@ class ClubSkill(BaseSkill):
             # 无 hold 的第二发落在框消失后的社團页上 = 盲拍。
             # 改 _force_settle 老实走稳定门 + 显式 after-ack(6s 盖 step 门控节奏)。
             if self._checkin_clicked and self.since("checkin_fire") < 6.0:
-                return action_wait(300, "確認已发 — 等确认框消失的帧证据")
+                return action_wait(300, "確認已发 - 等确认框消失的帧证据")
             self._checkin_clicked = True
             self.mark("checkin_fire")
             self.log("社團簽到  確認 (10AP to mailbox)")

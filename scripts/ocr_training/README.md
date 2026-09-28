@@ -36,7 +36,7 @@ py -3 scripts/ocr_training/05_evaluate.py
 ```
 
 ## Output
-- `data/ocr_model/ba_rec.onnx` — Fine-tuned recognition model
+- `data/ocr_model/ba_rec.onnx` - Fine-tuned recognition model
 - Pipeline automatically loads custom model when present
 
 ## Data Sources

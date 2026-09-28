@@ -2,7 +2,7 @@
 
 Why: classes with only 1-3 frames train poorly because YOLO sees them
 rarely per epoch. For static UI detection (vs fine-grained fused_avatar),
-overfitting is a non-issue — train ≈ test distribution. Simply replicating
+overfitting is a non-issue - train ≈ test distribution. Simply replicating
 minority-class frames N times is the cheapest fix.
 
 Strategy:
@@ -124,7 +124,7 @@ def main() -> int:
     }
     print(f"[stat] {len(minority)} minority classes (pooled frame_count < {args.target})")
     if not minority:
-        print("[done] no minority classes — nothing to oversample")
+        print("[done] no minority classes - nothing to oversample")
         return 0
 
     # Pass 3: plan copies per frame_key

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""战斗链 + 编队 —— 活动/悬赏/JFD/大赛/推图/挖矿全都复用这一份。
+"""战斗链 + 编队 -- 活动/悬赏/JFD/大赛/推图/挖矿全都复用这一份。
 
 链路 2026-08-08 真机逐帧验过（10 次出击 / 3.6 分钟，全 cls 驱动零 wait）:
     编队(出击)  战斗内(三倍速/暂停/自动战斗开启)  **战斗胜利**
@@ -7,11 +7,11 @@
 
  `战斗失败` **train=0，UI 模型一框都没有  输了看不见**。
    所以胜负判定是这样的：看见 `战斗胜利`/`战斗完成` 才算 WIN，其余一律
-   **UNKNOWN，不许记成"打过了"**。谎报 CLEAN 比报 UNKNOWN 危险得多 ——
+   **UNKNOWN，不许记成"打过了"**。谎报 CLEAN 比报 UNKNOWN 危险得多 --
    下游会据此跳过这一关。
 
 编队铁律（用户规则，memory event_ops_playbook）:
-   · **首通用部队1（速推主力）** —— 活动关卡的 Best Record 会把首通时的
+   · **首通用部队1（速推主力）** -- 活动关卡的 Best Record 会把首通时的
      加成倍率**永久锁定**在那一关上，用错队伍是不可逆的损失。
    · 加成队 = 部队2，且要**先看商店推算缺哪种币**再编。
     这里的 `formation_step` 在**确认不了当前选的是哪支部队时拒绝出击**，
@@ -228,7 +228,7 @@ class FormationMixin:
             if clean == "0":
                 return self.finish(
                     "BLOCKED",
-                    f"自动编队后加成仍是干净的 0%（raw={pct!r}）— 不出击")
+                    f"自动编队后加成仍是干净的 0%（raw={pct!r}）- 不出击")
 
         def _new_episode():
             self._bt()["seen_win"] = False      # 新一场，横幅重新算
@@ -272,7 +272,7 @@ class FormationMixin:
                     if clean == "0":
                         return self.finish(
                             "BLOCKED",
-                            f"自动编队后加成仍是干净的 0%（raw={pct!r}）— 不出击")
+                            f"自动编队后加成仍是干净的 0%（raw={pct!r}）- 不出击")
                 def _new_episode():
                     self._bt()["seen_win"] = False      # 新一场，横幅重新算
                 return tap_box(go, f"出击（部队{team}）", counter="sorties",
@@ -292,12 +292,12 @@ class FormationMixin:
             return self.finish(
                 "BLOCKED",
                 f"编队页确认不了当前是不是部队{team}（`{tab}`/`{hi}` 都没检出）"
-                f" — 拒绝盲目出击。用错队伍会把 Best Record 永久锁死。")
+                f" - 拒绝盲目出击。用错队伍会把 Best Record 永久锁死。")
         return wait(f"编队页: 等 部队{team} 的 cls 出现")
 
     def on_squad_quick_edit(self, obs: Observation, st: StateView) -> Optional[Action]:
         """快速編輯面板（专属页面身份，见 pages.py）：走自动编队子链。
-        这里**绝不能**落到通用的"点確認"处理器 —— 那会把旧阵容原样提交。"""
+        这里**绝不能**落到通用的"点確認"处理器 -- 那会把旧阵容原样提交。"""
         act = self._auto_form_chain(obs)
         if act is not None:
             self.state["qe_close_wait"] = 0
@@ -308,7 +308,7 @@ class FormationMixin:
             self.state["qe_close_wait"] = 0
             return tap_box(cf, "加成编队: 確認（提交）")
         # 確認已提交、面板自收动画/页面身份滞后的窗口。**这里绝不能返回 None**:
-        #    None 会落到 nav 归位, 它在"弹窗页"上找不到叉叉就点返回键 —— 和
+        #    None 会落到 nav 归位, 它在"弹窗页"上找不到叉叉就点返回键 -- 和
         #    面板自收赛跑, 输了就把编队页整层退掉（08-15 日常 live 实锤:
         #    確認 -> 被踢回关卡列表 -> 重进 -> 再編隊, 连环三圈全是白工,
         #    每圈 ~40s; 赢了才轮到出击）。面板正常 <1s 自收; 有界等待,
@@ -331,7 +331,7 @@ class FormationMixin:
             qe = obs.find(V.SQUAD_QUICK_EDIT, 0.40)
             if qe is not None:
                 return tap_box(qe, "加成编队: 快速編輯", once="af_edit")
-            return None      # 快速編輯键还没渲染出来 —— 落回等出击帧也无害
+            return None      # 快速編輯键还没渲染出来 -- 落回等出击帧也无害
         if self.pending("af_auto"):
             au = obs.find(V.SQUAD_AUTO_EDIT, 0.40)
             if au is not None:
@@ -340,9 +340,9 @@ class FormationMixin:
             # 2026-08-12 live 死锁（day3 在 arena 上发生过，这次 event 复发）:
             #    `快速編輯` 点出去了、`once:af_edit` 已经落下，但**面板没打开**
             #    （点击被吞 / 游戏卡） 找不到「自動」键  原来这里是裸 `wait`，
-            #    于是永远等下去 —— 实测卡满 3 分钟、体力 999 一点没消耗，
+            #    于是永远等下去 -- 实测卡满 3 分钟、体力 999 一点没消耗，
             #    而屏上 `出击` conf 0.978 一直亮着。
-            #    修的方向是**重试打开面板**，不是跳过编队 —— 活动加成队的自动
+            #    修的方向是**重试打开面板**，不是跳过编队 -- 活动加成队的自动
             #      编队是设计内功能（老 event_quest.py:1363 搬来的）。
             #      用户 2026-08-10 叫停的是**战术大赛**那边的自动编队
             #        （arena 也有队伍和快速编队，那边不许点进去自动编成），
@@ -356,13 +356,13 @@ class FormationMixin:
                 self.state.pop("hold:af_auto_missing:t", None)
                 if tries <= 3:
                     self.state.pop("once:af_edit", None)   # 允许重开面板
-                    self.log(f"等不到「自動」键 — 面板多半没打开，"
+                    self.log(f"等不到「自動」键 - 面板多半没打开，"
                              f"重点一次「快速編輯」（第 {tries}/3 次）")
                     return None
                 self.state["once:af_auto"] = True
                 self.state["once:af_ins"] = True
                 self.state["once:af_confirm"] = True
-                self.log("重开 3 次仍等不到「自動」键 — 放弃自动编队链，"
+                self.log("重开 3 次仍等不到「自動」键 - 放弃自动编队链，"
                          "用当前编队出击（不再死等）")
                 return None
             return wait("编辑面板: 等 自動 键")
@@ -390,7 +390,7 @@ class BattleMixin:
     def observe(self, obs: Observation, st: StateView) -> None:
         """胜利横幅是**一闪而过**的，而且常出现在 page=unknown 的帧上
         （08-08 实测 `战斗胜利` conf 0.99 就在一个 unknown 帧里）。
-        所以在这里**逐帧粘住**，别等結算頁才看 —— 那时横幅早没了。
+        所以在这里**逐帧粘住**，别等結算頁才看 -- 那时横幅早没了。
 
         win 计数也必须在**这里**转正（08-09 live 实锤）：原来写成
         「on_battle_result 里 seen_win  win+=1」，但结算屏大多数帧被判成
@@ -401,7 +401,7 @@ class BattleMixin:
         win_sig = obs.has([V.BATTLE_WIN, V.BATTLE_COMPLETE], 0.40)
         # **补一条不依赖横幅的胜利判据**（2026-08-10 live 实锤）：
         #    `战斗胜利`(train 33) / `战斗完成`(train 90) 都是弱类，横幅只闪几帧，
-        #    逐帧 step 或 tick 稍慢就整场错过 —— 实测这一场**活動點數 27152740、
+        #    逐帧 step 或 tick 稍慢就整场错过 -- 实测这一场**活動點數 27152740、
         #    AP 909889 明明打赢了，`win` 却还是 0**，flow 于是要把同一关再打一遍
         #    （和注释里那次 Q12 无限循环同形，只是换了个漏检的入口）。
         #     结算页上出现 `获得奖励`（train 量大、天天在用）= 这一场有产出 = 赢了。
@@ -431,7 +431,7 @@ class BattleMixin:
         off = obs.find(V.BATTLE_AUTO_OFF, 0.45)
         if off is not None and self.pending("autoon"):
             return tap_box(off, "战斗: 开自动战斗", once="autoon")
-        return wait("战斗中 — 等结算")
+        return wait("战斗中 - 等结算")
 
     #  结算
     def on_battle_result(self, obs: Observation, st: StateView) -> Optional[Action]:
@@ -448,11 +448,11 @@ class BattleMixin:
             #    `on_battle_result` **每帧**都会被调用，写在 return 之前
             #     每帧 +1  「打了 20 场都没看到胜利横幅」这种假数字，
             #    还会误触发 BLOCKED 把扫荡拒了。数的是 decide 调用次数，
-            #    不是场次 —— 「数意图不数事实」又一次。
+            #    不是场次 -- 「数意图不数事实」又一次。
             if not self._bt()["seen_win"]:
                 self._bt()["unknown"] += 1
                 self.log(f"这一场**胜负未知**（`战斗失败` train=0，输了看不见）"
-                         f"— 不记为已通关")
+                         f"- 不记为已通关")
         return tap_box(cf, "结算: 確認", post=_mark)
 
     #  奖励页

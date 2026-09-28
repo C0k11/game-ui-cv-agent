@@ -3,7 +3,7 @@
 Two-stage pipeline applied to both OCR output (`box.text`) and match
 patterns before substring comparison:
 
-  1. Apply a learned CORRECTIONS dictionary — maps known misreads back
+  1. Apply a learned CORRECTIONS dictionary - maps known misreads back
      to the canonical form (e.g. "Duest" -> "Quest", "辨中！" -> "辦中！").
   2. Fold Traditional <-> Simplified CJK via a small char table covering
      every char that appears in the BA vocabulary. This eliminates the
@@ -15,7 +15,7 @@ patterns before substring comparison:
 `scripts/ocr_training/ba_vocab.py::CORRECTIONS` is merged in as the
 hand-curated baseline.
 
-All functions are pure and cached — call `normalize(text)` repeatedly
+All functions are pure and cached - call `normalize(text)` repeatedly
 with no IO cost after first invocation.
 """
 from __future__ import annotations

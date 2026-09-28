@@ -399,7 +399,7 @@ def _read_topbar_clean(cls_name, samples: int = 5):
     OCR agrees on most often - correct more often than any single error mode).
     Returns int or None.
 
-    ️ KNOWN GAP (task#5): AP/credit still mis-crop on many frames; pyroxene is
+     KNOWN GAP (task#5): AP/credit still mis-crop on many frames; pyroxene is
     reliable. Until per-currency right-edge crop is calibrated, callers that
     spend on a balance (shop) must treat a low-confidence read as unverifiable
     and skip - never over-trust an inflated read."""
@@ -2488,7 +2488,7 @@ class DailyPipeline:
                 return esc
             if (_bright and not _recent_act and not _recent_loading
                     and self._no_ba_ticks >= 3 and self._no_ba_ticks % 3 == 0):
-                # ️位置从 (0.5,0.05) 挪到 (0.35,0.12) - 旧点自以为是"空天区", 实际
+                # 位置从 (0.5,0.05) 挪到 (0.35,0.12) - 旧点自以为是"空天区", 实际
                 # 压在 topbar 的 AP「+」按钮带上(2026-07-07 假 no-UI 时反复戳开
                 # 購買AP框)。(0.35,0.12) = topbar 下方 / 左侧图标列右侧 / 角色左侧,
                 # 两代 lobby 皮肤实测都是空背景; 真立绘屏(UI 全隐)点哪都安全。

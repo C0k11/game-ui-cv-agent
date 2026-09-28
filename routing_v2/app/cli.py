@@ -70,7 +70,7 @@ def cmd_probe(args):
 
 #  step
 def cmd_step(args):
-    """单步驱动 —— 「带着 bot 走一步」。
+    """单步驱动 -- 「带着 bot 走一步」。
 
     到达验证只认**页面身份变化**，不认状态字符串变化：
        HUB 的活动入口是 2 项轮播，状态串里带着入口名字，于是"轮播翻页"会被
@@ -116,11 +116,11 @@ def cmd_step(args):
             print(f"[step] 状态文件读不了（{e}） 从头来")
 
     # **飞轮常开**（用户铁律：跑一次攒一次）。
-    #   08-10 发现: 录帧只写在 `runner._save()` 里，**step 模式一张都不存** ——
+    #   08-10 发现: 录帧只写在 `runner._save()` 里，**step 模式一张都不存** --
     #      而逐帧走线恰恰是最值钱的素材: 每一帧都是人眼审过、知道语义的关键场景
     #      （灰态按钮 / 售罄条 / 购买确认框 / 各种 overlay），比自主跑的重复帧密度高得多。
     #   干净帧: obs.frame 直接来自 scrcpy（Android 内部抓取），天然无 overlay 烧录。
-    #   sidecar 记 page + reason —— 后续标注时不用猜"这帧当时是什么场景"。
+    #   sidecar 记 page + reason -- 后续标注时不用猜"这帧当时是什么场景"。
     shot_dir = _ROOT / "data" / "raw_images" / f"v2step_{time.strftime('%Y%m%d')}"
     if cfg["run"].get("save_frames", True):
         shot_dir.mkdir(parents=True, exist_ok=True)
@@ -178,7 +178,7 @@ def cmd_step(args):
     #    **新进程、ticks 归零**  所有 hold 判据永远攒不满，flow 卡在
     #    "连续确认中"（08-09 实测 event/event_shop 都被这个卡死）。
     #     `--ticks N`：同进程内先空跑 N-1 个 tick 把 hold 喂饱，
-    #      只有最后一个 tick 的动作才输出/执行 —— 仍然是"看一帧走一步"。
+    #      只有最后一个 tick 的动作才输出/执行 -- 仍然是"看一帧走一步"。
     nt = max(1, int(getattr(args, "ticks", 1) or 1))
     for _ in range(nt - 1):
         if flow is not None:
@@ -191,7 +191,7 @@ def cmd_step(args):
             st = machine.update(obs)
 
     # `--ticks N` 之后**必须重画 `_step_before.jpg`**（08-10 我自己被坑了）：
-    #    快照是第 1 帧存的，而决策用的是第 N 帧 —— 任务大厅的活动入口是 **3s
+    #    快照是第 1 帧存的，而决策用的是第 N 帧 -- 任务大厅的活动入口是 **3s
     #    轮播**，30 个 tick 期间翻了十几次  图上明明有 `距离结束还剩 0.95`，
     #    决策却报「等轮播翻过来」，我据此误判成 flow 的 bug。
     #    「看锁定框标注帧」这条纪律要成立，图和决策帧就必须是**同一帧**。
@@ -219,7 +219,7 @@ def cmd_step(args):
         act = nav.blank_escape(st, min_frames=0) or nav.to_lobby(obs, st)
 
     print(f"页面: {st}   检出 {len(obs.boxes)}")
-    print(f"该做: {act if act is not None else '（无 —— 没有对应 cls，不点）'}")
+    print(f"该做: {act if act is not None else '（无 -- 没有对应 cls，不点）'}")
     for b in sorted(obs.boxes, key=lambda x: -x.conf)[:10]:
         print(f"   {b.conf:.2f}  {b.cls:<26s} cx={b.cx:.3f} cy={b.cy:.3f}")
     _fly(obs, st, "decide", act.reason if act is not None else "(无动作)")
@@ -292,10 +292,10 @@ def cmd_step(args):
             if st2 is None:
                 continue
             # 声明了 1-step-ahead 契约就**只认它**，下面那三条一条都不用。
-            #    尤其不能退回第三条「屏上 cls 组成变了」——**弹入动画帧必然
+            #    尤其不能退回第三条「屏上 cls 组成变了」--**弹入动画帧必然
             #      让它成立**，2026-08-12 免費組合包实锤：点完「購買」291ms 就
             #      判"已生效"，而确认框那时还没成型。
-            #    没等到就一直转，直到 8s 超时走 else 分支报"这一发丢了" ——
+            #    没等到就一直转，直到 8s 超时走 else 分支报"这一发丢了" --
             #    fail-CLOSED，宁可报丢也不许假报生效。
             if _has_expect:
                 _hit = next((c for c in act.expect if obs2.has(c, 0.40)), None)
@@ -314,7 +314,7 @@ def cmd_step(args):
                       f"{st2.page}{'+'+st2.overlay if st2.overlay else ''}"
                       f"  ({(time.time()-t0)*1000:.0f}ms)")
                 break
-            # 页内动作（摸头/切速/开关）不换页也不换 overlay ——
+            # 页内动作（摸头/切速/开关）不换页也不换 overlay --
             #    生效证据 = **目标框从锚点消失**（比如摸完气泡就没了）。
             if act.anchor is not None and act.target_cls:
                 still = any(b.cls == act.target_cls
@@ -335,13 +335,13 @@ def cmd_step(args):
                 if sig2 != _sig0:
                     print(f" 页内有变化: 检出组成 {len(_sig0)}{len(sig2)} 项不同"
                           f"（页面仍 {page0}, {(time.time()-t0)*1000:.0f}ms）"
-                          f" — 目标框还在原位，多半是同位置刷新了新内容")
+                          f" - 目标框还在原位，多半是同位置刷新了新内容")
                     break
         else:
             fz = feed.frozen_s()
-            print(f" 8s 内页面/overlay 没变、目标框也还在原地 — "
+            print(f" 8s 内页面/overlay 没变、目标框也还在原地 - "
                   f"这一发丢了或点错了，看 _step_after.jpg"
-                  + (f"\n 屏幕内容已 {fz:.0f}s 没变化 — **疑似游戏死机**"
+                  + (f"\n 屏幕内容已 {fz:.0f}s 没变化 - **疑似游戏死机**"
                      f"（死机帧 YOLO 照样检出，别信当前决策）" if fz > 30 else ""))
         # 落地帧同样进飞轮：「点完之后长什么样」正是灰态/已领态/售罄态
         #   这些**只在动作之后才出现**的样本的唯一来源（08-10 商店买完那帧为证）。
@@ -392,7 +392,7 @@ def cmd_run(args):
             if not money_ok:
                 print("    金钱步未授权（本次没带 --money-ok） 拒绝")
                 return False
-            # 2026-08-12 修：这里原来是 `return _ask(act)` —— 带了 --money-ok
+            # 2026-08-12 修：这里原来是 `return _ask(act)` -- 带了 --money-ok
             #    **还要再交互问一次**，而 `_ask` 遇到 EOFError 返回 False。
             #    于是在任何非交互环境（管道、CI、我这种工具调用）里
             #    `--money-ok` **完全失效、永远拒绝**，flow 还会把"被拦"

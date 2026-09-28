@@ -1,8 +1,8 @@
-"""MailSkill — claim all mailbox rewards (pure-YOLO rewrite).
+"""MailSkill - claim all mailbox rewards (pure-YOLO rewrite).
 
 Verified flow (interactive probe 2026-06-01, data/_mail_probe_log.md). Mail is
 the daily收口: bounty / JFD / arena / 社團 rewards all funnel into the mailbox,
-so it must claim everything. NO OCR — the probe found a clean pure-YOLO done
+so it must claim everything. NO OCR - the probe found a clean pure-YOLO done
 signal: 一次領取 going grey (CLAIM_ONCE_GREY) means the queue is drained. The
 old X/200 digit read was a progress crutch and is dropped (it relied on
 full-frame OCR which is disabled in pure-YOLO mode anyway).
@@ -147,7 +147,7 @@ class MailSkill(BaseSkill):
                 self._open_clicked = True
                 self.mark("mail_open")
                 return action_click_box(mail_btn, "open mailbox")
-            # Envelope cls missed but its red dot is in the mail zone — click
+            # Envelope cls missed but its red dot is in the mail zone - click
             # the dot's anchor (its own center) to open the mailbox.
             dot = self.find_cls(screen, UC.DOT_RED, conf=0.35, region=_MAIL_ZONE)
             if dot is not None:
@@ -156,7 +156,7 @@ class MailSkill(BaseSkill):
                 self._open_clicked = True
                 self.mark("mail_open")
                 return action_click(dot.cx, min(0.06, dot.cy + 0.02), "open mailbox (dot)")
-            self.log("on lobby but no 邮件箱/红点 — YOLO gap; waiting")
+            self.log("on lobby but no 邮件箱/红点 - YOLO gap; waiting")
             return action_wait(400, "waiting for 邮件箱 cls")
 
         if self._phase_ticks > _ENTER_MAX and self.since("enter_phase") > _ENTER_MAX_SEC:
@@ -179,22 +179,22 @@ class MailSkill(BaseSkill):
         #  Stuck-claim block (live-caught 2026-06-11): 一次領取 = claim the
         # WHOLE queue in one tap, so a healthy mailbox greys out after 1-2
         # claims. If it stays YELLOW past _CLAIM_STUCK taps, something blocks
-        # every claim — here it was 通知「背包已滿，請整理背包」(item bag full).
+        # every claim - here it was 通知「背包已滿，請整理背包」(item bag full).
         # The bot can't tidy the bag; spinning here also kept the screen off
         # the lobby, so the global money-read left-truncated (6497497) and
         # false-tripped the breach guard. Recognise the block and exit.
         if self._claims >= _CLAIM_STUCK:
-            self.log(f"️ 一次領取 still yellow after {self._claims} taps "
+            self.log(f" 一次領取 still yellow after {self._claims} taps "
                      f"(背包满/被阻挡)  exit, 待用户整理背包")
             self._goto("exit")
             return action_wait(300, "claim blocked (bag full?)  exit")
 
-        # Claim-all (一次领取黄色) — one tap claims the whole unclaimed queue.
+        # Claim-all (一次领取黄色) - one tap claims the whole unclaimed queue.
         claim_all = self.find_cls(screen, UC.CLAIM_ONCE_YELLOW, conf=_CLS_CONF)
         if claim_all is not None:
             # Pace re-claims (稳定规则): reward / 通知 popup takes a beat.
             if self._phase_ticks % 3 != 1:
-                return action_wait(500, "claim clicked — settling")
+                return action_wait(500, "claim clicked - settling")
             # 被吞的点击不虚增计数(2026-07-21 mutate-before-ack 防御: 否则
             # _claims 虚高  假触 _CLAIM_STUCK bag-full 早退, mail 没领完)。
             # "claim" 本在稳定门豁免词表, 此防御主要覆盖 ADB 丢 tap 边缘。
@@ -209,7 +209,7 @@ class MailSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "mail drained  exit")
 
-        # Neither yellow nor grey claim-all visible yet — settle, then bail.
+        # Neither yellow nor grey claim-all visible yet - settle, then bail.
         if self._phase_ticks > _CLAIM_MAX:
             self.log("no claim-all cls found, exiting")
             self._goto("exit")
@@ -224,7 +224,7 @@ class MailSkill(BaseSkill):
             self.log("exit budget exhausted, reporting done")
             return action_done("mail exit timeout")
         # A 取消键 on the way out = some dialog is up (e.g. ESC-on-lobby opens
-        # the 是否結束 quit prompt, which also hides the Lobby signature) —
+        # the 是否結束 quit prompt, which also hides the Lobby signature) -
         # cancel is always the safe dismiss (live 2026-06-10, daily_mission).
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
         if cancel is not None:
@@ -235,7 +235,7 @@ class MailSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "mail exit: back button")
-        # Pace blind ESC (user 2026-06-10: "ADB点击要有耐心") — spamming it every
+        # Pace blind ESC (user 2026-06-10: "ADB点击要有耐心") - spamming it every
         # tick outruns page transitions and lands extra ESCs on the lobby,
         # popping the 是否結束 quit prompt over and over.
         if self._phase_ticks % 3 != 0:

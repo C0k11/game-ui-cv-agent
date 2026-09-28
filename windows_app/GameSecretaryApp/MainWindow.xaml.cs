@@ -78,7 +78,7 @@ public partial class MainWindow : Window
     private void OnStateChanged(object? sender, EventArgs e)
     {
         // Minimize stays on taskbar (normal behavior).
-        // Only the X close button hides to tray — see OnClosing().
+        // Only the X close button hides to tray - see OnClosing().
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)

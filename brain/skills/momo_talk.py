@@ -1,19 +1,19 @@
-"""MomoTalkSkill — mine all unread MomoTalk conversations (pure-YOLO rewrite).
+"""MomoTalkSkill - mine all unread MomoTalk conversations (pure-YOLO rewrite).
 
 Verified flow (interactive probe 2026-06-01, data/_mining_probe_log.md). Mining
 MomoTalk = reading unread conversations to unlock 羁绊剧情 (each story ≈ 80
-pyroxene — a top free-pyroxene source).
+pyroxene - a top free-pyroxene source).
 
 Probe refinements over the old skill:
 - After entering MomoTalk, click the 对话区域 tab (MOMO_CHAT_TAB) to reach the
   未讀訊息 list (the default name-sorted view doesn't show unread directly).
 - Open a student by tapping the row's LEFT (avatar, x≈0.22), NOT the unread
-  badge (x≈0.505) — tapping the badge is unreliable (probe: 莉 didn't open).
-- 学生发送信息中 (MOMO_SENDING) is a TRANSIENT "student is typing" cls — it only
+  badge (x≈0.505) - tapping the badge is unreliable (probe: 莉 didn't open).
+- 学生发送信息中 (MOMO_SENDING) is a TRANSIENT "student is typing" cls - it only
   flickers. WGC polls ~55fps so we catch it; we only declare a student done
   after a **wall-clock** window with NO sending / reply / goto-bond
   (2026-07-28: 原来是 tick 计数, 在 zero-wait 下缩水成 3.5s  连丢学生)。
-- 前往羁绊剧情 does NOT retrigger consecutively — post-bond chatter is just
+- 前往羁绊剧情 does NOT retrigger consecutively - post-bond chatter is just
   more reply options to clear.
 
 State machine
@@ -26,7 +26,7 @@ story     进入羁绊剧情  剧情menu跳过故事键确认键获得奖励点�
 exit      BTN_HOME / BTN_BACK  lobby  done.
 
 Detectors: ui + **avatar** (2026-07-28)。未读列表点的是行头像, 而头像属于
-fused_avatar 域 —— 只挂 ui 时那一下在感知层看是"半径 0.06 内零 cls = 盲拍"。
+fused_avatar 域 -- 只挂 ui 时那一下在感知层看是"半径 0.06 内零 cls = 盲拍"。
 挂上后同帧 5 个头像 conf 0.99-1.00 且带中文角色名, 顺带知道正在挖谁。
 """
 from __future__ import annotations
@@ -46,19 +46,19 @@ _AVATAR_DX = 0.28          # 头像漏检时的兜底外推量(badge.cx 左移�
 _AVATAR_CONF = 0.30        # fused_avatar 头像框置信度下限(实测该页 0.99-1.00)
 _ROW_DY = 0.035            # badge <-> 同行头像的 cy 容差(实测行距 0.107, 取 1/3)
 # Switch students ONLY when the screen has NO 学生信息回复选项 (reply) AND NO 学生发
-# 送信息中 (sending) AND NO bond CTA — driven purely by cls detection, NOT a timer.
+# 送信息中 (sending) AND NO bond CTA - driven purely by cls detection, NOT a timer.
 # This tiny window only bridges a 1-2 frame render gap (sending vanishes before
 # the reply renders) and the weak cls flickering (sending 28f / reply 32f  an
-# occasional missed frame). It is NOT a per-student cooldown — any reply/sending
+# occasional missed frame). It is NOT a per-student cooldown - any reply/sending
 # frame instantly resets it, so a still-talking student is never abandoned.
 # 2026-07-28 墙钟化(tick-vs-wallclock 家族第四例, 与 craft `_COLLECT_SETTLE` /
 # `_MAX_SENDING` / `_FIGHT_HOLD` 同病): 旧值 `_STABLE_EMPTY = 14` 是 **tick**。
-# 注释自己写着「8 was too impatient (live 2026-06-10)」—— 那时 ~1.6s/tick,
+# 注释自己写着「8 was too impatient (live 2026-06-10)」-- 那时 ~1.6s/tick,
 # 8 tick=12.8s 嫌短, 14 tick=22.4s 才够。**zero-wait 上线后 0.25s/tick  14 tick
 # 只剩 3.5s**, 那个修复被悄悄作废了。
 # live 复现(2026-07-28, 帧证据): 连开 贵音  爱丽丝(战斗)  凯伊, **前两个各等
 # 5.0-5.3s 就判 "student fully done"**, 而实测**会话面板渲染要 ~5s**(凯伊正是在
-# 第 5.0s 才出 回复选项) —— 卡在边界上。事后帧: 未讀訊息仍是 (16), 贵音/爱丽丝
+# 第 5.0s 才出 回复选项) -- 卡在边界上。事后帧: 未讀訊息仍是 (16), 贵音/爱丽丝
 # 红标「2」原封不动且行未高亮 = **根本没打开过**, 不是"没东西可回"。
 #
 # 拆成两段, 因为两件事的时间尺度差一个量级, 合成一个数必然一头错:
@@ -73,7 +73,7 @@ _ROW_OPEN_CAP = 2          # re-open a still-badged row at most this many times
                            # class of badges that never clear).
 # 2026-07-25 墙钟化: 旧值 `_MAX_SENDING = 30` **ticks**。自主跑实测
 # 0.15-0.25 s/tick(口径见 BaseSkill.mark)  真实只有 **4.5-7.5s**, 而注释自己
-# 写着"真实打字 <13s" —— 判据比它要判的现象还短, 学生打字打到一半就被当成
+# 写着"真实打字 <13s" -- 判据比它要判的现象还短, 学生打字打到一半就被当成
 # 误检当空聊天放弃。(我第一版用被 step_mode 停顿污染的均值算成 17.5s, 据此
 # 错误地驳回了 workflow 这一条; 见 BaseSkill.mark 的口径说明。)
 _MAX_SENDING_SEC = 18.0    # sending stuck this long = mis-detect (a real msg types <13s)
@@ -87,7 +87,7 @@ _MAX_SCROLLS = 6           # list swipes before giving up (mine visible, then sc
 #   _ENTER_MAX=22    **5.5s** 就报 `momotalk unreachable`
 #       这极可能正是 2026-07-27 夜那条 unreachable 的真根因: 当晚 scrcpy 断流
 #         17.7s, 帧都拿不稳, 5.5s 根本不够走完"点入口页面渲染"。今天同一落点
-#         bot 一发就进(它的 tap 走 AdbInput._IO_LOCK) —— 落点从来没错。
+#         bot 一发就进(它的 tap 走 AdbInput._IO_LOCK) -- 落点从来没错。
 #   _DIALOGUE_MAX=60  **15s**, 比上面 22s 的聊完窗口还短  窗口永远等不满,
 #         学生必被中途丢下(横跳 bug 的第二条腿)
 #   _STORY_MAX=70     **17.5s** 走完 menu跳过確認奖励点击继续 整条链, 不够
@@ -100,7 +100,7 @@ _STORY_MAX_SEC = 112.0
 _EXIT_MAX_SEC = 22.0
 # 整个 skill 的墙钟预算。16 条未读 × (渲染5s + 对话 + 静默22s + 羁绊剧情跳过~30s)
 # ≈ 15-20 分钟。这是**手动挖矿**skill(用户前端选择去不去), 不在每日主链上抢时间,
-# 而每条羁绊剧情 ≈ 80 青辉石 —— 宁可跑久也不要丢矿。
+# 而每条羁绊剧情 ≈ 80 青辉石 -- 宁可跑久也不要丢矿。
 _SKILL_BUDGET_SEC = 1500.0
 # 跳过故事键/剧情menu  「是否略過此劇情?」确认框渲染的 after-ack 窗口。
 # 2026-07-28 live: 没有这道闸时连点 5 次, 第二发把刚弹出的确认框又关掉 = 自锁。
@@ -108,7 +108,7 @@ _SKILL_BUDGET_SEC = 1500.0
 # 第一版写 2.0s, 自主跑(0.25 s/tick)够用, 但 step_walk 每步要抓干净帧+跑 YOLO,
 # 步间隔 **4-6s**  窗口必然已过期  在门控下**照样连发 5 次**, 看起来"修了没用"。
 # 手动实测证明按钮本身没问题: 点一次 ≫ 就弹出「是否略過此劇情?」(取消0.98/确认0.98)
-# —— 所以那 5 连发确实是**弹出来又被下一发关掉**的自锁。
+# -- 所以那 5 连发确实是**弹出来又被下一发关掉**的自锁。
 # 放宽到 6.0s 近乎零代价: 框正常 1-2s 就渲染出来, 上面的 confirm 分支立刻接走,
 # 根本等不满; 放窄却直接把一整段剧情卡死。(同 _FIGHT_HOLD 的取舍口径)
 _SKIP_ACK_SEC = 6.0
@@ -121,7 +121,7 @@ _UNKNOWN_ACK_SEC = 1.5
 
 class MomoTalkSkill(BaseSkill):
     def exit_report(self):
-        """竣工判据 —— 「跑完了」和「未读清空了」是两件事。
+        """竣工判据 -- 「跑完了」和「未读清空了」是两件事。
 
         2026-07-27 之前只报 `momotalk complete (N)`, N 是内部计数, 谁也不知道
         屏上还剩几条未读。现在 avatar 域挂上后能报**具体名单**, 对得上账。
@@ -129,16 +129,16 @@ class MomoTalkSkill(BaseSkill):
         if not self._mined:
             return ("LEFTOVER" if self._students_done == 0 else "UNKNOWN",
                     f"一个学生都没挖到(sub={self.sub_state}, "
-                    f"scroll={self._scrolls}) — 查未读badge/进入点击")
+                    f"scroll={self._scrolls}) - 查未读badge/进入点击")
         return ("CLEAN", f"挖了 {len(self._mined)} 人: {'/'.join(self._mined)}"
                          f" (scroll {self._scrolls}/{_MAX_SCROLLS})")
 
     def should_run(self, screen: ScreenState) -> bool:
-        # MomoTalk + bond-story mining is NOT a daily-routine auto-task — it is a
+        # MomoTalk + bond-story mining is NOT a daily-routine auto-task - it is a
         # MANUAL, player-chosen action (user 2026-06-15: "momotalk和剧情不在每日
         # 里面, 是玩家在前端选择去不去挖矿的"). So when this skill is triggered it
         # ALWAYS runs (the player already decided to mine); never dot-gate it.
-        # (The 社交入口 navbar dot is CLUB's — 社團 sign-in, owned by ClubSkill —
+        # (The 社交入口 navbar dot is CLUB's - 社團 sign-in, owned by ClubSkill -
         # NOT MomoTalk's, so it must not gate this skill either.) The scan phase
         # exits cleanly if there happen to be no unread conversations.
         return True
@@ -164,12 +164,12 @@ class MomoTalkSkill(BaseSkill):
         self._tab_opened: bool = False
         self._students_done: int = 0
         self._cur_student: str = ""          # 当前正在挖的角色名(avatar cls)
-        self._mined: List[str] = []          # 挖完的名单 — 竣工判据/日志用
+        self._mined: List[str] = []          # 挖完的名单 - 竣工判据/日志用
         self._empty_streak: int = 0
         self._sending_streak: int = 0        # consecutive sending frames (mis-detect cap)
         self._scan_misses: int = 0
         self._scrolls: int = 0               # list swipes done
-        self._row_opens: List[List[float]] = []  # [row-cy, opens] — re-open cap per view
+        self._row_opens: List[List[float]] = []  # [row-cy, opens] - re-open cap per view
         self._reply_positions: set = set()     # tapped reply spots this student (skip mis-detect repeats)
         self._reply_gone: int = 0              # consecutive frames with NO reply option
         self._story_taps: int = 0
@@ -182,7 +182,7 @@ class MomoTalkSkill(BaseSkill):
     def _goto(self, sub_state: str) -> None:
         self.sub_state = sub_state
         self._phase_ticks = 0
-        # 阶段墙钟起点 —— 上面所有 *_MAX_SEC 都读这个(裸 since() 首次返回 0.0,
+        # 阶段墙钟起点 -- 上面所有 *_MAX_SEC 都读这个(裸 since() 首次返回 0.0,
         # 所以必须每次进阶段显式 mark, 不能靠"没 mark 就当 0")。
         self.mark("phase")
 
@@ -214,14 +214,14 @@ class MomoTalkSkill(BaseSkill):
                 or self.find_cls(screen, UC.MOMO_UNREAD, conf=_CLS_CONF, region=_UNREAD_LIST_REGION) is not None)
 
     def _convo_alive(self) -> None:
-        """看到任一会话 cls(reply / sending / bond CTA / 剧情后续) 就调 ——
+        """看到任一会话 cls(reply / sending / bond CTA / 剧情后续) 就调 --
         把"聊完了"的墙钟清零, 并 latch"这个学生的会话确实开起来过"。"""
         self._empty_streak = 0
         self._seen_convo = True
         self.mark("convo")
 
     def _panel_student(self, screen: ScreenState):
-        """右侧会话面板**当前显示的是谁** —— 用消息气泡旁的头像(avatar 域)。
+        """右侧会话面板**当前显示的是谁** -- 用消息气泡旁的头像(avatar 域)。
 
         左侧未读列表的头像固定在 cx≈0.205, 右侧会话面板的在 cx≈0.55-0.80,
         两者不会混。取该带内出现次数最多的角色名(一屏会有多条同人的气泡)。
@@ -241,7 +241,7 @@ class MomoTalkSkill(BaseSkill):
         """未读列表**同一行**的学生头像框(fused_avatar 域, 带中文角色名)。
 
         判据: model_tag=="avatar" 且落在列表左侧栏(cx<0.35) 且与 badge 同行
-        (|Δcy| < 半行高)。不做全屏 argmax —— 那是 840AP 事故的病根
+        (|Δcy| < 半行高)。不做全屏 argmax -- 那是 840AP 事故的病根
         (find_cls 全屏最高分抢锚点)。
         """
         best = None
@@ -303,19 +303,19 @@ class MomoTalkSkill(BaseSkill):
             _chrome = self.find_cls(screen, [UC.STORY_MENU, UC.STORY_SKIP],
                                     conf=0.30, region=(0.80, 0.0, 1.0, 0.30))
             if _chrome is None:
-                # after-ack —— **这道闸自己第一版就漏了它**, 上线第一次 live 就被
+                # after-ack -- **这道闸自己第一版就漏了它**, 上线第一次 live 就被
                 # step_walk 连发守卫逮到「取消连发 3 次」(第 3 发时框已经关掉,
                 # 落点半径 0.06 内零 cls, 拍在 MomoTalk 面板下方的空白上)。
                 # 记这一笔是因为它证明了一件事: **新写的每一个 click 分支都要先
-                # 回答"这一下发出去之后凭什么知道它落地了"** —— 我今天一整天都在
+                # 回答"这一下发出去之后凭什么知道它落地了"** -- 我今天一整天都在
                 # 修这个族, 自己新写的闸照样踩。
                 if self._unknown_cancel_issued:
                     _uw = self.since("unknown_cancel")
                     if _uw < _UNKNOWN_ACK_SEC:
-                        return action_wait(300, f"未知框取消已发 — 等它关掉 "
+                        return action_wait(300, f"未知框取消已发 - 等它关掉 "
                                                 f"(after-ack {_uw:.1f}/"
                                                 f"{_UNKNOWN_ACK_SEC:.1f}s)")
-                    self.log("取消发出后未知框仍在 — 判为被吞, 重发一次")
+                    self.log("取消发出后未知框仍在 - 判为被吞, 重发一次")
                 self.log(f"未知確認框(确认@cy{_confirm.cy:.3f} 取消@cy"
                          f"{_cancel.cy:.3f}, 无剧情chrome)  取消, 绝不確認 "
                          f"(可能是劇透警告/導航離開框)")
@@ -378,7 +378,7 @@ class MomoTalkSkill(BaseSkill):
         _el = self.clock() - (self._enter_t0 or self.clock())
         if _el > _ENTER_MAX_SEC:
             self.log(f" MomoTalk 进不去: {_el:.1f}s > {_ENTER_MAX_SEC:.0f}s "
-                     f"(点击 {self._enter_ticks} tick) — 抓这一刻的帧看是入口没检出"
+                     f"(点击 {self._enter_ticks} tick) - 抓这一刻的帧看是入口没检出"
                      f"还是点了不响应")
             return action_done(f"momotalk unreachable ({_el:.0f}s)")
         if self.detect_screen_yolo(screen) not in (None, "Lobby"):
@@ -401,7 +401,7 @@ class MomoTalkSkill(BaseSkill):
                 return action_click_box(tab, "open 对话区域 tab")
 
         if self.since("phase") > _TAB_MAX_SEC:
-            # Tab cls missed but maybe already on the list — proceed.
+            # Tab cls missed but maybe already on the list - proceed.
             self._goto("scan")
             return action_wait(300, "tab timeout  scan")
         return action_wait(350, "waiting for 对话区域 tab")
@@ -414,7 +414,7 @@ class MomoTalkSkill(BaseSkill):
 
         #  Do NOT treat a lingering right-pane conversation as work. After a
         # student finishes, the right pane keeps showing its last messages
-        # (reply/bond cls stay detected) — the old `_in_conversation  dialogue`
+        # (reply/bond cls stay detected) - the old `_in_conversation  dialogue`
         # branch re-entered dialogue forever (total ran 1447, instant-done loop,
         # only 3 students actually mined before max_ticks). The open student's own
         # multi-turn dialogue is fully handled INSIDE _dialogue; scan only ever
@@ -451,7 +451,7 @@ class MomoTalkSkill(BaseSkill):
             # =="avatar", 中文角色名)。旧码只按 `badge.cx - 0.28` **外推**, 在
             # ui 域看落点半径 0.06 内零 cls = 盲拍(step_walk 守卫实拦)。实测挂上
             # avatar 后同帧 5 个头像 0.99-1.00 全中, cx=0.205 而外推值 0.226 已
-            # 压到框右边缘(x2=0.229) —— 外推能用但没有余量, 一旦版式微调就滑出去。
+            # 压到框右边缘(x2=0.229) -- 外推能用但没有余量, 一旦版式微调就滑出去。
             av = self._row_avatar(screen, unread.cy)
             if av is not None:
                 self._cur_student = av.cls_name
@@ -501,14 +501,14 @@ class MomoTalkSkill(BaseSkill):
             return action_back("dialogue timeout")
 
         # 面板身份闸(2026-07-28 帧实锤): 点开学生 A 之后, 右侧会话面板可能
-        # **还停在上一个学生 B** 上 —— 实测点了「贵音」, 右侧面板的气泡头像全是
+        # **还停在上一个学生 B** 上 -- 实测点了「贵音」, 右侧面板的气泡头像全是
         # `凯伊 cx=0.717`, 连羁绊剧情概要正文写的都是 Kei。旧码不问"现在这个面板
         # 是谁的"就直接点 CTA/回复  在 B 的面板上替 A 干活:
         #   · A 的未读**永远清不掉**(点两次到 _ROW_OPEN_CAP 后被跳过)
         #   · B 被重复挖(这次侥幸 B 也确实有矿, 所以看不出来)
         # 与 event_quest「换关不关旧弹窗、只有日志 label 变了」**完全同构**:
         # **参数变了 ≠ 屏幕变了**(见 memory log_is_not_truth 的元教训)。
-        # 只在**两边都认出来**时才判不符 —— 面板还没渲染出头像(names 空)属于
+        # 只在**两边都认出来**时才判不符 -- 面板还没渲染出头像(names 空)属于
         #   "判不了", 交给上面的 _OPEN_RENDER_SEC 窗口, 绝不在这里瞎猜。
         if self._cur_student:
             _panel = self._panel_student(screen)
@@ -516,15 +516,15 @@ class MomoTalkSkill(BaseSkill):
                 _w = self.since("convo")
                 if _w < _PANEL_SWITCH_SEC:
                     return action_wait(300, f"面板还是「{_panel}」不是"
-                                            f"「{self._cur_student}」— 等切换 "
+                                            f"「{self._cur_student}」- 等切换 "
                                             f"({_w:.1f}/{_PANEL_SWITCH_SEC:.0f}s)")
                 self.log(f"面板 {_w:.1f}s 仍停在「{_panel}」而我点的是"
-                         f"「{self._cur_student}」— 判开学生那一下没落地  回 scan 重开")
+                         f"「{self._cur_student}」- 判开学生那一下没落地  回 scan 重开")
                 self._goto("scan")
                 self._scan_misses = 0
                 return action_wait(300, "面板未切换  rescan")
 
-        # Bond-story CTA (priority — the 80-pyroxene payoff).
+        # Bond-story CTA (priority - the 80-pyroxene payoff).
         goto_bond = self.find_cls(screen, UC.GOTO_BOND_STORY, conf=_CLS_CONF)
         if goto_bond is not None:
             self._convo_alive()
@@ -549,19 +549,19 @@ class MomoTalkSkill(BaseSkill):
             _w = self.since("sending")
             if _w < _MAX_SENDING_SEC:
                 self._convo_alive()
-                # A new message wave makes previously-tapped reply spots STALE —
+                # A new message wave makes previously-tapped reply spots STALE -
                 # the next option legitimately renders at the SAME fixed spot.
                 self._reply_positions.clear()
-                return action_wait(450, f"学生发送信息中 — waiting "
+                return action_wait(450, f"学生发送信息中 - waiting "
                                         f"({_w:.1f}/{_MAX_SENDING_SEC:.0f}s)")
             # sending stuck  mis-detect; fall through to empty handling.
         else:
             self._sending_streak = 0
             self.clear_timer("sending")
 
-        # Reply option  tap, with DYNAMIC position-dedup. ️ The 回覆 box
+        # Reply option  tap, with DYNAMIC position-dedup.  The 回覆 box
         # renders at a FIXED spot, so consecutive turns reuse the same position
-        # — a permanent dedup ate the 2nd+ option and ABANDONED the student
+        # - a permanent dedup ate the 2nd+ option and ABANDONED the student
         # mid-chat (live 2026-06-10 横跳 root cause: 40 opens for ~24 students).
         # Dedup now invalidates when the option DISAPPEARS ≥2 frames (consumed)
         # or a sending wave arrives. A mis-detected static chat bubble (一花
@@ -588,7 +588,7 @@ class MomoTalkSkill(BaseSkill):
 
         # Nothing fresh to do  empty. 判"这个学生聊完了"改用**墙钟**(见文件头
         # _OPEN_RENDER_SEC/_TAIL_EMPTY_SEC 的实测与推导), 并按"有没有见过会话"
-        # 分两段 —— 合成一个数必然一头错。仍是 cls 驱动: 任一 reply/sending/bond
+        # 分两段 -- 合成一个数必然一头错。仍是 cls 驱动: 任一 reply/sending/bond
         # 帧都会 mark("convo") 把计时清零。
         self._empty_streak += 1
         _limit = _TAIL_EMPTY_SEC if self._seen_convo else _OPEN_RENDER_SEC
@@ -605,7 +605,7 @@ class MomoTalkSkill(BaseSkill):
                 # 要么这个学生真没内容。_ROW_OPEN_CAP=2 会让它再被开一次;
                 # 若两次都这样, badge 还在就说明是感知/点击问题, 去翻这一刻的帧。
                 self.log(f" student 「{self._cur_student or '?'}」 打开后 {_w:.1f}s "
-                         f"内**没出现任何会话 cls**(reply/sending/bond) —— "
+                         f"内**没出现任何会话 cls**(reply/sending/bond) -- "
                          f"点击没落地? 还是真没内容? (#{self._students_done})")
             self._goto("scan")
             self._scan_misses = 0
@@ -623,7 +623,7 @@ class MomoTalkSkill(BaseSkill):
 
         # Reward splash  claim, then RETURN TO DIALOGUE (not scan): the bond
         # story is mined but the student still has post-bond chatter to clear.
-        # Jumping to scan here (+ row-dedup) skipped it and switched students —
+        # Jumping to scan here (+ row-dedup) skipped it and switched students -
         # the "剧情打完没打后续就换人" bug. dialogue clears the post-bond replies,
         # THEN scans the next student.
         cont = self.find_cls(screen, UC.STORY_TAP_CONTINUE, conf=_CLS_CONF)
@@ -639,10 +639,10 @@ class MomoTalkSkill(BaseSkill):
 
         # Skip-confirm dialog (是否略過)  确认键.
         # 2026-07-28 live 实锤的死循环(mutate-before-ack, task#23 家族):
-        #   tick=8  wait  帧未稳定(转场/滚动) — 等稳定帧: confirm story skip
+        #   tick=8  wait  帧未稳定(转场/滚动) - 等稳定帧: confirm story skip
         #   tick=9  click 跳过故事键                     又退回去点 skip
         # 两个毛病叠在一起:
-        #   `self._story_cut = 0` **写在动作发出之前** —— 动作被【帧稳定门】吞掉
+        #   `self._story_cut = 0` **写在动作发出之前** -- 动作被【帧稳定门】吞掉
         #     后, `_story_cut` 已经是 0, 下一 tick 这条分支根本不再成立  掉回
         #     去点 跳过故事键  把刚弹出的确认框又关掉  **无限循环**
         #     (帧证据: 那一帧 确认键 0.98@cy0.725 明明就在屏上、也在判定带内)。
@@ -667,19 +667,19 @@ class MomoTalkSkill(BaseSkill):
             self._story_cut = 0
             self.clear_timer("story_cut")
 
-        # MENU  跳过故事键 (skip ASAP — story auto-plays).
+        # MENU  跳过故事键 (skip ASAP - story auto-plays).
         # after-ack(2026-07-28 live 实拦, double_fire_family 第六例):
-        # 旧码**没有任何 after-ack** —— 只要 跳过故事键 还在屏上, 每 tick 就再点
+        # 旧码**没有任何 after-ack** -- 只要 跳过故事键 还在屏上, 每 tick 就再点
         # 一次。而「是否略過此劇情?」确认框要时间渲染, 第二发正好把刚弹出来的框
         # 又关掉  **自锁**。step_walk 连发守卫当场抓到 **连点 5 次**, 屏上始终
         # 只有 剧情menu + 跳过故事键 两框, 确认框一次都没留住。
-        # (同一 tick 速率下 5 次 ≈ 1.5s —— 这不是"点了没反应", 是**点太快**。)
+        # (同一 tick 速率下 5 次 ≈ 1.5s -- 这不是"点了没反应", 是**点太快**。)
         # 状态挂在物理动作上: 发过就等帧证据(确认框出现, 上面那段接走), 窗口内不重发。
         menu = self.find_cls(screen, UC.STORY_MENU, conf=_CLS_CONF)
         skip = self.find_cls(screen, UC.STORY_SKIP, conf=_CLS_CONF)
         if skip is not None or menu is not None:
             if self._story_cut > 0 and self.since("story_cut") < _SKIP_ACK_SEC:
-                return action_wait(300, f"跳过/menu 已发 — 等确认框渲染 "
+                return action_wait(300, f"跳过/menu 已发 - 等确认框渲染 "
                                         f"(after-ack {self.since('story_cut'):.1f}"
                                         f"/{_SKIP_ACK_SEC:.1f}s)")
             self._story_cut += 1
@@ -693,11 +693,11 @@ class MomoTalkSkill(BaseSkill):
             self._story_taps += 1
             return action_click(0.5, 0.5, "advance story (skip disabled)")
 
-        # Bond story done — the game returns to the student's chat. The left list
+        # Bond story done - the game returns to the student's chat. The left list
         # tab is still visible so _on_unread_list trips, but the RIGHT pane is the
         # student's POST-BOND chatter. Go to DIALOGUE to clear it, NOT scan. The
         # reward popup is usually eaten by the global interceptor before our
-        # reward branch above fires, so THIS is the real "story done" exit — and
+        # reward branch above fires, so THIS is the real "story done" exit - and
         # it must return to the SAME student, else we jump to the next (横跳 bug).
         if self._on_unread_list(screen):
             self._goto("dialogue")
@@ -732,7 +732,7 @@ class MomoTalkSkill(BaseSkill):
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
         if cancel is not None:
             return action_click_box(cancel, "momotalk exit: cancel pending dialog")
-        # MomoTalk closes via its top-right X (弹窗叉叉) — ESC alone left it open
+        # MomoTalk closes via its top-right X (弹窗叉叉) - ESC alone left it open
         # (live 2026-06-15: mined 未讀0 但 exit timeout 停在 MomoTalk 屏, ESC 没关).
         close_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF, region=(0.55, 0.05, 0.99, 0.25))
         if close_x is not None:

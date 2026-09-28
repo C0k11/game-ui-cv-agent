@@ -3,7 +3,7 @@
 
 模拟卡牌选中目标时的瞄准态: 全图暗化 45-55%, 随机 1-3 个身份目标框
 (我方/敌方/塞特/Boss)保持原亮度(边缘羽化防矩形 artifact)。GT 标签不变
-(暗态下的 HUD/小人也是有效训练信号 — 真实瞄准态就长这样)。
+(暗态下的 HUD/小人也是有效训练信号 - 真实瞄准态就长这样)。
 
 合成量: train split 的 ~15% (synth 占比过高会让 best.pt 偏拟合合成分布,
 fused_avatar v6 教训: synth 63%  真实场景退化)。只对含身份类框的帧合成。
@@ -45,7 +45,7 @@ def main() -> None:
     for lbl, boxes in picks:
         img_p = img_dir / (lbl.stem + ".jpg")
         # cv2.imread/imwrite 不吃中文路径(凹轴池帧带中文前缀, 静默 None
-        #  v5 首跑 142 报数实写 87 实锤) — 走 fromfile/imencode。
+        #  v5 首跑 142 报数实写 87 实锤) - 走 fromfile/imencode。
         try:
             img = cv2.imdecode(np.fromfile(str(img_p), dtype=np.uint8),
                                cv2.IMREAD_COLOR)

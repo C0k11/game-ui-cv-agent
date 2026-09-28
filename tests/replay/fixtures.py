@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""事故回归 fixture(逻辑层) — 把已实锤的 live 事故钉死成秒级离线用例。
+"""事故回归 fixture(逻辑层) - 把已实锤的 live 事故钉死成秒级离线用例。
 
 与 scripts/regression_suite.py 的分工:
-  regression_suite = **模型层**  —— 跑 YOLO 看"还认不认得出"(要 GPU, 输入是 jpg)
-  本文件           = **逻辑层**  —— 给定检出框看"skill 判得对不对"(不要 GPU,
+  regression_suite = **模型层**  -- 跑 YOLO 看"还认不认得出"(要 GPU, 输入是 jpg)
+  本文件           = **逻辑层**  -- 给定检出框看"skill 判得对不对"(不要 GPU,
                                     输入是 tick json 里的 yolo_boxes)
 两层都过才叫没回归。统一入口: py scripts/regression_suite.py --domain logic
 
@@ -19,7 +19,7 @@ import os
 import sys
 
 # 直跑入口在 GBK 控制台打印 '禁' 会 UnicodeEncodeError 中断(后面用例全没跑,
-# exit=1 走的是 traceback 不是 veto 契约) — 与 regression_suite.py:20 对齐。
+# exit=1 走的是 traceback 不是 veto 契约) - 与 regression_suite.py:20 对齐。
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -38,7 +38,7 @@ def _load(name: str) -> dict:
 
 #  1) Challenge tab 假阳性
 def fx_challenge_false_positive():
-    """run_20260723_204309 t799: Challenge tab 列表 — 恰 3 个入场键(cy 0.266/
+    """run_20260723_204309 t799: Challenge tab 列表 - 恰 3 个入场键(cy 0.266/
     0.403/0.539) + 活动商店/活动任务底栏 + 未选中态「活动quest」在屏 + 0 个三星。
 
     旧 `_on_quest_list` 只看「≥2 入场键 + 活动底栏」-> 判 True -> survey 在
@@ -52,7 +52,7 @@ def fx_challenge_false_positive():
     screen = screen_from_tick(raw)
     got = sk._on_quest_list(screen)
     return (got is False,
-            f"_on_quest_list={got} (期望 False — Challenge 页不是 Quest 列表)")
+            f"_on_quest_list={got} (期望 False - Challenge 页不是 Quest 列表)")
 
 
 def fx_quest_list_true_positive():
@@ -64,12 +64,12 @@ def fx_quest_list_true_positive():
     sk.reset()
     got = sk._on_quest_list(screen_from_tick(raw))
     return (got is True,
-            f"_on_quest_list={got} (期望 True — 这是真 Quest 列表)")
+            f"_on_quest_list={got} (期望 True - 这是真 Quest 列表)")
 
 
 #  2) 上期活动(领奖期)banner 绝不点
 def fx_prev_event_banner_no_tap():
-    """run_20260722_163044 t1: hub 轮播停在**上期活动**卡 —— 只有 474
+    """run_20260722_163044 t1: hub 轮播停在**上期活动**卡 -- 只有 474
     「距离奖励获得结束」@0.93, 没有 405「距离结束还剩」。
 
     405/474 逐帧交替从不共存(20 帧@0.45s 实测)。误入午夜派對三连(2026-07-22)
@@ -83,7 +83,7 @@ def fx_prev_event_banner_no_tap():
     act = sk.tick(screen_from_tick(raw))
     a = act.get("action")
     return (a != "click",
-            f"action={a!r} reason={act.get('reason')!r} (期望非 click — "
+            f"action={a!r} reason={act.get('reason')!r} (期望非 click - "
             f"474 在屏 ≠ 有活动可进)")
 
 
@@ -155,7 +155,7 @@ def fx_schedule_ticket_cap_stops():
 
 
 def fx_schedule_buy_dialog_no_pyroxene_cls():
-    """禁2026-07-25 真实事故帧回归 —— 30 青辉石就是这么花掉的。
+    """禁2026-07-25 真实事故帧回归 -- 30 青辉石就是这么花掉的。
 
     run_20260724_201229 tick_0101: 屏上明明是「購買課程表票券 單價30
     總購買價格30」, 但 YOLO **对话框体内一个青辉石都没检出**(小图标压在深色
@@ -179,7 +179,7 @@ def fx_schedule_buy_dialog_no_pyroxene_cls():
         _yb("返回键", 0.045, 0.051, 0.95),
         _yb("体力", 0.403, 0.032, 0.93),
         _yb("信用点", 0.564, 0.033, 0.88),
-        _yb("青辉石", 0.740, 0.034, 0.51),        # 仅顶栏余额 — body 没有!
+        _yb("青辉石", 0.740, 0.034, 0.51),        # 仅顶栏余额 - body 没有!
     )
     sk = ScheduleSkill()
     sk.reset()
@@ -197,7 +197,7 @@ def fx_schedule_buy_dialog_no_pyroxene_cls():
 #  4) event_quest unlock 链: 購買AP 框绝不点確認
 def _eq_buy_ap_screen():
     """run_20260711_144712/tick_0030 的**逐条实检出**(那一帧就是「購買AP」框)。
-    注意body 里 **一个青辉石都没有** —— 单靠青辉石黑名单的闸在这一帧全盲。"""
+    注意body 里 **一个青辉石都没有** -- 单靠青辉石黑名单的闸在这一帧全盲。"""
     return _sched_screen(
         _yb("取消键", 0.402, 0.699, 0.976),
         _yb("返回键", 0.045, 0.051, 0.970),
@@ -240,7 +240,7 @@ def fx_event_unlock_never_confirm_buy_ap():
 
 def fx_event_unlock_ap_gate_fail_closed():
     """AP 读不出(None)时 unlock **绝不进出击链**。旧码 `_ap is not None and
-    _ap < 20` 是 fail-OPEN — 读不出直接放行, 而 _read_ap->None 是 live 常态。"""
+    _ap < 20` 是 fail-OPEN - 读不出直接放行, 而 _read_ap->None 是 live 常态。"""
     from brain.skills.event_quest import EventQuestSkill
     import brain.skills.event_quest as eq
     sk = EventQuestSkill()
@@ -274,13 +274,13 @@ def fx_event_unlock_ap_gate_fail_closed():
 #  5) schedule 关 popout 不许连发(after-ack)
 def fx_schedule_popout_close_no_double_fire():
     """禁2026-07-25: `close popout before switch` 连发两次, 第二发落在后面的
-    区域屏上误开了一个设施。旧节流是 `_phase_ticks % 2` —— **tick 奇偶既不是
+    区域屏上误开了一个设施。旧节流是 `_phase_ticks % 2` -- **tick 奇偶既不是
     时间也不是证据**, 而帧滞后让 `_roster_open` 在点击后仍为 True, `_dedup_click`
     又因为结构指纹变了而放行重复点击。
 
     注意这条**必须写成 fixture**: tests/replay 默认 `--mode stateless` 每 tick 新建
     skill, 结构上测不到任何跨 tick 状态; 而 sequential 模式下录制帧不会响应我们的
-    点击, 状态机立刻发散 —— 两种回放都逮不到这一族。
+    点击, 状态机立刻发散 -- 两种回放都逮不到这一族。
     """
     from brain.skills.schedule import ScheduleSkill
     # popout 开着: 右上关闭叉(_popout_close 的 region) + 顶部居中课程表票
@@ -305,12 +305,12 @@ def fx_schedule_popout_close_no_double_fire():
 def fx_quest_rows_numbers():
     """run_20260724_204934/t0056 真帧: 5 行 Q08-Q12。
 
-    禁这条钉的是 L1-2) 的地基 —— 台账主键从 cy 换成关号。旧盘上落的是
+    禁这条钉的是 L1-2) 的地基 -- 台账主键从 cy 换成关号。旧盘上落的是
     {"0.397": true, "0.871": true, ...} 这种**坐标当身份**的记录, 列表一滚动
     全部失效。关号条 = 已训 cls `关卡得星_3` box 正上方 [y1-2.4h, y1]
     (全语料 479 帧活动列表实测: 单格读出率 100%, 整帧连续递增 100%)。
 
-    需要真 jpg 才能跑 OCR — 没有就 skip(不算失败, 但会说出来)。
+    需要真 jpg 才能跑 OCR - 没有就 skip(不算失败, 但会说出来)。
     """
     import os
     import cv2
@@ -319,10 +319,10 @@ def fx_quest_rows_numbers():
     if not os.path.exists(jpg):
         return (True, "SKIP: 缺 quest_rows_5.jpg")
     raw = _load("quest_rows_5.json")
-    # 注意load_frame 默认 False — 漏传过一次导致本用例永远 SKIP 还计成 PASS
+    # 注意load_frame 默认 False - 漏传过一次导致本用例永远 SKIP 还计成 PASS
     screen = screen_from_tick(raw, jpg_path=jpg, load_frame=True)
     if screen.frame is None:
-        return (False, "帧读不出(jpg 在但解码失败) — 不许再当 SKIP 混过去")
+        return (False, "帧读不出(jpg 在但解码失败) - 不许再当 SKIP 混过去")
     sk = EventQuestSkill()
     sk.reset()
     rows = sk.parse_quest_rows(screen)
@@ -358,23 +358,23 @@ def fx_bonus_ledger_rejects_cy_keys():
     led = dict(sk._bonus_ledger)
     os.unlink(path)
     ok = (led == {10: True})
-    return (ok, f"台账={led} (期望 {{10: True}} — 两条 cy 主键必须作废)")
+    return (ok, f"台账={led} (期望 {{10: True}} - 两条 cy 主键必须作废)")
 
 
 
 
 #  7) L2 页面图
 def fx_page_graph_vocab_and_routes():
-    """页面图的 cls 名必须全在模型词表里 —— 拼错一个字就是一条**永不命中**
+    """页面图的 cls 名必须全在模型词表里 -- 拼错一个字就是一条**永不命中**
     的死判据(实测逮到过 格黑娜学园中央区/千年研究区域 两个错名)。
     另钉几条关键路径, 防止改图时把边改断。"""
     import pathlib as _pl
     from brain.nav import page_graph as PG
     # 注意路径必须锚仓库根(2026-07-25 审计): cwd 相对路径 + "缺文件->SKIP 计 PASS"
-    # = 不从仓库根启动时整条词表校验静默消失 — 与 quest_rows load_frame 同族假验证。
+    # = 不从仓库根启动时整条词表校验静默消失 - 与 quest_rows load_frame 同族假验证。
     mf = _pl.Path(_HERE).parents[1] / "data" / "raw_images" / "_classes.txt"
     if not mf.exists():
-        return (False, "master 词表缺失 — 词表校验没跑, 不许计 PASS")
+        return (False, "master 词表缺失 - 词表校验没跑, 不许计 PASS")
     master = [l.strip() for l in mf.read_text(encoding="utf-8").splitlines()
               if l.strip()]
     bad = PG.validate_vocab(master)
@@ -471,7 +471,7 @@ def fx_arena_never_reached_not_complete():
 def fx_shop_chain_flag_follows_plan():
     """禁上游触发点回归: sub_only 路径下 shop 不该"留在店里等 arena_shop 接力"。
 
-    2026-07-25 事故链的第一环 —— pipeline.py:1228 只给 top-level 那个 ShopSkill
+    2026-07-25 事故链的第一环 -- pipeline.py:1228 只给 top-level 那个 ShopSkill
     置了 chain_in_shop=False, daily_routine 内部 new 的那个没人管, 于是
     sub_only=["shop"] 跑完收在商店网格上, 把下一个 skill 丢在了未知页面。
     """
@@ -489,7 +489,7 @@ def fx_shop_chain_flag_follows_plan():
 
 #  7) 悬赏票数 strip: 关卡列表页读得出 + 零票绝不读成非零
 def _bounty_read_tickets(json_name: str, jpg_name: str):
-    """跑真 Bounty skill 的 `_read_tickets` —— 不是复刻算法, 是调它本人。"""
+    """跑真 Bounty skill 的 `_read_tickets` -- 不是复刻算法, 是调它本人。"""
     import os
     from brain.skills.bounty import BountySkill
     jpg = os.path.join(FX_DIR, jpg_name)
@@ -499,7 +499,7 @@ def _bounty_read_tickets(json_name: str, jpg_name: str):
     if screen.frame is None:
         return None, "帧读不出(jpg 在但解码失败)"
     # 注意这两张 fixture 都是 >=3200 宽的真 4K/准 4K 帧, 所以 run_digit_ocr 里
-    # "帧太窄就换 ADB 干净帧重抓"那条路**不会触发** —— 离线跑得到的就是 live 值。
+    # "帧太窄就换 ADB 干净帧重抓"那条路**不会触发** -- 离线跑得到的就是 live 值。
     if screen.frame.shape[1] < 3200:
         return None, f"fixture 帧宽 {screen.frame.shape[1]} <3200, 会走 ADB 升级路径"
     sk = BountySkill()
@@ -510,7 +510,7 @@ def _bounty_read_tickets(json_name: str, jpg_name: str):
 def fx_bounty_tickets_stagelist_readable():
     """run_20260727_042153/t0339 真帧: 关卡列表页, 屏上「懸賞通緝票券 6/6」。
 
-    禁旧 strip 在**这一整个页面**上从来读不出 —— 全语料 4K 实测 **0/211 帧**。
+    禁旧 strip 在**这一整个页面**上从来读不出 -- 全语料 4K 实测 **0/211 帧**。
     根因不是切太紧也不是对比度: 两个页面的标签字数不同(持有票券 4 字 /
     懸賞通緝票券 6 字), 数字被推到 icon.x2+6.1~7.3 个 icon 宽, 而旧右界只到
     +0.112 绝对宽; 更要命的是 y 留白 0.4*bh 让 DB 检测器整条返回空
@@ -521,7 +521,7 @@ def fx_bounty_tickets_stagelist_readable():
                                     "bounty_stagelist_6.jpg")
     if err:
         return (err.startswith("SKIP"), err)
-    return (got == 6, f"读出 {got} (期望 6 — 屏上「懸賞通緝票券 6/6」)")
+    return (got == 6, f"读出 {got} (期望 6 - 屏上「懸賞通緝票券 6/6」)")
 
 
 def fx_bounty_zero_tickets_never_overread():
@@ -531,7 +531,7 @@ def fx_bounty_zero_tickets_never_overread():
     以为有票 -> 出击 -> 0 票出击弹出的正是**青辉石買票框**。
     `tickets == 0 -> exit` 是 money_safety 的**源头闸**, 被读数直接架空。
     全语料 4K 实测: 114 张零票屏里旧逻辑有 **18 张**读成 >0。
-    注意fail-closed 只挡 None, **挡不住读大** —— 所以这条用例判的是"绝不 >0",
+    注意fail-closed 只挡 None, **挡不住读大** -- 所以这条用例判的是"绝不 >0",
     读成 None 也算过(安全), 读成正数就是事故重演。
     """
     got, err = _bounty_read_tickets("bounty_zero_tickets.json",
@@ -543,7 +543,7 @@ def fx_bounty_zero_tickets_never_overread():
 
 
 def fx_sweep_confirm_not_mistaken_for_done():
-    """run_20260602_182826/t0010 真帧: 掃蕩确认框 — 確認@cy0.792 + 取消@cy0.796,
+    """run_20260602_182826/t0010 真帧: 掃蕩确认框 - 確認@cy0.792 + 取消@cy0.796,
     **无 获得奖励**。
 
     禁2026-07-27 live 实锤(bounty 6 票 + 2 倍奖励): `_confirm` 的"掃蕩完成了"
@@ -578,14 +578,14 @@ def fx_sweep_confirm_not_mistaken_for_done():
     if act.get("action") != "click":
         bad.append(f"没去点確認(action={act.get('action')})")
     return (not bad,
-            f"{'/'.join(bad) if bad else '未误判'} — "
+            f"{'/'.join(bad) if bad else '未误判'} - "
             f"sub={sk.sub_state} cycles={sk._sweep_cycles} "
             f"action={act.get('action')} reason={act.get('reason')!r}")
 
 
 def fx_event_panel_fake_confirm_not_a_dialog():
     """run_20260727_220013/t0276 真帧: **裸的活动扫荡面板**(步进器全灰), 屏上
-    多出一个 `确认键 conf=0.81 @ cy=0.961` —— 面板底部的东西, 不是对话框按钮。
+    多出一个 `确认键 conf=0.81 @ cy=0.961` -- 面板底部的东西, 不是对话框按钮。
 
     禁旧码 `find_cls(BTN_CONFIRM, conf=0.6)` **不带 region**(与 840AP 那次同病),
     全屏 argmax 捡到它 -> 有確認无取消 => 判成「掃蕩完成框」-> 过结构闸 ->
@@ -593,8 +593,8 @@ def fx_event_panel_fake_confirm_not_a_dialog():
     命中 => **判成购买框, 整轮扫荡 back off**。当时 AP=445 ≈ 22 次扫荡。
 
     本用例同时钉两件事:
-      1) 带 region 后这一帧**取不到** 対话框確認(假阳被排除) —— 这是修复本身;
-      2) `_dialog_is_purchase` 在这一帧**确实为 True** —— 证明"band 才是那道闸",
+      1) 带 region 后这一帧**取不到** 対话框確認(假阳被排除) -- 这是修复本身;
+      2) `_dialog_is_purchase` 在这一帧**确实为 True** -- 证明"band 才是那道闸",
          不是结构闸自己变好了。2)失败说明这条用例已经测不到原 bug 了。
     """
     import os
@@ -615,9 +615,9 @@ def fx_event_panel_fake_confirm_not_a_dialog():
     if banded is not None:
         bad.append(f"带 region 仍取到確認 @cy={(banded.y1 + banded.y2) / 2:.3f}")
     if unbanded is None:
-        bad.append("不带 region 也取不到 — 这帧已复现不出原 bug, 用例失效")
+        bad.append("不带 region 也取不到 - 这帧已复现不出原 bug, 用例失效")
     if not is_buy:
-        bad.append("_dialog_is_purchase=False — 结构闸变了, 用例不再测原路径")
+        bad.append("_dialog_is_purchase=False - 结构闸变了, 用例不再测原路径")
     return (not bad, "/".join(bad) if bad else
             f"假確認被 band 排除(裸帧 argmax 会捡到 cy="
             f"{(unbanded.y1 + unbanded.y2) / 2:.3f}), 结构闸仍会误判={is_buy}")
@@ -645,22 +645,22 @@ def fx_sched_tickets_cls_anchored():
 
     禁旧法(写死矩形 `_TICKET_REGION`)在这一帧读 **None**。今天 46 帧对拍:
     旧法读出 11 帧 / 新法(cls 锚定)读出 30 帧, **19 处分歧全是「旧 None 新有值」**
-    —— 新法从不与旧法矛盾, 只在旧法瞎的地方补上。新法读出的序列
+    -- 新法从不与旧法矛盾, 只在旧法瞎的地方补上。新法读出的序列
     7,7,7->6,6,6->5,5,5->4,4->3×6->2,2 单调递减零跳变; 人眼在两点交叉验证过
     (步18 缩略图「4/7」/ 步21「3/7」)。
     """
     got, err = _sched_read_tickets("sched_tickets_3.json", "sched_tickets_3.jpg")
     if err:
         return (err.startswith("SKIP"), err)
-    return (got == 3, f"读出 {got} (期望 3 — 屏上「持有票券 3/7」)")
+    return (got == 3, f"读出 {got} (期望 3 - 屏上「持有票券 3/7」)")
 
 
 def fx_sched_ticket_decoy_never_read():
-    """walk_20260728_a 步 034 真帧: 同一个 `课程表票` cls 在屏上有**两处** ——
+    """walk_20260728_a 步 034 真帧: 同一个 `课程表票` cls 在屏上有**两处** --
     popout 表头 cy≈0.142(被弹窗压住, 读不出) 与 **課程表資訊 弹窗里 cy≈0.698**。
 
     禁后者是「3 -> 2」**派遣前后指示器**, 不是余额。往右取数字条读出来是
-    '21'/'1' —— 而 `'1'` **格式完全合法且在 0..7 内**, 不带 y 门的"找到票图标
+    '21'/'1' -- 而 `'1'` **格式完全合法且在 0..7 内**, 不带 y 门的"找到票图标
     就往右读"会把它当成"还剩 1 张"(真值是 2)。票数是金钱闸输入, 读小丢票、
     读大则可能在 0 票时去点開始 -> 弹青辉石購買框。
     本用例判"读出 1" = 诱饵没挡住。
@@ -681,7 +681,7 @@ def fx_craft_empty_slots_still_enter():
     造」被归进 2) => **一次都不会开新制造**, 而且一旦空了就再也不会有红点 =
     **自锁**。修法 = 红点 OR 今日未进过(日台账)。
 
-    这里同时钉住反向: **今天已经进过且无红点就必须 skip** —— 否则台账形同虚设,
+    这里同时钉住反向: **今天已经进过且无红点就必须 skip** -- 否则台账形同虚设,
     每一轮 daily 都要白跑一趟制造往返。
     """
     import brain.skills.craft as cm
@@ -711,11 +711,11 @@ def fx_craft_empty_slots_still_enter():
 
 
 def fx_momo_panel_identity_gate():
-    """禁点开学生 A 之后, 右侧会话面板还停在 B —— 绝不在 B 的面板上替 A 干活。
+    """禁点开学生 A 之后, 右侧会话面板还停在 B -- 绝不在 B 的面板上替 A 干活。
 
     2026-07-28 帧实锤: 点了「贵音」, 右侧气泡头像全是 `凯伊 cx=0.717`, 连羁绊
     剧情概要正文写的都是 Kei。与 event_quest「换关不关旧弹窗、只有 label 变了」
-    同构 —— **参数变了 ≠ 屏幕变了**。
+    同构 -- **参数变了 ≠ 屏幕变了**。
     钉两件事: 1)面板是别人时**一个 click 都不许发** 2)面板换对了要立刻放行。
     """
     from brain.skills.momo_talk import MomoTalkSkill
@@ -761,7 +761,7 @@ def fx_momo_unknown_dialog_never_confirm():
 
     2026-07-28 帧实锤: 点「進入羈絆劇情」弹出**劇透警告框**(按钮 cy≈0.913,
     落在 _story 判定带 y0.55-0.85 之外 => 旧码根本不处理它), 而框上明写
-    **「點擊確認時將前往活動頁面」** —— 点確認就把 bot 带出 MomoTalk。
+    **「點擊確認時將前往活動頁面」** -- 点確認就把 bot 带出 MomoTalk。
     反向也要钉: 合法的「是否略過此劇情?」框(同屏有 剧情menu/跳过故事键 chrome)
     必须仍然能確認, 否则羁绊剧情永远跳不过去。
     """
@@ -836,7 +836,7 @@ def fx_cafe_switch_2f_no_mutate_before_ack():
 
 
 def fx_cafe_dry_gate_needs_wallclock():
-    """禁摸头「这片视野扫干净了」不能只数帧 —— 帧数够但墙钟没到时不许判 dry。
+    """禁摸头「这片视野扫干净了」不能只数帧 -- 帧数够但墙钟没到时不许判 dry。
 
     `_HEADPAT_DRY_FRAMES=7` 的注释自己算过账「7×280≈2s」, 但那 280ms 被
     server/app.py:1519 的 ZERO-WAIT 丢弃(reason 不含 loading -> 一律 0.12s),
@@ -865,10 +865,10 @@ def fx_cafe_dry_gate_needs_wallclock():
 
 
 def fx_cafe_claim_earnings_no_premature_done():
-    """禁点「領取」时绝不能先把 _earnings_done 置 True —— 那一发会被稳定门吞掉。
+    """禁点「領取」时绝不能先把 _earnings_done 置 True -- 那一发会被稳定门吞掉。
 
     2026-07-28 live 实锤:
-        tick=13 wait  帧未稳定(转场/滚动) — 等稳定帧: claim earnings
+        tick=13 wait  帧未稳定(转场/滚动) - 等稳定帧: claim earnings
         tick=14 wait  earnings done -> invite      <- 状态却已"领完了"
         tick=15 click close leftover earnings before invite   <- 关窗, 钱没领
     帧证据: 那一帧 `領取_黄 0.97 @cy0.733` 原封不动。
@@ -893,7 +893,7 @@ def fx_cafe_claim_earnings_no_premature_done():
     act2 = sk._earnings(screen)
     double = act2.get("action") == "click"
     # 禁第二次 live 才逮到的那条: 点被吞后, 只要 領取_黄 还在屏上, **绝不许**
-    # 从"到达证据"分支判领完 —— 旧判据 `_earnings_claimed and _is_cafe` 会成立,
+    # 从"到达证据"分支判领完 -- 旧判据 `_earnings_claimed and _is_cafe` 会成立,
     # 因为咖啡页签名(咖啡厅邀请卷/回大厅按钮/返回键)在弹窗开着时照样检出。
     screen_with_cafe_sig = _sched_screen(
         _yb("领取_黄", 0.500, 0.733, 0.97),
@@ -914,7 +914,7 @@ def fx_cafe_claim_earnings_no_premature_done():
 
 
 def fx_cafe_dot_gate_only_on_lobby():
-    """禁「大厅红点门控」只能在大厅上判 —— 人已经在咖啡厅里时绝不许判"没活干"。
+    """禁「大厅红点门控」只能在大厅上判 -- 人已经在咖啡厅里时绝不许判"没活干"。
 
     2026-07-28 live 帧实锤: bot 停在**咖啡厅 1 号店内**, 屏上有
     `咖啡厅收益 0.98`(= _LOBBY_DOT_ENTRIES 里的 CAFE_EARNINGS), 它被当成"入口"
@@ -922,7 +922,7 @@ def fx_cafe_dot_gate_only_on_lobby():
     那一刻屏上挂着 **收益 108,334 信用点 / 123 AP / 9,167 信用点** 和
     **3 个 Emoticon_Action(3 个学生等着摸头)**。
     根因: CAFE_INVITE_TICKET / CAFE_EARNINGS 是**咖啡厅内部** cls, 大厅上不会
-    出现 —— 放进"大厅入口"列表 = 给"人已在咖啡厅"装了个必然为假的判据。
+    出现 -- 放进"大厅入口"列表 = 给"人已在咖啡厅"装了个必然为假的判据。
     反向也钉: 真在大厅且入口无点时, 仍必须 skip(否则门控失效, 每轮白跑)。
     """
     from brain.skills.cafe import CafeSkill
@@ -956,7 +956,7 @@ def fx_cafe_dot_gate_only_on_lobby():
 
 
 def fx_multi_farm_quota_not_max():
-    """2026-07-30 用户: "分配体力把商店搬空" — MAX 一发把 AP 全灌当前关,
+    """2026-07-30 用户: "分配体力把商店搬空" - MAX 一发把 AP 全灌当前关,
     轮转形同虚设(实录 909AP 全给 Q11, Q10 卡带零产出)。多关轮转时每轮
     必须走固定配额(加号), 绝不点 MAX。帧=walk 步58 真实扫荡面板。"""
     from brain.skills.event_quest import EventQuestSkill
@@ -972,7 +972,7 @@ def fx_multi_farm_quota_not_max():
 
 
 def fx_single_farm_still_max():
-    """反向锁: 单关配置时保持 MAX(一关吃满没毛病) — 别把配额逻辑
+    """反向锁: 单关配置时保持 MAX(一关吃满没毛病) - 别把配额逻辑
     误伤到单关场景。同一张扫荡面板帧。"""
     from brain.skills.event_quest import EventQuestSkill
     raw = _load("sweep_panel_q11.json")
@@ -1009,7 +1009,7 @@ def fx_sweep_wrong_popup_must_close():
 
 
 def fx_sweep_unknown_popup_fail_closed():
-    """弹窗身份读不出时: 墙钟窗口内等待重试, 超时必须关窗重开 —
+    """弹窗身份读不出时: 墙钟窗口内等待重试, 超时必须关窗重开 -
     **身份未知的弹窗上绝不开扫**(宁多关一次不扫错关)。"""
     from brain.skills.event_quest import EventQuestSkill
     raw = _load("sweep_panel_q11.json")
@@ -1028,7 +1028,7 @@ def fx_sweep_unknown_popup_fail_closed():
 
 
 def fx_panel_stepper_not_purchase_dialog():
-    """2026-07-31 配额首考当场误杀: 纯 AP 扫荡确认框(80AP×4)被 cancel —
+    """2026-07-31 配额首考当场误杀: 纯 AP 扫荡确认框(80AP×4)被 cancel -
     配额模式下面板 stepper 保持亮态, MAX_可点击 cx0.84 隔 dim 层 0.98 检出,
     全屏 body 判据把它当购买框铁证。修=stepper 必须在弹窗横向范围内
     (cx<0.72)。本帧含 取消+确认+面板亮MAX -> 必须判 False。"""
@@ -1038,7 +1038,7 @@ def fx_panel_stepper_not_purchase_dialog():
     sk.reset()
     got = sk._dialog_is_purchase(screen_from_tick(raw))
     return (got is False,
-            f"_dialog_is_purchase={got} (期望 False — 面板亮 stepper 不是购买框证据)")
+            f"_dialog_is_purchase={got} (期望 False - 面板亮 stepper 不是购买框证据)")
 
 
 CASES = [

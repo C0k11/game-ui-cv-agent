@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""导航 —— 「从这里到那里」的**唯一**实现。
+"""导航 -- 「从这里到那里」的**唯一**实现。
 
 为什么导航必须集中（§A1 + §A2）:
    `回大厅按钮` 和 `返回键` 几乎每一页都在。老代码里每个 skill 各写一句
-   "看到就点返回"，于是这两个按钮事实上变成了**全局兜底动作** —— 任何一帧
+   "看到就点返回"，于是这两个按钮事实上变成了**全局兜底动作** -- 任何一帧
    主 cls 没检出（进战斗的转场帧最典型），bot 就把自己弹回大厅。
    用户现场目击："刚要进战斗，bot 又手贱去点返回大厅的房子按钮"。
 
@@ -21,14 +21,14 @@ from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
 from routing_v2.state.machine import StateView
 
-# 页面层级 —— 「谁是谁的上一层」。
+# 页面层级 -- 「谁是谁的上一层」。
 #
 # 为什么必须显式建这张表（2026-08-12 用户点名:「返回和大厅按钮要结合位置语义
 #   来判断是返回还是回大厅，要根据板块来的，比方说我们打完学园交流会，
 #   这个时候就是返回任务大厅就行」）:
 #   在这张表之前，退出逻辑只知道"屏上有哪个键"，不知道"我要去哪一层"。
 #   于是 `prefer_home` 那个开关全仓没有一个调用点、`Flow.home_pages` 声明了
-#   零引用 —— 也就是说「这条 flow 该退到哪儿」这个概念根本不存在，
+#   零引用 -- 也就是说「这条 flow 该退到哪儿」这个概念根本不存在，
 #   `回大厅按钮` 事实上从来没被点过（另一个调用点挂在默认 False 的
 #   `allow_home_escape` 后面）。留下的是"一路按返回退到底"，
 #   而正确答案取决于**下一条 flow 的入口在哪一层**。
@@ -100,7 +100,7 @@ def hub_tile_dot(obs: Observation, region, conf: float = 0.40):
       (`mining.py` 剧情 tile 0 点卡上黄点), 悬赏/大赛没有, 于是 80 帧后
       SKIPPED tile_dead。
 
-    落点是**检出框**, 不是新硬坐标 —— 认不出卡但认得出卡上的点。
+    落点是**检出框**, 不是新硬坐标 -- 认不出卡但认得出卡上的点。
     region = (x1, y1, x2, y2) 归一化, 圈住该卡, 防止点到别的卡。
     學園交流會 那张卡同帧无红黄点, 所以这条退路对它不成立(不要硬套)。
     """
@@ -157,7 +157,7 @@ def wake_hidden_lobby(obs: Observation, st: StateView, flow) -> Optional[Action]
 #   **不动全局 0.20**(那会让每帧涌进一堆垃圾框), 也**不写坐标**。
 # 08-21 全量实测(飞轮 v19 67 帧, 推理底压到 0.01):
 #   - 12 张已确认大厅的帧上, 这个 cls **恰好各只有 1 个候选**,
-#     conf 0.0464-0.1402, 位置 (0.944, 0.9416), 帧间抖动 <0.001 —— 定位是准的,
+#     conf 0.0464-0.1402, 位置 (0.944, 0.9416), 帧间抖动 <0.001 -- 定位是准的,
 #     崩的只是类分(新皮)。
 #   - 55 张非大厅帧里只有 1 张有候选(组合包浮层压暗那张, conf 0.718),
 #     而那本来就是同一个真入口。**零误报**。
@@ -170,7 +170,7 @@ _task_entry_cache = {"seq": None, "box": None}
 def weak_task_entry(obs: Observation):
     """大厅里那个任务大厅入口的**检出框**(换皮期低阈通道)。拿不准返回 None。
 
-    落点仍然来自 cls 检出框, 不是坐标 —— JIT 复验、契约锚点都照常成立。
+    落点仍然来自 cls 检出框, 不是坐标 -- JIT 复验、契约锚点都照常成立。
     """
     if obs.count(V.LOBBY_NAV, 0.35) < 3:
         return None                       # 没确认在大厅, 不开低阈通道
@@ -195,7 +195,7 @@ def hall_door_from_lobby(obs: Observation, *, reason: str,
     """大厅进任务厅。入口 cls 过 0.45 就点框; 否则走**同一个 cls** 的低阈通道。
 
     08-21 用户定: 不要任何硬编码, 落点一律来自 cls。原来那发写死右下角坐标的
-    盲点是在**猜控件位置**, 已删 —— 版面再改一次就会点错,
+    盲点是在**猜控件位置**, 已删 -- 版面再改一次就会点错,
     而低阈通道会**如实检不出**并让上层去处理, 这才是 fail-closed 的形态。
     """
     if isinstance(expect, str):
@@ -233,12 +233,12 @@ def hall_door_followup(obs: Observation, flow) -> Optional[Action]:
     return wait("点任务夹后等大厅或任务厅")
 
 
-# 模态/弹窗类**底页** —— 它们没有"层级"，只能关掉，关掉后回到它盖着的那一页。
+# 模态/弹窗类**底页** -- 它们没有"层级"，只能关掉，关掉后回到它盖着的那一页。
 #   归位时必须先把它们关干净，否则下一条 flow 会在**别人的弹窗**上动手
 #   （2026-08-12 体外复现: bounty 从 `on_stage_popup` 收工时弹窗还开着，
 #    jfd 接手第一帧就在悬赏的关卡上点了「扫荡开始」；event 留下的编队页
 #    被 arena 接手，第一帧就去勾「跳過戰鬥」准备出击）。
-#   只放 `overlay=False` 的。覆盖层走 `close_overlay` —— 它们根本不会出现在
+#   只放 `overlay=False` 的。覆盖层走 `close_overlay` -- 它们根本不会出现在
 #     `st.page` 上，我第一版把它们混进这张表，等于写了一堆永不成立的分支，
 #     而真正的覆盖层照样被留给下一条 flow。
 _MODAL = {"stage_popup", "sweep_dialog", "formation", "squad_quick_edit"}
@@ -253,7 +253,7 @@ def close_overlay(obs: Observation, overlay: str) -> Optional[Action]:
         所以有取消键 = 这是个决策框，退它只能点取消。
       叉叉排在确认后面：模态框上 conf 0.96 的叉叉照样可能完全不吃点击
         （悬赏弃 6 票的第三个根因，连点 6 次画面纹丝不动）。
-    `确认键` 的安全性由金钱闸兜底 —— 真是购买框的话 `act/money.py` 先拦成 halt。
+    `确认键` 的安全性由金钱闸兜底 -- 真是购买框的话 `act/money.py` 先拦成 halt。
     """
     c = obs.find(V.CANCEL, 0.45)
     if c is not None:
@@ -301,21 +301,21 @@ _EXITABLE = {
     "momo_chat", "story_hub", "story_nodes", "task_hall", "arena",
     "bounty_branch", "bounty_stage", "jfd_academy", "jfd_stage",
     "campaign_stage", "event_page", "event_quest_list", "event_shop",
-    "facility",          # 没登记的设施页 —— 有退出控件，能安全走人
+    "facility",          # 没登记的设施页 -- 有退出控件，能安全走人
     "combo_pack", "confirm_dialog", "stage_popup",
     "sweep_dialog", "formation",
 }
 
 
 def to_lobby(obs: Observation, st: StateView) -> Optional[Action]:
-    """逐层退出当前页面 —— **只在已确认的具名页面上动手，且只用返回键。**
+    """逐层退出当前页面 -- **只在已确认的具名页面上动手，且只用返回键。**
 
-    这个函数**不做「该返回还是该回大厅」的决定** —— 那个决定在 `route()` 里，
+    这个函数**不做「该返回还是该回大厅」的决定** -- 那个决定在 `route()` 里，
        由目标层（`Flow.entry_page`）算出来，不看屏上有哪个键。
        `route()` 只在**层级图里没登记的页面**（facility / unknown）上回落到这里，
        那时候连"我在第几层"都不知道，唯一安全的动作就是逐层退一步。
 
-    曾经这里有个 `prefer_home` 开关，用来切换"逐层退 / 直奔大厅"——
+    曾经这里有个 `prefer_home` 开关，用来切换"逐层退 / 直奔大厅"--
        **全仓没有一个调用方传过它**，等于 `回大厅按钮` 在 live 路径上从没被点过，
        而注释还写着"由调用方声明意图"。开关和它那段说明一起删了，
        语义改由 `route(target=...)` 承载。
@@ -323,7 +323,7 @@ def to_lobby(obs: Observation, st: StateView) -> Optional[Action]:
     if st.page == "lobby":
         return None
     if st.page not in _EXITABLE:
-        # UNKNOWN / battle / 结算页 —— 一律不动。等它自己走完，或等 runner
+        # UNKNOWN / battle / 结算页 -- 一律不动。等它自己走完，或等 runner
         #   的 stuck 处理接管。这是 §A1 的具体落地。
         return None
     # `facility` 是**泛化**签名（只要 回大厅+返回键 同时在场就算），
@@ -355,7 +355,7 @@ def to_lobby(obs: Observation, st: StateView) -> Optional[Action]:
     if x is not None:
         return tap_box(x, "nav: 先关掉弹窗")
     # **要么一路返回，要么一路回大厅，绝不混用**（用户 2026-08-12 点名）。
-    #    `返回键`=退一层 / `回大厅`=跨越所有层跳回大厅 —— 语义不同，
+    #    `返回键`=退一层 / `回大厅`=跨越所有层跳回大厅 -- 语义不同，
     #    混着用就成了 live 里那串「点一下返回、紧接着点一下回大厅」。
     #    这个函数的语义是**逐层退**（见上面那段注释：让下一个 flow 在中间层
     #    认出自己的入口，bountyjfd 那次白走两步就是教训）， **只用返回键**；
@@ -365,7 +365,7 @@ def to_lobby(obs: Observation, st: StateView) -> Optional[Action]:
         return tap_box(b, "nav: 返回上一层（逐层退，本次退出全程只用返回键）")
     # 最后手段：**系统返回键**（安全性由 `back_key()` 统一把关）。
     #   2026-08-08 实测：大厅上的「社交」浮层（社團/好友/幫手 三张卡）**一个
-    #   退出控件都没有** —— 底栏被压暗所以 YOLO 检不到。bot 进去就出不来。
+    #   退出控件都没有** -- 底栏被压暗所以 YOLO 检不到。bot 进去就出不来。
     return back_key(obs, "nav: 屏上没有任何退出控件  系统返回键（浮层专用）")
 
 
@@ -380,11 +380,11 @@ def route(obs: Observation, st: StateView, target: str = "lobby",
 
     `plan` 是本次归位选定的策略，调用方原样保存并回传（首次传 None）。
        用户 2026-08-12 的硬规矩:「要么返回要么大厅，同一次退出过程中不许换策略」。
-       策略在归位开始时算一次，中途屏上冒出/消失哪个键都不改 —— 混用的表现
+       策略在归位开始时算一次，中途屏上冒出/消失哪个键都不改 -- 混用的表现
        就是 live 里那串「点一下返回、紧接着点一下回大厅」，前一下等于白点。
     """
     plan = dict(plan) if plan else {}
-    # 覆盖层先关 —— 它盖在底页上，**不参与"我在哪一页"的竞争**，所以
+    # 覆盖层先关 -- 它盖在底页上，**不参与"我在哪一页"的竞争**，所以
     #    `st.page` 完全可能已经等于目标层而屏上还压着一个确认框/奖励框。
     #    不关就交班 = 下一条 flow 第一帧就在别人的框上点確認。
     if st.overlay:
@@ -437,14 +437,14 @@ def route(obs: Observation, st: StateView, target: str = "lobby",
                        post=lambda p=plan: p.__setitem__("entry_sent", True)), plan
     chain = ancestors(st.page)
     if not chain:
-        # 未登记的页面（facility / unknown / blank）—— 沿用老的保守行为。
+        # 未登记的页面（facility / unknown / blank）-- 沿用老的保守行为。
         return to_lobby(obs, st), plan
     if target not in chain:
         # 目标不在祖先链上（在咖啡厅里要去任务大厅）: 先回大厅，到了再从大厅进。
         target = "lobby"
     dist = chain.index(target) + 1
     if not plan.get("mode"):
-        # 隔两层以上、且要一路回到大厅 —— 回大厅键一步到位，胜过按 N 次返回。
+        # 隔两层以上、且要一路回到大厅 -- 回大厅键一步到位，胜过按 N 次返回。
         plan["mode"] = "home" if (target == "lobby" and dist >= 2) else "back"
         plan["misses"] = 0
     if plan["mode"] == "home":
@@ -465,7 +465,7 @@ def route(obs: Observation, st: StateView, target: str = "lobby",
 
 
 def back_key(obs: Observation, why: str) -> Optional[Action]:
-    """系统返回键 —— **全 bot 唯一的发起处**（§A2）。
+    """系统返回键 -- **全 bot 唯一的发起处**（§A2）。
 
     大厅上按返回会弹「通知 / 是否結束？/ 取消·確認」，那个確認是
        **退出游戏**。2026-08-08 实测把游戏关掉过一次。
@@ -474,7 +474,7 @@ def back_key(obs: Observation, why: str) -> Optional[Action]:
 
     这个函数存在的意义就是**只有一处**：我第一版把同一道闸分别写进了
       `nav.to_lobby` 和 `ExitMixin.exit_step`，**漏了 runner._recover**，
-      于是它照样在大厅上按了 6 次返回 —— 正是 memory 里那条
+      于是它照样在大厅上按了 6 次返回 -- 正是 memory 里那条
       「修一处没 grep 全仓同形」。
     """
     if obs.count(V.LOBBY_NAV, 0.35) >= 3:
@@ -502,7 +502,7 @@ def blank_escape(st: StateView, min_frames: int = 45, obs: Optional[Observation]
 
     两道前提，缺一不可:
        `page == "blank"`（**len(boxes) == 0**）：屏上什么都没有，也就没有
-         任何按钮会被误点。这与老代码盲点「編輯模式」那个 bug 的区别就在这 ——
+         任何按钮会被误点。这与老代码盲点「編輯模式」那个 bug 的区别就在这 --
          那次屏上是有框的（emoticon 已检出），UI 其实在。
        **上一个认得出的页面必须是大厅**。2026-08-08 live 实锤：战斗中
          很多帧 UI 模型零检出  被判 blank  跑去点屏幕正中央，而战斗里
@@ -544,19 +544,19 @@ def blank_escape(st: StateView, min_frames: int = 45, obs: Optional[Observation]
                   f"空屏持续 {st.frames_in_page} 帧（上一个页面是大厅）"
                   f"  点背景唤回 UI",
                   justify="屏上零检出，没有任何按钮可被误点；且上一个认得出的"
-                          "页面是大厅 —— 只有大厅点背景会收起 UI")
+                          "页面是大厅 -- 只有大厅点背景会收起 UI")
 
 
 def list_swipe(obs: Observation, anchors, why: str, *, rows: float = 3.0,
                post=None) -> Optional[Action]:
-    """列表滑动 —— **几何量全部从检出推**，一个写死的数都不留。
+    """列表滑动 -- **几何量全部从检出推**，一个写死的数都不留。
 
     用户 2026-08-13 定的全局规矩:「**先扫**，确定滑的位置，也确定有没有目标
        然后**再滑**，不然怎么适配其他分辨率以及 aspect ratio」。
        "扫"由调用方做（先找目标，找到就根本别调这里）；这里只负责把
        **滑哪条轴、滑多远**从屏上那一列条目推出来。
 
-    在这之前全仓 5 处滑动写的都是「起点 0.72、终点 0.40」这种常量 ——
+    在这之前全仓 5 处滑动写的都是「起点 0.72、终点 0.40」这种常量 --
        那是拿**某一个分辨率下量出来的比例**当普适值，正是 memory
        [[read_layer_icon_units]] 那条「屏幕比例只在标定它的那个分辨率上成立」
        的同族违例（实测设备就有 19 种分辨率）。
@@ -707,7 +707,7 @@ def story_dot_on_front(front, dot) -> bool:
 def story_stack_dot(obs: Observation, front, conf: float = 0.40):
     """取剧情卡顶那一行的黄点(卡顶 y 远在标签之上, 用 front 的上缘定带)。
 
-    只认落在前卡上缘**之上**、且横向不比前卡左缘更左的那些 —— 隔壁短篇/支线
+    只认落在前卡上缘**之上**、且横向不比前卡左缘更左的那些 -- 隔壁短篇/支线
     卡上的黄点(cx 0.71)不能算进来。
     """
     if front is None:

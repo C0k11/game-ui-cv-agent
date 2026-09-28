@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""活动商店 —— **先推算，再决定加成队打哪种币**（用户规则）。
+"""活动商店 -- **先推算，再决定加成队打哪种币**（用户规则）。
 
 产出放进 `ctx.bag["event_shop_plan"]`，格式:
     {币种cls: {"balance": int|None, "buyable": int, "soldout": int}}
@@ -7,7 +7,7 @@
 
 两条金钱纪律:
   · **最后一个 tab 是盒抽币，绝不自动买**（`skip_last_tab`，默认 True）
-  · 活动币不是青辉石，但仍走 money 步（人审）—— 买错了这一期就补不回来了
+  · 活动币不是青辉石，但仍走 money 步（人审）-- 买错了这一期就补不回来了
 
 滑动纪律: 有亮购买(103)先把当前可见该买的买完, 没 103 才滑.
    往下找该买的; 上滑只因本屏全是购买灰色(489)或没有该买的亮购买.
@@ -29,7 +29,7 @@ from routing_v2.state import vocab as V
 SHELF = (0.18, 0.14, 1.0, 0.92)
 LEFT_COL = (0.0, 0.10, 0.24, 0.98)
 
-# **推算映射（用户 2026-08-08 口述，权威）—— 这是个相对规则，不是写死关号**
+# **推算映射（用户 2026-08-08 口述，权威）-- 这是个相对规则，不是写死关号**
 #
 #   把"产出通道"从最珍贵到次之排成一列，**依次对上关卡列表从下往上的关**：
 #
@@ -58,7 +58,7 @@ def farm_targets(tabs_bottom_up, has_event_points: bool):
 
 
 class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
-    """进场链（大厅/任务大厅/认错活动）继承 EventEntryMixin —— 2026-08-13
+    """进场链（大厅/任务大厅/认错活动）继承 EventEntryMixin -- 2026-08-13
     实锤: 单独跑（不经 event 交棒）时在 lobby 401 帧没有任何可执行动作。"""
     name = "event_shop"
     module = "event"
@@ -90,7 +90,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
     def _tabs(self, obs: Observation):
         """左栏币种 tab，**按 cy 升序**（从上到下）。
 
-        身份只能按 **cy 序位** 定，不能按 conf 排序 —— 老代码在商店 tab 上
+        身份只能按 **cy 序位** 定，不能按 conf 排序 -- 老代码在商店 tab 上
            就是这么串位的。推算映射也是按序位来的（见 FARM_MAP）。
         """
         return obs.rows([V.CURRENCY, V.CURRENCY_SEL], 0.30, region=LEFT_COL)
@@ -100,7 +100,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         if not tabs:
             # `货币` cls 会整页检不出（08-09 CODE:BOX 实锤：0.20 模型下限
             #    以上一个都没有，而屏上左栏明明有一档「貨幣」）。这是**感知缺口**，
-            #    不是"不在商店页"——页面身份已由货架 `购买` 独立确认过了。
+            #    不是"不在商店页"--页面身份已由货架 `购买` 独立确认过了。
             #     回退：按**单档**推算（左栏只有一档是最常见形态），
             #      日志明说是回退，免得以后把漏档当成真相。
             if self.hold("no_tabs", 45):
@@ -119,7 +119,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         self.state["ntabs"] = n = max(self.state.get("ntabs", 0), len(tabs))
         i = self.state["tab_i"]
         # `skip_last_tab` 的语义是「跳过盒抽币那一档」。而用户口述的映射里
-        #   **最下面那个币是 Quest11 的产出，是要买的** —— 所以这里只在
+        #   **最下面那个币是 Quest11 的产出，是要买的** -- 所以这里只在
         #   tab 数 ≥3 时才跳最后一个；两个 tab 的活动全都要扫。
         skip_last = bool(self.shop_cfg.get("skip_last_tab", True)) and n >= 3
         limit = max(0, n - (1 if skip_last else 0))
@@ -199,9 +199,9 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         denied = any(k.startswith("moneyno:") for k in self.state)
         if denied and self.pending("deny_note"):
             self.state["once:deny_note"] = True
-            self.log(f"{cur_name}: 购买未授权(--money-ok 没带) — "
+            self.log(f"{cur_name}: 购买未授权(--money-ok 没带) - "
                      f"本轮只扫描出推算，不再试买")
-            self.note_lines.append("购买未授权 — 本轮只扫描出推算")
+            self.note_lines.append("购买未授权 - 本轮只扫描出推算")
 
         # 08-16 remain: 选择购买/确认在场 = 已经勾上, 先成交, 不滑走.
         sel = obs.find(V.SHOP_BUY_SELECTED, 0.40)
@@ -212,7 +212,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
             return self.on_confirm_dialog(obs, st)
 
         if not buyable and not soldout:
-            return wait(f"{cur_name}: 货架不可见（面板盖住/加载中）— 不下结论")
+            return wait(f"{cur_name}: 货架不可见（面板盖住/加载中）- 不下结论")
 
         if self.state.get("shelf_await_settle"):
             sig_now = self._shelf_sig(obs)
@@ -236,7 +236,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
             if bal is None:
                 if self.pending("no_bal"):
                     self.state["once:no_bal"] = True
-                    self.log(f"{cur_name}: 余额读不出 — 不自动买(fail-closed)")
+                    self.log(f"{cur_name}: 余额读不出 - 不自动买(fail-closed)")
                 return wait(f"{cur_name}: 余额读不出, 不动")
             if obs.frame is None:
                 return wait(f"{cur_name}: 有亮购买未读价, 不滑走")
@@ -287,26 +287,26 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
                       n_down + 1)
             if sw is not None:
                 return sw
-            return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
+            return wait(f"{cur_name}: 货架上没检出行锚点 - 不瞎滑")
 
         if want_up:
             if n_up >= 12 or (last_up and moved is False):
                 return self._tab_done(cur_name, rec, bal)
-            sw = _arm(True, f"{cur_name}: 本屏无该买的亮购买 — 上滑(第 {n_up + 1} 次)",
+            sw = _arm(True, f"{cur_name}: 本屏无该买的亮购买 - 上滑(第 {n_up + 1} 次)",
                       n_up + 1)
             if sw is not None:
                 return sw
-            return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
+            return wait(f"{cur_name}: 货架上没检出行锚点 - 不瞎滑")
 
         sw = _arm(False, f"{cur_name}: 往下找该买的(第 {n_down + 1} 次)",
                   n_down + 1)
         if sw is not None:
             return sw
-        return wait(f"{cur_name}: 货架上没检出行锚点 — 不瞎滑")
+        return wait(f"{cur_name}: 货架上没检出行锚点 - 不瞎滑")
 
     def _tab_done(self, cur_name, rec, bal):
         self.log(f"{cur_name}: 余额 {bal}，可买 {rec['buyable']}，"
-                 f"售罄 {rec['soldout']} — 这个 tab 扫完")
+                 f"售罄 {rec['soldout']} - 这个 tab 扫完")
         self.state["tab_i"] += 1
         self.state.update(scrolls=0, upscrolls=0, sig="")
         self._shelf_reset()
@@ -397,7 +397,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
 
     def on_confirm_dialog(self, obs, st):
         # **反向保险**: 活动商店的商品框价签是活动币。框体内出现 青辉石
-        #    （真钱风险）或 体力图标（購買AP 框 —— 青辉石图标在那个框上
+        #    （真钱风险）或 体力图标（購買AP 框 -- 青辉石图标在那个框上
         #    检不出, 08-09 实锤, 但体力图标在）都不是我点出来的商品框,
         #    一律取消, 绝不确认。
         # 只看对话框中部. 顶栏体力在 y<0.10, 扫到顶栏会把活动币确认误取消.
@@ -405,13 +405,13 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         if bad is not None:
             c = obs.find(V.CANCEL, 0.45)
             if c is not None:
-                return tap_box(c, f"框内检出 `{bad.cls}` — 不是活动币商品框，取消")
-            return wait(f"框内检出 `{bad.cls}` 但没找到取消键 — 绝不点確認")
+                return tap_box(c, f"框内检出 `{bad.cls}` - 不是活动币商品框，取消")
+            return wait(f"框内检出 `{bad.cls}` 但没找到取消键 - 绝不点確認")
         if obs.has(V.CONFIRM_GREY, 0.45):
             c = obs.find(V.CANCEL, 0.45)
             return tap_box(c, "灰确认  取消") if c is not None else wait("等取消")
         # 购买数量框: 先拉 MAX 再确认（老码 buy_one 同序）。MAX 变灰 = 拉满。
-        #   MAX 也标 money —— 它决定成交数量, 就该走金钱授权;
+        #   MAX 也标 money -- 它决定成交数量, 就该走金钱授权;
         #   不标的话 gate.money 的「购买语境非白名单 tap」规则会 halt（实测）。
         mx = obs.find(V.QTY_MAX, 0.40, region=(0.0, 0.12, 1.0, 1.0))
         if mx is not None:
@@ -441,7 +441,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
         self.ctx.bag["event_shop_plan"] = plan
         lines = [f"{k}: 余额={v['balance']} 可买={v['buyable']} 售罄={v['soldout']}"
                  for k, v in plan.items()]
-        # `_wrap` 会被多次走到（收工被推进闸按回 -> 下一 tick 又收工）——
+        # `_wrap` 会被多次走到（收工被推进闸按回 -> 下一 tick 又收工）--
         #    note 只记第一次, 别把报告刷成 12 遍复读（2026-08-13 实锤）。
         if self.state.get("wrap_noted"):
             return self.finish(
@@ -456,7 +456,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
             [dict(v, key=k) for k, v in plan.items()],
             key=lambda v: v.get("from_bottom", 0))
         # 有没有"活动点数"这条通道，由 event flow 在关卡列表上看 `奖励资讯`
-        # 得出（那个页面才看得到进度条）。默认 True —— 多数活动都有。
+        # 得出（那个页面才看得到进度条）。默认 True -- 多数活动都有。
         has_pts = bool(self.ctx.bag.get("event_has_points", True))
         targets = farm_targets(tabs_bottom_up, has_pts)
         # 只留"还缺"的通道；全不缺就保留最后一关当兜底
@@ -466,7 +466,7 @@ class EventShopFlow(EventEntryMixin, ExitMixin, Flow):
 
         self.ctx.bag["event_farm_plan"] = ordered
         self.ctx.bag["event_shop_tabs"] = tabs_bottom_up
-        # 计划落盘（08-09）：ctx.bag 是进程内存 —— runner 崩溃/step 模式跨
+        # 计划落盘（08-09）：ctx.bag 是进程内存 -- runner 崩溃/step 模式跨
         #    进程都会把推算丢掉，event 只能"兜底打最后一关"。文件是权威副本。
         #    08-15 起写进账号桶（读侧 event._plan_from_file 同桶）。
         try:

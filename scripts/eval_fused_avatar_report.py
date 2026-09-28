@@ -9,7 +9,7 @@ detector.  For each frame in the val split (or any source dir of labeled .jpg):
        MATCHED  (truth bbox has overlapping pred with same class, IoU >= 0.5)
        MISS     (truth bbox has no matching pred  false negative)
        FP       (pred bbox with no matching truth  false positive)
-       WRONG    (matched bbox but wrong class — character ID error)
+       WRONG    (matched bbox but wrong class - character ID error)
   - Render summary stats per frame
 
 Sort: frames with lowest recall first so the worst cases are visible at the top.
@@ -265,7 +265,7 @@ table {{ border-collapse:collapse; font-size:13px }} th, td {{ padding:4px 10px 
 th {{ background:#1a1d24; text-align:left; cursor:pointer }}
 tr:nth-child(even) {{ background:#161922 }}
 </style></head><body>
-<h1>fused_avatar_26m 检测 — 人工审核</h1>
+<h1>fused_avatar_26m 检测 - 人工审核</h1>
 <div class="legend">
 <span style="background:#22c55e;color:#000">绿 = 正确 (匹配 + 类对)</span>
 <span style="background:#fb923c;color:#000">橙 = 类错 (IoU 对但类别错)</span>
@@ -283,7 +283,7 @@ tr:nth-child(even) {{ background:#161922 }}
 """]
     for fb in frame_blocks:
         recall = fb['n_match'] / max(1, fb['n_truth'])
-        html.append(f'<h2>{fb["name"]} — recall {100*recall:.0f}% '
+        html.append(f'<h2>{fb["name"]} - recall {100*recall:.0f}% '
                     f'(match {fb["n_match"]}/{fb["n_truth"]}, miss {fb["n_miss"]}, fp {fb["n_fp"]}, wrong-cls {fb["n_wrong"]})</h2>')
         html.append(f'<img class="frame-img" src="data:image/jpeg;base64,{fb["img_b64"]}">')
         stats = []
@@ -297,7 +297,7 @@ tr:nth-child(even) {{ background:#161922 }}
             stats.append('<div class="stats good">完美 </div>')
         html.extend(stats)
 
-    # Per-class table (sorted by recall ascending — worst first)
+    # Per-class table (sorted by recall ascending - worst first)
     html.append('<h2>Per-class recall (worst  best)</h2>')
     html.append('<table><tr><th>class</th><th>truth</th><th>matched</th><th>recall</th>'
                 '<th>FP as this</th><th>wrong-pred-here</th></tr>')

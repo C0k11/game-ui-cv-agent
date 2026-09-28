@@ -1,10 +1,10 @@
-"""Batch YOLO-prefill a run's frames — pick WHICH detector, and ACCUMULATE
+"""Batch YOLO-prefill a run's frames - pick WHICH detector, and ACCUMULATE
 across passes so one frame can carry boxes from several models.
 
 Each pass runs ONE model (ui / fused_avatar / emoticon / battle), remaps its
 local class ids to the shared master `_classes.txt` index BY NAME, keeps only
 the boxes inside that model's authoritative master-class span, and MERGES them
-into the per-image label .txt — boxes already written by other passes are
+into the per-image label .txt - boxes already written by other passes are
 preserved (only same-class IoU>0.6 duplicates are dropped). This is exactly the
 cross-teacher labeling the unified 26x model needs: the ui pass stamps UI boxes,
 the avatar pass adds head boxes on the SAME frame without erasing the UI ones.
@@ -22,7 +22,7 @@ Recommended flow for a fresh dataset (build the unified training set):
   精修 ONCE in the dashboard  train. Run the teacher passes BEFORE精修, not
   after (merge would re-add boxes a human deliberately deleted).
 
-Label format: `cls cx cy w h` normalized, cls = 0-based MASTER index — the
+Label format: `cls cx cy w h` normalized, cls = 0-based MASTER index - the
 format server/app.py:list_dataset_images parses (a 6th column is read as OBB
 angle there, so we never emit one).
 
@@ -43,7 +43,7 @@ RAW = REPO / "data" / "raw_images"
 TRAJ = REPO / "data" / "trajectories"
 MASTER_FILE = RAW / "_classes.txt"
 
-# 人审资产保护注册表(2026-07-25 建)。data/raw_images/ 在 .gitignore:40 —— 人审
+# 人审资产保护注册表(2026-07-25 建)。data/raw_images/ 在 .gitignore:40 -- 人审
 # 标注**全盘唯一副本, 零 VCS 兜底**。而预标是整池覆盖: 实测若对已人审的
 # run_20260715_025638_botplay_clean 跑一次 overwrite, 559 个人审 battle 框会被
 # 361 个模型框顶替。这里登记的池, prefill 默认**直接拒绝**, 除非显式
@@ -66,14 +66,14 @@ def _guard_audited(img_dir: Path, mode: str, allow_audited: bool) -> None:
     if info:
         raise SystemExit(
             f" {img_dir.name} 已登记为**人审池**({info.get('reviewed_at','?')}, "
-            f"{info.get('note','')}) — 拒绝 mode={mode} 覆盖。\n"
+            f"{info.get('note','')}) - 拒绝 mode={mode} 覆盖。\n"
             f"   人审标注在 .gitignore 内, 覆盖=永久丢失。确实要重标请显式传 "
             f"allow_audited=True(CLI: --allow-audited), 并先自行备份。")
 
 
 def _backup_labels(img_dir: Path, stamp: str) -> int:
     """写盘前快照将被改写的 label, **保池名目录结构**(7 个 botplay 池的文件名
-    全是 frame_00000.txt, 扁平备份无法区分来源 —— 磁盘上那两个 0 文件的
+    全是 frame_00000.txt, 扁平备份无法区分来源 -- 磁盘上那两个 0 文件的
     *_trackprefill 备份目录就是缺这条的实证)。返回备份文件数。"""
     import shutil
     srcs = sorted(img_dir.glob("*.txt"))
@@ -94,7 +94,7 @@ def _backup_labels(img_dir: Path, stamp: str) -> int:
 
 # **已被 battle v10s 取代, 默认别开**(2026-07-25 当天就废了)。
 # 用户提的种子模型法更干净: 拿人审的 54 帧 ×8 过采样 warm-train 出 v10s, 模型
-# **自己**就把黄机甲判成敌方了 —— 5 个没训过的池上「我方@cx>=0.55」从 153 掉到
+# **自己**就把黄机甲判成敌方了 -- 5 个没训过的池上「我方@cx>=0.55」从 153 掉到
 # 21, 而那 21 个抽检 18/18 **全是真学生**(推进到中线的我方)。此时再开 cx 规则
 # 只会把这 21 个真学生改错。
 #  规则本身留着(换新域、模型还没学会时的应急兜底), 但**先训模型, 别先套规则**。
@@ -104,11 +104,11 @@ def _backup_labels(img_dir: Path, stamp: str) -> int:
 # 源池里 6 个敌方框=0  模型先验"战场小人=我方", 实测敌方我方 22.5%/反向 0%。
 # 该规则在**固定横版镜头**的活动关(botplay)上把类错 434; 但在**大决战**上是
 # 灾难: 耶罗尼姆斯池人审 GT 里 我方 2483 框中 1689 个(68.0%)cx>=0.50、白_黑
-# 27.5% —— 那边镜头跟随平移, "我方在左"根本不成立, 无门控套用会灌 1682 条毒标签。
+# 27.5% -- 那边镜头跟随平移, "我方在左"根本不成立, 无门控套用会灌 1682 条毒标签。
 # 阈值取 0.55 而非 0.50: 人审池上扫阈值 0.458误伤 / 0.503 / 0.553 / 0.604,
 # 底部平坦, 0.55 给"推进到中线的学生"留余量(实测边界误伤集中在 0.50-0.55)。
 # 这条规则**永远只能活在后处理里**: 实测把整帧水平平移 ±25% 帧宽(外观一个像素
-# 没动), v10 判定保持 98.4% —— 全卷积 end2end head 架构上就学不到绝对 x 坐标,
+# 没动), v10 判定保持 98.4% -- 全卷积 end2end head 架构上就学不到绝对 x 坐标,
 # 指望"训练进去"是没有的事。
 CX_RULE_THRESHOLD = 0.55
 CX_RULE_ALLOWED_POOLS = ("botplay_clean",)   # 池名子串白名单
@@ -126,9 +126,9 @@ def _resolve_side_ids() -> None:
     idx = master_idx()
     _CLS_ALLY, _CLS_ENEMY = idx.get("我方", -1), idx.get("敌方", -1)
     if _CLS_ALLY < 0 or _CLS_ENEMY < 0:
-        raise SystemExit(" master 词表里找不到 我方/敌方 — cx 规则无法启用")
+        raise SystemExit(" master 词表里找不到 我方/敌方 - cx 规则无法启用")
 
-# Per-tag inference imgsz — mirrors brain/pipeline.py _IMGSZ_BY_TAG. Wrong imgsz
+# Per-tag inference imgsz - mirrors brain/pipeline.py _IMGSZ_BY_TAG. Wrong imgsz
 # silently yields 0 detections (ui @1920 = nothing), so pin it per model.
 _IMGSZ_BY_TAG = {"ui": 960, "avatar": 960, "battle": 960, "cafe": 640}
 
@@ -140,7 +140,7 @@ _KEY_TO_TAG = {"ui": "ui", "fused_avatar": "avatar",
 # master layout: [0,142]=UI-A, [143,393]=avatars(251), [394,450]=UI-B,
 # 451=Emoticon_Action. A pass keeps ONLY boxes inside its span so the ui model
 # can't stamp a spurious avatar class onto a cafe sprite (and vice-versa).
-# 2026-07-17: ui 域含 451 Emoticon_Action — ui v6+ 已兼职摸头(live 管线
+# 2026-07-17: ui 域含 451 Emoticon_Action - ui v6+ 已兼职摸头(live 管线
 # fold-in 正是靠它, emoticon 独立模型已退役), 旧表把 451 划给 emoticon
 # teacher 导致 ui 预标漏摸头框(用户抓)。451 同时在 emoticon teacher 域
 # (dashboard 补标仍可用): 两域重叠, overwrite 模式二者都会重写 451 框。
@@ -170,7 +170,7 @@ def _ui_span(i: int) -> bool:       # UI = 排除法兜底; 451 摸头与 emotic
     return _domain(i) == "ui" or i == 451
 def _avatar_span(i: int) -> bool:   return 143 <= i <= 394   # 含柚子战斗(394, fused 第252角色)
 def _emoticon_span(i: int) -> bool: return i == 451
-# battle 静态 span — 只供 UI datalist 展示/校验; **写路径一律用
+# battle 静态 span - 只供 UI datalist 展示/校验; **写路径一律用
 # owns_for(tag, remap) 的词表动态 span**(见下)。
 # 2026-07-14 教训: 曾枚举 476-479, 主教480/球481/黑白482 加类后静默漏
 # (用户"只标cls"输黑白被拒实锤)  改开放规则: HUD 段 + 476 起全部身份类
@@ -183,7 +183,7 @@ _OWNS = {"ui": _ui_span, "avatar": _avatar_span,
 def owns_for(tag: str, remap: dict):
     """写路径(prefill/suggest)用的 owns 判定。battle 域 = 该权重词表∩master
     (remap.values(), v5 加新类自动跟随, 无枚举漏类)。
-    2026-07-11 审计教训: 曾把 _OWNS['battle'] 设 lambda True — merge 模式
+    2026-07-11 审计教训: 曾把 _OWNS['battle'] 设 lambda True - merge 模式
     没事(检出本来只有战斗类), 但 **overwrite 模式 kept=[e if not owns] 起始
     变空 = 整池 UI/头像/emoticon 手标全被清掉**, owns 在 overwrite 里是
     "保留其他模型框"的过滤器, 双重用途缺一不可。"""
@@ -238,10 +238,10 @@ def get_model(model_key: str = "ui", version: "str | None" = None):
                 remap[int(li)] = mi
         if not remap:
             # 词表与 master 零命中 = 权重错配(如 battle legacy 的 c0/c1/c2/c3
-            # 占位名) — 静默跑会把未标帧全写成空 label 还报成功, 必须炸。
+            # 占位名) - 静默跑会把未标帧全写成空 label 还报成功, 必须炸。
             raise ValueError(
                 f"{model_key}/{ver} 权重词表与 master 零命中"
-                f"(names={list(m.names.values())[:6]}...) — 选错版本? "
+                f"(names={list(m.names.values())[:6]}...) - 选错版本? "
                 f"battle 预标请用 v4。")
         tag = _KEY_TO_TAG.get(model_key, "ui")
         _MODELS[cache_key] = (m, remap, tag)
@@ -260,7 +260,7 @@ def _iou(a, b) -> float:
 
 
 def _containment(a, b) -> float:
-    """交集 / 较小框面积 — 包含关系强度(大小框对的 IoU 天然低, 用这个补判)。"""
+    """交集 / 较小框面积 - 包含关系强度(大小框对的 IoU 天然低, 用这个补判)。"""
     ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
     ix1, iy1 = max(ax1, bx1), max(ay1, by1)
     ix2, iy2 = min(ax2, bx2), min(ay2, by2)
@@ -273,7 +273,7 @@ def _containment(a, b) -> float:
 
 def is_dup_box(box, mi, kept) -> bool:
     """预标去重: 任意类 IoU>0.6(同位歧义双标: 红点/黄点、确认/灰确认), 或
-    **同类**包含型(交集/小框>0.75) — 2026-07-12 凹轴池实锤14对: 训练口径不
+    **同类**包含型(交集/小框>0.75) - 2026-07-12 凹轴池实锤14对: 训练口径不
     统一让模型对同一学生出「含血条大框」+「本体小框」, IoU 仅~0.5 溜过 0.6
     线。跨类包含不删(Boss 大框套我方小框/角色框套 UI 按钮 = 合法结构)。
     kept: iterable of (master_id, [x1,y1,x2,y2])。"""
@@ -328,7 +328,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
         _resolve_side_ids()
     if cx_rule and not _cx_on:
         print(f"cx 规则已请求但 {img_dir.name} 不在白名单 "
-              f"{CX_RULE_ALLOWED_POOLS} — **不启用**(大决战等跟随镜头域套用会灌毒标签)")
+              f"{CX_RULE_ALLOWED_POOLS} - **不启用**(大决战等跟随镜头域套用会灌毒标签)")
     n_flip = 0
     m, remap, tag = get_model(model_key, version)
     owns = owns_for(tag, remap)
@@ -376,11 +376,11 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
     if len(_by_size) > 1:
         print(f"源目录含 {len(_by_size)} 种分辨率 "
               f"{ {f'{w}x{h}': len(v) for (w, h), v in sorted(_by_size.items())} }"
-              f" — 按分辨率分组推理(混批会让峰值显存翻数倍)")
+              f" - 按分辨率分组推理(混批会让峰值显存翻数倍)")
     batches = [(k, g[i:i + CHUNK])
                for k, g in sorted(_by_size.items())
                for i in range(0, len(g), CHUNK)]
-    # 尺寸 -> [该尺寸看过的帧, 其中空标的]。**skip 掉的帧也要进分母** —— skip
+    # 尺寸 -> [该尺寸看过的帧, 其中空标的]。**skip 掉的帧也要进分母** -- skip
     #   模式只重跑"原来就是空"的帧, 只数写入的话分母全是空标, 必报 100% 假阳。
     _yield: "dict[tuple, list]" = {k: [0, 0] for k in _by_size}
     for _size, chunk in batches:
@@ -429,7 +429,7 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 kept = existing  # merge: keep all, append new (same-cls dedup)
             for _sc, mi, box in new:
                 if is_dup_box(box, mi, kept):
-                    continue  # IoU>0.6 任意类 + 同类包含型 — 见 is_dup_box 注释
+                    continue  # IoU>0.6 任意类 + 同类包含型 - 见 is_dup_box 注释
                 kept.append((mi, box))
             lines = []
             for mid, (x1, y1, x2, y2) in kept:
@@ -445,18 +445,18 @@ def prefill_run(img_dir, *, model_key: str = "ui", version: "str | None" = None,
                 progress(written, len(imgs))
     # 2026-08-13: 空标不是"这帧没东西", 常常是"这个分辨率模型看不见"。
     #   实锤: walk_20260813_083604 里 1280x720 那 140 帧写出来 89 个空标(64%),
-    #   同目录 2560x1440 的 141 帧只有 13 个(9%) —— 720p 要上采样进 960 letterbox,
+    #   同目录 2560x1440 的 141 帧只有 13 个(9%) -- 720p 要上采样进 960 letterbox,
     #   细节没了。而空标文件进 train = **真内容配空标 = 负监督毒**(未标注反而
     #   会被 build 跳过, 无害)。所以这里必须出声, 不能默默写完就算完。
     for (w0, h0), (n0, z0) in sorted(_yield.items()):
         if n0 >= 5 and z0 / n0 > 0.40:
-            print(f"[!] {w0}x{h0}: {n0} 帧里 {z0} 个空标({z0/n0:.0%}) — "
+            print(f"[!] {w0}x{h0}: {n0} 帧里 {z0} 个空标({z0/n0:.0%}) - "
                   f"该分辨率很可能出模型分布(训练域是 2560x1440/3840x2160)。"
                   f"空标进 train 是负监督毒, **先删掉这批 txt 回到未标注**, "
                   f"别直接拿去训。")
     if _cx_on:
         print(f"cx 规则(>={CX_RULE_THRESHOLD}) 把 {n_flip} 个「我方」改判敌方 "
-              f"— 人审时优先复查这些框(阈值边界 0.50-0.55 有真学生误伤)")
+              f"- 人审时优先复查这些框(阈值边界 0.50-0.55 有真学生误伤)")
     return {"written": written, "skipped": skipped, "total": len(imgs),
             "model": model_key, "version": version, "mode": mode,
             "backed_up": n_bak, "cx_flipped": n_flip}

@@ -1,7 +1,7 @@
-"""CafeSkill — Blue Archive cafe daily routine (pure-YOLO rewrite).
+"""CafeSkill - Blue Archive cafe daily routine (pure-YOLO rewrite).
 
 Verified flow (interactive probe 2026-06-01), all clicks resolved through
-YOLO cls (ui_classes) or the emoticon / fused_avatar detectors — NO OCR, NO
+YOLO cls (ui_classes) or the emoticon / fused_avatar detectors - NO OCR, NO
 hardcoded button positions (only relative gesture params: the headpat
 cx-offset and the swipe start/end points).
 
@@ -28,14 +28,14 @@ switch    CAFE_MOVE_2F  2F (may pop a 訪問學生目錄 tutorial  BTN_CONFIRM).
 exit      is_lobby  done; else BTN_HOME / BTN_BACK.
 
 Detectors (set by pipeline.SKILL_YOLO_MAP["Cafe"] = "ui+cafe+avatar"):
-  ui      — all the UC.* button classes (find_cls / find_all_cls). From ui v6
-            this ALSO carries 'Emoticon_Action' (cls451) — the headpat bubble,
+  ui      - all the UC.* button classes (find_cls / find_all_cls). From ui v6
+            this ALSO carries 'Emoticon_Action' (cls451) - the headpat bubble,
             folded in from the old standalone emoticon model.
-  cafe    — legacy standalone emoticon model (single class 'Emoticon_Action').
+  cafe    - legacy standalone emoticon model (single class 'Emoticon_Action').
             Auto-dropped by pipeline once ui v6 is active; until then it serves
             the headpat marker. _emoticon_mark matches by the "emoticon"
             substring, so it works regardless of which model produced the box.
-  avatar  — fused_avatar (251 student heads), model_tag=="avatar".
+  avatar  - fused_avatar (251 student heads), model_tag=="avatar".
 """
 from __future__ import annotations
 
@@ -71,21 +71,21 @@ _HEADPAT_DEDUP_DIST = 0.035  # skip clicks within this of a recent headpat
                              # (0.06 过肥: 2026-07-21 实锤 0.05 间距两真学生被并)
 _HEADPAT_DEDUP_KEEP = 4     # remember the last N headpat coords for dedup
 _HEADPAT_DRY_FRAMES = 7     # consecutive empty frames  current view cleared
-#   3 (840ms) was too eager — emoticon bubbles render 400-600ms late after a
+#   3 (840ms) was too eager - emoticon bubbles render 400-600ms late after a
 #   pan/pat settle, so a slow bubble got declared "dry" and a student was
 #   missed (deep-dive r2 H3; live 2026-06-09 1F漏摸一个). 57 (user 2026-06-13
-#   "要给足摸头处理时间" — 漏摸复发: 7×280≈2s scan before declaring a region dry,
+#   "要给足摸头处理时间" - 漏摸复发: 7×280≈2s scan before declaring a region dry,
 #   extra margin for late bubbles / v10-folded-451 lower-conf renders). 精确根因
 #   (时序 vs v10 451检测弱 vs pan盲区) 待明天 live 走一步看漏摸那帧确认。
 _MAX_HEADPATS_PER_FLOOR = 12  # safety helmet (probe: ~12 students/floor)
-# 墙钟下限(2026-07-28) —— 与上面的帧数**合取**, 见 _init_state 的换算说明。
+# 墙钟下限(2026-07-28) -- 与上面的帧数**合取**, 见 _init_state 的换算说明。
 # 取值忠实于各自注释里写明的设计意图, 不趁机收窄(那些数都是修事故调大的)。
 _HEADPAT_DRY_SEC = 2.0    # 注释原话 "7×280≈2s scan before declaring a region dry"
 _PAT_SETTLE_SEC = 1.4     # 注释原话 "23 给足时间: late bubbles after a pan"(3×450)
 _LOBBY_DWELL_SEC = 1.2    # 大厅徽标渐入(3×350); live 2026-06-09 事故加的驻留窗
 _SWITCH_2F_ACK_SEC = 4.0  # 点 移动至2号点  2F 到达证据(CAFE_MOVE_1F 出现)
 # 点「領取」 帧证据(按钮变灰 / 弹窗链关掉)。要覆盖自主跑与 step 门控两种节奏
-# (门控每步 4-6s), 故取 6.0s —— 放宽近乎零代价: 真领到了下一 tick 就走灰按钮/
+# (门控每步 4-6s), 故取 6.0s -- 放宽近乎零代价: 真领到了下一 tick 就走灰按钮/
 # 到达分支, 等不满; 放窄则退回"点被吞却报领完"的老病。
 _CLAIM_ACK_SEC = 6.0
 _MAX_PANS_PER_FLOOR = 6       # safety helmet on camera sweeps
@@ -95,14 +95,14 @@ _INVITE_SWIPE_SETTLE = 3      # ticks to wait after a list swipe (anim settle)
 _ROW_PAIR_DY = 0.06           # avatar.cy <-> invite-button.cy max gap = same row
 
 # Top-left false-positive zone: 指定訪問/隨機訪問 buttons get mis-detected as
-# Emoticon_Action. The buttons hug the LEFT EDGE (cx≈0.04-0.08, cy≈0.25-0.40) —
+# Emoticon_Action. The buttons hug the LEFT EDGE (cx≈0.04-0.08, cy≈0.25-0.40) -
 # the old (0.27, 0.34) zone was 3× too wide and KILLED a real student bubble
 # at upper-left (live 2026-06-09: Emoticon_Action 0.97 on a student, rejected,
-# never patted — user caught it on screen). Domain-authority dedup in
+# never patted - user caught it on screen). Domain-authority dedup in
 # _run_yolo_on_image is the main FP layer now; this zone is just a backstop.
 _FP_ZONE = (0.10, 0.45)       # cx < 0.10 AND cy < 0.45  reject
 
-# Per-sub-state tick budgets — every phase is bounded, never dead-waits.
+# Per-sub-state tick budgets - every phase is bounded, never dead-waits.
 _ENTER_MAX = 25
 _EARNINGS_MAX = 18
 _INVITE_MAX = 45
@@ -111,10 +111,10 @@ _EXIT_MAX = 14
 
 
 def _game_day() -> str:
-    """BA game-day ISO date (resets 04:00 **server time**) — invite-state key.
+    """BA game-day ISO date (resets 04:00 **server time**) - invite-state key.
 
     与 schedule.py 的 `_game_day` 同一处修正(2026-07-27 实测): 旧版 "resets
-    04:00 **local**" 这句本身就是 bug —— 游戏日界锚在服务器/设备时区, 不是 host。
+    04:00 **local**" 这句本身就是 bug -- 游戏日界锚在服务器/设备时区, 不是 host。
     实测 host=UTC-4 / device=Asia/Shanghai  差 12h, host 跨过 04:00 时台账 key
     在**同一个游戏日内**翻天, 招待券台账被判过期重置。
     """
@@ -171,7 +171,7 @@ def _load_invite_targets() -> List[str]:
 
 
 def _load_skip_invite() -> bool:
-    """app_config profile `cafe_skip_invite` — True  headpat-only cafe run
+    """app_config profile `cafe_skip_invite` - True  headpat-only cafe run
     (invite ticket on CD / user choice). Same profile-read pattern as
     _load_invite_targets."""
     try:
@@ -200,7 +200,7 @@ class CafeSkill(BaseSkill):
         #   而那一刻屏上挂着 **收益 108,334 信用点 / 123 AP / 9,167 信用点**
         #   和 **3 个 Emoticon_Action(3 个学生等着摸头)**。
         # 根因: CAFE_INVITE_TICKET / CAFE_EARNINGS 是**咖啡厅内部**的 cls,
-        # 大厅上根本不会出现 —— 把它们放进"大厅入口"列表, 等于给"人已经在
+        # 大厅上根本不会出现 -- 把它们放进"大厅入口"列表, 等于给"人已经在
         # 咖啡厅里"这种情况装了一个必然为假的判据。
         #  不在大厅就**判不了**, 按 dot_on_entry 一贯的语义放行(fail-open 到
         #   "进去看一眼", 而不是 fail-closed 到"今天不干了")。
@@ -243,7 +243,7 @@ class CafeSkill(BaseSkill):
         # headpat
         self._pat_count: int = 0
         # 竣工判据用的**粘性**计数(2026-07-28): `_pat_count` 每层清零
-        # (_switch 里 =0), `_earnings_claimed` 领完也会被复位成 False ——
+        # (_switch 里 =0), `_earnings_claimed` 领完也会被复位成 False --
         # 拿它们当"今天干了什么"的证据必然低报。另存一份只增不减的。
         self._pats_total: int = 0
         self._earnings_done: bool = False
@@ -258,7 +258,7 @@ class CafeSkill(BaseSkill):
         self._verify_reentered: bool = False
         self._exit_lobby_ticks: int = 0   # dwell counter for the badge check
         # 2026-07-28 墙钟化(tick-vs-wallclock 家族, 全仓审计发现 cafe 是
-        # **零墙钟** 的 9 个 skill 之一 —— 所有时序判据都在数 tick)。
+        # **零墙钟** 的 9 个 skill 之一 -- 所有时序判据都在数 tick)。
         # 真正的机制不是"tick 变快了": server/app.py:1519 的 ZERO-WAIT 只对
         # reason 含 加载中/loading 的 wait 兑现 duration_ms, **其余一律睡 0.12s**
         # (代码注释自己写着 "counters are squashed to a fast re-poll")。
@@ -268,7 +268,7 @@ class CafeSkill(BaseSkill):
         #     · _pat_settle=3          设计 3×450=1.35s+  实际 ~0.6s
         #     · _exit_lobby_ticks<3    设计 3×350=1.05s+  实际 ~0.4s
         #   时序铁证: _HEADPAT_DRY_FRAMES 57 的修复日期 user **2026-06-13**,
-        #   ZERO-WAIT 政策日期 user **2026-06-14** —— **修复落地第二天就被作废**,
+        #   ZERO-WAIT 政策日期 user **2026-06-14** -- **修复落地第二天就被作废**,
         #   而注释里那句"待明天 live 走一步确认"的"明天"正是那一天。
         # 修法用**合取**而不是单纯把帧数调大: 帧数抗单帧抖动, 墙钟抗渐入/延迟渲染,
         # 两者要的是不同的东西, 缺一不可(verifier 对 :1151 的建议, 我认同并推广)。
@@ -283,11 +283,11 @@ class CafeSkill(BaseSkill):
         self._invite_targets = _load_invite_targets()
         self._skip_invite = _load_skip_invite()
         if self._skip_invite:
-            self.log("cafe_skip_invite=true — invite disabled (券CD), headpat only")
+            self.log("cafe_skip_invite=true - invite disabled (券CD), headpat only")
         elif self._invite_targets:
             self.log(f"cafe invite targets: {self._invite_targets}")
         else:
-            self.log("no cafe_invite_targets configured — will invite first rows")
+            self.log("no cafe_invite_targets configured - will invite first rows")
         # Restore today's invited set so a retry after a timeout doesn't waste
         # a ticket re-inviting the same student. Auto-expires at 04:00.
         try:
@@ -310,7 +310,7 @@ class CafeSkill(BaseSkill):
         """DIGIT-ONLY read of the X.X% shown on the 咖啡厅收益 button.
 
         Signal gate for the earnings popup: 0.0%  nothing to claim  never
-        open it. Returns None when unreadable — caller opens the popup as
+        open it. Returns None when unreadable - caller opens the popup as
         before (safe fallback, identical to pre-gate behaviour)."""
         try:
             from brain.pipeline import run_digit_ocr
@@ -319,7 +319,7 @@ class CafeSkill(BaseSkill):
             # in-box crops  None, below-box crop  '0' on a 0.0% frame).
             # 2026-07-27 改成**框自身尺寸**为单位(原来是屏幕比例 0.01/0.05)。
             # 咖啡厅收益 框实测 iw 0.0793 / ih 0.0247 (n=3100, 四分位很紧),
-            # 故 0.010.126 框宽, 0.052.02 框高 —— 16:9 下等价, 换分辨率/
+            # 故 0.010.126 框宽, 0.052.02 框高 -- 16:9 下等价, 换分辨率/
             # 窗口大小不再漂(理由见 brain.pipeline.icon_strip)。
             _bw = max(1e-6, earn_box.x2 - earn_box.x1)
             _bh = max(1e-6, earn_box.y2 - earn_box.y1)
@@ -359,11 +359,11 @@ class CafeSkill(BaseSkill):
     def exit_report(self):
         """咖啡厅的竣工判据 = 收益领了没 / 摸头摸了几个 / 邀请卷用了没。
 
-        2026-07-28 首次纳入编排时出口报 `UNKNOWN — 未声明竣工判据`。
+        2026-07-28 首次纳入编排时出口报 `UNKNOWN - 未声明竣工判据`。
         咖啡厅是**最容易"跑通了但没干活"**的 skill: 收益弹窗动画锚点会打空
         (memory cafe_flow_spec 那个"收益第1次没领"), 摸头靠 `Emoticon_Action`
         这个弱 cls(mean conf 0.65)且学生在走动, 漏一个人从日志上完全看不出来。
-        三项都用**粘性**计数 —— `_pat_count` 每层清零、`_earnings_claimed`
+        三项都用**粘性**计数 -- `_pat_count` 每层清零、`_earnings_claimed`
         领完就复位, 拿它们报数必然低报。
         """
         _pats, _inv = self._pats_total, len(self._invited)
@@ -371,10 +371,10 @@ class CafeSkill(BaseSkill):
                  "收益已领" if self._earnings_done else "**收益没领到**"]
         if not self._earnings_done:
             return ("LEFTOVER", " / ".join(_bits) +
-                    " — 收益是每天必领的, 查「領取」是否锚在弹出动画帧上")
+                    " - 收益是每天必领的, 查「領取」是否锚在弹出动画帧上")
         if _pats == 0:
             return ("LEFTOVER", " / ".join(_bits) +
-                    " — 一个都没摸到, 查 Emoticon_Action 检出")
+                    " - 一个都没摸到, 查 Emoticon_Action 检出")
         return ("CLEAN", " / ".join(_bits))
 
     def _goto(self, sub_state: str) -> None:
@@ -394,13 +394,13 @@ class CafeSkill(BaseSkill):
 
         #  popups that can appear in any sub_state (pure YOLO)
 
-        # Reward-result popup ("獲得獎勵") after a claim — tap to dismiss.
+        # Reward-result popup ("獲得獎勵") after a claim - tap to dismiss.
         got_reward = self.find_cls(screen, UC.GOT_REWARD, conf=_CLS_CONF)
         if got_reward is not None:
             self.log("reward-result popup, dismissing (YOLO 获得奖励)")
             return action_click_box(got_reward, "dismiss reward result")
 
-        # Full-screen bond / region level-up overlay — tap anywhere.
+        # Full-screen bond / region level-up overlay - tap anywhere.
         levelup = self.find_cls(
             screen, [UC.BOND_LEVELUP, UC.REGION_LEVELUP], conf=_CLS_CONF
         )
@@ -408,13 +408,13 @@ class CafeSkill(BaseSkill):
             self.log(f"level-up overlay ({levelup.cls_name}), tapping to dismiss")
             return action_click(0.5, 0.5, "dismiss level-up overlay")
 
-        # Tutorial popup (2F first visit, "訪問學生目錄/說明") — close via
+        # Tutorial popup (2F first visit, "訪問學生目錄/說明") - close via
         # BTN_CONFIRM. Only outside invite (the invite list reuses the center).
         if self.sub_state in ("switch", "headpat2"):
             tut_confirm = self._confirm_btn(screen, region=screen.CENTER)
             tut_close = self._close_x(screen)
             # Only treat as tutorial when NOT on a real cafe page and a
-            # confirm/close sits center — avoids eating cafe-main buttons.
+            # confirm/close sits center - avoids eating cafe-main buttons.
             if (tut_confirm is not None and not self._is_cafe(screen)
                     and not self._invite_list_open(screen)):
                 self.log("dismissing 2F tutorial popup (YOLO 确认键)")
@@ -450,12 +450,12 @@ class CafeSkill(BaseSkill):
         self._enter_attempts += 1
         page = self.detect_screen_yolo(screen)
 
-        # 2026-07-28 live 实锤(差点又丢一次收益): 收益弹窗有**两种版式** ——
+        # 2026-07-28 live 实锤(差点又丢一次收益): 收益弹窗有**两种版式** --
         #  · 小弹窗: 咖啡厅 UI 露在外面  `_is_cafe`/page=="Cafe" 成立
         #  · **大弹窗**「咖啡廳收益」(1號店/1號店/2號店 三格明细): **盖住底栏**
         #     page != "Cafe"  旧码走 recover **点叉叉把它关掉**
         # 实测那一刻屏上明明白白挂着 `領取_黄 0.97` + 收益
-        # **108,334 信用点 / 123 AP / 9,167 信用点** —— 关掉就等于把这笔钱扔了
+        # **108,334 信用点 / 123 AP / 9,167 信用点** -- 关掉就等于把这笔钱扔了
         # (下一轮 dot-gate 还可能因为"入口无黄点"直接 skip 整个 cafe)。
         #  收益是**钱**, 遵循「目标 cls 出现立即点」: 只要 claim band 里有可点的
         #   領取(黄/蓝), 不管当前认不认得出这是哪一页, 一律先转 earnings 去领,
@@ -503,7 +503,7 @@ class CafeSkill(BaseSkill):
                     if 0.0 < cafe_cx < 0.5:                 # sanity: 咖啡厅在左侧
                         self.log(f"咖啡厅入口外推 cx={cafe_cx:.3f} cy={cafe_cy:.3f} (从 {n} 个底栏入口)")
                         return action_click(cafe_cx, cafe_cy, "cafe nav (底栏外推兜底)")
-            self.log("on lobby but no 咖啡厅入口 cls (even @0.12 + 外推失败) — YOLO gap; waiting")
+            self.log("on lobby but no 咖啡厅入口 cls (even @0.12 + 外推失败) - YOLO gap; waiting")
             return action_wait(400, "waiting for 咖啡厅入口 cls")
 
         if page is not None:
@@ -528,14 +528,14 @@ class CafeSkill(BaseSkill):
         # 弹窗在场时**绝不**走「UI 隐藏」分支(2026-08-02 live 帧实锤):
         # 咖啡厅弹了「說明/訪問學生目錄」框(確認键灰、右上带 X), 而这一步的落点
         # (0.12,0.88) 是**写死坐标**, 在 UI 显示时正压在底栏「編輯模式」按钮一带
-        # —— 误触会进家具编辑模式。零导航 cls 有两种成因: UI 真被 toggle 隐藏
+        # -- 误触会进家具编辑模式。零导航 cls 有两种成因: UI 真被 toggle 隐藏
         # 弹窗盖住/转场帧漏检。在这里必须优先按「关弹窗」处理, 而不是盲点空地。
         _popup_x = self.find_cls(screen, UC.BTN_CLOSE_X, conf=0.60)
         if _popup_x is not None:
             self.log("咖啡厅有弹窗(叉叉在场)  先关弹窗, 不走 UI-隐藏盲点分支")
             return action_click_box(_popup_x, "cafe: close blocking popup (X)")
         # 单帧不算数(2026-08-07 live 实锤): 上面那道弹窗闸是 2026-08-02 加的,
-        # 代码在、常量对, 却**没拦住** —— 因为 skill 那一帧上连叉叉都没检出:
+        # 代码在、常量对, 却**没拦住** -- 因为 skill 那一帧上连叉叉都没检出:
         # 那是张**进咖啡厅的转场帧**(学生已渲染  有 1 个 Emoticon_Action,
         # UI chrome 还没出来  零导航 cls), 恰好满足"UI 隐藏"的形状。
         # 我的探针帧(晚一拍)上 回大厅0.98/返回键0.97/移动至2号点0.96/邀请卷0.98
@@ -546,9 +546,9 @@ class CafeSkill(BaseSkill):
         if _emos and _navs is None:
             self._ui_hidden_ticks += 1
             if self._ui_hidden_ticks < 3:
-                self.log(f"疑似咖啡厅 UI 隐藏({self._ui_hidden_ticks}/3) — "
+                self.log(f"疑似咖啡厅 UI 隐藏({self._ui_hidden_ticks}/3) - "
                          f"可能只是转场帧, 再看一拍(绝不盲点写死坐标)")
-                return action_wait(350, "cafe: 疑似 UI 隐藏 — 等下一帧确认")
+                return action_wait(350, "cafe: 疑似 UI 隐藏 - 等下一帧确认")
             self.log(f"咖啡厅 UI 被隐藏(连续 {self._ui_hidden_ticks} 拍: "
                      f"{len(_emos)} 个摸头标记 + 零导航 cls)  点空地把 UI toggle 回来")
             self._ui_hidden_ticks = 0
@@ -575,7 +575,7 @@ class CafeSkill(BaseSkill):
         CAFE_EARNINGS label leaking near the popup top). An ACTIVE (yellow)
         claim cls  claim it; otherwise (0% / already claimed) close & move on.
         DIGIT-DEFERRED: the old "skip 0% to save the cap" % read is gone with
-        nav-OCR off — we drive purely off the claim button colour/state.
+        nav-OCR off - we drive purely off the claim button colour/state.
         """
         if self._earnings_done:
             self._begin_invite(floor_2=False)
@@ -586,7 +586,7 @@ class CafeSkill(BaseSkill):
         # 一次就 _earnings_done=True 前进  明细层还盖着  invite 卡 20t 到 stuck-recovery
         # 才关。改成: close 到 _is_cafe(咖啡页签名回来)才算完, 不是 close 一次就走。
         # 2026-07-28 第二次 live 才逮到的真根因: 这条**自称到达证据**的判据
-        # `_earnings_claimed and _is_cafe(screen)` **根本不是到达证据** ——
+        # `_earnings_claimed and _is_cafe(screen)` **根本不是到达证据** --
         # 上面那段注释说的「the earnings POPUP covers the cafe page signature
         # (detect_screen_yolo!="Cafe" while it's open)」是 **2026-06-02 的观察**,
         # 模型变强后**已经不成立**: 实测收益弹窗开着时, 屏上照样检出
@@ -596,7 +596,7 @@ class CafeSkill(BaseSkill):
         #  补上真正的到达证据: **屏上已经没有可点的 領取(黄/蓝) 了**。
         #   领到手  按钮变灰或弹窗关  这个合取才成立;
         #   点被吞   領取_黄 仍在  落回下面 claim_active 分支重发。
-        # 教训: "判据的名字叫到达证据"不等于"它真的是到达证据" —— 必须问
+        # 教训: "判据的名字叫到达证据"不等于"它真的是到达证据" -- 必须问
         #   **它会不会在动作没落地时也成立**。今天这已经是第二遍了。
         _still_claimable = self.find_cls(
             screen, [UC.CLAIM_REWARD_YELLOW, UC.CLAIM_YELLOW, UC.CLAIM_BLUE],
@@ -627,7 +627,7 @@ class CafeSkill(BaseSkill):
 
         #  next, regardless of _is_cafe: the earnings POPUP covers the cafe
         # page signature (detect_screen_yolo!="Cafe" while it's open), so the
-        # claim MUST be checked before any _is_cafe gate — otherwise the bot
+        # claim MUST be checked before any _is_cafe gate - otherwise the bot
         # opens the popup then freezes "waiting for cafe UI" (live 2026-06-02:
         # 领取_黄 @0.5,0.732 sat unclaimed for 17 ticks). The active-claim cls in
         # the centered band = the popup is open.
@@ -637,14 +637,14 @@ class CafeSkill(BaseSkill):
             conf=_CLS_CONF, region=_CLAIM_BAND,
         )
         if claim_active is not None:
-            # Claim it, but DON'T mark earnings done yet — next tick the button
+            # Claim it, but DON'T mark earnings done yet - next tick the button
             # greys out and the claim_grey path below CLOSES the popup. Marking
             # done here advances to invite while the popup is STILL OPEN, which
             # covers the cafe signature  _is_cafe False  invite freezes
             # "waiting for cafe UI" (live 2026-06-09: earnings popup stayed open,
             # invite dead-waited 14 ticks until the stuck-20 fallback).
-            # 2026-07-28 live 实锤 —— **昨天那个正确的修复暴露了这个老 bug**:
-            #   tick=13 wait  帧未稳定(转场/滚动) — 等稳定帧: claim earnings
+            # 2026-07-28 live 实锤 -- **昨天那个正确的修复暴露了这个老 bug**:
+            #   tick=13 wait  帧未稳定(转场/滚动) - 等稳定帧: claim earnings
             #   tick=14 wait  earnings done  invite         状态却已经"领完了"
             #   tick=15 click close leftover earnings before invite   关窗, 钱没领
             # 帧证据: 那一帧屏上 `領取_黄 0.97 @cy0.733` 原封不动。
@@ -653,16 +653,16 @@ class CafeSkill(BaseSkill):
             # `_earnings_done = True`  下一 tick 本函数第一行 `if self._earnings_done`
             # 直接转 invite, **永远不会重试这一发**。
             # 加 _force_settle 之前这发必然发得出去, 所以 mutate-before-ack 藏着
-            #   不显形 —— 一个正确的修复把另一个一直存在的 bug 顶出了水面。
+            #   不显形 -- 一个正确的修复把另一个一直存在的 bug 顶出了水面。
             #  这里**绝不**置 `_earnings_done`, 它只能由下面那条到达证据分支
             #   (`_earnings_claimed and _is_cafe(screen)` = 弹窗链真的关干净了)来置;
             #   补 after-ack: 窗口内不重发, 窗口过了仍见 領取_黄 就判被吞并重发。
             if self._earnings_claimed and self.since("claim_earn") < _CLAIM_ACK_SEC:
-                return action_wait(300, f"領取已发 — 等帧证据(按钮变灰/弹窗关) "
+                return action_wait(300, f"領取已发 - 等帧证据(按钮变灰/弹窗关) "
                                         f"(after-ack {self.since('claim_earn'):.1f}"
                                         f"/{_CLAIM_ACK_SEC:.1f}s)")
             if self._earnings_claimed:
-                self.log("領取发出后 領取_黄 仍在 — 判为被吞(稳定门/丢tap), 重发一次")
+                self.log("領取发出后 領取_黄 仍在 - 判为被吞(稳定门/丢tap), 重发一次")
             self.log(f"earnings popup, claiming (YOLO {claim_active.cls_name})")
             self._earnings_claimed = True
             self.mark("claim_earn")
@@ -685,7 +685,7 @@ class CafeSkill(BaseSkill):
             close = self._close_x(screen)
             if close is not None:
                 return action_click_box(close, "close earnings popup (nothing)")
-            # X not detected THIS frame (one-frame miss) — ESC closes the popup
+            # X not detected THIS frame (one-frame miss) - ESC closes the popup
             # just as well. NEVER advance with the popup still covering the
             # students (live 2026-06-09 2nd run: advancing here left it open
             # 1F headpat saw nothing again). _earnings_done is already True so
@@ -702,7 +702,7 @@ class CafeSkill(BaseSkill):
             if self._earnings_claimed:
                 # Keep closing any layered popup (reward anim + 收益 breakdown)
                 # until the cafe page is back (the early _is_cafe check above
-                # advances). NEVER set _earnings_done here — a single close can
+                # advances). NEVER set _earnings_done here - a single close can
                 # leave the 2nd layer up  invite stuck. Timeout  give up (the
                 # dry-frame/stuck-recovery catches a stray popup).
                 if self._phase_ticks > _EARNINGS_MAX:
@@ -726,7 +726,7 @@ class CafeSkill(BaseSkill):
             return action_wait(500, "waiting for cafe UI (earnings)")
 
         # Cafe main screen: SIGNAL-DRIVEN earnings (user rule 2026-06-09:
-        # "收益明明是0为什么还要点一次" — don't walk the flow blindly). The
+        # "收益明明是0为什么还要点一次" - don't walk the flow blindly). The
         # button itself shows the live percentage; digit-OCR it and only open
         # the popup when there's actually something (>0%). Unreadable  open
         # popup as before (safe fallback).
@@ -734,7 +734,7 @@ class CafeSkill(BaseSkill):
         if earn is not None:
             pct = self._read_earnings_pct(screen, earn)
             if pct is None:
-                # Unreadable THIS frame ≠ "open the popup" — retry a few frames
+                # Unreadable THIS frame ≠ "open the popup" - retry a few frames
                 # first (live 2026-06-09 round-2: a single None re-opened the
                 # popup on a 0.0% cafe). Only after retries fail do we fall
                 # open (free-harvest skill must never silently skip real money).
@@ -750,9 +750,9 @@ class CafeSkill(BaseSkill):
             self.log(f"opening earnings popup (YOLO 咖啡厅收益, pct={pct})")
             return action_click_box(earn, "open earnings popup")
 
-        # CAFE_EARNINGS not seen — give the cls a few ticks, then skip.
+        # CAFE_EARNINGS not seen - give the cls a few ticks, then skip.
         if self._phase_ticks > _EARNINGS_MAX:
-            self.log("CAFE_EARNINGS cls never found — skipping earnings")
+            self.log("CAFE_EARNINGS cls never found - skipping earnings")
             self._earnings_done = True
             self._begin_invite(floor_2=False)
             return action_wait(300, "no earnings cls  invite")
@@ -866,7 +866,7 @@ class CafeSkill(BaseSkill):
             self._invite_floor_done = True
             return action_wait(300, "invite budget exhausted")
 
-        # Stage 2: confirm the "邀請XXX到咖啡廳" dialog (REQUIRES BTN_CONFIRM —
+        # Stage 2: confirm the "邀請XXX到咖啡廳" dialog (REQUIRES BTN_CONFIRM -
         # clicking 取消/X cancels the invite and the student never spawns).
         if self._invite_stage == 2:
             confirm = self._confirm_btn(screen)
@@ -877,7 +877,7 @@ class CafeSkill(BaseSkill):
                 self._invite_floor_done = True
                 return action_click_box(confirm, "confirm invite")
             # No confirm dialog. Probe note: the invite button sometimes needs
-            # a second press before the dialog appears — retry the row once.
+            # a second press before the dialog appears - retry the row once.
             if self._invite_retry_btn is not None and self._phase_ticks % 3 == 0:
                 bx, by = self._invite_retry_btn
                 self.log("invite confirm not shown, re-pressing invite button")
@@ -895,7 +895,7 @@ class CafeSkill(BaseSkill):
                 return action_wait(300, "invite done (dialog dismissed)")
             return action_wait(350, "waiting for invite confirm dialog")
 
-        # Stage 1: list open — find the target row, scroll, or click first.
+        # Stage 1: list open - find the target row, scroll, or click first.
         if self._invite_stage == 1:
             # Post-swipe settle: don't scan mid-animation.
             if self._invite_settle > 0:
@@ -934,17 +934,17 @@ class CafeSkill(BaseSkill):
 
             if btn is not None:
                 # Found a non-priority configured fav but still hunting the
-                # floor target — scroll on unless exhausted.
+                # floor target - scroll on unless exhausted.
                 self._invite_scrolls += 1
                 self._invite_settle = _INVITE_SWIPE_SETTLE
-                self.log(f"fav '{name}' found, hunting target — scroll "
+                self.log(f"fav '{name}' found, hunting target - scroll "
                          f"({self._invite_scrolls}/{_INVITE_MAX_SCROLLS})")
                 return action_swipe(0.5, 0.70, 0.5, 0.30, 800, "scroll invite list (hunt)")
 
             # No configured target on screen.
             if bottom or budget_out or not self._invite_targets:
                 # Fallback: invite a row, but STRICTLY skip anyone already
-                # invited this run (1F/2F 绝不能重复邀请同一角色 — 用户要求
+                # invited this run (1F/2F 绝不能重复邀请同一角色 - 用户要求
                 # "一个角色只能出现在一个 cafe")。遍历所有可见 invite 行 (按 cy),
                 # 选第一个 avatar 名可识别且未邀请的。(旧逻辑只在 len>1 时换第二行,
                 # 2F invite list 常只渲染 1 个按钮  len>1 False  又邀请季战斗。)
@@ -972,7 +972,7 @@ class CafeSkill(BaseSkill):
             return action_swipe(0.5, 0.70, 0.5, 0.30, 800, "scroll invite list")
 
         # Stage 0: open the invite ticket from the cafe main screen.
-        # First: if the list is already open (toggle race), go to stage 1 —
+        # First: if the list is already open (toggle race), go to stage 1 -
         # clicking the ticket again would CLOSE it.
         if self._invite_list_open(screen):
             self._invite_stage = 1
@@ -1087,7 +1087,7 @@ class CafeSkill(BaseSkill):
         self._pats_total += 1
         self._empty_frames = 0
         self._pat_settle = 1  # one tick for the heart animation
-        # 爱心动画比 pan 短, 但同样吃 squash —— 给半个 pan 的墙钟。
+        # 爱心动画比 pan 短, 但同样吃 squash -- 给半个 pan 的墙钟。
         self._pat_settle_sec = _PAT_SETTLE_SEC / 2.0
         self.mark("pat_settle")
         self._recent_pats.append((mark.cx, mark.cy))
@@ -1132,7 +1132,7 @@ class CafeSkill(BaseSkill):
             self._goto("switch")
             return action_wait(300, "resume  switch to 2F")
 
-        # 切回 1F 的到达对账(2026-07-28): _floor_back_done 只认帧证据 —
+        # 切回 1F 的到达对账(2026-07-28): _floor_back_done 只认帧证据 -
         # 1F 才有 移動至2號店, 2F 才有 移動至1號店。点击被吞(仍见 2F 按钮)
         # 超过 ACK 窗就有界重发, 绝不一发定生死。
         if getattr(self, "_floor_back_pending", False) and not is_2f:
@@ -1158,13 +1158,13 @@ class CafeSkill(BaseSkill):
                 return action_click_box(_still_2f, "1F dot on switch btn  back to 1F")
             elif (_proof_1f is None and _still_2f is None
                     and self.since("floor_back") < _SWITCH_2F_ACK_SEC * 2):
-                return action_wait(300, "切回1F转场中 — 等楼层按钮出现")
+                return action_wait(300, "切回1F转场中 - 等楼层按钮出现")
 
         # Safety helmet.
         if self._pat_count >= _MAX_HEADPATS_PER_FLOOR:
             return self._finish_headpat(screen, is_2f, "max headpats")
 
-        # Post-pat / post-pan settle — let animation finish before scanning.
+        # Post-pat / post-pan settle - let animation finish before scanning.
         # 合取: 帧数没走完 **或** 墙钟没到, 都继续等(见 _init_state 的换算说明)。
         if self._pat_settle > 0 or self.since("pat_settle") < self._pat_settle_sec:
             if self._pat_settle > 0:
@@ -1184,7 +1184,7 @@ class CafeSkill(BaseSkill):
             self.mark("dry_scan")
         # 合取: 帧数不够 **或** 墙钟不够, 都不许判 dry(见 _init_state 换算说明)。
         # 单看帧数会被 squash 削成 ~1.4s, 而气泡最晚 600ms 才渲染 + v10 折进
-        # cls451 后 conf 偏弱 —— 提前判 dry 就 pan 走 = 漏摸(live 2026-06-09)。
+        # cls451 后 conf 偏弱 -- 提前判 dry 就 pan 走 = 漏摸(live 2026-06-09)。
         if (self._empty_frames < _HEADPAT_DRY_FRAMES
                 or self.since("dry_scan") < _HEADPAT_DRY_SEC):
             return action_wait(280, f"scanning headpat (empty={self._empty_frames}, pan={self._pan_dir})")
@@ -1205,7 +1205,7 @@ class CafeSkill(BaseSkill):
         if self._pan_dir == 0:
             # sweep LEFT full-span (0.800.10) to reveal the right-side overflow.
             # Deep-dive r2 H4: the old 0.750.25 / 0.250.80 pair was asymmetric
-            # and left a mid-floor blind strip — a student standing there was
+            # and left a mid-floor blind strip - a student standing there was
             # never on screen during either dwell (live 2026-06-09 1F漏摸).
             self._pan_dir = 1
             self._pan_count += 1
@@ -1241,7 +1241,7 @@ class CafeSkill(BaseSkill):
                 if mv1 is not None and self.dot_in_region(
                         screen, (mv1.x1 - 0.01, mv1.y1 - 0.05, mv1.x2 + 0.04, mv1.y2 + 0.01)):
                     # mutate-before-ack(2026-07-28, 与 _switch_floor :1108 同形):
-                    # _floor_back_done 不在这里落账 — 点击被吞时人还在 2F, 却按
+                    # _floor_back_done 不在这里落账 - 点击被吞时人还在 2F, 却按
                     # 1F 分支把干净的 2F 重扫一遍, 然后 "1F re-sweep done" 把 1F
                     # 真正的活永久丢掉。落账移到 _headpat 的帧证据分支
                     # (移動至2號店 出现 = 真回到 1F)。
@@ -1262,7 +1262,7 @@ class CafeSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "1F re-sweep done  exit")
         # IN-CAFE SIGNAL both ways (user 2026-06-09): NO 黄点 on 移動至2號店
-        # 2F has nothing to do — skip the whole trip. 2-frame confirmation so a
+        # 2F has nothing to do - skip the whole trip. 2-frame confirmation so a
         # single dot-flicker frame can't wrongly cancel the 2F visit; button
         # not detected  can't judge  go as before.
         mv2 = self.find_cls(screen, UC.CAFE_MOVE_2F, conf=_CLS_CONF)
@@ -1310,10 +1310,10 @@ class CafeSkill(BaseSkill):
             #  这里**只发动作**; 真正的状态切换交给上面那条
             #   `on_2f_btn is not None`(CAFE_MOVE_1F 出现 = 到达 2F 的帧证据)分支。
             if self._switch_issued and self.since("switch_2f") < _SWITCH_2F_ACK_SEC:
-                return action_wait(300, f"移动至2号点 已点 — 等 2F 到达证据 "
+                return action_wait(300, f"移动至2号点 已点 - 等 2F 到达证据 "
                                         f"(after-ack {self.since('switch_2f'):.1f}"
                                         f"/{_SWITCH_2F_ACK_SEC:.1f}s)")
-            self.log("switching to cafe 2F (YOLO 移动至2号点) — 状态等到达证据再改")
+            self.log("switching to cafe 2F (YOLO 移动至2号点) - 状态等到达证据再改")
             self._switch_issued = True
             self.mark("switch_2f")
             return action_click_box(switch, "switch to cafe 2F")
@@ -1336,7 +1336,7 @@ class CafeSkill(BaseSkill):
 
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if self.detect_screen_yolo(screen) == "Lobby":
-            # BADGE-VERIFIED completeness (user rule 2026-06-09: 少摸一个角色 —
+            # BADGE-VERIFIED completeness (user rule 2026-06-09: 少摸一个角色 -
             # trust the lobby dot, not the dry-scan): if the cafe entry STILL
             # carries a red/yellow dot, work remains (a bubble the pan-sweep
             # missed / earnings that re-accrued)  re-enter ONCE and re-sweep.
@@ -1354,7 +1354,7 @@ class CafeSkill(BaseSkill):
                     self._verify_reentered = True
                     self._goto("enter")
                     return action_wait(300, "cafe dot persists  re-enter sweep")
-                # DWELL: badges fade in AFTER the loading transition — a single
+                # DWELL: badges fade in AFTER the loading transition - a single
                 # clean frame proves nothing (live 2026-06-09: dot was offline-
                 # detectable at 0.58 on the very frame the one-shot check ran
                 # empty on). Require 3 consecutive dot-free lobby ticks.
@@ -1362,7 +1362,7 @@ class CafeSkill(BaseSkill):
                 if self._exit_lobby_ticks == 1:
                     self.mark("lobby_dwell")
                 # 合取(2026-07-28): 帧数抗单帧抖动, 墙钟抗"徽标还没渐入完"。
-                # 这道复验是**漏摸/收益重累的唯一兜底** —— 它一空转, cafe 就带着
+                # 这道复验是**漏摸/收益重累的唯一兜底** -- 它一空转, cafe 就带着
                 # 没干完的活报 done, 而 exit_report 还会给 CLEAN(漏一个人从计数上
                 # 完全看不出来)。350ms 被 squash 后原本只剩 ~0.4s。
                 if (self._exit_lobby_ticks < 3

@@ -464,7 +464,7 @@ def get_florence_vision_nowait(cfg: Optional[FlorenceConfig] = None) -> Optional
     try:
         if _FLORENCE is not None:
             return _FLORENCE
-        # Lock acquired and model not loaded — trigger load now
+        # Lock acquired and model not loaded - trigger load now
         return get_florence_vision(cfg)
     finally:
         if _FLORENCE_LOCK.locked():
@@ -492,7 +492,7 @@ def get_florence_reference_matcher(reference_dir: str, cfg: Optional[FlorenceCon
     cached = _FLORENCE_MATCHERS.get(ref_key)
     if cached is not None:
         return cached
-    # Need Florence vision — fail fast if not ready
+    # Need Florence vision - fail fast if not ready
     fv = get_florence_vision_nowait(cfg)
     if fv is None:
         raise RuntimeError("Florence model still loading, matcher unavailable")

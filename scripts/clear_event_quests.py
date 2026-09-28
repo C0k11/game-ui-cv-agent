@@ -7,7 +7,7 @@
   资讯页   任務開始(坐标+后验)
   编队页   1部隊 tab(用户规则: 首通=速推主力队)  出擊
   战斗     battle v9 检出战斗HUD  tap AUTO; 「战斗胜利」cls 出现  立即
-           结算三连(事件驱动, 不再盲 sleep 干等 — 用户点破的浪费)
+           结算三连(事件驱动, 不再盲 sleep 干等 - 用户点破的浪费)
 用法: py scripts/clear_event_quests.py [max_quests=8] [--skill-test]
   --skill-test: 战斗中周期性 试点技能卡点敌方框中心释放(combat 2.0 操作
   链首验: 卡选中战场目标两步 tap; buff/自动型卡第二击落空=无害)。
@@ -87,7 +87,7 @@ def main():
         d = dets(ui, fr, 0.5)
         enters = sorted([(cy, cx) for n, c, cx, cy in d if n == "入场键"])
         if not enters:
-            print(f"[r{round_i}] 列表页无「入场键」检出 — 停(人工看)")
+            print(f"[r{round_i}] 列表页无「入场键」检出 - 停(人工看)")
             break
         target = None
         for cy, cx in enters:
@@ -108,7 +108,7 @@ def main():
         tap(3533, 1976)                     # 出擊
         print("  出击, 等战斗HUD...")
 
-        #  战斗: AUTO 状态门(盲 tap=toggle, AUTO 已开再点会关掉 —
+        #  战斗: AUTO 状态门(盲 tap=toggle, AUTO 已开再点会关掉 -
         # 用户实锤 bug)  检出「自动战斗关闭」cls 才点; 战斗胜利  结算
         t0 = time.time()
         frame_i = 0
@@ -141,7 +141,7 @@ def main():
                     print(f"  技能试验: 卡({kx:.2f},{ky:.2f})  "
                           f"目标({tx:.2f},{ty:.2f}) {'敌方' if foes else '中央'}")
         else:
-            print("  战斗 240s 超时 — 停(人工看)")
+            print("  战斗 240s 超时 - 停(人工看)")
             break
         for x, y in [(3437, 1998), (1920, 2005), (2318, 1998)]:
             time.sleep(6)

@@ -6,21 +6,21 @@ HARVEST sub-flows in fixed order (= `_full` in __init__, in_default subs):
 
     buy_pyroxene  club  craft  shop  arena_shop  schedule  cafe
 
-cafe runs LAST — its earnings grant AP, segueing into the task-hall block.
+cafe runs LAST - its earnings grant AP, segueing into the task-hall block.
 mail / daily_mission moved OUT to the TOP-LEVEL skill_order (they run after
 the hall block so hall rewards are in the mailbox; daily_mission gates on
 n/8≥7). momo_talk / story_mining are registered but NOT in the default
-harvest (user 2026-06-11: bond-story grinding ≠ 收菜) — run them via
+harvest (user 2026-06-11: bond-story grinding ≠ 收菜) - run them via
 sub_only.
 
 Per sub-flow:
 - Check sub.should_run(screen) (most have a red/yellow dot check on the
-  lobby entry icon — skip if no dot).
+  lobby entry icon - skip if no dot).
 - CraftSkill gates on the NAV_CRAFT red dot (user 2026-06-11: "制造有
-  红点的时候才代表东西造好了" — 没红点不进, 别每次都跑一趟).
+  红点的时候才代表东西造好了" - 没红点不进, 别每次都跑一趟).
 - Run sub.tick(screen) until it returns action 'done', then advance.
 
-Battle / sweep / arena / bounty etc. are NOT in here — those stay as
+Battle / sweep / arena / bounty etc. are NOT in here - those stay as
 their own entries in skill_order because user wants explicit control
 over battle skills (different AP budgets, ticket priorities, etc.).
 """
@@ -54,35 +54,35 @@ class DailyRoutineSkill(BaseSkill):
         from brain.skills.arena_shop import ArenaShopSkill
         from brain.skills.daily_mission import DailyMissionSkill
 
-        # Order matters — runs top to bottom (user-defined daily order, probe).
+        # Order matters - runs top to bottom (user-defined daily order, probe).
         # `force_run` = True means skip the dot check entirely (always enter).
         # Full plan with stable snake-case sub-ids.  `sub_only` (a list of
-        # sub-ids) restricts the run to JUST those subs — used for SAFE
+        # sub-ids) restricts the run to JUST those subs - used for SAFE
         # single-sub live walk-throughs: e.g. schedule (青辉石买票) never even
         # enters the plan unless its id is explicitly whitelisted.  This is a
         # money-safety isolation layer on top of schedule's own 3 guards.
         # (sub_id, skill_instance, force_run, in_default_daily)
         # in_default_daily=False  registered (runnable via sub_only) but NOT
         # part of the unattended daily harvest. User 2026-06-11: 剧情挖矿 +
-        # momotalk 挖矿 are bond-story grinding, not 收菜 — separate triggers.
+        # momotalk 挖矿 are bond-story grinding, not 收菜 - separate triggers.
         # Order (user 2026-06-11): 购买青辉石  社团  制造  商店  课程表 
         # 咖啡厅(LAST: cafe earnings grant AP, segueing straight into the task
         # hall block that spends it). mail / daily_mission moved OUT to the
         # TOP-LEVEL order (they run AFTER the hall block so hall rewards are
         # in the mailbox; daily_mission gates on n/8≥7).
         _full: List[Tuple[str, BaseSkill, bool, bool]] = [
-            ("buy_pyroxene",  BuyPyroxeneSkill(), False, True),  # 免费组合包 — 红点才进
-            ("club",          ClubSkill(), False, True),         # 社交 — 红点才进 (10AP信箱)
-            ("craft",         CraftSkill(), False, True),        # 制造 — 红点才进(造好可领)
+            ("buy_pyroxene",  BuyPyroxeneSkill(), False, True),  # 免费组合包 - 红点才进
+            ("club",          ClubSkill(), False, True),         # 社交 - 红点才进 (10AP信箱)
+            ("craft",         CraftSkill(), False, True),        # 制造 - 红点才进(造好可领)
             ("shop",          ShopSkill(), False, True),         # 普通商店日购(动态预算)
-            # 战术大赛商店买体力 — 与信用点商店同次访问(用户2026-06-13: "应该和信用点
+            # 战术大赛商店买体力 - 与信用点商店同次访问(用户2026-06-13: "应该和信用点
             # 商店一块"). 紧跟 shop, force_run(无大厅红点可门, 进店下滑到战术大赛tab买能量
             # 饮料; skill自身余额门不够则跳过). 只花战术大赛货币, 青辉石防火墙全程在岗.
             ("arena_shop",    ArenaShopSkill(), True, True),
-            ("schedule",      ScheduleSkill(), False, True),     # 课程表 — 黄点才进 (️青辉石买票)
-            ("cafe",          CafeSkill(), False, True),         # cafe 最后 — 收益给AP, 衔接任务大厅
-            ("momo_talk",     MomoTalkSkill(), False, False),    # MomoTalk 挖矿 — 单独开(非收菜)
-            ("story_mining",  StoryMiningSkill(), False, False), # 剧情挖矿 — 单独开(非收菜)
+            ("schedule",      ScheduleSkill(), False, True),     # 课程表 - 黄点才进 (青辉石买票)
+            ("cafe",          CafeSkill(), False, True),         # cafe 最后 - 收益给AP, 衔接任务大厅
+            ("momo_talk",     MomoTalkSkill(), False, False),    # MomoTalk 挖矿 - 单独开(非收菜)
+            ("story_mining",  StoryMiningSkill(), False, False), # 剧情挖矿 - 单独开(非收菜)
             ("mail",          MailSkill(), False, False),        #  top-level(厅后收口)
             ("daily_mission", DailyMissionSkill(), False, False),#  top-level(n/8≥7, 最后)
         ]
@@ -104,7 +104,7 @@ class DailyRoutineSkill(BaseSkill):
         # 2026-07-25 事故的**直接触发点**(run_20260725_231337 帧实锤):
         # shop.chain_in_shop 默认 True = "买完留在店里, 让 arena_shop 接力切
         # 战术大赛 tab"(shop.py:607/617)。pipeline.py:1228 已经给 top-level 那个
-        # ShopSkill 置了 False, 但**daily_routine 内部自己 new 的这个没人管** ——
+        # ShopSkill 置了 False, 但**daily_routine 内部自己 new 的这个没人管** --
         # 于是 `sub_only=["shop"]` 跑完后 DailyRoutine 收在**信用点商店网格**上,
         # 而 arena_shop 根本不在 plan 里, 没人来接力。下一个 skill(Arena)被丢在
         # 商店页, enter 干等 24 tick 超时, 最后报成 `arena complete`(假成功)。
@@ -148,7 +148,7 @@ class DailyRoutineSkill(BaseSkill):
             sub, force_run = self._plan[self._cur_idx]
             just_entered = False
 
-            # First time we touch this sub — decide whether to enter
+            # First time we touch this sub - decide whether to enter
             if not self._cur_started:
                 if not force_run:
                     try:
@@ -166,7 +166,7 @@ class DailyRoutineSkill(BaseSkill):
                 self.log(f" entering '{sub.name}'")
                 #  YOLO context follows the ACTIVE SUB, not the static
                 # DailyRoutine loadout (which carried +cafe+avatar for the
-                # whole routine — the emoticon model then ran and drew boxes
+                # whole routine - the emoticon model then ran and drew boxes
                 # on every non-cafe screen, e.g. 每日任務, live 2026-06-10).
                 # Cafe gets +cafe+avatar, Schedule +avatar, the rest base ui.
                 try:
@@ -194,7 +194,7 @@ class DailyRoutineSkill(BaseSkill):
                     # 的闸**从写下那天起就是死码**。
                     # 实锤日志: `dialog shows 免費  確認`  `Interceptor: YOLO reward
                     # popup  blind tap`  `confirm dialog absent, re-pressing buy`
-                    # —— 免費包已到账却回头重按已消失的購買键。本次无害(键没了),
+                    # -- 免費包已到账却回头重按已消失的購買键。本次无害(键没了),
                     # 但同形状落在 shop/ticket_sweep 上 = 对着**仍可点的付费键**重复购买。
                     sub.interceptor_handled = self.interceptor_handled
                 action = sub.tick(screen)
@@ -217,8 +217,8 @@ class DailyRoutineSkill(BaseSkill):
                     break
                 continue
 
-            # Sub still running — pass its action up to the pipeline
+            # Sub still running - pass its action up to the pipeline
             return action
 
         # All subs done
-        return action_done("daily routine complete — all subs handled")
+        return action_done("daily routine complete - all subs handled")

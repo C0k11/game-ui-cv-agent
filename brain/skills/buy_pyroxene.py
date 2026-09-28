@@ -1,11 +1,11 @@
-"""BuyPyroxeneSkill — claim the daily FREE combo pack (pure-YOLO rewrite).
+"""BuyPyroxeneSkill - claim the daily FREE combo pack (pure-YOLO rewrite).
 
 Verified flow (interactive probe 2026-06-01, data/_buy_pyroxene_probe_log.md).
-All clicks resolved through YOLO cls (ui_classes) — NO OCR, NO hardcoded pixel
+All clicks resolved through YOLO cls (ui_classes) - NO OCR, NO hardcoded pixel
 positions. The ONLY purpose is to claim the **每日免費組合包** (gives AP×10 +
 credits×10K, NOT pyroxene).
 
- HARD RULE — NEVER spend pyroxene / real money
+ HARD RULE - NEVER spend pyroxene / real money
 The shop has CAD$ packs sitting right next to the free one. We ONLY ever click
 a 购买 (SHOP_BUY) button that has a 免费 (FREE) price-label directly above it in
 the same column, and we ONLY confirm a purchase dialog that shows the 免费 cls.
@@ -24,10 +24,10 @@ confirm    "是否購買該商品？" dialog (BTN_CONFIRM + BTN_CANCEL). Poll fo
            FREE cls in the price area: present  BTN_CONFIRM; never appears
             BTN_CANCEL (treat as unexpected paid item, abort).
 reward     GOT_REWARD popup  dismiss via STORY_TAP_CONTINUE / GOT_REWARD header
-           (NEVER tap screen center — that hits the item icons). Loop until gone.
+           (NEVER tap screen center - that hits the item icons). Loop until gone.
 exit       close shop via BTN_CLOSE_X (retry on drop)  lobby  done.
 
-Detectors: base "ui" only (no avatar/battle/cafe) — not in SKILL_YOLO_MAP.
+Detectors: base "ui" only (no avatar/battle/cafe) - not in SKILL_YOLO_MAP.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ from brain.skills import ui_classes as UC
 
 #  tuning knobs
 _CLS_CONF = 0.30              # default UI cls confidence floor
-# 免费(FREE) is a genuinely weak/flickery cls (14f) — on a settled frame it's
+# 免费(FREE) is a genuinely weak/flickery cls (14f) - on a settled frame it's
 # 0.9 but it dips to 0.13-0.34 on transition frames. Use a TARGETED low floor
 # for it only (NOT a global conf drop). v6: oversample 免费 (task #32).
 _FREE_CONF = 0.20
@@ -63,16 +63,16 @@ _COMBO_DOT_REGION = (0.74, 0.14, 0.90, 0.30)
 _CONTENT_DOT_REGION = (0.20, 0.25, 0.76, 0.50)
 _BUY_FREE_POLL = 14          # poll this many ticks for the flickery 免费 cls
 
-# Per-sub-state tick budgets — every phase is bounded, never dead-waits.
+# Per-sub-state tick budgets - every phase is bounded, never dead-waits.
 _ENTER_MAX = 22
 _COMBO_MAX = 16
 _BUY_MAX = 30                # buy 态现在自己管「点击等框重按」全程(2026-07-29)
 _CONFIRM_MAX = 10            # poll the dialog for the FREE cls before bailing
 # tick-vs-墙钟家族(2026-07-28): _CONFIRM_MAX 10 tick 被 zero-wait 压到
 # 1.5-2.5s, 且「等对话框出现」和「等 免费 cls 渲染」共用同一个 _phase_ticks
-# 不重置 — 对话框第 8 tick 才出现时只剩 2 tick 判 免费  真免费包被当付费
+# 不重置 - 对话框第 8 tick 才出现时只剩 2 tick 判 免费  真免费包被当付费
 # 框 cancel 掉。拆成两个独立墙钟(方向都 fail-closed: 等得久只是晚 cancel,
-# 绝不会多确认)。FREE 判定 conf 保持 0.30 不降 — 降门槛放大「付费框误判
+# 绝不会多确认)。FREE 判定 conf 保持 0.30 不降 - 降门槛放大「付费框误判
 # 免费」方向, 钱闸只紧不松(agent 建议里降 conf 那半句已驳回)。
 _FREE_POLL_SEC = 8.0         # 框出现后 poll 免费 cls(≈40+ 帧, 盖住 flicker)
 _BUY_SETTLE_SEC = 2.5        # buy 点击后等确认框渲染的墙钟(过时重按)
@@ -90,7 +90,7 @@ class BuyPyroxeneSkill(BaseSkill):
         ~(0.115,0.359), red dot ~(0.149,0.345)), so dot_on_entry's strict
         inside-bbox test can miss it. We find the entry dynamically and scan a
         region expanded up/right of its bbox for a red dot. Entry not visible
-         defer (return True) — we're probably not on the lobby yet.
+         defer (return True) - we're probably not on the lobby yet.
         """
         entry = self.find_cls(screen, UC.SHOP_BUY_PYROXENE, conf=0.40)
         if entry is None:
@@ -102,10 +102,10 @@ class BuyPyroxeneSkill(BaseSkill):
     def exit_report(self):
         """竣工判据 = 今天这个免费包到底领没领。
 
-        2026-07-28 首次 live 跑通时出口报的是 `UNKNOWN — 未声明竣工判据`,
+        2026-07-28 首次 live 跑通时出口报的是 `UNKNOWN - 未声明竣工判据`,
         正是「活干没干完没人审计」那一类(memory completion_gap)。而这个 skill
         更需要判据: 它**整个存在的意义**就是每天领一次, 领不到就是白跑,
-        且它自己 `should_run` 靠红点门控 —— 红点漏检就会静默跳过一整天。
+        且它自己 `should_run` 靠红点门控 -- 红点漏检就会静默跳过一整天。
         """
         if self._bought:
             return ("CLEAN", "每日免費組合包已领(內容物 AP x10 + 信用点 x10K)")
@@ -113,7 +113,7 @@ class BuyPyroxeneSkill(BaseSkill):
             return ("CLEAN", "今日免费包**先前已领**(屏上无 免费 标且无未领红点)")
         return ("LEFTOVER",
                 f"免费包**没领到**(sub={self.sub_state}, 確認点击 "
-                f"{self._confirm_clicks} 次) — 明天查 免费/红点 两条定位是否都漏检")
+                f"{self._confirm_clicks} 次) - 明天查 免费/红点 两条定位是否都漏检")
 
     def __init__(self):
         super().__init__("BuyPyroxene")
@@ -131,7 +131,7 @@ class BuyPyroxeneSkill(BaseSkill):
         self._buy_fired: bool = False      # buy 点击已发(显式 flag, 裸 since 首调 0.0 会挡第一发)
         self._confirm_clicks: int = 0      # ack-loop: 確認 实际点击次数(防幻影)
         self._dialog_seen: bool = False    # 确认框首见(免费 poll 墙钟起点)
-        # 「今天先前已领」的证据(屏上既无 免费 标也无未领红点) —— 与「没领到」
+        # 「今天先前已领」的证据(屏上既无 免费 标也无未领红点) -- 与「没领到」
         # 区分开, 否则竣工判据每天都会误报 LEFTOVER。见 exit_report。
         self._skipped_already_claimed: bool = False
 
@@ -164,12 +164,12 @@ class BuyPyroxeneSkill(BaseSkill):
         return None
 
     def _free_buy_button(self, screen: ScreenState) -> Optional[YoloBox]:
-        """The 购买 button of the FREE pack — paired geometrically with FREE.
+        """The 购买 button of the FREE pack - paired geometrically with FREE.
 
         Find the 免费 (FREE) price label, then among all 购买 (SHOP_BUY)
         buttons pick the one directly BELOW it in the same column. Returns None
         when no FREE label is on screen (pack already claimed today) OR no 购买
-        sits under it. This is the SOLE purchase path — a 购买 with no FREE
+        sits under it. This is the SOLE purchase path - a 购买 with no FREE
         above it is a CAD pack and is never returned."""
         buys = self.find_all_cls(screen, UC.SHOP_BUY, conf=_CLS_CONF)
         if not buys:
@@ -236,20 +236,20 @@ class BuyPyroxeneSkill(BaseSkill):
             entry = self.find_cls(screen, UC.SHOP_BUY_PYROXENE, conf=_CLS_CONF)
             if entry is not None:
                 # Pace the retry (稳定规则 2026-06-11): the popup takes 1-2s to
-                # render and the entry sits OUTSIDE it — an eager re-click
+                # render and the entry sits OUTSIDE it - an eager re-click
                 # dismisses the popup we just opened (live-caught oscillation).
                 # Click on tick 1 of every 3-tick window, settle otherwise.
                 if self._phase_ticks % 3 != 1:
-                    return action_wait(600, "entry clicked — settling for shop popup")
+                    return action_wait(600, "entry clicked - settling for shop popup")
                 self.log("clicking 购买青辉石 entry (paced retry)")
                 return action_click_box(entry, "open buy-pyroxene shop")
-            self.log("on lobby but no 购买青辉石 cls — YOLO gap; waiting")
+            self.log("on lobby but no 购买青辉石 cls - YOLO gap; waiting")
             return action_wait(400, "waiting for 购买青辉石 cls")
 
         if self._phase_ticks > _ENTER_MAX:
             self.log("enter budget exhausted, giving up")
             return action_done("could not reach buy-pyroxene shop")
-        # Unknown / transition screen — wait, then nudge back toward lobby.
+        # Unknown / transition screen - wait, then nudge back toward lobby.
         if len(screen.yolo_boxes or []) < 2:
             return action_wait(600, "no UI detected, likely loading")
         return self.nav_home(screen, "buy_pyroxene recover")
@@ -307,27 +307,27 @@ class BuyPyroxeneSkill(BaseSkill):
             # _goto("confirm") 再返回点击, 点击被稳定门吞("帧未稳定") 时 skill
             # 已在 confirm 等一个从没点出来的框  空转 21 tick  pipeline
             # stuck-20 兜底把商店页整个叉掉。07-21 修了 confirm 態的確認,
-            # 这里是 _buy 的同形。修: 状态不跳, 停在 buy —— 对话框出现由顶部
+            # 这里是 _buy 的同形。修: 状态不跳, 停在 buy -- 对话框出现由顶部
             # 分支自然转 confirm; 被吞立即重按; 落地但渲染慢则墙钟节流重按。
             if self._buy_fired and self.action_suppressed:
-                self.log("buy tap 被稳定门吞 — 立即重按(帧已稳定)")
+                self.log("buy tap 被稳定门吞 - 立即重按(帧已稳定)")
                 self._buy_fired = False
             if self._buy_fired and self.since("buy_fired") < _BUY_SETTLE_SEC:
-                return action_wait(300, "buy tapped — waiting confirm dialog")
+                return action_wait(300, "buy tapped - waiting confirm dialog")
             self._buy_fired = True
             self.mark("buy_fired")
             self._buy_retry = (free_buy.cx, free_buy.cy)
             self.log(f"clicking FREE pack 购买 at ({free_buy.cx:.2f},{free_buy.cy:.2f})")
             return action_click_box(free_buy, "buy FREE daily combo pack")
 
-        # 按过购买后的"无 FREE"不再是已领证据 — 确认框弹入过渡帧会把价签/
+        # 按过购买后的"无 FREE"不再是已领证据 - 确认框弹入过渡帧会把价签/
         # 红点一起遮住, 这里误判 already-claimed 会把真免费包放跑。等对话框
         # 渲染(顶部分支接), 超时由 _BUY_MAX 收口。
         if self._buy_fired:
             if self._phase_ticks > _BUY_MAX:
                 self._goto("exit")
                 return action_wait(250, "buy fired but no dialog ever  exit")
-            return action_wait(350, "buy fired — waiting dialog render")
+            return action_wait(350, "buy fired - waiting dialog render")
 
         # No FREE this frame. Distinguish "已领" from "免费 just flickering" via
         # the 組合包 TAB red dot (probe: dot present  NOT claimed yet).
@@ -336,7 +336,7 @@ class BuyPyroxeneSkill(BaseSkill):
             # Unclaimed (dot present) but 免费 not detected  it's flickering
             # (weak 14f cls). Keep polling many ticks before giving up.
             if self._phase_ticks > _BUY_FREE_POLL:
-                self.log("️ 组合包红点在但免费cls始终未检出(弱cls欠训)  退出不盲买, 待v6补样本")
+                self.log(" 组合包红点在但免费cls始终未检出(弱cls欠训)  退出不盲买, 待v6补样本")
                 self._goto("exit")
                 return action_wait(250, "FREE undetected despite dot  safe exit")
             return action_wait(350, f"免费 flickering (红点在), polling ({self._phase_ticks})")
@@ -344,7 +344,7 @@ class BuyPyroxeneSkill(BaseSkill):
         # No FREE AND no combo red dot (or we already bought)  genuinely done.
         if self._phase_ticks > 4:
             why = "claimed just now" if self._bought else "no 红点  already claimed today"
-            # 竣工判据要能区分「今天领到了」和「今天先前已领」——两者都是 CLEAN,
+            # 竣工判据要能区分「今天领到了」和「今天先前已领」--两者都是 CLEAN,
             # 但只有第三种(既没领到又没证据说已领)才是 LEFTOVER。
             if not self._bought:
                 self._skipped_already_claimed = True
@@ -369,7 +369,7 @@ class BuyPyroxeneSkill(BaseSkill):
         confirm_btn = self._confirm_dialog(screen)
         if confirm_btn is None:
             # 2026-07-29 重构: 进 confirm 的唯一入口是"对话框真在屏"(buy 顶部
-            # 分支), 这里框没了只有两种情况 — 確認已发, 框在关闭动画里
+            # 分支), 这里框没了只有两种情况 - 確認已发, 框在关闭动画里
             # 停住等 reward 证据(顶部分支接), 超时 fail-closed exit; 误检
             # 闪没/被吞  回 buy 重走(buy 态管重按与节流)。旧版的盲坐标
             # re-press 删除: 它在大厅上就是幽灵点击(今天 step_walk 实拦)。
@@ -379,7 +379,7 @@ class BuyPyroxeneSkill(BaseSkill):
                     self.log("確認已发但始终无 reward 证据  exit (fail-closed)")
                     self._goto("exit")
                     return action_wait(300, "confirmed, no reward evidence  exit")
-                return action_wait(300, "confirm fired — waiting reward popup")
+                return action_wait(300, "confirm fired - waiting reward popup")
             if self._phase_ticks >= 3:
                 self._dialog_seen = False   # 下次进 confirm 重新起 poll 表
                 self.clear_timer("dialog_seen")
@@ -393,7 +393,7 @@ class BuyPyroxeneSkill(BaseSkill):
         )
         if free_in_dialog is not None:
             # 2026-07-21 逐帧审实锤 mutate-before-ack: 旧码先 _bought=True+
-            # _goto("reward") 再返回 確認 点击 — 点击被稳定门吞(reason 无"確認"
+            # _goto("reward") 再返回 確認 点击 - 点击被稳定门吞(reason 无"確認"
             # 不豁免)/丢 tap 时状态已跳 reward  pipeline 以为领了实际每日免費
             # 包没领(信用点未+10K)。修: 不提前跳状态, 停在 confirm, 顶部
             # reward-popup 检查=落地唯一确认; reason 含"確認键" 稳定门豁免立即
@@ -415,7 +415,7 @@ class BuyPyroxeneSkill(BaseSkill):
             self.mark("dialog_seen")
         if (self._phase_ticks > _CONFIRM_MAX
                 and self.since("dialog_seen") > _FREE_POLL_SEC):
-            self.log(" dialog has NO 免费 cls (paid?) — cancelling, never buy")
+            self.log(" dialog has NO 免费 cls (paid?) - cancelling, never buy")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF, region=_DIALOG_BAND)
             if cancel is not None:
                 self._goto("exit")
@@ -454,7 +454,7 @@ class BuyPyroxeneSkill(BaseSkill):
     def _exit(self, screen: ScreenState) -> Dict[str, Any]:
         if screen.is_lobby():
             # is_lobby() is TRUE even with a residual popup over the nav (the
-            # lobby entries peek out behind it) — declaring done here left the
+            # lobby entries peek out behind it) - declaring done here left the
             # free-pack popup open and starved Club of 社交入口 for 50 ticks
             # (live 2026-06-12 t80-128). Popup gone = actually done.
             close = self._close_x(screen)
@@ -465,7 +465,7 @@ class BuyPyroxeneSkill(BaseSkill):
         if self._phase_ticks > _EXIT_MAX:
             self.log("exit budget exhausted, reporting done")
             return action_done("buy_pyroxene exit timeout")
-        # Close the shop popup (ADB drop on the X is common — retry).
+        # Close the shop popup (ADB drop on the X is common - retry).
         close = self._close_x(screen)
         if close is not None:
             return action_click_box(close, "close shop popup (X)")

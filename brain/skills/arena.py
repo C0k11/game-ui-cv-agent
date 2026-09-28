@@ -1,13 +1,13 @@
-"""ArenaSkill — 战术大赛 (PVP) daily routine (pure-YOLO rewrite).
+"""ArenaSkill - 战术大赛 (PVP) daily routine (pure-YOLO rewrite).
 
 Verified flow (interactive probe 2026-06-01, data/_missions_probe_log.md
-Step 23-34). Arena is PVP — NOT a sweep. Key probe findings vs the old skill:
-- Battles are FULLY AUTO-resolved (a few seconds). NO 跳过战斗 toggle needed —
+Step 23-34). Arena is PVP - NOT a sweep. Key probe findings vs the old skill:
+- Battles are FULLY AUTO-resolved (a few seconds). NO 跳过战斗 toggle needed -
   just 出击 then poll-dismiss the result dialog(s).
 - Winning + setting a new season-best pops an EXTRA 達成賽季最高紀錄 popup that
-  AWARDS pyroxene (a GAIN — dismiss it, never confuse with a cost).
+  AWARDS pyroxene (a GAIN - dismiss it, never confuse with a cost).
 - ~25s 等待時間 cooldown after each fight (blind tick wait here; OCR mm:ss is
-  unreliable — v6 could refine).
+  unreliable - v6 could refine).
 
  pyroxene protection
   digit-OCR 战术大赛票 X/5. Ticket 0  STOP challenging (a 0-ticket 出击 pops a
@@ -41,7 +41,7 @@ from brain.skills import ui_classes as UC
 
 _CLS_CONF = 0.30
 # A 青辉石 icon in this body band = buy dialog (NOT top-bar balance at cy<0.10).
-# Deep-dive C4 (2026-06-09): aligned to schedule's LIVE-VERIFIED region — the
+# Deep-dive C4 (2026-06-09): aligned to schedule's LIVE-VERIFIED region - the
 # buy-dialog pyroxene icon sits at cy≈0.577 (> the old 0.48 upper bound, which
 # would have MISSED it = bought a ticket).
 _PYROXENE_BODY_REGION = (0.20, 0.12, 0.82, 0.64)
@@ -50,7 +50,7 @@ _RESULT_BAND = (0.32, 0.55, 0.68, 0.85)
 
 _MAX_FIGHTS = 5            # daily arena ticket cap (must complete all 5)
 # ~25s 等待時間 between fights. NOW countdown-aware (user 2026-06-13: 倒计时早没了
-# bot还傻等22tick≈30s — the game countdown STARTS when the battle ends, well before
+# bot还傻等22tick≈30s - the game countdown STARTS when the battle ends, well before
 # the bot finishes dismissing results and begins counting, so a full blind 22-tick
 # wait massively over-shoots). _read_cooldown OCRs the mm:ss 等待時間 value; we go
 # the moment it reads --:-- (ready). _COOLDOWN_TICKS stays as the hard fallback cap;
@@ -66,14 +66,14 @@ _ENTER_MAX = 24
 _CLAIM_MAX = 12
 # tick-vs-墙钟家族(2026-07-28): _ENTER_MAX 24 tick 被 zero-wait 压到
 # 3.6-6.0s 盖不住两次页面加载( 'arena never reached' 假成功, 5 票作废);
-# _CLAIM_MAX 12 tick=1.8-3.0s 比 _CLAIM_SETTLE_SEC=2.5 还短 —— 那个墙钟
+# _CLAIM_MAX 12 tick=1.8-3.0s 比 _CLAIM_SETTLE_SEC=2.5 还短 -- 那个墙钟
 # 修复被它顶掉, 每日獎勵 漏领复发。改「帧数 AND 墙钟」合取(×1.6 等效):
 _ENTER_MAX_SEC = 38.4
 _CLAIM_MAX_SEC = 19.2
-# 领完一个黄钮后 toast 动画期间下一个检不出 —— 用墙钟等, 别数 tick
+# 领完一个黄钮后 toast 动画期间下一个检不出 -- 用墙钟等, 别数 tick
 # (2026-07-25: 旧的 "2 tick" ≈0.24s 盖不住动画, 每日獎勵 直接漏领)。
 _CLAIM_SETTLE_SEC = 2.5
-# 点了黄钮之后到帧证据(toast/按钮消失)前不重发 — reason 含 claim 命中关键词
+# 点了黄钮之后到帧证据(toast/按钮消失)前不重发 - reason 含 claim 命中关键词
 # 豁免会跳过稳定门+hold, 旧码 ~0.2s 一发把 6 次上限虚耗光(2026-07-28)。
 _CLAIM_RETRY_SEC = 6.0
 _EXIT_MAX = 16
@@ -122,7 +122,7 @@ class ArenaSkill(BaseSkill):
 
         为什么必须有: 2026-07-25 晚 Arena 报了 `done (0 fights, 0 rewards)`,
         而当天票 5/5 满 + 2 个未领奖励(重跑后 5 场全打完, 排名 3732)。
-        它是 7 次收工里 5 个 "UNKNOWN — 未声明竣工判据" 之一 —— **没有判据
+        它是 7 次收工里 5 个 "UNKNOWN - 未声明竣工判据" 之一 -- **没有判据
         就没人审计出口**, 假成功只能靠用户肉眼发现([[completion-gap]])。
         `self._tickets`(arena.py:100/424) 是离开 fight_check 前最后一次成功
         读数: 正常收工路径读到 0 才 exit  CLEAN 成立; select 失败那条路留下
@@ -131,11 +131,11 @@ class ArenaSkill(BaseSkill):
         if not self._reached:
             return ("UNKNOWN",
                     f"从未进到战术大赛页(enter 走了 {self._enter_ticks} tick) "
-                    f"— 票/奖励状态**完全未知**")
+                    f"- 票/奖励状态**完全未知**")
         if self._tickets is None:
             return ("UNKNOWN",
                     f"打了 {self._fights_done} 场、领了 {self._claim_clicks} 个"
-                    f"奖励, 但票数从未读出 — 不知道打光没")
+                    f"奖励, 但票数从未读出 - 不知道打光没")
         if self._tickets > 0:
             return ("LEFTOVER",
                     f"还剩 {self._tickets} 张票没打(已打 {self._fights_done} 场, "
@@ -158,7 +158,7 @@ class ArenaSkill(BaseSkill):
 
     def _read_tickets(self, screen: ScreenState) -> Optional[int]:
         """digit-OCR 持有票券 X/5 next to the arena ticket icon (LEFT panel,
-        ~0.055,0.678 — NOT the top bar).  money defense #1 (0  stop, never the
+        ~0.055,0.678 - NOT the top bar).  money defense #1 (0  stop, never the
         buy-ticket-pyroxene trap).
 
          Runs on a CLEAN ADB frame, not screen.frame: the overlay burns a
@@ -206,9 +206,9 @@ class ArenaSkill(BaseSkill):
         if res is None or res[0] is None:
             return None
         # Strict numerator proof: a bare number with no '/' could be the
-        # DENOMINATOR of a left-clipped "X/5" — the 2026-06-02 incident class
+        # DENOMINATOR of a left-clipped "X/5" - the 2026-06-02 incident class
         # ("0/5" clipped to '5' would read 0 tickets as 5  出击 at 0  buy
-        # dialog). Right-clipped '3/' (denominator lost) is fine — numerator
+        # dialog). Right-clipped '3/' (denominator lost) is fine - numerator
         # is provably the leading digit.
         s = (raw or "").strip()
         if "/" not in s or not s[:1].isdigit():
@@ -241,14 +241,14 @@ class ArenaSkill(BaseSkill):
     def _buy_dialog(self, screen: ScreenState) -> bool:
         """买票花费框 = 结构上"要你选数量并付费"的框。
 
-        2026-07-25 全仓金钱审计: 旧版是 `body青辉石 AND 取消键` —— 一条
+        2026-07-25 全仓金钱审计: 旧版是 `body青辉石 AND 取消键` -- 一条
         **合取的单点链**, 任一环漏检整条防线哑火。schedule 那起 30 青辉石事故
         的帧就是反例: 屏上明写「單價30」而 YOLO body **零青辉石检出**。
         arena 这里是逐字同型, 只是还没轮到它出事。
         改成**析取的正交多信号**(任一命中即判买票框):
           A 数量步进器在 body(has_qty_stepper, 与图标识别完全独立)
           B body 里有青辉石(原判据, 保留)
-        取消键 不再当必要条件 —— 它漏检时正是最危险的时刻(下面 result-dismiss
+        取消键 不再当必要条件 -- 它漏检时正是最危险的时刻(下面 result-dismiss
         分支唯一的拦阻就是"取消键还在", 那个单点信号一旦丢, 购买框的確認
         就落在 _RESULT_BAND 里被当成战斗结算点掉)。
         conf 0.20 = 模型下限: 危险检测器要尽可能灵敏, 误报代价只是取消+退出。
@@ -256,7 +256,7 @@ class ArenaSkill(BaseSkill):
         if self.has_qty_stepper(screen):
             return True
 # 2026-07-25 全量 cls 审计删除: 原来这里还并了一路 "清辉石"(master idx2),
-        # 注释写着"危险检测器多收一路零成本" —— 实测**训练 0 框 / 92k tick 实战
+        # 注释写着"危险检测器多收一路零成本" -- 实测**训练 0 框 / 92k tick 实战
         # 0 检出**, 那一路从来没收到过任何东西, 只是制造"有两路信号"的假象。
         # idx2 是 idx30「青辉石」的错别字重复类(BA 官方写作 青輝石), 本就不该
         # 被标注。真正有效的正交第二路是**结构信号** has_qty_stepper。
@@ -275,7 +275,7 @@ class ArenaSkill(BaseSkill):
         #  buy-ticket dialog (青辉石 cost + 取消键)  cancel + exit. Primary
         # safety is the ticket gate; this is the backstop.
         if self.sub_state in ("fight", "select", "fight_check") and self._buy_dialog(screen):
-            self.log(" ticket-purchase dialog (青辉石) — cancel, never buy")
+            self.log(" ticket-purchase dialog (青辉石) - cancel, never buy")
             self._goto("exit")
             cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=_CLS_CONF)
             if cancel is not None:
@@ -294,12 +294,12 @@ class ArenaSkill(BaseSkill):
                 # cost dialog mid-render racing past the _buy_dialog guard
                 # (deep-dive C2: one missing component on an animation frame
                 # defeats the conjunctive guard, and this block would then
-                # click the BUY button). Wait a frame — the fully-rendered
+                # click the BUY button). Wait a frame - the fully-rendered
                 # dialog is caught by the guard above next tick.
                 if self.find_cls(screen, UC.BTN_CANCEL, conf=0.20) is not None:
-                    return action_wait(400, "confirm+cancel both visible — not a result dialog, re-read")
+                    return action_wait(400, "confirm+cancel both visible - not a result dialog, re-read")
                 # Count a fight ONLY if 出击 actually launched (stage>=2). A
-                # centered 确认键 also appears on NON-result notices — live
+                # centered 确认键 also appears on NON-result notices - live
                 # 2026-06-09: 通知「已超過清單更新時間」(opponent-list refresh
                 # expired) at fight stage 1 was counted as fight 1  cap would
                 # end arena one real fight early with a ticket unspent.
@@ -347,7 +347,7 @@ class ArenaSkill(BaseSkill):
             self._goto("claim")
             return action_wait(400, "entered arena")
 
-        #  Settle after any nav click — during the page transition the OLD page
+        #  Settle after any nav click - during the page transition the OLD page
         # (and its cls boxes) linger at low conf for a frame or two; re-clicking
         # the same spot then lands on the NEW page's UI. Live 2026-06-09: the
         # tick-2 "arena tile" re-click hit the freshly-loaded arena main and
@@ -365,7 +365,7 @@ class ArenaSkill(BaseSkill):
             return action_wait(400, "lobby: NAV_TASKS not seen")
         if page == "Mission":
             #  Hall scan (user iron rule 2026-06-11): the 战术大赛 tile's own
-            # red/yellow dot is the work signal — visible only here. No dot
+            # red/yellow dot is the work signal - visible only here. No dot
             # nothing to claim/fight today  graceful exit.
             has_work = self.hall_tile_dot(screen, UC.HUB_ARENA)
             if has_work is False:
@@ -395,11 +395,11 @@ class ArenaSkill(BaseSkill):
             return action_click_box(got, "dismiss reward (header)")
 
         # after-ack 落账(2026-07-25): 旧码在 return action_click_box 之前就
-        # _claim_clicks += 1 —— 点击被稳定门吞时计数照加, 上限被虚耗, 真黄钮
+        # _claim_clicks += 1 -- 点击被稳定门吞时计数照加, 上限被虚耗, 真黄钮
         # 还没领就判 "claim done"。改成上一 tick 的点击**确认没被吞**才计数。
         if getattr(self, "_claim_pending", False):
             if self.action_suppressed:
-                self.log("claim 点击被吞 — 计数不落账, 重试")
+                self.log("claim 点击被吞 - 计数不落账, 重试")
             else:
                 self._claim_clicks += 1
                 self.log(f"claim arena reward #{self._claim_clicks} 已落账")
@@ -421,7 +421,7 @@ class ArenaSkill(BaseSkill):
             # 点完等帧证据(toast 在顶部分支处理/黄钮消失), 期间不重发;
             # _force_settle 让它老实走稳定门(别再吃豁免)。
             if getattr(self, "_claim_fired", False) and self.since("claim_fire") < _CLAIM_RETRY_SEC:
-                return action_wait(300, "claim 已发 — 等 toast/黄钮消失的帧证据")
+                return action_wait(300, "claim 已发 - 等 toast/黄钮消失的帧证据")
             self._claim_pending = True
             self._claim_t0 = 0.0
             self._claim_fired = True
@@ -432,7 +432,7 @@ class ArenaSkill(BaseSkill):
             return act
 
         # 墙钟而非 tick(2026-07-25 live 实锤: 每日獎勵 漏领):
-        # 领完一个后 toast 动画期间下一个黄钮检不出, 旧码等 "2 tick" —— 而非
+        # 领完一个后 toast 动画期间下一个黄钮检不出, 旧码等 "2 tick" -- 而非
         # loading 的 action_wait 被 server 压到 0.12s, 2 tick ≈ 0.24s, 盖不住
         # 动画  直接判 "no 领取奖励_黄" 去打架, 每日獎勵 那个黄钮就丢了
         # (2026-07-09 注释记的同款事故, 当时的修法 2 tick 标定失准)。
@@ -490,7 +490,7 @@ class ArenaSkill(BaseSkill):
             self._goto("exit")
             return action_wait(300, "fight cap  exit")
 
-        # Cooldown between fights — countdown-aware (user 2026-06-13: 倒计时早没了
+        # Cooldown between fights - countdown-aware (user 2026-06-13: 倒计时早没了
         # 别傻等). Read the 等待時間 mm:ss: go the moment it reads --:-- (ready),
         # only wait while it actually shows time left. Hard cap + short floor guard.
         if self._fights_done > 0:
@@ -506,14 +506,14 @@ class ArenaSkill(BaseSkill):
                                           f"{self._cooldown}/{_COOLDOWN_MIN}")
             self._cooldown = 0   # countdown cleared / floor passed / hard cap  go
 
-        # A successful ticket read  the arena left panel is on screen — safe
+        # A successful ticket read  the arena left panel is on screen - safe
         # to select. (The old _on_arena/blind-select fallbacks are gone; they
         # were the leak.)
         self._goto("select")
         return action_wait(250, "arena main (tickets read)  select")
 
     def _select(self, screen: ScreenState) -> Dict[str, Any]:
-        # 對戰對象 popup may ALREADY be open (stray click / re-entry) — its body
+        # 對戰對象 popup may ALREADY be open (stray click / re-entry) - its body
         # covers the opponent rows, so spinning for cls92 here would falsely
         # exit (live 2026-06-09). Hand over to fight stage 0, which clicks the
         # visible 攻击编制.
@@ -558,14 +558,14 @@ class ArenaSkill(BaseSkill):
         # 被吞回退(root 信号, 2026-07-22 tick26 实锤): 攻击编制/出击 click 被
         # 稳定门吞时 stage 已提前推进(mutate-before-ack)  编队页从没出击却
         # "auto-battle in progress" 干等到 fight timeout(两连实锤, 5 票 0 打)。
-        # 必须在 settle 检查之前对账 — settle 的 wait 会把下一 tick 的
+        # 必须在 settle 检查之前对账 - settle 的 wait 会把下一 tick 的
         # action_suppressed 刷成 False, 信号只活一个 tick。
         if self.action_suppressed and self._fight_stage in (1, 2):
             self._fight_stage -= 1
             self._stage_settle = 0
             self.log(f"fight click 被稳定门吞  stage 回退到 {self._fight_stage}")
 
-        #  Blind settle after every click — give the page time to transition
+        #  Blind settle after every click - give the page time to transition
         # before reading it. Without this we act on a stale/animating frame and
         # the click looks like it "did nothing" (点了没反应  误判重选/空点).
         if self._stage_settle > 0:
@@ -627,7 +627,7 @@ class ArenaSkill(BaseSkill):
         # 2026-07-25 live 实锤的假成功(run_20260725_231337):
         #   t0015 DailyRoutine done(收在**信用点商店**里, 因为 shop.chain_in_shop
         #         默认 True 要给 arena_shop 接力, 而 sub_only 路径下 arena_shop
-        #         根本不在 plan 里 —— 见 daily_routine.__init__ 的修复)
+        #         根本不在 plan 里 -- 见 daily_routine.__init__ 的修复)
         #   t0016..0039 Arena/enter 干等 24 tick(屏上 cls = 信用点商店_已选中/
         #         全部选择/回大厅按钮0.97, PAGE_SIGNATURES 没收录商店  page=None,
         #         上面那条 `if page is not None: action_back` 根本够不到)
@@ -651,7 +651,7 @@ class ArenaSkill(BaseSkill):
             return action_done("arena exit timeout")
         #  A 取消键 on screen while exiting = some cost/choice dialog is up
         # (result dialogs are cancel-less). Cancel is ALWAYS the safe button
-        # on the way out — never the confirm (deep-dive: exit had no buy-dialog
+        # on the way out - never the confirm (deep-dive: exit had no buy-dialog
         # guard and clicked 确认键 first = BUY on a surviving purchase dialog).
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.20)
         if cancel is not None:
@@ -666,7 +666,7 @@ class ArenaSkill(BaseSkill):
         back = self.find_cls(screen, UC.BTN_BACK, conf=_CLS_CONF)
         if back is not None:
             return action_click_box(back, "exit: back key")
-        # Pace blind ESC — every-tick spam outruns transitions (and on the
+        # Pace blind ESC - every-tick spam outruns transitions (and on the
         # lobby pops the 是否結束 quit prompt repeatedly).
         if self._phase_ticks % 3 != 0:
             return action_wait(600, "exit: settle before next ESC")

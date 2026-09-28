@@ -8,11 +8,11 @@
        表里 (0,0)，实际 train=39/val=28）
      · 反过来，把**已经没样本**的类当健康  死判据静默上线
        （[[cls_ownership_audit]] 那族「守卫悄悄死掉」）
-**什么时候才能把输出贴回去 —— 只有一个时机：新模型训完并 active 切过去之后。**
+**什么时候才能把输出贴回去 -- 只有一个时机：新模型训完并 active 切过去之后。**
    `HEALTH` 描述的是「**当前上线的模型**学到了什么」，不是「下一版数据集里有什么」。
    数据集重建完、模型还没训（或训了没上线）时贴回去 = **高估现役模型的能力**：
    把它其实没学过的类从 DEAD 提成 WEAK/ok，`require(sole_signal=True)` 就不再拦，
-   一条死判据于是静默上线 —— 正是这张表本来要防的事，方向还反了。
+   一条死判据于是静默上线 -- 正是这张表本来要防的事，方向还反了。
     脚本会自己比对「数据集构建时间」和「active 权重的时间」，前者更新就拒绝 --emit。
 
 用法:
@@ -46,7 +46,7 @@ def counts():
     for i, split in enumerate(("train", "val")):
         d = os.path.join(DS, "labels", split)
         if not os.path.isdir(d):
-            print(f" 没有 {d} —— 先跑 build_ui_v2.py")
+            print(f" 没有 {d} -- 先跑 build_ui_v2.py")
             sys.exit(2)
         for f in os.listdir(d):
             if not f.endswith(".txt"):
@@ -79,7 +79,7 @@ def main():
         print("%-26s %14s %14s%s" % (cls, f"{t0}/{v0}", f"{t1}/{v1}", flag))
     moved = [d for d in diff if d[7]]
     print("-" * 82)
-    print(f"**等级变了**的有 {len(moved)} 个 —— 这些会真的改变 require() 的行为:")
+    print(f"**等级变了**的有 {len(moved)} 个 -- 这些会真的改变 require() 的行为:")
     for cls, t0, v0, t1, v1, was, now, _ in moved:
         print(f"   {cls:<24} {was}  {now}   ({t0}/{v0}  {t1}/{v1})")
 
@@ -97,7 +97,7 @@ def main():
         v = reg["versions"][tag]
         w = v.get("weights") or v.get("path") or v.get("pt") or ""
     except Exception as e:
-        print(f"读不到 registry 的 active 权重（{e}）— 时机闸退化为只警告")
+        print(f"读不到 registry 的 active 权重（{e}）- 时机闸退化为只警告")
     w_t = os.path.getmtime(w) if w and os.path.exists(w) else 0.0
     stale = ds_t > w_t
     print()
@@ -105,7 +105,7 @@ def main():
           % (time.strftime("%m-%d %H:%M", time.localtime(ds_t)), tag,
              time.strftime("%m-%d %H:%M", time.localtime(w_t)) if w_t else "(找不到)"))
     if stale:
-        print("**数据集比现役权重新** —— 这些数字属于**还没训出来的模型**。")
+        print("**数据集比现役权重新** -- 这些数字属于**还没训出来的模型**。")
         print("   现在贴回 vocab.py 会让代码以为现役模型学过它没学过的类。")
         print("    上面的对账可以看，但 --emit 被拒绝。等 v16 训完 + active 切过去再跑。")
 

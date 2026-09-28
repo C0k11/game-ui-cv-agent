@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""把各源目录的 `classes.txt` 副本同步到 master —— **只同步纯改名，绝不掩盖真 drift**。
+"""把各源目录的 `classes.txt` 副本同步到 master -- **只同步纯改名，绝不掩盖真 drift**。
 
 背景（2026-08-11 发现）：`build_ui_v2.py` 的 schema drift 校验从**废案改名那次
    之后就一直红着**，`return 1` 直接退出  自那以后 build 一次都没跑成过。
@@ -10,9 +10,9 @@
    那道校验的价值是抓**顺序错乱**（源目录按另一套 idx 打的标 = 整批标注全错位，
    是会毁掉训练集的那种错）。无差别覆盖等于把这道闸拆了。
     这里**逐条分类**：
-     · benign  —— master 是 `_废弃{i}_{原名}_...` 而副本正好是 `{原名}`  纯改名
-     · benign  —— 副本比 master 短（老类表，前缀一致） 只是没跟上新增类
-     · DRIFT —— 其他任何不一致  **打印出来并拒绝同步**，交给人判断
+     · benign  -- master 是 `_废弃{i}_{原名}_...` 而副本正好是 `{原名}`  纯改名
+     · benign  -- 副本比 master 短（老类表，前缀一致） 只是没跟上新增类
+     · DRIFT -- 其他任何不一致  **打印出来并拒绝同步**，交给人判断
 
 用法:
     python scripts/sync_source_classes.py            # 只报告，不写盘
@@ -37,16 +37,16 @@ RAW = REPO / "data" / "raw_images"
 
 
 def _norm(s: str) -> str:
-    """去掉点/空格/下划线等分隔符 —— 改名时顺带做过规范化
+    """去掉点/空格/下划线等分隔符 -- 改名时顺带做过规范化
     （`D.U. 白鸟区`  `DU白鸟区`），不归一化就会把纯改名误判成 drift。"""
     return re.sub(r"[\s._·・\-]+", "", s)
 
 
 def is_benign(idx: int, src_name: str, master_name: str) -> bool:
-    """副本 idx 处是 src_name，master 是 master_name —— 这是纯改名吗？
+    """副本 idx 处是 src_name，master 是 master_name -- 这是纯改名吗？
 
     只认一种形态：master 变成了 `_废弃{行号}_{原名}_{理由}`。
-    **行号必须等于它自己的 idx** —— 这一条是关键：真发生顺序错乱时，
+    **行号必须等于它自己的 idx** -- 这一条是关键：真发生顺序错乱时，
     `_废弃N_` 里的 N 对不上所在行，照样会被判成 drift。
     """
     if src_name == master_name:
@@ -96,7 +96,7 @@ def main() -> int:
           f"真 drift {len(drift)} / 没有 classes.txt {missing}")
 
     if drift:
-        print("\n以下目录不是改名，是真 drift —— **不同步**，请人工判断:")
+        print("\n以下目录不是改名，是真 drift -- **不同步**，请人工判断:")
         for name, bad in drift[:20]:
             print(f"  {name}")
             for i, s, m in bad[:4]:

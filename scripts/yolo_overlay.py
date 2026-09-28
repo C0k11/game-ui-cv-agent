@@ -1,6 +1,6 @@
 """Transparent YOLO bounding-box overlay on game window.
 
-Architecture (v2 — "cheat-grade" render pipeline):
+Architecture (v2 - "cheat-grade" render pipeline):
   - Detection boxes are stored as **normalized 0-1 coordinates** relative
     to the game client area.  They are never converted to absolute screen
     coordinates until the instant of drawing.
@@ -9,11 +9,11 @@ Architecture (v2 — "cheat-grade" render pipeline):
         2. Moves the overlay to match (SetWindowPos).
         3. Invalidates the overlay for a WM_PAINT.
     Because position is re-read every tick, the overlay "sticks" to the
-    game window with zero perceptible lag — even while dragging.
+    game window with zero perceptible lag - even while dragging.
   - Box data is pushed from the AI thread via ``update()`` (lock-free
     swap of a list reference).  The render loop never waits on AI.
 
-Usage (standalone test — draws live YOLO boxes on MuMu):
+Usage (standalone test - draws live YOLO boxes on MuMu):
     py scripts/yolo_overlay.py --title "MuMu"
 
 Usage (from code):
@@ -174,7 +174,7 @@ class YoloOverlay:
         #   HARMFUL: frame-to-frame detection flicker makes ByteTrack re-assoc /
         #   switch IDs, and the velocity coast FLINGS a box across the screen
         #   for max_age frames after a UI element vanishes (screen change /
-        #   popup) — exactly the "框到处飞 / 锁不住 / 瞎预测" the user reported.
+        #   popup) - exactly the "框到处飞 / 锁不住 / 瞎预测" the user reported.
         #    pass track=False for static UI: boxes become the raw current-frame
         #   detections (rock-steady, no coast, no predict).  User rule (2026-06-09):
         #   "只要是静态就不用预测了，主要是移动目标需要。"
@@ -248,7 +248,7 @@ class YoloOverlay:
         return self._thread is not None and self._thread.is_alive()
 
     def update(self, yolo_boxes: list) -> None:
-        """Push new detection boxes — thread-safe (lock-free swap).
+        """Push new detection boxes - thread-safe (lock-free swap).
 
         Runs SORT tracker + exponential smoothing so boxes glide
         instead of jumping between frames.
@@ -266,7 +266,7 @@ class YoloOverlay:
                 ))
         # Apply tracker for smooth lock-on effect. Pass real dt (seconds since
         # last detection) so velocity / smoothing / lead-aim are frame-rate
-        # independent — detection FPS varies, so a fixed-dt assumption would
+        # independent - detection FPS varies, so a fixed-dt assumption would
         # make lead/coast wrong when the detector hitches.
         if self._track_enabled and self._tracker is not None:
             import time as _t
@@ -294,7 +294,7 @@ class YoloOverlay:
             return 0, 0, 0, 0
 
     def _sync_position(self) -> None:
-        """Reposition overlay to match target window — called at 250 Hz.
+        """Reposition overlay to match target window - called at 250 Hz.
 
         Always queries the *current* window position so the overlay
         tracks window drags with sub-frame latency.  Only issues
@@ -486,7 +486,7 @@ class YoloOverlay:
             self._overlay_hwnd, _CK, 0, LWA_COLORKEY,
         )
 
-        # 250 Hz timer — drives position sync + repaint
+        # 250 Hz timer - drives position sync + repaint
         _user32.SetTimer(self._overlay_hwnd, 1, _TIMER_MS, None)
 
         print(f"[Overlay] Started overlay={self._overlay_hwnd} "

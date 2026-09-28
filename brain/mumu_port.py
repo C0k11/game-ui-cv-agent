@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MuMu ADB 端口解析 —— 别再把 7555 写死。
+"""MuMu ADB 端口解析 -- 别再把 7555 写死。
 
 为什么要有这个模块(2026-07-28 live 事故):
 跑到一半 adbd 卡死(dumpsys 15s 超时  scrcpy 起不来  管线掉到 DXcam 上
@@ -53,7 +53,7 @@ def _from_manager(vmindex: int = 0) -> str | None:
 def _from_adb_devices() -> str | None:
     """兜底: `adb devices` 里唯一 online 的 127.0.0.1:* 。
 
-    只认 state == "device" —— offline 条目正是事故现场的样子
+    只认 state == "device" -- offline 条目正是事故现场的样子
     (7555 offline 与 16384 device 同时列着), 认错就等于没修。"""
     try:
         out = subprocess.run([_ADB, "devices"], capture_output=True,

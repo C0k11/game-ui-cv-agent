@@ -33,7 +33,7 @@ CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 RAW_IMAGES_DIR = REPO_ROOT / "data" / "raw_images"
 RAW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Trajectory ticks are valid annotation sources too — same JPGs the live
+# Trajectory ticks are valid annotation sources too - same JPGs the live
 # pipeline captured, perfect for labeling UI states caught in-the-wild.
 # Exposed as datasets with `traj/<run_dir>` prefix so the frontend can
 # distinguish them from raw_images recordings.
@@ -43,7 +43,7 @@ TRAJECTORIES_DIR = REPO_ROOT / "data" / "trajectories"
 # Single source of truth so adding 确认键 in one dataset makes it
 # available in every other dataset without re-typing.  Per-dataset
 # classes.txt files are kept in sync (copy of master) so YOLO training
-# remains compatible — see _ensure_dataset_migrated().
+# remains compatible - see _ensure_dataset_migrated().
 MASTER_CLASSES_FILE = RAW_IMAGES_DIR / "_classes.txt"
 
 CHARACTERS_DIR = CAPTURES_DIR / "角色头像"
@@ -57,7 +57,7 @@ APP_CONFIG_PATH = REPO_ROOT / "data" / "app_config.json"
 # total_assault, hard_farming, campaign_push.
 _SKILL_OPTIONS: List[Dict[str, str]] = [
     # Production daily flow (validated 2026-05-13).  All skills below
-    # run end-to-end with badge-based skip routing — those with a lobby
+    # run end-to-end with badge-based skip routing - those with a lobby
     # nav-icon mapping (cafe/schedule/club/craft/shop/pass_reward) auto-
     # skip when their icon shows no red/yellow dot.  Sidebar-routed
     # skills (bounty/arena/daily_tasks/mail/event_activity) always run.
@@ -81,14 +81,14 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
     # 老 profile 里残留的已删 id 会在 app.py 校验时被过滤掉, 用户重新
     # save profile 即可清理.
 
-    # 战斗扫荡单跑入口 (live 单 skill 测试用 — 2026-06-09: 传 "bounty" 被过滤
+    # 战斗扫荡单跑入口 (live 单 skill 测试用 - 2026-06-09: 传 "bounty" 被过滤
     #  fallback 全套 daily_routine 真跑, step gate 拦住才没出事。这三个 id
     # 必须合法, 否则单测只能跑全套):
     {"id": "bounty", "label": "[测试] 悬赏通缉 单跑"},
     {"id": "arena", "label": "[测试] 战术大赛 单跑"},
     {"id": "jfd", "label": "[测试] 学院交流会 单跑"},
     {"id": "batch_sweep", "label": "批量掃蕩 (刷体力, 剩余AP全花)"},
-    {"id": "special_sweep", "label": "[测试] 智能AP分配 — 扫2x/3x bonus板块(今天特殊任务)"},
+    {"id": "special_sweep", "label": "[测试] 智能AP分配 - 扫2x/3x bonus板块(今天特殊任务)"},
     # 2026-07-08 活动规划器: Bonus解锁活動點數优先货币扫荡领奖 (无活动自动 done)。
     {"id": "event_quest", "label": "活动规划器 (加成解锁+点数优先+货币扫荡)"},
     # 2026-06-11 编排重构: mail / daily_mission 升为顶层(厅后收口), 必须在
@@ -120,7 +120,7 @@ _SKILL_OPTIONS: List[Dict[str, str]] = [
 # rewards, etc. that other skills push into the mailbox during this
 # run.  Yesterday's accumulated mail (login bonus, etc.) is also
 # claimed by the end-of-run Mail since BA's mailbox accumulates
-# until claimed — no need for an additional start-of-run Mail.
+# until claimed - no need for an additional start-of-run Mail.
 _DEFAULT_SKILL_ORDER = [
     # canonical 日常顺序(用户 2026-07-11 定死): 收菜攒AP  纯票扫荡
     # 学园交流会(吃AP)  活动(剩余AP全灌+加成台账)  战术大赛  邮件
@@ -174,7 +174,7 @@ _PIPELINE_RUN_META: Dict[str, Any] = {}
 #  Daily scheduler
 # Background thread that, when enabled in the active profile, auto-starts
 # the pipeline at `reset_time` (HH:MM, local) and again every
-# `interval_hours`. Manual POST /api/v1/start always wins — scheduler
+# `interval_hours`. Manual POST /api/v1/start always wins - scheduler
 # skips firing if a run is already active.
 _SCHEDULER_THREAD: Optional[threading.Thread] = None
 _SCHEDULER_STOP: threading.Event = threading.Event()
@@ -197,7 +197,7 @@ def _normalize_skill_order(values: Any) -> List[str]:
     # Mail is allowed to appear twice (run at pipeline start AND end so
     # both yesterday's accumulated mail and today's just-generated
     # rewards get claimed within a single run).  Other skills are
-    # deduped — running e.g. cafe twice doesn't gain anything.
+    # deduped - running e.g. cafe twice doesn't gain anything.
     # ×2 允许重复: mail(开局+收口) / batch_sweep(厅后+领奖后) / special_sweep
     # (2026-06-16 替 batch 当默认 AP-eater, 回马枪需出现两次否则被去重)。
     # +event_quest(2026-07-11 canonical序尾部再跑一轮消化 mail/任务回灌AP,
@@ -270,7 +270,7 @@ def _default_profile_settings() -> Dict[str, Any]:
         #   currencies=["tab3"]  only spend from the listed tabs
         "event_shop_auto_buy": True,
         "event_shop_currencies": [],
-        # Furniture items (interactive cafe decor — 可愛器皿組合 / 刺繡手帕
+        # Furniture items (interactive cafe decor - 可愛器皿組合 / 刺繡手帕
         # etc.) priority toggle. False (default) = buy after materials.
         # True = buy furniture first.
         "event_shop_furniture_first": False,
@@ -280,11 +280,11 @@ def _default_profile_settings() -> Dict[str, Any]:
         "target_favorites": [],
         "skill_order": list(_DEFAULT_SKILL_ORDER),
         "bounty_branches": ["高架公路", "沙漠鐵道", "教室"],
-        # Cafe invite targets — [1F, 2F] 中文角色名 matching the fused_avatar
+        # Cafe invite targets - [1F, 2F] 中文角色名 matching the fused_avatar
         # model cls names (e.g. "莉央(战斗)"). cafe.py reads index 0 for 1F,
         # index 1 for 2F. Empty list = invite the first visible rows.
         "cafe_invite_targets": [],
-        # Schedule (課程表) target students — 中文角色名 matching the
+        # Schedule (課程表) target students - 中文角色名 matching the
         # fused_avatar cls (e.g. "莉央(战斗)"). schedule.py Case B (all regions
         # max-level) only dispatches a room when one of these students sits in
         # it. Empty list = spend leftover tickets on any room (fallback).
@@ -394,7 +394,7 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
     # Cafe: skip the invite sub-flow entirely (ticket on CD / headpat-only).
     data["cafe_skip_invite"] = bool(raw.get("cafe_skip_invite", False))
 
-    # Cafe invite targets — ordered list of 中文角色名 ([1F, 2F]); trim blanks
+    # Cafe invite targets - ordered list of 中文角色名 ([1F, 2F]); trim blanks
     # but PRESERVE order/position (index drives which floor invites whom).
     raw_cafe = raw.get("cafe_invite_targets")
     if isinstance(raw_cafe, list):
@@ -402,7 +402,7 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
             str(x or "").strip() for x in raw_cafe if str(x or "").strip()
         ]
 
-    # Schedule target students — list of 中文角色名 (order irrelevant; dedup +
+    # Schedule target students - list of 中文角色名 (order irrelevant; dedup +
     # trim blanks). schedule.py Case B dispatches only rooms holding one of
     # these; empty = spend leftover tickets on any room.
     raw_sched = raw.get("schedule_target_students")
@@ -430,7 +430,7 @@ def _normalize_profile_settings(value: Any) -> Dict[str, Any]:
         if isinstance(incoming, list):
             data[key] = [str(x).strip() for x in incoming if str(x or "").strip()]
     # event_farm_stages: 三种写法都放行(list / dict{关号:配比} / "10,11,11"),
-    # 展开与校验交给 `EventQuestSkill._parse_farm_stages` 一处做, 这里只做透传 ——
+    # 展开与校验交给 `EventQuestSkill._parse_farm_stages` 一处做, 这里只做透传 --
     # 白名单归一化会**静默丢掉**没列在这里的 key, 新配置项忘了加就是死配置
     # (`event_farming_stage` 就是活标本: 存在于默认值里, 全仓无人读)。
     _fs = raw.get("event_farm_stages")
@@ -837,7 +837,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
         _enable_high_resolution_timer()
         # Predefine so the `finally` cleanup never hits UnboundLocalError when we
-        # early-return before these are created (e.g. window not found) —
+        # early-return before these are created (e.g. window not found) -
         # otherwise finally dies mid-way: the real error gets masked AND
         # _PIPELINE_RUNNING never resets  all later starts rejected.
         _yolo_hfps = None
@@ -865,7 +865,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         # Overlay policy (2026-06-11, user rule): boxes ONLY in battle mode.
         # The daily loop's overlay lags detection by a tick on static UI
         # (drift / flicker / size-jitter) and burns into window-captured
-        # frames (training poison — see flywheel overlay-burn incident).
+        # frames (training poison - see flywheel overlay-burn incident).
         # Battle tooling (battle_overlay_demo / future combat runner) draws
         # its own Kalman-smoothed overlay where boxes can actually lock on.
         # profile/payload `game_overlay: "always"` re-enables here for debug.
@@ -881,7 +881,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             except Exception as e:
                 _log_pipeline(f"YOLO overlay unavailable: {e}")
         else:
-            _log_pipeline("YOLO overlay OFF (battle_only policy — daily frames stay clean)")
+            _log_pipeline("YOLO overlay OFF (battle_only policy - daily frames stay clean)")
 
         adb = None
         android_w, android_h = 1280, 720
@@ -916,7 +916,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     _log_pipeline(f"ADB ready {adb_host}:{adb_port} size={android_w}x{android_h}")
                     # Money-read defense: let skills pull overlay-free frames
                     # (DXcam frames carry burned-in overlay boxes that can kill
-                    # small-icon detection — see brain.pipeline.get_clean_frame).
+                    # small-icon detection - see brain.pipeline.get_clean_frame).
                     try:
                         from brain.pipeline import set_clean_frame_source
                         set_clean_frame_source(adb.capture_frame)
@@ -931,7 +931,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         _log_pipeline(f"Pipeline worker started. window='{window_title}' hwnd={hwnd} render={render_hwnd} sleep={step_sleep} dry_run={dry_run}")
 
         #  Clean-flywheel recorder (user rule 2026-06-09: 每次启动 bot 实跑都
-        # 录干净帧当迭代素材). ADB screencap runs INSIDE Android — the Win32
+        # 录干净帧当迭代素材). ADB screencap runs INSIDE Android - the Win32
         # overlay doesn't exist there, so frames are guaranteed overlay-free
         # (DXcam/trajectory frames burn the boxes in). Each capture is its own
         # adb subprocess (stateless, thread-safe vs. the input taps). Low rate
@@ -939,7 +939,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
         if adb is not None:
             _clean_dir = RAW_IMAGES_DIR / ("run_" + time.strftime("%Y%m%d_%H%M%S") + "_clean")
             # Interval env-tunable (2026-07-06): battle-material runs want denser
-            # frames (e.g. 1.2s) — VFX/battle scenes change fast; menus dedup out
+            # frames (e.g. 1.2s) - VFX/battle scenes change fast; menus dedup out
             # later anyway. All captures serialize through AdbInput._IO_LOCK with
             # the taps, so a faster rate cannot re-introduce the tap-loss bug the
             # way a parallel ADB process would (it would bypass the lock).
@@ -1093,14 +1093,14 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # GPU budget (2026-06-11, live-caught: 68% GPU util lagged the
             # user's machine): 30 FPS continuous inference exists for the
             # battle overlay. With the overlay OFF (battle_only policy) the
-            # only consumer is the tick loop (1-2s cadence) — 2 FPS keeps
+            # only consumer is the tick loop (1-2s cadence) - 2 FPS keeps
             # frames fresh at ~1/15th the GPU burn.
             if globals().get("_GAME_OVERLAY") == "always":
                 _yolo_fps_target = 30
             else:
                 _yolo_fps_target = 2
             _log_pipeline(f"YOLO high-FPS thread started ({_yolo_fps_target} FPS"
-                          f"{' — overlay off, low-power mode' if _yolo_fps_target == 2 else ''})")
+                          f"{' - overlay off, low-power mode' if _yolo_fps_target == 2 else ''})")
             _interval = 1.0 / _yolo_fps_target
             _frame_count = 0
             _errors = 0
@@ -1145,7 +1145,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         except Exception:
                             frame = None
                     if frame is None:
-                        # 无帧 — clear shared frame after timeout
+                        # 无帧 - clear shared frame after timeout
                         # so pipeline falls back to ADB (background mode support)
                         with _yolo_latest_lock:
                             if _yolo_latest_ts > 0 and time.perf_counter() - _yolo_latest_ts > 2.0:
@@ -1172,7 +1172,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         pipe_ref = None
                         with _PIPELINE_LOCK:
                             pipe_ref = _PIPELINE
-                        # current_skill is the meta DailyRoutine — dig into its
+                        # current_skill is the meta DailyRoutine - dig into its
                         # active sub-skill for the REAL name + sub_state (the old
                         # `skill_name=="Cafe"` was always False since the meta is
                         # named "DailyRoutine").
@@ -1252,10 +1252,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 
             _tick_counter += 1
 
-            # 1. Capture — ADB FIRST (主tick抓帧ADB化, 2026-06-12): the Android
+            # 1. Capture - ADB FIRST (主tick抓帧ADB化, 2026-06-12): the Android
             #    internal screencap is full-res 3840x2160, overlay-free, and
             #    window-size independent. The old DXcam-first path fed the tick
-            #    whatever the DESKTOP WINDOW size was (~900px when small) —
+            #    whatever the DESKTOP WINDOW size was (~900px when small) -
             #    digit-OCR physically impossible (топ-bar credit 28,096,458
             #    read as 96,458  shop refused to buy twice; dialog 持有數量
             #    unreadable at 10px). DXcam shared frame = fallback only;
@@ -1264,13 +1264,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             frame = None
             _frame_src = ""
             #  scrcpy 首选(2026-07-16 Phase2, 用户: 全面替换): 帧龄 0.02s
-            #   vs ADB 0.77s/张 — tick 周期 0.92s~0.3s。1440p 对 YOLO 无损
+            #   vs ADB 0.77s/张 - tick 周期 0.92s~0.3s。1440p 对 YOLO 无损
             #   (检出与 4K 帧一致已实测); digit-OCR 由 run_digit_ocr 内部
             #   自动升级 ADB 4K 干净帧, 钱/票读数精度不受影响。
             _tick_frame_age = None
             _tick_frame_seq_new = None
             # task#17 断流窗口防抖(2026-07-21 帧龄埋点实锤): 正常 scrcpy 帧龄
-            # 8-10ms, 但每 ~20s 断流 3.5s — 断流期 latest() 返回冻结旧帧。旧码
+            # 8-10ms, 但每 ~20s 断流 3.5s - 断流期 latest() 返回冻结旧帧。旧码
             # 接受 3.0s 内的帧  断流窗口拿 3s 前冻结帧决策 = BuyPyroxene ×12
             # 连点/"抢拍"真凶。降到 1.0s: 断流(age 爬升) 落 ADB 新鲜抓帧
             # (0.77s 但真实当前)。静止页 seq 不动但内容==当前屏, age 未超阈
@@ -1278,14 +1278,14 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             _SCRCPY_MAX_AGE = 1.0
             # 因果闸(2026-07-26, 靠帧龄埋点才查得出来的一类错):
             # **帧的摄取时刻必须晚于上一次 tap 的下发时刻**, 否则 skill 就是在
-            # "上一发点击还没落下去的那一屏"上重算 —— 这不是"帧旧", 是**因果倒置**。
+            # "上一发点击还没落下去的那一屏"上重算 -- 这不是"帧旧", 是**因果倒置**。
             # 实锤 run_20260725_225503/tick_0268:
             #   frame.cap_ts = 1785034938.928
             #   dispatch_prev.sent_ts = 1785034939.624    cap_ts 比 tap 早 **696ms**
             #   帧龄 886.7ms **在 1.0s 闸内**, 所以旧闸放行了
             #   于是 settle 確認 在那张帧上仍是 (0.914,0.921)@0.971, 照着点  拍空;
             #   下一 tick 落 ADB(cap_ts 晚于 tap +0.238s)立刻算出真值 (0.501,0.927)。
-            # 这类错**JIT 复验治不了** —— 复验会读到同一张冻结帧, 反而"确认"错误落点。
+            # 这类错**JIT 复验治不了** -- 复验会读到同一张冻结帧, 反而"确认"错误落点。
             # 静止页不会被误伤: tap 后画面真变了 scrcpy 就产新帧; 画面没变说明
             # tap 没生效, 这时落 ADB 抓一张真·当前帧正是要的。
             _last_tap_ts = globals().get("_LAST_TAP_SENT_TS", 0.0)
@@ -1319,7 +1319,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     frame = None
             if frame is None:
                 # 高频线程共享帧 fallback(来源=scrcpy 或 DXcam, boxes 同帧)
-                # 同样吃因果闸 —— 实测那 27 个过期帧里有 6 个来自 hf。
+                # 同样吃因果闸 -- 实测那 27 个过期帧里有 6 个来自 hf。
                 # _yolo_latest_ts 用 perf_counter, 所以 tap 时刻也要记一份同源的
                 # (墙钟和 perf_counter 混比是 2026-07-11 踩过的坑: age 恒大)。
                 _last_tap_perf = globals().get("_LAST_TAP_SENT_PERF", 0.0)
@@ -1350,9 +1350,9 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             tmp_path = str(REPO_ROOT / "data" / "_pipeline_frame.jpg")
             cv2.imwrite(tmp_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-            # 2. Pipeline tick — OCR at tick rate, YOLO from high-FPS thread
+            # 2. Pipeline tick - OCR at tick rate, YOLO from high-FPS thread
             # OCR on-demand (2026-07-11): 恒 True, 真正决定权在
-            # read_screen_from_frame — YOLO ≥3框(已知屏)零 OCR, <3框(盲区)才跑
+            # read_screen_from_frame - YOLO ≥3框(已知屏)零 OCR, <3框(盲区)才跑
             skip_ocr = True
             # YOLO source must match the frame source: ADB frames run INLINE
             # YOLO (boxes correspond to this exact full-res frame). Inject the
@@ -1398,7 +1398,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             reason = action.get("reason", "")
             # Loading gate (稳定规则 2026-06-11): 加载中 visible  never act this
             # tick, the game is mid-transition. Skills check is_loading() too,
-            # but stale injected boxes can slip an action through — this is the
+            # but stale injected boxes can slip an action through - this is the
             # belt-and-braces hold at the execution layer.
             if (action_type in ("click", "back", "swipe", "swipe_tap")
                     and pipe.last_screen is not None
@@ -1424,10 +1424,10 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                           f"reason={reason}{_age_tag}")
 
             # Overlay YOLO boxes are updated by the high-FPS YOLO thread above.
-            # (Florence/template overlay 注入已删 2026-07-17 — 生产者
+            # (Florence/template overlay 注入已删 2026-07-17 - 生产者
             #  florence_boxes/template_hits 已随 OCR 死码一并裁撤。)
 
-            # 3a. Single-step approval gate — pause before each click/back/swipe,
+            # 3a. Single-step approval gate - pause before each click/back/swipe,
             # expose the pending action, block until POST /api/v1/step/go.
             # _atomic_no_gate: 轮播时序敏感点击(hub 活动卡 2.5s/页), pend 等
             # 人工放行必然撞切页  豁免 step 门同 tick 落屏(skill 侧限定
@@ -1452,13 +1452,13 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                     "tick": pipe._total_ticks,
                 }
                 _PIPELINE_STATUS["step_pending"] = _STEP_PENDING
-                _log_pipeline(f"STEP PAUSE [{_aname}/{_asub}] {action_type} @ {action.get('target') or action.get('from')} — {reason}")
+                _log_pipeline(f"STEP PAUSE [{_aname}/{_asub}] {action_type} @ {action.get('target') or action.get('from')} - {reason}")
                 _STEP_GO.clear()
                 _t_pause0 = time.time()
                 _got_go = _STEP_GO.wait(timeout=900)
                 # 人工审核的这段时间必须从 skill 的超时预算里扣掉, 否则逐帧
                 # 门控本身会把每个 skill 的墙钟预算烧光(实测每步 ~60s, survey
-                # 预算才 90s) —— 门控工具反过来制造故障。
+                # 预算才 90s) -- 门控工具反过来制造故障。
                 try:
                     from brain.skills.base import add_harness_pause
                     add_harness_pause(time.time() - _t_pause0)
@@ -1480,7 +1480,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # 规则: 距决策 >0.30s 的 click, 若决策帧上落点有 cls 锚(半径 0.06
             # 内/含住落点), 就重抓一帧跑 YOLO 确认同名 cls 仍支撑落点; 消失
             # 丢弃这一发 + 置 action_suppressed 让 skill 下一 tick 重算。
-            # 盲拍(决策帧上落点本就无 cls, 如"点击继续"空点)无从复验, 放行 —
+            # 盲拍(决策帧上落点本就无 cls, 如"点击继续"空点)无从复验, 放行 -
             #   否则合法空点会被永久丢弃死循环。
             # 旧笔记 click_causality_gate 那句「JIT复验治不了它」只对因果倒置
             #   成立(复验读到同一张冻结帧); 尾发/弹窗重排这两种, 复验读到的是
@@ -1489,11 +1489,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # 2026-08-02 分级复验(修「快路径全程免检」): 旧闸是
             #   `决策龄 > 0.30s` 才进 JIT  **自主跑基本全程跳过**
             #   (frame_age_truth 实测 captap 中位 ~85ms), JIT 只在 step_mode
-            #   的人审停顿下生效 —— 于是 event_quest 掃蕩確認键那种「决策帧上
+            #   的人审停顿下生效 -- 于是 event_quest 掃蕩確認键那种「决策帧上
             #   按钮还在弹入中途位 cy0.705, 85ms 后落到 0.809」的尾发, 在
             #   step_mode 下被 JIT 悄悄接住、看不见, 自主跑却直接砸到道具上。
             # 但 0.30s 不是拍脑袋: 低于它, scrcpy 往往还没产出「晚于上次 tap」
-            #   的新帧, 复验只能回退 ADB screencap(~900ms) 阻塞热路径 —— 那才是
+            #   的新帧, 复验只能回退 ADB screencap(~900ms) 阻塞热路径 -- 那才是
             #   这个阈值真正在挡的成本。所以不是降阈值, 是**分级**:
             #     慢路径(>0.30s): 行为不变, 允许 ADB 回退拿真·当前帧
             #     快路径(≤0.30s): 只在 scrcpy 手上**恰好**有比决策帧更新的帧时
@@ -1511,7 +1511,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                                               None) or [])
                 except Exception:
                     _jit_boxes = []
-                # 定向复验(2026-08-07 live 实锤 — 活动轮播):
+                # 定向复验(2026-08-07 live 实锤 - 活动轮播):
                 # 动作可以显式指定"落地前必须仍看得见这个 cls", 用于**目标本身
                 # 会在决策落屏之间换掉**的场合。典型 = 任務大廳活动入口轮播:
                 # 2.5s/页 在「距离结束还剩」(405, 当期可打) 与「距离奖励获得结束」
@@ -1524,7 +1524,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                 _req_cls = action.get("_jit_require_cls")
                 _jit_cls = _req_cls or _jit_anchor_cls(_jit_tgt, _jit_boxes)
                 # 别强制慢路径(用户 2026-08-07 现场发现"点击怎么这么慢"):
-                # 我最初这里写了 `_jit_slow = True` 让它 ADB 抓真·当前帧 ——
+                # 我最初这里写了 `_jit_slow = True` 让它 ADB 抓真·当前帧 --
                 # 而 ADB 抓 4K 帧实测 ~900ms([[frame_age_truth]]), **等于给正在
                 # 和 2.5s 轮播赛跑的那一发又加了近 1 秒延迟**, 自相矛盾:
                 # 为了"别点错"反而更容易错过窗口。
@@ -1571,7 +1571,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                             _jfb = None
                             _log_pipeline(f"[jit] 复验 YOLO 失败({_je})  放行")
                         # 定向复验只问"这个 cls 还在不在屏上"(轮播换页时它整个
-                        # 消失), 不要求它压住落点 —— 落点本就在它下方 0.10。
+                        # 消失), 不要求它压住落点 -- 落点本就在它下方 0.10。
                         if _req_cls is not None and _jfb is not None:
                             _still = [b for b in _jfb
                                       if getattr(b, "cls_name", "") == _req_cls
@@ -1579,12 +1579,12 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                             if _still:
                                 _log_pipeline(
                                     f"[jit] 定向复验通过: '{_req_cls}' 仍在屏"
-                                    f"({_jsrc}) — '{reason}'")
+                                    f"({_jsrc}) - '{reason}'")
                             else:
                                 _log_pipeline(
                                     f"[jit] 丢弃: 定向 cls '{_req_cls}' 在新帧"
                                     f"({_jsrc}, {len(_jfb)}框)**已消失** = 轮播已换页,"
-                                    f" 这一点会落到错的活动上 — '{reason}'")
+                                    f" 这一点会落到错的活动上 - '{reason}'")
                                 try:
                                     if pipe.current_skill is not None:
                                         pipe.current_skill.action_suppressed = True
@@ -1601,14 +1601,14 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                             _log_pipeline(
                                 f"[jit] 复验通过: 锚 '{_jit_cls}' 仍支撑落点 "
                                 f"(决策龄 {(time.time()-_t_decided)*1000:.0f}ms, "
-                                f"{_jsrc}) — '{reason}'")
+                                f"{_jsrc}) - '{reason}'")
                         elif _jfb is not None:
                             _jage = (time.time() - _t_decided) * 1000
                             _log_pipeline(
                                 f"[jit] 丢弃过期点击: 决策龄 {_jage:.0f}ms, "
                                 f"锚 '{_jit_cls}' 在新帧({_jsrc}, "
                                 f"{len(_jfb)}框)落点半径 {_JIT_RADIUS} 内已消失"
-                                f" — '{reason}'")
+                                f" - '{reason}'")
                             try:
                                 if pipe.current_skill is not None:
                                     pipe.current_skill.action_suppressed = True
@@ -1622,7 +1622,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
             # 3. Execute action (unless dry_run)
             # 只放行真输入动作(2026-07-16 审计 A 级): 旧闸把最高频的
             # wait 也送进执行函数, 落穿 ADB 分支后每 tick 执行
-            # SetForegroundWindow(MuMu) — 有前台权限时反复抢焦点。
+            # SetForegroundWindow(MuMu) - 有前台权限时反复抢焦点。
             if (not dry_run and action_type in
                     ("click", "back", "swipe", "swipe_tap", "scroll")):
                 _t_exec0 = time.time()
@@ -1662,11 +1662,11 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
                         _log_pipeline(f"[lat] tick={pipe._total_ticks} "
                                       f"age unavailable (src={_frame_src})")
                 except Exception as _e:
-                    # 埋点绝不许拖垮主链 —— 但也绝不静默(money_safety 教训)。
+                    # 埋点绝不许拖垮主链 -- 但也绝不静默(money_safety 教训)。
                     _log_pipeline(f"[lat] instrumentation error: {_e}")
 
             # 4. Sleep
-            #  ZERO-WAIT policy (user 2026-06-14: 不要有wait time — 出现目标就点 /
+            #  ZERO-WAIT policy (user 2026-06-14: 不要有wait time - 出现目标就点 /
             # 没目标pass / 只有"加载中"cls在时才硬wait, wait时长=加载中存在时长). All
             # the per-skill settle/re-scan/render-wait counters are squashed to a
             # fast re-poll; only a 加载中/loading wait keeps its full duration (the
@@ -1742,7 +1742,7 @@ def _pipeline_worker(window_title: str, step_sleep: float, dry_run: bool) -> Non
 # JIT 落点复验的两个纯几何判定(2026-07-28 幽灵点击根治)。
 # 拆成纯函数: 不碰帧/模型, 回归测试可以直接喂框列表验语义。
 _JIT_STALE_S = 0.30   # 超过这个龄 = 慢路径: 允许 ADB 回退抓真·当前帧复验
-#: 快路径(≤_JIT_STALE_S, 自主跑绝大多数 tick)也复验 —— 但只用 scrcpy 手上
+#: 快路径(≤_JIT_STALE_S, 自主跑绝大多数 tick)也复验 -- 但只用 scrcpy 手上
 #: **恰好**比决策帧新的帧, 拿不到就放行, 绝不回退 ADB。代价 = 每次点击多一次
 #: YOLO(~30-50ms), 收益 = 弹入动画期的尾发不再全靠 step_mode 才拦得住。
 #: 关掉它就退回 2026-08-02 之前的「快路径全程免检」行为。
@@ -1782,7 +1782,7 @@ def _jit_landing_ok(tgt, cls_name: str, fresh_boxes,
     """新帧上落点仍被**同名** cls 支撑? False  目标已消失/移位, 丢弃这一发。
 
     2026-08-01 用户抓包收紧: 旧判「中心距 ≤0.06 也算支撑」在掃蕩完成框上
-    放行了確認键老坐标 — 落点其实压在奖励图标上(差 0.059)弹出 tooltip。
+    放行了確認键老坐标 - 落点其实压在奖励图标上(差 0.059)弹出 tooltip。
     「附近有同名 cls」≠「落点在按钮框内」: 游戏按像素判定, 复验必须按
     **bbox 含住**(外扩 0.012 容忍亚像素抖动)。多丢的合法微移点击由
     action_suppressed 让 skill 重算新坐标, 自愈且方向安全。
@@ -1971,7 +1971,7 @@ def get_app_config() -> Dict[str, Any]:
         "profile": profile,
         "profiles": cfg.get("profiles") or {},
         "skill_options": list(_SKILL_OPTIONS),
-        # The validated production order — frontend "restore default"
+        # The validated production order - frontend "restore default"
         # button uses this instead of dumping every option (including
         # optional extras).
         "default_skill_order": list(_DEFAULT_SKILL_ORDER),
@@ -2511,7 +2511,7 @@ def _ensure_dataset_migrated_locked(img_dir: Path) -> None:
     # Rewrite label files only if local indices differ from master
     needs_label_remap = any(remap.get(i, i) != i for i in range(len(local)))
     if needs_label_remap:
-        # 防呆快照(2026-07-11 审计): 懒迁移重写手标前先备份 — 若 rename/merge
+        # 防呆快照(2026-07-11 审计): 懒迁移重写手标前先备份 - 若 rename/merge
         # 后有池 classes.txt 未同步到新 master, 这里的 remap 会大面积改写人工
         # 标注(且旧路径零备份), 必须可回滚。
         try:
@@ -2567,7 +2567,7 @@ def _read_registry() -> Dict[str, Any]:
 
 
 def _current_generation() -> Dict[str, Any]:
-    """当前各域 live 模型代数 + 迭代代号 — dashboard label 区顶部显示。
+    """当前各域 live 模型代数 + 迭代代号 - dashboard label 区顶部显示。
     各域最强策略: UI 域 unified v6b(待 live 通电)否则 ui v5; 头像 fused v4;
     摸头 emoticon v26n。unified.active 含 PENDING = 未通电, 当前 live 仍 ui.active。"""
     reg = _read_registry()
@@ -2583,7 +2583,7 @@ def _current_generation() -> Dict[str, Any]:
         # 分域: pipeline live = 三独立模型 (UI=ui.active=v5). unified 暂不全域上线,
         # 最新版仅借作 prefill 标注 teacher (见 ui.versions.v6c)。
         ui_live = ui.get("active", "?")
-        unified_note = f"暂不上(分域); {uni_latest}标注teacher,等v7" if uni_latest else "—"
+        unified_note = f"暂不上(分域); {uni_latest}标注teacher,等v7" if uni_latest else "-"
     else:
         ui_live = uni_active
         unified_note = f"{uni_active}·已全域上线"
@@ -2613,7 +2613,7 @@ def list_datasets() -> Dict[str, Any]:
     except Exception:
         _train_set, _val_set = set(), set()
     # battle 模型 sources (build_battle_v3 直接引用原池 = 已并入永久 train 集,
-    # 不再是"飞轮待标注" — 2026-07-10 用户: 飞轮区只留没用过/即将要用的)
+    # 不再是"飞轮待标注" - 2026-07-10 用户: 飞轮区只留没用过/即将要用的)
     try:
         from scripts.build_battle_v9 import SRCS as _battle_srcs  # noqa: PLC0415
         _train_set |= {p.name for p in _battle_srcs}
@@ -2648,7 +2648,7 @@ def list_datasets() -> Dict[str, Any]:
     # 时 YoloOverlay 透明置顶, DXcam 抓的是合成画面  检测框烧进像素 = 训练垃圾
     # (2026-05-28 删过 11 个烧录 run)。故不再进 label 队列。飞轮采集改用
     # capture/start 录的干净 raw_images/run_* (采集时无 pipeline overlay)。
-    # TRAJECTORIES_DIR 仍保留 — schedule roster tuner (roster_samples/roster_image)
+    # TRAJECTORIES_DIR 仍保留 - schedule roster tuner (roster_samples/roster_image)
     # 仍按需读它, 但那是 schedule 专用区, 不混入通用 label dataset 列表。
     return {"datasets": datasets, "generation": _current_generation()}
 
@@ -2664,7 +2664,7 @@ def list_dataset_images(dataset: str = Query(...)) -> Dict[str, Any]:
     # Accept both raw_images naming (frame_*.jpg) and trajectory naming
     # (tick_*.jpg / arbitrary).
     images = sorted([p.name for p in img_dir.glob("*.jpg")])
-    # Lazy-migrate this dataset to master class indices.  Idempotent —
+    # Lazy-migrate this dataset to master class indices.  Idempotent -
     # no-op if already on master.  For brand-new trajectory dirs this
     # also seeds classes.txt with the master copy on first access.
     _ensure_dataset_migrated(img_dir)
@@ -2761,7 +2761,7 @@ def add_dataset_class(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 #  Class registry management: stats / rename / merge
-# 铁律: master 索引一经分配**绝不移位** — 部署模型 idx、build 脚本 REMAP、头像段
+# 铁律: master 索引一经分配**绝不移位** - 部署模型 idx、build 脚本 REMAP、头像段
 # 143-394、battle 段 128-136/412/476-479 的路由全按 idx 走。合并 = 全库 label 行
 # srcdst 重写 + src 行墓碑化(_dead 前缀占位); 改名 = 原位改行。绝不删行/挪行
 # (删行走 scripts/trim_master_classes.py 的显式全库 remap, 不进 API)。
@@ -2772,11 +2772,11 @@ _CLS_STATS_CACHE: Dict[str, Any] = {"data": None}
 _BULK_LABEL_LOCK = threading.Lock()
 
 
-# merge/rename/stats 的扫描范围排除项 — **只排真正的快照/元数据目录**。
+# merge/rename/stats 的扫描范围排除项 - **只排真正的快照/元数据目录**。
 # 2026-07-11 审计教训: 最初一刀切 startswith('_') 跳过, 但 _emoticon_v2/
 # _arrow_boost/_ui_val_pool(build_ui_v2 REAL_SOURCES)/_val_v8flywheel/
 # _val_v12flywheel_0616(VAL_SOURCES)/_battle_val/_fused_synth_remap 全是活
-# train/val 源(~15k label 文件) — 跳过=merge 漏改 idx 语义分裂+统计撒谎+懒
+# train/val 源(~15k label 文件) - 跳过=merge 漏改 idx 语义分裂+统计撒谎+懒
 # 迁移把墓碑旧名复活进 master 尾部。范围必须与 _ensure_dataset_migrated 可
 # 触达的池集合对齐。
 def _label_dir_excluded(name: str) -> bool:
@@ -2804,7 +2804,7 @@ def _all_label_dirs() -> List[Path]:
 
 
 def _class_code_refs(name: str) -> List[str]:
-    """brain/ + scripts/ 源码里引用该类名的文件 — 改名/合并前的防呆警告源
+    """brain/ + scripts/ 源码里引用该类名的文件 - 改名/合并前的防呆警告源
     (skill 逻辑按类名字符串匹配模型输出; scripts/ 里也有按名硬查 master 的
     消费方如 clean_prefill_dots 的 MASTER.index('红点'), 改名即 import 崩)。"""
     hits: List[str] = []
@@ -2895,7 +2895,7 @@ def classes_stats(refresh: bool = Query(False)) -> Dict[str, Any]:
 
 def _backup_label_files(files: List[Path], tag: str) -> Path:
     """Snapshot the exact label files a mutation is about to rewrite (+ master).
-    只备份将被改的文件(非全库) — merge 常见只碰几百个文件, 秒级。"""
+    只备份将被改的文件(非全库) - merge 常见只碰几百个文件, 秒级。"""
     import shutil
     stamp = time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time()*1000)%1000:03d}"
     out = RAW_IMAGES_DIR / "_backups" / f"{stamp}_{tag}"
@@ -2945,7 +2945,7 @@ def classes_rename(payload: Dict[str, Any]) -> Dict[str, Any]:
         old = master[idx]
         if old.startswith("_dead"):
             raise HTTPException(status_code=400,
-                                detail=f"idx {idx} 是墓碑类({old}), 不能改名复活 — 新类请用 add_class 追加")
+                                detail=f"idx {idx} 是墓碑类({old}), 不能改名复活 - 新类请用 add_class 追加")
         if new_name.startswith("_dead"):
             raise HTTPException(status_code=400, detail="类名不能用 _dead 前缀(墓碑保留)")
         if new_name == old:
@@ -2953,7 +2953,7 @@ def classes_rename(payload: Dict[str, Any]) -> Dict[str, Any]:
         if new_name in master:
             raise HTTPException(
                 status_code=409,
-                detail=f"'{new_name}' 已存在(idx {master.index(new_name)}) — 两类合一请用合并")
+                detail=f"'{new_name}' 已存在(idx {master.index(new_name)}) - 两类合一请用合并")
         refs = _class_code_refs(old)
         if refs and not force:
             raise HTTPException(status_code=409, detail={
@@ -2992,7 +2992,7 @@ def classes_merge(payload: Dict[str, Any]) -> Dict[str, Any]:
     if refs and not force and not dry:
         raise HTTPException(status_code=409, detail={
             "code_refs": refs,
-            "hint": f"'{src_name}' 被 brain/ 源码引用 — 合并后该名进墓碑, 下代模型"
+            "hint": f"'{src_name}' 被 brain/ 源码引用 - 合并后该名进墓碑, 下代模型"
                     "不再训它, skill 逻辑要同步改。确认请 force=true。"})
 
     # pass 1: 并行找出所有含 src 行的 label 文件
@@ -3211,7 +3211,7 @@ AXIS_COOKIES_FILE = REPO_ROOT / "data" / "axis_cookies.txt"
 def _bili_sessdata_alive() -> "bool | None":
     """B站登录态探测(nav API)。True=有效 / False=实锤失效 / None=网络未知。
     2026-07-14 实锤: SESSDATA 两天就被 B 站轮换作废(isLogin=false), yt-dlp
-    带失效 cookies 会**静默降 480p**(大蛇池首下中招) — 下载前 fail fast。"""
+    带失效 cookies 会**静默降 480p**(大蛇池首下中招) - 下载前 fail fast。"""
     try:
         import http.cookiejar
         import urllib.request
@@ -3242,7 +3242,7 @@ def _axis_probe_video_ok(p: Path) -> "str | None":
             if s.get("codec_type") == "video":
                 v_dur = float(s.get("duration") or 0)
         if fmt_dur > 0 and v_dur > 0 and v_dur < fmt_dur * 0.85:
-            return (f"视频流仅 {v_dur:.0f}s / 容器 {fmt_dur:.0f}s — B站截断试看流"
+            return (f"视频流仅 {v_dur:.0f}s / 容器 {fmt_dur:.0f}s - B站截断试看流"
                     f"(未登录?), 配置 data/axis_cookies.txt 后重下")
     except Exception:
         pass    # 校验自身失败不拦(ffprobe 缺失等), 只拦实锤截断
@@ -3258,10 +3258,10 @@ def axis_download(payload: Dict[str, Any]) -> Dict[str, Any]:
     AXIS_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "yt_dlp"]
     authed = False
-    if AXIS_COOKIES_FILE.exists():          # 文件优先 — 浏览器提取在 Win 上全挂
+    if AXIS_COOKIES_FILE.exists():          # 文件优先 - 浏览器提取在 Win 上全挂
         if "bilibili.com" in url and _bili_sessdata_alive() is False:
             raise HTTPException(status_code=409, detail=(
-                "SESSDATA 已失效(nav isLogin=false) — 带它下载会静默拿 480p。"
+                "SESSDATA 已失效(nav isLogin=false) - 带它下载会静默拿 480p。"
                 "重新导出 SESSDATA 更新 data/axis_cookies.txt 后重试; "
                 "或删除该文件明确走 480p 降级。"))
         cmd += ["--cookies", str(AXIS_COOKIES_FILE)]
@@ -3335,7 +3335,7 @@ def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
     labeled = [t for t in old_txt if t.stat().st_size > 0]
     if (old_jpg or old_txt) and not force:
         raise HTTPException(status_code=409, detail=(
-            f"帧池 {pool} 已有 {len(old_jpg)}帧/{len(labeled)}个非空标注 — 重抽会清池"
+            f"帧池 {pool} 已有 {len(old_jpg)}帧/{len(labeled)}个非空标注 - 重抽会清池"
             f"(标注先备份到 _backups), 确认请带 force=true"))
     if labeled:
         _backup_label_files(labeled, f"extract_{pool}"[:60])
@@ -3345,7 +3345,7 @@ def axis_extract(payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
     # -ss/-t 都放 -i 前(输入选项): 输入 seek 会重置时间戳, `-to` 放输出侧会退化
-    # 成"时长"语义(ffmpeg 8 实测帧数翻倍) — 服务端算好 duration 传 -t 最稳。
+    # 成"时长"语义(ffmpeg 8 实测帧数翻倍) - 服务端算好 duration 传 -t 最稳。
     cmd = ["ffmpeg", "-nostdin", "-y", "-hide_banner", "-loglevel", "warning",
            "-nostats"]
     if ss > 0:
@@ -3597,7 +3597,7 @@ def dataset_florence_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
 # reliable cls, the human then corrects mis-labels (select box  change class
 #  e.g. "X"  "邮件箱") and adds the boxes the model misses. conf is kept LOW
 # (default 0.15) so even weak detections (邮件箱-grade) surface for review.
-# 模型加载已并入 scripts.yolo_prefill_run.get_model(model_key) — single-frame
+# 模型加载已并入 scripts.yolo_prefill_run.get_model(model_key) - single-frame
 # suggest 与整run prefill 共用一套,支持 ui/fused_avatar/emoticon 多 teacher 选择
 # + namemaster remap + 权威类段过滤。
 
@@ -3617,7 +3617,7 @@ def _iou_box(a, b) -> float:
 
 def _parse_target_classes(raw):
     """target_classes payload (master cls name 或 idx 的 list)  set of master
-    idx。None/空 = 不过滤 (标该模型全 span)。用于 label "只标目标 cls" — 飞轮补
+    idx。None/空 = 不过滤 (标该模型全 span)。用于 label "只标目标 cls" - 飞轮补
     单个/几个弱类时只预填它们, 不用标全部。"""
     if not isinstance(raw, list) or not raw:
         return None
@@ -3655,7 +3655,7 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
         h, w = img.shape[:2]
         # Pick the requested teacher (ui|fused_avatar|emoticon|battle_heads),
         # remap its LOCAL class ids  master BY NAME, and keep only boxes inside
-        # that model's authoritative span — so an avatar pass won't suggest a
+        # that model's authoritative span - so an avatar pass won't suggest a
         # spurious UI class on a sprite (and vice-versa). Shared with the 整run
         # prefill so single-frame and batch behave identically.
         from scripts.yolo_prefill_run import get_model, owns_for, is_dup_box, _IMGSZ_BY_TAG  # noqa: PLC0415
@@ -3678,7 +3678,7 @@ def dataset_yolo_suggest(payload: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             raw.append((sc, mi, [x1, y1, x2, y2]))
         raw.sort(key=lambda t: -t[0])  # high conf first
-        # Dedup within this single model's output — any-cls IoU>0.6 + 同类包含型
+        # Dedup within this single model's output - any-cls IoU>0.6 + 同类包含型
         # (is_dup_box, 与整run预标同源: 含血条大框 vs 本体小框 IoU~0.5 漏网根治)。
         kept = []
         for sc, mi, box in raw:
@@ -3706,9 +3706,9 @@ def dataset_yolo_prefill_run(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Batch-prefill every frame in a dataset/run with ONE detector
     (model: ui|fused_avatar|emoticon|battle_heads). mode: 'merge' accumulates
     this model's boxes onto whatever other passes already wrote (shared-frame
-    cross-teacher labeling for the unified model — never erases other classes),
+    cross-teacher labeling for the unified model - never erases other classes),
     'overwrite' keeps only this model's boxes, 'skip' leaves already-labeled
-    frames. Synchronous — ~600 frames ≈ 1 min on GPU. Reuses
+    frames. Synchronous - ~600 frames ≈ 1 min on GPU. Reuses
     scripts/yolo_prefill_run.prefill_run (namemaster remap + span filter +
     dedup). Default mode='skip' preserves the legacy single-pass button."""
     dataset = str(payload.get("dataset") or "")
@@ -4084,7 +4084,7 @@ def step_go_api() -> Dict[str, Any]:
 #   - Ref crop transformation (which fraction of ref to use, shape mask)
 #   - Augmentation knobs (UI overlay probs, border ablation, brightness)
 # build_fused_avatar_dataset.py reads these templates instead of detecting
-# rooms via static_ui — gives the user pixel-perfect control.
+# rooms via static_ui - gives the user pixel-perfect control.
 
 SYNTH_TEMPLATES_DIR = REPO_ROOT / "data" / "synth_templates"
 SYNTH_SAMPLES_DIR = SYNTH_TEMPLATES_DIR / "samples"
@@ -4117,7 +4117,7 @@ def _synth_default_template(ctx: str) -> Dict[str, Any]:
         },
         "synth_count": 200,
         #  UI-model synth (2026-05-29)
-        # target: "avatar" (default — slots labelled with student names for the
+        # target: "avatar" (default - slots labelled with student names for the
         # avatar detector) OR "ui" (slots provide BACKGROUND diversity only;
         # the ui_stamps below are the labelled boxes, with ui-cls indices).
         "target": "avatar",
@@ -4174,7 +4174,7 @@ def synth_templates_list() -> Dict[str, Any]:
 
 @app.get("/api/v1/synth/template/{ctx}")
 def synth_template_get(ctx: str) -> Dict[str, Any]:
-    """Load a template — returns defaults if file doesn't exist yet."""
+    """Load a template - returns defaults if file doesn't exist yet."""
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", ctx)[:64]
     f = SYNTH_TEMPLATES_DIR / f"{safe}.json"
     if f.exists():
@@ -4334,7 +4334,7 @@ def synth_ref_image(cn_name: str):
 
 @app.get("/api/v1/synth/portrait/{cn}")
 def synth_portrait(cn: str):
-    """Small portrait for a fused_avatar cls — schedule-target picker thumbnails.
+    """Small portrait for a fused_avatar cls - schedule-target picker thumbnails.
     Resolves the paren-less 简体 cls  EN via avatar_thumb_map.json (built by
     scripts/build_avatar_thumb_map.py), then serves the 54×59 crop (角色头像_crop/)
     or the large portrait as fallback."""
@@ -4418,7 +4418,7 @@ def synth_characters() -> Dict[str, Any]:
 
 @app.get("/api/v1/avatar_classes")
 def avatar_classes() -> Dict[str, Any]:
-    """fused_avatar model's ACTUAL cls names — what the detector outputs and
+    """fused_avatar model's ACTUAL cls names - what the detector outputs and
     schedule.py Case B matches on (the trained 252-class subset, NOT master's
     308). Read from data/fused_avatar_classes.json (dumped from the .pt
     model.names; re-dump if the avatar model is retrained). Falls back to
@@ -4458,7 +4458,7 @@ def _synth_apply_ui_overlay(ref_img, ui_components, aug_positions=None):
         lv = _random.randint(1, 90)
         text = f"Lv.{lv}" if _random.random() < 0.75 else "MAX"
         font_scale = max(0.35, min(0.65, w / 100.0))
-        # Anchor is text baseline center-ish — offset by char width
+        # Anchor is text baseline center-ish - offset by char width
         tw = int(35 * font_scale); th = int(20 * font_scale)
         x = max(2, min(w - tw - 2, int(nx * w) - tw // 2))
         y = max(th, min(h - 2, int(ny * h) + th // 2))
@@ -4501,7 +4501,7 @@ def _synth_apply_ui_overlay(ref_img, ui_components, aug_positions=None):
 
 
 def _synth_apply_border_ablation(ref_img):
-    """Mirror of build script's apply_border_ablation — random colored bar on
+    """Mirror of build script's apply_border_ablation - random colored bar on
     one or more sides, forces classifier to use avatar pixels not UI frame."""
     import numpy as _np
     import random as _random
@@ -4524,7 +4524,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     payload: {
       "template": {...} (full template JSON from dashboard, not yet saved),
-      "char_cn": "若藻"  (optional — if given, paste this char in all slots;
+      "char_cn": "若藻"  (optional - if given, paste this char in all slots;
                           if not given, pick random chars)
     }
     Returns: { "image_b64": "...", "labels": [{class, name, xyxy}...] }
@@ -4571,7 +4571,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     def load_ref(cn_name: str, prefer_crop: bool = True):
         """Load a ref for the character.
 
-        prefer_crop=True (default for slots): use the 54×59 head crop —
+        prefer_crop=True (default for slots): use the 54×59 head crop -
           matches what game shows in schedule popup / momotalk / etc.
         prefer_crop=False: use the 404×456 half-body portrait (e.g. student
           list cards where bigger art is visible).
@@ -4666,7 +4666,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         aabb_w = aabb_x2 - aabb_x1; aabb_h = aabb_y2 - aabb_y1
         if aabb_w < 8 or aabb_h < 8:
             continue
-        # Preserve ref aspect ratio (COVER: fill AABB, overflow clipped — no bg padding inside)
+        # Preserve ref aspect ratio (COVER: fill AABB, overflow clipped - no bg padding inside)
         rh0, rw0 = cropped.shape[:2]
         if rh0 <= 0 or rw0 <= 0:
             continue
@@ -4683,7 +4683,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             resized = _cv2.resize(cropped, (target_w, target_h), interpolation=_cv2.INTER_AREA)
         except Exception:
             continue
-        #  Apply aug AFTER resize — effects are now sized for slot pixels,
+        #  Apply aug AFTER resize - effects are now sized for slot pixels,
         # so Lv text / star / weapon / heart are visible at game resolution
         aug_pos = (tpl.get("ref_transform") or {}).get("aug_positions") or {}
         if _random.random() < ui_overlay_prob:
@@ -4709,7 +4709,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Center ref in AABB (may overflow AABB on one axis)
         ref_left = aabb_x1 + (aabb_w - target_w) // 2
         ref_top  = aabb_y1 + (aabb_h - target_h) // 2
-        # Clip ref paste region to AABB ∩ image bounds — overflow outside AABB
+        # Clip ref paste region to AABB ∩ image bounds - overflow outside AABB
         # is invisible (clipped here; further clipped by polygon mask if quad)
         clip_x1 = max(0, aabb_x1, ref_left)
         clip_y1 = max(0, aabb_y1, ref_top)
@@ -4745,7 +4745,7 @@ def synth_preview(ctx: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         labels.append({"name": chosen, "xyxy": [px1, py1, px2, py2]})
         #  Overlay: yellow = the slot's TRUE shape (quad polygon or rect).
         # This matches what the user configured in the editor.  We do NOT draw
-        # the inner ref AABB rect anymore (was confusing — looked like the slot
+        # the inner ref AABB rect anymore (was confusing - looked like the slot
         # was axis-aligned even when slot is a parallelogram).
         if quad_px is not None:
             # Thick yellow polygon outline = the slot quad
@@ -4863,7 +4863,7 @@ def api_start(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
     # Join the old worker OUTSIDE _PIPELINE_LOCK (its finally takes the
-    # lock — joining inside would deadlock). Without this, stopstart
+    # lock - joining inside would deadlock). Without this, stopstart
     # runs two workers concurrently ticking taps into the game (审计).
     try:
         _old = _PIPELINE_THREAD

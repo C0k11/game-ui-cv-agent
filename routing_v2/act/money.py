@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""金钱判据 —— **全 bot 唯一的一份**（pages / gate / interrupt 共用）。
+"""金钱判据 -- **全 bot 唯一的一份**（pages / gate / interrupt 共用）。
 
 花钱 = 点确认成交（买AP / 买票 / CAD）。
 站在购买青辉石页、组合包页、特别贩售，不是花钱。
@@ -33,14 +33,14 @@ from routing_v2.percept.observe import Observation
 from routing_v2.state import vocab as V
 
 # 弹窗体 = 顶栏以下、左侧 tab 栏以右。
-# cy<0.12 是顶栏余额；cx<0.12 是商店族页面的**左侧页签栏** ——
+# cy<0.12 是顶栏余额；cx<0.12 是商店族页面的**左侧页签栏** --
 #    「青輝石」tab 的图标就挂在 (0.03, 0.30)，2026-08-08 信用点商店批量购买的
 #    确认框上被它误报 HALT（对话框本体从来不会把价签排到 cx<0.12 去，
 #    BA 的对话框都居中、价格行在中央区）。
 BODY = (0.12, 0.12, 1.0, 1.0)
 CONF = 0.40
 
-# 对话框控件 —— 有这些才说明"这是个流程"，不是个广告位
+# 对话框控件 -- 有这些才说明"这是个流程"，不是个广告位
 _DIALOG_CHROME = [V.CONFIRM, V.CONFIRM_GREY, V.CANCEL, V.QTY_MAX, V.QTY_MAX_GREY,
                   V.QTY_MINUS, V.QTY_MINUS_GREY, V.CURRENCY_QTY_AREA]
 
@@ -54,16 +54,16 @@ _INCOME_STRONG = [V.GOT_REWARD, V.BATTLE_WIN, V.BATTLE_COMPLETE,
                   V.STORY_TAP_CONTINUE,
                   # 羁绊剧情面板：「羈絆劇情獎勵 青辉石x40 + 学生卡」是
                   #   **奖励预览**（08-09 帧证）。有这个键在场 = 在看奖励，
-                  #   不是在付钱 —— 不排除的话每次进羁绊剧情都会误报 halt。
+                  #   不是在付钱 -- 不排除的话每次进羁绊剧情都会误报 halt。
                   V.MOMO_ENTER_BOND, V.MOMO_GOTO_BOND]
 
 # **弱信号**：这些是**页面上的常驻按钮**，不是"这一屏在给你东西"的证据。
 #   2026-08-12 审计实锤：`领取奖励_黄` 是 arena 列表 / 每日任务页的常驻键
 #   （pages.py 自己的注释就这么写的），而 arena 的「時間獎勵 +90/分」是持续
-#   累积、永远领不完的 —— 也就是这个 cls 在战术大赛页上近乎每帧在场。
+#   累积、永远领不完的 -- 也就是这个 cls 在战术大赛页上近乎每帧在场。
 #   离线复现：拿仓库自己那张「購買AP 框」fixture，只额外加一个 `领取奖励_黄`
 #   框，`purchase_context` 就从"购买框"变成 **None**，money_popup 打断跟着
-#   不触发 —— 一个角落里的领取键关掉了三条判据。
+#   不触发 -- 一个角落里的领取键关掉了三条判据。
 #   所以它们只对**最松的那条**（"弹窗体内看见青辉石"）豁免，
 #     对**结构性**判据（購買青輝石+对话框控件 / 双键框内有数量步进器）不豁免。
 #     结构性判据本来就是为了治"青辉石检不出"的盲区，不能被一个词关掉。
@@ -127,7 +127,7 @@ def signin_book_context(obs: Observation) -> Optional[str]:
 def purchase_context(obs: Observation) -> Optional[str]:
     """非 None = 眼前是成交框（买AP/买票/付费确认），不是货架页。"""
     # 2026-08-12 live 误报急停：daily_mission 在「完成每日任務8次以上 8/8
-    #    青辉石x20」那一帧被 halt —— 那是**奖励图标**（收入），不是价签。
+    #    青辉石x20」那一帧被 halt -- 那是**奖励图标**（收入），不是价签。
     #    收入豁免本来是有的，但那一帧上 `全部領取` 黄键**被 Now Loading 盖住**
     #     `income_context` 一个标记都找不到  落到"体内有青辉石=购买框"。
     #    实测该帧只剩 3 个高 conf 框 + `加载中 0.87`，而那个青辉石 conf 只有
@@ -139,7 +139,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
     if obs.has(V.LOADING, 0.40):
         return None
     inc = income_context(obs)
-    # 结构性判据只认强收入信号 —— 常驻领取按钮不许关掉它们
+    # 结构性判据只认强收入信号 -- 常驻领取按钮不许关掉它们
     inc_s = income_context(obs, strong_only=True)
     pyx = obs.find(V.PYROXENE, CONF, region=BODY)
     if pyx is not None:
@@ -171,7 +171,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
             if abs(buy.cx - chrome.cx) > 0.35:
                 return None
             return (f"「購買青輝石」+ 对话框控件（{chrome.cls}）= 购买流程")
-        # 大厅广告位 —— 不是购买框，别停
+        # 大厅广告位 -- 不是购买框，别停
         return None
 
     #  **双键框内有数量步进器 = 购买/兑换框**（08-09 血泪，差点花 30 青辉石）
@@ -182,7 +182,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
     #      数量步进器，那就是在让你**买东西/换东西**。
     #    扫荡确认框（"要使用340AP掃蕩17次嗎"）是**纯文字**、无步进器，不会误拦；
     #      关卡面板的步进器不在双键框里（面板没有取消键），靠 band 排掉。
-    #    误拦的代价只是停下来交人审；漏拦的代价是花青辉石 —— 不对称，宁可误拦。
+    #    误拦的代价只是停下来交人审；漏拦的代价是花青辉石 -- 不对称，宁可误拦。
     cf = _real_control(obs.find(V.CONFIRM, CONF))
     cc = _real_control(obs.find(V.CANCEL, CONF))
     if cf is not None and cc is not None and inc_s is None:
@@ -197,11 +197,11 @@ def purchase_context(obs: Observation) -> Optional[str]:
 
 
 # 退出框只可能从**大厅**弹出来（按返回键）。
-# **不含 facility**（08-09 审查实锤）：`facility` 是常态页 —— schedule 的
+# **不含 facility**（08-09 审查实锤）：`facility` 是常态页 -- schedule 的
 #    全體課程表面板、mining/club 掉 cls 时都落到它。把它当"可能弹退出框"的
 #    底页，会让设施页里的「确认上课/确认制造」被当成退出框点取消  flow 再点
 #    再取消，乒乓到 15 分钟超时（和 08-09「扫荡被取消 38 次」同形）。
-#    pages.py 的 facility 签名本身就是 need=[回大厅,返回键] —— 那恰恰是
+#    pages.py 的 facility 签名本身就是 need=[回大厅,返回键] -- 那恰恰是
 #    **游戏内**的证据，不是退出框的证据。
 LOBBY_LIKE = ("lobby",)
 
@@ -217,13 +217,13 @@ def is_combo_pack_page(obs: Observation) -> bool:
 
 def system_dialog(obs: Observation, last_solid: Optional[str] = None,
                   strict: bool = False) -> Optional[str]:
-    """系统级对话框（不是游戏内容）—— **確認 = 退出游戏**。
+    """系统级对话框（不是游戏内容）-- **確認 = 退出游戏**。
 
     判据：有 確認+取消，但**顶栏一个货币都没有**。游戏内的对话框永远挂在
     某个页面上，顶栏在；系统框把整个 UI 都盖住了。
 
     为什么这条判据必须放在**闸**里而不是 flow 基类里（2026-08-08 血泪）:
-       我先把它写进 `Flow.on_confirm_dialog` 的默认实现 —— 但 craft/shop/
+       我先把它写进 `Flow.on_confirm_dialog` 的默认实现 -- 但 craft/shop/
        event_shop/cafe/schedule/mining/arena/sweep **八个 flow 都覆写了那个方法**，
        于是护栏被整体绕过，craft 照样在退出游戏框上点了確認。
        **闸是每一发 tap 的必经之路，护栏放这里没人绕得过。**
@@ -250,19 +250,19 @@ def system_dialog(obs: Observation, last_solid: Optional[str] = None,
     if obs.has([V.AP, V.CREDIT, V.PYROXENE], 0.35, region=(0.0, 0.0, 1.0, 0.12)):
         return None                      # 顶栏在 = 游戏内对话框，正常
     # 顶栏货币是弱证据：确认框把屏压暗时顶栏常检不出（day2 悬赏扫荡确认
-    #    被误判成退出框）。「有叉叉=游戏框」也错 —— 真实退出框帧上就检出过
+    #    被误判成退出框）。「有叉叉=游戏框」也错 -- 真实退出框帧上就检出过
     #    0.96 的叉叉（离线 fixture 为证，测试当场枪毙了我这版）。
     #    结构证据 = **退出框只会从大厅弹出**：屏上有 返回键/回大厅按钮
     #    = 正在某个设施页里 = 游戏内对话框，放行。
     if obs.has([V.BACK, V.HOME], 0.35):
         return None
     # 同一族的第二条结构证据（2026-08-11 剧情挖矿 live 抓到）：
-    #    **剧情播放页三个都没有** —— 没顶栏、没返回键、没回大厅 ——
+    #    **剧情播放页三个都没有** -- 没顶栏、没返回键、没回大厅 --
     #    于是「是否略過此劇情？」这个纯游戏内对话框被判成疑似退出框，
     #    剧情挖矿链直接卡死在那儿（step 模式下动作链断掉时必现）。
     #    而它有一个大厅**不可能有**的东西：右上角的 `剧情menu`。
     #    退出游戏框只从大厅弹，大厅没有剧情menu  这条判据和上面那条一样硬。
     if obs.has(V.STORY_MENU, 0.40, region=(0.80, 0.0, 1.0, 0.18)):
         return None
-    return "系统对话框（顶栏货币全无、也不在任何设施页上）—— 確認可能是**退出游戏**"
+    return "系统对话框（顶栏货币全无、也不在任何设施页上）-- 確認可能是**退出游戏**"
 

@@ -2,7 +2,7 @@
 """通用模板扩散器: 把一个已定稿的框模板扫遍飞轮池, 产出候选标注 + 自检 sheet.
 
 用途: 某个 cls 判据已在样板帧上人审定稿(几何+假阳排除), 要把它批量铺到
-成千上万张零标注帧上。模板匹配本身就是检测器 — 不需要先用 cls 指纹捞场景
+成千上万张零标注帧上。模板匹配本身就是检测器 - 不需要先用 cls 指纹捞场景
 (指纹选宽会捞错画面, 选窄会漏, 2026-08-02 实测教训)。
 
 纪律(硬编码在流程里, 别绕过):
@@ -49,7 +49,7 @@ def _scan(task) -> tuple:
     """单帧扫描: 返回 (frame, verdict, hits)。hits=[(cx,cy,score)]。"""
     rel, cls_id, thr, dedup_r = task
     txt = (RAW / rel).with_suffix(".txt")
-    # 全池模式下大量帧没有预标 txt —— 无 txt  无 cls 可查, 遮罩闸退化为
+    # 全池模式下大量帧没有预标 txt -- 无 txt  无 cls 可查, 遮罩闸退化为
     # 只靠亮度判据(下方 DIM_V), 这是可接受的降级(宁可多出几张给人审)。
     lines = ([l.split() for l in txt.read_text(encoding="utf-8").splitlines() if l.strip()]
              if txt.exists() else [])
@@ -121,7 +121,7 @@ def main() -> None:
     if args.scan_all:
         # 全池模式: 模板匹配**不依赖预标**, 不必局限在 dedup 后那 7,057 帧。
         # 稀有场景(craft「材料不足」这种一天只出现几秒的)恰恰是被 dedup 当
-        # "近重复"砍掉、或压根没预标的那两万帧里才有量 —— 2026-08-02 实测:
+        # "近重复"砍掉、或压根没预标的那两万帧里才有量 -- 2026-08-02 实测:
         # 预标池里含 craft 開始製造键的只有 11 帧, 全池才是真正的存量。
         all_frames = []
         for d in _flywheel_dirs():
@@ -221,7 +221,7 @@ def main() -> None:
             txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"APPLIED {n} boxes to {len(hits)} frames")
     else:
-        print("(dry run — 人审 sheet 后加 --apply 落盘)")
+        print("(dry run - 人审 sheet 后加 --apply 落盘)")
 
 
 if __name__ == "__main__":

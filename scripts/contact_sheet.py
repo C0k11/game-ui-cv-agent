@@ -2,7 +2,7 @@
 
 Why visual: the live YoloOverlay can be burned into older trajectory captures
 (boxes + dark label bars composited into the pixels). It lags one tick, so no
-pixel/coord heuristic detects it reliably — but it's per-run and unmistakable
+pixel/coord heuristic detects it reliably - but it's per-run and unmistakable
 to the eye. One thumbnail per source run classifies every run at a glance
 (burned frames are dense with colored boxes + text). See
 import_traj_weak_cls.py for the full caveat.

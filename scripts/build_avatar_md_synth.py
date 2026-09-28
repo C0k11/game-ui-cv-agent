@@ -2,7 +2,7 @@
 
 Fixes the negative-label hazard WITHOUT teacher-patching or idx-remapping:
 instead of taking fused_avatar_v1 (avatar-only labels) and bolting UI on, we
-RE-SYNTHESIZE from frames that ALREADY carry BOTH ui + avatar master labels —
+RE-SYNTHESIZE from frames that ALREADY carry BOTH ui + avatar master labels -
 keep every UI/emoticon box's label intact, and rotate the AVATAR boxes through
 all 252 characters. Output frames are multi-domain (ui+avatar) by construction,
 master-idx, so:

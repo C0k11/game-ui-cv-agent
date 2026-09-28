@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""EventQuestSkill — 活动 AP 规划器 (2026-07-08, 机制全 live 实锤后落码).
+"""EventQuestSkill - 活动 AP 规划器 (2026-07-08, 机制全 live 实锤后落码).
 
 用户 AP 分配铁律 (2026-07-08):
   先把「活動點數」关(尾关)刷满里程碑(每200点一档全大件, 10000pt 档有青輝石)
@@ -17,7 +17,7 @@
     错活动  (顺手领免费成就)  back  重试, cap 3 次。
   - 落在 Challenge tab  固定位切 Quest tab (0.635,0.151, 2026-07-07 实测)。
 
-Money (铁律): 全程只走 入场/编队/出击/MAX/扫荡开始/确认/叉/back — 无购买路径。
+Money (铁律): 全程只走 入场/编队/出击/MAX/扫荡开始/确认/叉/back - 无购买路径。
   - 扫荡确认框 gate: body(y>0.12) 检到 青辉石  取消 + abort (fail-closed 黑名单
     backstop; 正向源头闸 = MAX_可点击 才扫, MAX_灰=AP不足 天然不触发買AP框)。
   - 商店购买是独立 skill (event_shop), 本 skill 绝不进商店。
@@ -51,12 +51,12 @@ _WEAK_CONF = 0.20          # 活动皮肤弱类 (活动商店/活动任务/活�
 _ENTER_MAX = 24
 _VERIFY_RETRY_MAX = 10     # 405 轮播重试上限 (双相位修正后期望 ≤3 轮命中)
 _PHASE_MAX = 18
-# `_PHASE_MAX` 是 **tick** 不是秒 —— 实测 tick 速率 0.15~2.3 s/tick, 同一个 "18"
+# `_PHASE_MAX` 是 **tick** 不是秒 -- 实测 tick 速率 0.15~2.3 s/tick, 同一个 "18"
 # 落在 2.7s ~ 41s 之间。凡"等某个东西出现"的地方一律另用墙钟, 别复用它。
 # tick-vs-墙钟家族(2026-07-28): 上面那行注释早就写明了病, 但 enter/verify/
 # unlock/tasks 四处判据还在裸用 tick。全部改「帧数 AND 墙钟」合取(×1.6 等效):
-_ENTER_MAX_SEC = 38.4      # 24×1.6 — enter 等的是 3.2s/张的 banner 轮播
-_PHASE_MAX_SEC = 28.8      # 18×1.6 — verify/milestone/tasks 等整场景加载+领奖链
+_ENTER_MAX_SEC = 38.4      # 24×1.6 - enter 等的是 3.2s/张的 banner 轮播
+_PHASE_MAX_SEC = 28.8      # 18×1.6 - verify/milestone/tasks 等整场景加载+领奖链
 _UNLOCK_QUEST_SEC = 420.0  # unlock **每关**墙钟(战斗 300 + 编队/结算 120),
                            # 旧 518 tick 总和=78-130s, 第一场解锁战打一半就开枪
 _MS_CLAIM_RETRY_SEC = 6.0  # milestone 領取 after-ack(盖 step 门控节奏)
@@ -74,7 +74,7 @@ _PV_READ_SEC = 6.0         # 掃蕩弹窗关号读不出的墙钟重试窗, 超�
 # 90s 给足余量。**绝不能用 tick 计**: 等待期间 _phase_ticks 照涨, 旧的 36 tick
 # 预算全被"等稳定"吃光  survey 没做完就 timeout  跳过 sweep  AP 一点没灌。
 _SURVEY_MAX_SEC = 90.0
-# 时敏目标(hub 活动 banner)的观测新鲜度约定 —— 2026-07-25 用户点破后定死。
+# 时敏目标(hub 活动 banner)的观测新鲜度约定 -- 2026-07-25 用户点破后定死。
 # 405(当期)与 474(上期)交替占**同一槽位**, 从不共存。
 # "看到目标就点"要成立, **"看到"必须是现在**: 观测年龄必须远小于窗口, 否则
 # 你点的是"过去那一帧里的东西", 落到现在的屏幕上就是另一张卡。
@@ -87,23 +87,23 @@ _SURVEY_MAX_SEC = 90.0
 _BANNER_CYCLE_SEC = 3.2
 _BANNER_FRESH_SEC = 0.35
 _SWEEP_OPEN_SEC = 12.0     # 掃蕩開始 迟迟不出现才关窗(必须 > _AP_READ_RETRY_SEC,
-                           # 否则重试窗跑不完就被关窗旁路抢先判死 —— 840AP 真凶)
+                           # 否则重试窗跑不完就被关窗旁路抢先判死 -- 840AP 真凶)
 _TAIL_QUESTS = 4           # 尾部加成关数量 (有时3有时4, 用户 2026-07-08)
 # 进 points 阶段后给这么多秒反复读活動點數; **窗口内一次都不扫荡**。
 # 为什么必须是墙钟且必须挡住扫荡(2026-07-28 第一版实锤): 第一版按**扫荡轮次**
-# 计数(连续 2 轮读不到才判无点数) —— 而 points 阶段的**第 1 轮就是 MAX 扫荡**,
+# 计数(连续 2 轮读不到才判无点数) -- 而 points 阶段的**第 1 轮就是 MAX 扫荡**,
 # 697 AP 一次性花掉 34 次全灌最后一关, 等判出"无点数"转到 Q11 时只剩 17 AP。
 # 判定必须发生在**第一次扫荡之前**, 否则修了等于没修。
 # 4s: 点数条渲染实测 <1s, 留 4 倍余量; 窗口内是 wait 态, 慢 IO 不挡点击热路径。
 _NO_POINTS_SEC = 4.0
 
-# 对话框按钮带 —— 見 `_sweep_flow` 里那段 2026-07-28 的注释。
+# 对话框按钮带 -- 見 `_sweep_flow` 里那段 2026-07-28 的注释。
 # 实测(今天全部帧): 对话框 確認 cy = 0.699 / 0.705 / 0.771 / 0.809;
 # 被误捡的假阳 cy = 0.961(扫荡面板底部); 顶栏 = 0.03。两头都留足余量。
 _DIALOG_BTN_BAND = (0.20, 0.55, 0.82, 0.93)
 # 掃蕩完成框(无取消键)專用带: 只认**落位后**的確認键。
 # 全部实测位: 确认框 0.699 / 弹入中途 0.705 / 0.771 / 完成框稳定 0.809。
-# 下沿取 0.75 —— 排掉 0.699/0.705 两个中途位, 保留 0.771/0.809。
+# 下沿取 0.75 -- 排掉 0.699/0.705 两个中途位, 保留 0.771/0.809。
 _DONE_BTN_BAND = (0.20, 0.75, 0.82, 0.93)
 
 # 固定位 (live 实测, 帧目检):
@@ -114,10 +114,10 @@ _R_POINTS = (0.55, 0.93, 0.82, 0.985)   # quest列表底部 活動點數 "2676/1
 # 任務資訊 popup 獲得期待獎勵 行的 xN 数字带 (2026-07-11 双帧标定:
 # Q09 固定36/Bonus6, Q12 固定36/Bonus35 全中)
 _R_SLOT_FIRST_XN = (0.126, 0.780, 0.172, 0.818)   # 首槽固定掉落 xN
-# _R_SLOT_BONUS_XN 是**固定位**, 而 Bonus 道具是**接在固定道具后面**排的 ——
+# _R_SLOT_BONUS_XN 是**固定位**, 而 Bonus 道具是**接在固定道具后面**排的 --
 # 槽位随道具数左右漂, 固定位标定天生活不过一次改版/一次 Best Record 刷新。
 # 2026-07-25 实锤: 刚给 Q09 打完 Best Record(結算屏白纸黑字 28(+26)最終 54),
-# survey 却读出 `固定x28 vs Bonus x1` 判"烂加成需重打" —— 那个 x1 是第 6 格
+# survey 却读出 `固定x28 vs Bonus x1` 判"烂加成需重打" -- 那个 x1 是第 6 格
 # 「稀有」道具的数量, Bonus 已经漂到第 7 格(cx 0.463)去了。再打一次 = 白烧 20AP。
 #  改**按 cls 锚定**(词表里现成就有 `活动关卡产出额外加成`, 同帧检出 0.97/0.95),
 #   固定位只作降级兜底。这就是"先 grep 词表再发明检测"。
@@ -143,16 +143,16 @@ class EventQuestSkill(BaseSkill):
     """活动 quest AP 规划器: Bonus 解锁  点数优先  货币扫荡  领奖。"""
 
     # no-UI 逃生 (2026-07-09): 405 轮播可能落进模型盲区页(特殊作戰運輸船主页
-    # v13 全零检出) — pipeline no-UI 时按 back 回已知页, 本 skill 恢复重试。
+    # v13 全零检出) - pipeline no-UI 时按 back 回已知页, 本 skill 恢复重试。
     # 2026-07-25 live 实锤必须**限定在入口阶段**: 它是类属性 = 全程武装, 而
     # 战斗一打就是 60-140s **零动作零「加载中」**, pipeline 那三道护栏
     # (亮帧 / 距上次动作<8s / 距加载中<30s) 全部自然过期  结算动画那几个
     # ui 域零框帧凑到 3 个就发 back。当场抓到: 「Battle Complete」屏(01:09
     # 通关, 屏上就一个 確認@0.97)上 pipeline 挂起了 `no-UI escape: back`。
-    # 那一按会把结算/Best Record 注册流程拆掉 —— 而这一整场真打的唯一目的
+    # 那一按会把结算/Best Record 注册流程拆掉 -- 而这一整场真打的唯一目的
     # 就是注册 Best Record。
     #  逃生只在**它被发明出来要救的那个阶段**(入口导航 enter/verify)武装;
-    #   其余阶段(战斗/编队/扫荡/领奖)一律不逃 —— 那些地方的零框帧是动画,
+    #   其余阶段(战斗/编队/扫荡/领奖)一律不逃 -- 那些地方的零框帧是动画,
     #   不是盲区页, 等就对了(no_ba 30-tick abort 兜底仍在)。
     _ESCAPE_PHASES = ("enter", "verify")
 
@@ -192,7 +192,7 @@ class EventQuestSkill(BaseSkill):
         super().__init__("EventQuest")
         # 2026-07-28 用户实锤:「活动只会刷最后一关」。根因两条, 都在下面修:
         #   `_points` 无条件扫 `len(_quests)-1`(最后一关), 只有**点数达标**才
-        #     转 `_currency` 轮转 —— 而本期是**无点数活动**(点数永远读不出),
+        #     转 `_currency` 轮转 -- 而本期是**无点数活动**(点数永远读不出),
         #     于是 AP 全灌最后一关。今天实测: 22 次全给 Q12=兽爪, 而 memory
         #     event_ops_playbook 记的账是 **兽爪过剩 Q12 该暂停**, 缺口在
         #     Q10 卡带(~6,355) 与 Q11 银币(~10,326)。
@@ -222,7 +222,7 @@ class EventQuestSkill(BaseSkill):
         # banner 实例记账(pHash): 点错的轮播项拉黑防复点(情人節同为405)
         self._banner_bad_hashes: list = []
         self._pending_hash = None
-        # ev_marker(活动商店/任务 cls)命中但一直上不了 quest 列表的计数 —
+        # ev_marker(活动商店/任务 cls)命中但一直上不了 quest 列表的计数 -
         # **上期活动(领奖期)主页同样检出这些 cls**(误入午夜派對三连实锤
         # 2026-07-22), 连续 3 次  判 wrong event  拉黑 banner+back。
         self._ev_marker_hits = 0
@@ -232,10 +232,10 @@ class EventQuestSkill(BaseSkill):
         self._auto_insurance = False
         # wrong-event back 后跳过下一次 405 检出。误入根因(20帧@0.45s 实测
         # 钉死 2026-07-22): 轮播 ~2.5s/页, 405@0.97/474@0.93 逐帧交替从不
-        # 共存(v14 训练没问题) — 检出405tap 落屏有 1-2s 延迟, 点下去时轮播
+        # 共存(v14 训练没问题) - 检出405tap 落屏有 1-2s 延迟, 点下去时轮播
         # 已切到 474 卡。back 后立即再点大概率复现同样时序碰撞  跳一次错相。
         self._skip_next_405 = 0
-        # 上次落点是否盲区页(no-UI escape 逃生回 hub) — 决定下次 tap 相位修正
+        # 上次落点是否盲区页(no-UI escape 逃生回 hub) - 决定下次 tap 相位修正
         self._blind_landing = False
         # 加成台账(用户 2026-07-11: 本地记录哪些关打过加成, 记过的不再挨个
         # 开 popup 检查; 没打过的活动内一次性补打)
@@ -257,7 +257,7 @@ class EventQuestSkill(BaseSkill):
         self._surveyed_nums: List[Optional[int]] = []
         self._survey_num: Optional[int] = None
         # 2026-07-25 live 崩溃: `_survey_cy` 以前只在"要开 popup 之前"那一行才
-        # 首次赋值 —— 而 `survey: popup appeared late` 分支(屏上**已经**有 popup,
+        # 首次赋值 -- 而 `survey: popup appeared late` 分支(屏上**已经**有 popup,
         # 比如 pipeline 在 popup 开着时重启)会直接置 _popup_open=True 走去记账,
         # 于是 `self._survey_cy` AttributeError。与 [[money-safety]] 记的
         # `_py_drop_pending` 同一类"从没在 __init__ 初始化"的静默杀手。
@@ -276,7 +276,7 @@ class EventQuestSkill(BaseSkill):
         self._pts_cache: Optional[Tuple[int, int]] = None
         self._pts_read_round: int = -1
         self._points_done = False
-        self._currency_idx = 0        # 货币关轮转指针 — 按**扫荡轮次**推进
+        self._currency_idx = 0        # 货币关轮转指针 - 按**扫荡轮次**推进
         self._cur_round_mark = -1     # 上次推进指针时的 _sweep_rounds
         self._no_pts_t0 = 0.0         # 「等活動點數读出」墙钟窗口起点(0=未开始)
         # 当前开着的**掃蕩弹窗属于哪一关**(2026-07-31 换关假象结案): 身份只
@@ -318,7 +318,7 @@ class EventQuestSkill(BaseSkill):
 
         主路径 = 按 `活动关卡产出额外加成` cls 框外推数字带(槽位会随道具数左右
         漂, 固定位标定活不长); 检不到标签才退回旧固定位。
-        多个 Bonus 槽时取**最左**那个 —— 首个 Bonus 道具与首槽固定道具是同一种
+        多个 Bonus 槽时取**最左**那个 -- 首个 Bonus 道具与首槽固定道具是同一种
         (实测 Q09: 固定 謎樣的痕跡 x28 / Bonus 謎樣的痕跡 x26, 结算屏 28(+26)=54),
         比例判据必须拿同一种道具比, 否则拿"兽爪 vs 卡带"比是无意义的。
         """
@@ -342,7 +342,7 @@ class EventQuestSkill(BaseSkill):
     def _on_quest_list(self, screen: ScreenState) -> bool:
         """活动 quest 列表页特征: ≥2 关卡行 + (关卡得星 或 活动商店/活动任务底栏)."""
         # "新活动首日"盲点(2026-08-07 live 实锤, CODE:BOX 开活动当天):
-        # 旧码只数 `入场键`(已解锁), 要求 ≥2。而**刚开的活动只解锁第 1 关** ——
+        # 旧码只数 `入场键`(已解锁), 要求 ≥2。而**刚开的活动只解锁第 1 关** --
         # 屏上是 1 个 入场键 + 4 个 入场键没解锁  len=1 < 2  verify 恒 False
         #  上层连点 3 次 Quest tab 后判「上期领奖页」back 出去, **整个活动
         # 一关都打不了**, 而 AP 有 909、活動點數 0/15000。
@@ -356,7 +356,7 @@ class EventQuestSkill(BaseSkill):
         # 负特征 (2026-07-09 live 实锤): 特殊作戰運輸船列表也有 入场键+得星_0,
         # 曾骗过 verify  survey 在错活动里跑。「普通关卡选中」= 主线/特殊作戰
         # tab 指示器。2026-07-11 勘误: 活动页选中态 Challenge tab 也会误检成
-        # 普通关卡选中@0.97 — 有活动内铁证(奖励资讯/活动quest tab)时不 veto,
+        # 普通关卡选中@0.97 - 有活动内铁证(奖励资讯/活动quest tab)时不 veto,
         # 交给底栏硬条件判(真·特殊作戰无活动底栏, 本来就过不了)。
         if self.find_cls(screen, "普通关卡选中", conf=0.5) is not None \
                 and self.find_cls(screen, [UC.EVENT_REWARD_INFO, UC.EVENT_QUEST,
@@ -364,11 +364,11 @@ class EventQuestSkill(BaseSkill):
                                   conf=_WEAK_CONF) is None:
             return False
         # 硬条件: 活动专属底栏 (v13 下 活动商店0.98/活动任务0.96 稳; 弱检出
-        # 地板 0.20 兜底)。得星不再单独放行 — 它对特殊作戰无区分度。
+        # 地板 0.20 兜底)。得星不再单独放行 - 它对特殊作戰无区分度。
         has_bottom = self.find_cls(
             screen, [UC.EVENT_SHOP, UC.EVENT_TASK], conf=_WEAK_CONF) is not None
         # Challenge tab 假阳性(2026-07-23 实锤): Challenge 列表同样有 ≥2
-        # 入场键+活动底栏 — 切 Quest tab 点击被稳定门吞后 verify 假 OK
+        # 入场键+活动底栏 - 切 Quest tab 点击被稳定门吞后 verify 假 OK
         # survey 在 Challenge 3 关上死等 4 keys 超时, 全天 swept=0 两连。
         # 正锚: 活动quest_已选择 在屏(Quest tab 真选中); 兜底: 未选中态
         # 活动quest 不在屏 且 检出 关卡得星_3(Challenge 全 0 星/Story 无星)。
@@ -384,7 +384,7 @@ class EventQuestSkill(BaseSkill):
         """任務資訊 popup 特征: 扫荡开始 + 任务开始 同屏.
 
         "首通关卡没有扫荡"(2026-08-07 live, CODE:BOX 开活动当天):
-        旧判据只认**扫荡面板**(掃蕩開始+任務開始) —— 那是**打过一次之后**才有的
+        旧判据只认**扫荡面板**(掃蕩開始+任務開始) -- 那是**打过一次之后**才有的
         形态。**从没打过的关**弹出来的是「章節資訊」+ 一个「進入章節」按钮,
         零扫荡控件  `_on_popup` 恒 False  survey 开了 popup 等不到判定,
         超时关掉、再开、再关…… (用户现场看到的"叉掉了又打开反复几次"),
@@ -452,7 +452,7 @@ class EventQuestSkill(BaseSkill):
 
     #  L1- 列表结构化解析 (2026-07-25)
     # 为什么必须做: 台账主键一直是 **cy**(归一化屏幕纵坐标)。列表一滚动 cy
-    # 全变, 台账整个失效 —— data/event_bonus_state.json 落盘的就是
+    # 全变, 台账整个失效 -- data/event_bonus_state.json 落盘的就是
     # {"0.397": true, "0.871": true, ...} 这种东西。"坐标不是身份"。
     #
     # 关号锚定方式(符合感知铁律: YOLO cls 主导定位, OCR 只读数字):
@@ -463,7 +463,7 @@ class EventQuestSkill(BaseSkill):
     #   单格读出率 **100.0%** / 整帧全对率 **100.0%** / 错 0
     # 验收判据用**结构自洽**当 ground truth(不靠人工标): 同帧自上而下关号
     # 必须是连续递增整数, 满足才算这一帧全对。参数扫了 5 组, 2.4h 最稳
-    # (2.0h 那组会把 08 切成 30 —— 切太紧比切太松危险得多)。
+    # (2.0h 那组会把 08 切成 30 -- 切太紧比切太松危险得多)。
     _QNUM_STRIP_UP = 2.4        # 关号条上边界 = 得星 y1 - 2.4 * 得星高
     _ROW_PAIR_DY = 0.05         # 入场键 <-> 得星 同行的最大 cy 差(实测 ~0.024)
 
@@ -472,14 +472,14 @@ class EventQuestSkill(BaseSkill):
 
         返回 [{"num": int|None, "cy": float, "enter": YoloBox,
                "star": YoloBox|None}, ...]
-        num=None 表示这一行关号没读出来 —— 调用方必须 fail-closed 处理,
+        num=None 表示这一行关号没读出来 -- 调用方必须 fail-closed 处理,
         **绝不允许退回用 cy 当身份**(那正是要消灭的东西)。
         """
         # 行内配对必须收整个得星族(2026-07-25 审计): 未通关行显示的是
         # `关卡得星_0`(已训独立类), 只配 _3 会让开荒期/未通关尾关整行 num=None
         #  关号锚定静默退回 cy 老路, 恰好败在最需要它的 20AP 解锁场景。
         # (sweep/verify 用 _3 当页面身份锚防 Challenge 假阳性的那些点**不改**,
-        # 那是不同用途。_0 的 val 实例=0, 关号条几何只在 _3 行标定过 ——
+        # 那是不同用途。_0 的 val 实例=0, 关号条几何只在 _3 行标定过 --
         # 首个未通关活动期 live 时要盯读出率。)
         stars = [b for b in (screen.yolo_boxes or [])
                  if b.cls_name in (UC.STAGE_STAR_3, UC.STAGE_STAR_0)
@@ -502,7 +502,7 @@ class EventQuestSkill(BaseSkill):
         _nums = [r["num"] for r in rows if r["num"] is not None]
         if _nums:
             self._note_max_stage(max(_nums))
-        # 运行时结构自洽校验(2026-07-25 审计): 与离线验收同款判据 — 同帧关号
+        # 运行时结构自洽校验(2026-07-25 审计): 与离线验收同款判据 - 同帧关号
         # 自上而下必须严格递增。相邻误读(1112)在 1-30 范围闸内完全合法, 一旦
         # 带错号落账 = 真关整个活动期被跳过加成核对。取最长严格递增子序列,
         # 序外的 num 判误读置 None(fail-closed 回 popup/cy 兜底, 绝不带错号行动)。
@@ -519,7 +519,7 @@ class EventQuestSkill(BaseSkill):
             keep = {seq[j][0] for j in max(chains, key=len)}
             for i, r in enumerate(rows):
                 if r["num"] is not None and i not in keep:
-                    self.log(f"关号 {r['num']} 破坏同帧递增序 — 判误读, 置 None")
+                    self.log(f"关号 {r['num']} 破坏同帧递增序 - 判误读, 置 None")
                     r["num"] = None
         return rows
 
@@ -611,7 +611,7 @@ class EventQuestSkill(BaseSkill):
                     self._bonus_ledger = _kept
                     if _dropped:
                         self.log(f"台账里 {_dropped} 条是旧的 cy 主键(坐标当身份) "
-                                 f"— 已作废, 本轮重新核对")
+                                 f"- 已作废, 本轮重新核对")
         except Exception:
             self._bonus_ledger = {}
 
@@ -657,7 +657,7 @@ class EventQuestSkill(BaseSkill):
 
         **体力通道已删除(2026-07-26, 全语料实测证伪)**。
         旧码是 `体力 in body and conf>=0.60  购买框`, 注释宣称
-        "纯AP框体力@0.38 vs 真購買AP框@0.92 干净分离" —— **那个标定是错的**,
+        "纯AP框体力@0.38 vs 真購買AP框@0.92 干净分离" -- **那个标定是错的**,
         样本太少。全语料重测(分母=798 帧"确认+取消同屏", 即本判据的生效语境):
 
           只靠体力通道判出购买框的帧 = **6**, 逐条人审 **6/6 全是纯AP扫荡确认框**
@@ -674,9 +674,9 @@ class EventQuestSkill(BaseSkill):
         实锤代价: 2026-07-25 晚它误杀了一轮 240AP 扫荡(12 次)。
 
         保留的两条通道都正交且实测有效:
-           stepper(MIN/MAX/加减号) 在 body —— 真購買AP框 @0.96/0.97 稳定检出,
+           stepper(MIN/MAX/加减号) 在 body -- 真購買AP框 @0.96/0.97 稳定检出,
              纯AP确认框 **零检出**(dim 盖住底层 popup)。这是最可靠的购买框铁证。
-           青辉石 在 body —— 常漏检(小图标压深色价格条), 但**检到即铁证**,
+           青辉石 在 body -- 常漏检(小图标压深色价格条), 但**检到即铁证**,
              阈值保持 0.20 最大灵敏。
         """
         if self._pyroxene_in_body(screen):
@@ -687,11 +687,11 @@ class EventQuestSkill(BaseSkill):
             if cy <= 0.12 or b.confidence < 0.20:
                 continue
             # stepper 必须在**确认弹窗横向范围内**(2026-07-31 配额首考当场
-            # 误杀): 上面"纯AP框 stepper 零检出"是 MAX 时代**灰态**的实测 —
+            # 误杀): 上面"纯AP框 stepper 零检出"是 MAX 时代**灰态**的实测 -
             # 配额模式下面板 stepper 保持亮态, 隔着 dim 层照样 0.98 检出
             # (实锤帧: MAX_可点击 cx0.84/加号 cx0.79 从弹窗右侧露出  纯AP
             # 80AP×4 扫荡框被 cancel)。历史两帧真購買AP框的弹窗右界≈0.74,
-            # 其 stepper 全在弹窗中央 — cx<0.72 内的 stepper 才是购买框铁证,
+            # 其 stepper 全在弹窗中央 - cx<0.72 内的 stepper 才是购买框铁证,
             # 面板 stepper(cx≥0.78)排除。青辉石通道不加此限(检到即铁证)。
             if b.cls_name in self._BUY_DIALOG_MARKERS and cx < 0.72:
                 return True
@@ -701,20 +701,20 @@ class EventQuestSkill(BaseSkill):
     def exit_report(self):
         """活动的竣工判据 = AP 灌完了没(单关 20AP, 所以 <20 才叫干净)。
 
-        2026-07-25 那次 840 AP 原地报废, skill 出口报的是 "complete" ——
+        2026-07-25 那次 840 AP 原地报废, skill 出口报的是 "complete" --
         流程确实走完了, 活一点没干。两件事必须分开报。"""
         _ap = self._last_ap_read
         _swept = getattr(self, "_swept", 0)
         if _ap is None:
             return ("UNKNOWN",
-                    f"AP 从未成功读出(本轮 swept={_swept}) — **不知道**灌完没")
+                    f"AP 从未成功读出(本轮 swept={_swept}) - **不知道**灌完没")
         if _ap >= 20:
             # 陈旧读数降级(2026-07-25 审计): AP 读点在掃蕩開始/出击**之前**,
-            # rounds-cap/phase-timeout 出口不再重读 — 读数后一轮 MAX 扫最多
+            # rounds-cap/phase-timeout 出口不再重读 - 读数后一轮 MAX 扫最多
             # 花 ~240AP 都不反映。读数后有过消耗就不许拿它报 LEFTOVER。
             if getattr(self, "_ap_spend_after_read", False):
                 return ("UNKNOWN",
-                        f"最后读数 AP={_ap} 但之后还有扫荡/出击消耗未反映 — "
+                        f"最后读数 AP={_ap} 但之后还有扫荡/出击消耗未反映 - "
                         f"真实剩余未知, 本轮 swept={_swept}")
             return ("LEFTOVER",
                     f"还剩 {_ap} AP 没灌进活动(≥20 = 至少还能扫一次), "
@@ -726,34 +726,34 @@ class EventQuestSkill(BaseSkill):
 
         2026-07-25 全仓金钱审计实锤: `_dialog_is_purchase` 只挂在 _sweep_quest
         的两处(993/1003), 而 unlock 链上三处 確認 点击(编队確認 / battle settle /
-        settle)**一个闸都没有** —— 与 schedule.py 那起 30 青辉石事故完全同型:
+        settle)**一个闸都没有** -- 与 schedule.py 那起 30 青辉石事故完全同型:
         上层把「購買AP」框的確認当成结算報告的確認点掉。而 unlock 的 battle 子步
         在长达 _BATTLE_MAX_SEC=300s 的窗口里持续武装 `find_cls(BTN_CONFIRM,0.6)`,
-        期间冒出来的任何確認都会被收下 —— 購買AP 框的確認实测 0.961, 稳稳进门。
+        期间冒出来的任何確認都会被收下 -- 購買AP 框的確認实测 0.961, 稳稳进门。
 
         误伤实测(scratchpad/fp_scan.py, 全 790 run 语料):
           编队/出击屏 2734 帧(其中 272 帧確認在屏)  命中 **0**
           unlock 链真实点击帧(confirm auto-formation 2 + 出击 4)  命中 **0**
         真购买框侧: run_20260711_144712/t30 stepper@0.96 + body体力@0.92 稳定命中
-        (那一帧 body **青辉石一个都没检出** —— 所以绝不能只靠青辉石黑名单)。
+        (那一帧 body **青辉石一个都没检出** -- 所以绝不能只靠青辉石黑名单)。
         代价方向: 误伤 = 少解锁一关加成(策略损失, 明天可补); 漏检 = 花青辉石。
         """
         if not self._dialog_is_purchase(screen):
             return None
-        self.log(f" 购买框结构出现在 {where} — 绝不点確認, 取消/退出")
+        self.log(f" 购买框结构出现在 {where} - 绝不点確認, 取消/退出")
         cancel = self.find_cls(screen, UC.BTN_CANCEL, conf=0.5)
         self._formation_step = ""     # 放弃本关解锁, 不留半截子步
         self._set("close")
         if cancel is not None:
-            return action_click_box(cancel, f"PURCHASE DIALOG @{where} — cancel!")
-        return action_back(f"PURCHASE DIALOG @{where} — back!")
+            return action_click_box(cancel, f"PURCHASE DIALOG @{where} - cancel!")
+        return action_back(f"PURCHASE DIALOG @{where} - back!")
 
     def _read_ap(self, screen: ScreenState) -> Optional[int]:
         """topbar AP 读数(体力icon cls锚定 + 右侧数字strip, span 0.06 只读
         斜杠前; 主tick帧=ADB干净帧)。读不出  None(调用方 fail-closed)."""
         # 2026-07-25 实锤(840 AP 全废的直接原因): 旧码 find_cls 不带 region,
         # 而 find_cls 取的是**全屏 conf 最高**那个框。掃蕩弹窗一开, 对话框体内
-        # 的两个体力图标(cy 0.506/0.681)就跟顶栏那个抢锚点 —— 实测体内 0.94 >
+        # 的两个体力图标(cy 0.506/0.681)就跟顶栏那个抢锚点 -- 实测体内 0.94 >
         # 顶栏 0.93, 于是选中体内的, 紧接着撞上下面 cy>0.12 的门直接 return None。
         # 表现: 弹窗没开时读得出(t041-43), 弹窗一开就"AP 连续 7.7s 读不出
         # fail-closed 收工", 840 AP 原地报废。
@@ -792,7 +792,7 @@ class EventQuestSkill(BaseSkill):
     #  enter / verify
 
     def _enter(self, screen: ScreenState) -> Dict[str, Any]:
-        """感知铁律(2026-07-11): cls 主导 + 极端事件驱动 —
+        """感知铁律(2026-07-11): cls 主导 + 极端事件驱动 -
         目标 cls(405)出现立即点; 加载中wait; 无锁定wait(轮播在转)。"""
         if self._phase_ticks > _ENTER_MAX and self.since("phase_wall") > _ENTER_MAX_SEC:
             return action_done("event_quest enter timeout")
@@ -801,7 +801,7 @@ class EventQuestSkill(BaseSkill):
             self._set("survey")
             return action_wait(300, "on event quest list")
         if screen.is_loading():
-            return action_wait(400, "加载中 loading — wait")
+            return action_wait(400, "加载中 loading - wait")
         # 目标 cls: 405 距離結束還剩 = 进行中活动 banner(hub 轮播实测 0.97)。
         # 474 距離獎勵獲得結束 = 领奖余韵, 不点。情人節同为 405  点错由
         # verify 用 cls 证据识别并 pHash 拉黑该实例, 此处先比对黑名单。
@@ -823,15 +823,15 @@ class EventQuestSkill(BaseSkill):
         # 时敏目标的"新鲜"必须按**目标自己的窗口**定义(2026-07-25 用户点破:
         # "banner轮换有两秒, 怎么可能来不及点… 我要的是逻辑上不打架的看到目标就点,
         # 就和人类一样")。
-        # 旧码 `fresh_age < 1.2` —— 通道名叫 fresh, 却接受 **1.2s 前**的数据, 而
+        # 旧码 `fresh_age < 1.2` -- 通道名叫 fresh, 却接受 **1.2s 前**的数据, 而
         # banner **2s 一换**: 观测本身已用掉 60% 窗口, 再加推理+tap 延迟必然撞换页。
         # 人类是"现在看现在点"(视觉延迟 ~50ms); bot 却拿 1.2s 前的画面点现在的屏。
         # 实锤: tick_0775 帧上 405@0.96  开火  0777(1s后)同坐标已是 474@0.70,
         # 最终进了「秘密的午夜派對」。
         #  阈值改成窗口的一小部分。够不到就**等下一次新鲜观测**, 绝不拿旧数据开火
-        #   —— 等一拍最多损失 ~0.5s, 而误入的代价是整个 verifybackrescan 循环。
+        #   -- 等一拍最多损失 ~0.5s, 而误入的代价是整个 verifybackrescan 循环。
         # 2026-07-25 实测订正: 旧码(含我昨天写的注释)**假设** fresh 通道一定比
-        # 主 tick 帧新, 于是只在 fresh 上开火。埋点数据推翻了这个假设 ——
+        # 主 tick 帧新, 于是只在 fresh 上开火。埋点数据推翻了这个假设 --
         #   主 tick 帧(scrcpy) 帧龄中位 13.8ms / ADB 兜底 1495ms
         #   fresh 通道         帧龄中位 399ms(最大 3366ms)
         #   两者同时可得的 32 个 tick 里, **17 个(53.1%) fresh 反而更旧**。
@@ -858,7 +858,7 @@ class EventQuestSkill(BaseSkill):
                     src_frame = fresh_frame
                     src_tag = f"fresh {fresh_age*1000:.0f}ms"
                     break
-            # 失信裁决(2026-07-11: DXcam 桌面遮挡/窗口错位时 fresh 内容错 —
+            # 失信裁决(2026-07-11: DXcam 桌面遮挡/窗口错位时 fresh 内容错 -
             # 主 tick 帧看得见 banner 而 fresh 完全没有 = 源不可信, 2 次即弃)
             if banner is None and tick_banner is not None:
                 fresh_any = any(b.cls_name in (UC.EVENT_END_LEFT,
@@ -869,11 +869,11 @@ class EventQuestSkill(BaseSkill):
                     if self._fresh_mismatch >= 2:
                         self._fresh_distrust = True
                         self.log("fresh source DISTRUSTED (tick sees banner, "
-                                 "fresh blind) — pure tick mode")
+                                 "fresh blind) - pure tick mode")
         # fresh 不够新时**绝不回落到 tick 帧**: tick 帧允许 _SCRCPY_MAX_AGE=1.0s
-        # 陈旧(server/app.py:1252), 比 fresh 通道**更旧** —— 旧码的兜底路径反而是
+        # 陈旧(server/app.py:1252), 比 fresh 通道**更旧** -- 旧码的兜底路径反而是
         # 更差的数据源。时敏目标上这等于"看不清就闭眼点"。改成: 等下一拍。
-        # (仅当 fresh 源被判定失信时才允许纯 tick 模式 —— 那是 DXcam 桌面遮挡
+        # (仅当 fresh 源被判定失信时才允许纯 tick 模式 -- 那是 DXcam 桌面遮挡
         #  一类的源故障, 此时 tick 帧是唯一可信源, 与"数据太旧"是两回事。)
         if (banner is None and not fresh_usable
                 and fresh is not None
@@ -882,7 +882,7 @@ class EventQuestSkill(BaseSkill):
                    else "?")
             _on = (tick_banner.cls_name if tick_banner is not None else "无")
             return action_wait(120,
-                               f"banner 观测太旧/非当期 — tick帧龄 {_ta}(帧上={_on}) "
+                               f"banner 观测太旧/非当期 - tick帧龄 {_ta}(帧上={_on}) "
                                f"/ fresh帧龄 {fresh_age:.2f}s, 轮播窗口 "
                                f"{_BANNER_CYCLE_SEC}s, 等新鲜一拍再点")
         if banner is None and not fresh_usable:
@@ -898,7 +898,7 @@ class EventQuestSkill(BaseSkill):
                 # (轮播 2.5s/页 + tap 延迟 1-2s, 立即再点大概率复现碰撞)。
                 if self._skip_next_405 > 0:
                     self._skip_next_405 -= 1
-                    return action_wait(2500, "405=刚误入过 — 跳一次错开相位")
+                    return action_wait(2500, "405=刚误入过 - 跳一次错开相位")
                 # 检出即直点一次(用户 2026-07-22 定死)。落点=405 气泡下方
                 # +0.10 徽章本体(卡整体可点, ev_enter cy+0.10 实证)。轮播
                 # 2.5s/页: 检出tap 延迟 >1.5s 会点到切页后的 474 卡(误入
@@ -909,13 +909,13 @@ class EventQuestSkill(BaseSkill):
                 bcx = (b405.x1 + b405.x2) / 2
                 bcy = (b405.y1 + b405.y2) / 2 + 0.10
                 act = action_click(bcx, bcy, "banner tap (405 + 落地前复验)")
-                # 2026-08-07 live 实锤 — 原来这里是 `_atomic_no_gate=True`,
+                # 2026-08-07 live 实锤 - 原来这里是 `_atomic_no_gate=True`,
                 # **主动关掉落点复验去和轮播赛跑**。上面那段注释自己写着
                 # 「检出405tap 落屏延迟 >1.5s 就点到切页后的 474 卡(误入三连根因)」
-                # —— 知道失效模式却选择赛跑, 于是今天又进错上期活动(页面写着
+                # -- 知道失效模式却选择赛跑, 于是今天又进错上期活动(页面写着
                 # 「活動期間已結束」), 整个活动一关没打。
                 # 实测证据: 任務大廳实帧上 v15 检出 `距离奖励获得结束 0.88`
-                # (474, cx0.078 cy0.149) —— **类完全没问题, 信号一直都在**,
+                # (474, cx0.078 cy0.149) -- **类完全没问题, 信号一直都在**,
                 # 是代码把唯一能用的那道闸关了。
                 # 改成定向复验: 落地前用最新帧确认 405 还在屏上, 换页了就丢弃,
                 # 下一拍重来。轮播 2.5s/页, 丢一次最多多等一轮, 远好过进错活动。
@@ -923,7 +923,7 @@ class EventQuestSkill(BaseSkill):
                 return act
         if banner is not None:
             if src_frame is not None and self._banner_blacklisted(screen, src_frame):
-                return action_wait(400, "405=已拉黑实例 — 等轮播下一项")
+                return action_wait(400, "405=已拉黑实例 - 等轮播下一项")
             # 检出即直点一次(用户 2026-07-22 定死), swipe_tap 相位修正已删。
             self._blind_landing = False
             # pHash 记账只在 fresh 模式有意义(tick 错位下"帧上项"≠"落点项",
@@ -931,7 +931,7 @@ class EventQuestSkill(BaseSkill):
             self._pending_hash = (self._banner_phash(screen, src_frame)
                                   if src_frame is not None else None)
             self._set("verify")
-            # 标签必须说清**真实**来源与帧龄 —— 旧码不管走哪条都写 "fresh",
+            # 标签必须说清**真实**来源与帧龄 -- 旧码不管走哪条都写 "fresh",
             # 复盘时看到 'fresh atomic' 会以为观测是新的(实测中位 399ms)。
             tag = src_tag or ("tick+1" if src_frame is None else "?")
             act = action_click_box(banner, f"banner tap ({tag}, 落地前复验, "
@@ -943,19 +943,19 @@ class EventQuestSkill(BaseSkill):
         hub = self.find_cls(screen, UC.NAV_TASKS, conf=_CLS_CONF)
         if hub is not None:
             return action_click_box(hub, "lobby  task hub")
-        # 无锁定: hub 轮播转在 474/卡池项 或 lobby 未识别 — wait 等目标出现;
+        # 无锁定: hub 轮播转在 474/卡池项 或 lobby 未识别 - wait 等目标出现;
         # 久等不出(2 个轮播周期+)才 nav_home 重置。
-        # 等满一个完整轮播周期(2 页×~5s≈24 tick)再 reset — 8 tick(~3s)等不完
+        # 等满一个完整轮播周期(2 页×~5s≈24 tick)再 reset - 8 tick(~3s)等不完
         # 一轮就回大厅重进 = 低效循环(2026-07-22 实锤连续两轮 reset)。
         if self._phase_ticks % 24 == 23:
-            return self.nav_home(screen, "no 405 full carousel — reset")
-        return action_wait(400, "no target cls — wait (carousel)")
+            return self.nav_home(screen, "no 405 full carousel - reset")
+        return action_wait(400, "no target cls - wait (carousel)")
 
     def _verify(self, screen: ScreenState) -> Dict[str, Any]:
-        """落点校验 — cls 证据制(2026-07-11): 有明确 cls 证据才判,
+        """落点校验 - cls 证据制(2026-07-11): 有明确 cls 证据才判,
         转场/无检出/加载中一律 wait(旧版在转场帧 2s 枪毙点对的入口×3)。"""
         if self._on_quest_list(screen):
-            self.log("verify OK — on event quest list")
+            self.log("verify OK - on event quest list")
             self._pending_hash = None            # 点对了, 不拉黑
             self._verify_retries = 0
             self._ev_marker_hits = 0
@@ -963,7 +963,7 @@ class EventQuestSkill(BaseSkill):
             self._set("survey")
             return action_wait(300, "verified event")
         if screen.is_loading():
-            return action_wait(400, "verify: 加载中 loading — wait")
+            return action_wait(400, "verify: 加载中 loading - wait")
         # 证据1: 成就页(情人節式复刻)  顺手领免费  拉黑该 banner 实例
         claim_all = self.find_cls(screen, UC.CLAIM_ALL_YELLOW, conf=0.5)
         if claim_all is not None:
@@ -982,7 +982,7 @@ class EventQuestSkill(BaseSkill):
         if got is not None:
             return action_click(*_POS_TOUCH_CONTINUE, "dismiss reward toast")
         # 证据2前置(2026-07-11 下午 5 连误杀实锤): **选中态 Challenge tab 会被
-        # 误检为 普通关卡选中@0.97(0.839,0.151)** — 同视觉模式。活动开出
+        # 误检为 普通关卡选中@0.97(0.839,0.151)** - 同视觉模式。活动开出
         # Challenge 关后落地默认停 Challenge tab, 旧判序把点对的入口当特殊作戰
         # 枪毙。页上铁证: 奖励资讯@0.96(0.877,0.898) + 活动quest(未选中Quest
         # tab)@0.73(0.635,0.153)  已在目标活动内, 点 Quest tab 切页即可。
@@ -1001,7 +1001,7 @@ class EventQuestSkill(BaseSkill):
             # 冷却 8 tick 等渲染, 冷却中不计数不重点。
             if self._marker_click_cooldown > 0:
                 self._marker_click_cooldown -= 1
-                return action_wait(300, "Quest tab 已点 — 等列表渲染")
+                return action_wait(300, "Quest tab 已点 - 等列表渲染")
             # 计数只在**上一次动作真落地**后才涨(2026-07-25 live 实锤):
             # 旧码无条件 +1, 而下面返回的「切 Quest tab」点击会被 pipeline 帧稳定门
             # 吞掉(活动页有角色待机动画+对话气泡, 帧几乎永远不"稳定")。
@@ -1010,12 +1010,12 @@ class EventQuestSkill(BaseSkill):
             #   suppressed: 'in event  Quest tab (fixed)'                    hits=2
             #    hits>=3  back "wrong event(上期领奖页)"  BRINGUP FREEZE 20 ticks
             # **点击一次都没落地, 却记了三次账**, 于是把**当期活动**误判成上期领奖页
-            # 退出去 —— 与 [[region-switch-truth]] 的 ARROW_LEFT 同一根因(同一道闸、
+            # 退出去 -- 与 [[region-switch-truth]] 的 ARROW_LEFT 同一根因(同一道闸、
             # 同类按钮、第二次犯)。mutate-before-ack 的计数器版本。
             if not self.action_suppressed:
                 self._ev_marker_hits += 1
             else:
-                self.log("切 Quest tab 被稳定门吞 — 不记账, 重发")
+                self.log("切 Quest tab 被稳定门吞 - 不记账, 重发")
             if self._ev_marker_hits >= 3:
                 self._ev_marker_hits = 0
                 # 不 pHash 拉黑(2026-07-22 live 实锤): 误入=tap 延迟撞轮播
@@ -1034,7 +1034,7 @@ class EventQuestSkill(BaseSkill):
             if not self.action_suppressed:
                 self._marker_click_cooldown = 8
             qtab = self.find_cls(screen, UC.EVENT_QUEST, conf=_WEAK_CONF)
-            # reason 带 "Quest tab" —— 已加进 pipeline `_dedup_click` 的点击豁免
+            # reason 带 "Quest tab" -- 已加进 pipeline `_dedup_click` 的点击豁免
             # 词表(见那里的注释): 切 tab 是**幂等**动作(重复点同一个 tab 无副作用),
             # 与"导航进关卡"不同, 不该受帧稳定门约束; 而活动页背景动画让帧几乎永
             # 不稳定, 不豁免就是死锁。
@@ -1059,19 +1059,19 @@ class EventQuestSkill(BaseSkill):
         if self.find_cls(screen, [UC.HUB_BOUNTY, "学院交流会", "战术大赛"],
                          conf=0.5) is not None:
             if self._phase_ticks < 6:
-                return action_wait(300, "hub 仍在屏 — 转场等待窗, 未判 miss")
+                return action_wait(300, "hub 仍在屏 - 转场等待窗, 未判 miss")
             self._pending_hash = None            # 没点进任何页, 不拉黑
             self._verify_retries += 1
             if self._verify_retries > _VERIFY_RETRY_MAX:
                 return action_done("event_quest: carousel retries exhausted")
             self._set("enter")
             self._blind_landing = False
-            return action_wait(300, "still on hub (tap missed) — rescan")
+            return action_wait(300, "still on hub (tap missed) - rescan")
         # 证据4: Challenge tab 落点(活动底栏在, 无入场键)  切 Quest tab
         if self.find_cls(screen, [UC.EVENT_SHOP, UC.EVENT_TASK],
                          conf=_WEAK_CONF) is not None \
                 and not self._enter_keys(screen):
-            self.log("landed on Challenge tab — switching to Quest tab")
+            self.log("landed on Challenge tab - switching to Quest tab")
             return action_click(*_POS_QUEST_TAB, "switch to Quest tab (fixed)")
         # 无证据(转场渲染/模型盲区页)  wait; 超时兜底 back 重扫
         # (墙钟合取: 2.7s 的窗口把「还在加载」和「点错了」混为一谈  白跑
@@ -1083,7 +1083,7 @@ class EventQuestSkill(BaseSkill):
             self._set("enter")
             self._blind_landing = True   # 无证据超时 = 盲区页同型(慢路径)
             return action_back("verify timeout (no evidence)  back, rescan")
-        return action_wait(500, "verify: no cls evidence yet — wait")
+        return action_wait(500, "verify: no cls evidence yet - wait")
 
     #  survey
 
@@ -1106,11 +1106,11 @@ class EventQuestSkill(BaseSkill):
             self._set("close")
             return action_wait(300, "survey timeout")
         # 页面丢失自愈(2026-07-11 live: 点入場后 1s 内被弹回 hub, 无我方
-        # 动作, 原因未明 — 任何被踢出场景一律重进而不是干等超时吃 swept=0)
+        # 动作, 原因未明 - 任何被踢出场景一律重进而不是干等超时吃 swept=0)
         if (self.find_cls(screen, [UC.HUB_BOUNTY, "学院交流会", "战术大赛"],
                           conf=0.5) is not None
                 or self.find_cls(screen, UC.NAV_TASKS, conf=0.5) is not None):
-            self.log("survey: kicked out to hub/lobby — re-enter")
+            self.log("survey: kicked out to hub/lobby - re-enter")
             self._survey_swiped = False
             self._popup_open = False
             self._set("enter")
@@ -1142,7 +1142,7 @@ class EventQuestSkill(BaseSkill):
         if self._popup_open:
             if self._on_popup(screen):
                 # 先停一拍再判(用户 2026-07-11: "点开马上就关, 没好好对比"
-                # — 半渲染帧上 EVENT_BONUS 会漏检  误判已解锁)。settle 1 tick
+                # - 半渲染帧上 EVENT_BONUS 会漏检  误判已解锁)。settle 1 tick
                 # 用稳定帧判, 判据仍是 cls「活动关卡产出额外加成」(0708 双向
                 # 实测: 解锁前 0 检出/解锁后 0.95+; 数字对比=后续升级路径)。
                 if not getattr(self, "_popup_judge_settle", 0):
@@ -1184,7 +1184,7 @@ class EventQuestSkill(BaseSkill):
                              f"Q{self._survey_num} (cy={self._survey_cy:.3f})"
                              f" bonus_unlocked={unlocked}")
                 else:
-                    self.log("survey: duplicate popup (already recorded) — close")
+                    self.log("survey: duplicate popup (already recorded) - close")
                 # 关 popup 后 settle 1 tick 再取 keys (过渡帧检出不全是
                 # 同关反复开合 bug 的根因之一)
                 self._survey_settle = 1
@@ -1197,18 +1197,18 @@ class EventQuestSkill(BaseSkill):
                 # 点击没开出 popup (过渡帧点歪)  放弃本次, 回列表重选同关
                 self._popup_wait = 0
                 self._popup_open = False
-                return action_wait(400, "survey: popup never opened — reselect")
+                return action_wait(400, "survey: popup never opened - reselect")
             return action_wait(600, "waiting survey popup")
         if self._on_popup(screen):
-            # popup 迟到 (开窗动画慢于重选判定) — 续用上次点击的 cy 记账
+            # popup 迟到 (开窗动画慢于重选判定) - 续用上次点击的 cy 记账
             # 但"上次点击"必须真的存在: pipeline 在 popup 已开着时启动/重启
-            # 时本轮从没点过任何关, _survey_num/_survey_cy 都是 None ——
+            # 时本轮从没点过任何关, _survey_num/_survey_cy 都是 None --
             # 那样记账等于把一个来路不明的 popup 的加成结论**扣到某个关号头上**,
             # 台账一旦写错, 那关的加成解锁会被永久跳过。fail-closed: 关掉重来。
             if self._survey_num is None or self._survey_cy is None:
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 self.log("survey: 屏上已有来路不明的 popup(本轮没点过任何关) "
-                         "— 关掉重选, 绝不记账")
+                         "- 关掉重选, 绝不记账")
                 if close is not None:
                     return action_click_box(close, "close survey popup")
                 return action_back("close survey popup (back)")
@@ -1230,7 +1230,7 @@ class EventQuestSkill(BaseSkill):
         # (锁关就是尾部), 或已经等过一轮  有几行打几行。
         _locked = [b for b in (screen.yolo_boxes or [])
                    if b.cls_name == UC.STAGE_ENTER_LOCKED and b.confidence >= _CLS_CONF]
-        # 下限 1(2026-08-07 当场补): 只放宽"关卡少", **不放宽"一关都没读到"** ——
+        # 下限 1(2026-08-07 当场补): 只放宽"关卡少", **不放宽"一关都没读到"** --
         # 弹窗盖住列表的过渡帧 rows=0 也会带着 _locked, 放行会让 _quests 空转。
         if len(rows) == 0 or (len(rows) < self._tail_quests and not _locked
                               and self._phase_ticks < 12):
@@ -1257,7 +1257,7 @@ class EventQuestSkill(BaseSkill):
             self._quests.append({"num": _num, "cy": _cy, "unlocked": True})
             self._surveyed_cys.append(_cy)
             self._surveyed_nums.append(_num)
-            self.log(f"survey: Q{_num} 台账已记加成解锁 — skip popup")
+            self.log(f"survey: Q{_num} 台账已记加成解锁 - skip popup")
             return action_wait(200, "survey: ledger hit, next")
         self._survey_cy = _cy
         self._survey_num = _num
@@ -1277,7 +1277,7 @@ class EventQuestSkill(BaseSkill):
     #  unlock (加成解锁: 自动编队 + 真打一次)
 
     def _unlock(self, screen: ScreenState) -> Dict[str, Any]:
-        # 每关墙钟(2026-07-28): 旧 tick 总和闸在第一场解锁战打到一半就开枪 —
+        # 每关墙钟(2026-07-28): 旧 tick 总和闸在第一场解锁战打到一半就开枪 -
         # 20AP 已花但 settle 没跑到, Best Record 不落账, bot 被丢在战斗屏。
         # since("unlock_quest") 在每关收关处(settle  _unlock_idx+=1)重打点。
         if self.since("unlock_quest") > _UNLOCK_QUEST_SEC:
@@ -1326,7 +1326,7 @@ class EventQuestSkill(BaseSkill):
         # AP<20  跳过解锁直接 points(台账不记, 明天带 AP 优先补打), 绝不
         # 在 AP 不足时往出击链里走。
         # 2026-07-25 极性对齐(全仓金钱审计 #1, 逐条核实属实): 这个闸原来写的是
-        # `if _ap is not None and _ap < 20` = **fail-OPEN** —— AP 读不出(None)
+        # `if _ap is not None and _ap < 20` = **fail-OPEN** -- AP 读不出(None)
         # 直接放行进出击链。而同一文件 978 行那个孪生闸(掃蕩)对**同一个函数的
         # 同一种失败**写的是 `if ap is None or ap < 20`(fail-CLOSED + 6s 墙钟
         # 重试窗), 两个闸极性相反。_read_apNone 是已被 live 反复证实的常态
@@ -1334,7 +1334,7 @@ class EventQuestSkill(BaseSkill):
         # AP 不足时点 出擊  BA 弹「購買AP」框  下游 battle 子步无条件点走屏上
         # 任何確認(已在 _purchase_veto 补闸, 但防线不能只有一层) = 花青辉石。
         # 修成 fail-closed + 复用 _ap_fail_t0 的 6s 重试窗(读失败≠没 AP, 别一次
-        # 抖动就把整个解锁判死 —— 那正是 840 AP 那次的错法)。
+        # 抖动就把整个解锁判死 -- 那正是 840 AP 那次的错法)。
         # 实测支撑(scratchpad): quest 列表屏 1787 帧顶栏体力可锚定 96.0%,
         # 6s 窗口足以吃掉 4% 的瞬时漏检。
         if self._formation_step == "":
@@ -1352,9 +1352,9 @@ class EventQuestSkill(BaseSkill):
                 self._ap_fail_t0 = 0.0
             if _ap is None or _ap < 20:
                 if _ap is not None:
-                    self.log(f"unlock: AP={_ap} <20 无法出击解锁 — 留待明日补打")
+                    self.log(f"unlock: AP={_ap} <20 无法出击解锁 - 留待明日补打")
                 # 清计时器(2026-07-25 审计): 泄漏进 points 阶段会让 sweep 的
-                # 第一次读失败拿陈旧 t0 算出 _el>6s, 6s 重试窗被整个跳过 —
+                # 第一次读失败拿陈旧 t0 算出 _el>6s, 6s 重试窗被整个跳过 -
                 # 单次感知抖动即收工, 复刻 840AP 式整轮报废。
                 self._ap_fail_t0 = 0.0
                 self._set("points")
@@ -1372,7 +1372,7 @@ class EventQuestSkill(BaseSkill):
             if rows:
                 _t = self._quests[self._unlock_idx]
                 _num, cy = _t["num"], _t["cy"]
-                # L1- 收益点: **先按关号找**。旧码只有 cy 最近邻 —— 列表
+                # L1- 收益点: **先按关号找**。旧码只有 cy 最近邻 -- 列表
                 # 一滚动(或过渡帧复位), 同一个 cy 就落在**另一关**上, 于是拿着
                 # 20AP 去解锁了错的关, 而且台账还记成对的那关做过了。
                 hit = next((r for r in rows
@@ -1386,8 +1386,8 @@ class EventQuestSkill(BaseSkill):
                           key=lambda b: abs((b.y1 + b.y2) / 2 - cy))
                 if abs((box.y1 + box.y2) / 2 - cy) <= 0.04:
                     # cy 兜底必须留痕(2026-07-25: 原日志被 _num 门住, 目标关号
-                    # 未知时静默退化 — 与 docstring"绝不坐标当身份"自相矛盾却看不见)
-                    self.log(f"unlock: 关号通道不可用(target={_num}) — 退回 cy 锚定")
+                    # 未知时静默退化 - 与 docstring"绝不坐标当身份"自相矛盾却看不见)
+                    self.log(f"unlock: 关号通道不可用(target={_num}) - 退回 cy 锚定")
                     return action_click_box(box, f"unlock: open quest cy={cy:.3f}")
                 if self._phase_ticks % 3 == 0:
                     return action_swipe(0.75, 0.72, 0.75, 0.42, duration_ms=400,
@@ -1437,28 +1437,28 @@ class EventQuestSkill(BaseSkill):
                 # 加成% 读数 (>0 才值得打; 读不出保守出击)
                 pct_raw = _read_digits(screen.frame, _R_SQUAD_PCT)
                 # 2026-07-25 收紧: 这个读数**是个闸**(读到 0 就跳过出击),
-                # 而它读得很脏 —— 同帧屏上白纸黑字「90%」, 实测读出 `'06'`
+                # 而它读得很脏 -- 同帧屏上白纸黑字「90%」, 实测读出 `'06'`
                 # (region 0.005-0.085 卡在徽章边上)。差一个字符就会当成 0。
                 # 两处 fail-closed:
                 #   只认**干干净净的 0**(整串就是 "0"/"0%"), 脏读一律当读不出
                 #      保守出击(多花 20-30AP), 而不是跳过。
-                #   **绝不写永久台账** —— 台账按关号永久生效, 一旦把有加成的关
+                #   **绝不写永久台账** -- 台账按关号永久生效, 一旦把有加成的关
                 #     记成"做过了", 那关**再也不会**被解锁(自我修复不了)。
                 #     只在本轮内存里标记, 下一轮 survey 用 popup 的真数字重判。
                 _clean = (pct_raw or "").strip().rstrip("%")
                 if _clean == "0":
-                    self.log("unlock: 0% event bonus (raw=%r, 干净读数) — "
+                    self.log("unlock: 0% event bonus (raw=%r, 干净读数) - "
                              "本轮跳过出击, **不写台账**(下轮 survey 重判)"
                              % pct_raw)
                     self._quests[self._unlock_idx]["unlocked"] = True
                     self._formation_step = ""
-                    return action_back("0% bonus — leave formation")
+                    return action_back("0% bonus - leave formation")
                 if pct_raw and _clean.isdigit() and int(_clean) == 0:
                     self.log(f"unlock: bonus% 读到 {pct_raw!r} 像 0 但不干净 "
-                             f"— 当读不出, 保守出击")
+                             f"- 当读不出, 保守出击")
                 # 点 出擊 前**就地复核 AP**(2026-07-25 审计 #1): 上面那个闸
                 # 只在 _formation_step=="" 评估一次, 之后经过 editautoconfirm
-                # 四个子步、几十个 tick 才走到这里 —— 真正花 AP 的是这一下点击,
+                # 四个子步、几十个 tick 才走到这里 -- 真正花 AP 的是这一下点击,
                 # 判据就得贴着它。fail-closed: 读不出/不够一律不点, 绝不靠
                 # "点了看弹什么框" 来试探(那正是 30 青辉石事故的思路)。
                 # 实测: 出击屏 1162 帧顶栏体力可锚定 96.0%(scratchpad/fp_scan 同批)。
@@ -1491,7 +1491,7 @@ class EventQuestSkill(BaseSkill):
         if step == "battle":
             self._battle_ticks += 1
             # 墙钟兜底(2026-07-25): tick 数在 ZERO-WAIT 后不再等价于时间, 而
-            # 真实 tick 速率**测不出来** —— 7 月 39 个 run 全是 step_mode 逐帧
+            # 真实 tick 速率**测不出来** -- 7 月 39 个 run 全是 step_mode 逐帧
             # 门控的, per-run 0.65~8.7 s/tick 全是人工停顿的指纹(实测
             # scratchpad/tick_rate.py)。所以别再拿 tick 当计时器: 战斗超时以
             # 墙钟为准, 与 tick 速率无关。_BATTLE_MAX 保留为轮询次数上限。
@@ -1543,22 +1543,22 @@ class EventQuestSkill(BaseSkill):
         # _sweep_quest 的 `quest_idx < len()` 守卫放行(负数恒小于长度)然后
         # self._quests[-1] 崩在 tick 里。live 走不到(reset 同时清 _quests 和
         # _surveyed_cys, survey 完成必有条目), 但 replay 台上 302 tick 复现 7 次,
-        # 是真实的崩溃路径 — 堵死比留着强。
+        # 是真实的崩溃路径 - 堵死比留着强。
         if not self._quests:
-            self.log("points: _quests 为空(survey 未产出) — 跳过扫荡转 milestone")
+            self.log("points: _quests 为空(survey 未产出) - 跳过扫荡转 milestone")
             self._set("milestone")
             return action_wait(300, "points: no surveyed quest to sweep")
         # 别把慢 IO 放在点击热路径上(2026-07-26, 帧龄埋点查出来的第二类错):
         # `_read_points`  run_digit_ocr, 而 run_digit_ocr 在**帧宽<3200 时会
-        # get_clean_frame() 重抓一张 ADB 4K 帧**(pipeline.py:794-799) —— 主 tick
+        # get_clean_frame() 重抓一张 ADB 4K 帧**(pipeline.py:794-799) -- 主 tick
         # 帧是 scrcpy 1440p(宽 2560), 所以**每次都触发**, 实测阻塞 770-900ms。
         # 实锤 run_20260725_225503/tick_0289: 帧龄 **21.2ms** 一点不旧, 落点上
-        # 也确实有 `skip键@0.987` —— 但决策链中途插了这一下 898ms, 等 tap 下发时
+        # 也确实有 `skip键@0.987` -- 但决策链中途插了这一下 898ms, 等 tap 下发时
         # 掃蕩动画早放完, 那一拍落在结果页的奖励图标上, 弹出道具说明浮窗挡住
         # 確認, skill 卡到 `stuck 20` 才救回来。
         #  与感知铁律"目标 cls 出现立即点, 零人为延迟"直接冲突。
         # 点数只在**扫荡完成后**才变, 每 tick 读纯属浪费  按扫荡轮次 + 墙钟节流。
-        # (两个缓存字段都在 _init_state 初始化 — 见 [[money-safety]] 记的
+        # (两个缓存字段都在 _init_state 初始化 - 见 [[money-safety]] 记的
         #  `_py_drop_pending` 从没初始化导致整条守卫静默死掉那种静默杀手。)
         if (self._sweep_rounds != self._pts_read_round
                 or self.since("pts_read") > 20.0):
@@ -1583,7 +1583,7 @@ class EventQuestSkill(BaseSkill):
             # 无点数活动逃生(2026-07-28 用户实锤「只会刷最后一关」的直接根因):
             # 点数读不出时旧码**无条件**继续扫最后一关, 整轮 AP 全灌一关。
             # memory event_ops_playbook 的定案是「无点数活动只刷最后三关」。
-            # 判定必须在**第一次扫荡之前**完成 —— 见 `_NO_POINTS_SEC` 那段:
+            # 判定必须在**第一次扫荡之前**完成 -- 见 `_NO_POINTS_SEC` 那段:
             # 第一版按扫荡轮次判, 结果第 1 轮 MAX 就把 697 AP 花光了。
             if not self._no_pts_t0:
                 self._no_pts_t0 = self.clock()
@@ -1593,7 +1593,7 @@ class EventQuestSkill(BaseSkill):
                 # 的 ADB 4K 重抓(~900ms)不挡点击热路径。
                 self._pts_cache = self._read_points(screen)
                 if self._pts_cache is not None:
-                    return action_wait(150, "points: 读到点数了 — 下一 tick 按点数走")
+                    return action_wait(150, "points: 读到点数了 - 下一 tick 按点数走")
                 return action_wait(400, f"points: 等活動點數读出 ({_el:.1f}s)")
             self.log(f"points: {_el:.1f}s 内读不到活動點數  判定**本期无点数活动**"
                      f"  转尾关轮转(这是'读不出'不是'没有点数'的资源结论; "
@@ -1608,14 +1608,14 @@ class EventQuestSkill(BaseSkill):
         """货币关轮转 MAX 扫。
 
         优先用**用户显式指定的关号计划**(`event_farm_stages`), 没配就自动兜底成
-        尾关轮转。`_currency_idx` 必须**按扫荡轮次**推进 —— 旧码它从初始化到
+        尾关轮转。`_currency_idx` 必须**按扫荡轮次**推进 -- 旧码它从初始化到
         永远都是 0, 轮转是死的(2026-07-28 用户实锤「只刷最后一关」的第二个根因)。
         """
         n = len(self._quests)
         if n < 2:
             self._set("tasks")
             return action_wait(200, "no currency quests")
-        # 每完成一轮扫荡才转下一关 —— 用 tick 推进会在同一关内乱跳。
+        # 每完成一轮扫荡才转下一关 -- 用 tick 推进会在同一关内乱跳。
         if self._sweep_rounds != self._cur_round_mark:
             self._cur_round_mark = self._sweep_rounds
             self._currency_idx += 1
@@ -1628,13 +1628,13 @@ class EventQuestSkill(BaseSkill):
                 return self._sweep_quest(screen, quest_idx=idx,
                                          phase_after="milestone",
                                          label=f"farm Q{want:02d}")
-            # 关号不在本次 survey 的表里(没解锁/没滚到) —— 报出来别静默降级,
+            # 关号不在本次 survey 的表里(没解锁/没滚到) -- 报出来别静默降级,
             # 否则"我配了刷 Q10 结果它刷别的"这种事永远查不出。
             self.log(f"farm 计划要 Q{want:02d}, 但本轮 survey 表里没有 "
                      f"{[q.get('num') for q in self._quests]}  本轮回退尾关轮转")
 
         # 自动兜底: 尾关轮转(memory 定案「无点数活动只刷最后三关」)。
-        # 旧码从 n-2 起算把最后一关排除在外 —— 那是"点数关已经扫饱"的前提下才
+        # 旧码从 n-2 起算把最后一关排除在外 -- 那是"点数关已经扫饱"的前提下才
         # 成立; 无点数活动没有这个前提, 最后一关同样是货币关, 要一起轮。
         _tail = min(self._tail_quests, n)
         idx = n - 1 - (self._currency_idx % max(1, _tail))
@@ -1655,7 +1655,7 @@ class EventQuestSkill(BaseSkill):
             return action_wait(200, f"{label} sweep phase timeout")
         if not self._on_popup(screen):
             # 弹窗不在屏(真关掉/被确认框·动画盖住)  身份缓存失效, 下次弹窗帧
-            # 重验。这是身份缓存唯一的清除点 — 关窗动作那里绝不清(见下)。
+            # 重验。这是身份缓存唯一的清除点 - 关窗动作那里绝不清(见下)。
             self._popup_vnum = None
             self._pv_fail_t0 = 0.0
         # 结果/确认链
@@ -1669,14 +1669,14 @@ class EventQuestSkill(BaseSkill):
             # 弹窗身份 = 感知不是意图(2026-07-31 换关假象结案, 同病第三例):
             # v1 只问"有没有弹窗"不问是哪关的(07-28, AP697 全灌 Q12);
             # v2 拿"开窗时想开哪关"的意图当身份, 且关窗时**先清状态再发动作**
-            # (mutate-before-ack) — 关窗点击在结果动画期被稳定门吞掉一次, 闸
+            # (mutate-before-ack) - 关窗点击在结果动画期被稳定门吞掉一次, 闸
             # 就永久解除武装  8+2 轮 reason 交替 Q10/Q11 而弹窗从没换过,
             # ~1130AP 全灌 Q11(帧铁证 walk_20260731 022125_015: reason=
             # "farm Q10 round 4" 标题=「11 神秘的電波塔」, 体外复现同帧同状态
             # 闸必触发  运行时身份已被清)。
             # v3(现行): 身份从弹窗标题 OCR 读出(_read_popup_num, 每个弹窗一次,
             # 缓存到弹窗离屏), 读不出超时 fail-closed 关窗重开(宁多关一次不
-            # 扫错关); 关窗动作**绝不清缓存** — 点击被吞时闸下一 tick 仍武装,
+            # 扫错关); 关窗动作**绝不清缓存** - 点击被吞时闸下一 tick 仍武装,
             # 弹窗真关掉后由函数顶部的非弹窗帧失效逻辑自然清。
             _want = (self._quests[quest_idx].get("num")
                      if 0 <= quest_idx < len(self._quests) else None)
@@ -1700,7 +1700,7 @@ class EventQuestSkill(BaseSkill):
                 close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
                 if close is not None:
                     _a = action_click_box(
-                        close, f"{label}: {_why} — 先关掉当前弹窗")
+                        close, f"{label}: {_why} - 先关掉当前弹窗")
                     # 2026-08-01 AP744 剩着收工的根因: 换关 X 被稳定门连吞
                     # phase 预算(confirm 没落地不重置)烧光  提前收口。X 是
                     # 幂等键(弹窗一关 X 即消失, 重发被 JIT bbox 复验丢弃)
@@ -1710,7 +1710,7 @@ class EventQuestSkill(BaseSkill):
                 # ESC 兜底已删(2026-08-01): X 检出 0.97 极稳用不上它, 而它在
                 # 陈旧帧上发出会把**列表页**退掉(live 实锤: 退到 MissionHub,
                 # currency 阶段无恢复路径  本轮轮转直接夭折)。X 没检出=等下一帧。
-                return action_wait(400, f"{label}: {_why} — 等弹窗X出现")
+                return action_wait(400, f"{label}: {_why} - 等弹窗X出现")
             # MAX 可点  点; MAX 灰  AP 不足, 收工
             qmax = self.find_cls(screen, UC.QTY_MAX, conf=_WEAK_CONF)
             qmax_grey = self.find_cls(screen, UC.QTY_MAX_GREY, conf=_CLS_CONF)
@@ -1746,14 +1746,14 @@ class EventQuestSkill(BaseSkill):
                 pass
             if (qmax_grey is not None and plus_grey is not None) or _qty_ready:
                 ss = self.find_cls(screen, UC.SWEEP_START, conf=0.5)
-                # 源头闸(2026-07-11 事故修复): 全灰≠可扫 — AP=0 时点掃蕩開始
+                # 源头闸(2026-07-11 事故修复): 全灰≠可扫 - AP=0 时点掃蕩開始
                 # 会弹「購買AP」框(30青辉石实锤)。扫前必读 topbar AP, 读不出
                 # 或 <20(单次成本) 一律收工, **绝不试探点掃蕩開始**(fail-closed,
                 # 同 special_sweep 0615 教训: 耗尽型扫荡必先读余额)。
                 if ss is not None and self._phase_ticks % 3 == 1:
                     ap = self._read_ap(screen)
                     # 区分"读失败"与"真的不够"(2026-07-25 live 实锤: 一次读
-                    # 不出就收工, **840 AP 原地作废**)。金钱防线一分不松 ——
+                    # 不出就收工, **840 AP 原地作废**)。金钱防线一分不松 --
                     # 仍然只在读到有效值 ≥20 时才点掃蕩開始; 但读失败属于感知
                     # 抖动, 该在墙钟窗口内重试, 而不是把整轮资源判死。
                     if ap is None:
@@ -1783,14 +1783,14 @@ class EventQuestSkill(BaseSkill):
                     # 还没花。旧码在此 +1  _currency 下一 tick 看到轮次变化
                     # 就把轮转指针推到下一关  对着**还没确认的弹窗**走"换关
                     # 先关窗"  每关只点開始就换走, 一个扫荡都确认不了。
-                    # 计数移到 confirm sweep(確認真点出去 = AP 真扣)那里 ——
+                    # 计数移到 confirm sweep(確認真点出去 = AP 真扣)那里 --
                     # 与 craft _start_taps/schedule 落账同族: 按物理动作计数。
                     return action_click_box(ss, f"{label}: 掃蕩開始 (round "
                                                 f"{self._sweep_rounds + 1}, AP={ap})")
                 # 2026-07-25 实锤: 这条旁路**从头到尾没读过 AP**, 却对外宣布
                 # "AP exhausted"。8 tick 在 ZERO-WAIT 下 ≈1.6s(server/app.py:1424
                 # 非 loading wait 一律压 0.12s), **比同文件 _AP_READ_RETRY_SEC=6.0
-                # 还短** —— AP 读不出时的重试返回 action_wait, _phase_ticks 照涨,
+                # 还短** -- AP 读不出时的重试返回 action_wait, _phase_ticks 照涨,
                 # 重试到第 9 tick 就被这里抢先关窗 = 我的重试修复被直接架空,
                 # 840 AP 就是这么没的。
                 # 收紧两点: 掃蕩開始 必须**不在屏**才允许判"开不出来"(在屏说明
@@ -1810,7 +1810,7 @@ class EventQuestSkill(BaseSkill):
                     self._popup_stuck_t0 = 0.0
             return action_wait(600, f"{label}: popup settling")
         # 确认框 (要使用NAP掃蕩N次嗎?)
-        # 2026-07-28 live 实锤 —— 与 840AP 那次**同一个病**(memory completion_gap:
+        # 2026-07-28 live 实锤 -- 与 840AP 那次**同一个病**(memory completion_gap:
         # "任何顶栏读数/角落按钮锚定必须带 region"): 这两个 find_cls **没带 region**,
         # 于是全屏 argmax 捡到了一个 `确认键 conf=0.81 @ cy=0.961`(屏幕最底部,
         # 活动扫荡面板上的东西, 不是对话框按钮)。
@@ -1832,16 +1832,16 @@ class EventQuestSkill(BaseSkill):
             # v13 全盲实锤)  加结构闸: body 有 stepper/体力 = 购买框  取消。
             # 纯AP扫荡确认框 body 只有取消/确认/叉(t56 实锤), 误伤=安全重试。
             if self._dialog_is_purchase(screen):
-                self.log(" purchase-dialog structure in confirm body — "
+                self.log(" purchase-dialog structure in confirm body - "
                          "CANCEL (fail-closed)")
                 self._set("close")
-                return action_click_box(cancel_btn, "PURCHASE DIALOG — cancel!")
+                return action_click_box(cancel_btn, "PURCHASE DIALOG - cancel!")
             if self._cs_fired and self.action_suppressed:
-                # 上一发 confirm 被稳定门吞(确认框还在屏) — 回滚计数再重计,
+                # 上一发 confirm 被稳定门吞(确认框还在屏) - 回滚计数再重计,
                 # 否则一次真确认被记两轮  轮转指针多跳一关。
                 self._swept = max(0, self._swept - 1)
                 self._sweep_rounds = max(0, self._sweep_rounds - 1)
-                self.log(f"{label}: confirm 被吞 — 回滚轮次(不算一轮)")
+                self.log(f"{label}: confirm 被吞 - 回滚轮次(不算一轮)")
             self._cs_fired = True
             self._swept += 1
             # 轮次在这里推进(确认框確認真发出去 = 这轮扫荡真消费), 见上面
@@ -1862,9 +1862,9 @@ class EventQuestSkill(BaseSkill):
             # 掃蕩完成框 (确认键无取消)
             # 同样过结构闸: 取消键偶发漏检时購買AP框会伪装成完成框
             if self._dialog_is_purchase(screen):
-                self.log(" purchase-dialog structure (no-cancel frame) — back off")
+                self.log(" purchase-dialog structure (no-cancel frame) - back off")
                 self._set("close")
-                return action_back("PURCHASE DIALOG suspected — back!")
+                return action_back("PURCHASE DIALOG suspected - back!")
             # 弹入动画中途位不许点(2026-08-02 用户抓包 + 日志铁证):
             # 掃蕩完成框的確認键**稳定位 cy≈0.809**, 但弹入过程中它从 ~0.705
             # 一路滑下来。`_DIALOG_BTN_BAND` 下沿 0.55 把中途位也圈了进去
@@ -1879,7 +1879,7 @@ class EventQuestSkill(BaseSkill):
             done_btn = self.find_cls(screen, UC.BTN_CONFIRM, conf=0.6,
                                      region=_DONE_BTN_BAND)
             if done_btn is None:
-                return action_wait(200, f"{label}: 掃蕩完成框確認键未落位(弹入中) — 等")
+                return action_wait(200, f"{label}: 掃蕩完成框確認键未落位(弹入中) - 等")
             return action_click_box(done_btn, f"{label}: 掃蕩完成 確認")
         # 列表页  开目标关 popup
         rows = self.parse_quest_rows(screen)
@@ -1927,7 +1927,7 @@ class EventQuestSkill(BaseSkill):
             # 獲得獎勵 toast/弹窗动画中途的坐标上。发一发等帧证据, 且
             # _force_settle 走稳定门(别再拿措辞当控制 API)。
             if self._ms_claim_fired and self.since("ms_claim") < _MS_CLAIM_RETRY_SEC:
-                return action_wait(300, "milestone claim 已发 — 等 toast/按钮变灰")
+                return action_wait(300, "milestone claim 已发 - 等 toast/按钮变灰")
             self._ms_claim_fired = True
             self.mark("ms_claim")
             act = action_click_box(claim_y, "milestone: claim reward (黄)")
@@ -1949,18 +1949,18 @@ class EventQuestSkill(BaseSkill):
                       info.x2 + 0.04, info.y2 + 0.02)
             if self.dot_in_region(screen, region, dot_classes=("红点",)):
                 return action_click_box(info, "milestone: 獎勵資訊 (red dot)")
-            self.log("milestone: no red dot on 獎勵資訊 — skip")
+            self.log("milestone: no red dot on 獎勵資訊 - skip")
             self._milestone_done = True
             self._set("tasks")
             return action_wait(200, "no milestone rewards")
         # 2026-07-27 live 实锤(logs tick 151-167): 旧码在这里是
-        # `action_wait(600, "milestone: waiting")` —— 一路等到 `_PHASE_MAX`
+        # `action_wait(600, "milestone: waiting")` -- 一路等到 `_PHASE_MAX`
         # (=18 **tick**, 又一个 tick 当计时器) 超时, 实测空转 17 tick ≈ **30s**。
         # 问题不只是慢: 它把「这一页压根没有獎勵資訊入口」和「入口还没渲染」
         # **混为一谈**, 于是"到底有没有里程碑奖励可领"这个问题被超时吞掉,
-        # 出口(exit_report)也报不出真相 —— 典型的"活干没干净还没人知道"。
+        # 出口(exit_report)也报不出真相 -- 典型的"活干没干净还没人知道"。
         # 改: 短墙钟只等渲染; 窗口过后**明确判定 + 留痕**, 不再空转。
-        # 措辞要诚实 —— 判的是"没找到入口", **不是**"没有奖励"。
+        # 措辞要诚实 -- 判的是"没找到入口", **不是**"没有奖励"。
         if not self._milestone_wait_t0:
             self._milestone_wait_t0 = self.clock()
         _el = self.clock() - self._milestone_wait_t0
@@ -2005,7 +2005,7 @@ class EventQuestSkill(BaseSkill):
                       task_btn.x2 + 0.05, task_btn.y2 + 0.02)
             if self.dot_in_region(screen, region, dot_classes=("红点",)):
                 return action_click_box(task_btn, "tasks: enter 任務 (red dot)")
-            self.log("tasks: no red dot on 任務 — skip")
+            self.log("tasks: no red dot on 任務 - skip")
             self._tasks_done = True
             self._set("close")
             return action_wait(200, "no task rewards")
@@ -2033,7 +2033,7 @@ class EventQuestSkill(BaseSkill):
         if self._phase_ticks > _PHASE_MAX:
             return action_done(f"event_quest exit timeout (swept={self._swept})")
         if self._phase_ticks % 3 != 1:
-            return action_wait(600, "closing — settling")
+            return action_wait(600, "closing - settling")
         close = self.find_cls(screen, UC.BTN_CLOSE_X, conf=_CLS_CONF)
         if close is not None:
             return action_click_box(close, "close popup (X)")

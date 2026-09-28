@@ -120,7 +120,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             #    BOSS 两格处, 10 AP 挂半路)。暂存, 走子开局按**部署方式**定:
             #    这一局自己点过 起点_黄 上队 = 全新开局, 配置声明也不听。
             self.state["pending_skip"] = skip
-            self.log(f"skip_rounds={skip} 已暂存 — 只在真续走(进来时任务已"
+            self.log(f"skip_rounds={skip} 已暂存 - 只在真续走(进来时任务已"
                      f"在图上)时生效")
 
     @staticmethod
@@ -467,7 +467,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
     #    原来是「箭头正下方最近的我方框; 箭头缺席时唯一的我方框」, 依赖
     #    509 走格子_我方。可 509 在大池里**约 40% 框的是敌方/BOSS**
     #    (2,173 框散在 1,640 帧, 带上下文抽 21 张明确敌方 >=8 张, 红底 RANK
-    #     菱形 / BOSS 横幅直接压在框上; 两版自动判据都被骗过 —— 红衣服、
+    #     菱形 / BOSS 横幅直接压在框上; 两版自动判据都被骗过 -- 红衣服、
     #     START 格黄高亮), 手工修不动, 已整类标废案。
     #    箭头则是**结构上只有我方才有**的标记(同样抽 21 张 21/21 干净),
     #    敌方永远没有, 不存在敌我混淆。
@@ -517,8 +517,8 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
                 # 08-30 实锤: 双倍活动缎带把这个 cls 打到 0.25-0.45 一带,
                 #    框也从标题条胀到盖住「任務」大字(y2~0.35), y2+0.08 落进
                 #    卡下死区水面, 7 发全空。两道保险:
-                #    ①偏移封顶在卡底边内(第二排小卡 0.44 起, 0.395 是安全带);
-                #    ②连空 3 发换打法: 直接点框心 -- 标签印在卡上, 框心必在卡内。
+                #    (1)偏移封顶在卡底边内(第二排小卡 0.44 起, 0.395 是安全带);
+                #    (2)连空 3 发换打法: 直接点框心 -- 标签印在卡上, 框心必在卡内。
                 if n >= 3:
                     act.y = t.cy
                 else:
@@ -548,7 +548,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             self.goto("grid", "已经在走格子地图上")
             return wait("进相位 grid")
         # 任務資訊框压在任务上（back 键会弹它, 三键: 中斷任務/重新挑戰/確認;
-        #    中断/重挑 两个 cls 欠拟合, 框常被判成 battle_result）——
+        #    中断/重挑 两个 cls 欠拟合, 框常被判成 battle_result）--
         #    点確認关掉继续, 关掉后地图露出来走上面的接管分支。
         if (st.page in ("battle_result", "unknown")
                 and obs.has(V.CONFIRM, 0.45) and obs.has(V.CLOSE_X, 0.45)):
@@ -963,7 +963,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             sk = int(self.state.pop("pending_skip", 0) or 0)
             if sk and self.state.get("deployed_fresh"):
                 self.log(f"skip_rounds={sk} 配置了, 但本局是全新部署"
-                         f"(自己点的起点上队) — 忽略, 从第 1 步走")
+                         f"(自己点的起点上队) - 忽略, 从第 1 步走")
             elif sk:
                 self.state["round_i"] = sk
                 self.log(f"断点续走: 跳过前 {sk} 步, 从第 {sk + 1} 步开始")
@@ -979,7 +979,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             # 还没上队: 点起点格（黄 = 可部署）。起点降到 0.35 -- 2 章地图
             #    整族 conf 断崖（见下面那条 UNKNOWN 的理由）。
             sp = obs.find(V.GRID_START, 0.35)
-            # 起点悬停▽(543) 只挂在还没上队的起点上方: 有它就点它正下方那格, 别再点
+            # 起点悬停倒三角(543) 只挂在还没上队的起点上方: 有它就点它正下方那格, 别再点
             #    已上队的起点(多起点图 6-1 实证); 它的数量 = 还差几队没上。
             hovers = obs.all(V.GRID_START_HOVER, 0.35)
             under = grid.start_under_hover(obs, hovers[0]) if hovers else None
@@ -987,7 +987,7 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
                 sp = under
             if hovers and self.state.get("hover_n") != len(hovers):
                 self.state["hover_n"] = len(hovers)
-                self.log(f"部署进度: 还有 {len(hovers)} 个起点未上队(悬停▽)")
+                self.log(f"部署进度: 还有 {len(hovers)} 个起点未上队(悬停倒三角)")
             box = ((sp.cx, sp.y1, sp.y2) if under is not None
                    else self.state.get("start_box") or (sp and (sp.cx, sp.y1, sp.y2)))
             if box is not None:

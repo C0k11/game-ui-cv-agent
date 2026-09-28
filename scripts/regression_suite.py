@@ -133,7 +133,7 @@ def main():
     print(f"\nveto失败 {veto_fail} | 功能失败 {warn_fail} | "
           f"通过 {len(cases) - veto_fail - warn_fail}/{len(cases)}")
     if veto_fail or logic_rc == 2:
-        print(" 金钱防线回归失败 — 一票否决, 禁止出货!")
+        print(" 金钱防线回归失败 - 一票否决, 禁止出货!")
         sys.exit(2)
     if warn_fail or logic_rc:
         sys.exit(1)

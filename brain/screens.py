@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Screen semantizer — classify the current SCREEN/PHASE from the bbox set.
+"""Screen semantizer - classify the current SCREEN/PHASE from the bbox set.
 
 用户 2026-06-11 点题: "理解bbox语义, 通过辨别bbox知道现在是什么阶段, 显然我们
 没有这个". This module is that layer: a declarative signature table mapping a
@@ -8,13 +8,13 @@ screen id to the cls constellation that proves we are on it, and
 
 Design rules
 ----
-- Signatures use ANCHOR classes only — stable structural UI (tabs, headers,
+- Signatures use ANCHOR classes only - stable structural UI (tabs, headers,
   fixed buttons). NEVER badges (红点/黄点/绿勾): they come and go with game
   state, not with the screen.
 - `need` = classes that MUST all be present (conf >= MIN_CONF).
 - `any_of` = at least one must be present (when a screen has alternative
   anchors, e.g. a button's active/grey variants).
-- `forbid` = classes that must NOT be present — used to split sibling screens
+- `forbid` = classes that must NOT be present - used to split sibling screens
   (Location Select vs region view both show 課程表 chrome; only the region
   view has 全体课程表).
 - Scoring: all `need` present + one `any_of` + no `forbid`  matched.
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 
 from brain.skills import ui_classes as UC
 # Batch-sweep dialog classes (master 455-468) live in ui_classes now; re-export
-# here — consumers import them from brain.screens (batch_sweep.py). 453/454 are
+# here - consumers import them from brain.screens (batch_sweep.py). 453/454 are
 # UC.SPECIAL_DEFENSE / UC.SPECIAL_CREDIT.
 from brain.skills.ui_classes import (
     SWEEP_BATCH, SWEEP_BATCH_START, SWEEP_BATCH_START_GREY,
@@ -48,7 +48,7 @@ MIN_CONF = 0.45
 SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     #  hub
     "lobby": {
-        # bottom nav bar — require 3 of the entries via any_of pairs is too
+        # bottom nav bar - require 3 of the entries via any_of pairs is too
         # loose; lobby is proven by ANY 3+ of these (handled specially below).
         "need": [],
         "any_of": [UC.NAV_CAFE, UC.NAV_SCHEDULE, UC.NAV_STUDENT, UC.NAV_SOCIAL,
@@ -136,7 +136,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
     },
 
     #  task hall (任務大廳; live walk step 1, 2026-06-11)
-    #  per-activity dots are visible ONLY here — the lobby entry dot is NOT
+    #  per-activity dots are visible ONLY here - the lobby entry dot is NOT
     #   a work signal (user iron rule: enter and scan, never gate at entry).
     "task_hall": {
         "need": [],
@@ -198,7 +198,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
         "forbid": [UC.BTN_CANCEL, SWEEP_PLAN1, SWEEP_PLAN2, UC.SHOP_SELECT_ALL],
     },
 
-    #  dialogs (generic, lowest priority — see _DIALOG_IDS)
+    #  dialogs (generic, lowest priority - see _DIALOG_IDS)
     "confirm_dialog": {
         "need": [UC.BTN_CONFIRM, UC.BTN_CANCEL],
         "any_of": [],
@@ -211,7 +211,7 @@ SCREEN_SIGNATURES: Dict[str, Dict[str, List[str]]] = {
 # "inside some facility" predicate when the specific screen is unknown.
 FACILITY_MARKERS = [UC.BTN_HOME, UC.BTN_BACK]
 
-# Dialogs OVERLAY a screen — report them alongside, not instead.
+# Dialogs OVERLAY a screen - report them alongside, not instead.
 _DIALOG_IDS = {"confirm_dialog"}
 
 
@@ -220,7 +220,7 @@ def classify_screen(yolo_boxes, min_conf: float = MIN_CONF
     """(screen_id, score, overlay_dialog_id|None) from the bbox constellation.
 
     score = matched anchors / signature anchors (0..1). Returns ("unknown",
-    0.0, dialog) when nothing matches — callers must NOT blind-click then.
+    0.0, dialog) when nothing matches - callers must NOT blind-click then.
     """
     present = {b.cls_name for b in (yolo_boxes or [])
                if getattr(b, "confidence", 0.0) >= min_conf}

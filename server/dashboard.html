@@ -9,10 +9,10 @@
 /*  Industrial dark theme (2026-06-10 rework)
  * Dense, flat, tool-grade: neutral graphite surfaces, one restrained
  * steel-blue accent + muted amber for "active/claim" semantics. No
- * gradients, no glows, no hover lifts — state changes are border/bg
+ * gradients, no glows, no hover lifts - state changes are border/bg
  * shifts only. Numbers render in mono. Radii kept small (3-5px). */
 :root{
-  --bg:#121417;            /* app background — neutral graphite */
+  --bg:#121417;            /* app background - neutral graphite */
   --bg2:#1a1d21;           /* panel surface */
   --bg3:#23272d;           /* hover / inputs */
   --bg-soft:#1e2226;       /* sub-panel tint */
@@ -20,7 +20,7 @@
   --border-soft:#272c32;
   --text:#d7dde3;
   --muted:#8a939d;
-  --accent:#4da3d9;        /* steel blue — single primary accent */
+  --accent:#4da3d9;        /* steel blue - single primary accent */
   --accent2:#3b8cc0;
   --accent-soft:rgba(77,163,217,.13);
   --gold:#d9a13d;          /* muted amber (active / claim) */
@@ -321,7 +321,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
             <span style="font-size:11px;color:var(--accent);margin-right:4px;font-weight:600;margin-top:4px">课程表目标</span>
             <div style="position:relative;width:280px">
               <div id="sched_chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:3px"></div>
-              <input id="sched_search" type="text" autocomplete="off" style="width:100%" placeholder="搜索角色名 (如 一花泳装) — 可点选多个" oninput="schedSearch()" onfocus="schedSearch()"/>
+              <input id="sched_search" type="text" autocomplete="off" style="width:100%" placeholder="搜索角色名 (如 一花泳装) - 可点选多个" oninput="schedSearch()" onfocus="schedSearch()"/>
               <div id="sched_dd" style="display:none;position:absolute;z-index:50;left:0;right:0;max-height:180px;overflow:auto;background:#1b1f27;border:1px solid var(--accent);border-radius:4px"></div>
             </div>
           </div>
@@ -336,7 +336,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
             <label style="font-size:12px;color:var(--muted)">间隔/小时
               <input id="sched_interval_hours" type="number" min="1" max="168" value="24" style="width:60px"/>
             </label>
-            <span id="sched_next_fire" style="font-size:11px;color:var(--muted);font-family:var(--mono)">—</span>
+            <span id="sched_next_fire" style="font-size:11px;color:var(--muted);font-family:var(--mono)">-</span>
           </div>
         </div>
         <div class="profile-hint">档案会保存所有以上设置，主号/小号/不同模拟器一键切换。</div>
@@ -363,7 +363,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
         <div style="font-size:12px;color:var(--muted);flex:1;min-width:240px">按顺序执行你启用的收菜模块 · 拖动整行排序，OK 切换启用 · 无 dot 的 skill 会被红黄点检测自动跳过</div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm" id="btn_skills_all_on" title="勾选所有 skill">全选</button>
-          <button class="btn btn-sm" id="btn_skills_all_off" title="取消所有勾选 — 不跑日常，只把档案 / 设置加载">全不选</button>
+          <button class="btn btn-sm" id="btn_skills_all_off" title="取消所有勾选 - 不跑日常，只把档案 / 设置加载">全不选</button>
           <button class="btn btn-sm" id="btn_skills_reset" title="恢复 10-skill 生产顺序">恢复默认</button>
         </div>
       </div>
@@ -477,7 +477,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <span class="tb-lbl">预填</span>
     <button class="btn btn-sm" id="btn_ocr" onclick="annToggleOCR()">OCR</button>
     <button class="btn btn-sm" id="btn_florence" onclick="annRunFlorence()">Florence</button>
-    <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前选择的 teacher 模型预填本帧框 — 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
+    <button class="btn btn-sm" id="btn_yolo" onclick="annRunYolo()" title="用当前选择的 teacher 模型预填本帧框 - 低conf也出, 方便补标/纠错; 选中框后点左侧类别可改类">YOLO预填</button>
     <select id="ann_prefill_model" onchange="annFillVersions()" title="整run预填用哪个模型当 teacher (迭代谁就拿谁的旧稳定版来标)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="ui">ui</option><option value="fused_avatar">头像</option><option value="emoticon">摸头</option><option value="battle_heads">战斗</option></select>
     <select id="ann_prefill_ver" title="模型版本: =prefill推荐teacher(=active), ·live=pipeline在用。UI 默认 v7(2026-06-08 上线, by-cls 0.92 全面最强: 制造入口0->0.97/emoticon/cafe/红黄点都到位, 超 v6c+v5)" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"></select>
     <select id="ann_prefill_mode" title="累加=追加到其他模型已标的框上不覆盖(首次叠标用) / 覆盖=只替换本模型自己段的框、删旧写新、其他模型框(ui/头像)保留(重跑某模型修错用,如调高摸头conf去课程表乱标) / 跳过已标=不碰已标帧" style="padding:3px 6px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px"><option value="merge">累加</option><option value="overwrite">覆盖(仅本模型)</option><option value="skip">跳过已标</option></select>
@@ -507,7 +507,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <span style="width:6px"></span>
       <button class="btn btn-sm" onclick="annMatchSize()" title="尺寸跟随 anchor">=</button>
       <button class="btn btn-sm" onclick="annArrayGenerate()" title="阵列生成 (Shift+G, 选 2 个时用)">⋯N</button>
-      <button class="btn btn-sm" onclick="annStampAction()" title="保存/粘贴 stamp (Shift+T)">⎘</button>
+      <button class="btn btn-sm" onclick="annStampAction()" title="保存/粘贴 stamp (Shift+T)">印</button>
     </span>
     </div>
   </div>
@@ -694,7 +694,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
             <label style="font-size:11px;color:var(--muted)">  Weapon</label>
             <input type="range" id="synth_aug_weapon" min="0" max="1" step="0.05" value="0.4"/>
             <span id="synth_aug_weapon_v" style="font-family:var(--mono);font-size:11px">0.40</span>
-            <label style="font-size:11px;color:var(--muted)">  ️ Heart</label>
+            <label style="font-size:11px;color:var(--muted)">   Heart</label>
             <input type="range" id="synth_aug_heart" min="0" max="1" step="0.05" value="0.2"/>
             <span id="synth_aug_heart_v" style="font-family:var(--mono);font-size:11px">0.20</span>
             <label style="font-size:11px;color:var(--muted)">  Alpha dim</label>
@@ -764,7 +764,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
           <span style="color:#fff;font-weight:600;font-size:13px">Preview · </span>
           <span id="synth_pv_info" style="color:#aaa;font-size:12px;font-family:var(--mono)"></span>
           <div style="margin-left:auto;display:flex;gap:4px;align-items:center">
-            <button onclick="synthPreview()" title="重新生成 (R) — 把当前裁剪/aug 设置应用上看效果" style="padding:4px 10px;background:var(--accent);border:1px solid var(--accent2);color:#0d1116;cursor:pointer;border-radius:3px;font-weight:600">重新生成 (R)</button>
+            <button onclick="synthPreview()" title="重新生成 (R) - 把当前裁剪/aug 设置应用上看效果" style="padding:4px 10px;background:var(--accent);border:1px solid var(--accent2);color:#0d1116;cursor:pointer;border-radius:3px;font-weight:600">重新生成 (R)</button>
             <button onclick="synthRandomPreview()" title="随机角色重新生成" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px">随机</button>
             <span style="width:1px;background:#444;align-self:stretch;margin:0 4px"></span>
             <button onclick="synthPvZoom(1/1.25)" title="缩小 (-)" style="padding:4px 10px;background:#222;border:1px solid #444;color:#fff;cursor:pointer;border-radius:3px;font-family:var(--mono)">−</button>
@@ -810,7 +810,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
 
   <div class="card">
     <div style="display:flex;align-items:center;margin-bottom:8px">
-      <h3 style="margin:0;font-size:13px"> 视频库 <span style="color:var(--muted);font-weight:normal;font-size:11px">(data/axis_videos/ — 手动放文件也会出现在这)</span></h3>
+      <h3 style="margin:0;font-size:13px"> 视频库 <span style="color:var(--muted);font-weight:normal;font-size:11px">(data/axis_videos/ - 手动放文件也会出现在这)</span></h3>
       <div style="flex:1"></div>
       <button class="btn btn-sm" onclick="axisRefresh()"> 刷新</button>
     </div>
@@ -823,7 +823,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
       <div style="flex:1.2;min-width:380px">
         <video id="axis_player" controls style="width:100%;max-height:420px;background:#000;border-radius:4px"></video>
         <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-sm btn-success" onclick="axisSheetStamp()" title="用视频当前时刻新建一行">⏱ 打点</button>
+          <button class="btn btn-sm btn-success" onclick="axisSheetStamp()" title="用视频当前时刻新建一行">打点</button>
           <button class="btn btn-sm" onclick="axisPlayerStep(-1)">-1s</button>
           <button class="btn btn-sm" onclick="axisPlayerStep(-0.1)">-0.1</button>
           <button class="btn btn-sm" onclick="axisPlayerStep(0.1)">+0.1</button>
@@ -868,7 +868,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);display:flex
     <div id="cls_mgr_merge_bar" style="display:none;background:#1b1f27;border:1px solid #facc15;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px"></div>
     <div id="cls_mgr_list" style="flex:1;overflow-y:auto;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--mono)"></div>
     <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.55">
-      合并 = 全库(raw_images + trajectories) label 行 src->dst 重写, src 变 <code>_dead</code> 墓碑占位 — <b>idx 永不移位</b>, 不破 build REMAP / 头像段 143-394 / battle 段路由; 执行前自动备份到 data/raw_images/_backups/。改名 = 原位改 master 行 + 全池 classes.txt 同步。注意 标 <span style="color:#f87171">CODE</span> 的类名被 brain/ 源码引用 — 动之前想清楚: 下代模型训完后 skill 里旧名会失配。
+      合并 = 全库(raw_images + trajectories) label 行 src->dst 重写, src 变 <code>_dead</code> 墓碑占位 - <b>idx 永不移位</b>, 不破 build REMAP / 头像段 143-394 / battle 段路由; 执行前自动备份到 data/raw_images/_backups/。改名 = 原位改 master 行 + 全池 classes.txt 同步。注意 标 <span style="color:#f87171">CODE</span> 的类名被 brain/ 源码引用 - 动之前想清楚: 下代模型训完后 skill 里旧名会失配。
     </div>
   </div>
 </div>
@@ -1062,17 +1062,17 @@ function fillAgentFromProfile(profile){
   if($('exploration_click'))$('exploration_click').checked=Boolean(p.exploration_click);
   if($('notify_on_finish'))$('notify_on_finish').checked=Boolean(p.notify_on_finish);
   if($('notify_webhook_url'))$('notify_webhook_url').value=p.notify_webhook_url||'';
-  // Bounty branches (high-架公路/沙漠鐵道/教室) — default all on
+  // Bounty branches (high-架公路/沙漠鐵道/教室) - default all on
   const _branches = Array.isArray(p.bounty_branches) && p.bounty_branches.length
     ? p.bounty_branches : ['高架公路','沙漠鐵道','教室'];
   if($('bounty_branch_overpass'))$('bounty_branch_overpass').checked=_branches.includes('高架公路');
   if($('bounty_branch_railway'))$('bounty_branch_railway').checked=_branches.includes('沙漠鐵道');
   if($('bounty_branch_classroom'))$('bounty_branch_classroom').checked=_branches.includes('教室');
-  // Cafe invite targets — [1F, 2F] 中文角色名 (matches fused_avatar cls)
+  // Cafe invite targets - [1F, 2F] 中文角色名 (matches fused_avatar cls)
   const _cafeInv = Array.isArray(p.cafe_invite_targets) ? p.cafe_invite_targets : [];
   if($('cafe_invite_1f'))$('cafe_invite_1f').value=_cafeInv[0]||'';
   if($('cafe_invite_2f'))$('cafe_invite_2f').value=_cafeInv[1]||'';
-  // Schedule target students — 中文角色名 list (matches fused_avatar cls)
+  // Schedule target students - 中文角色名 list (matches fused_avatar cls)
   _schedSel = Array.isArray(p.schedule_target_students) ? p.schedule_target_students.slice() : [];
   renderSchedChips();
   // Scheduler block (optional, missing on legacy profiles)
@@ -1095,9 +1095,9 @@ function collectCafeInviteTargets(){
   while(out.length && !out[out.length-1])out.pop();
   return out;
 }
-// Schedule target picker — searchable multi-select over fused_avatar cls (中文
+// Schedule target picker - searchable multi-select over fused_avatar cls (中文
 // cls from /api/v1/synth/characters = master _classes.txt[143:]). Stores the
-// exact cls strings schedule.py Case B matches on — no free-text typos.
+// exact cls strings schedule.py Case B matches on - no free-text typos.
 let _SCHED_ALL=[]; let _schedSel=[];
 async function loadSchedChars(){
   try{ const r=await api('/api/v1/avatar_classes'); _SCHED_ALL=Array.isArray(r&&r.characters)?r.characters:[]; }
@@ -1285,7 +1285,7 @@ async function agentRefresh(){
     else{
       hud.style.display='block';
       hud.className='routine-hud';
-      $('routinePhase').textContent=pp.current_skill||'—';
+      $('routinePhase').textContent=pp.current_skill||'-';
       const tot=(pp.total_skills>0)?pp.total_skills:6;
       const si=pp.skill_index||0;
       $('routineProgressBar').style.width=`${Math.min(((si+1)/tot)*100,100)}%`;
@@ -1302,7 +1302,7 @@ async function agentRefresh(){
     $('status_pill').className='pill bad';$('status_pill').textContent='Offline';
     $('status_text').textContent='Status: '+e.message;
   }
-  // Scheduler widget — independent of main status so one failure doesn't
+  // Scheduler widget - independent of main status so one failure doesn't
   // hide the other.
   try{
     const sched=await api('/api/v1/scheduler/status');
@@ -1359,7 +1359,7 @@ $('profile_select').onchange=async()=>{try{await api('/api/v1/config',{method:'P
   renderSkillList(defaults,defaults);saveAgent();
   try{await api('/api/v1/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:{skill_order:defaults}})});$('skill_plan_status').textContent='已恢复默认顺序';}catch(e){$('skill_plan_status').textContent='恢复失败';}
 };
-// Bulk select-all / select-none — when user wants to skip dailies
+// Bulk select-all / select-none - when user wants to skip dailies
 // entirely (just load profile) or quickly re-enable everything they
 // turned off.  Preserves current row ORDER, only toggles checkboxes.
 function _setAllSkillChecks(checked){
@@ -1370,13 +1370,13 @@ function _setAllSkillChecks(checked){
   saveAgent();updateSkillPlanStatus();
 }
 $('btn_skills_all_on').onclick=()=>{_setAllSkillChecks(true);$('skill_plan_status').textContent='已全部启用';};
-$('btn_skills_all_off').onclick=()=>{_setAllSkillChecks(false);$('skill_plan_status').textContent='已全部关闭 — Start 后不会执行任何 skill';};
+$('btn_skills_all_off').onclick=()=>{_setAllSkillChecks(false);$('skill_plan_status').textContent='已全部关闭 - Start 后不会执行任何 skill';};
 
 ['game_exe_path','window_title','steps','step_sleep_s','ap_purchase_limit','event_max_rounds','event_ap_reserve','goal','dry_run','forbid_premium_currency','exploration_click','account_label','notify_on_finish','notify_webhook_url','bounty_branch_overpass','bounty_branch_railway','bounty_branch_classroom'].forEach(id=>{
   const el=$(id);if(!el)return;el.addEventListener('change',saveAgent);
 });
 
-// Favorites — ordered array with priority numbers
+// Favorites - ordered array with priority numbers
 // #1 = 1F cafe invite, #2 = 2F cafe invite, all = schedule matching
 let favoritesOrder=[];     // ordered array of filenames
 let allAvatars=[];         // full list from API
@@ -1488,11 +1488,11 @@ async function loadFavorites(attempt=0){
     });
     renderFavoritesTray();applyGridFilter();
   }catch(e){
-    // Backend may still be starting — retry, then surface a clickable error
+    // Backend may still be starting - retry, then surface a clickable error
     // (the old silent catch left the grid permanently empty).
     if(attempt<3){setTimeout(()=>loadFavorites(attempt+1),1500*(attempt+1));return;}
     const grid=$('char_grid');
-    grid.innerHTML='<div class="char-grid-err" onclick="loadFavorites(0)">头像加载失败(后端未就绪?) — 点击重试</div>';
+    grid.innerHTML='<div class="char-grid-err" onclick="loadFavorites(0)">头像加载失败(后端未就绪?) - 点击重试</div>';
   }
 }
 $('fav_search')?.addEventListener('input',applyGridFilter);
@@ -1550,7 +1550,7 @@ function updateCapDestHint(){
   if(split==='val'){
     purposeWrap.style.display='';
     const purpose=$('cap_purpose').value;
-    hint.textContent=`-> _val_${purpose}/frames/ (append to val pool — never used for training)`;
+    hint.textContent=`-> _val_${purpose}/frames/ (append to val pool - never used for training)`;
     hint.style.color='#f97316';
   }else{
     purposeWrap.style.display='none';
@@ -1582,7 +1582,7 @@ $('btn_cap_stop').onclick=async()=>{
 };
 
 /*
-   ANNOTATE PAGE — Zoom/Pan Canvas + OCR
+   ANNOTATE PAGE - Zoom/Pan Canvas + OCR
     */
 const COLORS=["#ef4444","#22c55e","#3b82f6","#eab308","#a855f7","#06b6d4","#f97316","#8b5cf6","#10b981","#ec4899","#84cc16","#0ea5e9","#f43f5e","#4ade80","#818cf8","#facc15","#c084fc","#2dd4bf","#fb923c","#a3e635"];
 let ANN={
@@ -2015,7 +2015,7 @@ async function annLoadDatasets(){
     // 代数 badge: 当前各域 live 模型 (各域最强策略)
     const genEl=$('ann_generation');
     if(genEl){
-      genEl.textContent=`代号 ${gen.label||'?'}  live分域: UI ${gen.ui_live||'?'} · 头像 ${gen.avatar||'?'} · 摸头 ${gen.emoticon||'?'}  unified ${gen.unified||'—'}`;
+      genEl.textContent=`代号 ${gen.label||'?'}  live分域: UI ${gen.ui_live||'?'} · 头像 ${gen.avatar||'?'} · 摸头 ${gen.emoticon||'?'}  unified ${gen.unified||'-'}`;
     }
     _annDsCache.items=ds.datasets||[];
     _annDsCache.lbl=gen.label||'下代';
@@ -2048,7 +2048,7 @@ async function annLoadDataset(){
   ANN.dataset=ds;
   // U3 + U1 + Phase 1/2: cross-dataset reset. New dataset -> new images cache,
   // new history. Selection cleared (idx no longer makes sense).
-  // BUT keep clipboard / groupClipboard / stamp ACROSS dataset switches —
+  // BUT keep clipboard / groupClipboard / stamp ACROSS dataset switches -
   // the whole point of those is to let you copy in train and paste in val
   // (class IDs are remapped by name at paste time, see Ctrl+V handler).
   _annCacheClear();
@@ -2083,7 +2083,7 @@ function annBuildClassList(){
     // Click behaviour:
     //  - boxes selected -> REASSIGN their class to this one (the "select a
     //    box -> change its bbox class, e.g. X->邮件箱" workflow, works for ALL
-    //    157+ classes via the search filter — number keys only reach 0-9).
+    //    157+ classes via the search filter - number keys only reach 0-9).
     //  - nothing selected -> set the draw-class for new boxes (old behaviour).
     d.onclick=()=>{
       const sel=_annSelected();
@@ -2165,7 +2165,7 @@ function annFindFrames(){
   const tag = Array.from(targetIdx).map(i => `${i}:${ANN.classes[i]||'?'}`).join(', ');
   countEl.textContent = `${matches.length} 张 frame 含 [${tag}]`;
   if (!matches.length) {
-    listEl.innerHTML = `<div style="padding:6px;color:#22c55e">OK "${q}" 在当前 dataset 里 0 frames — 干净的</div>`;
+    listEl.innerHTML = `<div style="padding:6px;color:#22c55e">OK "${q}" 在当前 dataset 里 0 frames - 干净的</div>`;
     return;
   }
   listEl.innerHTML = '';
@@ -2271,7 +2271,7 @@ function annDraw(){
       const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(lbl_scr.x,lbl_scr.y-fs-4,tm.width+6,fs+4);
       ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,lbl_scr.x+3,lbl_scr.y-4);
       if(isAnchor){
-        // vertex handles (white) — only on anchor, not on multi-selected
+        // vertex handles (white) - only on anchor, not on multi-selected
         lb.points.forEach(p=>{
           const ps=img2scr(p.x*ANN.imgW,p.y*ANN.imgH);
           ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
@@ -2320,7 +2320,7 @@ function annDraw(){
     const tm=ctx.measureText(labelText);ctx.fillStyle=color;ctx.globalAlpha=0.85;ctx.fillRect(-bw/2,-bh/2-fs-4,tm.width+6,fs+4);
     ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.fillText(labelText,-bw/2+3,-bh/2-4);
     if(isAnchor){
-      // corner handles — only on anchor, not on multi-selected
+      // corner handles - only on anchor, not on multi-selected
       [[-bw/2,-bh/2],[bw/2,-bh/2],[-bw/2,bh/2],[bw/2,bh/2]].forEach(([hx,hy])=>{
         ctx.fillStyle='#fff';ctx.strokeStyle=color;ctx.lineWidth=2;
         ctx.beginPath();ctx.arc(hx,hy,HANDLE,0,Math.PI*2);ctx.fill();ctx.stroke();
@@ -2540,7 +2540,7 @@ annCanvas.addEventListener('pointerdown',e=>{
     //   plain click on UNSELECTED box -> single-select (clears multi)
     //   plain click on ALREADY-SELECTED box -> KEEP selection, promote to anchor
     //     (so user can immediately drag the whole group; clicking an in-group
-    //      box must not collapse the multi-selection — that's the bug fix.)
+    //      box must not collapse the multi-selection - that's the bug fix.)
     if(e.shiftKey){
       if(_annSelHas(hit)) _annSelRemove(hit); else _annSelAdd(hit);
     } else if(e.ctrlKey){
@@ -2549,7 +2549,7 @@ annCanvas.addEventListener('pointerdown',e=>{
       if(!_annSelHas(hit)){
         _annSelSingle(hit);
       } else if(hit !== ANN.selIdx){
-        // demote old anchor into selSet, promote hit to anchor — preserves group
+        // demote old anchor into selSet, promote hit to anchor - preserves group
         if(ANN.selIdx >= 0) ANN.selSet.add(ANN.selIdx);
         ANN.selSet.delete(hit);
         ANN.selIdx = hit;
@@ -2748,7 +2748,7 @@ annCanvas.addEventListener('pointerup',e=>{
       if(ANN.lassoMode==='remove'){
         for(const i of inside) _annSelRemove(i);
       } else {
-        // 'add' (or 'replace' if no modifier — but pointerdown forces shift/ctrl)
+        // 'add' (or 'replace' if no modifier - but pointerdown forces shift/ctrl)
         for(const i of inside) _annSelAdd(i);
       }
     }
@@ -2806,7 +2806,7 @@ document.addEventListener('keydown',e=>{
   if(k==='Escape' && (ANN.selIdx>=0 || ANN.selSet.size>0)){
     _annSelClear();annDraw();return;
   }
-  // L9: Ctrl+C / Ctrl+V — single OR group (preserve relative positions on paste).
+  // L9: Ctrl+C / Ctrl+V - single OR group (preserve relative positions on paste).
   // Cross-dataset safe: clipboard stores class NAME alongside id; on paste,
   // class id is remapped via current dataset's class table. Unmappable
   // classes are dropped with a toast count.
@@ -2917,7 +2917,7 @@ document.addEventListener('keydown',e=>{
   // X1 Shift+G: array generation. Select exactly 2 boxes (first + last),
   // press Shift+G, input N (total count), system generates N-2 intermediate
   // boxes at equal spacing between them. Massive win for grid UI (row of 60
-  // yellow dots etc.) — 2 clicks + 1 prompt instead of 60 clicks.
+  // yellow dots etc.) - 2 clicks + 1 prompt instead of 60 clicks.
   if(e.shiftKey&&!e.ctrlKey&&(k==='g'||k==='G')){
     e.preventDefault();
     annArrayGenerate();
@@ -2933,7 +2933,7 @@ document.addEventListener('keydown',e=>{
   }
 
   // U2: Shift+V copies ALL labels from previous frame (wraps around).
-  // Destructive (replaces current frame's labels) but safe — Ctrl+Z restores.
+  // Destructive (replaces current frame's labels) but safe - Ctrl+Z restores.
   if(e.shiftKey&&!e.ctrlKey&&(k==='v'||k==='V')){
     e.preventDefault();
     const n = ANN.data.length;
@@ -2997,7 +2997,7 @@ document.addEventListener('keydown',e=>{
 // navigation
 // G2: awaits the save POST before navigating so we never lose in-memory
 // edits to a race. If the save fails, dirty stays true, toast is shown,
-// and navigation is aborted — user keeps their edits and can retry.
+// and navigation is aborted - user keeps their edits and can retry.
 async function annAutoSave(fn){
   if(ANN.dirty){
     await annSave();
@@ -3072,7 +3072,7 @@ async function annRunYolo(){
     suggestions.forEach(s=>{
       let cls=ANN.classes.indexOf(s.label);
       if(cls<0){
-        // server appended this label to the master registry — mirror it
+        // server appended this label to the master registry - mirror it
         // locally at the SAME master index so cls numbering stays in sync.
         cls=(typeof s.cls==='number'&&s.cls>=0)?s.cls:ANN.classes.length;
         while(ANN.classes.length<=cls) ANN.classes.push('');
@@ -3097,7 +3097,7 @@ async function annRunYolo(){
 
 // Batch-prefill EVERY frame in the current run with the ui model (writes a
 // label .txt per image). Skips frames that already have labels so it won't
-// clobber edits. Synchronous server-side (~1min/600帧) — button shows busy,
+// clobber edits. Synchronous server-side (~1min/600帧) - button shows busy,
 // then we reload the dataset to render the freshly-written boxes.
 async function annPrefillRun(){
   if(!ANN.dataset){showToast('先选一个数据集','error',2000);return;}
@@ -3169,7 +3169,7 @@ async function annSave(){
     }catch(e){
       console.error('Save failed:',e);
       showToast(`保存失败 (${item.img}): ${e.message||e}`,'error',6000);
-      // dirty stays true intentionally — user keeps in-memory edits
+      // dirty stays true intentionally - user keeps in-memory edits
     }finally{
       _annSavingPromise=null;
     }
@@ -3228,7 +3228,7 @@ function annStampAction(){
   const sel = _annSelected();
   if(sel.length > 0 && !ANN.stamp){
     // Save as stamp on first invocation with selection (tag class names for
-    // cross-dataset paste — same scheme as Ctrl+C clipboard).
+    // cross-dataset paste - same scheme as Ctrl+C clipboard).
     const labels = sel.map(i => {
       const cp = JSON.parse(JSON.stringify(ANN.data[ANN.idx].labels[i]));
       cp._srcClassName = ANN.classes[cp.cls];
@@ -3354,7 +3354,7 @@ function annMatchSize(){
 
 //  Paste-from-frame picker  (Shift+P)
 // Lets the user copy all labels from an arbitrary already-labeled frame into
-// the current frame. Supports cross-dataset paste (e.g. train -> val) — when
+// the current frame. Supports cross-dataset paste (e.g. train -> val) - when
 // source dataset is different, class IDs are remapped by class NAME so that
 // schema differences don't corrupt labels (unmapped classes are dropped).
 // Destructive but Ctrl+Z restorable (snapshots history).
@@ -3423,7 +3423,7 @@ async function annPastePickerLoadDataset(){
 
 function annPastePickerFilter(){
   const q = (document.getElementById('ann_paste_search').value||'').toLowerCase().trim();
-  // Decide which data source to filter — in-memory (current ds) vs remote (cross ds)
+  // Decide which data source to filter - in-memory (current ds) vs remote (cross ds)
   const usingCurrent = _annPastePickerSrcDataset === ANN.dataset;
   const data = usingCurrent ? ANN.data : _annPastePickerSrcData;
   const rows = data
@@ -3654,7 +3654,7 @@ async function annOpenOCRFolder(){
 window.addEventListener('resize',()=>{if(currentPage==='annotate'&&ANN.bgImg)annDraw();});
 
 /*
-   SYNTH TEMPLATE EDITOR — canvas-based slot editor for
+   SYNTH TEMPLATE EDITOR - canvas-based slot editor for
    synthetic-data composition. Each context (schedule_popup
    / student_list / momotalk / battle_squad / tactical_competition
    / cafe_invite / arena_squad) gets its own template JSON
@@ -3734,7 +3734,7 @@ function synthZoomBy(factor, anchorMx, anchorMy){
   SYNTH.panX = (mx - nxi * newW) - (c.width - newW) / 2;
   SYNTH.panY = (my - nyi * newH) - (c.height - newH) / 2;
   synthDraw();
-  $('synth_status').textContent = `Zoom ${(newZoom*100).toFixed(0)}% — F/0 复位`;
+  $('synth_status').textContent = `Zoom ${(newZoom*100).toFixed(0)}% - F/0 复位`;
 }
 
 function synthToggleQuad(){
@@ -3818,7 +3818,7 @@ function synthRefreshCharList(q){
   el.innerHTML = '';
   const empty = document.createElement('option');
   empty.value = '';
-  empty.textContent = '(random — fill slots with random chars)';
+  empty.textContent = '(random - fill slots with random chars)';
   el.appendChild(empty);
   arr.slice(0, 200).forEach(c => {
     const o = document.createElement('option');
@@ -3849,7 +3849,7 @@ async function synthLoadContext(ctx){
     SYNTH.imgW = (t.image_size||[1920,1080])[0];
     SYNTH.imgH = (t.image_size||[1920,1080])[1];
     SYNTH.bgImg = null;
-    // Load sample image if any — fallback: auto-suggest one
+    // Load sample image if any - fallback: auto-suggest one
     let sample = t.sample_image;
     if (!sample) {
       try {
@@ -4284,7 +4284,7 @@ function synthAttachCanvasEvents(){
     SYNTH.panX = targetOx - (c.width - newW) / 2;
     SYNTH.panY = targetOy - (c.height - newH) / 2;
     synthDraw();
-    $('synth_status').textContent = `Zoom ${(newZoom*100).toFixed(0)}% — F/0 复位 · 中键/Space+拖 平移`;
+    $('synth_status').textContent = `Zoom ${(newZoom*100).toFixed(0)}% - F/0 复位 · 中键/Space+拖 平移`;
   }, {passive: false});
 
   c.oncontextmenu = (e) => {
@@ -4327,7 +4327,7 @@ function synthAttachCanvasEvents(){
       const wpx = ((cl.x2-cl.x1)*SYNTH.imgW).toFixed(0);
       const hpx = ((cl.y2-cl.y1)*SYNTH.imgH).toFixed(0);
       const tag = cl.quad ? '四边形' : '矩形';
-      $('synth_status').textContent = `已复制 ${tag} #${SYNTH.selIdx+1} (${wpx}×${hpx}px AABB) — 移到目标位置按 Ctrl+V`;
+      $('synth_status').textContent = `已复制 ${tag} #${SYNTH.selIdx+1} (${wpx}×${hpx}px AABB) - 移到目标位置按 Ctrl+V`;
       e.preventDefault();
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'v' && SYNTH.clipboard) {
@@ -4466,7 +4466,7 @@ function synthBuildPayload(){
 }
 
 /*
- * UI-STAMP MODE (additive — does not touch slot / ref-crop / aug)
+ * UI-STAMP MODE (additive - does not touch slot / ref-crop / aug)
  * Stamps are normalized to the SAMPLE image, same coord space as slots.
  *  */
 
@@ -4631,7 +4631,7 @@ async function synthBuildUI(){
   const btn = $('synth_build_ui_btn');
   const count = parseInt($('synth_count').value, 10) || (SYNTH.template && SYNTH.template.synth_count) || 300;
   let prevTxt;
-  if (btn){ prevTxt = btn.textContent; btn.textContent = '⏳ 生成中...'; btn.disabled = true; btn.style.opacity = '0.6'; }
+  if (btn){ prevTxt = btn.textContent; btn.textContent = '生成中...'; btn.disabled = true; btn.style.opacity = '0.6'; }
   if ($('synth_status')) $('synth_status').textContent = `生成 UI 合成中 (count=${count})...`;
   try {
     const r = await api(`/api/v1/synth/build_ui/${SYNTH.context}`, {
@@ -4821,7 +4821,7 @@ function synthCropDraw(){
   const ch = Math.max(0.001, cy2 - cy1);
 
   // Replicate paste logic: ref's crop region COVERS the SLOT AABB (sw × sh)
-  // preserving aspect ratio — fills slot, larger axis overflows (clipped by polygon).
+  // preserving aspect ratio - fills slot, larger axis overflows (clipped by polygon).
   const cropNatW = cw * refW, cropNatH = ch * refH;
   const cropAspect = cropNatW / Math.max(cropNatH, 1);
   const canvasSlotAspect = sw / Math.max(sh, 1);
@@ -4893,7 +4893,7 @@ function synthCropDraw(){
   drawShapePath(ctx); ctx.clip();
   ctx.drawImage(im, refX, refY, refCanvasW, refCanvasH);
   ctx.restore();
-  // 3. Slot polygon outline (yellow, dashed if shape isn't square — to show that
+  // 3. Slot polygon outline (yellow, dashed if shape isn't square - to show that
   //    the slot AABB is wider than what's actually visible)
   const isQuad = SYNTH.slots && SYNTH.slots.length > 0 && !!SYNTH.slots[0].quad;
   const shapeRestricts = (shape === 'circle' || (shape === 'rounded_rect' && radiusCanvas > 0));
@@ -4901,7 +4901,7 @@ function synthCropDraw(){
   if (shapeRestricts) ctx.setLineDash([4, 3]); else ctx.setLineDash([]);
   drawPolyPath(ctx); ctx.stroke();
   ctx.setLineDash([]);
-  // 4. Shape outline (solid yellow) — this is the ACTUAL visible boundary
+  // 4. Shape outline (solid yellow) - this is the ACTUAL visible boundary
   if (shapeRestricts) {
     ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
     drawShapePath(ctx); ctx.stroke();
@@ -4910,7 +4910,7 @@ function synthCropDraw(){
   ctx.fillStyle = '#facc15';
   for (const p of slotPts) ctx.fillRect(p.x-3, p.y-3, 6, 6);
 
-  // 6. Aug position markers — 4 colored draggable dots positioned inside the slot AABB.
+  // 6. Aug position markers - 4 colored draggable dots positioned inside the slot AABB.
   // Their normalized coords are 0-1 inside slot. We map to canvas px via slot AABB sx/sy/sw/sh.
   const augOrder = ['lv', 'star', 'weapon', 'heart'];
   const augHandlePx = {};
@@ -5072,7 +5072,7 @@ function synthAutoCount(){
   const nChars = (SYNTH._charList || []).length || 252;
   const cnt = Math.ceil(target * nChars / nSlots);
   $('synth_count').value = cnt;
-  $('synth_target_hint').textContent = `= ⌈${target}×${nChars}/${nSlots}⌉ = ${cnt} 张`;
+  $('synth_target_hint').textContent = `= ceil(${target}×${nChars}/${nSlots}) = ${cnt} 张`;
   $('synth_status').textContent = `OK ${SYNTH.context}: 每角色至少 ${target} 次 -> synth_count=${cnt}`;
 }
 
@@ -5343,7 +5343,7 @@ function clsMgrRender(){
   if(CLSM.mergeSrc!=null){
     const s = CLSM.stats.find(c=>c.idx===CLSM.mergeSrc);
     bar.style.display='block';
-    bar.innerHTML = `合并模式: src = <b>${s.idx}: ${clsEsc(s.name)}</b> (${s.boxes}框) — 在列表里点目标类的 <b>并入</b> <button class="btn btn-sm" style="margin-left:10px" onclick="CLSM.mergeSrc=null;clsMgrRender()">取消</button>`;
+    bar.innerHTML = `合并模式: src = <b>${s.idx}: ${clsEsc(s.name)}</b> (${s.boxes}框) - 在列表里点目标类的 <b>并入</b> <button class="btn btn-sm" style="margin-left:10px" onclick="CLSM.mergeSrc=null;clsMgrRender()">取消</button>`;
   } else bar.style.display='none';
   const el = $('cls_mgr_list');
   el.innerHTML='';
@@ -5415,24 +5415,24 @@ async function axisRefresh(){
     const r = await clsApi('/api/v1/axis/videos'); AXIS.videos=r.videos||[]; axisRenderVideos();
     const h=$('axis_cookie_hint');
     if(h) h.innerHTML = r.cookies_file
-      ? ' <span style="color:#4ade80">data/axis_cookies.txt 已配置 — 下载 1080p 全长流</span>'
+      ? ' <span style="color:#4ade80">data/axis_cookies.txt 已配置 - 下载 1080p 全长流</span>'
       : 'ℹ <span style="color:#facc15">未配置 data/axis_cookies.txt -> 自动降 480p(实锤完整流, 抄轴/训练够用)。要 1080p: B站页面 F12 -> Application -> Cookies -> 复制 SESSDATA 值建此文件(720p+ 未登录只给15-80s试看, Chrome/Edge cookie 提取在 Win 已被加密堵死)</span>';
   }
   catch(e){ $('axis_video_list').textContent='加载失败: '+e.message; }
 }
 function axisRenderVideos(){
   const el=$('axis_video_list');
-  if(!AXIS.videos.length){ el.innerHTML='<span style="color:var(--muted)">还没有视频 — 上面贴 bilibili 链接下载, 或手动把 mp4 放进 data/axis_videos/</span>'; return; }
+  if(!AXIS.videos.length){ el.innerHTML='<span style="color:var(--muted)">还没有视频 - 上面贴 bilibili 链接下载, 或手动把 mp4 放进 data/axis_videos/</span>'; return; }
   el.innerHTML='';
   const tbl=document.createElement('table'); tbl.style.cssText='width:100%;border-collapse:collapse;font-size:12px';
   tbl.innerHTML='<thead><tr style="color:var(--muted);text-align:left;font-size:11px"><th style="padding:4px">视频</th><th>时长</th><th>大小</th><th>帧池</th><th>轴表</th><th style="min-width:250px">操作</th></tr></thead>';
   const tb=document.createElement('tbody');
   AXIS.videos.forEach(v=>{
     const tr=document.createElement('tr'); tr.style.borderTop='1px solid #1b1f27';
-    const dur = v.duration ? `${Math.floor(v.duration/60)}:${String(Math.round(v.duration%60)).padStart(2,'0')}` : '—';
+    const dur = v.duration ? `${Math.floor(v.duration/60)}:${String(Math.round(v.duration%60)).padStart(2,'0')}` : '-';
     tr.innerHTML = `<td style="padding:6px 4px;max-width:280px;word-break:break-all">${clsEsc(v.name)}</td>`+
       `<td style="font-family:var(--mono)">${dur}</td><td style="font-family:var(--mono)">${v.size_mb}MB</td>`+
-      `<td style="font-size:11px;font-family:var(--mono)">${v.frames?clsEsc(v.pool)+'<br>'+v.frames+'帧/'+v.labeled+'标':'—'}</td>`+
+      `<td style="font-size:11px;font-family:var(--mono)">${v.frames?clsEsc(v.pool)+'<br>'+v.frames+'帧/'+v.labeled+'标':'-'}</td>`+
       `<td style="font-family:var(--mono)">${v.sheet_rows||0}行</td><td></td>`;
     const td=tr.lastElementChild;
     const mk=(label,title,fn,cls='btn btn-sm')=>{const b=document.createElement('button');b.className=cls;b.textContent=label;b.title=title;b.style.margin='1px';b.onclick=fn;td.appendChild(b);};
@@ -5478,7 +5478,7 @@ async function axisJobCancel(jid){
   catch(e){ alert('取消失败: '+e.message); }
 }
 async function axisTrackPrefill(v){
-  if(!confirm(` track 预标 ${v.pool} (${v.frames}帧)?\nByteTrack 时序预标(闪烁捞回/遮挡插值/类别投票), 权重=battle 最新版。\n注意 会覆盖该池现有 battle 域标注(自动备份) — 已人审过的池别跑!`)) return;
+  if(!confirm(` track 预标 ${v.pool} (${v.frames}帧)?\nByteTrack 时序预标(闪烁捞回/遮挡插值/类别投票), 权重=battle 最新版。\n注意 会覆盖该池现有 battle 域标注(自动备份) - 已人审过的池别跑!`)) return;
   try{
     await clsApi('/api/v1/axis/track_prefill',{pool:v.pool});
     showToast('track 预标已启动(后台 job, 约2-4分钟)','ok'); axisPollJobs();
@@ -5525,10 +5525,10 @@ async function axisPollJobs(){
   clearTimeout(AXIS.jobTimer);
   if(running){ AXIS.wasRunning=true; AXIS.jobTimer=setTimeout(axisPollJobs,2000); }
   else if(!fetchOk && AXIS.wasRunning){
-    // 瞬时请求失败不能断轮询链(server 重启/网络抖动) — 重试到 10 次再放弃
+    // 瞬时请求失败不能断轮询链(server 重启/网络抖动) - 重试到 10 次再放弃
     AXIS.pollFails=(AXIS.pollFails||0)+1;
     if(AXIS.pollFails<=10) AXIS.jobTimer=setTimeout(axisPollJobs,3000);
-    else{ AXIS.wasRunning=false; const el=$('axis_jobs'); if(el){el.style.display='block'; el.innerHTML='<span style="color:#f87171">job 轮询失败(server 离线?) — 点上方  刷新重试</span>';} }
+    else{ AXIS.wasRunning=false; const el=$('axis_jobs'); if(el){el.style.display='block'; el.innerHTML='<span style="color:#f87171">job 轮询失败(server 离线?) - 点上方  刷新重试</span>';} }
   }
   else if(AXIS.wasRunning){ AXIS.wasRunning=false; axisRefresh(); }
 }
@@ -5581,7 +5581,7 @@ function axisSheetRender(){
 function axisSheetStatus(){ $('axis_sheet_status').textContent = AXIS.dirty ? '未保存 *' : (AXIS.rows.length? '已保存':''); }
 async function axisSheetSave(){
   if(!AXIS.cur) return;
-  if(AXIS.loadFailed){ alert('轴表当初加载失败 — 保存会用当前(可能空的)表覆盖磁盘。请重新打开该视频的轴表确认加载成功后再存。'); return; }
+  if(AXIS.loadFailed){ alert('轴表当初加载失败 - 保存会用当前(可能空的)表覆盖磁盘。请重新打开该视频的轴表确认加载成功后再存。'); return; }
   try{
     const r = await clsApi('/api/v1/axis/sheet',{video:AXIS.cur.name, rows:AXIS.rows});
     AXIS.dirty=false; axisSheetStatus();

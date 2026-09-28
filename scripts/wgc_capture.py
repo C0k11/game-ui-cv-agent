@@ -375,7 +375,7 @@ class WgcCapture:
 
     @property
     def mode(self) -> str:
-        """'window' or 'monitor' — how WGC is sourcing pixels."""
+        """'window' or 'monitor' - how WGC is sourcing pixels."""
         return self._mode
 
     @property

@@ -1,8 +1,8 @@
-"""Authoritative UI YOLO class vocabulary — single source of truth.
+"""Authoritative UI YOLO class vocabulary - single source of truth.
 
 All skills resolve click targets through these named constants instead of
 hardcoding OCR text. The names match ui_v1/v2 model cls_name exactly (see
-data/_ui_v1_class_freq.json — 156 in-use classes out of 448).
+data/_ui_v1_class_freq.json - 156 in-use classes out of 448).
 
 DESIGN RULE (user spec 2026-05-28):
   - YOLO cls drives ALL clicking. OCR is for DIGITS ONLY (counts, AP, etc).
@@ -15,7 +15,7 @@ Frame counts (from ui_v1 train set) annotated so we know which cls are
 reliable vs which still need oversampling:
   - >=80f  : solid
   - 20-80f : usable
-  - 12-19f : weak (v1 mislabels these — v2 oversample target=60 fixes)
+  - 12-19f : weak (v1 mislabels these - v2 oversample target=60 fixes)
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ TOPBAR_PLUS_GREY = "加号灰色"   # 116 (24f)
 DOT_RED = "红点"               # 5   (559f) unclaimed reward badge
 DOT_YELLOW = "黄点"            # 6   (223f) unfinished / new-content badge
 
-#  lobby 底栏导航入口 (16-19f each — weak in v1, v2 fixes)
+#  lobby 底栏导航入口 (16-19f each - weak in v1, v2 fixes)
 NAV_MAIL = "邮件箱"            # 4   (19f)  top-right envelope
 NAV_DAILY_REWARD = "每日领奖"   # 7   (16f)
 NAV_MOMOTALK = "MomoTalk"     # 8   (16f)
@@ -56,7 +56,7 @@ BTN_CANCEL = "取消键"           # 118 (47f)
 BTN_CLOSE_X = "弹窗叉叉"        # 19  (429f) popup close X
 BTN_BACK = "返回键"            # 31  (695f) top-left back arrow
 BTN_HOME = "回大厅按钮"         # 28  (689f) home button  lobby
-BTN_COLLAPSE = "收起键"         # 29  (0f — NOT trained)
+BTN_COLLAPSE = "收起键"         # 29  (0f - NOT trained)
 LOADING = "加载中"             # 22  (45f)
 
 #  领取按钮 (多状态: 黄=可领, 灰=已领/不可)
@@ -70,7 +70,7 @@ CLAIM_BLUE = "领取蓝色"            # 418 (12f)
 CLAIM_GREY = "领取_灰"             # 396 (12f)
 CLAIM_REWARD_YELLOW = "领取奖励_黄"  # 89  (12f)
 CLAIM_REWARD_GREY = "领取奖励_灰"    # 90  (19f)
-GOT_REWARD = "获得奖励"            # 397 (53f)  result popup "獲得獎勵" — tap dismiss
+GOT_REWARD = "获得奖励"            # 397 (53f)  result popup "獲得獎勵" - tap dismiss
 GREEN_CHECK = "绿勾"              # 403 (12f)  already-done check mark
 
 # any of these yellow variants = there's something to claim
@@ -86,7 +86,7 @@ CAFE_EARNINGS = "咖啡厅收益"          # 25  (20f)
 CAFE_INVITE_BTN = "邀请键"            # 32  (12f, 60b)
 CAFE_MOVE_1F = "移动至一号店"          # 34  (12f)
 CAFE_MOVE_2F = "移动至2号点"          # 27  (16f)
-EMOTICON_ACTION = "Emoticon_Action"  # 451 cafe headpat bubble — folded in from
+EMOTICON_ACTION = "Emoticon_Action"  # 451 cafe headpat bubble - folded in from
 #   the standalone emoticon_yolo26n at ui v6. cafe._emoticon_mark matches by the
 #   "emoticon" substring so it works whether the box comes from ui or the legacy
 #   standalone model; this constant is the canonical name for find_cls callers.
@@ -152,7 +152,7 @@ GOTO_NOW = "立即前往"                # 468
 TICKET_BOUNTY = "悬赏通缉票"          # 85  (20f)
 TICKET_ARENA = "战术大赛票"           # 91  (41f)
 ARENA_OPPONENT_ROW = "战术大赛对战选择区域"  # 92 (v5): bounds each opponent row; cy~0.34/0.57/0.79 right panel.
-#   Arena selects opponent by clicking the TOP-most row box center —
+#   Arena selects opponent by clicking the TOP-most row box center -
 #   no avatar model, no hardcoded position.
 TICKET_SCHOOL_EXCHANGE = "学院交流会票"  # 406 (22f)
 
@@ -196,7 +196,7 @@ SHOP_SELECT_ALL = "全部选择"         # 55  (18f)
 SHOP_SELECT_ALL_GREY = "全部选择灰"   # 404 (12f)
 SHOP_ALL_SELECTED = "已全部选择"      # 402  全选完成态（区别于 全部选择/灰）
 SHOP_BUY = "购买"                   # 103 (30f)  per-item buy
-# 489 = 灰(禁用)态「購買」。v15 起模型真会吐它。尚无消费方 —— 记在这里是因为
+# 489 = 灰(禁用)态「購買」。v15 起模型真会吐它。尚无消费方 -- 记在这里是因为
 # 它可能是 `no_dialog 两义`(买不起 / 本日限購已尽)的直接解: 屏上按钮变灰
 # 本身就是"这件买不了"的信号, 比事后靠"点了没弹框"反推可靠。接入前要 live 验。
 SHOP_BUY_GREY = "购买灰色"           # 489
@@ -208,12 +208,12 @@ CURRENCY_QTY_AREA = "货币数量显示区域"  # 104  数字显示区  digit-OC
 COMBO_PACK = "组合包未选择"          # 414 (12f)
 COMBO_PACK_SEL = "组合包已选择"      # 445 (14f)
 FREE = "免费"                       # 446 (14f)
-# 商店左侧 tab 指示器 ——  切勿进 青辉石 tab 购买（花青辉石）
+# 商店左侧 tab 指示器 --  切勿进 青辉石 tab 购买（花青辉石）
 SHOP_TAB_CREDIT = "信用点商店"        # 62   一般(信用点)tab
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"  # 54  一般 tab 选中 = 安全
 SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"  # 61   花青辉石 tab 选中
 
-#  战术大赛商店 (买体力 — 花战术大赛货币, NOT 青辉石/信用点)
+#  战术大赛商店 (买体力 - 花战术大赛货币, NOT 青辉石/信用点)
 # 商店左栏下滑可见. 新类 469-473 (v9 起训, 2026-06-11 用户手标+模板补).
 ARENA_SHOP_TAB = "战术大赛商店"           # 469  左栏 tab (未选中)
 ARENA_SHOP_TAB_SEL = "战术大赛商店已选择"   # 470  tab 选中 = 在战术大赛商店内
@@ -225,12 +225,12 @@ ENERGY_DRINK_MID = "一般能量饮料"          # 473  60AP, 售30货币
 CRAFT_QUICK = "快速制造"             # 443 (28f)
 CRAFT_START = "开始制造"             # 444 (19f)
 # 485 = 灰(禁用)态「開始製造」。2026-08-02 从 444 里拆出来(219 个灰键当年被
-# 错标成亮态 444), v15 起模型真会吐它 —— 2026-08-07 live 首次实测 0.99。
+# 错标成亮态 444), v15 起模型真会吐它 -- 2026-08-07 live 首次实测 0.99。
 # 加这个常量是**必须的**: 没有它, 灰键在全 bot 无人认识  craft 的灰键闸
 # (挂在 `find_cls(CRAFT_START)` 非空这个前提上)整条被跳过  落到 MAX 外推盲点。
 CRAFT_START_GREY = "开始制造灰色"     # 485
 
-#  活动 (event — 周年庆暂跳过, 但 cls 已训)
+#  活动 (event - 周年庆暂跳过, 但 cls 已训)
 EVENT_STORY = "活动剧情"             # 93  (24f)
 EVENT_STORY_SEL = "活动剧情_已选择"   # 97  (12f)
 EVENT_QUEST = "活动quest"           # 94  (12f)
@@ -244,7 +244,7 @@ EVENT_END_LEFT = "距离结束还剩"       # 405 (23f)
 # (只能进去领尾奖, 无关卡可打)。405 只标「距離結束還剩」(进行中可打)。
 # event skill: 检到 474 的活动 = 领奖期, 只领奖不派 AP。51 样本(0708 OCR 重分类)。
 EVENT_REWARD_END = "距离奖励获得结束"  # 474 (51f, waits v13)
-# 2x/3x 多倍产出加成 badge — drives 智能 AP 分配 (special_sweep): 这个 badge 在哪个
+# 2x/3x 多倍产出加成 badge - drives 智能 AP 分配 (special_sweep): 这个 badge 在哪个
 # 板块, AP 就优先扫那 (2026-06-15 在 特殊任务). v12 检 @0.93+.
 EVENT_DOUBLE_TRIPLE = "双倍或三倍活动进行中"   # 452
 # 特殊任务 两个委托 (2x/3x 期间可扫荡刷 AP): 据点防御=学生经验道具 / 信用货币回收=信用点.

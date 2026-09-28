@@ -53,7 +53,7 @@ class Snapshot:
 
 def _hp_of(crop_bgr):
     """我方框内绿血条宽比 ≈ HP%. 绿=HSV(35-60, S>110, V>130).
-    读不出(空crop/无绿像素=遮挡/特效盖条)返回 None 哨兵 —
+    读不出(空crop/无绿像素=遮挡/特效盖条)返回 None 哨兵 -
     回退 1.0 会把残血读成满血, 急救规则失灵."""
     if crop_bgr.size == 0:
         return None
@@ -347,7 +347,7 @@ class CombatBrain:
             s = self.p.snapshot()
             if s.age > 5.0:               # feed 假死: 不拿旧状态做决策
                 if time.time() - last_status > 5:
-                    self.log(f"    帧龄{s.age:.1f}s — 感知断流, 等恢复"
+                    self.log(f"    帧龄{s.age:.1f}s - 感知断流, 等恢复"
                              f"(feed重启x{getattr(self.p.feed, 'restarts', '?')})")
                     last_status = time.time()
                 time.sleep(1.0)
@@ -363,7 +363,7 @@ class CombatBrain:
                             self.p.battle, fr, 0.5)}
                         if "战斗胜利" not in bn and bn & BATTLE_HUD:
                             self.log("    (victory ADB 复核: 仍在战斗"
-                                     " — 误报重置, 继续)")
+                                     " - 误报重置, 继续)")
                             self.p.clear_victory()
                             continue
                 self.log(f"    胜利({time.time() - t0:.0f}s)")
@@ -389,7 +389,7 @@ class CombatBrain:
                                          f"{time.time() - t0:.0f}s)")
                                 return "win"
                             if bn & BATTLE_HUD:
-                                self.log("    (ADB 帧仍在战斗 — scrcpy"
+                                self.log("    (ADB 帧仍在战斗 - scrcpy"
                                          "断流误报, 继续)")
                                 empty_since = None
                                 continue

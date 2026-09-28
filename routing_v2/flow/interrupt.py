@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""全局打断处理 —— **一处定义，所有 flow 共享**（§A2）。
+"""全局打断处理 -- **一处定义，所有 flow 共享**（§A2）。
 
 老代码的病：「剧情过场不吃 ESC」这件事，13 个 skill **一处都不知道**。
-于是 2026-08-07 整个活动被开场剧情挡死 —— bot 连按 5 次返回键全无响应，
+于是 2026-08-07 整个活动被开场剧情挡死 -- bot 连按 5 次返回键全无响应，
 而每个 skill 都以为"按返回就能退出去"。
 
 这里登记的打断优先于任何 flow 的决策:
@@ -24,7 +24,7 @@
 
 真正的缺口在另一头（同一次审计的实测，交给 pages.py 那边处理）:
    408 帧里有 **108 帧屏上有 `弹窗叉叉`（= 有个弹窗盖着）但 overlay 判成 None**
-   —— 这种弹窗对覆盖层是**隐形**的，flow 会继续对着它底下的按钮点。
+   -- 这种弹窗对覆盖层是**隐形**的，flow 会继续对着它底下的按钮点。
    战术大赛「對戰對象」详情面板就是其中一例（见 flow/arena.py 的死面板逃生）。
 """
 from __future__ import annotations
@@ -48,13 +48,13 @@ class Interrupts:
     def __init__(self, log=None):
         self._log = log or (lambda m: print(m, flush=True))
         self._story_ts = 0.0
-        # 「下一章節」框点哪个键 —— 由当前 flow 说了算（用户 2026-08-11:
+        # 「下一章節」框点哪个键 -- 由当前 flow 说了算（用户 2026-08-11:
         #   「要连着推的话可以不用中断出来」）。
         #   默认 False = 中斷（逃生语义：别的 flow 撞上剧情就是要离开）；
         #   StoryMiningFlow 会把它置 True，因为它**就是来看剧情的**。
         self.watch_next_chapter = False
         # 购买框有条件交回 flow（2026-08-13 event_shop 高价优先购买上线）:
-        #   三重合取, 缺一律 halt —— 1) 当前 flow 声明自己会处理购买框
+        #   三重合取, 缺一律 halt -- 1) 当前 flow 声明自己会处理购买框
         #   (handles_purchase_dialog, 全仓只有 event_shop)  2) 12s 内刚真派发
         #   过一发**已授权**的金钱步(runner 在 tap 落地后盖章)  3) 框体内无
         #   青辉石。
@@ -72,12 +72,12 @@ class Interrupts:
         if fn is None:
             # **没实现的打断不许静默**（同「死开关不再静默」那条纪律）:
             #    `pages.INTERRUPTS` 里新登记一条却忘了在这里写 handler 时，
-            #    runner 拿到 None 会当成"这一页不归打断管"直接交给 flow ——
+            #    runner 拿到 None 会当成"这一页不归打断管"直接交给 flow --
             #    而打断的语义恰恰是"flow 不许在这个局面上动手"。出声一次。
             if kind not in self._warned:
                 self._warned.add(kind)
                 self._log(f"    打断 `{kind}` 在 interrupt.py 里没有 handler"
-                          f" — 这一帧交回 flow 决策了，去补 `_on_{kind}`")
+                          f" - 这一帧交回 flow 决策了，去补 `_on_{kind}`")
             return None
         return fn(obs)
 
@@ -86,14 +86,14 @@ class Interrupts:
         import routing_v2.act.money as money_rules
         # 组合包已选中: 交给 FreePackFlow, 不停机。
         if money_rules.is_combo_pack_page(obs):
-            self._log("    组合包页 — 不停机，交给 free_pack 领免费")
+            self._log("    组合包页 - 不停机，交给 free_pack 领免费")
             return None
         # 默认停在特别贩售: 切到组合包。切 tab 不是成交。
         if not (obs.has(V.CONFIRM, money_rules.CONF)
                 and obs.has(V.CANCEL, money_rules.CONF)):
             tab = obs.find(V.COMBO_PACK, money_rules.CONF)
             if tab is not None:
-                self._log("    购买青辉石页不在组合包 — 切到组合包领免费")
+                self._log("    购买青辉石页不在组合包 - 切到组合包领免费")
                 return tap_box(tab, "切到组合包页签（领免费；切 tab 不花钱）",
                                expect=(V.COMBO_PACK_SEL, V.FREE))
         # **有条件交回 flow**（event_shop 高价优先购买, 2026-08-13）:
@@ -110,15 +110,15 @@ class Interrupts:
                 and time.time() < self.money_grace_until
                 and obs.find(V.PYROXENE, money_rules.CONF,
                              region=money_rules.BODY) is None):
-            self._log("    购买框 = 刚授权的金钱步点出来的 — 交回 flow 处理"
+            self._log("    购买框 = 刚授权的金钱步点出来的 - 交回 flow 处理"
                       "（MAX/確認仍逐发过严格闸）")
             return None
         why = money_rules.purchase_context(obs) or "（判据已不成立）"
-        return halt(f"{why} —— 成交框停，交人审")
+        return halt(f"{why} -- 成交框停，交人审")
 
     #  系统退出确认框
     def _on_quit_dialog(self, obs: Observation) -> Optional[Action]:
-        """「是否結束？」—— **確認就是退出游戏**，只许点取消。
+        """「是否結束？」-- **確認就是退出游戏**，只许点取消。
 
         这个框不是游戏内容，是我们自己按返回键按出来的（大厅按返回会弹它）。
         按返回那件事已经在 nav/base 里禁掉了，这里是**第二道**：万一还是弹出来，
@@ -130,7 +130,7 @@ class Interrupts:
         x = obs.find(V.CLOSE_X, 0.50)
         if x is not None:
             return tap_box(x, "系统退出框  关掉")
-        return wait("系统退出框，但取消键没检出 — 绝不点確認")
+        return wait("系统退出框，但取消键没检出 - 绝不点確認")
 
     #  剧情过场
     def _on_story_cutscene(self, obs: Observation) -> Optional[Action]:
@@ -138,12 +138,12 @@ class Interrupts:
         唯一有效链: 剧情menu(右上)  跳过故事键  确认键。
 
         中间要留 after-ack: 点完「跳过」到确认框弹出有动画时间，这段时间里
-        跳过键还在屏上 —— 不留冷却就会连点两下，第二下落到确认框外面。
+        跳过键还在屏上 -- 不留冷却就会连点两下，第二下落到确认框外面。
         冷却必须显式记时间戳（裸 since() 首次返回 0.0 会被当成"冷却已过"）。
         """
         # 「下一章節」框（2026-08-11 小号实测）: 跳完一段剧情，游戏会问
         #    「要觀看下一章節嗎？」，两个键 中斷(剧情中断退出 0.99) / 觀看(剧情观看 0.99)。
-        #    **老逃生链三段全匹配不上** —— 这一页没有 剧情menu / 跳过故事键 / 確認，
+        #    **老逃生链三段全匹配不上** -- 这一页没有 剧情menu / 跳过故事键 / 確認，
         #    于是落到最后那句 `wait(...不瞎点)` 卡死。
         #     逃生的语义是"离开剧情"，所以点 **中斷**；`观看` 会把我们继续拖进下一段。
         quit_b = obs.find(V.STORY_QUIT, 0.40)
@@ -173,14 +173,14 @@ class Interrupts:
         tap_cont = obs.find(V.STORY_TAP_CONTINUE, 0.40)
         if tap_cont is not None:
             return tap_box(tap_cont, "剧情逃生: 点击继续")
-        return wait("剧情过场，但逃生链的 cls 一个都没检出 — 不瞎点")
+        return wait("剧情过场，但逃生链的 cls 一个都没检出 - 不瞎点")
 
     #  升级过场
     def _on_levelup(self, obs: Observation) -> Optional[Action]:
         """全屏升级过场：点掉。
 
         找不到落点时返回 **wait 而不是 None**（08-11 对齐三个 handler 的口径）。
-           打断是"连续 N 帧确认"才锁上的，解除同样要 N 帧 —— 中间那几帧里
+           打断是"连续 N 帧确认"才锁上的，解除同样要 N 帧 -- 中间那几帧里
            cls 可能一时掉到 0.45 以下，而**过场还实实在在盖在屏上**。
            返回 None 等于把这几帧交回 flow，flow 就会去点过场底下的按钮
            （点击被过场吞掉 = 连发族那个"判定带宽不一致  弹入/弹出动画帧
@@ -191,7 +191,7 @@ class Interrupts:
         b = obs.find(V.BOND_LEVELUP, 0.45)
         if b is not None:
             return tap_box(b, "升级过场: 点掉")
-        return wait("升级过场还锁着，但这一帧没检出可点的横幅 — 等，不交回 flow 乱点")
+        return wait("升级过场还锁着，但这一帧没检出可点的横幅 - 等，不交回 flow 乱点")
 
     #  加载
     def _on_loading(self, obs: Observation) -> Action:
@@ -200,13 +200,13 @@ class Interrupts:
            「只有没 cls 的时候，或者出现『加载中』这个 cls 的时候才等，
              而且**等待时间也是『加载中』这个 cls 的持续时间**」
 
-        所以这里**没有任何时长参数** —— 只要 `加载中`(cls 22, train 855/val 44)
+        所以这里**没有任何时长参数** -- 只要 `加载中`(cls 22, train 855/val 44)
         还在屏上就返回 wait，它一消失下一帧立刻继续。等多久由游戏决定，不由
         我们猜。这是全 bot 唯一合法的"等"，另一种是屏上没有对应 cls（no-op）。
         """
         if self._load_t0 == 0.0:
             self._load_t0 = time.time()
-        return wait("加载中 — 等它自己消失（时长由 cls 决定，不设上限）")
+        return wait("加载中 - 等它自己消失（时长由 cls 决定，不设上限）")
 
     def note_no_loading(self) -> None:
         """`加载中` 不在场时由 runner 调一次，用来结算并打印这次加载的真实时长。"""

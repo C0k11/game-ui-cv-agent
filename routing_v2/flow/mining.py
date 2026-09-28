@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""剧情挖矿 —— 用户点名要的模块，**默认关，前端按钮开**。
+"""剧情挖矿 -- 用户点名要的模块，**默认关，前端按钮开**。
 
 挖什么由 `story_mining.sources` 配：羁绊剧情 / 主线剧情 / 支线剧情 / 短篇剧情。
 判"这个节点看过没"靠 `剧情图标未完成`(430, train 580) vs `剧情图标已完成`(427,
-train 576) —— 这两个类很结实，是这条链能成立的基础。
+train 576) -- 这两个类很结实，是这条链能成立的基础。
 
 过场处理交给全局 interceptor（`flow/interrupt.py`）:
    BA 的过场**不吃 KEYCODE_BACK**，只能走 剧情menu  跳过故事键  确认键。
@@ -49,7 +49,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
                           fac_swipes=0, rot=0, advis=0, flips=0, hub_flip=False,
                           card_tapped=False)
         self.want_team = 1
-        # 「下一章節」框点 觀看 还是 中斷 —— 这条 flow 是来看剧情的，
+        # 「下一章節」框点 觀看 还是 中斷 -- 这条 flow 是来看剧情的，
         #   要连着推。**这个意图属于本 flow，不能写进全局 ctx.bag**:
         #   所有 flow 在 `build()` 时就一次性构造完，`setup()` 里往 bag 一写，
         #   整轮每条 flow 的剧情逃生语义都被反转成「觀看」，而且没有清除路径。
@@ -80,7 +80,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         """剧情 hub。同类剧情卡是**堆叠**的, 只有最前面那张点了才进得去。
 
         2026-08-21 用户口述 + CC live 实测(飞轮 v19_045/046/047/048):
-          主线剧情是 第1部 / 第2部 两张卡叠着 —— **点后卡只是把它翻到最前面,
+          主线剧情是 第1部 / 第2部 两张卡叠着 -- **点后卡只是把它翻到最前面,
           不进入; 点前卡才进那部剧情。**
         08-20 那版注释里写的"点 0.44,0.45 只翻部, 页还是 hub"看到的就是这个现象,
           但当时读成"落点没对准", 于是堆了三层 dx/dy 去猜立绘在哪。
@@ -158,14 +158,14 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     def on_story_chapter_map(self, obs, st):
         """「主线剧情」点进来是**大章节图**，不是节点图。
 
-        这一层以前**整个不存在** —— 章节图判成 `facility`，而本 flow 没有
+        这一层以前**整个不存在** -- 章节图判成 `facility`，而本 flow 没有
            `on_facility`  进去就卡死，剧情挖矿链从来没走通过。
         用户口述的规则（原话）:
            「从最左边的大章节 banner 开始（以后检查路由也是这样 **new 以及完成的
              x 坐标判断**）的小章节根据**黄点**一步步推」
           大章节 = `new` ∪ `完成` 里 **cx 最小**那个（最左 = 进度最早）
             点完右侧面板刷新，小章节 = 面板里的 `黄点` 所在那一行
-        黄点只当**定位锚**，落点是"同一行往右一个行宽"——行本身没有 cls。
+        黄点只当**定位锚**，落点是"同一行往右一个行宽"--行本身没有 cls。
            这是本域唯一允许的"从锚点推落点"，因为锚和目标在同一个控件上。
         """
         self.state["card_tapped"] = False
@@ -242,7 +242,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         self.state["card_tapped"] = False
         # AP 记账（**不是闸**）
         # 2026-08-11 用户纠正：「**剧情是不耗体力的**」。
-        #    原来这里有一道 `ap < 10 就收工`，会把一个**免费**活动直接停掉 ——
+        #    原来这里有一道 `ap < 10 就收工`，会把一个**免费**活动直接停掉 --
         #    典型的"照抄别的 flow 的闸"：bounty/event 那些是真花 AP 的，剧情不是。
         #     只留记账（`max_ap` 万一将来有花 AP 的剧情节点仍能兜底），
         #      **删掉低 AP 收工那条**。
@@ -259,7 +259,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
             return self._wrap(f"挖满 {cap_nodes} 个节点")
 
         # 2026-08-11 live 单步抓到两个 bug，都在这四行里：
-        #     **点错目标**：`剧情图标未完成` 是**状态标记不是按钮** ——
+        #     **点错目标**：`剧情图标未完成` 是**状态标记不是按钮** --
         #       点它页面纹丝不动（实测连点两次 story_nodes  story_nodes）。
         #       能点的是**同一行右侧的 `入场键`**。
         #     **没判锁**：那一行的入场键可能是 `入场键没解锁`（实测第一行
@@ -332,7 +332,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     def on_stage_popup(self, obs, st):
         # 同 momotalk：只认「進入章節」，**绝不碰 `任务开始`**。
         #    argmax 会让 0.99 的 `任务开始` 压过 `进入章节`，而剧情节点上出现
-        #    那个键就说明我们站错了页面 —— 点下去打战斗吃 AP，AP 不够就弹
+        #    那个键就说明我们站错了页面 -- 点下去打战斗吃 AP，AP 不够就弹
         #    「購買AP 單價30」（2026-08-10 arena 上实锤过一次）。
         b = obs.find(V.STORY_ENTER_CHAPTER, 0.35)
         return tap_box(b, "进入章节") if b is not None else wait("等进入章节键")

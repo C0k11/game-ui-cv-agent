@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""前端 API（FastAPI router）—— 挂到 `server/app.py` 上，或独立起。
+"""前端 API（FastAPI router）-- 挂到 `server/app.py` 上，或独立起。
 
     from routing_v2.app.api import router as v2_router
     app.include_router(v2_router)
@@ -93,7 +93,7 @@ _SCANS = {
 def scan(name: str):
     """抓一帧，看这一页上**真的有哪些**可选项。
 
-    前端必须先把游戏切到对应页面再调 —— 这就是"动态"的代价，也是它比
+    前端必须先把游戏切到对应页面再调 -- 这就是"动态"的代价，也是它比
        写死清单强的地方：换活动/换版面/游戏更新都自动跟得上。
     """
     if name not in _SCANS:
@@ -181,7 +181,7 @@ def run(body: RunIn):
         cfg["run"]["step_mode"] = bool(body.step_mode)
 
     def approver(act, obs) -> bool:
-        """逐帧门控 / 金钱人审 —— 挂起等前端 /v2/approve。"""
+        """逐帧门控 / 金钱人审 -- 挂起等前端 /v2/approve。"""
         if act.money and not _state["money_ok"]:
             _log(f"金钱步「{act.reason}」本次未授权（money_ok=False） 拒绝")
             return False
@@ -191,7 +191,7 @@ def run(body: RunIn):
                                  "x": act.x, "y": act.y,
                                  "cls": act.target_cls, "answer": None,
                                  "ts": time.time()}
-        _log(f"⏸ 等前端放行: {act}")
+        _log(f"等前端放行: {act}")
         t0 = time.time()
         while time.time() - t0 < 600:
             with _LOCK:
@@ -201,7 +201,7 @@ def run(body: RunIn):
                     _state["pending"] = None
                 return bool(ans)
             time.sleep(0.05)
-        _log("⏸ 人审超时 10 分钟  当作不放行")
+        _log("人审超时 10 分钟  当作不放行")
         with _LOCK:
             _state["pending"] = None
         return False

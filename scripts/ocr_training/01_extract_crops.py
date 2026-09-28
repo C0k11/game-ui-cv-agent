@@ -2,9 +2,9 @@
 
 Reads every tick_XXXX.json + tick_XXXX.jpg pair, crops text regions using
 the OCR bounding boxes, applies auto-corrections from ba_vocab, and writes:
-  data/ocr_training/crops/       — cropped text images (PNG)
-  data/ocr_training/labels.txt   — PaddleOCR format: image_path\tlabel
-  data/ocr_training/labels_raw.txt — before corrections, for auditing
+  data/ocr_training/crops/       - cropped text images (PNG)
+  data/ocr_training/labels.txt   - PaddleOCR format: image_path\tlabel
+  data/ocr_training/labels_raw.txt - before corrections, for auditing
 
 Usage:
     py -3 scripts/ocr_training/01_extract_crops.py [--min-conf 0.5] [--max-crops 200000]
@@ -27,7 +27,7 @@ TRAJ_DIR = REPO / "data" / "trajectories"
 OUT_DIR = REPO / "data" / "ocr_training"
 CROP_DIR = OUT_DIR / "crops"
 
-# Minimum crop dimensions (pixels) — skip tiny/degenerate boxes
+# Minimum crop dimensions (pixels) - skip tiny/degenerate boxes
 MIN_W, MIN_H = 8, 8
 # Padding around crop (fraction of box size) to capture context
 PAD_FRAC = 0.08

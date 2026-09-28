@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""cls **族关系**审计 —— 485 类不是 485 个独立目标, 是「物件 × 状态」。
+"""cls **族关系**审计 -- 485 类不是 485 个独立目标, 是「物件 × 状态」。
 
 用户 2026-07-25 点破: "你得思考 cls 之间的联系, 有的都是某些 cls 的变种
 或者是没被点击之前的状态之类的"。
 
-为什么这件事值钱 —— 状态混淆是**最贵的一类 bug**:
+为什么这件事值钱 -- 状态混淆是**最贵的一类 bug**:
   把「不可点」当「可点」 空点、卡流程;  把「可点」当「不可点」 漏活、资源作废。
 而只要 val 里**只有族里的一态**, 这类 bug 就**永远测不出来**。
-实测到的最刺眼一例: `关卡得星_3` val 794 实例, 而 `关卡得星_0` val **0** —— 可
+实测到的最刺眼一例: `关卡得星_3` val 794 实例, 而 `关卡得星_0` val **0** -- 可
 memory[[ui-cls-semantics]] 早就记着"Challenge 行灰星=独立类 _0, 任何得星族
 startswith/子串闸都会在 Challenge tab 误通过", 那起 Challenge 假阳性事故的回归,
 **用现有 val 根本测不到**。
@@ -32,7 +32,7 @@ from collections import Counter, defaultdict
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DS = r"D:\Project\ml_cache\models\yolo\dataset\ui_v2"
 
-# 状态后缀模式 —— 剥掉后剩下的是"物件词根"。
+# 状态后缀模式 -- 剥掉后剩下的是"物件词根"。
 # 纯字符串模式, 不猜语义: 宁可漏归族(少报), 也不要把两个不相干的类硬凑一族。
 STATE_PATTERNS = [
     (r"_黄$", "可用/高亮"),
@@ -135,7 +135,7 @@ def main() -> int:
     print(f"\n小计: {len(partial)} 个族只测得出一部分状态")
 
     print("\n" + "=" * 76)
-    print("️ 族内训练样本失衡 (>20x)  模型偏向样本多的那一态")
+    print(" 族内训练样本失衡 (>20x)  模型偏向样本多的那一态")
     print("=" * 76)
     imbal = []
     for root, mem in sorted(multi.items()):

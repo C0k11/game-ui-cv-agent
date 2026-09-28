@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""设备层 —— ADB 只干两件事：**点** 和 **救命**。绝不在热路径抓帧。
+"""设备层 -- ADB 只干两件事：**点** 和 **救命**。绝不在热路径抓帧。
 
 为什么这么切（README §A4 / §C）:
   ADB screencap+decode 实测 **1588ms**(4K), 而 scrcpy latest() 是 **0ms**。
-  老代码把抓帧和点击混在一条 ADB 链上, 于是每次决策都背 1.6s 延迟 ——
+  老代码把抓帧和点击混在一条 ADB 链上, 于是每次决策都背 1.6s 延迟 --
   活动入口轮播周期才 3.00s, 必然点在翻过去那一页上。这一层从结构上堵死:
   `screencap()` 只在**冷路径**(存活探针 / 冻结检测)可用, 且带显式告警。
 
@@ -11,7 +11,7 @@
   1. **端口会漂**: MuMu 实例重启 7555  16384。唯一权威 = MuMuManager info。
   2. **adbd 会卡死**: 三级恢复阶梯, setprop 那级实测无效（保留只为记录）。
   3. **分辨率不能写死**: `wm size` 问设备, 不假设 3840x2160。
-     (语料里实测出 19 种分辨率 —— 写死过一次就够了。)
+     (语料里实测出 19 种分辨率 -- 写死过一次就够了。)
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ _FALLBACK_SERIAL = "127.0.0.1:7555"
 _PKG = "com.nexon.bluearchive"
 
 # 全进程唯一的 ADB IO 锁。2026-06-15 实锤: 同 transport 上并发跑多 MB 的
-# screencap 会**丢 MotionEvent** —— 表现成"点了没反应", 是最难查的形态。
+# screencap 会**丢 MotionEvent** -- 表现成"点了没反应", 是最难查的形态。
 # feed 的 watchdog / 存活探针 / tap 全部走这把锁。
 IO_LOCK = threading.RLock()
 
@@ -90,7 +90,7 @@ def resolve_serial(vmindex: int = 0) -> str:
     except Exception:
         pass
     # 兜底: adb devices 里唯一 online 的 127.0.0.1:*
-    # 只认 state == "device" —— offline 条目正是事故现场的样子
+    # 只认 state == "device" -- offline 条目正是事故现场的样子
     #   (7555 offline 与 16384 device 同时列着), 认错就等于没修。
     live = []
     for line in _run([_ADB, "devices"]).splitlines()[1:]:
@@ -128,7 +128,7 @@ class Device:
            而游戏在 display 2 上是**横屏 3840x2160**, `input tap` 用的也是横屏
            坐标空间。直接信 `wm size`  归一化 y=0.953 换算成 **3662 > 2160**,
            整发点到屏幕外, 表现成"点了没反应"。
-           （老代码把 3840x2160 写死反而"碰巧对"—— 这就是为什么写死坐标能活
+           （老代码把 3840x2160 写死反而"碰巧对"-- 这就是为什么写死坐标能活
              那么久：它在唯一被测过的那个配置上是对的。）
 
         正解：物理面板给出两个边长，**哪个当宽由画面朝向决定**。
@@ -144,12 +144,12 @@ class Device:
 
     @property
     def size(self) -> Tuple[int, int]:
-        """tap 坐标空间。别写死 —— 语料里实测 19 种分辨率。"""
+        """tap 坐标空间。别写死 -- 语料里实测 19 种分辨率。"""
         if self._size is None:
             a, b = self._physical()
             self._size = (a, b)
             self._log(f"[device] 还没 calibrate()，暂用物理面板 {a}x{b}"
-                      f" —— 横屏游戏上这几乎肯定是错的，开跑前请先 calibrate")
+                      f" -- 横屏游戏上这几乎肯定是错的，开跑前请先 calibrate")
         return self._size
 
     #  动作（唯一允许走 ADB 的热路径）
@@ -190,7 +190,7 @@ class Device:
     def screencap(self, _reason: str = ""):
         """ADB 抓一张。**只允许**存活探针/冻结检测/离线标定用。
 
-        每次调用都打日志——如果你在热路径日志里看到它，那就是 bug 回来了。
+        每次调用都打日志--如果你在热路径日志里看到它，那就是 bug 回来了。
         """
         t0 = time.time()
         try:
@@ -204,7 +204,7 @@ class Device:
         except Exception:
             fr = None
         self._log(f"    [device] ADB screencap({_reason}) "
-                  f"{(time.time()-t0)*1000:.0f}ms — 冷路径专用")
+                  f"{(time.time()-t0)*1000:.0f}ms - 冷路径专用")
         return fr
 
     #  存活 / 恢复
@@ -212,7 +212,7 @@ class Device:
         """游戏进程在不在。
 
         `dumpsys mCurrentFocus` **不可信**（2026-08-07 实锤）: 它报前台是
-        `app.lawnchair`（Android 桌面），而游戏好好地停在大厅 —— MuMu + Unity
+        `app.lawnchair`（Android 桌面），而游戏好好地停在大厅 -- MuMu + Unity
         全屏不注册 window focus。所以这里只数**进程**，页面身份交给 YOLO。
         """
         return _PKG in self.sh("pidof", _PKG) or bool(
@@ -249,7 +249,7 @@ class Device:
         time.sleep(2.0)
         if self.alive():
             return True
-        self._log("[device] L3 MuMuManager restart —— 实例重启，端口会漂")
+        self._log("[device] L3 MuMuManager restart -- 实例重启，端口会漂")
         _run([_MANAGER, "control", "-v", "0", "restart"], 120)
         for _ in range(40):
             time.sleep(3.0)
@@ -263,7 +263,7 @@ class Device:
         return False
 
     def frozen(self) -> bool:
-        """游戏画面冻死判据 —— **连续两帧 md5 完全一致**（唯一可靠判据）。
+        """游戏画面冻死判据 -- **连续两帧 md5 完全一致**（唯一可靠判据）。
 
         这条只在"YOLO 认不出任何页面 + 长时间不动"时才值得跑（两次 ADB 抓帧
         = 3s+）。日常靠 scrcpy 的 seq 变化就够了。

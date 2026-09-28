@@ -195,13 +195,13 @@ class CafeFlow(ExitMixin, Flow):
         return self._invite(obs, st, nxt="headpat2")
 
     def _verify_floor(self, obs) -> Optional[Action]:
-        """切厅后的**到位对账** —— 返回非 None 说明还没到位（继续等/回去重切）。
+        """切厅后的**到位对账** -- 返回非 None 说明还没到位（继续等/回去重切）。
 
         2026-08-13 大号实锤: 切 2 号店的契约 `expect=(移動至一號店,)` 被**转场
            动画帧的误检**骗兑现（「弹入动画帧必然让判据成立」家族），人根本
            没离开 1 号厅，「2 号厅」的邀请+摸头+反向 pan 全跑在 1 号厅身上，
            黄点挂着还报了 CLEAN。`observe` 每帧都在按屏上按钮校正 `floor`，
-           但相位推进从不回头看它 —— 这里补上闭环: 干活相位开头核对楼层，
+           但相位推进从不回头看它 -- 这里补上闭环: 干活相位开头核对楼层，
            身份连续对不上就回 `switch` 重试（`switch_taps` 预算 2 次）。
         """
         exp = self.state.get("expect_floor")
@@ -221,11 +221,11 @@ class CafeFlow(ExitMixin, Flow):
                 self.state["switch_bounced"] = True
                 return self.goto_and_wait(
                     "switch", f"楼层身份仍是 {cur} 号厅（目标 {exp}）"
-                              f"— 切换被弹回，回去重切")
-            return wait(f"楼层身份是 {cur} 号厅但目标是 {exp} — 等转场尘埃落定")
+                              f"- 切换被弹回，回去重切")
+            return wait(f"楼层身份是 {cur} 号厅但目标是 {exp} - 等转场尘埃落定")
         if self.phase_ticks > 120:
             self.state.pop("expect_floor", None)   # 按钮长期检不出: 别锁死
-            self.log("楼层按钮 120 tick 没检出 — 放弃楼层对账，按原计划走")
+            self.log("楼层按钮 120 tick 没检出 - 放弃楼层对账，按原计划走")
             return None
         return wait("等楼层按钮出现（转场中）")
 
@@ -287,9 +287,9 @@ class CafeFlow(ExitMixin, Flow):
             self.state.pop("hold:after_invite:t", None)
             n = self.bump(f"invite_retry_f{fl}")
             if n < 2:
-                self.log(f"邀请 tap 没兑现（列表还开着, 第 {n} 次）— 重找目标再点")
+                self.log(f"邀请 tap 没兑现（列表还开着, 第 {n} 次）- 重找目标再点")
                 return wait("重试邀请")
-            self.log(f"邀请 tap 连续 {n} 次没兑现 — 放弃这张券, **不计数**")
+            self.log(f"邀请 tap 连续 {n} 次没兑现 - 放弃这张券, **不计数**")
             return self.goto_and_wait(nxt, f"{fl} 号厅邀请没点成（不计数）")
 
         panel = obs.has(V.CAFE_INVITE, 0.40)
@@ -349,7 +349,7 @@ class CafeFlow(ExitMixin, Flow):
         #    老代码 brain/skills/cafe.py:920-926 的原话:
         #      `bottom = self._invite_sig_repeat >= 2`（滑完屏上内容没变 = 到底），
         #    滑动次数只是安全帽（防指纹判据失灵时无限滑）。
-        #    我上一版写成「滑 8 次就算找完」—— 次数是**意图**，指纹才是**事实**。
+        #    我上一版写成「滑 8 次就算找完」-- 次数是**意图**，指纹才是**事实**。
         sig = "|".join(sorted(
             [b.cls for b in obs.boxes if b.model == "avatar" and b.conf >= 0.45]
             + [f"{b.cy:.2f}" for b in obs.all(V.CAFE_INVITE, 0.45)]))
@@ -358,7 +358,7 @@ class CafeFlow(ExitMixin, Flow):
             n = self.state["invite_scrolls"] + 1
 
             def _swiped(s=sig, k=n):
-                # 指纹在**滑之前**记；下一轮滑之前对比 —— 没变 = 这一滑没推动列表
+                # 指纹在**滑之前**记；下一轮滑之前对比 -- 没变 = 这一滑没推动列表
                 if s == self.state.get("last_sig"):
                     self.state["sig_repeat"] = self.state.get("sig_repeat", 0) + 1
                 else:
@@ -370,7 +370,7 @@ class CafeFlow(ExitMixin, Flow):
                 return sw
             return wait("这一屏推不出滑动几何 - 不瞎滑")
         # 放弃：**先落标记再关面板**。标记是"我已经找过一轮"这个事实，
-        #    关不关得掉面板都不影响它 —— 否则关面板那一发被闸吞掉，下一帧
+        #    关不关得掉面板都不影响它 -- 否则关面板那一发被闸吞掉，下一帧
         #    又从"没找过"重来（用户实测的抽风）。
         if self.pending("no_invite_note"):
             self.state["once:no_invite_note"] = True
@@ -383,12 +383,12 @@ class CafeFlow(ExitMixin, Flow):
         return self.goto_and_wait(nxt, "邀请列表处理完")
 
     def _invite_swipe(self, obs, why: str, post):
-        """邀请列表专用滑动 —— 几何全部从检出推，零写死。
+        """邀请列表专用滑动 -- 几何全部从检出推，零写死。
 
         用户 2026-08-13 指出的两条病:
-          1. 「滑动的位置是靠邀请按钮定位的，很容易误触」—— 按钮列上按下再拖，
+          1. 「滑动的位置是靠邀请按钮定位的，很容易误触」-- 按钮列上按下再拖，
              游戏可能把它认成 tap = 误邀请。
-          2. 「有时候是从最下面的 bound 滑动，都没在栏目里滑」——
+          2. 「有时候是从最下面的 bound 滑动，都没在栏目里滑」--
              `nav.list_swipe` 的起点取 `max(cy)+rowh*0.6`，最下一行贴近面板
              下缘时起点就落到面板外面去了。
         修法（用户口述）: **横坐标取头像列和邀请键列的中点**（两列之间的空白区，
@@ -471,9 +471,9 @@ class CafeFlow(ExitMixin, Flow):
             if obs.has(V.CAFE_INVITE, 0.40):
                 x = obs.find(V.CLOSE_X, 0.55)
                 if x is not None:
-                    return tap_box(x, "主视图被邀请列表盖着 — 先关掉",
+                    return tap_box(x, "主视图被邀请列表盖着 - 先关掉",
                                    expect_gone=(V.CAFE_INVITE,))
-                return wait("邀请列表开着但叉叉没检出 — 等一帧")
+                return wait("邀请列表开着但叉叉没检出 - 等一帧")
             # 要**连续** 40 tick 认不出才放弃（2026-08-13 live: 邀请完的
             #    过场动画期主视图锚点全被盖住, 原来 12 tick 就跳走 --
             #    优香刚被请进来, 头一次都没摸到。`hold` 是连续性计数,
@@ -649,7 +649,7 @@ class CafeFlow(ExitMixin, Flow):
             if obs.find(V.CLAIM_ACTIVE, 0.45) is not None:
                 # 收益的领取链整条走的是**覆盖层**处理器（领取 -> 結果框確認
                 #    -> 再领），`do_earnings` 那一支根本没机会跑。所以
-                #    `claimed` 必须在**这里**落账 —— 2026-08-13 live 实测
+                #    `claimed` 必须在**这里**落账 -- 2026-08-13 live 实测
                 #    `claims=3` 明明领到了，收尾却报「收益没领到」。
                 self.state.update(claimed=True, earn_done=True)
             elif not self.state.get("earn_done"):

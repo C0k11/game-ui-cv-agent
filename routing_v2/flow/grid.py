@@ -44,7 +44,7 @@ def empty_spot(obs: Observation, avoid: float = 0.08) -> Optional[Tuple[float, f
 
 
 def start_under_hover(obs: Observation, hover: Box, conf: float = 0.35) -> Optional[Box]:
-    """起点悬停▽(543)正下方最近的起点格(黄/灰)。▽在格子上方 ~0.05-0.10, 横向对齐。"""
+    """起点悬停倒三角(543)正下方最近的起点格(黄/灰)。倒三角在格子上方 ~0.05-0.10, 横向对齐。"""
     cands = [b for b in obs.all([V.GRID_START, V.GRID_START_GREY], conf)
              if b.cy > hover.cy and abs(b.cx - hover.cx) < 0.05]
     if not cands:

@@ -38,7 +38,7 @@ _DS = r"D:\Project\ml_cache\models\yolo\dataset\ui_v2"
 _TRAJ = os.path.join(_ROOT, "data", "trajectories")
 _OUT = os.path.join(_ROOT, "data", "raw_images", "_val_v15_gap")
 
-# 帧源白名单 —— 只收**Android 内部取流**的尺寸(overlay 物理进不去)。
+# 帧源白名单 -- 只收**Android 内部取流**的尺寸(overlay 物理进不去)。
 # 背景: server/app.py:2330 有条 2026-06-05 的纪律"trajectory 因 overlay 烧录
 # 风险退役, 不再进 label 队列"(2026-05-28 删过 11 个烧录 run)。那条纪律是
 # **DXcam/窗口抓取当主力**时定的; 现在主 tick 帧源已是 scrcpy  ADB
@@ -48,7 +48,7 @@ _OUT = os.path.join(_ROOT, "data", "raw_images", "_val_v15_gap")
 #     3840x2160 = ADB screencap 4K         Android 内部
 #     2560x1440 = scrcpy max_size           Android 内部
 #     3612x2033 / 2364x1331 = 窗口抓取的非标准尺寸(随显示缩放漂移),
-#                             且集中在 06-01~06-10 —— **正是烧录事故期** 
+#                             且集中在 06-01~06-10 -- **正是烧录事故期** 
 # 代价: 少 51 帧候选。收益: 素材源纯度有**硬保证**, 不靠目检也不靠
 # detect_overlay_burn.py(那个在战斗帧上误报严重, 见该文件说明)。
 SAFE_FRAME_SIZES = {(3840, 2160), (2560, 1440)}
@@ -69,13 +69,13 @@ def tainted_stamps() -> tuple:
 
     2026-07-25 workflow 审计实锤(v1 的防泄漏承诺没兑现):
     merge_flywheel_pools 把 run_<date>_<HHMMSS>_clean 合成
-    run_<date>_merged_clean 后 rmtree 源目录 — 目录名时间戳被抹掉, 文件只剩
+    run_<date>_merged_clean 后 rmtree 源目录 - 目录名时间戳被抹掉, 文件只剩
     143655_/0717a_ 这类前缀, _stamp() 全部 None  这些 train 池的源 run 一个
     都进不了污染集。已落盘的 _val_v15_gap 实锤混进 ≥12 帧与 ui_v2 train 同
     session 的帧(20260711 的 143655/144712/162423 等)。
     逐前缀恢复不可靠(±1s 改名秒漂 + 0709m_/v8queue 前缀根本不带 HHMMSS)
      **fail-closed: 凡名字带日期但没有完整时间戳的池, 整天拉黑**。
-    代价是这几天的干净 run 也进不了 val — 溯源已被 merge 销毁, 宁缺勿泄。
+    代价是这几天的干净 run 也进不了 val - 溯源已被 merge 销毁, 宁缺勿泄。
     """
     stamps, days = set(), set()
 
@@ -99,7 +99,7 @@ def tainted_stamps() -> tuple:
         _eat(base)
         if _stamp(base) is None and re.search(r"\d{8}", base):
             # 跨天合并池(实测 run_20260717_merged_ui_clean 内含 0708p/0709m/
-            # 0714a/0715a-c/0716a-b/0717a-g 批次) — 池名只透出一天, 其余天要从
+            # 0714a/0715a-c/0716a-b/0717a-g 批次) - 池名只透出一天, 其余天要从
             # **文件批次前缀** MMDD[a-z]_ 恢复, 每个批次天整天拉黑。
             my = re.search(r"(\d{4})\d{4}", base)
             year = my.group(1) if my else "2026"
@@ -190,7 +190,7 @@ def main() -> int:
 
     # 族感知(2026-07-25 用户点破 "有的是某些 cls 的变种/未点击前的状态"):
     # 同一物件的不同状态(领取_黄/_灰、关卡得星_3/_0、全部选择/全部选择灰…)
-    # **必须成对进 val**, 否则测不出**状态混淆** —— 而那是最贵的一类 bug:
+    # **必须成对进 val**, 否则测不出**状态混淆** -- 而那是最贵的一类 bug:
     # 把不可点当可点=空点卡流程, 把可点当不可点=漏活。
     # 实测最刺眼: `关卡得星_3` val 794 实例, `关卡得星_0` val **0**, 而
     # Challenge 假阳性事故的根因正是这两类混淆  那个回归现在根本测不到。
@@ -230,7 +230,7 @@ def main() -> int:
     # 覆盖贪心 + 同 run 间隔。
     # 两轮: 稀有类往往只在少数**连续** tick 出现, 严格间隔会把它们整类滤掉
     # (实测 MIN_GAP=10 一轮时 `跳过战斗未选` 拿到 0/5)。所以第 1 轮用严间隔
-    # 保多样性, 第 2 轮对仍未满额的类放宽到 MIN_GAP_TIGHT 补齐 —— 近重复帧
+    # 保多样性, 第 2 轮对仍未满额的类放宽到 MIN_GAP_TIGHT 补齐 -- 近重复帧
     # 虽然信息量低, 但**有总比没有强**: 一个类在 val 里 0 实例 = 永远测不到。
     need = dict(quota)
     picked_set, picked = set(), []

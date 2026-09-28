@@ -6,11 +6,11 @@
    先用现役模型预标一遍，再看哪些弱 cls 真的被覆盖到、哪些还得单独去采。
 
 纪律:
- · **预标 ≠ 标注** —— 产出必须过前端人审才准进训练集（项目铁律）。
+ · **预标 ≠ 标注** -- 产出必须过前端人审才准进训练集（项目铁律）。
  · 权重跟 **registry 的 active**，别硬编码（老脚本写死 v14，现役已是 v15；
    memory `flywheel: 预标权重v9改v14跟线上模型` 就是为这个改过一次）。
  · **绝不覆盖已有 txt**（可能是人审过的）。
- · 写 **5 列** YOLO txt —— 第 6 列会被当成 OBB angle（[[flywheel_label_import]]）。
+ · 写 **5 列** YOLO txt -- 第 6 列会被当成 OBB angle（[[flywheel_label_import]]）。
 
 用法:
   py scripts/prelabel_pool.py <池名> [--conf 0.35] [--dry]
@@ -95,12 +95,12 @@ def main():
     got = [(c, frames_with[c]) for c in sorted(weak) if frames_with[c]]
     for c, n in sorted(got, key=lambda x: -x[1]):
         print(f"   {c:<24} {n} 帧")
-    print(f"   —— 覆盖到 {len(got)}/{len(weak)} 个弱 cls")
+    print(f"   -- 覆盖到 {len(got)}/{len(weak)} 个弱 cls")
     print("\n=== 对**新 cls(495+)**的覆盖 ===")
     got2 = [(c, frames_with[c]) for c in sorted(new_cls) if frames_with[c]]
     for c, n in sorted(got2, key=lambda x: -x[1]):
         print(f"   {c:<24} {n} 帧")
-    print(f"   —— 覆盖到 {len(got2)}/{len(new_cls)} 个新 cls"
+    print(f"   -- 覆盖到 {len(got2)}/{len(new_cls)} 个新 cls"
           "（新 cls 现役模型没学过，检不出是正常的，要靠人标）")
     print("\n=== 命中最多的 20 个 cls ===")
     for c, n in per_cls.most_common(20):

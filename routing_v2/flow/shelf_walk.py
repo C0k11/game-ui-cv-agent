@@ -178,7 +178,7 @@ class ShelfWalkMixin:
         buyable = [b for b in btns if b.cls == V.SHOP_BUY]
         soldout = [b for b in btns if b.cls == V.SHOP_BUY_GREY]
         if not buyable and not soldout:
-            return wait(f"{name}: 货架不可见(面板盖住/加载中) — 不下结论")
+            return wait(f"{name}: 货架不可见(面板盖住/加载中) - 不下结论")
 
         sig = content_sig(obs, btns)
         if self.state.get("shelf_await_settle"):
@@ -221,7 +221,7 @@ class ShelfWalkMixin:
                     shelf_settle_watch=""))
             if sw is not None:
                 return sw
-            return wait(f"{name}: 货架上没检出行锚点 — 不瞎滑")
+            return wait(f"{name}: 货架上没检出行锚点 - 不瞎滑")
 
         if denied and stop_when_denied:
             return "done"
@@ -229,7 +229,7 @@ class ShelfWalkMixin:
             if bal is None:
                 if self.pending("no_bal"):
                     self.state["once:no_bal"] = True
-                    self.log(f"{name}: 余额读不出 — 不自动买(fail-closed)")
+                    self.log(f"{name}: 余额读不出 - 不自动买(fail-closed)")
                 return wait(f"{name}: 余额读不出, 不动")
             rows = cluster_rows(btns)
             picked = pick_row_buy(
@@ -261,4 +261,4 @@ class ShelfWalkMixin:
                 shelf_settle_watch=""))
         if sw is not None:
             return sw
-        return wait(f"{name}: 货架上没检出行锚点 — 不瞎滑")
+        return wait(f"{name}: 货架上没检出行锚点 - 不瞎滑")

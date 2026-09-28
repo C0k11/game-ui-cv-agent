@@ -22,7 +22,7 @@ def main() -> None:
     # Pre-import YOLO in the MAIN thread to avoid a Python 3.13
     # threaded circular import in torchvision when the pipeline
     # worker thread lazy-imports ultralytics later.  Swallow any
-    # error here — if ultralytics cannot be imported the pipeline
+    # error here - if ultralytics cannot be imported the pipeline
     # will fall back to OCR-only detection.
     try:
         from ultralytics import YOLO  # noqa: F401

@@ -55,13 +55,13 @@ def eval_manual_mAP50(weights: Path, yaml_path: Path) -> tuple[float, float, flo
     to coexist with the running trainer (which is using ~16GB VRAM).
     Trainer batch=8 imgsz=960  ~16GB. Eval batch=1 imgsz=960  ~2GB. Safe.
     """
-    from ultralytics import YOLO  # imported lazily — module is heavy
+    from ultralytics import YOLO  # imported lazily - module is heavy
     model = YOLO(str(weights))
     metrics = model.val(
         data=str(yaml_path),
         imgsz=960,
-        batch=1,        # tiny — coexist with trainer
-        half=True,      # FP16 — half VRAM
+        batch=1,        # tiny - coexist with trainer
+        half=True,      # FP16 - half VRAM
         conf=0.001,
         iou=0.7,
         plots=False,

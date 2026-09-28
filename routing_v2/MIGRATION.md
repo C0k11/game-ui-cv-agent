@@ -1,4 +1,4 @@
-# 迁移与删除审计 —— 老代码什么时候可以删
+# 迁移与删除审计 -- 老代码什么时候可以删
 
 > 用户 2026-08-08：「干好了也就是说可以把除开训练材料以及重要的素材资产，
 > 可以把老的狗屎山代码删除了（记得可利用的都得搬完）」
@@ -42,19 +42,19 @@
 | `arena.py` `arena_shop.py` | `flow/arena.py` | 写完（大赛商店买体力未做） |
 | `story_mining.py` | `flow/mining.py` | 写完，**未 live** |
 | `momo_talk.py` | `flow/momotalk.py` | 写完，**未 live** |
-| `batch_sweep.py` `special_sweep.py` | — | **没搬**（默认关，活动期 AP 全给活动） |
-| `combat_brain.py` | — | **没搬**，战斗层用户已预告要单独重写 |
+| `batch_sweep.py` `special_sweep.py` | - | **没搬**（默认关，活动期 AP 全给活动） |
+| `combat_brain.py` | - | **没搬**，战斗层用户已预告要单独重写 |
 
 ---
 
 ## 二、禁绝对不能删
 
-- `data/raw_images/` `data/**/*.jsonl` `dataset/` `runs/` —— 训练素材与权重
-- `data/raw_images/_classes.txt` —— **按行号索引，连改都要小心**
-- `data/model_registry.json` —— 新层也从这里解析模型
+- `data/raw_images/` `data/**/*.jsonl` `dataset/` `runs/` -- 训练素材与权重
+- `data/raw_images/_classes.txt` -- **按行号索引，连改都要小心**
+- `data/model_registry.json` -- 新层也从这里解析模型
 - `scripts/train_yolo26.py` `scripts/build_ui_v2.py` 等训练/建库脚本
 - `data/ocr_model/ba_rec.onnx`
-- `vision/` —— OCR 归一化词表（新层的 `read.py` 暂未用，但训练侧在用）
+- `vision/` -- OCR 归一化词表（新层的 `read.py` 暂未用，但训练侧在用）
 
 ## 三、可以跟着一起删的（依赖老 skill，且新层不需要）
 
@@ -63,7 +63,7 @@
 `tests/replay/`，以及仓库根目录那一堆 `_probe_*.py` / `_shopdbg*.py` / `_cal_*.py`
 （都是一次性探针，功能已被 `py -m routing_v2 probe/step` 取代）。
 
-注意 `scripts/audit_cls_usage.py` 要**改**不要删 —— 它的扫描目标要从 `brain/` 换成
+注意 `scripts/audit_cls_usage.py` 要**改**不要删 -- 它的扫描目标要从 `brain/` 换成
 `routing_v2/`，那道 `--fail-on-dead` 闸仍然有用。
 
 ## 四、`server/app.py`（4898 行）

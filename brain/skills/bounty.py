@@ -1,4 +1,4 @@
-"""BountySkill — 悬赏通缉 daily ticket sweep (pure-YOLO, TicketSweepSkill).
+"""BountySkill - 悬赏通缉 daily ticket sweep (pure-YOLO, TicketSweepSkill).
 
 Verified flow: data/_missions_probe_log.md (Step 3-12). bounty is the canonical
 "票券扫荡型" skill; the full flow lives in TicketSweepSkill. Here we only:
@@ -7,7 +7,7 @@ Verified flow: data/_missions_probe_log.md (Step 3-12). bounty is the canonical
 - select the dashboard-configured branch (高架公路 / 沙漠铁道 / 教室) by its cls.
 
 bounty tickets are SHARED across branches (1/6 total), and a MAX sweep drains
-them all, so we pick ONE branch (the first enabled) — no iteration. bounty
+them all, so we pick ONE branch (the first enabled) - no iteration. bounty
 sweeps cost ONLY tickets (no AP).
 
 should_run: dot on the 任务大厅入口 hub tile (campaign_nav badge).
@@ -35,7 +35,7 @@ class BountySkill(TicketSweepSkill):
     _HUB_TILE = UC.HUB_BOUNTY
     _PAGE_NAME = "Bounty"
     _CONFIG_KEY = "bounty_branches"
-    # User-corrected 2026-06-11 (2nd revision): bounty NEVER costs AP — with
+    # User-corrected 2026-06-11 (2nd revision): bounty NEVER costs AP - with
     # or without monthly pass, tickets only. (My earlier "_COSTS_AP=True"
     # was a wrong inference: the missing 197 AP that day was the USER's own
     # manual 大装备 batch sweep, not bounty. 指控前先问人.)
@@ -46,7 +46,7 @@ class BountySkill(TicketSweepSkill):
 
     def should_run(self, screen: ScreenState) -> bool:
         # Always enter (user iron rule 2026-06-11): the LOBBY entry dot only
-        # means "something in the hall has work" — it must NOT gate this skill.
+        # means "something in the hall has work" - it must NOT gate this skill.
         # The real signal is the 悬赏通缉 tile's own dot, checked by the hall
         # scan inside _enter (no dot there  graceful "no work" exit).
         return True

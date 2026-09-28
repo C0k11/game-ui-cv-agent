@@ -234,9 +234,9 @@ def main():
         if delta > 0:
             print(f"  Custom model is BETTER by {delta:.1%}")
         elif delta < 0:
-            print(f"  Custom model is WORSE by {abs(delta):.1%} — consider more training")
+            print(f"  Custom model is WORSE by {abs(delta):.1%} - consider more training")
         else:
-            print(f"  Models are equal — consider more/different training data")
+            print(f"  Models are equal - consider more/different training data")
     else:
         # Evaluate whichever model is available
         use_custom = CUSTOM_MODEL.exists()

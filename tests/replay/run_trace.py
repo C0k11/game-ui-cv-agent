@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Diff replay 跑批器 — 出一份决策 trace, 供改动前后互比。
+"""Diff replay 跑批器 - 出一份决策 trace, 供改动前后互比。
 
 用法:
     # 改动前
@@ -10,7 +10,7 @@
     py tests/replay/run_trace.py --diff before.json after.json
 
 diff 只列**决策指纹变了**的 tick(动作类型/坐标/时长), reason 文案变化不算。
-每处变化都要人去判断是修好了还是弄坏了 —— 录制的 action 只作旁注, 不是断言
+每处变化都要人去判断是修好了还是弄坏了 -- 录制的 action 只作旁注, 不是断言
 目标(它含 bot 当时犯的错)。
 """
 from __future__ import annotations
@@ -102,7 +102,7 @@ def cmd_diff(before: str, after: str) -> int:
             changed.append((k, rb, ra))
     print(f"tick 总数 before={len(bi)} after={len(ai)} | 决策变化 {len(changed)}")
     if not changed:
-        print("OK 零变化 —— 这次改动没有改变任何历史 tick 的决策")
+        print("OK 零变化 -- 这次改动没有改变任何历史 tick 的决策")
         return 0
     print()
     for (run, tick), rb, ra in changed[:80]:

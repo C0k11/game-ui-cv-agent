@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""YOLO 检测层 —— 实测 **23ms**（ui, imgsz=960, RTX4090）。
+"""YOLO 检测层 -- 实测 **23ms**（ui, imgsz=960, RTX4090）。
 
 三条硬规矩:
-  1. **模型只从 registry 解析，解析不出就 raise**（绝不静默回落老权重 ——
+  1. **模型只从 registry 解析，解析不出就 raise**（绝不静默回落老权重 --
      "改了 registry 没效果、旧模型还在跑"就是这么来的）。
   2. **`_废弃` 前缀的类在这一层直接丢弃**（README §A11）。`_classes.txt` 是
      按行号索引的，废案类不能删行，只能改名；那就在检测出口处统一过滤，
@@ -10,7 +10,7 @@
   3. **imgsz 必须按模型给**（ui_v2+ 训练在 960；实测 @1920  0 检出）。
 
 别对 ui 权重跑 `strip_optimizer`: YOLO26 是 NMS-free，去重靠 o2o 头学出来，
-   FP16 量化会改变它 —— 同一轮权重 FP32 双框 206  FP16 550（2026-08-07 实锤）。
+   FP16 量化会改变它 -- 同一轮权重 FP32 双框 206  FP16 550（2026-08-07 实锤）。
    registry 里 v15 指的是**未 strip** 的 `best_real.pt`，别"顺手优化"。
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from routing_v2.percept.observe import Box
 _ROOT = Path(__file__).resolve().parents[2]
 _REGISTRY = _ROOT / "data" / "model_registry.json"
 
-# 每个模型的推理尺寸。ui 必须 960 —— 训练就在 960，@1920 实测零检出。
+# 每个模型的推理尺寸。ui 必须 960 -- 训练就在 960，@1920 实测零检出。
 _IMGSZ = {"ui": 960, "avatar": 960, "battle": 960, "emoticon": 640}
 # 每个模型的检出下限。ui 取 0.20：弱类（免费 live ~0.18-0.30）在这个下限才出得来，
 # 上层判据自己再按 cls 收紧（金钱链一律 ≥0.45）。
@@ -46,7 +46,7 @@ def _name_table(model, tag: str) -> Dict[int, str]:
     为什么: 权重里的 names 是**训练那一刻**的快照。之后我们又把 9 个废案类
        改名加了 `_废弃N_` 前缀（`_classes.txt` 是按行号索引的，废案只能改名不能
        删行）。只信权重的话，这些废案还会照常吐出来，然后又有人拿它们当
-       "有 cls 但检不到 = 漏训"去补数据 —— §A11 那个坑我已经踩过一次。
+       "有 cls 但检不到 = 漏训"去补数据 -- §A11 那个坑我已经踩过一次。
        nc 对得上就用文本表，对不上就退回权重表并告警（不静默）。
     """
     wnames = {int(k): str(v) for k, v in (getattr(model, "names", {}) or {}).items()}
@@ -55,7 +55,7 @@ def _name_table(model, tag: str) -> Dict[int, str]:
     lines = [l.strip() for l in
              _CLASSES_TXT.read_text(encoding="utf-8").splitlines() if l.strip()]
     nc = len(wnames)
-    # 2026-08-11 放宽「行数必须相等」：**master 比权重多是正常状态** ——
+    # 2026-08-11 放宽「行数必须相等」：**master 比权重多是正常状态** --
     #    加了新 cls 还没重训时就是这样，而且前端（server/app.py `_master_append`）
     #    在标注中心自己就会 append。新类**永远 append 在末尾**，idx 递增、
     #    前 nc 行的对应关系不变  取前 nc 行仍然正确。
@@ -64,18 +64,18 @@ def _name_table(model, tag: str) -> Dict[int, str]:
     #      顺序真乱了（memory 里那种「按另一套 idx 打的标」），照样退回权重表。
     if len(lines) < nc:
         print(f"[detect] _classes.txt {len(lines)} 行 < 权重 nc={nc}"
-              f" — 表被删过行, idx 已错位, 退回权重名字表", flush=True)
+              f" - 表被删过行, idx 已错位, 退回权重名字表", flush=True)
         return wnames
     extra = len(lines) - nc
     head = lines[:nc]
     diff = [(i, wnames[i], head[i]) for i in range(nc) if wnames.get(i) != head[i]]
     if len(diff) > 40:
-        print(f"[detect] 截断到前 {nc} 行后仍有 {len(diff)} 处不同 —"
+        print(f"[detect] 截断到前 {nc} 行后仍有 {len(diff)} 处不同 -"
               f" 疑似顺序错乱而非 append, 退回权重名字表", flush=True)
         return wnames
     if extra:
         print(f"[detect] _classes.txt 比权重多 {extra} 行（新 cls 待重训）"
-              f" — 取前 {nc} 行, 废案过滤保持有效", flush=True)
+              f" - 取前 {nc} 行, 废案过滤保持有效", flush=True)
     if diff:
         print(f"[detect] 类名表以 _classes.txt 为准，{len(diff)} 个与权重不同"
               f"（改名/标废弃）", flush=True)
@@ -93,7 +93,7 @@ def resolve(model_key: str) -> Path:
     reg = _registry()
     sec = reg.get(model_key)
     if not sec:
-        raise RuntimeError(f"registry 无 '{model_key}' 节 — 修 registry，不回落老模型")
+        raise RuntimeError(f"registry 无 '{model_key}' 节 - 修 registry，不回落老模型")
     active = sec.get("active")
     info = (sec.get("versions") or {}).get(active) or {}
     p = info.get("path")
@@ -109,7 +109,7 @@ def resolve(model_key: str) -> Path:
 
 # 推理设备: 默认交给 ultralytics(有 CUDA 就 0 号卡)。DETECT_DEVICE=cpu 可强制 CPU;
 #    CUDA 报错(09-07 实锤: 4090 显存 ECC 不可纠正错误, 任何 CUDA 调用都失败)时
-#    本进程自动改 CPU 重试一次并记一行, 之后一直 CPU —— 检测器不能因为卡坏了就
+#    本进程自动改 CPU 重试一次并记一行, 之后一直 CPU -- 检测器不能因为卡坏了就
 #    静默返回 0 框(那会让每条 flow 都当"页面认不出"空转)。
 _device = os.environ.get("DETECT_DEVICE") or None
 _cuda_dead = False
@@ -143,7 +143,7 @@ def load(tag: str = "ui"):
 
 
 def warm(tags=("ui",)):
-    """预热 —— 主循环起跑前调用，别让第一帧背模型加载的几秒。
+    """预热 -- 主循环起跑前调用，别让第一帧背模型加载的几秒。
 
     起跑必须过预热闸（2026-08-01 事故）：冷启动的加载帧会把收菜 skill 的
     预算烧光。这里同步加载并跑一张空图，返回才算就绪。

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""MomoTalk 学生好感度 —— 用户点名要的模块，**默认关，前端按钮开**。
+"""MomoTalk 学生好感度 -- 用户点名要的模块，**默认关，前端按钮开**。
 
 信号质量很好: `学生momotalk信息未读`(439) **train 6462 / val 241**，
 `学生信息回复选项`(440) train 418。这条链的感知基础是全 bot 里最扎实的之一。
 
-`学生发送信息中`(438) 是**瞬时态**（学生正在打字）—— 见到就等，别在这时候
+`学生发送信息中`(438) 是**瞬时态**（学生正在打字）-- 见到就等，别在这时候
    去点回复选项，点了会落空。这也是为什么这里**不能用固定 sleep**：打字时长
    随消息长度变，只能靠 cls 消失来判。
 
@@ -87,14 +87,14 @@ class MomoTalkFlow(ExitMixin, Flow):
         # 本屏的都清完了  **再滑动**找下面的（用户口述顺序）
         if self.state["scrolls"] < 8:
             # 全仓最毒的一处 mutate-before-ack：`done_rows` 是**已处理行的
-            #    台账**，在 decide 期就清空 —— 滑动一旦没发出去（被闸吞/被 step
+            #    台账**，在 decide 期就清空 -- 滑动一旦没发出去（被闸吞/被 step
             #    只看一眼），台账没了而屏幕没动  本屏已聊过的行会被**重新点一遍**。
             n = self.state["scrolls"] + 1
-            # 禁 SWIPE_HARDCODED_OK: 这里的几何还是写死的，理由如下 ——
+            # 禁 SWIPE_HARDCODED_OK: 这里的几何还是写死的，理由如下 --
             #    别处的滑动都改成了 `nav.list_swipe`（几何从检出推，见那里的
             #    说明），但 MomoTalk 左侧学生列表**没有可靠的行锚点**:
             #    唯一的行内 cls 是 `未读`，而走到这一支恰恰是"本屏未读都清完了"，
-            #    锚点必然为空 —— 拿它推几何等于推不出来。
+            #    锚点必然为空 -- 拿它推几何等于推不出来。
             #    这条 flow 目前 `modules.momotalk = False`（默认关），
             #      所以先留着并**具名豁免**，不静默放过。
             #     要修的前提: 给学生行本身训一个 cls（或让这条 flow 也推
@@ -108,7 +108,7 @@ class MomoTalkFlow(ExitMixin, Flow):
     def on_momo_chat(self, obs, st):
         # 学生正在打字  见即等。**不能用 sleep 猜时长。**
         if obs.has(V.MOMO_SENDING, 0.35):
-            return wait("学生打字中 — 等它说完")
+            return wait("学生打字中 - 等它说完")
 
         # 羁绊剧情入口
         bond = obs.find([V.MOMO_GOTO_BOND, V.MOMO_ENTER_BOND], 0.35)
@@ -136,12 +136,12 @@ class MomoTalkFlow(ExitMixin, Flow):
 
         # 「这段聊干净了」= **连续 N 帧既没有三个小点、也没有回复选项、
         #    也没有羁绊入口**（用户 08-09 口述判据）。
-        #    旧写法用 `frames_in_page > 45` 这种**时间判据**当收工 ——
+        #    旧写法用 `frames_in_page > 45` 这种**时间判据**当收工 --
         #      学生打字慢一点就被判成聊完，后续对话（羁绊剧情看完回来还有）
         #      直接丢掉。时间不是事实，**cls 才是**。
         #    这里能走到说明本帧三样都没有；hold 负责确认它不是过渡帧。
         if not self.hold("chat_clean", 40):
-            return wait("对话看着聊完了 — 连续确认中（防学生正要开口的过渡帧）")
+            return wait("对话看着聊完了 - 连续确认中（防学生正要开口的过渡帧）")
         self.log("这段对话已聊干净（无 学生发送信息中 / 回复选项 / 羁绊入口）")
         return self.exit_step(obs, prefer_close=False) or wait("等返回列表")
 
@@ -172,7 +172,7 @@ class MomoTalkFlow(ExitMixin, Flow):
     def on_stage_popup(self, obs, st):
         # **别把 `任务开始` 混进来**（2026-08-10 arena 同形 bug 的连坐排查）：
         #    `find([A, B])` 是 conf argmax，而 `任务开始`(常 0.99) 会压过
-        #    `进入章节`；更要命的是**羁绊剧情根本不该出现「任務開始」**——
+        #    `进入章节`；更要命的是**羁绊剧情根本不该出现「任務開始」**--
         #    真出现了说明我们站在**别的 flow 的关卡弹窗**上，点下去就是打战斗、
         #    吃 AP，AP 不够时游戏直接弹「購買AP 單價30」。
         #     只认「進入章節」，认不出就不动，交给 nav 退出去。

@@ -5,13 +5,13 @@
    然后把小号那些，还有很多就 build up 起来训练」。
 
 三个必须踩准的坑（全是今天/历史实锤过的）:
- 1. **`_ann.jpg` 不是干净帧** —— runner 每次存帧写两份:
+ 1. **`_ann.jpg` 不是干净帧** -- runner 每次存帧写两份:
     `NNNN_page.png`（干净）+ `NNNN_page_ann.jpg`（**烧了标注框的渲染图**）。
     把 ann 当素材训进去 = 教模型认自己画的框。 一律排除。
- 2. **png 在这套工具链里等于不存在** —— `build_ui_v2.frames_in()` 历史上只读
+ 2. **png 在这套工具链里等于不存在** -- `build_ui_v2.frames_in()` 历史上只读
     `*.jpg`，前端 datasets 也只按 jpg 计数（[[v16_dataset_integration]] 实锤过
     三批素材"接了源却一帧没进集"）。 干净的 png 必须转成 jpg。
- 3. **按内容 md5 去重** —— runner 一轮存几十帧，相邻帧大量重复；
+ 3. **按内容 md5 去重** -- runner 一轮存几十帧，相邻帧大量重复；
     [[v16_dataset_integration]]「数唯一帧不数框」。
 
 用法:

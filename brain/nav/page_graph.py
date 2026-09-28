@@ -7,13 +7,13 @@
 skill 将来只需要声明目标("我要到 EventQuestList"), 路径交给 BFS。
 
 ## 数据来源(不是拍脑袋)
-`data/screen_flow_draft.md` —— 2026-07-17 用 ui v13 对 **1029 张干净帧**批量
+`data/screen_flow_draft.md` -- 2026-07-17 用 ui v13 对 **1029 张干净帧**批量
 推理, 按结构 cls 集合 Jaccard≥0.65 union-find 聚成 30+ 画面簇, 组内 ≥80% 帧
 出现的 cls = 核心指纹; 转移边取自 trajectory 里 click 动作落点 + 后续帧组变化。
 本文件是把那份稿子**形式化成机器可读**, 并把稿子里列出的坑编码成负条件。
 
 ## v1 纪律: 只观测, 不接管
-和 exit_report 一样 —— 先挂在 pipeline 上每 tick 输出"我认为在哪一页", 跟
+和 exit_report 一样 -- 先挂在 pipeline 上每 tick 输出"我认为在哪一页", 跟
 skill 自己的 sub_state 对账, 攒够真实分布再谈让它接管导航。
 **绝不在没有实测准确率之前把导航交给它。**
 
@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # require  : **必须全部出现**, 少一个直接否决。
 #            为什么需要它(2026-07-25 全语料实测才发现): 光有 min_core 时,
 #            "扫荡开始+任务开始" 两个通用 cls 就能凑够 Bounty_SweepPanel 的
-#            门槛, **票种压根没参与判定** —— 活动关的扫荡面板被判成悬赏的,
+#            门槛, **票种压根没参与判定** -- 活动关的扫荡面板被判成悬赏的,
 #            实测 219 帧。凡是"靠某个专属物件区分的同构页面"(悬赏/交流会/
 #            活动 三家扫荡面板长得一模一样, 只有票据不同), 那个物件必须
 #            进 require 而不是 core。
@@ -156,7 +156,7 @@ PAGES: Dict[str, P] = {
         "require": ["学院交流会票", "扫荡开始"], "core": ["任务开始", "弹窗叉叉"],
         "min_core": 1, "neg": ["取消键"], "parent": "Exchange_StageList",
     },
-    # 活动关的扫荡面板 —— 与上面两家**长得一模一样**, 只靠"没有那两种票"区分。
+    # 活动关的扫荡面板 -- 与上面两家**长得一模一样**, 只靠"没有那两种票"区分。
     # 草稿 §6 当时无帧所以缺了这一节, 结果它的帧全被判成悬赏的(实测 219 帧)。
     "EventSweepPanel": {
         "require": ["扫荡开始"], "core": ["任务开始", "弹窗叉叉"],
@@ -191,7 +191,7 @@ PAGES: Dict[str, P] = {
     },
 }
 
-# 坑: 确认框族**故意不定名** —— cls 集合不可分, 图不做它做不到的判断。
+# 坑: 确认框族**故意不定名** -- cls 集合不可分, 图不做它做不到的判断。
 # 命中这个形状就报 ambiguous, 让调用方用上下文闸(结构/位置)去分。
 CONFIRM_SHAPE = ("确认键", "取消键")
 
@@ -208,7 +208,7 @@ EDGES: List[Tuple[str, str, str]] = [
     ("MissionHub", "战术大赛", "Arena_Opponents"),
     ("MissionHub", "悬赏通缉", "Bounty_SceneSelect"),
     ("MissionHub", "学院交流会", "Exchange_SchoolSelect"),
-    # 2026-07-25 审计补边: EventQuestList/EventSweepPanel 原先**零入边** —
+    # 2026-07-25 审计补边: EventQuestList/EventSweepPanel 原先**零入边** -
     # 文件头旗舰用例 route(...,'EventQuestList') 永远 None, 而 event_quest 是
     # 当前 skill_order 唯一主链。banner cls 取 live 实际点击的 405(event_quest
     # _enter 点「距离结束还剩」进活动, 不是 idx77 那个入口框)。
@@ -239,7 +239,7 @@ def _names(screen, conf: float = 0.30) -> set:
 
 
 def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
-    """返回 (page|None, 说明)。识别不出一律 None —— **绝不硬归类**。
+    """返回 (page|None, 说明)。识别不出一律 None -- **绝不硬归类**。
 
     多个页面同时命中时取 (命中 core 数, min_core) 最大的那个: 子画面的指纹
     总比父画面更具体(例如 Schedule_Report 比 Schedule_RosterPopout 多一个
@@ -247,10 +247,10 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
     """
     ns = _names(screen, conf)
     if not ns:
-        return None, "零检出(黑屏/过场/CG) — 等下一帧"
+        return None, "零检出(黑屏/过场/CG) - 等下一帧"
     # 坑: 只剩一个叉叉 = 弹窗动画中, 不判
     if ns <= {"弹窗叉叉", _GLOBAL_BACK, _GLOBAL_HOME}:
-        return None, "只剩弹窗/chrome cls — 等下一帧"
+        return None, "只剩弹窗/chrome cls - 等下一帧"
     hits = []
     for name, p in PAGES.items():
         if any(n in ns for n in p.get("neg", ())):
@@ -262,7 +262,7 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
         # 与 require(AND) 的分工: AND 适合"只有一个专属锚且必现"的页; 域里有
         # **多个专属锚、但每帧只保证出现其中之一**时只能用 OR。
         # 实测逼出来的(全语料 44,177 有检出帧): Schedule_RoomCarousel 用
-        # AND require=[全体课程表] 翻 182 帧 —— 修正 117(社交页误判 57/咖啡厅 4/
+        # AND require=[全体课程表] 翻 182 帧 -- 修正 117(社交页误判 57/咖啡厅 4/
         # 纯"左切换+右切换"凑数垃圾 56), 但**误伤 65 帧真课程表页**(那些帧
         # 全体课程表 没检出、只检出 课程表票)。改 OR 后误伤归零。
         req_any = p.get("require_any", ())
@@ -275,7 +275,7 @@ def identify(screen, conf: float = 0.30) -> Tuple[Optional[str], str]:
     if not hits:
         # 坑: 确认框形状但认不出是哪个框
         if all(c in ns for c in CONFIRM_SHAPE):
-            return None, ("ConfirmDialog_ambiguous — 确认框族 cls 不可分, "
+            return None, ("ConfirmDialog_ambiguous - 确认框族 cls 不可分, "
                           "交上下文闸(结构/位置)判, 图不猜")
         return None, f"无匹配页面 (在屏 {len(ns)} 类)"
     hits.sort(key=lambda t: (t[0], t[1]), reverse=True)
@@ -322,12 +322,12 @@ def route(src: str, dst: str, max_hops: int = 8) -> Optional[List[str]]:
 
 
 def validate_vocab(master: List[str]) -> List[str]:
-    """所有引用的 cls 必须在模型词表里 —— 拼错一个字就是一条永不命中的死判据。
+    """所有引用的 cls 必须在模型词表里 -- 拼错一个字就是一条永不命中的死判据。
     返回不存在的名字列表(空 = 全对)。"""
     used = set()
     for p in PAGES.values():
         # require 必须进校验(2026-07-25 审计): 它语义是"少一个直接否决", 拼错
-        # 不是死判据而是**永久否决该页** — 比 core 拼错更静默。之前只是碰巧
+        # 不是死判据而是**永久否决该页** - 比 core 拼错更静默。之前只是碰巧
         # 3 个 require 名都出现在别页 neg 里才被盖到。
         used |= (set(p["core"]) | set(p.get("neg", ()))
                  | set(p.get("require", ())))

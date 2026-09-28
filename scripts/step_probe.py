@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""逐帧门控探针 —— step_mode 审核的标准工具(用户 2026-07-25: "门控每一帧,
+"""逐帧门控探针 -- step_mode 审核的标准工具(用户 2026-07-25: "门控每一帧,
 确保逻辑以及我们的 yolo 没问题")。
 
 每一步做三件事, 缺一不可:
-   **抓干净帧**(ADB screencap, Android 内部取流 — overlay 物理进不去)
-   **跑 YOLO 看检出** —— 验感知层: 这一帧模型认出了什么, 置信度多少
-   **拉 bot 的 pending 意图** —— 验逻辑层: 它想干什么, 落点在哪个 cls 上
+   **抓干净帧**(ADB screencap, Android 内部取流 - overlay 物理进不去)
+   **跑 YOLO 看检出** -- 验感知层: 这一帧模型认出了什么, 置信度多少
+   **拉 bot 的 pending 意图** -- 验逻辑层: 它想干什么, 落点在哪个 cls 上
 然后人/主对话判断"该不该放行", 对了才 go。
 
 纪律(execution_doctrine #13, 用户三次纠偏): **绝不批量放行**。
-只看 reason 字符串就 go = 假审核 —— bounty 弃 6 票 / jfd 假成功 / arena 空转
+只看 reason 字符串就 go = 假审核 -- bounty 弃 6 票 / jfd 假成功 / arena 空转
 全是这么放过去的。批量只允许用于**同构且已逐帧验证过**的重复步骤。
-纪律(#17): **探针帧永远比 pending 新** —— pending 是几秒前那一帧算出来的。
+纪律(#17): **探针帧永远比 pending 新** -- pending 是几秒前那一帧算出来的。
 看到"落点与当前检出对不上"先想这个, 别急着报 bug。
 
 用法:
@@ -34,7 +34,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
 ADB = r"C:\Program Files\Netease\MuMu\nx_device\12.0\shell\adb.exe"
-# 端口不写死 — MuMu 实例重启会换号(2026-07-28: 755516384, 全仓 16 处硬编码)
+# 端口不写死 - MuMu 实例重启会换号(2026-07-28: 755516384, 全仓 16 处硬编码)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     from brain.mumu_port import mumu_serial
@@ -69,11 +69,11 @@ def grab() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     # 语义: **先放行(上一轮已审过的那一步), 再展示下一步**。
-    # 反过来(先展示后放行)等于没审就批 —— 那是铁律 #13 禁止的自动放行。
+    # 反过来(先展示后放行)等于没审就批 -- 那是铁律 #13 禁止的自动放行。
     ap.add_argument("--go", action="store_true",
                     help="先放行上一轮审过的那步, 再抓下一步给我审")
     # 硬闸(2026-07-25 live 当场补): 上一轮探针如果显示 pending=无(bot 还在
-    # 算/在 wait), 我 --go 就会把**期间新算出来的动作盲批掉** —— 实测发生过一次
+    # 算/在 wait), 我 --go 就会把**期间新算出来的动作盲批掉** -- 实测发生过一次
     # (批了 BuyPyroxene 的 FREE 购买点击, 事后核对才确认是对的 = 靠运气不是门控)。
     # 加 --expect: 放行前先比对当前 pending 的 reason, 对不上直接拒批。
     ap.add_argument("--expect", default="",
@@ -90,15 +90,15 @@ def main() -> int:
         if a.expect:
             got = str(cur.get("reason", ""))
             if not cur:
-                print(f"拒批: 当前无 pending, 但我期待 {a.expect!r} —— "
+                print(f"拒批: 当前无 pending, 但我期待 {a.expect!r} -- "
                       f"上一轮看到的那步已经不在了, 重新探再审")
                 return 2
             if a.expect not in got:
-                print(f"拒批: 期待 reason 含 {a.expect!r}, 实际是 {got!r} —— "
+                print(f"拒批: 期待 reason 含 {a.expect!r}, 实际是 {got!r} -- "
                       f"这不是我审过的那一步, 绝不盲批")
                 return 2
         elif not cur:
-            print("拒批: 当前无 pending —— 加 --expect 或先探针看清再批")
+            print("拒批: 当前无 pending -- 加 --expect 或先探针看清再批")
             return 2
         r = api("/step/go", "POST", {})
         print(f"[放行] {r.get('approved', r)}")
@@ -114,7 +114,7 @@ def main() -> int:
     if raw.get("_error"):
         print(f"pending: {raw['_error']}")
     elif not pend:
-        print(f"pending: 无(step_mode={raw.get('step_mode')}) — "
+        print(f"pending: 无(step_mode={raw.get('step_mode')}) - "
               f"bot 未暂停在动作上(可能在 wait/加载/刚启动还没算出第一步)")
     else:
         print(f"skill={pend.get('skill')}  sub={pend.get('sub_state')}  "
@@ -181,7 +181,7 @@ def main() -> int:
                       (0, 200, 255), -1)
         cv2.putText(ann, str(i), (x1 + 3, max(11, y1 - 3)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
-    # 落点十字(红) —— 一眼看出 bot 要点哪
+    # 落点十字(红) -- 一眼看出 bot 要点哪
     if isinstance(pend.get("target"), (list, tuple)) and len(pend["target"]) == 2:
         tx, ty = pend["target"]
         px, py = int(float(tx) * SW), int(float(ty) * h * sc)

@@ -19,7 +19,7 @@ Output:
     data.yaml                            (path / train / val / nc / names)
 
 Class schema: pulled from run_20260521_103956_distinct/classes.txt (447 classes).
-All 3 train dirs + val dir use the same schema — verified before build aborts
+All 3 train dirs + val dir use the same schema - verified before build aborts
 on mismatch.
 
 Usage:
@@ -40,21 +40,21 @@ TRAIN_SOURCES = [
     "run_20260521_103956_distinct",  # main batch (852 labeled w/ oversample)
     "run_20260527_094158",           # craft 补录 (149)
     "run_20260527_101545",           # craft 补录 (15)
-    "run_20260518_002646",           # tiny补 — covers cls 97 活动剧情_已选择 (2)
+    "run_20260518_002646",           # tiny补 - covers cls 97 活动剧情_已选择 (2)
     "run_20260529_000756",           # 新capture: lobby入口文字重标 + momotalk按钮 (34)
     "run_20260529_123209",           # 新capture: YOLO预标 + 手工补标 (506)
     "_synth_bond",                   # overlay 合成: 441/442 贴多样背景 (300, 真帧仅2-4)
     "_synth_bond_goto",              # avatar-slot 合成: 441+449 momotalk对话屏换头像 (300)
     "_synth_bond_enter",            # avatar-slot 合成: 442+449 羁绊面板屏换头像 (300)
     # NOTE: run_20260518_163513 / run_20260228_* / run_20260307_* are
-    # fused_avatar labels (character heads), NOT UI — DO NOT include.
-    # _synth_* dirs are UI-synth output (build_ui_synth.py) — add as needed.
+    # fused_avatar labels (character heads), NOT UI - DO NOT include.
+    # _synth_* dirs are UI-synth output (build_ui_synth.py) - add as needed.
 ]
 VAL_SOURCE = "_ui_val_pool"
 
 # Classes to drop entirely when building (bad/un-learnable labels).
 # NONE currently. cls 92 (战术大赛对战选择区域) was dropped on a bogus
-# "recall 0.0 even on train" reading — but v3 detects ALL opponent-row regions
+# "recall 0.0 even on train" reading - but v3 detects ALL opponent-row regions
 # cleanly (verified on a live 戰術大賽 screenshot), so it IS learnable and is in
 # fact the cleanest arena opponent-select signal (bounds each opponent row, no
 # avatar model needed). Kept for v5.
@@ -94,7 +94,7 @@ def link_pair(src_jpg: Path, src_txt: Path, dst_jpg: Path, dst_txt: Path) -> str
     the txt into dst paths.
 
     The label is parse+rewritten (not symlinked) so trailing ``rect``/``conf``/
-    angle tokens are stripped and DROP_CLASSES lines removed — symlinking would
+    angle tokens are stripped and DROP_CLASSES lines removed - symlinking would
     propagate the corrupt source verbatim. Returns the cleaned label text so
     callers can tally negatives without re-reading.
     """

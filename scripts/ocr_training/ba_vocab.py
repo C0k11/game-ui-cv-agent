@@ -1,4 +1,4 @@
-"""Blue Archive vocabulary — every UI text string the pipeline needs to recognize.
+"""Blue Archive vocabulary - every UI text string the pipeline needs to recognize.
 
 This serves as:
 1. Ground-truth label source for auto-correcting trajectory OCR crops
@@ -210,7 +210,7 @@ CORRECTIONS = {
     "指定訪間": "指定訪問",
     "随機訪間": "隨機訪問",
     "隋機訪間": "隨機訪問",
-    # 部隊 (team tab labels) — 隊 隧 misread
+    # 部隊 (team tab labels) - 隊 隧 misread
     "1部隧": "1部隊",
     "2部隧": "2部隊",
     "3部隧": "3部隊",
@@ -218,7 +218,7 @@ CORRECTIONS = {
     "部隧": "部隊",
     # 邀請 button label mis-OCR (observed run_20260513_112359 t114)
     "返明": "邀請",
-    # 掃蕩 (sweep) variants — 蕩荡 was already in mined list, here
+    # 掃蕩 (sweep) variants - 蕩荡 was already in mined list, here
     # the prefix-dropped variants where OCR misses the leading 掃
     "蕩次數": "掃蕩次數",
     "荡次数": "掃蕩次數",

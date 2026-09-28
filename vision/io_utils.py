@@ -22,7 +22,7 @@ def imread_any(path: _PathLike, flags: int = cv2.IMREAD_COLOR) -> Optional[np.nd
     """Read an image file regardless of path encoding.
 
     Returns `None` on any failure (missing file, corrupt data, unsupported
-    format) — mirroring the `cv2.imread` contract.
+    format) - mirroring the `cv2.imread` contract.
     """
     try:
         p = str(path)

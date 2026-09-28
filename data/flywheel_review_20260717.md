@@ -3,10 +3,10 @@
 > 整备动作(2026-07-17 执行完毕): 1)dHash 贪心稀疏(Hamming≤6, 3,101->988 帧, **2,113 冗余帧** -> `data/_dup_backup_20260717/` 可恢复)
 > 2)registry active 模型预标(ui v13 / battle v9 / fused_avatar v6, `yolo_prefill_run.py` merge 模式, span 路由): **988 帧 9,812 框**
 > 3)烧录抽查: 顶条 HUD 目检干净(ADB/scrcpy 源) 4)UI 常规池预标空帧 20 张 -> `_unlabeled_backup/_20260717_prefill_empty/`
-> 5)**双重毒清除**: defeat_candidates_v10 的 28 帧是 botplay 池副本 — botplay 侧同帧(无 cls484 标注=矛盾标签)已移
+> 5)**双重毒清除**: defeat_candidates_v10 的 28 帧是 botplay 池副本 - botplay 侧同帧(无 cls484 标注=矛盾标签)已移
 > `data/_defeat_dedup_backup_20260717/`; defeat 池 battle merge 复验 = 仍纯 484×28, 人审框未动。
 
-## 训练材料路由(谁喂谁 — build 时 box 级过滤, 不用物理分池)
+## 训练材料路由(谁喂谁 - build 时 box 级过滤, 不用物理分池)
 
 | 池组 | 去向 | 说明 |
 |---|---|---|
@@ -18,14 +18,14 @@
 ## 禁人审否决项(用户 2026-07-17 定)
 
 - **Challenge tab/行上出现任何语义框一律删**: Challenge=抄轴/手打专属, 词表不给 Challenge 建"可打"类。
-  已清 3 帧错框(v13 把活动 Challenge 高亮黄字误检成 80「普通关卡选中」— 该类本义是主线 Normal tab 指示器):
+  已清 3 帧错框(v13 把活动 Challenge 高亮黄字误检成 80「普通关卡选中」- 该类本义是主线 Normal tab 指示器):
   `run_20260708_event_probe_clean/frame_000002` + `run_20260709_merged_clean/120806__frame_000371` + `123518__frame_000017`。
   这三帧保留为负样本(教 v14: Challenge 高亮≠80)。主线任务页 Normal tab 的 80 正标(`run_20260715_000407_clean/frame_000016`)保留勿删。
   Challenge 行的「入场键」「关卡得星_0」是纯视觉类, 保留无害(bot 防线在 sweep/rerun 的 关卡得星_3 精确正锚)。
 
-## 人审入口(dashboard 标注页) — 2026-07-17 已合并为两组
+## 人审入口(dashboard 标注页) - 2026-07-17 已合并为两组
 
-**1)`run_20260717_merged_ui_clean`(442 帧 5,471 框)— 全部 UI 材料一个池**(16 源池合并, 帧名前缀=源池溯源:
+**1)`run_20260717_merged_ui_clean`(442 帧 5,471 框)- 全部 UI 材料一个池**(16 源池合并, 帧名前缀=源池溯源:
 evshop=活动商店 / 0709m=7月9日大池 / 0717a=今天daily走线 / 其余日期简写)。审点:
 - `evshop__*` 77帧: **cls103 购买按钮已 OCR 辅助标满(+537框, 文本精确匹配, 抽查全准)**; 剩人工 **貨幣tab(101/102)/余额条(104)** + 抽查
 - `0717a__*` 53帧: 任务 hub 帧上人工画 **idx77 当期活动入口** 框(v13 未训新类)
@@ -40,18 +40,18 @@ evshop=活动商店 / 0709m=7月9日大池 / 0717a=今天daily走线 / 其余日
 
 ## 惯例检查结论(本次已执行)
 
-- OK 冗余: 3,101->988 帧(77% 近邻重复移备份; event_shop/botplay 保全未稀疏 — 弱类/战斗动态)
+- OK 冗余: 3,101->988 帧(77% 近邻重复移备份; event_shop/botplay 保全未稀疏 - 弱类/战斗动态)
 - OK 烧录: 顶条 HUD 抽查全干净(ADB/scrcpy 源, overlay 物理不可见)
-- OK 空帧: 预标后 0-box 帧已移 `data/_unlabeled_backup`(event_shop/botplay 除外 — 弱区空帧=人工补框对象, 保留)
+- OK 空帧: 预标后 0-box 帧已移 `data/_unlabeled_backup`(event_shop/botplay 除外 - 弱区空帧=人工补框对象, 保留)
 - OK 格式: label 全 5 列 master 索引(yolo_prefill_run 保证), classes.txt=master 副本
 - 注意 val 纪律: 这批全部是连续 live 录制 -> **审完只进 train, 不切 val**(近邻泄漏铁律); 新 val 仍需独立走查 session
 
 ## 405/474 混淆审计(2026-07-17, 用户抓误标后全量核查)
 
-- 两池(merged_ui + 0711_merged)全部 405/474 框 OCR 复核(判定键=「獲得」474专属 vs「還剩」405专属 —
+- 两池(merged_ui + 0711_merged)全部 405/474 框 OCR 复核(判定键=「獲得」474专属 vs「還剩」405专属 -
   注意ba_rec 系统性吞「獎勵」二字, 第一版"无獎勵判405"规则差点反向改错 73 框, dry-run 拦下):
   **ok405=184 / ok474=75 / 修正 2 框**(405->474: `0715c__frame_000004` + `0717a__frame_000006`,
-  hub 左上「距離獎勵獲得結束」上期领奖 banner 被标当期入口 — 不修 v14 会把领奖倒计时学成活动入口, 7/15 进错活动坑复活)。
+  hub 左上「距離獎勵獲得結束」上期领奖 banner 被标当期入口 - 不修 v14 会把领奖倒计时学成活动入口, 7/15 进错活动坑复活)。
 - 人工 1 帧: `run_20260711_merged_clean/144712_frame_000002` cls405 框内 OCR 零字(目检定 405/474)。
 
 ## 老池一致性审计(2026-07-20, 用户抓"老池和新规颗粒度偏差"后全量核查)
@@ -64,7 +64,7 @@ v14 发车前把本轮新定的标注规矩(灰态不标/405-474 判定键/103 �
 - ***cls80 大清洗(v13 Challenge 误检真根源)**: 0617 池 156 个活动页黄色高亮 Quest tab 被标
   80 -> **全部改判 100 活动quest_已选择**("黄字高亮tab=80"就是这么教进 v13 的; 100 同时是
   ensure_quest_tab 正锚, 此前正样本被错标成 80 所以漏检)。Challenge 高亮误标 del ×22
-  (0617×4 + **0711×18 全军覆没** — 上次只清了 merged_ui 3 帧, 0711 是漏网)。
+  (0617×4 + **0711×18 全军覆没** - 上次只清了 merged_ui 3 帧, 0711 是漏网)。
   Normal 正标(含 OCR 读歪 Jormal/lormal 变体+空读)646 个全保留。
 - **405<->474 时代污染**: 474 类 7/08 才诞生, 之前的领奖 banner 全标 405 -> OCR 判定键
   (獲得/還剩)全量复核: 仅 3 框(0531 池)需 405->474, 其余 1,190+ 正确。规模比担心的小。
@@ -72,7 +72,7 @@ v14 发车前把本轮新定的标注规矩(灰态不标/405-474 判定键/103 �
   確認 20->23 recls ×22(灰白底); 20 del ×8(遮罩暗态 + **0607 一个出擊黄键误标成確認**)。
 - 复扫对账: 80 总量 914->735 / 0521 103 中位 0.0353×0.0318 / 405 1200->1197 / 474 128->131。
 - 工具: scratchpad ocr_audit_legacy.py / gray_audit_legacy.py(判定词吃过一次亏:
-  'Jormal/lormal'=Normal 的 OCR 读歪, 'halllengge'=Challenge 打碎 — 变体必须人眼过分布再定案)。
+  'Jormal/lormal'=Normal 的 OCR 读歪, 'halllengge'=Challenge 打碎 - 变体必须人眼过分布再定案)。
 
 ## 本次迭代训练源(用户 2026-07-17 定稿)
 

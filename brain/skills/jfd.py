@@ -1,4 +1,4 @@
-"""JointFiringDrillSkill (JFD) — 学院交流会 daily ticket sweep (TicketSweepSkill).
+"""JointFiringDrillSkill (JFD) - 学院交流会 daily ticket sweep (TicketSweepSkill).
 
 Verified flow: data/_missions_probe_log.md (Step 13-22). Structurally identical
 to bounty (same TicketSweepSkill base), with two differences:
@@ -19,7 +19,7 @@ from brain.skills.ticket_sweep import TicketSweepSkill
 from brain.skills import ui_classes as UC
 
 
-# Academy  right-panel position (no cls — probe-measured; documented v6 gap).
+# Academy  right-panel position (no cls - probe-measured; documented v6 gap).
 _ACADEMY_POS = {
     "三一": (0.92, 0.253),
     "格黑娜": (0.915, 0.401),
@@ -34,7 +34,7 @@ class JointFiringDrillSkill(TicketSweepSkill):
     _PAGE_NAME = ""              # JFD has no PAGE_SIGNATURE  rely on ticket cls
     _CONFIG_KEY = "jfd_academy"
     # User-corrected 2026-06-11: with the monthly passes (大小月卡, active on
-    # this account) JFD sweeps cost NO AP — gating on AP wrongly exited with
+    # this account) JFD sweeps cost NO AP - gating on AP wrongly exited with
     # 15 free tickets unspent (live, twice). The no-pass case is still safe
     # without the gate: an unaffordable sweep greys the confirm (defense 
     # cancels) and the order runs JFD before batch_sweep eats the AP anyway.
@@ -50,7 +50,7 @@ class JointFiringDrillSkill(TicketSweepSkill):
         return True
 
     def _click_branch(self, screen: ScreenState) -> Optional[Dict[str, Any]]:
-        """Select the academy by position (tiles have no cls — v6 gap). Only
+        """Select the academy by position (tiles have no cls - v6 gap). Only
         fires while the JFD ticket cls is on screen (= Academy Select page)."""
         if self.find_cls(screen, self._TICKET_CLS, conf=0.30) is None:
             return None  # not confirmed on the JFD academy-select page yet

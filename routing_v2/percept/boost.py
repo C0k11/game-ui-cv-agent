@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""双三倍加成归属 —— 把 cls452「双倍或三倍活动进行中」翻译成**哪个玩法**在加成。
+"""双三倍加成归属 -- 把 cls452「双倍或三倍活动进行中」翻译成**哪个玩法**在加成。
 
 ## 为什么以前说它"只说有、不说哪类"
 
 memory 里这条结论挂了很久，全仓零使用（老代码只有 `brain/skills/special_sweep.py`
 拿它做过一次"落在特殊任务上吗"的判断，半径 0.13 是拍脑袋的）。
 2026-08-11 看图才发现结论下早了：**452 检出的不是一个全局横幅，而是任务大厅
-每个磁贴左上角那枚红色「活動進行中」小标** —— 人眼看
+每个磁贴左上角那枚红色「活動進行中」小标** -- 人眼看
 `data/raw_images/v2step_20260811/013124_000162_task_hall.png` 就一目了然。
  **它的位置就指明了是哪个磁贴**，配合同屏的磁贴 cls 就能说清是哪一类。
 
@@ -17,7 +17,7 @@ memory 里这条结论挂了很久，全仓零使用（老代码只有 `brain/sk
 ## 本模块只做感知，不碰策略
 
 刷什么、往哪投 AP 是**用户的决定**（memory `routing_v2_live_day3` §「策略是用户的」
-—— 我 08-10 擅自改 arena 配对被当场叫停）。这里只回答"屏上写着哪几类有加成"，
+-- 我 08-10 擅自改 arena 配对被当场叫停）。这里只回答"屏上写着哪几类有加成"，
 **不给任何 flow 改刷取顺序**。上层要不要用、怎么用，交配置和用户。
 
 ## 归属半径怎么标出来的（实测，不是"我觉得 0.1 差不多"）
@@ -26,9 +26,9 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
 **我发明像素统计判据然后当因果**。所以这里的每个数都挂了人眼真值：
 
 真值来源（看图确认，两天天然不同源  满足 `val_set_crisis` 的「单位是天」）:
-  * `data/raw_images/v2step_20260811/*task_hall*.png` (25 帧) —— 任務 / 懸賞通緝 /
+  * `data/raw_images/v2step_20260811/*task_hall*.png` (25 帧) -- 任務 / 懸賞通緝 /
     特殊任務 三个磁贴挂标；學園交流會 / 戰術大賽 / 劇情 没挂
-  * `data/raw_images/v2step_20260810/*task_hall*.png` (27 帧) —— 只有學園交流會挂
+  * `data/raw_images/v2step_20260810/*task_hall*.png` (27 帧) -- 只有學園交流會挂
   （标定快照 2026-08-11；这两个目录是 step 模式的飞轮录帧，**还在长**，
     重跑 `_selftest()` 时帧数会比这里大，结论不受影响。）
 
@@ -41,7 +41,7 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
   | dc ÷ 磁贴框高            | 0.93 ~ 1.30          | **2.50** ~ 19.85     |
   | dy = 452.cy − 磁贴.cy    | −0.0526 ~ −0.0366    | （全负 = 恒在上方）  |
   | dx = 452.cx − 磁贴.cx    | −0.0179 ~ −0.0074    | （全负 = 恒偏左）    |
-  | margin = 次近距 ÷ 最近距 | 2.12 ~ 4.37          | —                    |
+  | margin = 次近距 ÷ 最近距 | 2.12 ~ 4.37          | -                    |
 
    真/假之间有 0.0543 / 0.0898 的**空档**，取几何中点 sqrt(·)≈**0.070** 当绝对半径；
     比例判据同理 sqrt(1.30×2.50)≈**1.80**。两条**都要过**（见下面为什么要两条）。
@@ -57,10 +57,10 @@ memory `template_label_assets` 记着五个自造几何判据全废的教训，�
 同样在 08-10/08-11 语料里扫（**全部 1003 帧**，conf≥0.20），452 还出现在：
   lobby 83 次 (0.931,0.792)+(0.180,0.865) / 悬赏分支页 8 / 悬赏关卡列表 9 /
   学院选择页 6 / 课程表区域页 5 / 组合包 1 / 关卡弹窗 1 …
-其中悬赏分支页那三个 452 在 cx≈0.555，而分支 cls（高架公路等）在 cx≈0.904 ——
+其中悬赏分支页那三个 452 在 cx≈0.555，而分支 cls（高架公路等）在 cx≈0.904 --
 **中心距 0.35，布局完全是另一套**（红标在宽行卡左端，名字标签在右端）。
  本模块只认 `V.HUB_TILES`；换一套锚点必须重新标定。屏上没有磁贴时**不表态**
-（返回空 + `in_task_hall=False`），绝不"就近凑一个"—— §A1 认不出就什么都不做。
+（返回空 + `in_task_hall=False`），绝不"就近凑一个"-- §A1 认不出就什么都不做。
 这 1003 帧跑 `read_boosts()`：归属命中 74 次，**全部落在 task_hall 且磁贴全对，
   非 task_hall 页面零归属**；其余 113 个 452 一律进 `orphans`（如实说"说不清"）。
 
@@ -76,7 +76,7 @@ detect 层 ui 的地板就是 0.20  弱的那枚**多数帧根本进不了 Obser
  `hit.weak` 标出 conf<0.45 的，调用方自己决定信不信；
   多帧要结论请用 `consensus()`，别拿单帧当真相（README §A3 / 病根「单帧当真相」）；
   真正的修法是**补样本**（08-10 那 27 帧已在飞轮里），不是在这里加 OCR 兜底
-    —— 「YOLO 看不见就补数据，不加 OCR 把问题藏起来」是 read.py 开篇那条铁律。
+    -- 「YOLO 看不见就补数据，不加 OCR 把问题藏起来」是 read.py 开篇那条铁律。
 
 ## 用法
 
@@ -106,7 +106,7 @@ WEAK_CONF = 0.45          # 低于此值只当"疑似"，`hit.weak=True`
 
 # 磁贴  routing_v2 flow 名（`flow/registry.py` 的 key）。
 # `batch_sweep` / `special_sweep` 在 registry 里是 **PLANNED（有开关没实现）**，
-#   所以"任務/特殊任務 在加成"这个事实目前**没有 flow 能消费** —— 这正是
+#   所以"任務/特殊任務 在加成"这个事实目前**没有 flow 能消费** -- 这正是
 #   memory `mainline_ap_routing` 那条「全仓没有『无活动自动切回推图/扫荡』分支」。
 #   这里如实映射，不假装它能跑。
 TILE_FLOW: Dict[str, str] = {
@@ -139,7 +139,7 @@ class BoostHit:
 
     @property
     def weak(self) -> bool:
-        """conf 低于 WEAK_CONF —— 位置是对的，但这一帧的证据弱，别单帧下结论。"""
+        """conf 低于 WEAK_CONF -- 位置是对的，但这一帧的证据弱，别单帧下结论。"""
         return self.conf < WEAK_CONF
 
     def __repr__(self) -> str:
@@ -150,11 +150,11 @@ class BoostHit:
 
 @dataclass(frozen=True)
 class BoostOrphan:
-    """检出了 452 但**说不清是谁的** —— 超半径 / 方向不对 / 屏上没有磁贴。
+    """检出了 452 但**说不清是谁的** -- 超半径 / 方向不对 / 屏上没有磁贴。
 
     它不是噪声，是"有加成但我认不出"，必须让调用方看见：
        典型成因是那个磁贴自己漏检了（比如加载中），这时最近磁贴会是隔壁那个，
-       距离 ~0.09 被半径挡掉 —— 挡对了，但事实是"这里确实有加成"。
+       距离 ~0.09 被半径挡掉 -- 挡对了，但事实是"这里确实有加成"。
     """
     badge: Box
     nearest: Optional[str]    # 最近的磁贴 cls（可能 None = 屏上一个磁贴都没有）
@@ -191,7 +191,7 @@ class BoostReport:
     def describe(self) -> str:
         """一行人话，直接丢日志。"""
         if not self.in_task_hall:
-            return "加成: 不在任务大厅（屏上没有磁贴）— 不表态"
+            return "加成: 不在任务大厅（屏上没有磁贴）- 不表态"
         if not self.hits and not self.orphans:
             return f"加成: 无（认出 {len(self.tiles_seen)} 个磁贴，均无「活動進行中」）"
         parts = [f"{h.tile}{'?' if h.weak else ''}({h.conf:.2f})" for h in self.hits]
@@ -208,7 +208,7 @@ def read_boosts(obs: Observation, *,
                 tiles: Optional[Sequence[str]] = None) -> BoostReport:
     """任务大厅这一帧：哪几个磁贴挂着「活動進行中」。**纯函数，不点任何东西。**
 
-    `tiles` 默认 `V.HUB_TILES`。传别的锚点集合前先重标半径 —— 上面文档里
+    `tiles` 默认 `V.HUB_TILES`。传别的锚点集合前先重标半径 -- 上面文档里
     悬赏分支页那个反例说明**换一套页面，几何整个变**。
 
     读不出就返回空报告（`in_task_hall=False`），绝不猜。
@@ -217,7 +217,7 @@ def read_boosts(obs: Observation, *,
 
     #  磁贴：每个 cls 只留 conf 最高那个。
     #    实测踩到过：012241_000017 那帧 YOLO 给了**两个**「悬赏通缉」框，其中一个
-    #      正好压在红标上（中心距 0.0004）—— 不去重的话 margin 会被这个 DUP 毁掉。
+    #      正好压在红标上（中心距 0.0004）-- 不去重的话 margin 会被这个 DUP 毁掉。
     #      YOLO26 是 NMS-free，DUP 是它的常态（v15 验收时按 DUP/WRONG 拆过 FP）。
     tile_boxes: Dict[str, Box] = {}
     for name in names:
@@ -267,7 +267,7 @@ def read_boosts(obs: Observation, *,
             margin=(d2 / d1) if d1 > 0 else float("inf"),
             badge=m, tile_box=t1))
 
-    #  一个磁贴只能有一枚红标 —— 走到这里还同属一个磁贴的，**必然是同一枚的 DUP**：
+    #  一个磁贴只能有一枚红标 -- 走到这里还同属一个磁贴的，**必然是同一枚的 DUP**：
     #    相邻磁贴的红标间距 ≈ 磁贴行距 0.128，而半径只有 0.070，两枚真红标不可能
     #    同时进同一个磁贴的圈。 取 conf 最高那个当代表（同一物件，用模型最好的
     #    那次估计；按距离取会把 0.95 的丢掉留下 0.22 的，`weak` 就报假了），
@@ -291,7 +291,7 @@ def read_boosts(obs: Observation, *,
 
 def consensus(reports: Iterable[BoostReport], *,
               min_ratio: float = 0.25) -> Dict[str, int]:
-    """多帧共识 —— 返回 {磁贴 cls: 命中帧数}，只保留占比 ≥ `min_ratio` 的。
+    """多帧共识 -- 返回 {磁贴 cls: 命中帧数}，只保留占比 ≥ `min_ratio` 的。
 
     为什么要有这个：单帧命中率实测最低只有 **48.1%**（弱 conf 的那枚红标一半帧
       根本进不了 Observation），而"这个玩法今天有没有加成"是**持久事实**，用一帧
@@ -321,7 +321,7 @@ def consensus(reports: Iterable[BoostReport], *,
 
 #  自检：把上面文档里的标定重跑一遍。改常量后必须跑这个
 def _selftest() -> int:
-    """`python -m routing_v2.percept.boost` —— 对实测帧复算归属准确率。
+    """`python -m routing_v2.percept.boost` -- 对实测帧复算归属准确率。
 
     它验的是"归属对不对"，真值是**人眼看图**定的（见模块文档），
       不是拿模型自己的输出当真值（memory `template_label_assets` 那五个废掉的

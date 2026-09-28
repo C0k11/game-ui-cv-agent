@@ -3,7 +3,7 @@
 
 轴表(dashboard 凹轴 tab 打点, data/axis_sheets/<stem>.json)= 决策时刻清单:
 每行 t 秒该由谁(char)干什么(action)。对"按轴放技能"来说, 每个 t 时刻的
-前提是 tracker 还锁着人 — 本脚本逐时刻回放检查:
+前提是 tracker 还锁着人 - 本脚本逐时刻回放检查:
 
   该帧我方 GT 框数(人审过的池才有) / tracker 我方轨迹数 /
   开场站位绑定(左右=编成序)的各 slot 主 tid 是否仍存活且没换人

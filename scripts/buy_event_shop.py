@@ -29,7 +29,7 @@ ROOT = Path(r"D:\Project\ai game secretary")
 FURNITURE_PRICE = 1000       # 单价 > 此值 = 家具(用户定义), 跳过
 TAB_XY = [(220, 410), (220, 653), (220, 883)]   # 左侧三货币 tab(4K, 2026-07-28 帧标定)
 
-# 合法价目集合(2026-07-28 逐帧人工盘店标定, 奇普托斯活动) —— playbook 债
+# 合法价目集合(2026-07-28 逐帧人工盘店标定, 奇普托斯活动) -- playbook 债
 # 「行列位置已知价目表映射, OCR 降级校验」的落地形态: 读出的单价必须
 # ∈ 本 tab 素材价集合, 否则= OCR 串位(上期 54056 / 95次95 实害)丢弃该位。
 # tab1(卡带): 報告1/3/12/60 + BD女武神/狂獵 10/30/100/300 + 鐵系 5/15/50/200
@@ -85,7 +85,7 @@ def main():
 
     def read_price(fr, x1, y1, x2, y2):
         """单价数字 rec-only 直读。价格条紧贴按钮上沿(高~90px);
-        再往上是「可購買N次」黑条 — 读区过宽会把次数当单价
+        再往上是「可購買N次」黑条 - 读区过宽会把次数当单价
         (2026-07-15 实锤: 95次被当95单价, 排序污染)."""
         crop = fr[max(0, int(y1 - 95)):max(0, int(y1 - 8)),
                   int(x1):int(x2)]
@@ -95,7 +95,7 @@ def main():
             out = ocr.text_recognizer([crop])
             txts = out[0] if isinstance(out, tuple) else out
             # 千分位防线: "1,200"经findall拆成["1","200"]取[0]=1
-            # 1200家具穿过FURNITURE_PRICE过滤被当1块钱买(审计) —
+            # 1200家具穿过FURNITURE_PRICE过滤被当1块钱买(审计) -
             # 先剥分隔符再取第一段完整数字
             raw = "".join(t for t, _ in (txts or []))
             raw = raw.replace(",", "").replace(".", "").replace(" ", "")
@@ -105,7 +105,7 @@ def main():
             return None
 
     def _body_close_btn(d):
-        """对话框 body 区(0.15<cy<0.80)内的 取消键/叉叉 — 商店页自身
+        """对话框 body 区(0.15<cy<0.80)内的 取消键/叉叉 - 商店页自身
         右上返回X(cy~0.05)绝不点(点=退出商店整页, 审计)。
         关闭是清理动作非守卫: conf≥0.5 防误检点到商品误开购买框."""
         for n in ("取消键", "叉叉"):
@@ -145,7 +145,7 @@ def main():
             tap(int((ck[2] + ck[4]) / 2), int((ck[3] + ck[5]) / 2))
             time.sleep(2.0)
             # 「獲得獎勵! TOUCH TO CONTINUE」全屏弹窗(2026-07-15 实锤
-            # 挡死后续检出)  **先 cls 验证横幅在场才点屏中**——
+            # 挡死后续检出)  **先 cls 验证横幅在场才点屏中**--
             # 盲点(1920,1750)在横幅缺席时会点进商店网格误开购买框,
             # 后面无闸点确认=白名单闸旁路(审计根治)
             for _ in range(3):
@@ -164,7 +164,7 @@ def main():
                 time.sleep(1.5)
             return "bought"
         if pyx_body:
-            print("    body 检出青辉石 — 取消!", flush=True)
+            print("    body 检出青辉石 - 取消!", flush=True)
         b = next((x for x in d if x[0] == "取消键"), None)
         if b:
             tap(int((b[2] + b[4]) / 2), int((b[3] + b[5]) / 2))
@@ -177,10 +177,10 @@ def main():
     _dead = set()                       # 售罄/买不起位置(tab 内拉黑)
 
     # read_balance 换 rec-only(2026-07-30 结案, task#35「丢首位」机制查清):
-    # 屏上 3,135 被旧路径一致读成 135 — 不是裁剪几何, 是 run_digit_ocr 走
+    # 屏上 3,135 被旧路径一致读成 135 - 不是裁剪几何, 是 run_digit_ocr 走
     # **det+rec 全管线**, det 在浅底胶囊上把「3,」段漏检(只框住 135), 任何
-    # 窗口组都救不了(四窗 4:0 一致地错, 后缀合票无从救 — pass1 因此提前
-    # 收工真损失)。rec-only 全框直读 '3,135' conf .80 完美 — 与 read_price
+    # 窗口组都救不了(四窗 4:0 一致地错, 后缀合票无从救 - pass1 因此提前
+    # 收工真损失)。rec-only 全框直读 '3,135' conf .80 完美 - 与 read_price
     # 同法。rec-only 的误差模型与 det 相反: 垃圾出现在**前缀**(图标圆环/
     # 左缘阴影被硬解成 9/2, 实测 [865,865,9865] / 0728 语料 2<->22 交替),
     # 不再有截位短数  窗口全部必含完整数字(剥图标窗 l0.20 会半切首位,
@@ -190,7 +190,7 @@ def main():
     def read_balance(fr, d):
         """余额 = 「货币数量显示区域」cls 框内 rec-only 直读(det 会漏首段)。
 
-        读不出  None, 调用方降级(不做买不起过滤, 走 MAX/no_dialog 兜底) —
+        读不出  None, 调用方降级(不做买不起过滤, 走 MAX/no_dialog 兜底) -
         余额是增强层, fail-open 到旧行为, 不阻塞购买。"""
         b = next((x for x in d if x[0] == "货币数量显示区域"), None)
         if b is None:
@@ -237,7 +237,7 @@ def main():
         return None
 
     def _shelf_sig():
-        """货架区域像素指纹 —— 判"这一滑到底有没有真的滚动"。"""
+        """货架区域像素指纹 -- 判"这一滑到底有没有真的滚动"。"""
         import hashlib                                       # noqa: PLC0415
         fr = adb.capture_frame()
         if fr is None:
@@ -252,10 +252,10 @@ def main():
 
         用户 2026-08-07 现场纠正: 「我们的滑动路由逻辑是死的不是变通的,
         这个问题也发生在活动商店里面」。原码两处都是 `for si in range(5)`
-        **固定滑 5 次**, 不看内容 —— 货架短(新活动/搬空后)时纯属瞎滑, 还会
+        **固定滑 5 次**, 不看内容 -- 货架短(新活动/搬空后)时纯属瞎滑, 还会
         把已经到底的列表反复拖拽出回弹, 让 cls 检出落在抖动帧上。
         证据判据: 滑动前后货架区像素指纹相同 = 列表没动 = 到底。
-        (与"数固定次数"相比, 这个判据不依赖货架有多长, 也不受买东西影响 ——
+        (与"数固定次数"相比, 这个判据不依赖货架有多长, 也不受买东西影响 --
          买卖改变的是**买完之后**的画面, 而这里比的是同一次滑动的前/后。)
         """
         before = _shelf_sig()
@@ -271,7 +271,7 @@ def main():
         d = dets(fr, 0.28)
         scan_items.last_frame, scan_items.last_dets = fr, d
         # conf 分界已被对抗审推翻(全量 645 位置+153 位人审): 售罄位 79%
-        # conf≥0.5(23 个 ≥0.90), 亮态还有 0.065/0.130 — conf 编码的是训练
+        # conf≥0.5(23 个 ≥0.90), 亮态还有 0.065/0.130 - conf 编码的是训练
         # 熟悉度, 与亮暗态无关, 任何阈值都切不开。我上一版只看一帧 3 个位就
         # 定 0.5 = 单帧标定谬误(与上期 read_price 同病)。
         # 真信号 = 购买按钮 det 框内灰度均值: 暗态(售罄) 75-97 / 亮态
@@ -310,7 +310,7 @@ def main():
                     continue
                 row.append((price, cx, ry))
             # 家具行判别(2026-07-28 帧标定): 两 tab 家具行价签都是
-            # (200,200,300,2000) — **行内出现重复价** 或 行内 max>1000。
+            # (200,200,300,2000) - **行内出现重复价** 或 行内 max>1000。
             # 素材行是严格 4 档递增, 绝无重复价。价格过滤挡不住 200/300
             # 档家具(tab1 狂獵BD 也是 300), 只有整行判才干净。
             prices = [p for p, _, _ in row]
@@ -342,7 +342,7 @@ def main():
         """检出「购买」按钮当行锚  网格补全  价集校验  价格降序买。
 
         min_price: 本遍只买 ≥ 该价的位置。两遍策略(2026-07-28 tab1 流水
-        实锤): 单遍"取景屏内降序"不是全局降序 — 取景0 的 1/3 币低档先花钱,
+        实锤): 单遍"取景屏内降序"不是全局降序 - 取景0 的 1/3 币低档先花钱,
         滚到后面高純鋼@200 落空。第一遍全店只吃 ≥100 高价档, 第二遍清低档。"""
         bought = 0
         for _round in range(12):            # 每买一次重扫(余额变)
@@ -350,13 +350,13 @@ def main():
             if not items:
                 return bought
             # 数学闸(用户 2026-07-28: 不许"点了才知道买不起"):
-            # 余额可读时, 单价 > 余额的位置直接不点。tab 身份校验同帧做 —
+            # 余额可读时, 单价 > 余额的位置直接不点。tab 身份校验同帧做 -
             # 读的是哪个币的余额必须与正在买的 tab 一致, 否则跳过本轮。
             _fr = getattr(scan_items, "last_frame", None)
             _d = getattr(scan_items, "last_dets", [])
             _tab_now = verify_tab(_d, tab_i)
             if _tab_now is not None and _tab_now != tab_i:
-                print(f"    tab 身份不符: 选中={_tab_now} 预期={tab_i} — 重点 tab",
+                print(f"    tab 身份不符: 选中={_tab_now} 预期={tab_i} - 重点 tab",
                       flush=True)
                 tap(*TAB_XY[tab_i - 1])
                 time.sleep(2.5)
@@ -407,16 +407,16 @@ def main():
 
     def ensure_shop_page() -> bool:
         """到达闸(2026-07-30 用户当场抓包): 旧版没有任何"我在商店页吗"的
-        判据, 假定启动时人已把游戏放在商店页 — 今天停在任务 hub, tab 坐标
+        判据, 假定启动时人已把游戏放在商店页 - 今天停在任务 hub, tab 坐标
         点空 + verify_tab None 被放行 + scan 扫不到但 20 次盲滑照做(swipe
         不带落点, step_walk 盲拍闸只管 click = 守卫盲区)。
         修: 不在商店页  cls 锚定逐步导航(每步验帧), 到不了绝不滑动。
         导航链: 大厅[任务大厅入口]  任务hub[距离结束还剩]  活动hub
-        [活动商店(底栏, conf≥0.85 — 贈品交換页会被同 cls 捡 0.66)]  商店。"""
+        [活动商店(底栏, conf≥0.85 - 贈品交換页会被同 cls 捡 0.66)]  商店。"""
         for hop in range(6):
             fr = _cap()
             if fr is None:
-                print("抓帧失败 — 停", flush=True)
+                print("抓帧失败 - 停", flush=True)
                 return False
             d = dets(fr, 0.5)
             if on_shop_page(d):
@@ -439,16 +439,16 @@ def main():
                     time.sleep(3)
                     break
             else:
-                print(f"不在商店页且无导航锚点(检出 {len(d)} 框) — "
+                print(f"不在商店页且无导航锚点(检出 {len(d)} 框) - "
                       f"fail-closed 停, 绝不盲滑", flush=True)
                 return False
-        print("6 跳仍未到商店页 — 停", flush=True)
+        print("6 跳仍未到商店页 - 停", flush=True)
         return False
 
     if not ensure_shop_page():
         sys.exit(1)
 
-    # 币种动态枚举(用户 2026-07-30: 不许 hardcode 刷哪/买哪 — 万一下期
+    # 币种动态枚举(用户 2026-07-30: 不许 hardcode 刷哪/买哪 - 万一下期
     # 4 种币呢): 左侧 tab 列 = YOLO (货币|货币_已选择) cls 按 cy 排序,
     # 坐标/数量全部从检出来。最后一个 tab = 盒抽/小活动产物币, **绝不自动买**
     # (07-28 "tab3 铁律"的动态化形态, K 币时=第 K 个)。TAB_XY 只做检出弱时
@@ -469,7 +469,7 @@ def main():
 
     def survey_shelf(tab_i):
         """全货架巡检(回顶+逐屏 scan, 纯读不点): YOLO 购买按钮定位+gray 亮暗,
-        OCR 只读价格/余额数字。跨屏计数有边界行重复 — 判据是 bright>0 的
+        OCR 只读价格/余额数字。跨屏计数有边界行重复 - 判据是 bright>0 的
         二值(搬空/还饿), 精度无所谓。plan 模式下这就是"第一次进活动先盘店"。"""
         adb._shell("input swipe 2400 700 2400 1600 400")
         time.sleep(2)
@@ -481,18 +481,18 @@ def main():
             _tn = verify_tab(scan_items.last_dets, tab_i)
             if _tn is None or _tn == tab_i:
                 break
-            print(f"    巡检 tab 身份不符: 选中={_tn} 预期={tab_i} — 重点 tab",
+            print(f"    巡检 tab 身份不符: 选中={_tn} 预期={tab_i} - 重点 tab",
                   flush=True)
             tap(*tab_xy[tab_i - 1])
             time.sleep(2.5)
         else:
-            print(f"    tab{tab_i} 重点后身份仍不符 — 巡检作废", flush=True)
+            print(f"    tab{tab_i} 重点后身份仍不符 - 巡检作废", flush=True)
             return None
         bright = dark = furn = 0
         bal = None
         for si in range(5):
             if si and not _scroll_step():        # 同上: 滑不动=到底, 别瞎滑
-                print(f"    tab{tab_i} 货架到底(滑动无位移, 第 {si} 屏) — 停止巡检",
+                print(f"    tab{tab_i} 货架到底(滑动无位移, 第 {si} 屏) - 停止巡检",
                       flush=True)
                 break
             items = scan_items(tab_i)
@@ -545,17 +545,17 @@ def main():
             for pass_i, floor in ((1, 100), (2, 0)):
                 adb._shell("input swipe 2400 700 2400 1600 400")   # 回顶
                 time.sleep(2)
-                # 售罄拉黑按 (px,py) 记 — 两遍间滚动相位不同, 不跨遍复用
+                # 售罄拉黑按 (px,py) 记 - 两遍间滚动相位不同, 不跨遍复用
                 _dead.clear()
                 for screen_i in range(5):
                     if screen_i and not _scroll_step():
-                        print(f"  pass{pass_i} 货架到底(滑动无位移) — 停止盲滑",
+                        print(f"  pass{pass_i} 货架到底(滑动无位移) - 停止盲滑",
                               flush=True)
                         break
                     n = sweep_screen(ti, min_price=floor)
                     total += n
                     print(f"  pass{pass_i} 取景{screen_i} 成交 {n}", flush=True)
-        # 货架台账(用户 2026-07-30: 判"该币还刷不刷"看的是货架不是余额 —
+        # 货架台账(用户 2026-07-30: 判"该币还刷不刷"看的是货架不是余额 -
         # 余额 0 + 货架有亮位 = 还饿要刷; 余额 0 + 全暗 = 搬空停刷)。
         # plan 模式 = 首日盘店, 同样落账; 实买模式 = 买完后的购后货架。
         shelf = survey_shelf(ti)

@@ -1,6 +1,6 @@
 """MuMu Runner: High-FPS capture -> YOLO+OCR -> Pipeline -> ADB click.
 
-注意 standalone runner 已被 server/app.py 取代 — skill 行为不完整(无 swipe_tap/
+注意 standalone runner 已被 server/app.py 取代 - skill 行为不完整(无 swipe_tap/
 scroll), 日常请用 `py -m uvicorn server.app:app`; 本文件的 AdbInput 是全项目
 核心, 继续被 server 侧引用, 保留.
 
@@ -67,7 +67,7 @@ class AdbInput:
     #  ADB I/O serialization (live 2026-06-15: bounty/jfd swept 0 tickets).
     # Root cause: the clean-flywheel worker's `exec-out screencap` (streaming a
     # multi-MB 3840x2160 PNG ~200-300ms) and the main-tick `input tap` hit the
-    # same adbd transport concurrently with NO lock — the tap's MotionEvent got
+    # same adbd transport concurrently with NO lock - the tap's MotionEvent got
     # dropped/timed-out, so the game never saw the 入場 press (manual same-pos
     # tap DID open the popup -> not a coordinate bug). One class-wide lock makes
     # every adb subprocess (capture/tap/swipe/back) mutually exclusive: a tap
@@ -130,7 +130,7 @@ class AdbInput:
                   tx: int, ty: int) -> bool:
         # 原子连发(一条 adb shell 内 swipe->tap, 间隔≈input进程启动~0.3s):
         # 对自动轮播类 UI, 手动 swipe 会把轮播拉停数秒(2026-07-09 hub banner
-        # 实锤), tap 在静止期内落点无时序竞争 — 分两次 adb 调用则间隔 >1s
+        # 实锤), tap 在静止期内落点无时序竞争 - 分两次 adb 调用则间隔 >1s
         # 会耗尽暂停期(0709 败因)。
         return self._shell(
             f"input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(dur_ms)}"
@@ -142,7 +142,7 @@ class AdbInput:
         return self._shell("input keyevent 4")  # KEYCODE_BACK
 
     def capture_frame(self) -> Optional[np.ndarray]:
-        # *RAW screencap 优先 (2026-07-11 实测: PNG 1.50s vs RAW 0.77s @4K —
+        # *RAW screencap 优先 (2026-07-11 实测: PNG 1.50s vs RAW 0.77s @4K -
         # 设备端 PNG 编码是大头, localhost 传 33MB 反而快)。RAW 头=w,h,format
         # (+colorspace) uint32 LE, 后跟 RGBA8888。解析失败回退 PNG。
         try:
@@ -265,7 +265,7 @@ class MuMuCapture:
     def find_window(self) -> bool:
         if self._capture_mode == "adb":
             # ADB mode doesn't need a window handle
-            print(f"[Capture] ADB mode — no window handle needed")
+            print(f"[Capture] ADB mode - no window handle needed")
             return True
         self.hwnd = find_window_by_title_substring(self.title)
         if self.hwnd is None:
@@ -321,7 +321,7 @@ class MuMuCapture:
 
     def _grab_wgc(self) -> Optional[np.ndarray]:
         """Capture via Windows.Graphics.Capture (~55fps, works occluded/background).
-        NOTE: a MINIMIZED window still freezes (WGC platform limit) — use adb then."""
+        NOTE: a MINIMIZED window still freezes (WGC platform limit) - use adb then."""
         if self.render_hwnd is None:
             return None
         if self._wgc is None:
@@ -505,7 +505,7 @@ def main() -> None:
                              "shows the boxes you actually need.")
     parser.add_argument("--overlay-scale", type=float, default=0.5, help="Overlay window scale (default 0.5)")
     parser.add_argument("--force-skills", action="store_true",
-                        help="Bypass the red/yellow-dot should_run gate — every "
+                        help="Bypass the red/yellow-dot should_run gate - every "
                              "skill enters (for testing a skill with no dot today)")
     parser.add_argument("--skills", default="",
                         help="Comma-separated skill names to run (override default order). "
@@ -647,7 +647,7 @@ def main() -> None:
                             pipe_done_at = time.perf_counter()
                 else:
                     # After a CLICK: give the game time to open/animate the next
-                    # screen before we read+act again. 0.5s was too short — the
+                    # screen before we read+act again. 0.5s was too short - the
                     # next read landed on a transition/animation frame where weak
                     # cls (免费/制造入口) flicker low, so skills misread + re-clicked
                     # (user: "点一下得等一下，等游戏把界面打开"). 1.0s + the skills'
@@ -682,7 +682,7 @@ def main() -> None:
             # `not pipe.is_running` check never fired -> 3-4 orphan windows piled
             # up (live 2026-06-02).
             if pipe_done_at is None and pipe.current_skill is None:
-                print("[Info] Pipeline complete (no current skill) — auto-exit soon.")
+                print("[Info] Pipeline complete (no current skill) - auto-exit soon.")
                 pipe_done_at = time.perf_counter()
             if pipe_done_at is not None and (time.perf_counter() - pipe_done_at) > 4.0:
                 print("[Info] Auto-exit after completion.")

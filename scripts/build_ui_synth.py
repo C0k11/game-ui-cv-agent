@@ -2,7 +2,7 @@
 
 破局 for rare UI cls (前往/进入羁绊剧情, 学生momotalk信息未读, 侧栏图标…):
 a fixed UI element only shows up in a handful of real frames, and oversample-
-duplicating those few frames just makes the model MEMORIZE them (overfit) —
+duplicating those few frames just makes the model MEMORIZE them (overfit) -
 it never learns the element independent of its background. This composites the
 element onto MANY different backgrounds instead:
 
@@ -42,7 +42,7 @@ AVATAR_DIR = REPO / "data" / "captures" / "角色头像"
 MASTER_CLASSES = REPO / "data" / "raw_images" / "_classes.txt"
 OUT_BASE = REPO / "data" / "raw_images"
 
-# Deterministic PRNG (seedable) — avoids Math.random-style nondeterminism.
+# Deterministic PRNG (seedable) - avoids Math.random-style nondeterminism.
 _rng = np.random.RandomState(0)
 
 
@@ -90,7 +90,7 @@ def synth_context(ctx: str, count: int = 300, seed: int = 0, val: bool = False):
     tpl = json.loads(tpl_path.read_text(encoding="utf-8"))
     stamps = tpl.get("ui_stamps") or []
     if not stamps:
-        print(f"[WARN] template '{ctx}' has no ui_stamps — synth frames would have "
+        print(f"[WARN] template '{ctx}' has no ui_stamps - synth frames would have "
               f"NO labels. Place UI stamps in the dashboard synth editor first.")
         return
     sample_rel = tpl.get("sample_image") or f"samples/{ctx}.jpg"
@@ -104,7 +104,7 @@ def synth_context(ctx: str, count: int = 300, seed: int = 0, val: bool = False):
     bj = (tpl.get("augmentation") or {}).get("brightness_jitter", [0.92, 1.08])
     avatars = _load_avatars()
     if not avatars and slots:
-        print("[WARN] no avatars found — frames will all use the sample bg (low diversity)")
+        print("[WARN] no avatars found - frames will all use the sample bg (low diversity)")
 
     out_dir = OUT_BASE / f"_synth_{ctx}{'_val' if val else ''}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -203,11 +203,11 @@ def _bg_pool(limit=1500, exclude_run=None):
 def synth_overlay(classes, src_runs=None, count=300,
                   out_name="overlay", seed=0, jitter=0.18,
                   distractor_classes=(5, 6), distractor_prob=0.6):
-    """OVERLAY synth — break BOTH position-memorization AND neighbor-coupling.
+    """OVERLAY synth - break BOTH position-memorization AND neighbor-coupling.
     Crop a real UI sprite, paste onto MANY diverse backgrounds at a JITTERED
-    position (±jitter, default 0.18 — big enough to break "制造入口 always in that
+    position (±jitter, default 0.18 - big enough to break "制造入口 always in that
     one slot"), and with prob `distractor_prob` paste 1–3 distractor sprites
-    (红点 cls5 / 黄点 cls6) in its NEIGHBORHOOD — breaks the "制造入口 == no red dot
+    (红点 cls5 / 黄点 cls6) in its NEIGHBORHOOD - breaks the "制造入口 == no red dot
     beside it" coupling. Distractors are labelled too (so they don't become
     negative samples). Output: data/raw_images/_synth_<out_name>/."""
     global _rng

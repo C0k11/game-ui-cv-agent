@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""动作契约审计 —— 扫描每个 flow 的每一发动作，看它「看没看到下一步 cls」。
+"""动作契约审计 -- 扫描每个 flow 的每一发动作，看它「看没看到下一步 cls」。
 
 用户 2026-08-12 要求:「从头到尾每个环节都要排查**按键逻辑以及打架**，
    还有就是**看没看到下一步 cls 的逻辑**」。
@@ -31,7 +31,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 FLOW_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "routing_v2", "flow")
 
-# 「这一发会让屏幕换个样子」的措辞 —— 命中就该有显式契约
+# 「这一发会让屏幕换个样子」的措辞 -- 命中就该有显式契约
 _OPENS = re.compile(r"开|開|打开|進入|进入|切到|切回|进 |去 |打开|展开|列表|面板|"
                     r"弹|彈|快速制造|邀请卷|邀請券|tab|入口|页|頁")
 

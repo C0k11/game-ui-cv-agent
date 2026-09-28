@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""离线回归 —— 不碰设备、不碰模型，纯逻辑。
+"""离线回归 -- 不碰设备、不碰模型，纯逻辑。
 
 为什么必须有这个（memory replay_harness）:
    老仓的回放测试**测不到跨 tick 状态**（每 tick 新建 skill），于是 after-ack
@@ -53,7 +53,7 @@ def O(*boxes, seq=1):
 
 
 def cfg():
-    """测试**不许**读 profile.json —— 那是用户的实时配置，改一下测试就飘。
+    """测试**不许**读 profile.json -- 那是用户的实时配置，改一下测试就飘。
     2026-08-08 实测：profile 里把 event.order 改成 bonus_only 之后，通关阶段
     那条用例当场变红。回归测试的输入必须是自己声明的。"""
     from routing_v2.config import merged
@@ -88,7 +88,7 @@ def t_pages():
           f"实际 {classify(day1).page}")
 
     # §A1 转场帧：只有 回大厅/返回键的帧**不许**当场触发"点回大厅"。
-    #    （它现在会被认成泛化的 `facility`，但泛化页面要待够 90 帧才准走人 ——
+    #    （它现在会被认成泛化的 `facility`，但泛化页面要待够 90 帧才准走人 --
     #      任何转场都活不过 90 帧，所以用户现场看到的"刚要进战斗就被弹回大厅"
     #      不会复现。行为断言比页面名断言更有意义。）
     stray = O(B(V.HOME, cx=0.05, cy=0.05), B(V.BACK, cx=0.02, cy=0.05))
@@ -140,7 +140,7 @@ def t_pages():
           classify(real_buy).interrupt == "money_popup")
 
     # 2026-08-08 live 实锤（反向误报）：活动首通的「獲得獎勵」奖励卡里
-    #    就有 **青輝石 x30**（cy=0.511 conf 0.94）—— 那是**收入**，不是价签。
+    #    就有 **青輝石 x30**（cy=0.511 conf 0.94）-- 那是**收入**，不是价签。
     #    打赢一场就被自己的金钱闸 HALT 掉。同一个图标，语境相反。
     reward = O(B(V.GOT_REWARD, conf=0.98, cx=0.5, cy=0.22),
                B(V.PYROXENE, conf=0.94, cx=0.669, cy=0.511))
@@ -189,7 +189,7 @@ def t_pages():
     #     点了確認，差一点把游戏关掉）
     _mf = ALL["mail"](Ctx(cfg=cfg(), log=lambda m: None))
     # fixture 要还原**真实来路**：退出框只从大厅弹（08-09 起判据用 last_solid）。
-    #   先在大厅待一帧，再弹框，这样 last_solid=lobby —— 和真机一致。
+    #   先在大厅待一帧，再弹框，这样 last_solid=lobby -- 和真机一致。
     _ml = Machine(1)
     _pure_lobby = O(B(V.NAV_CAFE, cx=0.073, cy=0.953),
                     B(V.NAV_SHOP, cx=0.621, cy=0.953),
@@ -201,7 +201,7 @@ def t_pages():
     check("退出框（从大厅弹） on_confirm_dialog 绝不点確認",
           _a3 is None or _a3.target_cls == V.CANCEL, str(_a3))
     # 反向：**游戏内**的双键框（底页是关卡弹窗）不该被当退出框拦
-    #   ——「要使用340AP掃蕩17次嗎」被误拦过，扫荡直接被取消（08-09 实锤）。
+    #   --「要使用340AP掃蕩17次嗎」被误拦过，扫荡直接被取消（08-09 实锤）。
     _mg = Machine(1)
     _stage = O(B(V.SWEEP_START, cx=0.73, cy=0.56), B(V.TASK_START, cx=0.73, cy=0.75))
     _mg.update(_stage)
@@ -210,7 +210,7 @@ def t_pages():
     check("游戏内双键框（底页=关卡弹窗）不当退出框  点確認",
           _a4 is not None and _a4.target_cls == V.CONFIRM, str(_a4))
     # 「退出框」判据的四向锁（08-09 多 agent 审查 + 实测复现后重写）:
-    #    历史上错过两版 ——「顶栏没货币」误拦 340AP 扫荡框；
+    #    历史上错过两版 --「顶栏没货币」误拦 340AP 扫荡框；
     #    「last_solid 不在大厅系」在 **Machine 新建时 last_solid 恒为
     #      'unknown'** 的窗口里 fail-OPEN，实测 gate.ok=True  **会点確認
     #      关掉游戏**；而当时的测试**没传 last_solid**，给了假保证。
@@ -336,7 +336,7 @@ def t_machine():
     check("换页第 3 帧才认", st.page == "formation", f"实际 {st.page}")
 
     # blank 兜底只允许"上一个认得出的页面是大厅"时开火（战斗中很多帧零检出，
-    #    在那里点屏幕中央可能触发学生技能 —— 08-08 live 实锤）
+    #    在那里点屏幕中央可能触发学生技能 -- 08-08 live 实锤）
     from routing_v2.flow import nav
     m2 = Machine(1)
     blank = O()
@@ -369,7 +369,7 @@ def t_gate():
     act = Action(kind="tap", x=0.5, y=0.7, reason="随便点", target_cls="x")
     v = g.money(act, body)
     check("弹窗体内青辉石  拦下且 halt", (not v.ok) and v.halt)
-    # 但**导航白名单**里的 cls 要放行 —— 否则购买页会被拦死，
+    # 但**导航白名单**里的 cls 要放行 -- 否则购买页会被拦死，
     #   免費組合包永远走不完（08-09 实锤：连"切到組合包 tab"都被 halt）。
     #   是白名单不是黑名单：漏一个花钱按钮=真花钱，漏一个导航按钮=只是卡住。
     _navs = [V.COMBO_PACK, V.CLOSE_X, V.BACK, V.CANCEL]
@@ -415,7 +415,7 @@ def t_gate():
              B(V.CREDIT, cx=0.51, cy=0.05))          # 顶栏货币在，弹窗体内没青辉石
     check(" 这一帧 purchase_context 确实是 None（盲区成立）",
           money_rules.purchase_context(_dlg) is None)
-    # `_last` 由 `note_fired` 落 —— 它只在 tap **真的发出去之后**才被调用
+    # `_last` 由 `note_fired` 落 -- 它只在 tap **真的发出去之后**才被调用
     #   （原来写在 dedup 里，等于把被 JIT 丢弃的那一发也记成「上一发」，
     #    而 `_last` 是金钱闸唯一的正向证据，见 Gate.note_fired）
     _prev = lambda g, c: g.note_fired(Action(kind="tap", x=0.3, y=0.7,
@@ -472,7 +472,7 @@ def t_gate():
     a3 = Action(kind="tap", x=0.3, y=0.3, reason="確認键!!", target_cls="btn")
     check("换 reason 文案绕不过连发闸", not g3.dedup(a3, False, 2, 25).ok)
     # 重发必须按**边沿**算间隔: 原来判的是 `frames_in_page >= retry`,
-    #   那是电平 —— 跨过一次就恒真，实测连续 6 帧连发 6 下（设计意图是
+    #   那是电平 -- 跨过一次就恒真，实测连续 6 帧连发 6 下（设计意图是
     #   6 x retry 帧的重试预算，实际缩水到 1/70）。
     g7 = Gate(cfg(), log=lambda m: None)
     a4 = Action(kind="tap", x=0.4, y=0.4, reason="r", target_cls="btn2")
@@ -594,7 +594,7 @@ def t_flows():
     c = cfg()
     ctx = Ctx(cfg=c, log=lambda m: None)
 
-    # craft: 灰态 cls 优先（§A6 —— 模型修好不能把兜底打死）
+    # craft: 灰态 cls 优先（§A6 -- 模型修好不能把兜底打死）
     craft = ALL["craft"](ctx)
     m = Machine(1)
     grey = O(B(V.CRAFT_START_GREY, conf=0.99, cx=0.8, cy=0.85))
@@ -628,7 +628,7 @@ def t_flows():
     check("once:quick 未开未领  等面板, 不收工",
           a4 is not None and a4.kind == "wait", str(a4))
 
-    # event: 轮播闸 —— 405 一直在场时**不点**，只在跃迁那帧点
+    # event: 轮播闸 -- 405 一直在场时**不点**，只在跃迁那帧点
     ev = ALL["event"](ctx)
     m3 = Machine(1)
     hall_cur = O(B(V.HUB_CAMPAIGN, cx=0.4, cy=0.4),
@@ -698,7 +698,7 @@ def t_flows():
     evb = ALL["event"](ctx)
     evb.state["phase"] = "bonus_clear"
     # fixture：不许读 data/routing_v2/event_topped.json 那份真实台账
-    #    （线上顶过关之后这条测试会红 —— 08-09 已经中过一次）
+    #    （线上顶过关之后这条测试会红 -- 08-09 已经中过一次）
     evb.ctx.bag["event_topped"] = {}
     m8 = Machine(1)
     lst2 = O(B(V.EVENT_SHOP, cx=0.1, cy=0.5), B(V.EVENT_QUEST_SEL, cx=0.6, cy=0.15),
@@ -721,7 +721,7 @@ def t_flows():
     evb2 = ALL["event"](ctx)
     evb2.state["phase"] = "bonus_sweep"        # 直接跳到但没赢过
     # 08-15 起 _topped_mark 对 bag fixture 只写内存（不再污染真实台账文件）,
-    #    上面 evb 那场胜利会把 "0" 记进**共享的** ctx.bag —— 这条用例的前提
+    #    上面 evb 那场胜利会把 "0" 记进**共享的** ctx.bag -- 这条用例的前提
     #    是"台账里什么都没有", 必须自带干净台账。
     ctx.bag["event_topped"] = {}
     a = evb2.decide(lst2, Machine(1).update(lst2))
@@ -908,7 +908,7 @@ def t_flows():
           str(_mny.purchase_context(_sweepc)))
 
     # 购买框有条件交回 flow（event_shop 高价优先购买, 2026-08-13）:
-    #   三重合取 —— flow 声明 + 12s 授权金钱步宽限窗 + 框体无青辉石。
+    #   三重合取 -- flow 声明 + 12s 授权金钱步宽限窗 + 框体无青辉石。
     #   缺任何一项都必须照旧 halt（08-09 那道防线不许被这次放行弄坏）。
     import time as _tm
     from routing_v2.flow.interrupt import Interrupts as _Itc
@@ -1034,7 +1034,7 @@ def t_flows():
     check("留空 ticket_plan = 老行为（不限流）",
           f2._plan() == {} and f2._quota("教室") is None)
 
-    # 换分支必须清 branch_tix0 —— 不清的话下一个分支拿上一个的基线，
+    # 换分支必须清 branch_tix0 -- 不清的话下一个分支拿上一个的基线，
     #   配额会瞬间"用完"，第二个分支一张票都不打。
     f3, _, _ = _bounty_with({"教室": 3, "高架公路": 3}, 6, "教室", 6)
     f3.state["tickets"] = 3
@@ -1084,7 +1084,7 @@ def t_flows():
     f7.state.update(branch_name="教室", branch_tix0=6, branch_i=0)
     f7._tickets = lambda _obs: None
     _ob7 = O(B(V.TICKET_BOUNTY, cx=0.2, cy=0.05))
-    # hold() 靠 `self.ticks` 判"连续" —— 不推 ticks 的话 cnt 永远是 1，
+    # hold() 靠 `self.ticks` 判"连续" -- 不推 ticks 的话 cnt 永远是 1，
     #   循环 70 次也只会一直返回"连续确认中"。第一版就是这么**假通过**的：
     #   断言（不是 tap）碰巧成立，却根本没走到被测的那条分支。
     for _ in range(70):
@@ -1147,7 +1147,7 @@ def t_config():
     #  AP 百分比分配（用户点名）
     # 只测**算术**：给定 AP / 百分比 / 谁还没跑  reserve 该是多少。
     # 抓帧和 OCR 不在这一层测（那是 read.py 的活）。
-    # 调**真函数**，不在测试里复制一份算法 —— 复制的话真代码改了测试照样绿。
+    # 调**真函数**，不在测试里复制一份算法 -- 复制的话真代码改了测试照样绿。
     from routing_v2.app.runner import ap_reserve_for
 
     def _reserve(ap, split, me, order, floor=0):
@@ -1305,7 +1305,7 @@ def t_config():
     check("tab cls 弱到检不出时，靠货架大赛币价签仍认得出 arena_shop",
           classify(_shelf).page == "arena_shop", classify(_shelf).page)
     # 2026-08-13 live 推翻了这条原本的「或」语义: `战术大赛商店已选择` 认的是
-    #   **左栏里被选中的那一行**，不是「战术大赛」这一行 —— 帧证是 bot 点歪到
+    #   **左栏里被选中的那一行**，不是「战术大赛」这一行 -- 帧证是 bot 点歪到
     #   大決戰之后，那一行照样给 0.90~0.95，页面于是判成 arena_shop、handler
     #   照常执行，站在大決戰商店里找能量饮料。**tab 选中态单独不能成立**。
     _tabonly = O(B(V.ARENA_SHOP_TAB_SEL, conf=0.95, cx=0.067, cy=0.396))
@@ -1347,7 +1347,7 @@ def t_config():
 
 #  6. 死判据
 def t_invariants():
-    """架构不变量 —— 扫源码，防"修一处没 grep 全仓同形"。"""
+    """架构不变量 -- 扫源码，防"修一处没 grep 全仓同形"。"""
     print("\n 架构不变量 ")
     import re
     root = _ROOT / "routing_v2"
@@ -1410,7 +1410,7 @@ def t_invariants():
     # **滑动的几何量必须来自检出**（用户 2026-08-13 定的全局规矩:「先扫，确定
     #   滑的位置，也确定有没有目标然后再滑，不然怎么适配其他分辨率以及
     #   aspect ratio」）。写死 `swipe(0.5, 0.72, 0.5, 0.40)` 是拿某一个分辨率下
-    #   量出来的比例当普适值 —— 实测设备就有 19 种分辨率。
+    #   量出来的比例当普适值 -- 实测设备就有 19 种分辨率。
     #   例外: 扫荡/活动 quest 那几条另有规则（用户点名），目前它们不调 swipe。
     import glob as _glob2
     import re as _re2
@@ -1452,7 +1452,7 @@ def t_invariants():
     check("只有 sweep/event 可以引用 `任务开始`（别的 flow 点它 = 误打战斗吃 AP）",
           not bad2, " | ".join(bad2))
 
-    # flow 子类不许覆写 decide() —— 2026-08-08 悬赏 live 实锤:
+    # flow 子类不许覆写 decide() -- 2026-08-08 悬赏 live 实锤:
     #    TicketSweepFlow 自己写了按页派发, 把基类 **overlay页面** 顺序整个
     #    跳过  扫荡确认框开着时照样跑列表逻辑, 把对话框里的费用行票图标
     #    当票数锚读出 0  伪报"票用完了"。
@@ -1482,7 +1482,7 @@ def t_invariants():
 def t_vocab():
     print("\n cls 健康度 ")
     from routing_v2.state.vocab import DEAD, HEALTH, WEAK, require
-    # 断言**机制**，别断言某个具体类的等级 —— 等级每次重建数据集都会变。
+    # 断言**机制**，别断言某个具体类的等级 -- 等级每次重建数据集都会变。
     #    原来这里写死「战斗失败 是死类」，v16 重建后它有 6 框了，测试当场红。
     #    测试写死会过期的事实，和注释写死会过期的行为是同一种漂移。
     check("DEAD/WEAK 分级和 HEALTH 表自洽",
@@ -1606,7 +1606,7 @@ def t_route():
     #    **字段还在、注释还在解释它，代码早就不读它了**（`Gate._last_ts` 说是
     #    连发冷却的时间戳，实际只写不读；`sweep` 的 `swipes`/`last_low_y` 是
     #    "滑到底"那套删掉的逻辑留下的）。
-    #    这是**语法事实**不是统计猜测 —— 我先试过"扫注释里引用的标识符存不存在"，
+    #    这是**语法事实**不是统计猜测 -- 我先试过"扫注释里引用的标识符存不存在"，
     #      108 处命中全是误报（文件名/memory 名/页面名字符串），那条路是死的。
     #    允许清单里的都是有意保留的诊断字段；**新增一个死字段就会红**。
     import ast as _ast
@@ -1680,7 +1680,7 @@ def t_route():
 
     # 相位机（2026-08-13）: 分派器是 flow 自己的相位, **不是抖动的页面身份**。
     #   原来按 st.page 分派, 于是点开邀请卷后页面身份要 3 帧才切, 那几帧
-    #   on_cafe 从头重跑、第 2 条分支把自己刚开的面板叉掉 —— live 实测
+    #   on_cafe 从头重跑、第 2 条分支把自己刚开的面板叉掉 -- live 实测
     #   开-叉循环 11 次。断言**机制**: 相位在 invite 时, 那条叉叉分支
     #   (它住在 do_earnings 里) 根本不在调用链上。
     _cf = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
@@ -1690,7 +1690,7 @@ def t_route():
     check("邀请相位: 页面身份还是 cafe 也不许叉掉邀请面板",
           _a5 is None or _a5.target_cls != V.CLOSE_X,
           f"{_a5 and _a5.target_cls}")
-    # 同一帧、同一个页面身份, 换个相位就该叉 —— 证明决定权在相位不在页面
+    # 同一帧、同一个页面身份, 换个相位就该叉 -- 证明决定权在相位不在页面
     _cf2 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
     _cf2.goto("earnings")
     _stray = O(B(V.CLOSE_X, cx=0.79, cy=0.16))
@@ -1739,11 +1739,11 @@ def t_route():
     import routing_v2.act.money as _mr
     _far = O(B(V.SHOP_BUY_PYROXENE, cx=0.116, cy=0.360),
              B(V.CONFIRM, cx=0.499, cy=0.699))
-    check("广告位和框隔半屏 — 不算购买流程",
+    check("广告位和框隔半屏 - 不算购买流程",
           _mr.purchase_context(_far) is None, str(_mr.purchase_context(_far)))
     _near = O(B(V.SHOP_BUY_PYROXENE, cx=0.470, cy=0.520),
               B(V.CONFIRM, cx=0.499, cy=0.699))
-    check("同一个框里的价签+確認 — 照常判成购买流程",
+    check("同一个框里的价签+確認 - 照常判成购买流程",
           _mr.purchase_context(_near) is not None)
 
     # 契约时钟跟帧走, 不跟动作走（2026-08-13 商店死按钮死锁）:
@@ -1778,7 +1778,7 @@ def t_route():
     for _ in range(20):                    # 20 帧瞬间跑完, 墙钟 < 0.5s
         _g_w.heartbeat(_empty, page_changed=False, retry_frames=70)
         _v_w = _g_w.advance(_dead, _empty, page_changed=False, retry_frames=70)
-    check("帧数够了但 0.5s 墙钟没到 — 仍然按住（帧数与墙钟合取）",
+    check("帧数够了但 0.5s 墙钟没到 - 仍然按住（帧数与墙钟合取）",
           not _v_w.ok, f"ok={_v_w.ok}")
 
     # 走格子几何层（fixture = walk_20260813_083604 帧119 的真实检出, 人工核对过）
@@ -1906,7 +1906,7 @@ def t_route():
         _act_w = _cp2.decide(_wo, _SV(page="grid_quest", frames_in_page=10))
         if _cp2.outcome:
             break
-    check("答案方向落不到检出格子 — fail-closed 收 UNKNOWN 不瞎点",
+    check("答案方向落不到检出格子 - fail-closed 收 UNKNOWN 不瞎点",
           _cp2.outcome == "UNKNOWN", f"{_cp2.outcome} act={_act_w}")
     # 换一个方向能解析的答案: 手工喂 plan right-down -> 应该点到 (0.429,0.603)
     _cp3 = ALL["campaign"](Ctx(cfg=_cfg2, log=lambda m: None))
@@ -2272,14 +2272,14 @@ def t_route():
                B(V.GREEN_CHECK, cx=0.88, cy=0.20),
                B(V.SHOP_BUY_SELECTED_GREY, cx=0.91, cy=0.92))
     for _ in range(10):
-        # 走 decide 而不是直调 on_shop —— `hold()` 数的是 self.ticks，
+        # 走 decide 而不是直调 on_shop -- `hold()` 数的是 self.ticks，
         #   只有 decide 会推进它（直调等于每帧都是第 1 帧，hold 永远不满）
         _a_s = _sh.decide(_short, _SV(page="shop", frames_in_page=20))
     check("「選擇購買」是灰的就不许点它",
           _a_s is None or _a_s.target_cls != V.SHOP_BUY_SELECTED_GREY,
           f"{_a_s and _a_s.target_cls}")
     check("买不起要落 credit_short 收敛", bool(_sh.state.get("credit_short")))
-    # 信用点这栏完了 **不等于** 整条 flow 完了 —— 大赛商店那段必须有交代
+    # 信用点这栏完了 **不等于** 整条 flow 完了 -- 大赛商店那段必须有交代
     #   （用户 2026-08-13:「也没去战术大战商店那边接着选择饮料然后检测」）
     _sh2 = ALL["shop"](Ctx(cfg=cfg(), log=lambda m: None))
     _sh2.state.update(pack_done=True, bought=True)
@@ -2287,7 +2287,7 @@ def t_route():
     for _ in range(30):
         _a_ar = _sh2.decide(O(B(V.SHOP_TAB_CREDIT_SEL, cx=0.05, cy=0.12)),
                             _SV(page="shop", frames_in_page=60))
-    check("信用点买完但还没去大赛商店 — 不许收工（还在找 tab）",
+    check("信用点买完但还没去大赛商店 - 不许收工（还在找 tab）",
           _sh2.outcome is None, f"outcome={_sh2.outcome}")
     _sh2.state["arena_skip"] = True
     check("大赛 tab 找不到要记成「没找到入口」，不谎报已处理",
@@ -2339,7 +2339,7 @@ def t_route():
 
     # 领不到 != 领过了（用户 2026-08-13:「体力999了领不了咖啡厅收益了,
     #   也没法辨别」）。原来"面板里没有可点的领取键"被写成 claimed=True,
-    #   收尾堂而皇之报「收益已领」—— 谎报。
+    #   收尾堂而皇之报「收益已领」-- 谎报。
     _cf4 = ALL["cafe"](Ctx(cfg=cfg(), log=lambda m: None))
     _cf4.goto("earnings")
     _grey = O(B(V.CLAIM_GREY, cx=0.62, cy=0.62))
@@ -2378,11 +2378,11 @@ def t_route():
     _dotty = O(B(V.CAFE_MOVE_2F, cx=0.10, cy=0.14), B(V.DOT_YELLOW, cx=0.55, cy=0.70))
     for _ in range(25):
         _fin6 = _cf6.decide(_dotty, _SV(page="cafe", frames_in_page=30))
-    check("屏上还有黄点就是还有活 — 不许 CLEAN", _cf6.outcome == "LEFTOVER",
+    check("屏上还有黄点就是还有活 - 不许 CLEAN", _cf6.outcome == "LEFTOVER",
           f"{_cf6.outcome}")
 
     # 绿勾归属必须 1:1 最近邻（2026-08-13 真帧量出来的）: 绿勾长在自己学生
-    #   右上偏移约 (+0.028,-0.030), 而学生横向间距只有 0.057 —— 旧判据
+    #   右上偏移约 (+0.028,-0.030), 而学生横向间距只有 0.057 -- 旧判据
     #   `|dx|<0.06` 比间距还大, 每个学生都能蹭到邻居的勾。实帧: 2 个绿勾
     #   判出 3 个"已选", `美咲泳装` 蹭了 `花子` 的勾被跳过。
     _sc = ALL["schedule"](Ctx(cfg=cfg(), log=lambda m: None))
@@ -2397,17 +2397,17 @@ def t_route():
     _ob = Observation(boxes=_stu + _chk + [_tick], seq=1, w=3840, h=2160)
     _sc.goto("roster")
     _act = _sc.decide(_ob, _SV(page="schedule_region", frames_in_page=10))
-    check("2 个绿勾只认领 2 个学生 — 没勾的那位仍会被选中",
+    check("2 个绿勾只认领 2 个学生 - 没勾的那位仍会被选中",
           _act is not None and _act.target_cls == "美咲泳装",
           f"{_act and _act.target_cls}")
     # 绿勾**会闪**（老代码 _accumulate_green_marks）: 下一帧勾没检出来,
-    #   也不许把已经上过课的两位重新当成可选 —— 累积表说了算。
+    #   也不许把已经上过课的两位重新当成可选 -- 累积表说了算。
     _ob2 = Observation(boxes=_stu + [_tick], seq=2, w=3840, h=2160)
     _act2 = _sc.decide(_ob2, _SV(page="schedule_region", frames_in_page=11))
     check("绿勾这一帧没检出, 累积表仍然记得那两位上过课",
           _act2 is not None and _act2.target_cls == "美咲泳装",
           f"{_act2 and _act2.target_cls}")
-    # 房间面板一开（屏上有「課程表開始」）就必须换相位, **不许再挑学生** ——
+    # 房间面板一开（屏上有「課程表開始」）就必须换相位, **不许再挑学生** --
     #   这是「抢拍」的结构性断点（原来 t1138/1144/1147 连点 3 个学生）。
     _sc2 = ALL["schedule"](Ctx(cfg=cfg(), log=lambda m: None))
     _sc2.goto("roster")
@@ -2442,7 +2442,7 @@ def t_route():
           not _v3.ok, f"ok={_v3.ok}")
     # 真开了面板 -> 必然带来新 cls（課程表開始）。但**节拍闸先按住固定帧数**:
     #   页面身份在同一个面板上会跳(facility <-> schedule_region), 而
-    #   `page_changed` 会作废契约 —— 所有兑现条件的修复都被那条绕过去。
+    #   `page_changed` 会作废契约 -- 所有兑现条件的修复都被那条绕过去。
     #   所以在一切判定之前先无条件按住 _MIN_HOLD 帧。
     from routing_v2.act.gate import _MIN_HOLD as _MH
     _opened = O(B("晴露营"), B("沙织"), B(V.SCHED_START))
@@ -2480,7 +2480,7 @@ def t_route():
             break
     check("严格契约: 页面反复跳也不放行（等的是邀请键，不是页面动没动）",
           _rel2 is None, f"第 {_rel2} 次就放行了")
-    # 宽松契约（没写 expect）照旧被页面变化作废 —— 那条语义是对的
+    # 宽松契约（没写 expect）照旧被页面变化作废 -- 那条语义是对的
     _g6 = _G2(cfg())
     _loose = _A2(kind="tap", x=0.5, y=0.5, target_cls="某键", reason="r")
     _g6.arm(_loose, O(B("某键")))
@@ -2493,7 +2493,7 @@ def t_route():
     check("宽松契约: 页面变了就作废（保留原语义）", _vl.ok)
 
     # 契约超时要退回 once 标记（2026-08-13 用户现场诊断）: 按钮还在归位时
-    #   点下去, tap 确实发出去了但游戏没收到 —— `once` 的旧契约是"发出去就算
+    #   点下去, tap 确实发出去了但游戏没收到 -- `once` 的旧契约是"发出去就算
     #   做过", 于是标记被消耗、`pending()` 永为 False、**再也不重试**。
     #   发出去 != 游戏有反应, 所以严格契约超时必须把标记退回去。
     from routing_v2.act.action import Action as _A
@@ -2504,7 +2504,7 @@ def t_route():
     _g.arm(_act)
     _g._pending["t0"] -= 9.0
     check("严格契约记下了 once 标记", _g._pending.get("once") == "selectall")
-    # 超时和退标记归 heartbeat（时钟跟帧走 —— flow 光等待时也必须能超时）
+    # 超时和退标记归 heartbeat（时钟跟帧走 -- flow 光等待时也必须能超时）
     _rb0 = ""
     for _i in range(200):                       # 一直等不到「选择购买」
         _rb0 = _g.heartbeat(O(B("信用点")), page_changed=False,
@@ -2606,7 +2606,7 @@ def t_ledger():
         push(58723911)
         check("两次一致才立基线", led.confirmed.get(_RD.CREDIT) == 58723911,
               str(led.confirmed.get(_RD.CREDIT)))
-        # 插位读大: 同页同渲染稳定复读, "复读一致"闸拦不住 —— 结构闸咬回
+        # 插位读大: 同页同渲染稳定复读, "复读一致"闸拦不住 -- 结构闸咬回
         push(588723911)
         push(588723911)
         check("插位读大稳定复读也咬得回(58,723,911->588,723,911)",
@@ -2980,7 +2980,7 @@ def t_deadbtn():
 def t_ocr_geom():
     """icon_strip 天花板单位修复（08-15）: 天花板是布局量(别吃邻居行), 该随
     UI 等比缩放; 写成绝对像素后 4K 顶栏被夹瘦切首位(47,143,185->433185 /
-    7,555->555), 而 1440p 全对 —— 单位错, 不是标定错。地板仍是真绝对像素
+    7,555->555), 而 1440p 全对 -- 单位错, 不是标定错。地板仍是真绝对像素
     (DB 检测器物性)。"""
     print("\n OCR 裁片几何 ")
     from routing_v2.percept.read import CREDIT, PYROXENE, STRIP, icon_strip
@@ -4131,7 +4131,7 @@ def t_schedule_locked_card_0821():
 
 
 def t_story_stack_0821():
-    """08-21: 剧情卡堆叠 —— 点后卡只翻面, 点前卡才进。
+    """08-21: 剧情卡堆叠 -- 点后卡只翻面, 点前卡才进。
 
     fixture 数字全部来自当天真采的四件套 `flywheel_v19_ui_20260821`:
       v19_048 (第2部在前): 前卡 cx .3274 w .1241 / 后卡 cx .4400 w .0620 / 黄点 cx .4102
@@ -4230,7 +4230,7 @@ def t_daily_fix_0820():
     ctx = Ctx(cfg=cfg(), log=lambda m: None)
     st_hall = _SV(page="task_hall", frames_in_page=3)
 
-    # 任务大厅证据(推图 + 返回, 底栏 NAV 簇不在) —— 与 nav.task_hall_evidence 一致
+    # 任务大厅证据(推图 + 返回, 底栏 NAV 簇不在) -- 与 nav.task_hall_evidence 一致
     hall = [B(V.HUB_CAMPAIGN, conf=0.92, cx=0.62, cy=0.31),
             B(V.BACK, cx=0.045, cy=0.052)]
 
@@ -4463,7 +4463,7 @@ def t_v20_wiring():
     a = cp.do_grid(grid_menu, Machine(1).update(grid_menu))
     check("campaign: 菜单开着 -> 点空处(无 cls 落点), 不点解除",
           a is not None and a.kind == "tap" and a.target_cls == "(no-cls)", str(a))
-    # 6 543 悬停▽: 点它正下方的起点, 不点已上队的那个
+    # 6 543 悬停倒三角: 点它正下方的起点, 不点已上队的那个
     deploy = O(B(V.TASK_START_GREY, cx=0.85, cy=0.90),
                B(V.GRID_START, cx=0.40, cy=0.60), B(V.GRID_START, cx=0.60, cy=0.60, conf=0.7),
                B(V.GRID_START_HOVER, cx=0.60, cy=0.52),
@@ -4471,7 +4471,7 @@ def t_v20_wiring():
     cp2 = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
     cp2.goto("grid")
     a = cp2.do_grid(deploy, Machine(1).update(deploy))
-    check("悬停▽下的起点被选中(cx 0.60, 不是 conf 更高的 0.40)",
+    check("悬停倒三角下的起点被选中(cx 0.60, 不是 conf 更高的 0.40)",
           a is not None and a.kind == "tap" and abs(a.x - 0.60) < 0.01, str(a))
     # 7 預設子链(配置门控)全程
     c3 = cfg()

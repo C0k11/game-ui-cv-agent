@@ -19,7 +19,7 @@ reference = REPO / "study" / "ref" / "core" / "config" / "default_config.py"
 CROP_DIR = REPO / "data" / "captures" / "角色头像_crop"
 OUT = REPO / "data" / "student_name_map.json"
 
-# Parse reference default_config — stored as STATIC_DEFAULT_CONFIG = '''{ ... }'''
+# Parse reference default_config - stored as STATIC_DEFAULT_CONFIG = '''{ ... }'''
 text = reference.read_text("utf-8")
 match = re.search(r"STATIC_DEFAULT_CONFIG\s*=\s*'''(.*?)'''", text, re.DOTALL)
 if not match:

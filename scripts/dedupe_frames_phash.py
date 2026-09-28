@@ -1,10 +1,10 @@
 """Deduplicate trajectory frames via perceptual hash (dHash).
 
 Algorithm:
-  1. Compute 8x8 dHash (64-bit) for each frame — measures gradient pattern
+  1. Compute 8x8 dHash (64-bit) for each frame - measures gradient pattern
   2. Sort frames in chronological order
   3. Keep a frame if its dHash differs from the last kept frame by
-     >= --threshold hamming bits (default 5 — empirically distinct)
+     >= --threshold hamming bits (default 5 - empirically distinct)
   4. Symlink (or copy) kept frames into --out
 
 Outputs:

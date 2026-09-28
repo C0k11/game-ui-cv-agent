@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""主循环 —— 零 wait，对齐 fps。
+"""主循环 -- 零 wait，对齐 fps。
 
     帧(scrcpy 0ms)  YOLO(23ms)  状态(连续N帧确认)  flow  四道闸  tap(32ms)
 
 **没有一个 sleep**。推进靠"下一步的 cls 出现"，重发靠"状态连续 N 帧没变"。
-   老代码里的 `sleep(2)/sleep(4)/sleep(6)` 全部删掉了 —— 用户原话：
+   老代码里的 `sleep(2)/sleep(4)/sleep(6)` 全部删掉了 -- 用户原话：
    「点了入场 popout 识别到了再点下一步，通过识别到 cls 而不是硬给 wait time」
    「点击也要对齐 fps」。
 
@@ -79,7 +79,7 @@ def _dead_tap(same_tap: dict, key, sent: bool, cap: int = 4) -> bool:
     """归位死路判定: 同一 (cls, 落点) **真发出去** cap 次画面仍没变才算死。
 
     只数 sent=true（08-15 复盘）: 原来数提案, 被 advance/dedup 按住的空提案
-       也 +1 —— 12 次"连发 7 次"里典型只有 1 发真 tap, 闸的正常工作被数成
+       也 +1 -- 12 次"连发 7 次"里典型只有 1 发真 tap, 闸的正常工作被数成
        "按钮死了", 真按钮只挨一下就被放弃。换目标即清零。
     """
     if same_tap.get("key") != key:
@@ -93,7 +93,7 @@ def _dead_tap(same_tap: dict, key, sent: bool, cap: int = 4) -> bool:
 def money_watch_should_halt(watch: Optional[str]) -> bool:
     """台账 watch: None / EXTERNAL / WARN_MONEY 继续跑; MONEY BREACH 才停整轮。
 
-    2026-08-21: `WARN_MONEY` 是台账**首条**掉钱告警。台账是事后账 ——
+    2026-08-21: `WARN_MONEY` 是台账**首条**掉钱告警。台账是事后账 --
       钱已经动了，停轮救不回来；真防线是 act/gate.py 里 tap **之前**那两条。
       信用点/青辉石扫描的职责是对账（用户自己抽卡、升角色都会让余额变），
       不是叫停程序。连续第二条才升级成 MONEY BREACH 停轮。
@@ -134,7 +134,7 @@ class Runner:
         self.feed: Optional[Feed] = None
         self.machine = Machine(int(self.run.get("confirm_frames", 3)), log=log)
         self.interrupts = Interrupts(log=log)
-        # 台账账号桶（08-15）: 算不出桶就先记 None, boot 里拒绝开跑 ——
+        # 台账账号桶（08-15）: 算不出桶就先记 None, boot 里拒绝开跑 --
         #    __init__ 不 raise 是为了 config/health 这类只读命令还能用。
         try:
             from routing_v2.config import data_dir as _data_dir
@@ -158,7 +158,7 @@ class Runner:
         self._dense_shots = bool(self.run.get("dense_shots", True))
         # 门控用的两件东西（2026-08-13 用户要「一阵一看一动，门控点击、
         #   看 flow 的路由以及决策」）:
-        #   `max_taps`  跑够这么多 tap 就**干净收手**（不是 kill）——
+        #   `max_taps`  跑够这么多 tap 就**干净收手**（不是 kill）--
         #               人看完这一批的路由再放下一批。0 = 不限。
         #   `_trace`    每个产生动作的 tick 落一行 jsonl: 页面身份/覆盖层/
         #               打断/是哪条 flow/动作/落点/理由。日志是给人读的，
@@ -175,7 +175,7 @@ class Runner:
     def boot(self) -> bool:
         self.log(" routing_v2 启动 ")
         if self._data_dir is None:
-            self.log("[boot] profile.json 缺 account.id（台账分桶键）— 拒绝开跑:"
+            self.log("[boot] profile.json 缺 account.id（台账分桶键）- 拒绝开跑:"
                      " 大小号共用台账会互相把「今天做过/本期顶过」当成自己的账")
             return False
         self.log(f"[boot] 台账桶: {self._data_dir.name}")
@@ -205,12 +205,12 @@ class Runner:
             # **scrcpy 起不来先怀疑 adb 连接，别信它报的错**（2026-08-13 实锤）:
             #    它报的是 `push ... : Read-only file system`，看起来像模拟器
             #    文件系统坏了；实际 `adb disconnect + connect` 之后
-            #    `touch /data/local/tmp/x` 立刻 WRITE_OK —— 只是连接僵死。
+            #    `touch /data/local/tmp/x` 立刻 WRITE_OK -- 只是连接僵死。
             #    这一级之前是缺的: `boot` 只在 `alive()` 为假时才走恢复阶梯，
             #    而当时 `adb shell echo` 是通的、只有 push 失败，于是
             #    Feed 自己那次"清掉挂死的 scrcpy server 再试"必然也失败
             #    （它不重连 adb），整轮 boot 直接死掉。
-            self.log("[boot] scrcpy 起不来 — 先怀疑 adb 连接，走一次恢复阶梯再试")
+            self.log("[boot] scrcpy 起不来 - 先怀疑 adb 连接，走一次恢复阶梯再试")
             if self.device.recover():
                 self.feed = Feed(serial=self.device.serial, log=self.log)
                 if not self.feed.start():
@@ -220,7 +220,7 @@ class Runner:
                 self.log("[boot] scrcpy 起不来，且 adb 恢复阶梯也没救回来")
                 return False
         # 必须用首帧朝向标定 tap 坐标空间（`wm size` 报的是竖屏面板，直接信
-        #   会让 y 飞出屏幕 —— 08-08 新架构第一次真机单步就撞上）
+        #   会让 y 飞出屏幕 -- 08-08 新架构第一次真机单步就撞上）
         fr, _, _ = self.feed.wait_new(-1, timeout=6.0)
         if fr is None:
             self.log("[boot] scrcpy 起来了但没出帧")
@@ -246,7 +246,7 @@ class Runner:
         # 2026-08-12 live 实锤：这里原来**硬写 `("ui",)`**，把 flow 声明的
         #    `yolo = (...)` 整个无视掉。后果：`CafeFlow` 明明声明了
         #    `yolo = ("ui", "avatar")`（注释还专门写了「只跑 ui 的话
-        #    `obs.find("凯伊")` 永远 None」），跑起来还是只推 ui ——
+        #    `obs.find("凯伊")` 永远 None」），跑起来还是只推 ui --
         #    而**学生名 143-394 属于 fused_avatar，build_ui_v2 明确 drop 掉了**
         #     邀请目标一个都找不到，收尾报「配置的角色没找到，未消耗邀请卷」。
         #    今晚 live 帧上 `Kei` 就躺在列表第一行，而 flow 说找不到。
@@ -308,12 +308,12 @@ class Runner:
             name = f"{obs.seq:07d}_{tag or 'f'}"
             # 2026-08-12 用户判断准确:「数据飞轮本来就会录进去，我怀疑
             #    **就是录制的 jpg**，你之前门控一帧一看那会可能是没设置好导致成了 png」
-            #    —— 查下来比这更糟：**两种格式是反的**
+            #    -- 查下来比这更糟：**两种格式是反的**
             #      干净帧  `.png`       `build_ui_v2.frames_in()` 历史上只扫 jpg，
             #                             前端 datasets 也只按 jpg 计数  **整批看不见**
             #      标注渲染图  `_ann.jpg`  **反而会被扫进训练集**
             #    也就是说，把这些池接进 sources，进集的是**烧了框的渲染图**，
-            #    干净帧全漏 —— 等于教模型认自己画的框
+            #    干净帧全漏 -- 等于教模型认自己画的框
             #    （[[flywheel_label_import]] 那条 overlay 烧录陷阱的复刻版）。
             #     干净帧统一写 **jpg**（q95，肉眼无损，整条工具链才看得见）
             #      渲染图挪进 **`_ann/` 子目录**（下划线开头的目录被所有
@@ -371,7 +371,7 @@ class Runner:
         # 大厅点背景会把 UI 收起来（08-08 我一发算错坐标的点击就把它收了，
         # 之后 bot 永远看不见任何 cls = 死循环）。此时点屏幕中央就能唤回；
         # 若是过场则等于推进对话；若是加载则无害。
-        # 前提是 **len(boxes)==0** —— 屏上什么都没有，也就没有按钮会被误点。
+        # 前提是 **len(boxes)==0** -- 屏上什么都没有，也就没有按钮会被误点。
         #    这跟老代码那个盲点「編輯模式」的 bug 有本质区别（那次屏上有框）。
         if st.page == "blank" or (st.page == "unknown" and nav.screen_empty(obs)):
             a = nav.blank_escape(st, obs=obs)
@@ -380,7 +380,7 @@ class Runner:
         if st.page == "unknown":
             # UNKNOWN 的默认行为就是**什么都不做**。
             #   只有在 UNKNOWN **持续**很久（不是转场帧）时才允许最温和的一步：
-            #   关弹窗。`回大厅` 默认不给 —— 它几乎每页都在，当兜底就等于
+            #   关弹窗。`回大厅` 默认不给 -- 它几乎每页都在，当兜底就等于
             #   "任何看不懂的帧都把自己弹回大厅"（§A1，用户现场目击过）。
             if not self.run.get("unknown_escape", True):
                 return None
@@ -403,7 +403,7 @@ class Runner:
                 return tap_box(b, f"recover: UNKNOWN {st.frames_in_page} 帧  返回上一层({n})")
             if n <= 8:
                 # 安全性统一走 `nav.back_key()`（大厅上按返回 = 退出游戏框）。
-                #    第一版这里自己造了个 Action，绕过了那道闸 —— 于是它在
+                #    第一版这里自己造了个 Action，绕过了那道闸 -- 于是它在
                 #    大厅上连按了 6 次返回，把游戏关掉过一次。
                 return nav.back_key(
                     obs, f"recover: UNKNOWN {st.frames_in_page} 帧，"
@@ -426,8 +426,8 @@ class Runner:
         """返回 False = 要停整条链。"""
         # **上一发还没兑现，就不许收工/退出**（2026-08-12 通用闸）。
         #    用户要求「从头到尾每个环节都要排查按键逻辑以及打架，还有就是
-        #    **看没看到下一步 cls 的逻辑**」——与其一处处补，不如在这里堵死:
-        #    一晚上抓到 4 处同形 bug，形状完全一样 ——
+        #    **看没看到下一步 cls 的逻辑**」--与其一处处补，不如在这里堵死:
+        #    一晚上抓到 4 处同形 bug，形状完全一样 --
         #      点了"开面板/弹确认框"的键  面板要几帧才出来  那几帧里 handler
         #      照常从头跑、命中不了任何分支  一路落到 `finish(CLEAN…)`
         #       **把自己刚打开的东西关掉，还报告"干净"**。
@@ -435,7 +435,7 @@ class Runner:
         #        战术大赛商店「選擇購買」 确认框没人点就跑了）
         #     推进闸里还挂着未兑现的契约时，`done` 一律降级成 `wait`。
         #      契约超时会自己作废（宽松 max(地板10, retry//6)、严格 retry_frames），
-        #      所以不会永远卡住 —— 只是**不许在动作悬空时下"干完了"的结论**。
+        #      所以不会永远卡住 -- 只是**不许在动作悬空时下"干完了"的结论**。
         if act.kind in ("wait", "note"):
             if act.kind == "note":
                 self.log(f"    · {act.reason}")
@@ -449,7 +449,7 @@ class Runner:
         if act.kind == "swipe":
             # 滑动也要过推进闸。原来它排在 `gate.allow()` 之前、一道闸都不过，
             #    于是 arm 里那个 settle 契约**永远没人递减**（`advance` 只在
-            #    tap 路径被调用），下一帧照样滑、arm 再盖一次 ——「滑一次扫一次」
+            #    tap 路径被调用），下一帧照样滑、arm 再盖一次 --「滑一次扫一次」
             #    的节流从写下起就没生效过，还顺手把别人的契约顶掉。
             v = self.gate.advance(act, obs, page_changed=st.changed,
                                   retry_frames=retry)
@@ -463,7 +463,7 @@ class Runner:
             # 滑动也 arm 推进闸：不然一帧一发连着滑（猛滑），列表还在惯性
             #   滚动时模型没机会扫干净，眼前的目标就被滑过去了。
             self.gate.arm(act, obs)
-            # 08-10：这里原本**不执行 `act.post`** —— 于是滑动类 flow 只能把
+            # 08-10：这里原本**不执行 `act.post`** -- 于是滑动类 flow 只能把
             #    「滑了第几次 / 上次最低 y」写在 decide 里（mutate-before-ack），
             #    动作被闸吞掉时计数照样涨、防空转的基准也被污染。
             #    swipe 和 tap 一样：**真发出去了才记账**。
@@ -471,7 +471,7 @@ class Runner:
                 act.post()
             return True
         if act.kind == "key":
-            # 按键要过**推进闸 + 连发闸**。原来只过连发闸 —— 于是上一发 tap 的
+            # 按键要过**推进闸 + 连发闸**。原来只过连发闸 -- 于是上一发 tap 的
             #    契约还挂着时，一次系统返回键照样发得出去，正是
             #    「確認框没人点、直接点返回键跑了」那个形态残留的通道。
             for _nm, _fn in (("advance", lambda: self.gate.advance(
@@ -507,11 +507,11 @@ class Runner:
                             retry_frames=retry,
                             last_solid=getattr(st, "last_solid", None))
         # 契约超时 = 上一发没生效  把它的 `once` 标记退回去（见 Gate.advance）。
-        #    不退的话「点了一次游戏没反应就再也不点」——用户 2026-08-13 现场诊断，
+        #    不退的话「点了一次游戏没反应就再也不点」--用户 2026-08-13 现场诊断，
         #    帧上实证按钮当时还在归位（两态连续闪 4 帧）。
         if v.rollback_once and self._flow is not None:
             if self._flow.state.pop(f"once:{v.rollback_once}", None) is not None:
-                self.log(f"    [gate] 契约没兑现 — 退回 `{v.rollback_once}` 的 once 标记，允许重试")
+                self.log(f"    [gate] 契约没兑现 - 退回 `{v.rollback_once}` 的 once 标记，允许重试")
         if not v.ok:
             if v.by == "jit":
                 # JIT 丢掉没发出去, 但漏记窗会把随后石头下降当成 EXTERNAL
@@ -521,7 +521,7 @@ class Runner:
                                "stop_flow": v.stop_flow})
             # **金钱步被人审拒绝 = 终态，不许重试**（2026-08-13 live 实锤）:
             #    这一批没带 `--money-ok`，战术大赛商店的「選擇購買」被拒，
-            #    而 flow 每一帧只要看到那个键就原样再发一次 —— 轨迹里
+            #    而 flow 每一帧只要看到那个键就原样再发一次 -- 轨迹里
             #    **同一发被拦了 1408 次**，flow 空转到 tap 预算/超时。
             #    人审的答案在一次 run 内是确定的（`--money-ok` 是命令行开关），
             #      重试**不可能**改变结果，纯烧时间。
@@ -534,7 +534,7 @@ class Runner:
                 if n >= 2:
                     self._flow.finish(
                         Outcome.BLOCKED,
-                        f"金钱步未授权（`{act.target_cls}`）—— 本次没带 "
+                        f"金钱步未授权（`{act.target_cls}`）-- 本次没带 "
                         f"--money-ok，重试改变不了结果，收工不空转")
                     self._save(obs, tag="MONEYNO", target=act)
                     self._stop_flow = True
@@ -552,7 +552,7 @@ class Runner:
         if self.run.get("step_mode", True) and self.approver is not None:
             shot = self._save(obs, tag="STEP", target=act)
             if not self.approver(act, obs):
-                self.log("    ⏸ 人工未放行 —— 停")
+                self.log("    人工未放行 -- 停")
                 self.stats.halted = "人工中止"
                 return False
 
@@ -569,11 +569,11 @@ class Runner:
         # 花钱键: tap 成败都记窗. 必须在 note_fired 之前, _last 仍是上一发.
         # tap 返回失败币种不确定, 开青辉石窗 (漏 EXTERNAL 比误 BREACH 贵).
         self._note_ledger_spend(act, uncertain=not ok)
-        # 推进契约也只在**真发出去之后**才 arm（同一条「数事实」纪律）——
+        # 推进契约也只在**真发出去之后**才 arm（同一条「数事实」纪律）--
         #   被闸吞掉的决策若 arm 了，闸会为一发从没发出去的点击一直等下去。
         if ok:
             self.gate.arm(act, obs)
-            # 落点/连发计数/重发基准同理 —— 原来记在 dedup 里，等于把
+            # 落点/连发计数/重发基准同理 -- 原来记在 dedup 里，等于把
             #   **被 JIT 丢弃的那一发**也记成了「上一发」，而 `_last` 是金钱闸
             #   唯一的正向证据（见 Gate.note_fired）。
             self.gate.note_fired(act, st.frames_in_page)
@@ -605,7 +605,7 @@ class Runner:
         queue: List[Flow] = list(flows)
         budget_s = float(self.run.get("max_minutes", 90)) * 60
         # **第一条 flow 也要归位**（2026-08-13 live 实测）: 归位原来只发生在
-        #    flow 之间，于是开跑时画面停在哪儿就在哪儿开工 —— 上一轮收尾停在
+        #    flow 之间，于是开跑时画面停在哪儿就在哪儿开工 -- 上一轮收尾停在
         #    课程表页，这一轮 cafe 第一个跑，`do_enter` 只会从大厅进，
         #    在 `schedule_region` 上干等 601 tick 报 UNKNOWN。
         #    "上一次是怎么退出的"不该由下一次的第一条 flow 承担。
@@ -615,7 +615,7 @@ class Runner:
 
         while queue:
             if time.time() - self.stats.t0 > budget_s:
-                self.log(f"[run] ⏱总时长上限 {budget_s/60:.0f} 分到了，剩下的不跑了")
+                self.log(f"[run] 总时长上限 {budget_s/60:.0f} 分到了，剩下的不跑了")
                 for f in queue:
                     f.outcome = f.outcome or Outcome.SKIPPED
                     f.note_lines.append(
@@ -642,7 +642,7 @@ class Runner:
             # 插队**必须先于归位**：归位的目标取自 queue[0]，插队会改 queue[0]。
             #    顺序反了的后果（2026-08-12 我自己引入又被审计逮到）: event 交给
             #    event_shop 时，归位先按 arena 的 task_hall 把画面退出活动页，
-            #    等 event_shop 插进队首时它要的 `event_page` 已经没了 —— 而它
+            #    等 event_shop 插进队首时它要的 `event_page` 已经没了 -- 而它
             #    只有 on_event_page / on_event_shop，decide 恒 None，空转到 stuck。
             req = self.ctx.bag.pop("request_flow", None)
             requested = False
@@ -652,7 +652,7 @@ class Runner:
                 queue.insert(1, f)              # 回来接着跑原 flow
                 requested = True
             # 交班归位：把画面带到下一条 flow 的入口层再交班。
-            #    不归位的代价是**下一条 flow 在别人的页面上开工** —— handler
+            #    不归位的代价是**下一条 flow 在别人的页面上开工** -- handler
             #    按页面名匹配，而页面名不带"这是谁的页面"（见 Flow.entry_page）。
             #    **插队来的不归位**：请求方是**故意**把画面留在那儿交给它的
             #      （event 停在活动页把控制权交给 event_shop），归位反而拆掉入口。
@@ -668,14 +668,14 @@ class Runner:
             #     队列跑空后读一次 AP，够一轮就把 event 再挂回去把它花掉。
             #    只做**一次**（`_ap_replanned`）：event 自己有 AP 闸和扫荡上限，
             #      但复盘无限次就成了死循环（领奖励刷再领…）。
-            #    读不出 AP 就**不复盘**（fail-closed）——宁可少刷一轮，
+            #    读不出 AP 就**不复盘**（fail-closed）--宁可少刷一轮，
             #      也不要凭空多跑一趟把时间预算烧光。
             if not queue and not self._ap_replanned:
                 self._ap_replanned = True
                 extra = self._ap_replan()
                 if extra is not None:
                     queue.append(extra)
-                    # 复盘追加的这条也要归位 —— 上面那次归位发生在
+                    # 复盘追加的这条也要归位 -- 上面那次归位发生在
                     #   queue 还空着的时候，等于没做。不归位它就会在
                     #   daily_mission 的页面上开工。
                     self._handoff(getattr(extra, "entry_page", "lobby"),
@@ -698,7 +698,7 @@ class Runner:
         return self.stats
 
     def _handoff(self, target: str, nxt: str = "") -> None:
-        """交班归位 —— 把画面带到 `target` 那一层，带不到就如实报告。
+        """交班归位 -- 把画面带到 `target` 那一层，带不到就如实报告。
 
         为什么不能"就地交班"（2026-08-12 体外复现，scratchpad/repro_handoff.py）:
            页面 handler 按**页面名**匹配，页面名不带"这是谁的页面"。
@@ -728,7 +728,7 @@ class Runner:
         #    back 键弹任務資訊框 -> 框被判 ack_dialog 点確認关掉 -> back 又弹
         #    -> 乒乓 60 发烧光整轮预算）。同一 (cls, 落点) **真发出去** 4 次
         #    画面还没变 -> 这条归位路是死的, 停下来交班, 别把预算烧光。
-        # 08-15 复盘改法: 原来数的是**提案**且在 _dispatch 之前数 —— 昨晚
+        # 08-15 复盘改法: 原来数的是**提案**且在 _dispatch 之前数 -- 昨晚
         #    12 次"连发 7 次"里典型形态是 1 发真 tap + 5 发被 advance/dedup
         #    按住的提案, 第 7 个提案就地交班: **把闸的正常工作数成了按钮死了**,
         #    真按钮只挨了一下就被判死(jfd 残留任務資訊的叉叉, event 接手后
@@ -752,7 +752,7 @@ class Runner:
             # 归位期间契约时钟同样要走（归位的 tap 一样会 arm 契约）
             self.gate.heartbeat(obs, page_changed=st.changed,
                                 retry_frames=int(self.run.get("retry_frames", 38)))
-            # 归位期间照样喂台账 —— 少采一段就是一段掉钱盲区
+            # 归位期间照样喂台账 -- 少采一段就是一段掉钱盲区
             #    （memory `money_safety`: 30 青辉石就是在没采样的那一段花掉的）。
             watch = self.ledger.feed(obs, st.page, "handoff")
             self._money_warn(obs, watch)
@@ -769,11 +769,11 @@ class Runner:
             #    （campaign.do_enter 有 grid_quest 接管分支; 拆任务 = 白扔 AP）
             if nxt == "campaign" and obs.has(
                     ["PHASE结束", "PHASE自动结束_已勾选", "走格子_格子"], 0.40):
-                self.log("[run] 走格子任务进行中且下一条是 campaign — 直接交班续走")
+                self.log("[run] 走格子任务进行中且下一条是 campaign - 直接交班续走")
                 return
             act = None
             if st.interrupt:
-                # 归位期没有"flow 主动购买"这回事 —— 购买框一律走 halt
+                # 归位期没有"flow 主动购买"这回事 -- 购买框一律走 halt
                 self.interrupts.flow_handles_purchase = False
                 act = self.interrupts.handle(st.interrupt, obs)
             if act is None:
@@ -806,17 +806,17 @@ class Runner:
             if k is not None and _dead_tap(same_tap, k,
                                            self._sent_seq > before):
                 self.log(f"[run] 归位在 `{k[0]}` 上真发了 {same_tap['n']} 次"
-                         f"仍没变化 — 这条路是死的, 就地交班")
+                         f"仍没变化 - 这条路是死的, 就地交班")
                 return
         # 归位失败必须**出声**：接下来那条 flow 会在一个非预期的页面上开工。
-        self.log(f"[run] 归位到 `{target}` 超了 {budget:.0f}s — 就地交班，"
+        self.log(f"[run] 归位到 `{target}` 超了 {budget:.0f}s - 就地交班，"
                  f"下一条 flow 会在当前页面上开工")
 
     def _ap_replan(self) -> Optional[Flow]:
         """队列跑空  看看 mail/每日领奖之后 AP 是不是又攒起来了。
 
         **为什么必须花掉**（用户 2026-08-10 口述的 AP 资源模型）:
-           AP **240 是自然回复上限，到 240 就停止回复** —— 停在高位不是"存着"，
+           AP **240 是自然回复上限，到 240 就停止回复** -- 停在高位不是"存着"，
            是**每分钟都在亏**。240~999 只能靠领取堆进去，>999 溢出进邮箱（不丢）。
             唯一会**真损失**的形态就是"AP 卡在 240 附近不动"，所以要尽量花到低位。
         """
@@ -883,7 +883,7 @@ class Runner:
     def _apply_ap_split(self, flow: Flow) -> None:
         """按用户配的百分比，给这个 flow 算出它该留多少 AP 给后面的人。
 
-        **不改任何 flow 的逻辑** —— 复用现成的 `ap_reserve` 闸：
+        **不改任何 flow 的逻辑** -- 复用现成的 `ap_reserve` 闸：
            各 flow 本来就会刷到 `AP - reserve < 一轮的量` 就收手。
            把"我分到 60%"翻译成"给后面留 40%"，就是 reserve。
 
@@ -959,7 +959,7 @@ class Runner:
 
         while True:
             if time.time() - t0 > cap:
-                flow.finish(Outcome.UNKNOWN, f"⏱超过单 flow 上限 {cap/60:.0f} 分")
+                flow.finish(Outcome.UNKNOWN, f"超过单 flow 上限 {cap/60:.0f} 分")
                 return
             fr, age, seq = self.feed.wait_new(self._last_seq, timeout=3.0)
             # **帧饥饿绝不静默**（2026-08-13 实锤: 流死后 seq 不再前进,
@@ -997,12 +997,12 @@ class Runner:
             st = self.machine.update(obs)
 
             # 契约时钟**每帧走表**（gate.heartbeat 的注释里有死锁实录）。
-            #    超时退回 once 标记也在这里做 —— 原来退回只挂在 allow() 的
+            #    超时退回 once 标记也在这里做 -- 原来退回只挂在 allow() 的
             #    返回值上，flow 等待期一发动作都不派，退回就永远轮不到。
             rb = self.gate.heartbeat(obs, page_changed=st.changed,
                                      retry_frames=retry)
             if rb and flow.state.pop(f"once:{rb}", None) is not None:
-                self.log(f"    [gate] 契约没兑现 — 退回 `{rb}` 的 once 标记，"
+                self.log(f"    [gate] 契约没兑现 - 退回 `{rb}` 的 once 标记，"
                          f"允许重试")
 
             watch = self.ledger.feed(obs, st.page, flow.name)
@@ -1021,7 +1021,7 @@ class Runner:
             if fz > 120.0:
                 if not self._feed_healed:
                     self._feed_healed = True
-                    self.log(f"屏幕内容 {fz:.0f}s 没变 — 疑似流死，重建 feed 自愈…")
+                    self.log(f"屏幕内容 {fz:.0f}s 没变 - 疑似流死，重建 feed 自愈…")
                     try:
                         self.feed.stop()
                     except Exception:
@@ -1033,7 +1033,7 @@ class Runner:
                         self.log("feed 已重建，继续")
                         continue
                 self.stats.halted = (f"屏幕内容 {fz:.0f}s 没变化且 feed 自愈无效"
-                                     f" — 疑似游戏死机（需重启 MuMu/游戏）")
+                                     f" - 疑似游戏死机（需重启 MuMu/游戏）")
                 self._save(obs, tag="FROZEN")
                 return
 
@@ -1057,7 +1057,7 @@ class Runner:
                     self._shot_tick = self.stats.ticks
             # 战斗中**定期录帧**（2026-08-12 用户点名:「打的这几次加成录制
             #    下来没，可以喂给最新的战斗模型」）。
-            #    上面那句 `if st.changed` 是**页面变化**才存 —— 而战斗全程
+            #    上面那句 `if st.changed` 是**页面变化**才存 -- 而战斗全程
             #      页面身份纹丝不动  打完 4 场加成，`battle` 页只存下 4 帧
             #      （battle_result 16 / formation 8），整场战斗等于没录。
             #     battle 页按固定 tick 间隔补录。战斗帧是 battle 模型唯一的
@@ -1073,7 +1073,7 @@ class Runner:
             #  全局打断优先
             act = None
             if st.interrupt:
-                # 「下一章節」框点 中斷 还是 觀看 —— 由当前 flow 的意图决定
+                # 「下一章節」框点 中斷 还是 觀看 -- 由当前 flow 的意图决定
                 #   （剧情挖矿要连着推，别的 flow 撞上剧情就是要逃出来）。
                 self.interrupts.watch_next_chapter = bool(
                     getattr(flow, "watch_next_chapter", False))
@@ -1087,7 +1087,7 @@ class Runner:
             if st.interrupt != "loading":
                 _d = self.interrupts.note_no_loading()
                 if _d is not None:
-                    self.log(f"    ⏳ 加载中持续了 {_d:.2f}s（等待时长由 cls 决定）")
+                    self.log(f"    加载中持续了 {_d:.2f}s（等待时长由 cls 决定）")
             #  flow 决策
             if act is None:
                 act = flow.decide(obs, st)
@@ -1106,20 +1106,20 @@ class Runner:
                 if idle > stuck:
                     flow.finish(Outcome.UNKNOWN,
                                 f"在 page={st.page} 上连续 {idle} 帧没有可执行动作"
-                                f" — 判据不认识这个局面，交人看")
+                                f" - 判据不认识这个局面，交人看")
                     self._save(obs, tag="STUCK")
                     return
                 continue
 
             if act.kind == "done":
                 # **上一发还没兑现，就不许收工**。这道闸原来写在 `_dispatch`
-                #    里 —— 而这一行 return 在 `_dispatch` 调用**之前**，
+                #    里 -- 而这一行 return 在 `_dispatch` 调用**之前**，
                 #    `done` 根本走不到那儿，等于从写下起就是死码
                 #    （`_handoff` 里那句 `or act.kind == "done": continue`
                 #    也是同样绕过）。它要治的是一晚上抓到的 4 处同形 bug:
                 #      点了"开面板/弹确认框"的键，面板要几帧才出来，那几帧
                 #      handler 从头跑、命中不了任何分支，一路落到 finish(CLEAN)
-                #      —— **把自己刚打开的东西关掉，还报告"干净"**。
+                #      -- **把自己刚打开的东西关掉，还报告"干净"**。
                 #    这里必须显式调 `advance()` 而不是只看 `_pending` 非空:
                 #      `advance` 的超时计数只在**尝试发 tap** 时才涨，而这条
                 #      路径一发 tap 都不发，光等的话会一路空转到 10 分钟上限。
@@ -1129,7 +1129,7 @@ class Runner:
                     if not v.ok:
                         if flow.once(f"holddone:{act.reason[:24]}"):
                             self.log(f"    想收工（{act.reason}）但上一发的契约"
-                                     f"还没兑现 — 先等它，别在动作悬空时下结论")
+                                     f"还没兑现 - 先等它，别在动作悬空时下结论")
                         continue
                 flow.outcome = act.outcome
                 self.log(f"   {flow.name}  {act.outcome}: {act.reason}")
@@ -1138,7 +1138,7 @@ class Runner:
                 return
             if self._max_taps and self.stats.taps >= self._max_taps:
                 flow.finish(Outcome.UNKNOWN,
-                            f"tap 预算 {self._max_taps} 用完 — 门控收手，"
+                            f"tap 预算 {self._max_taps} 用完 - 门控收手，"
                             f"不是跑完了（--max-taps）")
                 self.stats.halted = f"tap 预算 {self._max_taps} 用完（门控收手）"
                 self._save(obs, tag="BUDGET")
@@ -1178,10 +1178,10 @@ class Runner:
                  f"（{_RS['ocr_calls']*100.0/_n:.1f}% of tick, "
                  f"共 {_RS['ocr_ms']/1000:.1f}s）")
         if self.interrupts.load_count:
-            self.log(f"  ⏳「加载中」{self.interrupts.load_count} 次，"
+            self.log(f"  「加载中」{self.interrupts.load_count} 次，"
                      f"共等 {self.interrupts.load_total:.1f}s，"
                      f"均 {self.interrupts.load_total/self.interrupts.load_count:.2f}s"
-                     f" —— 这是本轮**全部**的等待（其余全靠 cls 推进）")
+                     f" -- 这是本轮**全部**的等待（其余全靠 cls 推进）")
         if self.interrupts.counts:
             self.log(f"  打断: {self.interrupts.counts}")
         self.log("\n" + self.ledger.report())
