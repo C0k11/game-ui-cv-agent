@@ -3,7 +3,7 @@
 
   A. HUD 重写: 用户 shift+V 批量贴可能弄乱倍速/暂停类  删池内全部 HUD 框,
      ui v13 (imgsz960 conf0.35) 重写。**暂停菜单键(131重开/132继续/133放弃)
-     一律不写** — 用户拍板: 视频域日文按钮不进训练(实战=繁中服)。
+     一律不写** - 用户拍板: 视频域日文按钮不进训练(实战=繁中服)。
   B. 全 axis 池清日文暂停键残留 (赫赛德 131×6)。
   C. 「黑白」传播: 104/473 战斗帧覆盖=部分标注毒  全帧模板搜索(按已标段
      抽模板, 同 fix_axis_bishop_pool 方案), 分析模式看分布定阈值再 --apply。
@@ -39,9 +39,7 @@ PAUSE_KEYS = {N2I[n] for n in ("重新开始键", "继续键", "放弃键")}
 APPLY = "--apply" in sys.argv
 BW_TH = float(next((a.split("=")[1] for a in sys.argv
                     if a.startswith("--bw-th=")), 0.68))
-SCRATCH = Path(r"C:\Users\shien\AppData\Local\Temp\claude"
-               r"\D--Project-ai-game-secretary--claude-worktrees-magical-tharp-fa5d91"
-               r"\a4e15e41-e17a-4cd8-8e96-4b51142a5c5a\scratchpad")
+SCRATCH = Path(r"D:\Project\ai game secretary\scratchpad")
 
 
 def load(t):

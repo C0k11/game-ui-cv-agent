@@ -1,7 +1,7 @@
 """Build a YOLO detection dataset for the FUSED multi-class avatar detector.
 
 Detector that simultaneously (a) finds avatar bboxes and (b) identifies which
-character — like the emoticon model does for headpat bubbles, but with 250+
+character - like the emoticon model does for headpat bubbles, but with 250+
 character classes instead of 1.
 
 Two data tracks:
@@ -17,7 +17,7 @@ Two data tracks:
 Output:
   data/yolo_datasets/fused_avatar_v1/
     images/train/*.jpg   (manual 80% + synthetic)
-    images/val/*.jpg     (manual 20% — pure gold)
+    images/val/*.jpg     (manual 20% - pure gold)
     labels/{train,val}/*.txt
     data.yaml            (nc: N, names: [char1, char2, ...])
 
@@ -69,7 +69,7 @@ COSTUME_SUFFIXES = (
 # Master class layout (per 2026-05-18 trim):
 #   indices  0..142   : UI-A classes from 5/18 trim (房间区域, 弹窗叉叉, etc.)
 #   indices  143..394 : 252 character avatars (佳澄 .. 柚子战斗)
-#   indices  395..454 : UI-B — 后期为 ui/unified 训练追加的 60 个 UI 类
+#   indices  395..454 : UI-B - 后期为 ui/unified 训练追加的 60 个 UI 类
 #                       (购买青辉石 / 领取_灰 / 获得奖励 / 选择购买 /
 #                        Emoticon_Action / 学院名 三一·千年·格黑娜 / ...)
 # ️ 早期假设 "143.. 全是角色"  load_character_names 用 master[143:] 把 UI-B
@@ -88,12 +88,12 @@ PER_CLASS_CAP = 200    # cap synthetic samples per character (raised from 80  20
                        # to allow more position/scale variants per ref)
 SYNTH_PASTE_PROB = 0.70  # chance a slot gets a paste vs left empty
 USE_LARGE_REF_PROB = 0.40  # when both small & large refs are available, use
-                           # large (downsampled) this often — gives sharper
+                           # large (downsampled) this often - gives sharper
                            # synthesized faces than upsampling small refs.
 NEGATIVE_TARGET = 120  # auto-harvest this many no-avatar frames as hard negatives
 
 # Skill+sub_state combos that reliably contain ZERO character avatars.
-# These produce "explicit negative" training frames — model learns
+# These produce "explicit negative" training frames - model learns
 # stars/hearts/icons in these contexts are NOT avatar candidates.
 NEGATIVE_CONTEXTS = [
     ("Mail",          "enter"),       # mail list (icons + text, no avatars)
@@ -183,7 +183,7 @@ def _make_trad_to_simp():
         return cc.convert
     except Exception:
         pass
-    # Minimal fallback table — only covers chars commonly used in BA names
+    # Minimal fallback table - only covers chars commonly used in BA names
     table = str.maketrans(
         "亞愛陽麗靈葉節氣練結經顧讀東車馬見電華壽歲齋靜聲務態戰錢點舊親"
         "離禮選讓雙邊團綠紅藍黃歡樂畫麼個兒後業髮豐夢鬧願鳥魚鶴鸚鵡鳳"
@@ -207,8 +207,8 @@ def build_cn_to_en_lookup() -> Dict[str, str]:
 
     Combines THREE sources, with 繁简 normalization so master 简体 labels
     can match harvest_name_map's 繁体 keys:
-      1. student_name_map.json — 261 variant entries
-      2. harvest_name_map.json:renamed — 205 entries (mostly 繁体)
+      1. student_name_map.json - 261 variant entries
+      2. harvest_name_map.json:renamed - 205 entries (mostly 繁体)
       3. For each entry, generate variants:
          a. paren-removed (both ASCII () and fullwidth （） handled)
          b. simplified-Chinese form (亞伽里  亚伽里)
@@ -244,8 +244,8 @@ def build_cn_to_en_lookup() -> Dict[str, str]:
         except Exception:
             pass
 
-    # Manual extension map (covers BA chars missing from the auto-built maps —
-    # 亚留, 爱丽丝, 紫, 千秋, 律, 律 etc. — built by hand from EN file inventory)
+    # Manual extension map (covers BA chars missing from the auto-built maps -
+    # 亚留, 爱丽丝, 紫, 千秋, 律, 律 etc. - built by hand from EN file inventory)
     if EXTENSION_NAME_MAP_JSON.exists():
         try:
             ingest(json.loads(EXTENSION_NAME_MAP_JSON.read_text(encoding="utf-8")))
@@ -256,14 +256,14 @@ def build_cn_to_en_lookup() -> Dict[str, str]:
 
 
 def load_refs_multi_source(fused_names: List[str]) -> Dict[str, Dict[str, np.ndarray]]:
-    """Load 2 ref images per character (small + large) — EN-named Yostar refs only.
+    """Load 2 ref images per character (small + large) - EN-named Yostar refs only.
 
     Sources (all clean official artwork, no game-screen harvested noise):
-      * BIG_REF_DIR/<EN>.png  (404×456) — primary, sharp downsample-friendly
-      * CROP_DIR/<EN>.png     (54×59)   — small variant, native game-icon size
+      * BIG_REF_DIR/<EN>.png  (404×456) - primary, sharp downsample-friendly
+      * CROP_DIR/<EN>.png     (54×59)   - small variant, native game-icon size
 
     CN-named harvested refs (角色头像_crop_harvested_named/) are deliberately
-    NOT used — they contain UI clutter (heart, star, lv text residue) and
+    NOT used - they contain UI clutter (heart, star, lv text residue) and
     compression noise from being cut from real game screenshots.
 
     For each master CN char (一花泳装), name conversion tries 3 forms:
@@ -329,7 +329,7 @@ def load_character_names() -> List[str]:
       indices  143..   : user-added character classes (CN names like 若藻)
 
     UI never grows, characters grow as user labels.  This sidesteps the
-    EN-vs-CN naming mismatch — user labels in CN, we just use what's there.
+    EN-vs-CN naming mismatch - user labels in CN, we just use what's there.
     """
     master = load_master()
     if len(master) <= MASTER_UI_BOUNDARY:
@@ -381,7 +381,7 @@ def extract_val_pool_samples(
 ) -> List[Tuple[Path, List[str]]]:
     """Read DEDICATED val frames from data/raw_images/_val_fused/frames/.
 
-    These are held-out frames the user labeled specifically for validation —
+    These are held-out frames the user labeled specifically for validation -
     100% go to val, never to train.  The `_` prefix tells extract_manual_samples
     to skip this dir, while the `/frames/` subdir matches the dashboard's
     layout convention so the user can label it like any other dataset.
@@ -465,7 +465,7 @@ def find_negative_frames(limit: int) -> List[Path]:
 
 
 def find_schedule_popup_bg_frames(limit: int) -> List[Path]:
-    """Trajectory frames where schedule popup is open — used as backgrounds."""
+    """Trajectory frames where schedule popup is open - used as backgrounds."""
     ROOM_NAMES = ("視聽室", "體育館", "圖書館", "教室", "實驗室", "射擊場", "載具庫")
     out: List[Path] = []
     if not TRAJECTORIES.is_dir():
@@ -500,10 +500,10 @@ def find_schedule_popup_bg_frames(limit: int) -> List[Path]:
 
 
 def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
-    """Adversarial augmentation (Gemini Path B): overlay random UI elements.
+    """Adversarial augmentation: overlay random UI elements.
 
     Trains the classifier to IGNORE Lv text / star / weapon icon / heart icon
-    / alpha-dim overlay — visual noise that appears in real game contexts
+    / alpha-dim overlay - visual noise that appears in real game contexts
     (cafe / schedule / student list / arena squad) but is NOT part of the
     character identity.  Without this, model overfits to "MomoTalk blue
     frame" or similar context-specific scaffolding.
@@ -515,7 +515,7 @@ def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
     h, w = ref_img.shape[:2]
     out = ref_img.copy()
 
-    # 50% — Lv text bottom-left or top-left  (real games show Lv1..Lv90 or MAX)
+    # 50% - Lv text bottom-left or top-left  (real games show Lv1..Lv90 or MAX)
     if random.random() < 0.50:
         lv = random.randint(1, 90)
         text = f"Lv.{lv}" if random.random() < 0.75 else "MAX"
@@ -528,7 +528,7 @@ def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
         cv2.putText(out, text, (x, y), cv2.FONT_HERSHEY_DUPLEX,
                     font_scale, (255, 255, 255), 1)
 
-    # 35% — Star (top-left)
+    # 35% - Star (top-left)
     if random.random() < 0.35:
         cx = max(6, min(w - 6, random.randint(5, 12)))
         cy = max(6, min(h - 6, random.randint(5, 12)))
@@ -536,7 +536,7 @@ def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
         cv2.circle(out, (cx, cy), r, (0, 220, 255), -1)  # yellow disc (simulated star)
         cv2.circle(out, (cx, cy), r, (0, 80, 120), 1)    # outline
 
-    # 40% — Weapon-class icon (bottom-right corner)
+    # 40% - Weapon-class icon (bottom-right corner)
     if random.random() < 0.40:
         size = max(8, w // 6)
         color = random.choice([
@@ -550,7 +550,7 @@ def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
         y1 = max(0, h - size - 1)
         cv2.rectangle(out, (x1, y1), (w - 1, h - 1), color, -1)
 
-    # 25% — Heart with number (bottom-right area, common in schedule popup)
+    # 25% - Heart with number (bottom-right area, common in schedule popup)
     if random.random() < 0.25:
         # Pink heart blob
         size = max(4, w // 14)
@@ -563,7 +563,7 @@ def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
                     cv2.FONT_HERSHEY_DUPLEX, max(0.25, w / 220.0),
                     (255, 255, 255), 1)
 
-    # 25% — Alpha-dim (simulates "not selected" or "cooling down" state)
+    # 25% - Alpha-dim (simulates "not selected" or "cooling down" state)
     if random.random() < 0.25:
         alpha = random.uniform(0.55, 0.85)
         out = np.clip(out.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
@@ -572,7 +572,7 @@ def apply_ui_overlay_aug(ref_img: np.ndarray) -> np.ndarray:
 
 
 def apply_border_ablation(ref_img: np.ndarray) -> np.ndarray:
-    """Random border crop/cover — forces classifier to use AVATAR pixels,
+    """Random border crop/cover - forces classifier to use AVATAR pixels,
     not the UI-frame style (MomoTalk's blue ring, schedule's pink ring etc.)
     that becomes a 'cheat code' if model relies on it.
     """
@@ -687,7 +687,7 @@ def build_cross_context_synth(
     bbox in a manual frame, with 55% probability REPLACE the avatar with a
     fresh random ref (with UI overlay + border ablation augmentation applied).
     The rest of the frame UI scaffolding stays intact (MomoTalk blue ring,
-    student list card chrome, battle squad bar, etc.) — this teaches the
+    student list card chrome, battle squad bar, etc.) - this teaches the
     model that character ID is *independent* of UI context.
 
     Per-class cap shared with the schedule-popup synth via class_counts
@@ -941,7 +941,7 @@ def build_template_driven_synth(
                     ref = ref[ry1:ry2, rx1:rx2]
 
                 # NOTE: aug (UI overlay + border ablation) applied AFTER resize
-                # below — at slot pixel resolution so effects are visible at
+                # below - at slot pixel resolution so effects are visible at
                 # the scale model actually sees during inference.
 
                 #  Compute slot AABB (rect: x1..x2; quad: polygon AABB)
@@ -1196,7 +1196,7 @@ def build_synthetic_samples(
     """Generate synthetic composites.  Returns list of (img, yolo_lines, tag).
 
     If ref_bundle is provided, each paste draws between bundle["small"] and
-    bundle["large"] according to USE_LARGE_REF_PROB — large refs give sharper
+    bundle["large"] according to USE_LARGE_REF_PROB - large refs give sharper
     downsampled faces with less aliasing than 54×59 upscaled.
     """
     from ultralytics import YOLO
@@ -1272,7 +1272,7 @@ def build_synthetic_samples(
                 if char_name is None:
                     # All chars at cap, skip
                     continue
-                # Pick small or large ref per paste — large gives sharper
+                # Pick small or large ref per paste - large gives sharper
                 # downsample at slot size ~60×60, small is original.
                 if ref_bundle and char_name in ref_bundle:
                     bundle = ref_bundle[char_name]
@@ -1285,7 +1285,7 @@ def build_synthetic_samples(
                 else:
                     ref = refs[char_name]
 
-                #  Gemini Path B: adversarial augmentation
+                #  adversarial augmentation
                 # Apply UI overlay (Lv text / star / weapon / heart / dim)
                 # + border ablation BEFORE paste, so model sees realistic
                 # noise on top of the ref.
@@ -1348,10 +1348,10 @@ def main() -> int:
 
     char_names = load_character_names()
     if not char_names:
-        print(f"[err] master[{MASTER_UI_BOUNDARY}:] empty — user hasn't added "
+        print(f"[err] master[{MASTER_UI_BOUNDARY}:] empty - user hasn't added "
               f"any character classes yet (master len={len(master)})")
         return 1
-    print(f"[init] master has {len(master)} classes total — "
+    print(f"[init] master has {len(master)} classes total - "
           f"{MASTER_UI_BOUNDARY} UI + {len(char_names)} characters")
 
     # All characters from master are already 'in master' by construction.
@@ -1374,7 +1374,7 @@ def main() -> int:
               f"( val, 100% held out from train)")
     else:
         print(f"[val_pool] none found at _val_fused/frames/ "
-              f"— falling back to stratified split from train")
+              f"- falling back to stratified split from train")
 
     #  2. Synthetic samples
     synth_samples_data: List[Tuple[np.ndarray, List[str], str]] = []
@@ -1614,7 +1614,7 @@ def main() -> int:
         safe = name.replace("'", "\\'")
         yaml_lines.append(f"  {i}: '{safe}'")
     (OUT_ROOT / "data.yaml").write_text("\n".join(yaml_lines) + "\n", encoding="utf-8")
-    print(f"[yaml] data.yaml — {len(fused_names)} classes")
+    print(f"[yaml] data.yaml - {len(fused_names)} classes")
     print()
     print(f"[done] dataset  {OUT_ROOT}")
     print("Next: py scripts/train_yolo26.py fused_avatar_26m")

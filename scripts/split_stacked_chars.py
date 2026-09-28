@@ -26,9 +26,7 @@ from vision.io_utils import imread_any  # noqa: E402
 RAW = Path(r"D:\Project\ai game secretary\data\raw_images")
 MY = 476
 _BAK = None
-SCRATCH = Path(r"C:\Users\shien\AppData\Local\Temp\claude"
-               r"\D--Project-ai-game-secretary--claude-worktrees-magical-tharp-fa5d91"
-               r"\a4e15e41-e17a-4cd8-8e96-4b51142a5c5a\scratchpad")
+SCRATCH = Path(r"D:\Project\ai game secretary\scratchpad")
 
 
 def find_hp_bars(img, x1, y1, x2, y2, min_w=None):
@@ -102,7 +100,7 @@ def find_orphan_bars(img, boxes_px):
         cx = (bx1 + bx2) / 2
         covered = False
         for (_c, x1, y1, x2, y2) in boxes_px:
-            # 血条应落在某框的上半段 — 落在任何框内都算已覆盖(宽松)
+            # 血条应落在某框的上半段 - 落在任何框内都算已覆盖(宽松)
             if x1 - 8 <= cx <= x2 + 8 and y1 - 12 <= cy <= y2:
                 covered = True
                 break
@@ -178,7 +176,7 @@ def main():
                                          int((cx - w / 2) * W), int((cy - h / 2) * H),
                                          int((cx + w / 2) * W), int((cy + h / 2) * H)))
                     # 铁闸: 无任何身份框的帧不补(结算页 UI 绿条/场景绿灯
-                    # 假阳性全出自非战斗帧 — 目检 12 例实锤)
+                    # 假阳性全出自非战斗帧 - 目检 12 例实锤)
                     orphans = find_orphan_bars(img, boxes_px) if boxes_px else []
                     for (bx1, by1, bx2, by2) in orphans:
                         bw_px = bx2 - bx1
