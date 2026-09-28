@@ -73,15 +73,33 @@ class ClubFlow(ExitMixin, Flow):
         # `社团` cls 标的是社交浮层那张卡, 不是内部. 卡还在 = 没进门.
         return obs.find(V.CLUB, 0.45) is not None
 
+    def on_ack_dialog(self, obs, st):
+        # 09-07 小号实测: 社團卡带锁, 点卡只弹「通知: 必須完成任務3-4Normal才能解除鎖定」
+        #    (確認+叉叉). 基类点 確認 回浮层, 卡还在, once 键又被翻新 -> 点卡/確認
+        #    无限循环(一轮 40 次)。记下"点卡之后弹过通知", 回到浮层就收工。
+        if self.state.get("card_taps"):
+            self.state["card_notice"] = True
+        return super().on_ack_dialog(obs, st)
+
     def on_club(self, obs, st):
         # 08-16 remain: 点卡 counter=entered 后 0.39s(_inside hold 12) 当内部
         #    CLEAN, 真内部加载出来已被 handoff 点返回. 浮层绝不能当内部.
         if self._overlay(obs):
+            card = obs.find(V.CLUB, 0.45)
+            lock = obs.find(V.ROOM_LOCKED, 0.40)
+            if (card is not None and lock is not None
+                    and abs(lock.cx - card.cx) < 0.15 and abs(lock.cy - card.cy) < 0.20):
+                return self.finish(Outcome.SKIPPED, "社團卡上有锁(本账号未解锁), 跳过")
+            n = int(self.state.get("card_taps", 0) or 0)
+            if self.state.get("card_notice") or n >= 2:
+                return self.finish(
+                    Outcome.SKIPPED,
+                    f"社團卡点了 {n} 次仍在社交浮层(点卡只弹通知框: 未解锁/未加入), 跳过")
             if not self.pending("enter_card"):
                 return wait("已点社团卡，等浮层收起（浮层不算内部）")
-            card = obs.find(V.CLUB, 0.45)
             return tap_box(card, "点「社團」卡进入社团",
-                           once="enter_card", expect_gone=(V.CLUB,))
+                           once="enter_card", expect_gone=(V.CLUB,),
+                           post=lambda: self.state.update(card_taps=n + 1))
         if self.hold("no_card", 45) and self.pending("enter_card"):
             return self.finish(Outcome.UNKNOWN, "社交浮层上没检出「社團」卡")
         self.state["inside"] = True

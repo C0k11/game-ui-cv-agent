@@ -4481,11 +4481,12 @@ def t_v20_wiring():
     form = O(B(V.SORTIE, cx=0.85, cy=0.90), B(V.SQUAD_1_HI, cx=0.15, cy=0.30),
              B(V.SQUAD_2, cx=0.15, cy=0.40), B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
     a = cp3.do_grid(form, Machine(1).update(form))
-    check("套預設前先切部队2", a is not None and a.target_cls == V.SQUAD_2, str(a))
+    check("09-08 口径: 1部队高亮也不切部队, 直接开預設面板",
+          a is not None and a.target_cls == V.PRESET_ENTRY and a.once_key == "pr_open", str(a))
     form2 = O(B(V.SORTIE, cx=0.85, cy=0.90), B(V.SQUAD_1, cx=0.15, cy=0.30),
               B(V.SQUAD_2_HI, cx=0.15, cy=0.40), B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
     a = cp3.do_grid(form2, Machine(1).update(form2))
-    check("部队2高亮后开預設面板",
+    check("面板没开前每帧都去点入口(pending 语义), 不碰部队页签",
           a is not None and a.target_cls == V.PRESET_ENTRY and a.once_key == "pr_open", str(a))
     cp3.state["once:pr_open"] = True
     pan = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
@@ -4509,7 +4510,7 @@ def t_v20_wiring():
     cp3.state["once:pr_close"] = True
     a = cp3.do_grid(form2, Machine(1).update(form2))
     check("面板关了 -> 出击(套预设只做一次)", a is not None and a.target_cls == V.SORTIE, str(a))
-    # 空预设行(組成灰) -> BLOCKED 不点; team=1 -> 拒绝
+    # 空预设行(組成灰) -> BLOCKED 不点; team 键已废(09-08), team=1 也照套到当前部队
     # 7b 页签几何兜底: 只检出选中的页签1(v20 live 538 未选中态 0 检出), 要页签 2
     #    -> 按面板版式在第 2 槽落点(tap_at, 锚 预设标题); 选中态由帧像素判(深底 = 选中)
     c3b = cfg()
@@ -4562,12 +4563,114 @@ def t_v20_wiring():
     cp5 = ALL["campaign"](Ctx(cfg=c5, log=lambda m: None))
     cp5.goto("grid")
     a = cp5.do_grid(form, Machine(1).update(form))
-    check("preset_apply 指向部队1 -> 拒绝", cp5.outcome == "BLOCKED", str(a))
+    check("team 键忽略: team=1 也直接给当前部队开預設面板",
+          cp5.outcome is None and a is not None and a.target_cls == V.PRESET_ENTRY, str(a))
     # 没配置 -> 编队页照旧直接出击
     cp6 = ALL["campaign"](Ctx(cfg=cfg(), log=lambda m: None))
     cp6.goto("grid")
     a = cp6.do_grid(form, Machine(1).update(form))
     check("没配 preset_apply -> 编队页直接出击", a is not None and a.target_cls == V.SORTIE, str(a))
+
+
+def t_event_form_0908():
+    """09-08 用户口径: 活动首通给当前部队套預設, 加成给当前部队自动配队, 都不切 1-4 部队页签。"""
+    print("\n 09-08 活动编队: 首通套預設 / 加成自动配队, 不切部队 ")
+    import time as _time
+    import routing_v2.flow.battle as _BT
+    _orig_ready = _BT.formation_ready
+    _BT.formation_ready = lambda obs: True          # 六槽证明打桩, 这里测的是编队口径
+    try:
+        c = cfg()
+        c["event"]["clear_preset"] = {"tab": 2, "row": 1}
+        ev = ALL["event"](Ctx(cfg=c, log=lambda m: None))
+        ev.setup()
+        m = Machine(1)
+        form = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1, cx=0.053, cy=0.261),
+                 B(V.SQUAD_3_HI, cx=0.052, cy=0.480), B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
+        a = ev.decide(form, m.update(form))
+        check("首通: 3部队高亮也不切部队, 直接开預設面板",
+              a is not None and a.target_cls == V.PRESET_ENTRY and a.once_key == "pr_open", str(a))
+        ev.state["once:pr_open"] = True
+        pan = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB_SEL, cx=0.0955, cy=0.226),
+                B(V.PRESET_TAB, cx=0.2197, cy=0.226),
+                B(V.PRESET_APPLY, cx=0.8965, cy=0.40), B(V.PRESET_APPLY, cx=0.8965, cy=0.50),
+                B(V.SORTIE, cx=0.85, cy=0.95))
+        a = ev.decide(pan, m.update(pan))
+        check("預設面板: 页签1选中 -> 切到页签2(栏目2)",
+              a is not None and a.target_cls == V.PRESET_TAB and abs(a.x - 0.2197) < 0.01
+              and a.once_key == "pr_tab", str(a))
+        ev.state["once:pr_tab"] = True
+        ev.state["pr_tab_t"] = _time.time() - 10           # 行区停稳等待已过
+        pan2 = O(B(V.PRESET_TITLE, cx=0.5, cy=0.135), B(V.PRESET_TAB, cx=0.0955, cy=0.226),
+                 B(V.PRESET_TAB_SEL, cx=0.2197, cy=0.226),
+                 B(V.PRESET_APPLY, cx=0.8965, cy=0.40), B(V.PRESET_APPLY, cx=0.8965, cy=0.50),
+                 B(V.SORTIE, cx=0.85, cy=0.95))
+        a = ev.decide(pan2, m.update(pan2))
+        check("页签2选中 -> 点第1行 組成",
+              a is not None and a.target_cls == V.PRESET_APPLY and abs(a.y - 0.40) < 0.01
+              and a.once_key == "pr_apply", str(a))
+        ev.state["once:pr_apply"] = True
+        a.post()
+        dlg = O(B(V.PRESET_CHANGE_TITLE, cx=0.50, cy=0.135), B(V.CONFIRM, cx=0.594, cy=0.799),
+                B(V.CANCEL, cx=0.405, cy=0.802), B(V.CLOSE_X, cx=0.733, cy=0.134))
+        a = ev.decide(dlg, m.update(dlg))
+        check("變更編輯框 -> 確認(子链请求过)",
+              a is not None and a.target_cls == V.CONFIRM and a.once_key == "pr_confirm", str(a))
+        ev.state["once:pr_confirm"] = True
+        a.post()
+        pan_x = O(*pan2.boxes, B(V.CLOSE_X, cx=0.733, cy=0.134))
+        a = ev.decide(pan_x, m.update(pan_x))
+        check("套用后面板还开着 -> 叉掉", a is not None and a.target_cls == V.CLOSE_X, str(a))
+        ev.state["once:pr_close"] = True
+        a = ev.decide(form, m.update(form))
+        check("面板关了 -> 先重验六槽(wait), 不碰部队页签",
+              a is not None and a.kind == "wait" and ev.state.get("fm_preset_done") is True, str(a))
+        a = ev.decide(form, m.update(form))
+        check("首通出击: 就在当前(3)部队上, 没切过部队",
+              a is not None and a.target_cls == V.SORTIE and "部队1" not in a.reason, str(a))
+        a.post()
+        a = ev.decide(form, Machine(1).update(form))
+        check("下一关编队页: 預設一轮只套一次, 直接出击",
+              a is not None and a.target_cls == V.SORTIE, str(a))
+
+        evb = ALL["event"](Ctx(cfg=c, log=lambda m: None))
+        evb.setup()
+        evb.state["phase"] = "bonus_clear"
+        mb = Machine(1)
+        formb = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261),
+                  B(V.SQUAD_2, cx=0.051, cy=0.370), B(V.SQUAD_QUICK_EDIT, cx=0.80, cy=0.86))
+        a = evb.decide(formb, mb.update(formb))
+        check("加成: 1部队高亮不切部队2, 直接 快速編輯 自动配队",
+              a is not None and a.target_cls == V.SQUAD_QUICK_EDIT and a.once_key == "af_edit", str(a))
+        for k in ("af_edit", "af_auto", "af_ins", "af_confirm"):
+            evb.state["once:" + k] = True
+        a = evb.decide(formb, mb.update(formb))
+        check("加成: 自动编队链走完 -> 当前部队出击, 不套預設",
+              a is not None and a.target_cls == V.SORTIE and not evb.state.get("preset_want"), str(a))
+        evb2 = ALL["event"](Ctx(cfg=c, log=lambda m: None))
+        evb2.setup()
+        evb2.state["phase"] = "bonus_clear"
+        mb2 = Machine(1)
+        formb2 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_1_HI, cx=0.053, cy=0.261))
+        a = evb2.decide(formb2, mb2.update(formb2))
+        check("加成: 出击键在而 快速編輯 没检出 -> 先等(漏检), 不盲出击",
+              a is not None and a.kind == "wait", str(a))
+
+        ev0 = ALL["event"](Ctx(cfg=cfg(), log=lambda m: None))
+        ev0.setup()
+        form0 = O(B(V.SORTIE, cx=0.92, cy=0.913), B(V.SQUAD_2_HI, cx=0.051, cy=0.370),
+                  B(V.PRESET_ENTRY, cx=0.934, cy=0.667))
+        a = ev0.decide(form0, Machine(1).update(form0))
+        check("没配 clear_preset: 2部队高亮也原样出击, 不切回部队1, 不开預設",
+              a is not None and a.target_cls == V.SORTIE, str(a))
+        cbad = cfg()
+        cbad["event"]["clear_preset"] = {"tab": 9, "row": 1}
+        evx = ALL["event"](Ctx(cfg=cbad, log=lambda m: None))
+        evx.setup()
+        a = evx.decide(form, Machine(1).update(form))
+        check("clear_preset 越界 -> BLOCKED, 不瞎套", evx.outcome == "BLOCKED", str(a))
+    finally:
+        _BT.formation_ready = _orig_ready
 
 
 def t_grid_multi_0905():
@@ -5197,6 +5300,7 @@ if __name__ == "__main__":
     t_schedule_locked_card_0821()
     t_v20_wiring()
     t_grid_multi_0905()
+    t_event_form_0908()
     print("\n" + "" * 52)
     if FAILS:
         print(f" {len(FAILS)} 项没过:")

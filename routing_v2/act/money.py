@@ -73,6 +73,25 @@ _INCOME_WEAK = [V.CLAIM_REWARD_YELLOW, V.CLAIM_YELLOW, V.CLAIM_BLUE,
 _INCOME_MARKERS = _INCOME_STRONG + _INCOME_WEAK
 
 
+# 真按钮的宽度(金标 09-07 中位数: 確認 0.0467 / 取消 0.0465 / 叉叉 0.0202)。
+#    09-07 小号实测: 悬赏页首访弹「幫助」面板, 里面是一张**购票框的示意图**
+#    (取消/確認/步进器/青辉石 一应俱全但缩了 0.55 倍), 结构判据全中 -> HALT 停整轮,
+#    下一条 flow 起手又撞同一帧再 HALT。示意图里的控件比真控件小一半:
+#    宽度不到额定 72% 的 確認/取消/叉叉 不当成交框的控件。只放宽尺寸这一条,
+#    结构判据本身不动。
+_CONTROL_W = {"确认键": 0.0467, "取消键": 0.0465, "弹窗叉叉": 0.0202}
+
+
+def _real_control(b):
+    if b is None:
+        return None
+    nominal = _CONTROL_W.get(b.cls)
+    if nominal and b.w < 0.72 * nominal:
+        return None
+    return b
+
+
+
 def income_context(obs: Observation, strong_only: bool = False) -> Optional[str]:
     """屏幕正在**给**你东西（奖励页/结算页/领取页）。此时的青辉石是收入。
 
@@ -139,7 +158,7 @@ def purchase_context(obs: Observation) -> Optional[str]:
         #    （按返回那件事本身已经在 nav/base 里禁掉了，这里是第二道。）
         if obs.count(V.LOBBY_NAV, 0.35) >= 3:
             return None
-        chrome = obs.find(_DIALOG_CHROME, CONF)
+        chrome = _real_control(obs.find(_DIALOG_CHROME, CONF))
         if chrome is not None:
             # 对话框控件和「購買青輝石」得**属于同一个框**才算购买流程。
             #    2026-08-13 小号实测的误报: 制造锁着 -> 点入口弹一个单键框
@@ -164,8 +183,8 @@ def purchase_context(obs: Observation) -> Optional[str]:
     #    扫荡确认框（"要使用340AP掃蕩17次嗎"）是**纯文字**、无步进器，不会误拦；
     #      关卡面板的步进器不在双键框里（面板没有取消键），靠 band 排掉。
     #    误拦的代价只是停下来交人审；漏拦的代价是花青辉石 —— 不对称，宁可误拦。
-    cf = obs.find(V.CONFIRM, CONF)
-    cc = obs.find(V.CANCEL, CONF)
+    cf = _real_control(obs.find(V.CONFIRM, CONF))
+    cc = _real_control(obs.find(V.CANCEL, CONF))
     if cf is not None and cc is not None and inc_s is None:
         band = (0.0, max(0.0, cf.cy - 0.35), 1.0, max(0.0, cf.cy - 0.02))
         step = obs.find([V.QTY_MAX, V.QTY_MAX_GREY, V.QTY_MIN, V.QTY_MIN_GREY,

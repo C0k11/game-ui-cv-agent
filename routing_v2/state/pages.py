@@ -169,7 +169,7 @@ INTERRUPTS: List[Sig] = [
 #   `活动商店` 掉到 0.10 过一次，得星和页签照样在，否定锚兜住了）。
 _GUIDE_HUB_NOT_TABS = [V.EVENT_QUEST, V.EVENT_QUEST_SEL,
                        V.EVENT_STORY, V.EVENT_STORY_SEL,
-                       V.EVENT_TASK, V.EVENT_REWARD_INFO, V.EVENT_AFTERSTORY]
+                       V.EVENT_TASK, V.EVENT_REWARD_INFO]
 _GUIDE_HUB_NOT_STARS = [V.STAR_0, V.STAR_3]
 # 悬赏 / JFD / 大赛的关卡列表也有一排入场键 —— 票券 cls 在场就不是活动页
 _GUIDE_HUB_NOT_TICKETS = [V.TICKET_BOUNTY, V.TICKET_JFD, V.TICKET_ARENA]

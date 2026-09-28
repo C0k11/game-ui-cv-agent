@@ -46,7 +46,8 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
 
     def setup(self) -> None:
         self.state.update(nodes=0, src_i=0, ap0=None, scrolls=0, map_scrolls=0,
-                          fac_swipes=0, rot=0)
+                          fac_swipes=0, rot=0, advis=0, flips=0, hub_flip=False,
+                          card_tapped=False)
         self.want_team = 1
         # 「下一章節」框点 觀看 还是 中斷 —— 这条 flow 是来看剧情的，
         #   要连着推。**这个意图属于本 flow，不能写进全局 ctx.bag**:
@@ -101,6 +102,27 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
                 return wait(f"{srcs[i]} 的 cls 没检出  换下一类")
             return wait(f"等 {srcs[i]} 的 cls")
 
+        # 前卡那部刚被「說明」框挡回来(见 on_ack_dialog): 这部有前置没看,
+        #    点它只会再弹同一个框。翻到另一部去; 翻不动/翻过头就换下一类。
+        if self.state.get("hub_flip"):
+            n = int(self.state.get("flips", 0) or 0)
+            if not backs or n >= _MAX_STACK_ROT or int(self.state.get("advis", 0) or 0) > 2:
+                self.state["hub_flip"] = False
+                self.state["src_i"] += 1
+                self.state["rot"] = 0
+                return wait(f"{srcs[i]}: 前卡那部有前置未看, 后卡 {len(backs)} 张/"
+                            f"已翻 {n} 次  换下一类")
+            key = f"flip{i}_{n}"
+            if self.pending(key):
+                def _flipped():
+                    self.state["hub_flip"] = False
+                    self.state["flips"] = n + 1
+
+                return tap_box(backs[0],
+                               f"{srcs[i]}: 前卡那部被說明框挡回, 点后卡翻到另一部",
+                               once=key, post=_flipped)
+            return wait("等卡片翻面(說明框之后)")
+
         # 带黄点(=还有没看的)那一部要是压在后面, 先把它翻到最前面。
         #    点后卡不进页, 所以这一步不会误入别的部。
         dot = nav.story_stack_dot(obs, front)
@@ -127,7 +149,10 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         #    把监控日志灌爆) -- 决策没变就别复读
         if self.once(f"src_log{i}"):
             self.log(f"进 [{i+1}/{len(srcs)}] {srcs[i]}")
-        return tap_box(front, f"进 {srcs[i]}(前卡)", dy=_STORY_CARD_DY)
+        # 记下「刚点了前卡」: 接着弹出的单键框就是那部的「說明」框(见 on_ack_dialog);
+        #    进到章节图/节点图就清掉。
+        return tap_box(front, f"进 {srcs[i]}(前卡)", dy=_STORY_CARD_DY,
+                       post=lambda: self.state.update(card_tapped=True))
 
     #  大章节图  小章节（用户 2026-08-11 口述的路由规则）
     def on_story_chapter_map(self, obs, st):
@@ -143,6 +168,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         黄点只当**定位锚**，落点是"同一行往右一个行宽"——行本身没有 cls。
            这是本域唯一允许的"从锚点推落点"，因为锚和目标在同一个控件上。
         """
+        self.state["card_tapped"] = False
         # 右侧面板已经有黄点  大章节已选好，直接进小章节
         dots = [b for b in obs.all(V.DOT_YELLOW, 0.40)
                 if b.cx > 0.55 and 0.15 < b.cy < 0.90]
@@ -213,6 +239,7 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     #  节点图：挖未完成的
     def on_story_nodes(self, obs, st):
         self.once_reset("bigchap", "subchap")   # 进到节点图就重置上一层的一次性闸
+        self.state["card_tapped"] = False
         # AP 记账（**不是闸**）
         # 2026-08-11 用户纠正：「**剧情是不耗体力的**」。
         #    原来这里有一道 `ap < 10 就收工`，会把一个**免费**活动直接停掉 ——
@@ -320,6 +347,55 @@ class StoryMiningFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
     def on_confirm_dialog(self, obs, st):
         cf = obs.find(V.CONFIRM, 0.45)
         return tap_box(cf, "确认") if cf is not None else wait("等確認键")
+
+    def _formation_guard(self, obs, subject):
+        """剧情战的编队页是游戏钦定的**固定队**: 标题「部隊出擊」, 左侧只有 1部隊
+        一个药丸, 没有 2/3/4 部队页签, SPECIAL 第二格可以就是空的
+        (小号 09-06 第1部第1章实测: 4 STRIKER + 1 SPECIAL + EMPTY, 六槽证明永远
+        不成立, 通用闸 40 tick + 5s 后 BLOCKED 收工, 一个节点都挖不到)。
+        六槽证明是给**用户可编辑**的部队防空队出击用的; 固定队由游戏配好, 不适用。
+        屏上有其它部队页签 = 普通编队页, 仍走通用闸。
+        """
+        if not obs.has([V.SQUAD_2, V.SQUAD_3, V.SQUAD_4,
+                        V.SQUAD_2_HI, V.SQUAD_3_HI, V.SQUAD_4_HI], 0.45):
+            self._reset_formation_guard()
+            return None
+        return super()._formation_guard(obs, subject)
+
+    def on_ack_dialog(self, obs, st):
+        """剧情 hub 上弹的单键框 = 「說明: 進入第2部之前, 建議先觀賞以下劇情」。
+
+        小号 09-06 实测: 第1部没看完时点前卡的第2部, 弹这个框(進入第2部 + 確認,
+           只有 確認 有 cls), pages 判成 ack_dialog, 基类默认点 確認 回 hub,
+           hub 再点同一张前卡  死循环。
+        这里点 確認 后给 hub 挂 `hub_flip`: 下一帧点后卡把另一部翻到前面再进。
+           `進入第2部` 那个键没 cls 支撑, 而且强行进第2部也不是挖矿的目的
+           (前置那部本来就还有没看的节点)。
+        """
+        # 这框在 pages 里底页判成 battle_result(小号 09-06 step 实测), 不能靠
+        #    page/last_solid 认 hub。三条证据任一: 刚点过前卡(意图) / 底页确实是
+        #    hub / 压暗的 hub 上卡顶那排黄点还在(cy<0.25, 实测 3 个 0.93+)。
+        hub_dots = [b for b in obs.all(V.DOT_YELLOW, 0.40) if b.cy < 0.25 and b.cx > 0.30]
+        base = (self.state.get("card_tapped")
+                or getattr(st, "page", "") == "story_hub"
+                or getattr(st, "last_solid", "") == "story_hub"
+                or len(hub_dots) >= 2)
+        if not base:
+            return super().on_ack_dialog(obs, st)
+        cf = obs.find(V.CONFIRM, 0.45)
+        if cf is None:
+            return wait("hub 說明框: 等確認键")
+        n = int(self.state.get("advis", 0) or 0)
+        key = f"advis{n}"
+        if self.pending(key):
+            def _acked():
+                self.state["advis"] = n + 1
+                self.state["hub_flip"] = True
+                self.state["card_tapped"] = False
+
+            return tap_box(cf, "hub 說明框(前卡那部有前置未看): 確認回 hub, 再翻另一部",
+                           once=key, post=_acked)
+        return wait("hub 說明框: 已点確認, 等回 hub")
 
     def _wrap(self, why):
         ap_used = ""

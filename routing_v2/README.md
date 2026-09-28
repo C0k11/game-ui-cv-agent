@@ -299,8 +299,8 @@ while running:
 ### 3.5 活动
 ```jsonc
 "event": {
-  "clear_first_with_team": 1,      // *首通用部队1(用户规则)
-  "bonus_team": 2,                 // *加成队 = 部队2
+  "clear_preset": null,            // *首通给当前部队套推关队預設 {"tab":2,"row":1}; null = 原样出击
+                                   //  09-08 口径: 不切 1-4 部队; 加成 = 当前部队 快速編輯->自動->確認
   "order": "clear_then_bonus",     // *先 Q1->Qn 通关, 再打加成(用户规则)
   "shop_plan_before_bonus": true,  // *先商店推算定缺哪种币, 再按币种编队
   "farm_stages": {"10":1, "11":2},

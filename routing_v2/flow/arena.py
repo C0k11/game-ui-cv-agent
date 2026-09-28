@@ -42,6 +42,7 @@ _ARENA_DOT_REGION = (0.62, 0.74, 0.79, 0.92)
 
 
 class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
+    allow_empty_autoform = False      # 用户 08-10: 战术大赛不许自动编队, 空队也不许
     name = "arena"
     module = "arena"
     entry_page = "task_hall"
@@ -56,6 +57,11 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         if self.state.get("inside") or not self.state.get("entry_probe"):
             return None
         if nav.task_hall_anchor_count(obs) < 1:
+            # 09-07 小号: 锁通知把大厅压暗, 锚一个都检不出 -- 这里不能判锁
+            #    (离线测试: 无大厅锚的内页通知绝不误 SKIP)。记一笔"探测后弹过
+            #    单键框", 基类点掉它; 若随后又回到任务大厅、大赛页一个 cls 都没
+            #    见过, on_task_hall 再按锁收工, 不用干等 120 tick 报 UNKNOWN。
+            self.state["probe_ack"] = True
             return None
         if obs.has(
                 [V.TICKET_ARENA, V.ARENA_ROW, V.ARENA_ATTACK_FORM],
@@ -94,6 +100,12 @@ class ArenaFlow(FormationMixin, BattleMixin, ExitMixin, Flow):
         if not nav.task_hall_evidence(obs):
             return wait("当前帧缺少两个任务大厅专属锚，不计战术大赛入口漏检")
         if self.state.get("entry_probe"):
+            if (self.state.get("probe_ack") and not self.state.get("inside")
+                    and t is not None):
+                return self.finish(
+                    Outcome.SKIPPED,
+                    "战术大赛入口探测后只弹了单键通知框, 点掉又回到任务大厅"
+                    "(大赛页 cls 一个没见过), 按未解锁收工")
             if self.hold("entry_probe_no_result", 120):
                 return self.finish(
                     Outcome.UNKNOWN,

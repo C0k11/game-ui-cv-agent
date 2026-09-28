@@ -32,7 +32,7 @@ PLUS_GREY = "加号灰色"
 DOT_RED = "红点"
 DOT_YELLOW = "黄点"
 NEW_MARK = "new"
-STORY_NEW = "剧情new"
+STORY_NEW = "new"                    # 09-14 用户裁决: 剧情new(428) 与 new(429) 语义重复, 428 标废, 常量并到 new
 
 #  大厅底栏
 NAV_MAIL = "邮件箱"
@@ -278,6 +278,9 @@ CRAFT_QUICK = "快速制造"
 CRAFT_START = "开始制造"
 CRAFT_START_GREY = "开始制造灰色"      # v15 起模型真会吐（train=289）
 CRAFT_NO_MATERIAL = "材料不足"
+# 09-08 用户恢复(09-02 曾按"flow无引用"标废): 手动制造路要用。
+CRAFT_ORE = "蓝矿"                  # 清單里的 製造專用材料 卡(两种蓝矿, 起点强制投它; 含已投入态)
+CRAFT_SLOT_EMPTY = "制造槽_空"      # 制造主页的空槽卡(「+ 開始製造」占位), 手动制造从它进
 
 #  活动
 EVENT_STORY = "活动剧情"
@@ -293,7 +296,9 @@ EVENT_REWARD_INFO = "奖励资讯"
 EVENT_LIVE = "距离结束还剩"           # 当期，进行中，可打关
 EVENT_ENDED = "距离奖励获得结束"       # 上期余韵期，只能领尾奖
 EVENT_ENTRIES = [EVENT_LIVE, EVENT_ENDED]
-EVENT_AFTERSTORY = "後日談"           # 09-03 起不再作页面判据(能不能打只看入场行+关卡得星); 类表清理时可废
+# 09-09 用户裁决: 双活动只认卡片上的花体标题. 夏萊總結算 = 靠扫荡币当门票的迷你活动, 没有关卡, bot 不进它.
+SCHALE_SETTLEMENT = "夏莱总结算"
+EVENT_AFTERSTORY = "後日談"           # 09-06 用户裁决废案(类表 491 已改 _废弃, 不标不检); 常量只给旧测试用
 EVENT_MULTIPLIER = "双倍或三倍活动进行中"
 SPECIAL_DEFENSE = "据点防御"
 SPECIAL_CREDIT = "信用货币回收"

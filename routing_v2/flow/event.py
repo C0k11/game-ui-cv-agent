@@ -3,9 +3,11 @@
 
 用户规则（memory event_ops_playbook + 2026-08-07/08 现场口述）:
   1. **先 Q1  Qn 整体打通，再打加成**（`order: clear_then_bonus`）
-  2. **首通用部队1**（速推主力）—— 活动关卡的 **Best Record 会把首通时的
-     加成倍率永久锁定在那一关上**，用错队伍不可逆
-  3. 加成队 = 部队2，且**先看商店推算缺哪种币**再编队（`shop_plan_before_bonus`）
+  2. **首通用預設里的推关队**（09-08 口径; 原来是"部队1"）—— 活动关卡的 **Best Record
+     会把首通时的加成倍率永久锁定在那一关上**，用错队伍不可逆。不管当前高亮的是几部队,
+     按 cfg `clear_preset`={"tab","row"} 给当前部队 組成 一次(不配 = 当前阵容原样出击)
+  3. 加成 = **当前部队直接自动配队**(快速編輯 -> 自動 -> 確認; 09-08 口径, 原来是"切部队2"),
+     且**先看商店推算缺哪种币**再编队（`shop_plan_before_bonus`）
   4. **别自己瞎滑关卡栏**：从 1 开始打没打过的关，游戏会自动把下一关归位过来
 
 今天（08-07/08）在这条链上踩的坑，逐条对应到代码:
@@ -39,6 +41,7 @@ from routing_v2.act.action import Action, swipe, tap_at, tap_box, wait
 from routing_v2.flow import nav
 from routing_v2.flow.base import ExitMixin, Flow, Outcome, qty_max_ok
 from routing_v2.flow.battle import BattleMixin, FormationMixin
+from routing_v2.flow.preset import PresetMixin
 from routing_v2.percept import read as R
 from routing_v2.percept.observe import Box, Observation
 from routing_v2.state import vocab as V
@@ -71,7 +74,7 @@ GUIDE_HUB_MAX_TRIES = 3
 def _hub_evidence(obs) -> str:
     """疑似引导型活动页的证据串。09-05: 结论曾写死成「夏萊總結算」, 那次其实是当期活动的 Story 页签(页签类欠训)。"""
     fam = [V.EVENT_QUEST, V.EVENT_QUEST_SEL, V.EVENT_STORY, V.EVENT_STORY_SEL,
-           V.EVENT_TASK, V.EVENT_REWARD_INFO, V.EVENT_AFTERSTORY]
+           V.EVENT_TASK, V.EVENT_REWARD_INFO]
     tabs = sorted(obs.all(fam, 0.20), key=lambda b: -b.conf)[:3]
     top = ", ".join(f"{b.cls}:{b.conf:.2f}" for b in tabs) or "无"
     shop = obs.find(V.EVENT_SHOP, 0.20)
@@ -137,6 +140,19 @@ class EventEntryMixin:
         # 09-05 实帧: 轮播滑动中 474「距離獎勵獲得結束」文字被认成 405(0.93-0.96, cx 0.049-0.057 且逐帧左移),
         #    静止的 405 cx 约 0.078。要求连续两帧 405 在场且 cx 变化 < 0.006 才发; 滑动帧每帧移 0.01 以上过不了,
         #    代价只是多等一帧。
+        # 09-09 用户裁决: 双活动同一个轮播位, 两张卡都只检出 405; 认卡只看卡面花体标题.
+        #    夏萊總結算 = 靠扫荡币当门票的迷你活动(遊戲指南原文「不存在活動關卡」), bot 不进它: 见到标题就
+        #    在卡上向左滑一下切到另一张(09-08 实测滑动立即换页, 轮播 3.3 s 一页, 不用赌时序), 滑后重新等 405 坐实.
+        title = obs.find(V.SCHALE_SETTLEMENT, 0.40, region=(0.0, 0.12, 0.22, 0.42))
+        if title is not None:
+            n = self.bump("schale_swipes")
+            if n > int(self.cfg.get("mini_event_max_swipes", 6) or 6):
+                return self.finish(Outcome.SKIPPED,
+                                   "任务大厅活动卡只有 夏萊總結算(迷你活动, 没有关卡), 滑了 %d 次没见到别的活动卡" % (n - 1))
+            y = min(0.95, cur.cy + 0.10)
+            return swipe(min(0.98, cur.cx + 0.045), y, max(0.02, cur.cx - 0.045), y,
+                         "活动卡是 夏萊總結算(迷你活动无关卡) -- 向左滑切另一张(第 %d 次)" % n, ms=150,
+                         post=lambda: self.state.pop("ev_405_cx", None))
         pc = self.state.get("ev_405_cx")
         self.state["ev_405_cx"] = cur.cx
         if pc is None or abs(pc - cur.cx) >= 0.006:
@@ -218,7 +234,7 @@ class EventEntryMixin:
         return self.exit_step(obs, prefer_close=False) or wait("等退出控件")
 
 
-class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
+class EventFlow(EventEntryMixin, PresetMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
     name = "event"
     module = "event"
     entry_page = "task_hall"
@@ -231,8 +247,8 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             # 轮播抽错活动（进到"没有活动关卡"的引导型活动）的台账
             guide_hits=0, guide_seen=False, guide_giveup=False,
             tab_tries=0,
+            fm_preset_done=False,   # 首通預設一轮只套一次(见 on_formation)
         )
-        self.want_team = int(self.cfg.get("clear_first_with_team", 1))
         order = self.cfg.get("order", "clear_then_bonus")
         if order == "bonus_only":
             # 阶段名必须和 `_bonus_step` 认的那两个对上（"bonus_clear" /
@@ -240,7 +256,6 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             #    flow 在关卡列表前干等到超时，一个 tap 都没有（08-08 实测）。
             self.state["phase"] = "shop_plan" if self.cfg.get(
                 "shop_plan_before_bonus", True) else "bonus_clear"
-            self.want_team = int(self.cfg.get("bonus_team", 2))
 
     #  活动页：切到 Quest 页签
     def on_event_page(self, obs, st):
@@ -445,6 +460,24 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                                post=lambda: self.state.update(in_reward=True))
 
         rows, locked = self._rows(obs)
+        # 09-07 小号实锤: 游戏记住上次停在 Quest 页签, 进活动页直接就是带得星的关卡行, 下面那段
+        #    "行全无得星才走剧情"的保险根本不会触发 -> 剧情一行没看就开打 Quest。用户口径: 有剧情栏目
+        #    先把剧情推完, 没有剧情栏目的活动才直接 Quest。所以先显式切 Story 页签(未选中态 活动剧情
+        #    cls 0.98 稳), 剧情行都进过了才放行到 Quest; 40 帧都没见过 Story 页签 = 这期没有剧情栏目。
+        if self.cfg.get("event_story_first", True) and not self.state.get("story_pass_done"):
+            on_story = bool(rows) and all(star is None for _, star in rows)
+            if not on_story:
+                story_tab = obs.find(V.EVENT_STORY, 0.40, region=(0.0, 0.0, 1.0, 0.34))
+                if story_tab is not None:
+                    if self.pending("ev_story_tab"):
+                        return tap_box(story_tab, "先看活动剧情: 切到 Story 页签",
+                                       once="ev_story_tab", expect_gone=(V.EVENT_STORY,))
+                    if not self.hold("story_tab_stuck", 40):
+                        return wait("已点 Story 页签, 等剧情行(行无得星)")
+                    self.state["story_pass_done"] = True
+                    self.log("点了 Story 页签 40 帧仍是带得星的关卡行 -- 放弃剧情段, 直接 Quest")
+                # Story 页签 cls 不在场就不等(未选中态 0.98 稳, 离线测试的关卡列表帧也没有它):
+                #    这一帧直接按 Quest 逻辑走; 之后哪一帧看见了再切过去看剧情。
         # 页签误读保险(2026-09-05 live 实锤): 这期活动的 Story 页签选中态被认成 活动quest_已选择(0.64-0.78),
         #    剧情行也有 入場 键, 老逻辑会去点第一行进剧情然后无限循环。Quest 页签的每个解锁行都带 关卡得星,
         #    剧情行一颗星都没有 -> 行全无星 = 不在 Quest 页签: 能看见 活动quest 就切过去, 看不见就退出重进(有上限)。
@@ -455,8 +488,13 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             if self.cfg.get("event_story_first", True):
                 done_idx = set(self.state.get("ev_story_done") or [])
                 order = sorted(rows, key=lambda rs: rs[0].cy)
+                # 行首黄色书本 = 已看过(剧情图标已完成, 金标口径), 不再重看; 灰书(未完成)才进。
+                #    v21 在这页检出率低, 检不到就退回"按行序记账"老逻辑, 不会因此漏行。
+                seen_icons = obs.all(V.STORY_NODE_DONE, 0.40)
                 for i, (e, _s) in enumerate(order):
                     if i in done_idx or int(self.state.get(f"ev_story_enter:{i}", 0)) >= 3:
+                        continue
+                    if any(abs(k.cy - e.cy) < ROW_TOL for k in seen_icons):
                         continue
 
                     def _mark(i=i):
@@ -465,6 +503,9 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                         self.state["ev_story_done"] = sorted(d)
                         self.state[f"ev_story_enter:{i}"] = int(self.state.get(f"ev_story_enter:{i}", 0)) + 1
                     return tap_box(e, f"活动剧情: 进第 {i + 1} 行剧情关(看完剧情再切 Quest)", post=_mark)
+                if not self.state.get("story_pass_done"):
+                    self.state["story_pass_done"] = True
+                    self.log(f"活动剧情: 屏上 {len(order)} 行都进过了 -- 剧情段结束, 切 Quest")
             tab = obs.find(V.EVENT_QUEST, 0.35, region=(0.0, 0.0, 1.0, 0.34))
             if tab is not None and self.pending("ev_tab_fix"):
                 return tap_box(tab, "关卡行全无得星 = 当前不是 Quest 页签(剧情页签误读), 切到 Quest", once="ev_tab_fix",
@@ -676,11 +717,10 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
 
     def _start_bonus(self) -> Action:
         self.state["phase"] = "bonus_clear"
-        self.want_team = int(self.cfg.get("bonus_team", 2))
         short = self.ctx.bag.get("event_short_currencies")
         if short:
             self.log(f"商店推算：还缺 {short}  加成队按这些币种的加成学生编")
-        self.log(f"加成阶段：用部队{self.want_team} 首通，把 Best Record 顶上去")
+        self.log("加成阶段：当前部队直接自动配队(快速編輯 -> 自動 -> 確認)首通，把 Best Record 顶上去")
         return wait("转入加成阶段（顶纪录）")
 
     def _ap_read(self, obs) -> Optional[int]:
@@ -714,12 +754,9 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         return ap
 
     def _bonus_step(self, obs, st, rows):
-        # want_team 必须**每帧从配置推导**，不能只在 `_start_bonus()` 里设
-        #    一次（08-09 实测）：step 模式每次都是新实例，从 state 恢复
-        #    phase="bonus_clear" 时**根本不会走 _start_bonus**  want_team
-        #    还是类默认的 **1（推图队）**  加成队没上场，白烧 AP。
-        #    「加成阶段  部队2」是配置事实，不是一次性副作用。
-        self.want_team = int(self.cfg.get("bonus_team", 2))
+        # 编队口径(首通套預設 / 加成自动配队)由 on_formation **每帧从 phase 推导**,
+        #    不在这里设一次性副作用(08-09 实测: step 模式每次都是新实例, 从 state
+        #    恢复 phase="bonus_clear" 时根本不会走 _start_bonus)。
         ph = self.state["phase"]
         ap = self._ap_read(obs)
         reserve = int(self.cfg.get("ap_reserve", 0) or 0)
@@ -867,14 +904,14 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
             #      就算顶好了，跟全局计数从几开始无关。
             base = int(self.state.setdefault("win_base", self._bt()["win"]))
             if self._bt()["win"] > base:
-                self._topped_mark(fb, f"部队{self.want_team} 打赢")   # 落台账
+                self._topped_mark(fb, "自动编队 打赢")   # 落台账
                 if ti + 1 < need:
                     self.state["target_i"] = ti + 1
                     self.state["win_base"] = self._bt()["win"]   # 下一目标的基线
                     self.log(f"加成目标[{ti+1}/{need}] 纪录已顶  打下一个目标")
                     return wait("换下一个加成目标")
                 self.state["phase"] = "bonus_sweep"
-                self.log(f"加成全部完成：部队{self.want_team} 打赢 "
+                self.log("加成全部完成：自动编队 打赢 "
                          f"{self._bt()['win']} 场（{need} 个目标关纪录都顶好了）"
                          f"  转入扫荡（自动套用这些最高纪录）")
                 return wait("转入加成阶段（扫荡）")
@@ -902,7 +939,7 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
                 return wait("入场键已点，等关卡弹窗打开")
             self.state[f"enter_miss{ti}"] = 0
             return tap_box(target,
-                           f"加成进关顶纪录（要用部队{self.want_team}）",
+                           "加成进关顶纪录（编队页给当前部队自动配队）",
                            counter="bonus_enters", once=f"enter{ti}")
 
         #  扫荡 —— 进这一步的前提是「**这些关的纪录确实是加成队顶的**」
@@ -1172,20 +1209,37 @@ class EventFlow(EventEntryMixin, FormationMixin, BattleMixin, ExitMixin, Flow):
         return any(abs(d.cx - box.cx) < rx and abs(d.cy - box.cy) < ry
                    for d in obs.all(V.DOT_RED, 0.40))
 
-    def on_formation(self, obs, st):
-        """加成阶段**必须**确认选中的是加成队才出击。
-        `formation_step` 在看不到目标部队 cls 时会拒绝出击（宁可 BLOCKED）；
-        「部队2  自动编队」的规则只活在 formation_step 一处（§A2）。
+    def _clear_preset_cfg(self):
+        """首通给当前部队套的預設: cfg event.clear_preset = {"tab": 2, "row": 1}。
+        None/缺省 = 不套(当前阵容原样出击); 非法 -> {"bad": why}。"""
+        p = self.cfg.get("clear_preset") or None
+        if p is None:
+            return None
+        if not isinstance(p, dict):
+            return {"bad": f"clear_preset 配置不合法: {p!r}"}
+        try:
+            tab, row = int(p.get("tab", 0)), int(p.get("row", 0))
+        except (TypeError, ValueError):
+            return {"bad": f"clear_preset 配置不合法: {p!r}"}
+        if not 1 <= tab <= 5 or not 1 <= row <= 6:
+            return {"bad": f"clear_preset 越界: {p!r} (tab 1-5, row 1-6)"}
+        return {"tab": tab, "row": row}
 
-        `want_team` **每次都从 phase 推导**，绝不靠 `_start_bonus()` 那次
-           赋值（08-09 连撞两次）：编队页是**页面派发**进来的，跨进程/跨页面时
-           `_bonus_step` 根本没执行过  want_team 还是类默认 1  屏上明明
-           `2部队高亮`，flow 却要"切到部队1"，加成队被换掉。
-           **一次性副作用不是状态**；能从 state 推的就别存副本。"""
+    def on_formation(self, obs, st):
+        """编队页(09-08 用户口径): 不管当前高亮的是几部队, 不切部队页签。
+           首通(phase clear) -> form_mode "preset": 按 cfg event.clear_preset 给当前部队
+             套推关队預設(組成 -> 變更編輯 確認), 一轮只套一次, 没配就原样出击;
+           加成(phase bonus*) -> form_mode "auto": 当前部队 快速編輯 -> 自動 -> 確認 再出击。
+           口径**每帧从 phase 推导**(08-09 教训: 编队页是页面派发进来的, 跨进程/跨页面时
+           `_bonus_step` 根本没执行过; 一次性副作用不是状态)。规则只活在 formation_step 一处。"""
         ph = str(self.state.get("phase", ""))
-        self.want_team = (int(self.cfg.get("bonus_team", 2))
-                          if ph.startswith("bonus")
-                          else int(self.cfg.get("clear_first_with_team", 1)))
+        if ph.startswith("bonus"):
+            self.form_mode, self.form_preset = "auto", None
+        else:
+            want = self._clear_preset_cfg()
+            if want and want.get("bad"):
+                return self.finish(Outcome.BLOCKED, want["bad"])
+            self.form_mode, self.form_preset = "preset", want
         return self.formation_step(obs, st)
 
     def on_battle_result(self, obs, st):

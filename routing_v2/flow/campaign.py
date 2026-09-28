@@ -1014,9 +1014,10 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
             return wait("找起点格（这章地图检出弱, 多看几帧）")
         return wait("等部署界面")
 
-    # 部署侧编队面板: 按配置先给指定部队套預設, 再出击(v20 新族的 live 测试入口)。
-    #    cfg campaign.preset_apply = {"team": 2, "tab": 1, "row": 2} 或 None(默认不动)。
-    #    部队1 是用户的推图队, team=1 直接拒绝 -- 套预设会覆盖阵容且不可逆。
+    # 部署侧编队面板: 按配置给**当前部队**套預設, 再出击。
+    #    cfg campaign.preset_apply = {"tab": 2, "row": 1} 或 None(默认不动)。
+    #    09-08 用户口径: 推图不用管 1-4 部队, 当前部队有人也直接預設换人上战场;
+    #    老的 team 键忽略(不再切部队, 也不再因 team=1 拒绝)。
     def _preset_before_sortie(self, obs):
         plan = self.cfg.get("preset_apply") or None
         if not isinstance(plan, dict):
@@ -1024,31 +1025,21 @@ class CampaignFlow(GridMultiMixin, PresetMixin, ExitMixin, Flow):
         if self.state.get("preset_applied") and not self.state.get("preset_want"):
             return None                        # 本局已套过
         try:
-            team = int(plan.get("team", 0))
             tab = int(plan.get("tab", 0))
             row = int(plan.get("row", 0))
         except (TypeError, ValueError):
             return self.finish(Outcome.BLOCKED, f"preset_apply 配置不合法: {plan!r}")
-        if team not in V.SQUAD_TABS or not 1 <= tab <= 4 or not 1 <= row <= 4:
+        if not 1 <= tab <= 5 or not 1 <= row <= 6:
             return self.finish(Outcome.BLOCKED,
-                               f"preset_apply 配置越界: {plan!r} (team 2-4, tab/row 1-4)")
-        if team == 1:
-            return self.finish(Outcome.BLOCKED, "preset_apply 指向部队1(用户推图队) -- 拒绝覆盖")
+                               f"preset_apply 配置越界: {plan!r} (tab 1-5, row 1-6)")
         if not self.state.get("preset_want"):
-            # 先把目标部队页签切成高亮再开面板 -- 套到别的队上就是事故
-            tab_cls, hi_cls = V.SQUAD_TABS[team]
-            if not obs.has(hi_cls, 0.45):
-                t = obs.find(tab_cls, 0.45)
-                if t is not None:
-                    return tap_box(t, f"套預設前切到部队{team}", expect=(hi_cls,))
-                return wait(f"套預設前等部队{team}页签")
             self.preset_start(tab, row)
-            self.log(f"部队{team} 已选中, 开始套預設(页签{tab} 第{row}行)")
+            self.log(f"部署侧: 给当前部队套預設(页签{tab} 第{row}行), 不切部队")
         act = self.preset_step(obs)
         if act is not None:
             return act
         if self.state.get("preset_applied"):
-            self.log(f"預設已套用到部队{team}, 出击")
+            self.log("預設已套到当前部队, 出击")
             return None
         return wait("套預設中")
 

@@ -97,8 +97,12 @@ DEFAULTS: Dict[str, Any] = {
 
     #  活动
     "event": {
-        "clear_first_with_team": 1,    # 首通用部队1（速推主力，用户规则）
-        "bonus_team": 2,               # 加成队 = 部队2
+        # 09-08 起编队不再切 1-4 部队: 首通给当前部队套 clear_preset, 加成给当前部队自动配队。
+        #    下面两个键已不生效, 留给老前端表单。
+        "clear_first_with_team": 1,
+        "bonus_team": 2,
+        # 首通给当前部队套的推关队預設 {"tab": 2, "row": 1}; None = 当前阵容原样出击。
+        "clear_preset": None,
         "order": "clear_then_bonus",   # 先 Q1Qn 通关，再打加成
         "shop_plan_before_bonus": True,  # 先商店推算定缺哪种币，再按币种编队
         # ⚠ farm_stages 是**死配置**: schema 里标着"旧表", 但 `flow/event.py`
@@ -203,9 +207,8 @@ DEFAULTS: Dict[str, Any] = {
         "stage": "",
         "stages": [],
         "skip_rounds": 0,
-        # 部署侧套預設(v20 新族 live 测试入口): {"team": 2, "tab": 1, "row": 2} = 出击前
-        #   把部队2 切出来, 开預設面板, 页签1 第2行 組成 -> 變更編輯 確認。None = 不动。
-        #   team=1 一律拒绝(用户推图队不许覆盖)。
+        # 部署侧套預設: {"tab": 2, "row": 1} = 出击前给**当前部队**开預設面板, 页签2 第1行
+        #   組成 -> 變更編輯 確認。None = 不动。09-08 口径: 不切部队, 老的 team 键忽略。
         "preset_apply": None,
         # 多队关(答案 needs.teams > 1, 6 章起 184 关 2 队 / Hard 15 章起 16 关 3 队): 部署时按答案属性挑部队。
         #   grid_squads = {"red": 1, "yellow": 2, "blue": 3, "purple": 3, "any": 1} 属性 -> 部队号(1-4);
@@ -388,6 +391,11 @@ SCHEMA = {
     "event.bonus_team": {"kind": "select", "label": "加成队",
                          "options": [1, 2, 3, 4],
                          "section": "daily"},
+    "event.clear_preset": {"kind": "map", "label": "活动首通預設(栏目/行)",
+                           "options": ["tab", "row"],
+                           "note": "首通前给当前部队套的預設: tab=栏目 1-5, row=行 1-6(N部隊); 留空 = 当前阵容原样出击。"
+                                   "加成阶段一律当前部队自动配队, 不再切部队。",
+                           "section": "daily"},
     "event.order": {"kind": "select", "label": "活动打法",
                     "options": ["clear_then_bonus", "bonus_only", "clear_only"],
                     "choice_labels": {"clear_then_bonus": "先通关再打加成",

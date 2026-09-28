@@ -90,6 +90,15 @@ def formation_slot_saturation(obs: Observation):
     return striker, special
 
 
+def squad_empty(obs: Observation) -> bool:
+    """四个 STRIKER 条带全无彩条 = 队伍是空的(EMPTY 占位, 不是被立绘挡住)。"""
+    metrics = formation_slot_saturation(obs)
+    if metrics is None:
+        return False
+    striker, _special = metrics
+    return all(value < _STRIKER_SAT_MIN for value in striker)
+
+
 def formation_ready(obs: Observation) -> bool:
     """仅当四个 STRIKER 和两个 SPECIAL 都有固定 UI 彩条证据时返回 True。"""
     metrics = formation_slot_saturation(obs)
@@ -101,17 +110,25 @@ def formation_ready(obs: Observation) -> bool:
 
 
 class FormationMixin:
-    """编队页处理。子类给 `want_team` 属性（1-4）。
+    """编队页处理。`form_mode` 决定怎么走(09-08 用户口径):
 
-    用户定死的全局约定（2026-08-09，学费 840AP）：
-       **部队1 = 推图队；部队2 = 加成专用队，选了部队2就必然自动编队**。
-       自動按「当前关」优化且各关共享同一个部队2  每一关都要重排
-       （老 event_quest.py:14 实测：Q10 优化后的同队对 Q11 只有 55%）。
-       光切到部队2 ≠ 加成队就绪 —— 队里是上次的旧阵容；漏了自动编队，
-       Best Record 按弱加成阵容锁定，之后每一发扫荡都吃亏。
+      · "team"   老口径: 切到 `want_team`(1-4) 那支部队再出击(mining 等还在用)。
+      · "preset" 不管当前高亮的是几部队: 按 `form_preset`={"tab","row"} 给**当前部队**
+                 套預設(組成 -> 變更編輯 確認), 一轮只套一次, 套完重验六槽再出击;
+                 form_preset 为 None = 当前阵容原样出击。flow 要混入 PresetMixin。
+      · "auto"   不管当前是几部队: 快速編輯 -> 自動 -> 確認 给当前部队自动编队再出击
+                 (活动加成; 加成% 读到干净的 0 拒出击)。
+
+    用户 09-08 拍板(取代 08-09 的"部队1 推图 / 部队2 加成"): 推图和活动都不用管 1-4 部队,
+       直接把当前部队的阵容换成要的队伍上战场 -- 首通用預設里的推关队, 加成直接自动配队。
+       自動按「当前关」优化(老 event_quest.py:14 实测: Q10 优化后的同队对 Q11 只有 55%),
+       所以加成每一关都要重排; 漏了自动编队, Best Record 按弱加成阵容锁定, 之后每一发扫荡都吃亏。
     """
     want_team: int = 1
+    form_mode: str = "team"
+    form_preset: Optional[dict] = None
     _FORM_GIVEUP_FRAMES = 120
+    _AF_EDIT_MISSING_TICKS = 20
 
     def _reset_formation_guard(self) -> None:
         for key in ("hold:formation_unready",
@@ -143,10 +160,88 @@ class FormationMixin:
             self._reset_formation_guard()
         super().observe(obs, st)
 
+    def _empty_squad_autoform(self, obs: Observation) -> Optional[Action]:
+        """六槽证明不成立且四个 STRIKER 全空 -> 先走一遍自动编队(只一遍)再验。返回 None = 没做/做完。
+
+        09-07 小号实测: 活动编队独立于推图队, 新号 1部队 六槽全空, 六槽证明永远不成立
+           -> 40tick+5s BLOCKED, 活动一关没打。全空的队没有任何用户阵容可保护;
+           arena 那边用户禁自动编队, 用 allow_empty_autoform 关掉。"""
+        if (not getattr(self, "allow_empty_autoform", True)
+                or self.state.get("empty_af_done") or not squad_empty(obs)):
+            return None
+        if self.once("empty_af_log"):
+            self.log("编队页六槽全空(新号/活动独立编队) -- 先走一遍自动编队再验出击")
+        act = self._auto_form_chain(obs)
+        if act is not None:
+            self.state["empty_af_started"] = True
+            return act
+        self.state["empty_af_done"] = True
+        if self.state.get("empty_af_started"):
+            # 链真的点过东西, 阵容可能变了: 六槽证明从头再验
+            self._reset_formation_guard()
+            return wait("空队自动编队链走完, 重新验六槽")
+        # 快速編輯 键都没有(离线帧/面板没渲染): 什么都没做, 照旧走闸
+        return None
+
+    def _formation_here(self, obs: Observation, st: StateView, mode: str) -> Optional[Action]:
+        """preset/auto 口径: 不碰部队页签, 就在当前高亮的部队上换阵容, 再出击。"""
+        if mode == "preset":
+            want = getattr(self, "form_preset", None)
+            if isinstance(want, dict) and not self.state.get("fm_preset_done"):
+                if not hasattr(self, "preset_step"):
+                    return self.finish("BLOCKED", "form_mode=preset 但 flow 没混入 PresetMixin")
+                if not self.state.get("preset_want") and not self.state.get("preset_applied"):
+                    self.preset_start(int(want["tab"]), int(want["row"]))
+                    self.log(f"编队页: 给当前部队套預設(页签{want['tab']} 第{want['row']}行), 不切部队")
+                act = self.preset_step(obs)
+                if act is not None:
+                    self._reset_formation_guard()
+                    return act
+                if self.state.get("preset_applied") and not self.state.get("preset_want"):
+                    self.state["fm_preset_done"] = True
+                    self.state.pop("preset_applied", None)
+                    self._reset_formation_guard()
+                    return wait("預設已套到当前部队, 重新验六槽")
+                return wait("套預設中")
+        elif mode == "auto":
+            act = self._auto_form_chain(obs)
+            if act is not None:
+                self._reset_formation_guard()
+                return act
+            if self.pending("af_edit") and not self.hold("af_edit_missing", self._AF_EDIT_MISSING_TICKS):
+                # 出击键在而 快速編輯 没检出 = 漏检, 多看几帧再决定; 有界, 不死等
+                return wait("加成编队: 等 快速編輯 键检出")
+        go = obs.find(V.SORTIE, 0.45)
+        if go is None:
+            self._reset_formation_guard()
+            return wait("编队页: 等出击键")
+        blocked = self._formation_guard(obs, "")
+        if blocked is not None:
+            if mode == "preset":
+                act = self._empty_squad_autoform(obs)
+                if act is not None:
+                    return act
+            return blocked
+        if mode == "auto":
+            pct = R.digits(obs.frame, _R_SQUAD_PCT)
+            clean = (pct or "").strip().rstrip("%")
+            if clean == "0":
+                return self.finish(
+                    "BLOCKED",
+                    f"自动编队后加成仍是干净的 0%（raw={pct!r}）— 不出击")
+
+        def _new_episode():
+            self._bt()["seen_win"] = False      # 新一场，横幅重新算
+        why = "出击（当前部队, 已自动配队）" if mode == "auto" else "出击（当前部队）"
+        return tap_box(go, why, counter="sorties", post=_new_episode)
+
     def formation_step(self, obs: Observation, st: StateView,
                        team: Optional[int] = None) -> Optional[Action]:
+        mode = str(getattr(self, "form_mode", "team") or "team")
+        if mode in ("preset", "auto"):
+            return self._formation_here(obs, st, mode)
         team = team or self.want_team
-        auto_form = (team == 2)          # 唯一定义点：部队2  自动编队
+        auto_form = (team == 2)          # 老口径唯一定义点：部队2 -> 自动编队
         tab, hi = V.SQUAD_TABS.get(team, (None, None))
         if tab is None:
             self._reset_formation_guard()
@@ -163,6 +258,10 @@ class FormationMixin:
             if go is not None:
                 blocked = self._formation_guard(obs, "")
                 if blocked is not None:
+                    if not auto_form:
+                        act = self._empty_squad_autoform(obs)
+                        if act is not None:
+                            return act
                     return blocked
                 if auto_form:
                     # 加成% 闸（老 event_quest.py:1437 原样搬）：编队屏左下
