@@ -42,18 +42,14 @@ RESUME_FLAG: bool = False
 # effective batch ~constant (12x5=60, 10x6=60, 8x8=64).
 RESUME_BATCH: int = 0
 
-# Base weight - already in repo root + data/models
+# Base weights (COCO pretrained) live in YOLO_ROOT with every other model; nothing is kept in
+# or downloaded into the repo. A missing file is fetched by ultralytics to that same path.
 BASE_WEIGHT_CANDIDATES = [
-    REPO_ROOT / "yolo26n.pt",
-    REPO_ROOT / "data" / "models" / "yolo26n.pt",
+    YOLO_ROOT / "yolo26n.pt",
 ]
-# Classifier weight - kind=="classify" configs prefer this.  If not
-# found locally, ultralytics will fetch from its model registry on
-# first use (`YOLO("yolo26n-cls.pt")`).
+# Classifier weight - kind=="classify" configs prefer this.
 CLS_BASE_WEIGHT_CANDIDATES = [
-    REPO_ROOT / "yolo26n-cls.pt",
-    REPO_ROOT / "data" / "models" / "yolo26n-cls.pt",
-    ML_CACHE / "models" / "yolo" / "yolo26n-cls.pt",
+    YOLO_ROOT / "yolo26n-cls.pt",
 ]
 
 # Training configs.  Each entry produces one trained .pt.
@@ -1412,22 +1408,20 @@ TRAIN_CONFIGS = {
 
 
 def find_base_weight(kind: str = "detect") -> str:
-    """Return base weight name/path for the given task kind.
+    """Return the base weight path for the given task kind.
 
-    For detect: looks for local yolo26n.pt copies, else falls back to
-    the bare model name so ultralytics fetches it.
-    For classify: looks for local yolo26n-cls.pt copies, else falls back
-    to the bare model name "yolo26n-cls.pt".
+    For detect: yolo26n.pt, for classify: yolo26n-cls.pt, both under YOLO_ROOT.
+    If the file is missing, the path is still returned: ultralytics downloads a
+    known asset to the exact path it is given (a bare name would land in the cwd).
     """
     candidates = (
         CLS_BASE_WEIGHT_CANDIDATES if kind == "classify"
         else BASE_WEIGHT_CANDIDATES
     )
-    default_name = "yolo26n-cls.pt" if kind == "classify" else "yolo26n.pt"
     for p in candidates:
         if p.exists():
             return str(p)
-    return default_name  # ultralytics auto-downloads
+    return str(candidates[0])  # ultralytics downloads it to this path
 
 
 def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
@@ -1441,10 +1435,10 @@ def train_one(config_name: str, dry_run: bool = False) -> Optional[Path]:
         return None
 
     # Per-config base weight override (e.g. "yolo26m.pt" / "yolo26x.pt").
-    # Bare name lets ultralytics auto-fetch if not in repo root.
+    # A bare name is resolved under YOLO_ROOT, so a first-time download lands in ml_cache.
     base_override = cfg.get("base")
     if base_override:
-        base = base_override
+        base = str(YOLO_ROOT / base_override) if Path(base_override).name == base_override else base_override
     else:
         base = find_base_weight(kind)
     print(f"\n==== TRAIN {config_name} ({kind}) ====")
