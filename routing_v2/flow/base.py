@@ -380,10 +380,6 @@ class Flow:
         x = obs.find(V.CLOSE_X, 0.55)
         return tap_box(x, "领完了  叉掉面板") if x is not None else None
 
-    def on_levelup(self, obs: Observation, st: StateView) -> Optional[Action]:
-        b = obs.find(V.BOND_LEVELUP, 0.40)
-        return tap_box(b, "点掉升级过场") if b is not None else None
-
     def on_offsite(self, obs: Observation, st: StateView) -> Optional[Action]:
         """落到了这个 flow 没登记的页面。
 

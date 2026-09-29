@@ -328,8 +328,10 @@ class EventFlow(EventEntryMixin, PresetMixin, FormationMixin, BattleMixin, ExitM
     #   `read.stage_numbers()` 从得星框往上推 ROI 去读(见那边的注释),
     #   再拿"关号连续递增"这个列表结构上必然成立的事实补洞纠错。
     #
-    # 注意: 关号读数是 OCR, 一行一次、还跑在 CPU 上(本机 onnxruntime 的 CUDA
-    #   provider 加载失败, 缺 cublasLt64_12.dll)。**绝不能每帧都读** --
+    # 注意: 关号读数是 OCR, 一行一次。live 进程里文字检测走 GPU(detect 先 import torch,
+    #   带进了 CUDA DLL), 识别和方向分类仍走 CPU(rapidocr 1.2.3 只认 det_ 开头的 use_cuda
+    #   参数); 不加载 torch 的进程(离线测试)整条走 CPU, 并提示缺 cublasLt64_12.dll(09-28 实测)。
+    #   **绝不能每帧都读** --
     #   一屏 4-7 行就是 4-7 次 OCR, tick 会被拖垮。列表在同一页时行版式不变,
     #   所以按**行的 cy 指纹**缓存, 版式一变(滚动/换页)才重读。
     def _stage_map(self, obs, rows) -> dict:

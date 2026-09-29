@@ -101,11 +101,6 @@ INTERRUPTS: List[Sig] = [
         note="剧情过场**不吃 KEYCODE_BACK**（08-07 连按5次实测无响应）。"
              "整个活动被开场剧情挡死过一次。唯一出路：menu跳过确认。"),
 
-    Sig("levelup",
-        any_of=[V.BOND_LEVELUP],
-        priority=85, interrupt=True,
-        note="全屏升级过场，点任意处消掉"),
-
     # 系统级「是否結束？」退出游戏确认框 -- **確認 = 退出游戏**
     Sig("quit_dialog",
         need=[V.CONFIRM, V.CANCEL],

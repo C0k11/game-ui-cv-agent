@@ -289,7 +289,6 @@ EVENT_QUEST = "活动quest"
 EVENT_QUEST_SEL = "活动quest_已选择"
 EVENT_SHOP = "活动商店"
 EVENT_TASK = "活动任务"
-EVENT_BONUS = "活动关卡产出额外加成"
 EVENT_REWARD_INFO = "奖励资讯"
 # 这两个才是真正在用的活动入口（train 949 / 130，live 实帧 0.88）。
 #    带 `_活动入口` 后缀的 77/78 是**废案**，已在 detect 层丢弃。
@@ -302,8 +301,8 @@ EVENT_AFTERSTORY = "後日談"           # 09-06 用户裁决废案(类表 491 �
 EVENT_MULTIPLIER = "双倍或三倍活动进行中"
 SPECIAL_DEFENSE = "据点防御"
 SPECIAL_CREDIT = "信用货币回收"
-EVENT_STAGE_STORY_SEEN = "活动剧情关卡_已看"
-EVENT_STAGE_BATTLE_DONE = "活动站斗关卡_已打"
+# 09-06 用户裁决标废的 活动关卡产出额外加成(110) / 活动剧情关卡_已看(98) / 活动站斗关卡_已打(99) /
+#    羁绊升级(398) 检测层早已丢弃, 09-28 从词表删掉, 连同只靠 羁绊升级 的 levelup 打断。
 # 关卡完成度只能靠 关卡得星_0 / _3 间接判. 529/530 禁止引用 (见 STAR_*).
 
 #  剧情 / 挖矿
@@ -328,7 +327,6 @@ STORY_EASY_GUIDE = "简易攻略"
 NODE_DONE = "完成"
 NODE_DONE_GREY = "完成_灰色"
 SCENE_DONE = "战斗图标已完成"
-BOND_LEVELUP = "羁绊升级"
 
 #  MomoTalk
 MOMO_TAB = "momotalk学生聊天区域按钮"

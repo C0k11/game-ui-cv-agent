@@ -447,7 +447,7 @@ SCHEMA = {
 
     "story_mining.sources": {"kind": "multi", "label": "挖哪些剧情",
                              "options": ["羁绊剧情", "主线剧情", "支线剧情",
-                                         "短篇剧情", "活动剧情", "後日談"],
+                                         "短篇剧情", "活动剧情"],
                              "section": "campaign"},
     "story_mining.target_students": {"kind": "list", "label": "只挖这些学生的羁绊",
                                      "section": "campaign"},

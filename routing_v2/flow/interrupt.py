@@ -8,8 +8,8 @@
 这里登记的打断优先于任何 flow 的决策:
   money_popup     停整条链，交人审
   story_cutscene  剧情逃生（menu  跳过  确认）
-  levelup         点掉
   loading         等
+(升级过场 levelup 09-28 删: 它唯一的判据 羁绊升级 09-06 已标废, 检测层丢弃, 这条打断不会再触发)
 
 **打断 ≠ 覆盖层**（08-11 审计时写清楚，免得又有人来"修"错层）:
    · 打断(interrupt) = 登记在 `pages.INTERRUPTS`，与"在哪一页"无关，由 runner
@@ -174,24 +174,6 @@ class Interrupts:
         if tap_cont is not None:
             return tap_box(tap_cont, "剧情逃生: 点击继续")
         return wait("剧情过场，但逃生链的 cls 一个都没检出 - 不瞎点")
-
-    #  升级过场
-    def _on_levelup(self, obs: Observation) -> Optional[Action]:
-        """全屏升级过场：点掉。
-
-        找不到落点时返回 **wait 而不是 None**（08-11 对齐三个 handler 的口径）。
-           打断是"连续 N 帧确认"才锁上的，解除同样要 N 帧 -- 中间那几帧里
-           cls 可能一时掉到 0.45 以下，而**过场还实实在在盖在屏上**。
-           返回 None 等于把这几帧交回 flow，flow 就会去点过场底下的按钮
-           （点击被过场吞掉 = 连发族那个"判定带宽不一致  弹入/弹出动画帧
-             契约必破"的老病）。`_on_story_cutscene` / `_on_quit_dialog`
-           早就是 wait 收尾，这里是唯一的例外，补齐。
-           代价上限 = 多等 confirm_frames 帧（过场真没了打断自然解除）。
-        """
-        b = obs.find(V.BOND_LEVELUP, 0.45)
-        if b is not None:
-            return tap_box(b, "升级过场: 点掉")
-        return wait("升级过场还锁着，但这一帧没检出可点的横幅 - 等，不交回 flow 乱点")
 
     #  加载
     def _on_loading(self, obs: Observation) -> Action:

@@ -125,7 +125,7 @@ PAGES: Dict[str, P] = {
         "min_core": 2, "neg": ["咖啡厅邀请卷"], "parent": "Lobby",
     },
     "Cafe_Invite": {
-        "core": ["邀请键", "收藏图标", "弹窗叉叉"],
+        "core": ["邀请键", "弹窗叉叉"],
         "min_core": 2, "parent": "Cafe_Hall1",
     },
     #  Bounty
@@ -183,7 +183,6 @@ PAGES: Dict[str, P] = {
     "RewardObtained": {
         "core": ["获得奖励", "点击继续字样"], "min_core": 1, "parent": None,
     },
-    "BondLevelUp": {"core": ["羁绊升级"], "min_core": 1, "parent": None},
     "Club": {"core": ["社团"], "min_core": 1, "parent": "Lobby"},
     "Loading": {"core": ["加载中"], "min_core": 1, "parent": None},
     "Cafe_Headpat": {  # 坑: chrome 全隐 + 只有 Emoticon 是合法态
