@@ -162,7 +162,7 @@ def _box_iou_n(a, b) -> float:
 
 #  Pipeline state
 _PIPELINE_LOCK = threading.Lock()
-_PIPELINE = None          # brain.pipeline.DailyPipeline instance
+_PIPELINE = None          # old DailyPipeline instance; stays None since the 09-28 archive
 _PIPELINE_THREAD = None   # background worker thread
 _PIPELINE_RUNNING = False
 _PIPELINE_STATUS = {"running": False, "error": "", "ticks": 0}
@@ -743,69 +743,10 @@ except Exception as e:
 #  Pipeline control
 
 def _start_pipeline(*, payload: Dict[str, Any]) -> None:
-    """Start the DailyPipeline in a background thread."""
-    global _PIPELINE, _PIPELINE_THREAD, _PIPELINE_RUNNING, _PIPELINE_STATUS, _PIPELINE_RUN_META
-    with _PIPELINE_LOCK:
-        if _PIPELINE_RUNNING:
-            return
-        from brain.pipeline import DailyPipeline
-        active_profile, profile_settings, _ = _get_active_profile_settings()
-        skill_names = _normalize_skill_order(payload.get("skill_order") or profile_settings.get("skill_order"))
-        profile_options = dict(profile_settings)
-        for key in [
-            "steps",
-            "goal",
-            "forbid_premium_currency",
-            "ap_purchase_limit",
-            "event_max_rounds",
-            "event_ap_reserve",
-            "exploration_click",
-            "sub_only",
-        ]:
-            if payload.get(key) is not None:
-                profile_options[key] = payload.get(key)
-
-        _PIPELINE = DailyPipeline(skill_names=skill_names, profile_options=profile_options)
-        _PIPELINE.start()
-        _PIPELINE_RUNNING = True
-
-        window_title = str(payload.get("window_title") or profile_settings.get("window_title") or "Blue Archive")
-        step_sleep = float(payload.get("step_sleep_s") or profile_settings.get("step_sleep_s") or 0.6)
-        dry_run = bool(payload.get("dry_run") if payload.get("dry_run") is not None else profile_settings.get("dry_run", True))
-        globals()["_STEP_MODE"] = bool(payload.get("step_mode", False))
-        globals()["_GAME_OVERLAY"] = str(payload.get("game_overlay")
-                                         or profile_settings.get("game_overlay")
-                                         or "battle_only").strip().lower()
-        globals()["_STEP_PENDING"] = None
-        _STEP_GO.clear()
-        account_label = str(payload.get("account_label") or profile_settings.get("account_label") or active_profile).strip()
-        _PIPELINE_RUN_META = {
-            "profile_name": active_profile,
-            "account_label": account_label,
-            "notify_on_finish": bool(payload.get("notify_on_finish") if payload.get("notify_on_finish") is not None else profile_settings.get("notify_on_finish")),
-            "notify_webhook_url": str(payload.get("notify_webhook_url") or profile_settings.get("notify_webhook_url") or "").strip(),
-            "skill_names": list(skill_names),
-            "window_title": window_title,
-            "dry_run": dry_run,
-            "forbid_premium_currency": bool(profile_options.get("forbid_premium_currency", True)),
-            "ap_purchase_limit": int(profile_options.get("ap_purchase_limit") or 0),
-            "steps": int(profile_options.get("steps") or 0),
-        }
-        _PIPELINE_STATUS = {
-            "running": True,
-            "error": "",
-            "ticks": 0,
-            "profile_name": active_profile,
-            "account_label": account_label,
-            "skill_order": list(skill_names),
-        }
-
-        _PIPELINE_THREAD = threading.Thread(
-            target=_pipeline_worker,
-            args=(window_title, step_sleep, dry_run),
-            daemon=True,
-        )
-        _PIPELINE_THREAD.start()
+    """The old brain DailyPipeline and its skills were archived on 2026-09-28
+    (archive/2026-09-28/). Daily runs go through routing_v2 (console at /v2/);
+    this entry refuses instead of half-starting, and api_start reports the message."""
+    raise RuntimeError("旧 brain 日常流水线已于 2026-09-28 归档, 日常请用 /v2/ 控制台(routing_v2)")
 
 
 def _stop_pipeline() -> None:

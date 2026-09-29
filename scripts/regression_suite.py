@@ -7,20 +7,16 @@
 veto 用例 FAIL  exit 2(金钱安全一票否决, 训练收尾流程必须硬停);
 非 veto FAIL  exit 1(功能回退警告, 人工定夺)。
 
-check 实现与 brain 内真实防线同判据(独立复刻, 判据变更两边同步):
+check 判据复刻自旧 brain 防线(那些技能与逻辑层回放 09-28 已归档, 这里只剩模型层用例):
   purchase_dialog ≈ event_quest._dialog_is_purchase 结构白名单闸:
     取消键+确认键同屏(conf≥0.20 守卫地板) 且 body(y>0.12) 出现
     stepper(加号/MAX_可点击/MIN_灰色) 或 体力  购买框。
 帧来源见 data/regression/manifest.json 各 case 的 origin。
 """
 import json
-import os
 import sys
 from pathlib import Path
 
-# 回放绝不写生产状态(2026-07-28): schedule 的 _reconcile_ledger 挂进
-# _read_tickets 后, 票数 fixture(历史帧)会在同游戏日内钳真台账。
-os.environ.setdefault("BA_REPLAY", "1")
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, r"D:\Project\ai game secretary")
 from vision.io_utils import imread_any  # noqa: E402
@@ -84,25 +80,10 @@ CHECKS = {"purchase_dialog": check_purchase_dialog,
           "speed_1x": check_speed_1x}
 
 
-def _run_logic_layer() -> int:
-    """逻辑层回归(tests/replay/fixtures.py): 给定检出框看 skill 判得对不对。
-    不跑 YOLO、不要 GPU、秒级。与本文件的模型层用例是两层, 都过才叫没回归。"""
-    from tests.replay.fixtures import run as _run
-    return _run()
-
-
 def main():
     want = None
     if "--domain" in sys.argv:
         want = sys.argv[sys.argv.index("--domain") + 1]
-
-    if want == "logic":
-        sys.exit(_run_logic_layer())
-
-    logic_rc = 0
-    if want is None:
-        logic_rc = _run_logic_layer()
-        print()
 
     manifest = json.loads((REG / "manifest.json").read_text(encoding="utf-8"))
     cases = [c for c in manifest["cases"]
@@ -132,10 +113,10 @@ def main():
               f"{'  (known_overblock)' if c.get('known_overblock') else ''}")
     print(f"\nveto失败 {veto_fail} | 功能失败 {warn_fail} | "
           f"通过 {len(cases) - veto_fail - warn_fail}/{len(cases)}")
-    if veto_fail or logic_rc == 2:
+    if veto_fail:
         print(" 金钱防线回归失败 - 一票否决, 禁止出货!")
         sys.exit(2)
-    if warn_fail or logic_rc:
+    if warn_fail:
         sys.exit(1)
 
 

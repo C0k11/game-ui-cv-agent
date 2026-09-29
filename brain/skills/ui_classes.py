@@ -1,7 +1,10 @@
-"""Authoritative UI YOLO class vocabulary - single source of truth.
+"""UI YOLO class name constants of the old brain code. The class table
+data/raw_images/_classes.txt is the authority; routing_v2 uses routing_v2/state/vocab.py.
 
-All skills resolve click targets through these named constants instead of
-hardcoding OCR text. The names match ui_v1/v2 model cls_name exactly (see
+The old brain skills resolved click targets through these named constants
+(skills archived 2026-09-28; brain/skills/base.py, brain/pipeline.py and the audit
+scripts still import this module). Constants of classes deprecated in the class
+table were removed with them. The names match ui_v1/v2 model cls_name exactly (see
 data/_ui_v1_class_freq.json - 156 in-use classes out of 448).
 
 DESIGN RULE (user spec 2026-05-28):
@@ -56,13 +59,11 @@ BTN_CANCEL = "取消键"           # 118 (47f)
 BTN_CLOSE_X = "弹窗叉叉"        # 19  (429f) popup close X
 BTN_BACK = "返回键"            # 31  (695f) top-left back arrow
 BTN_HOME = "回大厅按钮"         # 28  (689f) home button  lobby
-BTN_COLLAPSE = "收起键"         # 29  (0f - NOT trained)
 LOADING = "加载中"             # 22  (45f)
 
 #  领取按钮 (多状态: 黄=可领, 灰=已领/不可)
 CLAIM_ALL_YELLOW = "全部领取_黄"     # 107 (12f)  claim-all active
 CLAIM_ALL_GREY = "全部领取_灰色"     # 413 (12f)  claim-all done
-CLAIM_ONEKEY_GREY = "一键领取灰色"   # 415  一键领取 done (daily-mission)
 CLAIM_ONCE_YELLOW = "一次领取黄色"   # 417 (32f)  一次領取 active (mail)
 CLAIM_ONCE_GREY = "一次领取灰色"     # 416 (12f)
 CLAIM_YELLOW = "领取_黄"            # 106 (28f)  single claim active
@@ -136,14 +137,7 @@ SORTIE = "出击"                     # 124 (44f)
 SWEEP_BATCH = "批量扫荡"             # 455  button on the 任務 stage screen
 SWEEP_BATCH_START = "批量扫荡开始"    # 456  dialog confirm (active)
 SWEEP_BATCH_START_GREY = "批量扫荡开始灰色"  # 457  dialog confirm (disabled)
-SWEEP_GEAR_SMALL_SEL = "前置小装备已选中"    # 458
-SWEEP_PLAN1 = "困难关卡刷取方案一"    # 459
-SWEEP_PLAN2 = "困难关卡刷取方案二"    # 460
-SWEEP_GEAR_SMALL = "前置小装备"       # 461
-SWEEP_GEAR_BIG_SEL = "大装备已选中"   # 462
-SWEEP_GEAR_BIG = "大装备"            # 463
 SWEEP_PLAN1_SEL = "困难关卡刷去方案一已选中"   # 464 (typo in master: 刷去)
-SWEEP_PLAN2_SEL_B = "困难方案刷取方案二已选中"  # 465 (label variant)
 SWEEP_PLAN2_SEL = "困难关卡刷取方案二已选中"   # 466
 BATTLE_COMPLETE = "战斗完成"          # 467  sweep/battle result header
 GOTO_NOW = "立即前往"                # 468
@@ -194,7 +188,6 @@ QTY_MINUS_GREY = "减号灰色"          # 113 (49f)
 #  商店
 SHOP_SELECT_ALL = "全部选择"         # 55  (18f)
 SHOP_SELECT_ALL_GREY = "全部选择灰"   # 404 (12f)
-SHOP_ALL_SELECTED = "已全部选择"      # 402  全选完成态（区别于 全部选择/灰）
 SHOP_BUY = "购买"                   # 103 (30f)  per-item buy
 # 489 = 灰(禁用)态「購買」。v15 起模型真会吐它。尚无消费方 -- 记在这里是因为
 # 它可能是 `no_dialog 两义`(买不起 / 本日限購已尽)的直接解: 屏上按钮变灰
@@ -211,7 +204,6 @@ FREE = "免费"                       # 446 (14f)
 # 商店左侧 tab 指示器 --  切勿进 青辉石 tab 购买（花青辉石）
 SHOP_TAB_CREDIT = "信用点商店"        # 62   一般(信用点)tab
 SHOP_TAB_CREDIT_SEL = "信用点商店_已选中"  # 54  一般 tab 选中 = 安全
-SHOP_TAB_PYROXENE_SEL = "青辉石商店_已选择"  # 61   花青辉石 tab 选中
 
 #  战术大赛商店 (买体力 - 花战术大赛货币, NOT 青辉石/信用点)
 # 商店左栏下滑可见. 新类 469-473 (v9 起训, 2026-06-11 用户手标+模板补).
@@ -237,7 +229,6 @@ EVENT_QUEST = "活动quest"           # 94  (12f)
 EVENT_QUEST_SEL = "活动quest_已选择" # 100 (12f)
 EVENT_SHOP = "活动商店"              # 95  (37f)
 EVENT_TASK = "活动任务"              # 96  (37f)
-EVENT_BONUS = "活动关卡产出额外加成"  # 110 (12f)
 EVENT_REWARD_INFO = "奖励资讯"       # 475 (活动页右下入口, v13 0.96)
 EVENT_END_LEFT = "距离结束还剩"       # 405 (23f)
 # 语义区分(用户 2026-07-08): 「距離獎勵獲得結束」= 上个活动的领奖余韵期 banner
@@ -281,13 +272,10 @@ GOTO_BOND_STORY = "前往羁绊剧情"      # 441 (12f)
 ENTER_BOND_STORY = "进入羁绊剧情"     # 442 (12f)
 
 #  升级 / 全屏过场 (tap to dismiss)
-BOND_LEVELUP = "羁绊升级"            # 398 (15f)
-REGION_LEVELUP = "地区升级"          # 399 (12f)
 
 #  左右翻页
 ARROW_LEFT = "左切换"               # 0   (117f)
 ARROW_RIGHT = "右切换"              # 1   (86f)
-FAVORITE_ICON = "收藏图标"           # 33  (14f)
 
 
 #  语义组 helpers
