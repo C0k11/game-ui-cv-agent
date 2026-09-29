@@ -3,7 +3,22 @@
 > 用户 2026-08-08：「干好了也就是说可以把除开训练材料以及重要的素材资产，
 > 可以把老的狗屎山代码删除了（记得可利用的都得搬完）」
 
-**结论先说：现在还不能删。** 新层写完了、离线 40 项全过、真机跑通了
+> **2026-09-28 已执行(用户定: 视觉仓向逆向项目对齐, 旧 brain 日常技能整块归档, 不逐个修)。**
+> 移到本地 `archive/2026-09-28/`(只移不删, `_manifest.tsv` 每行带 SHA256; git 历史里也都在):
+> `brain/skills/` 下 19 个日常技能, `brain/screens.py`, `brain/nav/`, `brain/combat_brain.py`,
+> `tests/`(回放 fixtures), `scripts/` 下 `bot_play_quest.py` `test_battle_live.py`
+> `test_skillcard_avatar.py` `wait_battle_end.py` `step_probe.py` `step_walk.py` `l3_health_report.py`,
+> 以及 `docs/yolo_migration_spec.md`。
+> 原地改(原件在 `archive/2026-09-28/_orig/`): `brain/pipeline.py` 去掉 `DailyPipeline` 和只给它用的
+> 开关, 留 OCR / YOLO 推理 / 干净帧 / 顶栏读数给标注前端和脚本; `mumu_runner.py` 只留 `AdbInput`;
+> `server/app.py` 的 `_start_pipeline` 改成明确报"已归档"; `scripts/regression_suite.py` 去掉逻辑层,
+> 只剩模型层用例; `brain/skills/ui_classes.py` 删掉已标废类的常量。`brain/skills/base.py`,
+> `brain/scrcpy_feed.py`, `brain/mumu_port.py` 仍被 `server/app.py` 与脚本使用, 保留。
+> 第五节的准入条件没有逐条满足, 是用户按对齐方向直接定的。仍未做: 第四节把 `server/app.py`
+> 老 pipeline 那半边(`_pipeline_worker` 等)整段拆掉; 第三节说的 `audit_cls_usage.py` 改扫 `routing_v2/`
+> (它的训练框计数读 `data/raw_images`, 重装后那里只剩保留集, 现在的输出不能当依据)。
+
+~~**结论先说：现在还不能删。**~~(2026-09-28 已被上面取代) 新层写完了、离线 40 项全过、真机跑通了
 `mail` 全流程，但**其余 12 条 flow 一条都还没在真机上走过**。
 下面是逐项审计 + 删除的准入条件。
 

@@ -343,8 +343,8 @@ while running:
 - 金钱项只读展示，不给放宽入口
 
 ## 5. 迁移与验收
-1. `routing_v2` 与老 `brain/skills` **并存**，前端切换；老代码不删（回滚用）
-2. 每个 flow 上线前：**step_walk 逐帧走一遍 + 帧证据**，通过才允许自主跑
+1. 老 `brain/skills` 日常技能 2026-09-28 已整块归档（见 `MIGRATION.md` 开头），日常只走 `routing_v2`
+2. 每个 flow 上线前：**`py -m routing_v2 step --go` 逐帧走一遍 + 帧证据**，通过才允许自主跑
 3. 每个 flow 必须给出**竣工判据**（CLEAN / LEFTOVER / UNKNOWN），不许"跑完了"就算完
 4. 战斗层（`battle/`）后续单独重写 -- 用户已预告
 
